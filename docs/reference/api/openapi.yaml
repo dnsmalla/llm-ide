@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 97
+  x-api-version: 98
 servers:
   - url: "https://{host}"
     variables:
@@ -8449,6 +8449,72 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/index/search:
+    get:
+      tags:
+        - "index"
+      parameters:
+        - name: "q"
+          in: "query"
+          required: true
+          description: "1 to 200 characters. Words of 2+ characters are matched against title and the redacted body; a query with none returns no results."
+          schema:
+            type: "string"
+        - name: "limit"
+          in: "query"
+          required: false
+          description: "Integer 1 to 50; the default is 20."
+          schema:
+            type: "string"
+        - name: "projectId"
+          in: "query"
+          required: false
+          description: "At most 200 characters. Omit to search every project of the user."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "results"
+                properties:
+                  results:
+                    type: "array"
+                    description: "Best match first. Only the caller's own notes."
+                    items:
+                      type: "object"
+                      required:
+                        - "noteKey"
+                        - "title"
+                        - "snippet"
+                        - "date"
+                        - "kind"
+                        - "projectId"
+                      properties:
+                        noteKey:
+                          type: "string"
+                        title:
+                          type: "string"
+                        snippet:
+                          type: "string"
+                          description: "Plain text, at most about 200 characters around the first matched word: control, bidi and zero-width characters removed, secrets redacted. Never markup."
+                        date:
+                          type: "string"
+                          description: "Note start, ISO."
+                        kind:
+                          type: "string"
+                        projectId:
+                          type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/index/status:
     get:
       tags:
@@ -16114,7 +16180,14 @@ components:
           type: "string"
           enum:
             - "meeting"
-          description: "Only meeting is indexed today."
+            - "note"
+            - "email"
+            - "slack"
+            - "document"
+            - "repo"
+            - "plan"
+            - "other"
+          description: "meeting (default) is the Mac's meeting notes; the others let the Library index its other sources. Any other value is refused with 400."
         title:
           type: "string"
         date:

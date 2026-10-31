@@ -908,8 +908,8 @@ export type Note = {
   noteKey: string;
   /** Optional; defaults to the batch projectId. */
   projectId?: string;
-  /** Only meeting is indexed today. */
-  kind?: "meeting";
+  /** meeting (default) is the Mac's meeting notes; the others let the Library index its other sources. Any other value is refused with 400. */
+  kind?: "meeting" | "note" | "email" | "slack" | "document" | "repo" | "plan" | "other";
   title: string;
   /** Note start, ISO. */
   date: string;
@@ -4050,6 +4050,34 @@ export type DeleteKbIndexNotesKeyResponse200 = {
 };
 
 export type DeleteKbIndexNotesKeyResponse400 = CommonError;
+
+/** Request parts for `GET /kb/index/search` (schema/http/index.schema.json). */
+export type GetKbIndexSearchRequest = {
+  query: {
+    /** 1 to 200 characters. Words of 2+ characters are matched against title and the redacted body; a query with none returns no results. */
+    q: string;
+    /** Integer 1 to 50; the default is 20. */
+    limit?: string;
+    /** At most 200 characters. Omit to search every project of the user. */
+    projectId?: string;
+  };
+};
+
+export type GetKbIndexSearchResponse200 = {
+  /** Best match first. Only the caller's own notes. */
+  results: {
+    noteKey: string;
+    title: string;
+    /** Plain text, at most about 200 characters around the first matched word: control, bidi and zero-width characters removed, secrets redacted. Never markup. */
+    snippet: string;
+    /** Note start, ISO. */
+    date: string;
+    kind: string;
+    projectId: string;
+  }[];
+};
+
+export type GetKbIndexSearchResponse400 = CommonError;
 
 /** Request parts for `GET /kb/index/status` (schema/http/index.schema.json). */
 export type GetKbIndexStatusRequest = {
@@ -8036,6 +8064,13 @@ export interface ApiEndpoints {
     responses: {
       200: DeleteKbIndexNotesKeyResponse200;
       400: DeleteKbIndexNotesKeyResponse400;
+    };
+  };
+  "GET /kb/index/search": {
+    request: GetKbIndexSearchRequest;
+    responses: {
+      200: GetKbIndexSearchResponse200;
+      400: GetKbIndexSearchResponse400;
     };
   };
   "GET /kb/index/status": {

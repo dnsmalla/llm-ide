@@ -81,3 +81,46 @@ test('HTTP: /kb/ingest refuses a meeting id with the reserved note prefix or a c
   assert.equal(control.status, 400);
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM meetings WHERE user_id = ? AND id LIKE '%bad%'").get(U).n, 0);
 });
+
+test('GET /kb/index/search: ranked, user-scoped, snippet is sanitised plain text, kinds beyond meeting are indexed', async () => {
+  const other = users.registerUser(conn, { email: `ihttp2-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'o' }).id;
+  const key = 'sk-ant-api03-' + 'k'.repeat(30);
+  const put = await srv.call('POST', '/kb/index/notes', { projectId: 'ps', notes: [
+    note(201, { noteKey: 'search/a.md', title: 'Quarterly roadmap', kind: 'note', body: `intro\u0007‮ text before. The zebrafish migration plan is here ${key}. <script>alert(1)</script> tail` }),
+    note(202, { noteKey: 'search/b.md', title: 'Mail about zebrafish', kind: 'email', body: 'zebrafish' }),
+    note(203, { noteKey: 'search/c.md', title: 'Unrelated', kind: 'slack', body: 'nothing here' }),
+  ] });
+  assert.equal(put.status, 200);
+  assert.equal(put.body.upserted, 3);
+  const bad = await srv.call('POST', '/kb/index/notes', { projectId: 'ps', notes: [note(204, { kind: 'evil' })] });
+  assert.equal(bad.status, 400);
+
+  const r = await srv.call('GET', '/kb/index/search?q=zebrafish&limit=10&projectId=ps');
+  assert.equal(r.status, 200);
+  const keys = r.body.results.map((x) => x.noteKey).sort();
+  assert.deepEqual(keys, ['search/a.md', 'search/b.md']);
+  const a = r.body.results.find((x) => x.noteKey === 'search/a.md');
+  assert.equal(a.kind, 'note');
+  assert.equal(a.title, 'Quarterly roadmap');
+  assert.match(a.snippet, /zebrafish migration plan/);
+  assert.ok(!a.snippet.includes(key), 'secrets stay redacted');
+  assert.ok(!/[\u0000-\u001f‮]/.test(a.snippet), 'no control or bidi characters');
+  assert.ok(a.snippet.length <= 202 + 2);
+  assert.ok(Date.parse(a.date) > 0);
+
+  // limit caps the rows
+  assert.equal((await srv.call('GET', '/kb/index/search?q=zebrafish&limit=1&projectId=ps')).body.results.length, 1);
+  // another project / another user sees nothing
+  assert.deepEqual((await srv.call('GET', '/kb/index/search?q=zebrafish&projectId=nope')).body.results, []);
+  srv.as(other);
+  assert.deepEqual((await srv.call('GET', '/kb/index/search?q=zebrafish')).body.results, []);
+  srv.as(U);
+
+  // a query with no searchable word returns nothing; bad parameters are 400
+  assert.deepEqual((await srv.call('GET', '/kb/index/search?q=a')).body.results, []);
+  for (const qs of ['', '?q=', '?q=zebrafish&limit=0', '?q=zebrafish&limit=51', '?q=zebrafish&limit=x', `?q=${'x'.repeat(201)}`, `?q=zebrafish&projectId=${'p'.repeat(201)}`]) {
+    const e = await srv.call('GET', `/kb/index/search${qs}`);
+    assert.equal(e.status, 400, qs);
+    assert.equal(e.body.error.code, 'VALIDATION_FAILED');
+  }
+});

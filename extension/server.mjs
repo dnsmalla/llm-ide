@@ -302,7 +302,8 @@ const HOST = config.host;
 //   v95 — workspace trust and the per-user install allowlist (additive; every route is per user; no route reaches the network). GET /auth/me/workspace-trust → { enforced, items:[{ path, trusted, updatedAt }] } (enforced is false under LLMIDE_WORKSPACE_TRUST=off); PUT /auth/me/workspace-trust { path, trusted } → 200 { ok, item:{ path, trusted, updatedAt } } | 400 VALIDATION_FAILED|INVALID_PATH (a folder too broad to be one project) | 404 NOT_FOUND (path stored as its real path; trust is only ever set by this explicit request). A folder is untrusted unless trusted: in one, the folder's own .mcp.json servers that start a process are not loaded on a Claude turn, and a turn (Claude or provider adapter) emits `notice` kind `workspace_trust` { text, data:{ path, trusted:false, skipped:[{ kind:'mcp-stdio'|'hooks'|'plugin'|'skill-scripts', name, file, withheld }] } } (level warning when something was withheld, info otherwise; names only, never a command line or env). GET /auth/me/extensions/allowlist → { operator:[glob], ceiling:[glob]|null, user:[entry], ignored:[entry], effective:[glob] }; PUT …/allowlist { sources:[string] } replaces the user's additions → same shape | 400 VALIDATION_FAILED|INVALID_SOURCE|TOO_MANY_SOURCES (details.entry|max) | 403 SOURCE_EXCEEDS_CEILING (details.entry). A user may add owner/repo or owner/*; wider globs need the operator's LLMIDE_EXT_ALLOWED_SOURCES_CEILING to cover them. Install, update and catalog search use operator list + the user's additions. Migrations 0056, 0057.
 //   v96 — re-attach to a running chat turn (additive; per user, memory only). GET /agent/v2/turns → { turns:[{ sessionId, startedAt, mode }] } (the caller's running turns, oldest first; another user's are never listed); GET /agent/v2/turns/stream?sessionId=&after= → SSE replay of the running (or just-ended, 60 s) turn: every buffered event after the `after`-th (a count, default 0), then live events, `id: <seq>` on each frame, ends when the turn ends; a first `replay_info` { gap, dropped, ended } event when the bounded ring (2000 events / 4 MB per turn, 64 turns, 4 readers per turn) dropped events the reader asked for | 400 VALIDATION_FAILED | 404 NO_TURN (also another user's session) | 429 TOO_MANY_READERS. Nothing is ever written to disk. POST /agent/v2/stream accepts `detach: true` (default false): the turn then keeps running when its own stream drops (a webview reload) and is stopped only by POST /agent/v2/cancel; without it a dropped stream stops the turn as before. Both GETs ride the 'kbWrite' rate bucket.
 //   v97 — chat history paging (additive): GET /kb/chat/sessions/:id?beforeSeq=&limit= — with `beforeSeq` (integer >= 1, else 400 VALIDATION_FAILED) the page is the newest `limit` (default 200, max 2000) messages whose seq is below it, so older history pages without re-reading the newest; absent, the newest page exactly as before. Every session answer gains `hasMore` (true when older messages remain below the page).
-const SERVER_API_VERSION = 97;
+//   v98 — note index full-text search and more note kinds (additive; no migration: note_index.kind is free text). GET /kb/index/search?q=&limit=&projectId= → { results:[{ noteKey, title, snippet, date, kind, projectId }] } (kind 'note' FTS rows of the caller only, best match first; limit 1-50, default 20; q 1-200 characters, a query with no 2+ character word answers an empty list; snippet is plain text of about 200 characters around the first matched word, secrets redacted again, control, bidi and zero-width characters removed; projectId omitted = every project) | 400 VALIDATION_FAILED. POST /kb/index/notes now accepts `kind` in meeting|note|email|slack|document|repo|plan|other (default meeting; anything else 400). Rides the 'kbWrite' rate bucket.
+const SERVER_API_VERSION = 98;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -451,6 +452,7 @@ const ALL_ENDPOINTS = [
   '/kb/index/notes/:key',
   '/kb/index/reconcile',
   '/kb/index/scan',
+  '/kb/index/search',
   '/kb/index/status',
   '/kb/os/state',
   '/kb/os/stream',
@@ -476,7 +478,7 @@ function rateLimitProfile(url, method) {
     // to avoid burning through Slack's per-method rate limit and causing
     // collateral SLACK_FETCH_FAILED errors on unrelated /kb/slack/fetch calls.
     if (path === '/kb/slack/conversations') return 'dispatch';
-    if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream') return 'kbWrite';
+    if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search') return 'kbWrite';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —

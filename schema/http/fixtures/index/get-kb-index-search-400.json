@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/index/search",
+  "status": 400,
+  "request": {
+    "query": {
+      "q": "roadmap",
+      "limit": "51"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "q (1-200 characters) is required; limit is an integer 1-50; projectId at most 200 characters"
+    }
+  }
+}

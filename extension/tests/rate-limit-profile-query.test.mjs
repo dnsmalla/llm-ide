@@ -21,6 +21,7 @@ test('POST profiles match with a query string appended', () => {
   assert.equal(rateLimitProfile('/kb/dispatch?a=b', 'POST'), 'dispatch');
   assert.equal(rateLimitProfile('/kb/export-all?x=1', 'GET'), 'kbExport');
   assert.equal(rateLimitProfile('/agent/v2/turns?x=1', 'GET'), 'kbWrite');
+  assert.equal(rateLimitProfile('/kb/index/search?q=ab', 'GET'), 'kbWrite');
   assert.equal(rateLimitProfile('/agent/v2/turns/stream?sessionId=a', 'GET'), 'kbWrite');
 });
 

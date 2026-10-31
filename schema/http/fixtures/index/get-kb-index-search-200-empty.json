@@ -1,0 +1,12 @@
+{
+  "endpoint": "GET /kb/index/search",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "nothingmatchesthis"
+    }
+  },
+  "response": {
+    "results": []
+  }
+}

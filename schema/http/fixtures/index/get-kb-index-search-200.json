@@ -1,0 +1,23 @@
+{
+  "endpoint": "GET /kb/index/search",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "roadmap",
+      "limit": "10",
+      "projectId": "example-project"
+    }
+  },
+  "response": {
+    "results": [
+      {
+        "noteKey": "plans/roadmap.md",
+        "title": "Quarterly roadmap",
+        "snippet": "\u2026the roadmap for the next quarter covers the importer and the search screen\u2026",
+        "date": "2026-10-29T00:00:00.000Z",
+        "kind": "note",
+        "projectId": "example-project"
+      }
+    ]
+  }
+}

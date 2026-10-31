@@ -5,12 +5,13 @@
 //   POST   /kb/index/reconcile             { projectId?, manifest[], prune? } -> { missing[], stale[], extra[], pruned }
 //   POST   /kb/index/scan                  { projectId?, scanId, index, total, complete?, prune?, entries[≤500] } -> { missing[], stale[], extra[], pruned, received, total, complete }
 //   DELETE /kb/index/notes/:key?projectId= -> { deleted }
+//   GET    /kb/index/search?q=&limit=&projectId= -> { results: [{ noteKey, title, snippet, date, kind, projectId }] }
 //   GET    /kb/index/status?projectId=     -> { notes, ftsRows, consistent, lastIndexedAt }
 //
 // Nothing calls these yet (T2.1 wires the Mac). Every route is scoped to the
 // authenticated user; the router passes userId.
 import { sendJSON, readJsonBody, decodeParam } from '../core/utils.mjs';
-import { upsertNotes, reconcileNotes, deleteNote, indexStatus, scanNoteChunk } from '../kb/note-index.mjs';
+import { upsertNotes, reconcileNotes, deleteNote, indexStatus, scanNoteChunk, searchNotes, PROJECT_ID_MAX } from '../kb/note-index.mjs';
 
 // Upserts carry bodies, so they get the tightest limit: 1 MB (50 notes of at
 // most 512 KiB each is 25 MB, so the byte cap is the real bound on a batch).
@@ -51,6 +52,22 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
     const noteKey = decodeParam(path.slice('/kb/index/notes/'.length));
     const deleted = deleteNote(userId, { projectId: u.searchParams.get('projectId') ?? '', noteKey });
     sendJSON(res, 200, { deleted });
+    return true;
+  }
+
+  if (req.method === 'GET' && path === '/kb/index/search') {
+    const q = u.searchParams.get('q');
+    const limitRaw = u.searchParams.get('limit');
+    const limit = limitRaw === null || limitRaw === '' ? undefined : Number(limitRaw);
+    const projectId = u.searchParams.has('projectId') ? u.searchParams.get('projectId') : undefined;
+    const bad = typeof q !== 'string' || q.length === 0 || q.length > 200
+      || (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 50))
+      || (projectId !== undefined && projectId.length > PROJECT_ID_MAX);
+    if (bad) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'q (1-200 characters) is required; limit is an integer 1-50; projectId at most 200 characters' } });
+      return true;
+    }
+    sendJSON(res, 200, { results: searchNotes(userId, { q, limit, projectId }) });
     return true;
   }
 

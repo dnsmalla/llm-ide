@@ -21,9 +21,16 @@
         "kind": {
           "type": "string",
           "enum": [
-            "meeting"
+            "meeting",
+            "note",
+            "email",
+            "slack",
+            "document",
+            "repo",
+            "plan",
+            "other"
           ],
-          "description": "Only meeting is indexed today."
+          "description": "meeting (default) is the Mac's meeting notes; the others let the Library index its other sources. Any other value is refused with 400."
         },
         "title": {
           "type": "string"
@@ -250,6 +257,80 @@
           "properties": {
             "deleted": {
               "type": "boolean"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/index/search": {
+      "request": {
+        "query": {
+          "type": "object",
+          "required": [
+            "q"
+          ],
+          "properties": {
+            "q": {
+              "type": "string",
+              "description": "1 to 200 characters. Words of 2+ characters are matched against title and the redacted body; a query with none returns no results."
+            },
+            "limit": {
+              "type": "string",
+              "description": "Integer 1 to 50; the default is 20."
+            },
+            "projectId": {
+              "type": "string",
+              "description": "At most 200 characters. Omit to search every project of the user."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "results"
+          ],
+          "properties": {
+            "results": {
+              "type": "array",
+              "description": "Best match first. Only the caller's own notes.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "noteKey",
+                  "title",
+                  "snippet",
+                  "date",
+                  "kind",
+                  "projectId"
+                ],
+                "properties": {
+                  "noteKey": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "snippet": {
+                    "type": "string",
+                    "description": "Plain text, at most about 200 characters around the first matched word: control, bidi and zero-width characters removed, secrets redacted. Never markup."
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Note start, ISO."
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         },

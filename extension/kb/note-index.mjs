@@ -21,7 +21,9 @@ export const MAX_NOTE_BODY_BYTES = 512 * 1024; // raw body per note, before reda
 export const MAX_MANIFEST = 20000;
 const PARTICIPANTS_MAX = 200;
 const META_MAX_CHARS = 4096;
-const KINDS = new Set(['meeting']);         // other kinds need a later flag (token bench)
+// 'meeting' is the Mac's meeting notes; the rest let the Library index its other sources (the column is free text,
+// so no migration is needed). An unknown kind is refused, never stored.
+export const KINDS = new Set(['meeting', 'note', 'email', 'slack', 'document', 'repo', 'plan', 'other']);
 
 const nowIso = () => new Date().toISOString();
 
@@ -355,6 +357,51 @@ export function noteIndexHits(userId, { q, limit = 10, projectId, db = getDb() }
       if (out.length >= cap) break;
       out.push(row(n));
     }
+  }
+  return out;
+}
+
+export const SEARCH_LIMIT_MAX = 50;
+export const SEARCH_LIMIT_DEFAULT = 20;
+const SNIPPET_CHARS = 200;
+// Control characters, bidi overrides/isolates, and zero-width characters: never shown, never kept.
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+
+/** A plain-text excerpt of a (redacted) note body around the first matched word; no markup is interpreted. */
+export function snippetOf(body, q) {
+  const text = redactSecretsForStorage(String(body ?? '')).replace(UNSAFE_TEXT, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const lower = text.toLowerCase();
+  const words = String(q ?? '').toLowerCase().split(/[^\p{L}\p{M}\p{N}_]+/u).filter((w) => w.length >= 2);
+  let at = -1;
+  for (const w of words) { const i = lower.indexOf(w); if (i !== -1 && (at === -1 || i < at)) at = i; }
+  const start = at === -1 ? 0 : Math.max(0, at - 60);
+  let out = [...text.slice(start)].slice(0, SNIPPET_CHARS).join('');
+  if (start > 0) out = `…${out}`;
+  if (start + out.length < text.length) out = `${out}…`;
+  return out;
+}
+
+/**
+ * The route's note search: ranked hits with { noteKey, title, snippet, date, kind } (and projectId). User-scoped in SQL
+ * (noteIndexHits), limit 1..SEARCH_LIMIT_MAX. A query with no searchable word (2+ characters) returns nothing.
+ */
+export function searchNotes(userId, { q, limit = SEARCH_LIMIT_DEFAULT, projectId, db = getDb() } = {}) {
+  requireUser(userId);
+  if (!buildSearchFilter(q)) return [];
+  const cap = Math.max(1, Math.min(Number(limit) || SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX));
+  const hits = noteIndexHits(userId, { q, limit: cap, projectId, db });
+  if (hits.length === 0) return [];
+  const rows = lazyPrepare(db, `SELECT id, note_key, kind, body_text FROM note_index
+     WHERE user_id = ? AND id IN (${hits.map(() => '?').join(',')})`).all(userId, ...hits.map((h) => h.noteId));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const out = [];
+  for (const h of hits) {
+    const r = byId.get(h.noteId);
+    if (!r) continue;
+    out.push({
+      noteKey: r.note_key, title: h.title, snippet: snippetOf(r.body_text, q), date: h.date, kind: r.kind, projectId: h.projectId,
+    });
   }
   return out;
 }
