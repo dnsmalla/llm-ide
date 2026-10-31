@@ -1,7 +1,7 @@
 // Names and starting text for new, renamed and conflict-copy notes. Pure. The host re-validates every
 // path (notes_write.rs); this module only produces good candidates and gives early, readable errors.
 
-import { setKey } from "./frontmatter-edit.ts";
+import { renderNote } from "./frontmatter-edit.ts";
 
 export const NOTE_EXTENSIONS = ["md", "markdown", "txt"] as const;
 export const MAX_NAME_CHARS = 120;
@@ -86,10 +86,13 @@ export function newNoteRel(folder: string, title: string, nowMs: number, taken: 
 /** The text a new note starts with: a header with its title and creation time, then a heading. */
 export function initialNoteText(title: string, nowMs: number): string {
   const t = title.trim() === "" ? "Untitled" : title.trim();
-  let text = "---\n---\n\n";
-  text = setKey(text, "title", t);
-  text = setKey(text, "created_at", new Date(nowMs).toISOString());
-  return `${text}# ${t.replace(/[\r\n]+/g, " ")}\n\n`;
+  return renderNote(
+    [
+      ["title", t],
+      ["created_at", new Date(nowMs).toISOString()],
+    ],
+    `# ${t.replace(/[\r\n]+/g, " ")}\n\n`,
+  );
 }
 
 export function parentOf(rel: string): string {

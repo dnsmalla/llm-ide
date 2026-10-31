@@ -174,7 +174,8 @@ test("names: slugs, validation, never-overwrite candidates", () => {
   assert.equal(conflictCopyRel("a/b.md", () => false), "a/b (conflict copy).md");
   const init = initialNoteText("Plan: Q4", t);
   assert.equal(parseNote(init).data.title, "Plan: Q4");
-  assert.ok(init.endsWith("# Plan: Q4\n\n"));
+  assert.equal(init, `---\ntitle: 'Plan: Q4'\ncreated_at: '${new Date(t).toISOString()}'\n---\n\n# Plan: Q4\n\n`, "exactly one header, no stray fence");
+  assert.equal(parseNote(init).body, "# Plan: Q4\n\n");
   assert.throws(() => uniqueRel("", "n", "md", () => true), RangeError);
 });
 

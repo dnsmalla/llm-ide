@@ -132,6 +132,17 @@ export function renderBlock(key: string, value: EditValue): string[] {
   return [`${key}:`, ...value.map((v) => `- ${yamlScalar(v)}`)];
 }
 
+/** A new note: a header of `fields` in order (lists as block lists), a blank line, then `body`. */
+export function renderNote(fields: readonly (readonly [string, EditValue])[], body: string, eol: "\n" | "\r\n" = "\n"): string {
+  const lines: string[] = [];
+  for (const [k, v] of fields) {
+    validKey(k);
+    lines.push(...renderBlock(k, v));
+  }
+  const head = lines.length === 0 ? "" : lines.join(eol) + eol;
+  return `---${eol}${head}---${eol}${eol}${body}`;
+}
+
 function validKey(key: string): void {
   if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) throw new RangeError(`not a frontmatter key: ${key}`);
 }
