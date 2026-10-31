@@ -1,10 +1,12 @@
-// Which client class is this request? (docs/spec/command-bus.md section 1.4 and docs/spec/command-bus.md "Client class".)
+// Which client class is this request? (docs/spec/command-bus.md section 1.4 and "Client class".)
 //
 // The bearer token carries NO client claim (server/auth.mjs: userId, role, jti), and the desktop UI and the Chrome
 // extension hold the same kind of token, so a token alone cannot tell them apart. Two advisory headers fill the gap:
 //   x-llmide-client      the class the caller says it is (a registry client class)
-//   x-llmide-host-nonce  proof that the caller is the HOST that spawned this core: it must equal LLMIDE_CORE_NONCE
-//                        (the per-launch random nonce the host already passes to the core; 32-128 hex characters)
+//   x-llmide-host-nonce  proof that the caller is the HOST that spawned this core: it must equal
+//                        HMAC-SHA256(LLMIDE_HOST_APPROVAL_KEY, "bus-host-proof/v1") (core/host-approval.mjs busHostProof).
+//                        It is a secret DERIVED from the approval key. It is NOT LLMIDE_CORE_NONCE: that nonce is served
+//                        unauthenticated on GET /health (identity echo for the host), so it is never accepted as proof.
 // Rules, all CAPPED so a remote origin can never raise its own tier:
 //   - with host proof the host vouches for the declared class (the Mac host forwards its phone as `ios-native` and its
 //     own UI as `desktop-ui`), so the declared class is used as is;
@@ -12,20 +14,26 @@
 //     an absent or unknown header is `extension`;
 //   - `relay-bridge` is not a class: a bridge declares the class of the real client behind it (with proof), so an
 //     undeclared bridge is the lowest class;
-//   - LLMIDE_CORE_NONCE unset (a standalone dev server) means nobody can prove host: `desktop-ui` is unreachable, so
-//     nothing can be approved. The opt-in LLMIDE_BUS_TRUST_CLIENT_HEADER=1 treats the declared class as proven; it is
-//     for loopback development and tests only, and /health does not advertise it.
-import crypto from 'node:crypto';
+//   - LLMIDE_HOST_APPROVAL_KEY unset or malformed (a standalone dev server): nobody can prove host, `desktop-ui` is
+//     unreachable, so nothing can be approved. The opt-in LLMIDE_BUS_TRUST_CLIENT_HEADER=1 treats the declared class as
+//     proven; it is for loopback development and tests only, /health does not advertise it, and it is REFUSED when the
+//     server is bound to a non-loopback address or NODE_ENV=production.
 import { REGISTRY, classInfo } from './registry.mjs';
+import { verifyBusHostProof } from '../../core/host-approval.mjs';
 
-const NONCE_RE = /^[0-9a-f]{32,128}$/;
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+/** True when the trust-the-header escape hatch may be honoured at all: loopback bind, not production. */
+export function trustClientHeaderAllowed(env = process.env) {
+  if (env.LLMIDE_BUS_TRUST_CLIENT_HEADER !== '1') return false;
+  if (String(env.NODE_ENV || '').toLowerCase() === 'production') return false;
+  const host = String(env.LLMIDE_HOST || '127.0.0.1').trim().toLowerCase();
+  return LOOPBACK_HOSTS.has(host);
+}
 
 function hostProven(req) {
-  if (process.env.LLMIDE_BUS_TRUST_CLIENT_HEADER === '1') return true;
-  const want = process.env.LLMIDE_CORE_NONCE || '';
-  const got = req.headers?.['x-llmide-host-nonce'];
-  if (!NONCE_RE.test(want) || typeof got !== 'string' || got.length !== want.length) return false;
-  try { return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want)); } catch { return false; }
+  if (trustClientHeaderAllowed()) return true;
+  return verifyBusHostProof(req);
 }
 
 /** @returns {{ client: string, declared: string|null, proven: boolean }} */

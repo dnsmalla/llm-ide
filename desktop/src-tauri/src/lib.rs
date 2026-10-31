@@ -322,6 +322,7 @@ macro_rules! product_handlers {
                 confirm::bypass_confirm,
                 confirm::bypass_confirm_signed,
                 confirm::trust_confirm,
+                host_approval::host_bus_proof,
             $($spike),*
         ]
     };

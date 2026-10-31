@@ -71,7 +71,13 @@ export function isLoopbackUrl(url: string): boolean {
  */
 export const EXTRA_HEADER_ALLOWLIST: Readonly<Record<string, RegExp>> = Object.freeze({
   "x-llmide-host-approval": /^v1\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/,
+  // Command-bus host proof (`host_bus_proof`, 64 hex) and the class it vouches for. Normally attached by the client itself
+  // (`hostProof` option); a caller passing them must use the exact shape, and they only go to a trusted core.
+  "x-llmide-host-nonce": /^[0-9a-f]{64}$/,
+  "x-llmide-client": /^desktop-ui$/,
 });
+
+const HOST_PROOF_SHAPE = /^[0-9a-f]{64}$/;
 
 export interface CoreClientOptions {
   /** Current core base URL (no trailing path), or `null` while the core is not up. */
@@ -88,6 +94,13 @@ export interface CoreClientOptions {
    * or one the user confirmed, receives them.
    */
   credentialsAllowed?: () => boolean;
+  /**
+   * The command-bus host proof for the CURRENT core, or `null` (see `bus-proof.ts`: only a spawned, verified core has
+   * one). When it returns a 64-hex string, every authenticated request also carries `x-llmide-client: desktop-ui` and
+   * `x-llmide-host-nonce: <proof>`; the core then treats this UI as the desktop class. The proof is a bearer secret:
+   * it goes only to a trusted core, never on public (`auth: false`) routes, and never into a log or the DOM.
+   */
+  hostProof?: () => string | null;
 }
 
 export interface RequestOptions {
@@ -364,7 +377,14 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     if (streamInit?.lastEventId) headers["Last-Event-ID"] = streamInit.lastEventId;
     const enc = encodeBody(opts.body);
     if (enc.type) headers["Content-Type"] = enc.type;
-    if (auth) Object.assign(headers, await authHeader());
+    if (auth) {
+      Object.assign(headers, await authHeader());
+      const proof = options.hostProof?.() ?? null;
+      if (typeof proof === "string" && HOST_PROOF_SHAPE.test(proof) && trusted()) {
+        headers["x-llmide-client"] = "desktop-ui";
+        headers["x-llmide-host-nonce"] = proof;
+      }
+    }
     const res = await rawFetch(path, { method: opts.method ?? "GET", headers, body: enc.body }, opts.timeoutMs ?? defaultTimeout, opts.signal);
     if (res.status === 401 && auth && !retried && tokens) {
       await res.body?.cancel().catch(() => undefined);

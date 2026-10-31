@@ -27,6 +27,30 @@ export function hostApprovalKey(env = process.env) {
   return typeof v === 'string' && /^[0-9a-fA-F]{64}$/.test(v) ? Buffer.from(v, 'hex') : null;
 }
 
+// ---- command-bus host proof ----
+// A bearer secret DERIVED from the approval key: proof = hex(HMAC-SHA256(key, "bus-host-proof/v1")). The host sends it as
+// `x-llmide-host-nonce` ONLY to the core it spawned; the core accepts a declared client class above `extension` only with
+// it. It is NOT the /health identity nonce (LLMIDE_CORE_NONCE): that one is served unauthenticated, so it can identify a
+// core but must never act as a credential. The proof is equal in power to the approval key for bus approvals, so it must
+// never be logged, stored or sent to an adopted core. One proof per launch (the key is per launch).
+export const BUS_PROOF_HEADER = 'x-llmide-host-nonce';
+export const BUS_PROOF_LABEL = 'bus-host-proof/v1';
+const BUS_PROOF_RE = /^[0-9a-f]{64}$/;
+
+/** The expected proof (64 hex), or null when the key is unset or malformed (nothing then verifies). */
+export function busHostProof(env = process.env) {
+  const key = hostApprovalKey(env);
+  return key ? crypto.createHmac('sha256', key).update(BUS_PROOF_LABEL).digest('hex') : null;
+}
+
+/** Constant-time check of the request's proof header; false for an absent, repeated or malformed header. */
+export function verifyBusHostProof(req, env = process.env) {
+  const want = busHostProof(env);
+  const got = req.headers?.[BUS_PROOF_HEADER];
+  if (!want || typeof got !== 'string' || !BUS_PROOF_RE.test(got)) return false;
+  return crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex'));
+}
+
 const TOKEN_RE = /^v1\.(\d{1,15})\.([0-9a-f]{32})\.([0-9a-f]{64})$/;
 
 export function signedPart(purpose, expiry, nonce) {

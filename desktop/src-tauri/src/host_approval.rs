@@ -64,6 +64,36 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     outer.finalize().into()
 }
 
+/// Label of the command-bus host proof (see `bus_proof_with`).
+pub const BUS_PROOF_LABEL: &str = "bus-host-proof/v1";
+
+/// The command-bus host proof: `hex(HMAC-SHA256(key, "bus-host-proof/v1"))`. A bearer secret DERIVED from the
+/// per-launch approval key. The webview sends it as `x-llmide-host-nonce` ONLY to the core this app spawned and
+/// verified; the core accepts a client class above `extension` (the desktop UI, which alone approves commands) only
+/// with it. It is NOT the `/health` identity nonce, which any local process can read. It is equal in power to the
+/// Bypass key for bus approvals, so it is never logged, stored or shown; the webview keeps it in memory only.
+pub fn bus_proof_with(key: &[u8]) -> String {
+    to_hex(&hmac_sha256(key, BUS_PROOF_LABEL.as_bytes()))
+}
+
+pub fn bus_proof() -> Result<String, String> {
+    Ok(bus_proof_with(key()?))
+}
+
+/// Host command: the bus proof, to the main window only and only while the core is the one this app spawned and
+/// verified (`trust == spawned`, `ready`). Otherwise `None`: an adopted or unverified core never receives it.
+#[tauri::command]
+pub fn host_bus_proof(window: tauri::Window, host: tauri::State<'_, crate::core_host::CoreHost>) -> Result<Option<String>, crate::fs_ops::FsError> {
+    if window.label() != "main" {
+        return Err(crate::confirm::herr("forbidden", "only the main window may ask for the bus proof"));
+    }
+    let st = host.status();
+    if st.trust != "spawned" || st.state != crate::core_host::Phase::Ready {
+        return Ok(None);
+    }
+    bus_proof().map(Some).map_err(|e| crate::confirm::herr("io", e))
+}
+
 fn signed_part(purpose: &str, expiry: u64, nonce: &str) -> String {
     format!("llmide-host-approval/v1|{purpose}|{expiry}|{nonce}")
 }
@@ -161,6 +191,17 @@ mod tests {
             assert!(!v.verify_at(&key, bad, PURPOSE_BYPASS, 1_500), "{bad:?}");
         }
         assert!(v.verify_at(&key, &t, PURPOSE_BYPASS, 1_500), "the genuine token still works");
+    }
+
+    #[test]
+    fn the_bus_proof_is_a_derived_secret_matching_the_core_vector() {
+        // Same vector the core's test derives with node:crypto (extension/tests/bus-host-proof.test.mjs).
+        assert_eq!(bus_proof_with(&[7u8; 32]), "2c4681abf6209f234bb72de37c77e21d2be14d556be363ebb70411b7c80c6472");
+        assert_ne!(bus_proof_with(&[7u8; 32]), bus_proof_with(&[8u8; 32]));
+        let k = key_hex().unwrap();
+        let p = bus_proof().unwrap();
+        assert_eq!(p.len(), 64);
+        assert_ne!(p, k, "the proof is not the key");
     }
 
     #[test]

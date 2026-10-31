@@ -4,6 +4,7 @@ import { createChatBinding } from "./chat-binding";
 import { host, invokeHost, isHostAvailable } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
+import { createBusProofStore } from "./bus-proof";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 
@@ -14,6 +15,14 @@ export const trustGate = createTrustGate({
   subscribeStatus: (l) => coreStatusStore.subscribe(l),
 });
 
+/** The command-bus host proof (memory only; a spawned, verified core only). */
+const busProof = createBusProofStore({
+  invoke: (command) => invokeHost<unknown>(command),
+  getStatus: () => coreStatusStore.getSnapshot().status,
+  subscribeStatus: (l) => coreStatusStore.subscribe(l),
+  isHost: isHostAvailable,
+});
+
 /** The one core client. Its base URL follows the supervised core (it changes across restarts). */
 export const core = createCoreClient({
   baseUrl: () => {
@@ -21,6 +30,7 @@ export const core = createCoreClient({
     return s && s.state === "ready" && s.url ? s.url : null;
   },
   credentialsAllowed: () => trustGate.allowed(),
+  hostProof: () => busProof.get(),
 });
 
 // Confirming (or losing) trust changes whether the host may hold the token: re-publish only when now allowed.

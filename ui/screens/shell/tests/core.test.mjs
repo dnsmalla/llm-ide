@@ -288,3 +288,49 @@ test("extra headers: an unverified (untrusted) core never receives the approval 
   await assert.rejects(client.request("/x", { auth: false, headers: { "x-llmide-host-approval": APPROVAL } }), (e) => e.code === "UNTRUSTED_CORE");
   assert.equal(calls.length, sent);
 });
+
+const PROOF = "c3".repeat(32);
+
+test("host proof: attached as x-llmide-client + x-llmide-host-nonce to authenticated requests only, and only while a proof is supplied", async () => {
+  let proof = PROOF;
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : json(200, { ok: true })), { hostProof: () => proof });
+  await client.login("a@b.c", "pw");
+  assert.equal(calls[0].init.headers["x-llmide-host-nonce"], undefined, "login carries no proof");
+  await client.request("/bus/kinds");
+  let h = calls.at(-1).init.headers;
+  assert.equal(h["x-llmide-client"], "desktop-ui");
+  assert.equal(h["x-llmide-host-nonce"], PROOF);
+  await client.request("/health", { auth: false });
+  assert.equal(calls.at(-1).init.headers["x-llmide-host-nonce"], undefined, "public routes never get it");
+  proof = null;
+  await client.request("/bus/kinds");
+  h = calls.at(-1).init.headers;
+  assert.equal(h["x-llmide-host-nonce"], undefined);
+  assert.equal(h["x-llmide-client"], undefined);
+});
+
+test("host proof: a malformed proof is dropped unsent, and an untrusted core never receives it", async () => {
+  let proof = "not-hex";
+  let trusted = true;
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : json(200, {})), { hostProof: () => proof, credentialsAllowed: () => trusted });
+  await client.login("a@b.c", "pw");
+  await client.request("/x");
+  assert.equal(calls.at(-1).init.headers["x-llmide-host-nonce"], undefined);
+  proof = PROOF;
+  trusted = false;
+  const sent = calls.length;
+  await assert.rejects(client.request("/x"), (e) => e.code === "UNTRUSTED_CORE");
+  assert.equal(calls.length, sent);
+});
+
+test("host proof: callers may not pass the proof or client headers themselves except with the exact shape", async () => {
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : json(200, {})));
+  await client.login("a@b.c", "pw");
+  const sent = calls.length;
+  for (const headers of [{ "x-llmide-host-nonce": "short" }, { "x-llmide-host-nonce": PROOF.toUpperCase() }, { "x-llmide-client": "ios-native" }, { "x-llmide-client": "desktop-ui\r\nX: y" }]) {
+    await assert.rejects(client.request("/x", { headers }), (e) => e.code === "BAD_REQUEST");
+  }
+  assert.equal(calls.length, sent);
+  await client.request("/x", { headers: { "x-llmide-host-nonce": PROOF, "x-llmide-client": "desktop-ui" } });
+  assert.equal(calls.at(-1).init.headers["x-llmide-host-nonce"], PROOF);
+});

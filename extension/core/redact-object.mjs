@@ -29,6 +29,8 @@ const REDACT_KEYS = new Set([
   'privateKey', 'clientSecret', 'masterKey', 'encryptionKey',
   // Host-signed approval (core/host-approval.mjs): the header's name and its key.
   'x-llmide-host-approval', 'hostApproval', 'hostApprovalKey', 'LLMIDE_HOST_APPROVAL_KEY',
+  // Command-bus host proof (derived from the approval key; routes/bus/client.mjs).
+  'x-llmide-host-nonce', 'hostProof',
 ]);
 
 // Pattern-based fallback: also redact any key whose name contains these

@@ -83,6 +83,7 @@
     "allow-attach-release",
     "allow-bypass-confirm",
     "allow-bypass-confirm-signed",
-    "allow-trust-confirm"
+    "allow-trust-confirm",
+    "allow-host-bus-proof"
   ]
 }

@@ -258,7 +258,7 @@ test('an approval older than its ttl is expired, never run', async () => {
   assert.equal(control.calls.length, 0);
 });
 
-test('a client that claims desktop-ui without host proof is capped at extension; with the host nonce it is honoured', async () => {
+test('a client that claims desktop-ui without host proof is capped at extension; with the derived host proof it is honoured', async () => {
   const keep = process.env.LLMIDE_BUS_TRUST_CLIENT_HEADER;
   delete process.env.LLMIDE_BUS_TRUST_CLIENT_HEADER;
   try {
@@ -271,19 +271,20 @@ test('a client that claims desktop-ui without host proof is capped at extension;
     assert.equal(resolveClient({ headers: { 'x-llmide-client': 'relay-bridge' } }).client, 'phone-pwa');
     // Over HTTP: the claim does not open the desktop-only routes.
     assert.equal((await call('PUT', '/bus/kinds/review', { enabled: true }, hdr({}))).status, 403);
-    // Host proof.
-    const nonce = 'ab'.repeat(24);
-    process.env.LLMIDE_CORE_NONCE = nonce;
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': nonce } }).client, 'desktop-ui');
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'ios-native', 'x-llmide-host-nonce': nonce } }).client, 'ios-native');
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': 'cd'.repeat(24) } }).client, 'extension', 'wrong nonce');
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': nonce.slice(1) } }).client, 'extension', 'short nonce');
-    assert.equal((await call('PUT', '/bus/kinds/review', { enabled: true }, { headers: { 'x-llmide-host-nonce': nonce } })).status, 200);
-    // No LLMIDE_CORE_NONCE configured: nobody can prove host.
-    delete process.env.LLMIDE_CORE_NONCE;
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': nonce } }).client, 'extension');
+    // Host proof: HMAC(approval key, "bus-host-proof/v1"), never the /health nonce (tests/bus-host-proof.test.mjs).
+    const keyHex = 'a1'.repeat(32);
+    process.env.LLMIDE_HOST_APPROVAL_KEY = keyHex;
+    const proof = (await import('../core/host-approval.mjs')).busHostProof(process.env);
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': proof } }).client, 'desktop-ui');
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'ios-native', 'x-llmide-host-nonce': proof } }).client, 'ios-native');
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': 'cd'.repeat(32) } }).client, 'extension', 'wrong proof');
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': proof.slice(1) } }).client, 'extension', 'short proof');
+    assert.equal((await call('PUT', '/bus/kinds/review', { enabled: true }, { headers: { 'x-llmide-host-nonce': proof } })).status, 200);
+    // No approval key configured: nobody can prove host.
+    delete process.env.LLMIDE_HOST_APPROVAL_KEY;
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'desktop-ui', 'x-llmide-host-nonce': proof } }).client, 'extension');
   } finally {
-    delete process.env.LLMIDE_CORE_NONCE;
+    delete process.env.LLMIDE_HOST_APPROVAL_KEY;
     if (keep !== undefined) process.env.LLMIDE_BUS_TRUST_CLIENT_HEADER = keep;
   }
 });

@@ -764,6 +764,8 @@ const server = http.createServer(async (req, res) => {
     // per-launch random nonce (LLMIDE_CORE_NONCE) and checks it comes back
     // here, so a different process squatting the port cannot pass as this core.
     // Header only: the JSON body (and its schema) is unchanged.
+    // This nonce is IDENTITY only. It is readable by any local process, so it is never a credential: the bus host
+    // proof is a separate secret derived from LLMIDE_HOST_APPROVAL_KEY (core/host-approval.mjs busHostProof).
     if (CORE_NONCE) res.setHeader('x-llmide-nonce', CORE_NONCE);
     sendJSON(res, 200, await collectHealth());
     return;

@@ -93,6 +93,7 @@ const COMMANDS: &[&str] = &[
     "bypass_confirm",
     "bypass_confirm_signed",
     "trust_confirm",
+    "host_bus_proof",
 ];
 
 fn main() {
