@@ -5,6 +5,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { HistoryPanel } from "./HistoryPanel";
 import { estimateFit } from "./model.ts";
 import { ResultPanel } from "./ResultPanel";
+import type { MermaidRuntimeApi } from "./mermaid/renderer.ts";
 import { SetupPanel } from "./SetupPanel";
 import { SourcePanel, type SourceEnv } from "./SourcePanel";
 import { estimateChars, sendOrder } from "./sources.ts";
@@ -20,6 +21,8 @@ export interface DocGenScreenProps {
   onOpenFile: (path: string) => void;
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
+  /** The diagram renderer binding (host builds only). */
+  mermaid?: MermaidRuntimeApi;
   /** Test hooks. */
   initialView?: "result" | "history";
   initialViewport?: number;
@@ -135,6 +138,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
                 onOpenExternal={p.onOpenExternal}
                 onOpenSettings={p.onOpenSettings}
                 onSignIn={p.onOpenSettings}
+                mermaid={p.mermaid}
                 initialSections={p.initialSections}
               />
             ) : (

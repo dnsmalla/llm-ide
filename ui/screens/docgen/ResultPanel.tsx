@@ -1,9 +1,12 @@
 // The result: progress while reading and waiting, an error with a next step, or the document (safe markdown, read-only)
 // with notices, refine, save and open actions. Model output is untrusted: it only ever reaches the screen through the
 // Library's markdown renderer (no HTML, no images, links only through the host opener).
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { MarkdownView } from "../library/MarkdownView";
+import { MermaidView } from "./mermaid/MermaidView";
+import type { MermaidRuntimeApi } from "./mermaid/renderer.ts";
+import { isMermaidLang } from "./mermaid/source.ts";
 import { MAX_PROMPT } from "./model.ts";
 import type { RunState } from "./run.ts";
 import { Elapsed } from "./SetupPanel";
@@ -21,6 +24,8 @@ export interface ResultPanelProps {
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
   onSignIn: () => void;
+  /** The optional diagram renderer (host-installed on demand). Absent: a mermaid fence stays source text. */
+  mermaid?: MermaidRuntimeApi;
   /** Tests render the whole document at once. */
   initialSections?: number;
 }
@@ -94,13 +99,15 @@ function Done(p: ResultPanelProps): ReactNode {
   const r = p.run;
   const [instruction, setInstruction] = useState("");
   const revising = r.revising;
+  const runtime = p.mermaid;
+  const renderFence = useCallback((lang: string, text: string) => (runtime && isMermaidLang(lang) ? <MermaidView source={text} runtime={runtime} /> : null), [runtime]);
   return (
     <div className="dg-done">
       {r.notice && <StatusBanner severity="warning" message={<>{r.notice}</>} />}
       {r.skipped.length > 0 && <StatusBanner severity="warning" message={<>Could not read as text: {r.skipped.slice(0, 5).join(", ")}{r.skipped.length > 5 ? ` and ${r.skipped.length - 5} more` : ""}.</>} />}
       {r.editError && <StatusBanner severity="error" message={<>{r.editError}</>} />}
       {r.saveError && <StatusBanner severity="error" message={<>{r.saveError.message}</>} />}
-      {p.surface === "visual" && /```\s*mermaid/i.test(r.doc) && <p className="dg-muted">This output contains a Mermaid diagram. Diagrams are shown as source here until a bundled, sandboxed renderer is added.</p>}
+      {p.surface === "visual" && !runtime && /```\s*mermaid/i.test(r.doc) && <p className="dg-muted">This output contains a Mermaid diagram. Diagrams are shown as source here until a bundled, sandboxed renderer is added.</p>}
       <div className="dg-bar" role="group" aria-label="Document actions">
         <button type="button" className="dg-btn dg-primary" disabled={r.saving || revising || (r.saved !== null && !r.dirty)} onClick={p.onSave}>
           {r.saving ? "Saving…" : r.saved && !r.dirty ? "Saved" : r.saved ? "Save changes" : "Save to llm-doc/generated"}
@@ -135,7 +142,7 @@ function Done(p: ResultPanelProps): ReactNode {
         </div>
       )}
       <div className="dg-doc">
-        <MarkdownView text={r.doc} baseRel={null} onOpenExternal={p.onOpenExternal} initialSections={p.initialSections} />
+        <MarkdownView text={r.doc} baseRel={null} onOpenExternal={p.onOpenExternal} renderFence={renderFence} initialSections={p.initialSections} />
       </div>
       <form
         className="dg-refine"

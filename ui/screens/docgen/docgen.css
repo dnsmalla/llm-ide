@@ -47,3 +47,5 @@
 .dg-trow { display: flex; align-items: center; gap: 8px; }
 .dg-tform { display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 @media (prefers-reduced-motion: reduce) { .dg-root * { transition: none !important; animation: none !important; } }
+.dg-mermaid .dg-mermaid-img { display: block; max-width: 100%; height: auto; padding: var(--tok-space-sm); background: var(--tok-color-surface); }
+.dg-mermaid .dg-mermaid-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); }

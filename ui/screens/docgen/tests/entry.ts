@@ -9,3 +9,4 @@ export { VirtualList } from "../VirtualList.tsx";
 export { DocGenStore } from "../store.ts";
 export { INITIAL_RUN } from "../run.ts";
 export { SourceSelection, fileItem, noteItem } from "../sources.ts";
+export { MermaidView } from "../mermaid/MermaidView.tsx";

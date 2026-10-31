@@ -10,6 +10,8 @@ export interface LinkHandlers {
   onOpenExternal?: (url: string) => void;
   /** A relative link to another note in the folder. */
   onOpenNote?: (rel: string) => void;
+  /** A fenced code block a screen renders itself (e.g. a diagram). Return `null` to keep the plain code block. */
+  renderFence?: (lang: string, text: string) => ReactNode | null;
 }
 
 function Inlines({ nodes, h }: { nodes: readonly Inline[]; h: LinkHandlers }): ReactNode {
@@ -97,7 +99,9 @@ function BlockView({ b, h }: { b: Block; h: LinkHandlers }): ReactNode {
       );
     case "hr":
       return <hr />;
-    case "code":
+    case "code": {
+      const custom = h.renderFence?.(b.lang, b.text);
+      if (custom) return <>{custom}</>;
       return (
         <figure className="lib-code">
           <figcaption>{b.lang || "text"}</figcaption>
@@ -106,6 +110,7 @@ function BlockView({ b, h }: { b: Block; h: LinkHandlers }): ReactNode {
           </pre>
         </figure>
       );
+    }
     case "quote":
       return (
         <blockquote>
@@ -176,12 +181,12 @@ export interface MarkdownViewProps extends LinkHandlers {
 }
 
 /** Markdown for a note body. Renders `initialSections` sections, then one more whenever the reader nears the end. */
-export function MarkdownView({ text, baseRel, onOpenExternal, onOpenNote, initialSections = 2 }: MarkdownViewProps): ReactNode {
+export function MarkdownView({ text, baseRel, onOpenExternal, onOpenNote, renderFence, initialSections = 2 }: MarkdownViewProps): ReactNode {
   const blocks = useMemo(() => parseMarkdown(text, { baseRel }), [text, baseRel]);
   const ranges = useMemo(() => sectionRanges(blocks.length, SECTION_BLOCKS), [blocks.length]);
   const [shown, setShown] = useState(initialSections);
   const sentinel = useRef<HTMLDivElement | null>(null);
-  const handlers = useMemo<LinkHandlers>(() => ({ onOpenExternal, onOpenNote }), [onOpenExternal, onOpenNote]);
+  const handlers = useMemo<LinkHandlers>(() => ({ onOpenExternal, onOpenNote, renderFence }), [onOpenExternal, onOpenNote, renderFence]);
 
   useEffect(() => setShown(initialSections), [text, initialSections]);
   useEffect(() => {

@@ -10,6 +10,7 @@ import { createHostFs } from "../explorer/fs";
 import { createNotesHost } from "../library/host.ts";
 import { publicHttpsUrl } from "../library/safe-url.ts";
 import { DocGenScreen } from "./DocGenScreen";
+import { hostMermaidRuntime } from "./mermaid/binding.ts";
 import { createDocsApi } from "./docs-api.ts";
 import { fileReader } from "./fs-reader.ts";
 import { notesReader } from "./notes-source.ts";
@@ -48,11 +49,12 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     const notes = createNotesHost((cmd, args) => invokeHost(cmd, args));
     return { fs, notes, store: storeFor(surface, fs, notes) };
   }, [surface]);
+  const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
   const env = useMemo(() => ({ fs: available ? deps.fs : null, notes: available ? deps.notes : null }), [available, deps]);
   const onOpenFile = useCallback((path: string) => {
     const rel = safeRelativePath(path);
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
 }
