@@ -8,8 +8,9 @@ Read-only investigation at `main`. Purpose: replace unverified MASTER-PLAN lines
 
 - Cause (project note, 2026-10): `CFBundleVersion` was a constant, so Sparkle could not order builds.
 - Fix, commits `b244199f` (2026-10-10 "publish a real CFBundleVersion so Sparkle can compare builds") and `c04da0b4` ("give release builds a real build number"): `mac/Scripts/build.sh` lines 44-59 set `CFBundleVersion` to `LLMIDE_BUILD_NUMBER` (positive integer, validated), else `git rev-list --count HEAD`, else 1 (with a warning, and a red warning when `CI` is set and the count is 1, the shallow-clone case). It is written into the generated Info.plist at line 186. `mac/Scripts/appcast.sh` lines 45-51 reads `CFBundleVersion` back from the built `.app` and writes it as `<sparkle:version>` (line 88), refusing to run when it cannot read it, so the two cannot drift. `.github/workflows/mac-release.yml` sets `LLMIDE_BUILD_NUMBER: github.run_number` (line 53) and checks out with `fetch-depth: 0` (line 68). The troubleshooting row in `docs/how-to/release-with-auto-update.md` (line 175) documents it.
-- **Remaining risk (not in the project note):** two sources feed one comparison key. A local release uses the commit count (3 481 at this audit, `git rev-list --count HEAD`); CI uses `github.run_number`, which starts near 1 per workflow. If any release was ever cut locally, or the first CI run is below the last shipped number, Sparkle will see CI builds as **older** and never offer them. Whether a release has shipped, and with which number, was not checked (no appcast or release artifact is in the repo).
-- Not verified: an actual Sparkle update from one signed build to the next on a real Mac; no test covers the build-number logic (no test file for `build.sh` or `appcast.sh` under `mac/Tests/LlmIdeMacTests`, by `ls | grep`).
+- **Fixed 2026-10-31:** `mac/Scripts/build-number.sh` is now the only source (commit count) for `build.sh` and `mac-release.yml`; `LLMIDE_BUILD_NUMBER` must be >= the count; tested by `extension/tests/scripts-build-number.test.mjs`. The risk below is what it closed:
+- **Remaining risk (not in the project note), now closed:** two sources feed one comparison key. A local release uses the commit count (3 481 at this audit, `git rev-list --count HEAD`); CI uses `github.run_number`, which starts near 1 per workflow. If any release was ever cut locally, or the first CI run is below the last shipped number, Sparkle will see CI builds as **older** and never offer them. Whether a release has shipped, and with which number, was not checked (no appcast or release artifact is in the repo).
+- Not verified: an actual Sparkle update from one signed build to the next on a real Mac; the build-number logic now has a test (it had none: no test file for `build.sh` or `appcast.sh` under `mac/Tests/LlmIdeMacTests`, by `ls | grep`).
 - Recommendation: use one source for both paths (for example CI-only releases, or `run_number` offset above the highest shipped number, or a monotonic counter file in the repo) and add a script test. **Decision for you:** release only through CI, or define the single number source.
 - MASTER-PLAN line: `[~]` (fixed in code; ordering risk and a real update test open).
 
@@ -105,8 +106,8 @@ Closed since: item 11 (the connector OAuth transports now use the pinned fetch).
 
 ## Decisions for you
 
-1. Sparkle: single build-number source for local and CI releases (a).
+1. ~~Sparkle: single build-number source~~ done 2026-10-31 (a).
 2. Swift freeze: define the trigger and scope (d); relates to sync-kit S2.
 3. Whether to write the missing connector-catalog spec and schedule phase 3 (gdrive, gcal descriptors) and a real Miro verification run (b).
 4. Whether the 51 private-wrapper skips in the decode lab are worth closing before the Mac switches more routes (c).
-5. Pinning: approve moving Box and the MCP connector OAuth discovery behind the pinned fetch (e).
+5. ~~Pinning: Box and MCP connector OAuth discovery~~ done 2026-10-31 (e).

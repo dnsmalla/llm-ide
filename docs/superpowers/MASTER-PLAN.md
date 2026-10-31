@@ -300,7 +300,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
 - [x] `make test-desktop` (node, security, token drift, cargo if present); node part is in `make regression` (`Makefile`) (me)
 - [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
-- [~] Mac Sparkle `CFBundleVersion` limitation: fixed in code (`b244199f`, `c04da0b4`: build number from `LLMIDE_BUILD_NUMBER` or commit count, appcast reads it from the built app, CI uses `run_number`); open: local commit-count vs CI run-number ordering risk, no script test, no real update run (`plans/2026-10-31-status-audit.md` (a)) (me)
+- [~] Mac Sparkle `CFBundleVersion` limitation: one build-number source for local and CI (`mac/Scripts/build-number.sh` = commit count; `LLMIDE_BUILD_NUMBER` only raises it, below the count or a shallow clone fails; CI `fetch-depth: 0`; `extension/tests/scripts-build-number.test.mjs`); open: no real signed-build-to-build Sparkle update run (`plans/2026-10-31-status-audit.md` (a)) (me)
 - [x] Night-push job built (`746b94f9`) (me)
 - [ ] Install the nightly push job: commands in `scripts/nightly-push.sh --help` (you)
 - [ ] CI result checked after every push (`gh run list`) (you)
