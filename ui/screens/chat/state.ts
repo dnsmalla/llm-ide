@@ -140,8 +140,28 @@ export type Action =
 
 // --- text -----------------------------------------------------------------------------------
 
-const FENCE_OPEN = /^\s{0,3}```\s*[\w+.#-]*\s*$/;
-const FENCE_CLOSE = /^\s{0,3}```\s*$/;
+const FENCE_OPEN_RE = /^\s{0,3}```\s*[\w+.#-]*\s*$/;
+const FENCE_CLOSE_RE = /^\s{0,3}```\s*$/;
+/** A fence line is short; the patterns never see a longer one (a whitespace-padded line would backtrack quadratically). */
+const FENCE_LINE_MAX = 2000;
+const FENCE_OPEN = { test: (l: string): boolean => l.length <= FENCE_LINE_MAX && FENCE_OPEN_RE.test(l) };
+const FENCE_CLOSE = { test: (l: string): boolean => l.length <= FENCE_LINE_MAX && FENCE_CLOSE_RE.test(l) };
+/**
+ * Sealing a block copies the `sealed` array (state is immutable), which is O(n) per paragraph and O(n²) for a long
+ * reply. Past SEAL_MERGE_AFTER blocks a new block is folded into the last one while that one is still small, so the
+ * array stays near (size / SEAL_MERGE_MAX) long. The text is unchanged (blocks end at a blank line outside a fence).
+ */
+export const SEAL_MERGE_AFTER = 64;
+export const SEAL_MERGE_MAX = 16_000;
+function seal(sealed: readonly string[], open: string): string[] {
+  const n = sealed.length;
+  if (n >= SEAL_MERGE_AFTER && sealed[n - 1].length < SEAL_MERGE_MAX) {
+    const next = sealed.slice();
+    next[n - 1] = sealed[n - 1] + open;
+    return next;
+  }
+  return [...sealed, open];
+}
 
 export function emptyText(): TextPart {
   return { kind: "text", sealed: [], open: "", line: "", openHasContent: false, inFence: false };
@@ -166,7 +186,7 @@ export function appendText(part: TextPart, delta: string): TextPart {
     } else if (FENCE_OPEN.test(done)) {
       inFence = true; openHasContent = true;
     } else if (done.trim() === "") {
-      if (openHasContent) { sealed = [...sealed, open]; open = ""; openHasContent = false; }
+      if (openHasContent) { sealed = seal(sealed, open); open = ""; openHasContent = false; }
     } else {
       openHasContent = true;
     }

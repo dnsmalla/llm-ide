@@ -193,3 +193,14 @@ test("IME: the committing Enter after compositionend (keyCode 229, isComposing f
   assert.equal(g.isIme(enter), false, "a later, deliberate Enter sends");
   assert.equal(g.isIme({ key: "Enter", keyCode: 13, nativeEvent: { isComposing: true } }), true, "Chrome isComposing");
 });
+
+test("windowBlocks: a message renders within the cap, cut at a line end, the rest is counted for Show more", () => {
+  const blocks = ["aaaa\nbbbb\n\n", "cccc\ndddd\n\n"];
+  assert.deepEqual(c.windowBlocks(blocks, 100), { blocks, hidden: 0 });
+  const w = c.windowBlocks(blocks, 17);
+  assert.deepEqual(w.blocks, ["aaaa\nbbbb\n\n", "cccc\n"]);
+  assert.equal(w.hidden, 6);
+  assert.deepEqual(c.windowBlocks(["x".repeat(50)], 20), { blocks: ["x".repeat(20)], hidden: 30 }, "one long line is cut at the limit");
+  const big = c.windowBlocks(["y\n".repeat(2_000_000)], c.RENDER_CAP_CHARS);
+  assert.ok(big.blocks[0].length <= c.RENDER_CAP_CHARS && big.hidden > 0);
+});

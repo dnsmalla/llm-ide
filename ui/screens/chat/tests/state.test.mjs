@@ -147,7 +147,8 @@ test("10k-token reply reduces fast and keeps a small open tail", () => {
   for (let i = 0; i < 10_000; i++) s = c.reduce(s, { type: "events", events: [ev("delta", { text: i % 40 === 39 ? "word.\n\n" : "word " })] });
   assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
   const part = last(s).parts[0];
-  assert.ok(part.sealed.length > 200);
+  assert.ok(part.sealed.length >= c.SEAL_MERGE_AFTER, "past the merge threshold blocks are folded together");
+  assert.ok(c.textOf(part).startsWith("word word") && c.textOf(part).includes("word.\n\nword"));
   assert.ok((part.open + part.line).length < 400);
 });
 
@@ -164,4 +165,22 @@ test("tool_result: empty ids match nothing, duplicate ids are not attached to th
   assert.equal(d.result.text, "out", "a unique id still matches");
   assert.ok(last(s).notices.some((n) => n.kind === "duplicate_tool_id" && n.level === "warning"));
   assert.equal(last(s).notices.filter((n) => n.kind === "duplicate_tool_id").length, 1);
+});
+
+test("appendText: 200k paragraphs stay linear (sealed blocks are merged), text is unchanged, a fence is never split", () => {
+  const para = "para text\n\n";
+  const n = 200_000;
+  const t0 = performance.now();
+  let p = c.emptyText();
+  p = c.appendText(p, "```js\na\n\nb\n```\n\n");
+  for (let i = 0; i < 200; i++) p = c.appendText(p, para.repeat(n / 200));
+  const ms = performance.now() - t0;
+  assert.ok(ms < 3000, `${Math.round(ms)} ms`);
+  assert.equal(c.textOf(p), "```js\na\n\nb\n```\n\n" + para.repeat(n));
+  assert.ok(p.sealed.length < c.SEAL_MERGE_AFTER + (n * para.length) / c.SEAL_MERGE_MAX + 5, `sealed blocks: ${p.sealed.length}`);
+  assert.match(p.sealed[0], /^```js\na\n\nb\n```\n\n$/, "the early blocks (the fence) are never merged");
+  // a whitespace-padded line is not a fence and costs nothing
+  const t1 = performance.now();
+  c.appendText(c.emptyText(), "```" + " ".repeat(500_000) + "x\n");
+  assert.ok(performance.now() - t1 < 500);
 });

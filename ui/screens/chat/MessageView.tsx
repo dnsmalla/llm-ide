@@ -46,13 +46,41 @@ export function clipPreview(text: string, shown: number): { text: string; rest: 
   return text.length <= shown ? { text, rest: 0 } : { text: text.slice(0, shown), rest: text.length - shown };
 }
 
+/** Characters of one message rendered before "Show more"; each click reveals this much more. */
+export const RENDER_CAP_CHARS = 1_000_000;
+
+/** The blocks to render within `limit` characters (a block crossing the limit is cut at a line end) and what is left. */
+export function windowBlocks(blocks: readonly string[], limit: number): { blocks: string[]; hidden: number } {
+  const out: string[] = [];
+  let used = 0, total = 0;
+  for (const b of blocks) total += b.length;
+  for (const b of blocks) {
+    if (used + b.length <= limit) { out.push(b); used += b.length; continue; }
+    const room = limit - used;
+    if (room > 0) {
+      const cut = b.lastIndexOf("\n", room - 1);
+      const keep = cut > 0 ? cut + 1 : room;
+      out.push(b.slice(0, keep)); used += keep;
+    }
+    break;
+  }
+  return { blocks: out, hidden: total - used };
+}
+
 function StreamingText({ part, host, live }: { part: TextPart; host: MessageHost; live: boolean }) {
-  const tail = part.open + part.line;
+  const [limit, setLimit] = useState(RENDER_CAP_CHARS);
+  const all = part.open + part.line ? [...part.sealed, part.open + part.line] : part.sealed;
+  const w = windowBlocks(all, limit);
+  // Blocks are keyed by index: sealed ones never change, so memoised Markdown skips them while the stream continues.
   return (
     <>
-      {part.sealed.map((block, i) => <Markdown key={i} text={block} onOpenLink={host.onOpenLink} onCopy={host.onCopy} />)}
-      {tail && <Markdown text={tail} onOpenLink={host.onOpenLink} onCopy={host.onCopy} />}
-      {live && <span className="chat-caret" aria-hidden="true" />}
+      {w.blocks.map((block, i) => <Markdown key={i} text={block} onOpenLink={host.onOpenLink} onCopy={host.onCopy} />)}
+      {w.hidden > 0 && (
+        <button type="button" className="chat-link-btn" onClick={() => setLimit(limit + RENDER_CAP_CHARS)}>
+          Show more ({w.hidden.toLocaleString("en-US")} characters not shown)
+        </button>
+      )}
+      {live && w.hidden === 0 && <span className="chat-caret" aria-hidden="true" />}
     </>
   );
 }
