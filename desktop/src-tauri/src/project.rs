@@ -252,6 +252,8 @@ fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
     if let Ok(mut g) = ACTIVE.lock() {
         *g = Some(root.clone());
     }
+    // A watcher belongs to the root it was started for; its batches are relative to that old root.
+    crate::fs_watch::stop_all();
     Ok(info(&root))
 }
 
@@ -432,6 +434,20 @@ mod tests {
         // a too-broad pick is refused and leaves the active root unchanged
         assert!(activate(&dir, Path::new("/")).is_err());
         assert_eq!(active_root().unwrap(), fs::canonicalize(&proj).unwrap());
+    }
+
+    #[test]
+    fn opening_a_project_stops_the_file_watcher_of_the_previous_one() {
+        let dir = scratch("data-watch");
+        let old = scratch("watch-old").join("proj");
+        let new = scratch("watch-new").join("proj");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&new).unwrap();
+        activate(&dir, &old).unwrap();
+        crate::fs_watch::install_for_test(&fs::canonicalize(&old).unwrap());
+        assert!(crate::fs_watch::running());
+        activate(&dir, &new).unwrap();
+        assert!(!crate::fs_watch::running(), "the old root's watcher must not survive a project switch");
     }
 
     #[test]

@@ -119,9 +119,9 @@ fn v6_blocked(a: std::net::Ipv6Addr) -> bool {
     false
 }
 
-const BLOCKED_SUFFIXES: [&str; 14] = [
+const BLOCKED_SUFFIXES: [&str; 20] = [
     "localhost", "local", "localdomain", "internal", "intranet", "lan", "home", "corp", "private", "home.arpa", "test",
-    "example", "invalid", "onion",
+    "example", "invalid", "onion", "svc", "docker", "k8s", "consul", "ts.net", "cluster.local",
 ];
 
 fn domain_blocked(d: &str) -> bool {
@@ -175,6 +175,11 @@ pub fn check_url(raw: &str) -> Result<Checked, FsError> {
             Ok(Checked { url: u.as_str().to_string(), host_key: key })
         }
         "mailto" => {
+            // A percent-encoded CR/LF smuggles header lines (`Bcc:`) into the message some clients build.
+            let low = raw.to_ascii_lowercase();
+            if low.contains("%0d") || low.contains("%0a") || low.contains("%00") {
+                return refuse("the address contains an encoded line break");
+            }
             if u.path().is_empty() && u.query().is_none() {
                 return refuse("empty mailto address");
             }
@@ -422,6 +427,32 @@ mod tests {
             ok(u);
         }
         ok("http://[::ffff:8.8.8.8]/");
+    }
+
+    #[test]
+    fn mailto_refuses_encoded_line_breaks() {
+        for b in [
+            "mailto:a@example.com?subject=x%0d%0aBcc:evil@example.com",
+            "mailto:a@example.com?subject=x%0D%0ABcc:evil@example.com",
+            "mailto:a@example.com%0abcc:evil@example.com",
+            "mailto:a@example.com?body=line%0aline",
+            "mailto:a@example.com?subject=x%00y",
+        ] {
+            bad(b);
+        }
+        ok("mailto:a@example.com?subject=100%25%20done");
+    }
+
+    #[test]
+    fn service_mesh_and_vpn_names_are_not_public_sites() {
+        for b in [
+            "https://api.default.svc/", "https://redis.docker/", "https://foo.k8s/", "https://web.service.consul/", "https://host.tail1234.ts.net/",
+            "https://a.b.cluster.local/", "https://x.default.svc.cluster.local/",
+        ] {
+            bad(b);
+        }
+        ok("https://example.com/");
+        ok("https://svc.example.com/");
     }
 
     #[test]

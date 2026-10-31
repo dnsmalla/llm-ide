@@ -256,6 +256,19 @@ pub fn stop_all() {
     fs_watch_stop();
 }
 
+/// Is a watcher installed (for the root that was active when it started)?
+#[cfg(test)]
+pub(crate) fn running() -> bool {
+    CURRENT.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// Installs a watcher on `root` with a no-op sink (project tests).
+#[cfg(test)]
+pub(crate) fn install_for_test(root: &Path) {
+    let w = Watch::start(root, true, Box::new(|_| {})).expect("watch");
+    *CURRENT.lock().unwrap() = Some(w);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
