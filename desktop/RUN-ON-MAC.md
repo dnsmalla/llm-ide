@@ -72,10 +72,10 @@ Try these in order. Note anything that differs in the bug-report template at the
    (nothing is trusted), then repeat and confirm.
 6. **Explorer.** Open Explorer: expand the tree, open a file, edit and save (Cmd+S). Then edit the same file
    from a terminal (`echo x >> file`) while the app has unsaved changes: the app must offer to reload or keep
-   yours, never silently overwrite. Try rename, new file, delete (goes to the Trash).
+   yours, never silently overwrite. Try rename, new file, delete (goes to the Trash). Delete a chat: a native dialog asks first and says a copy is kept for 30 days in the chat folder (`.deleted`).
 7. **Search.** Cmd+Shift+F: search for a word, open a result at its line.
 8. **Terminal.** Open the terminal dock in Explorer and start a shell. A native consent dialog appears the
-   first time; refuse once (the dock shows a denied state with Try again), then allow. Type `exit`: the tab must
+   first time (its default button is Cancel; Allow terminal is the other one); refuse once (the dock shows a denied state with Try again), then allow. The approval lasts 30 minutes: after that a new terminal asks again and typing into an old one is refused. Type `exit`: the tab must
    say "(exited)" at once. Settings > Features has a Terminal switch (applies at next start).
 9. **Source Control.** In a scratch repo (`git init` there, add a file) open it as the project, go to the Source
    Control panel, stage, write a message and commit. Confirm with `git log` in the terminal.
