@@ -6,7 +6,7 @@ import { buildFixture, type FixtureEvent } from "../chat/fixture";
 import { replayEvents, type ReplayOptions } from "../chat/replay";
 import { runChatBench, notifyFinalRendered, type CommitSample, type TurnStats } from "../chat/chatBench";
 import { Markdown } from "../chat/markdown";
-import { StatusBanner } from "../design/components/StatusBanner";
+import { StatusBanner } from "@llmide/ui-kit";
 import { emitBench } from "../bench/records";
 import { claimStep, finishStep } from "../bench/runner";
 

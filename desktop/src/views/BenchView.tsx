@@ -3,7 +3,7 @@ import "./bench.css";
 import { getRecords, subscribeRecords } from "../bench/records";
 import { ALL_STEPS, getRunState, runSteps, subscribeRunState } from "../bench/runner";
 import { buildRows, type BenchRow } from "../bench/targets";
-import { StatusBanner } from "../design/components/StatusBanner";
+import { StatusBanner } from "@llmide/ui-kit";
 
 /** Bench tab: runs every bench in turn and shows the results against the §6 targets. */
 export function BenchView() {

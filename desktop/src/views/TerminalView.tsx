@@ -5,7 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { emitBench, waitVisibleAndPainted } from "../editor/editorBench";
-import { EditorTabBar } from "../design/components/EditorTabBar";
+import { EditorTabBar } from "@llmide/ui-kit";
 import { spawnShell, type PtyHandle } from "../terminal/ptyClient";
 import { OutputPump } from "../terminal/outputPump";
 import { terminalFont, xtermTheme } from "../terminal/xtermTheme";

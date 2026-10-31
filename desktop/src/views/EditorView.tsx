@@ -12,7 +12,7 @@ import {
   waitVisibleAndPainted,
   type OpenTiming,
 } from "../editor/editorBench";
-import { EditorTabBar } from "../design/components/EditorTabBar";
+import { EditorTabBar } from "@llmide/ui-kit";
 import { claimStep, finishStep } from "../bench/runner";
 
 const FILE_NAME = "sample.ts";

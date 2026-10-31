@@ -1,0 +1,146 @@
+/* Desktop shell chrome (toolbar, status bar, layout). Kit components live in @llmide/ui-kit. */
+
+/* Shared chrome, styled only with the generated tokens (tokens.css).
+ * Metrics mirror mac/Sources/LlmIdeMac/Core/DesignSystem/* and Shell/*. */
+
+body {
+  margin: 0;
+  background: var(--tok-color-body);
+  color: var(--tok-color-text);
+  font-family: var(--tok-type-sans-family);
+  font-size: var(--tok-type-body-size);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; }
+
+.placeholder { padding: var(--tok-space-xl); color: var(--tok-color-text-muted); font-size: var(--tok-type-body-size); }
+
+/* ---- App shell (mirrors Shell/AppShell.swift, Chrome/StatusBar.swift,
+ *      Chrome/ToolbarToolButton.swift, Features/Library/Views/LibraryView.swift).
+ *      Metrics are CSS px at a 1600 px wide window. ------------------------ */
+
+.shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--tok-color-body); }
+
+/* Unified toolbar in the title-bar row (titleBarStyle Overlay: traffic lights sit at the left). */
+.ui-toolbar {
+  height: 73px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 0 84px; /* clears the traffic lights */
+  background: var(--tok-color-surface);
+  border-bottom: 1px solid var(--tok-color-border);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ui-toolbar-brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.ui-toolbar-home { display: inline-flex; color: var(--tok-color-text-muted); }
+.ui-toolbar-title { font-size: 16px; font-weight: 500; color: var(--tok-color-text-muted); white-space: nowrap; }
+.ui-toolbar-tabs { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; justify-content: center; overflow: hidden; }
+.ui-toolbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--tok-color-text) 82%, transparent);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui-toolbar-item:hover { background: color-mix(in srgb, var(--tok-color-text) 6%, transparent); }
+.ui-toolbar-item[aria-selected="true"] {
+  background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent);
+  color: var(--tok-color-accent);
+  font-weight: 600;
+}
+.ui-toolbar-overflow { flex: none; color: var(--tok-color-text-muted); display: inline-flex; opacity: 0.7; }
+
+/* Secondary bar under the toolbar (sidebar toggle). */
+.shell-secondary .ui-chrome-bar { height: 44px; background: var(--tok-color-surface); border-bottom: 1px solid var(--tok-color-border); padding: 0 12px; }
+
+.shell-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.shell-content {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--tok-color-body);
+}
+.shell-content > * { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; }
+
+
+/* Bottom status bar (StatusBar.swift: 24-28 pt, surface, hairline on top). */
+.ui-statusbar {
+  flex: none;
+  box-sizing: border-box;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  background: var(--tok-color-surface);
+  border-top: 1px solid var(--tok-color-border);
+  font-size: 12px;
+  color: var(--tok-color-text-muted);
+  position: relative;
+}
+.ui-statusbar[data-state="failed"] .ui-statusbar-core { color: var(--tok-color-danger); }
+.ui-statusbar[data-state="ready"] .ui-statusbar-core { color: var(--tok-color-success); }
+.ui-statusbar-core { font-family: var(--tok-type-mono-family); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ui-statusbar-spacer { flex: 1; min-width: 0; }
+.ui-statusbar-project,
+.ui-statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tok-color-text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ui-statusbar-project:hover,
+.ui-statusbar-item:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); }
+.ui-statusbar-caret { display: inline-flex; color: var(--tok-color-text-muted); }
+.ui-statusbar-caret svg { width: 8px; height: 8px; transform: rotate(90deg); }
+.ui-statusbar-chat { font-weight: 600; }
+.ui-statusbar .ui-icon-button { width: 20px; height: 20px; }
+.ui-statusbar-theme { position: relative; display: inline-flex; }
+.ui-statusbar-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  min-width: 120px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--tok-color-surface2);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+.ui-statusbar-menu-item {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tok-color-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-statusbar-menu-item:hover { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
+.ui-statusbar-menu-item[aria-checked="true"] { color: var(--tok-color-accent); font-weight: 600; }
+

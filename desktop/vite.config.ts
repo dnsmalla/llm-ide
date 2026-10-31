@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -18,6 +19,14 @@ const useNpmDompurify = (): Plugin => ({
 // Tauri expects a fixed dev port (see src-tauri/tauri.conf.json devUrl).
 export default defineConfig({
   plugins: [useNpmDompurify(), react()],
+  resolve: {
+    // @llmide/ui-kit is consumed from source (../ui/kit): one React for kit and app.
+    alias: [
+      { find: /^@llmide\/ui-kit\/styles\.css$/, replacement: fileURLToPath(new URL("../ui/kit/src/styles/kit.css", import.meta.url)) },
+      { find: /^@llmide\/ui-kit$/, replacement: fileURLToPath(new URL("../ui/kit/src/index.ts", import.meta.url)) },
+    ],
+    dedupe: ["react", "react-dom"],
+  },
   optimizeDeps: {
     esbuildOptions: {
       plugins: [
@@ -35,6 +44,6 @@ export default defineConfig({
     },
   },
   clearScreen: false,
-  server: { port: 5173, strictPort: true, host: "127.0.0.1" },
+  server: { port: 5173, strictPort: true, host: "127.0.0.1", fs: { allow: [".."] } },
   build: { target: "es2022" },
 });

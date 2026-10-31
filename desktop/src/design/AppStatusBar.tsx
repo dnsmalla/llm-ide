@@ -1,7 +1,6 @@
 import { useState } from "react";
-import type { CoreStatus } from "../useCoreStatus";
-import { THEMES, type ThemeId } from "../theme";
-import { BellIcon, ChatBubbleIcon, FolderIcon, TerminalIcon, ChevronIcon } from "./icons";
+import { THEMES, BellIcon, ChatBubbleIcon, FolderIcon, TerminalIcon, ChevronIcon, type ThemeId } from "@llmide/ui-kit";
+import type { CoreStatus } from "./useCoreStatus";
 
 interface Props {
   status: CoreStatus | null;

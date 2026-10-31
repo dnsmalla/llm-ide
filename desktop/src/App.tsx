@@ -6,10 +6,8 @@ import { TerminalView } from "./views/TerminalView";
 import { ChatView } from "./views/ChatView";
 import { BenchView } from "./views/BenchView";
 import { ALL_STEPS, runSteps, setBenchNavigator } from "./bench/runner";
-import { SectionChromeBar } from "./design/components/SectionChromeBar";
-import { AppStatusBar } from "./design/components/AppStatusBar";
-import { LibrarySidebar, SelectItemEmpty } from "./design/components/LibrarySidebar";
-import { GraphIcon, EditorIcon, TerminalIcon, ChatIcon, BenchIcon, HomeIcon, SidebarIcon, DoubleChevronIcon } from "./design/components/icons";
+import { SectionChromeBar, LibrarySidebar, SelectItemEmpty, GraphIcon, EditorIcon, TerminalIcon, ChatIcon, BenchIcon, HomeIcon, SidebarIcon, DoubleChevronIcon } from "@llmide/ui-kit";
+import { AppStatusBar } from "./design/AppStatusBar";
 import { applyTheme, isThemeId, readStoredTheme, storeTheme, type ThemeId } from "./design/theme";
 import { useCoreStatus } from "./design/useCoreStatus";
 

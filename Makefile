@@ -27,8 +27,11 @@ clean:
 # absent. Rust is skipped with a notice, never failed, on a machine without it.
 test-desktop-node:
 	@if [ -d desktop/node_modules ]; then \
-	  cd desktop && npm test && npm run -s check:security && node scripts/gen-tokens.mjs --check; \
+	  cd desktop && npm test && npm run -s check:security && node ../scripts/gen-design-tokens.mjs --check; \
 	else echo "test-desktop: desktop/node_modules missing (cd desktop && npm ci); skipping node checks"; fi
+	@if [ -d ui/kit/node_modules ]; then \
+	  cd ui/kit && npm test --silent && npm run -s type-check; \
+	else echo "test-desktop: ui/kit/node_modules missing (cd ui/kit && npm ci); skipping ui-kit checks"; fi
 
 # test-desktop-node is under 2 s and is part of `make regression`; the cargo
 # step compiles Tauri (minutes cold), so it stays out of the regression gate
