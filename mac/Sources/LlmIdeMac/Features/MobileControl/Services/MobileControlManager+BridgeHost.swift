@@ -39,8 +39,8 @@ extension MobileControlManager: MobileBridgeHosting {
         append(.stderr, "\(MobileLogPolicy.typeLabel(type)) decode failed (\(MobileLogPolicy.frameLabel(data)))")
     }
 
-    func replyCommandError(commandId: String, message: String) {
-        reply(CommandError(commandId: commandId, message: message))
+    func replyCommandError(commandId: String, message: String, code: String?) {
+        reply(CommandError(commandId: commandId, message: message, code: code))
     }
 
     /// Exhaustive so a new `MobileBridgeAccess` case cannot compile without
@@ -97,8 +97,8 @@ extension MobileControlManager: MobileBridgeHosting {
         switch reply {
         case .state(let state):
             self.reply(Self.wire(state))
-        case .ack(let ok, let message):
-            self.reply(AutoTaskAck(ok: ok, message: message))
+        case .ack(let ok, let message, let code):
+            self.reply(AutoTaskAck(ok: ok, message: message, code: code))
         case .history(let entries):
             self.reply(AutoTaskHistoryReply(entries: entries.map {
                 AutoTaskHistoryEntry(actionText: $0.actionText, status: $0.status,

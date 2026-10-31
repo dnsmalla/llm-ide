@@ -63,7 +63,8 @@ enum MobileAutoTaskRequest: Equatable {
 /// `SharedProtocol` messages, for the same reason as `MobileAutoTaskRequest`.
 enum MobileAutoTaskReply: Equatable {
     case state(State)
-    case ack(ok: Bool, message: String?)
+    /// `code` is a `MobileRefusalCode` (machine-readable); nil keeps the old shape.
+    case ack(ok: Bool, message: String?, code: String? = nil)
     case history([HistoryEntry])
     case logs(Logs)
     case setup(Setup)

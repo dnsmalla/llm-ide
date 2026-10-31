@@ -136,6 +136,17 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 // and wrong response to "run this one specific task".
                 var started = false
                 var unrecognized = false
+                // A phone run honours the task's OWN enable flag. It used to ignore it, so a phone with
+                // Auto Task control on could start implement/review-merge although both were off on the Mac.
+                if let raw = m.task, let t = AutoTask(rawValue: raw), !ac.isTaskEnabled(t) {
+                    refuseDisabled(label: t.label, id: t.rawValue)
+                    return true
+                }
+                if let raw = m.task, AutoTask(rawValue: raw) == nil,
+                   let custom = scopedCustomTasks().first(where: { $0.id == raw }), !custom.isEnabled {
+                    refuseDisabled(label: custom.name, id: custom.id)
+                    return true
+                }
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
                     started = ac.runSingle(t, trigger: .phone)
                     if started {
@@ -400,6 +411,15 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         }
 
         replyAutoTaskSetup(autoCode: autoCode, templates: templates)
+    }
+
+    /// Typed refusal for a phone run of a task that is switched off on the Mac.
+    private func refuseDisabled(label: String, id: String) {
+        host?.logInfo("auto_task_run refused: \(id) is disabled on the Mac")
+        host?.sendAutoTaskReply(.ack(
+            ok: false,
+            message: "\(label) is turned off on your Mac. Turn it on there to run it from the phone.",
+            code: MobileRefusalCode.taskDisabled))
     }
 
     /// Re-read on every request: a phone may hold an old capability list after the switch flips off.

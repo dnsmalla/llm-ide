@@ -77,12 +77,16 @@ public struct AutoTaskAck: Codable, Equatable {
     public let type = MobileProtocol.Tag.autoTaskAck
     public let ok: Bool
     public let message: String?
+    /// Machine-readable reason (`task_disabled`, `desktop_only`, `awaiting_desktop_approval`, ...; see
+    /// `MobileRefusalCode`). Additive and optional: an older phone ignores it and still shows `message`.
+    public let code: String?
 
-    public init(ok: Bool, message: String?) {
+    public init(ok: Bool, message: String?, code: String? = nil) {
         self.ok = ok
         self.message = message
+        self.code = code
     }
-    private enum CodingKeys: String, CodingKey { case type, ok, message }
+    private enum CodingKeys: String, CodingKey { case type, ok, message, code }
 }
 
 public struct AutoTaskHistoryList: Codable, Equatable {

@@ -60,6 +60,8 @@ protocol MobileBridgeHosting: AnyObject {
 
     /// Answer the phone's pending `commandId` with an error.
     func replyCommandError(commandId: String, message: String)
+    /// Same, with a machine-readable `MobileRefusalCode` the phone can branch on.
+    func replyCommandError(commandId: String, message: String, code: String?)
     /// Answer `commandId` with "Auto-tasks not configured" and log it under `logLabel`.
     func replyNotConfigured(commandId: String, logLabel: String)
 
@@ -74,4 +76,10 @@ protocol MobileBridgeHosting: AnyObject {
     func decodeLoopRequest(type: String, data: Data?) -> MobileLoopRequest?
     /// Encode and send a Loop reply to the phone.
     func sendLoopReply(_ reply: MobileLoopReply)
+}
+
+extension MobileBridgeHosting {
+    func replyCommandError(commandId: String, message: String) {
+        replyCommandError(commandId: commandId, message: message, code: nil)
+    }
 }

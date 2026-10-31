@@ -59,8 +59,14 @@ public struct CommandError: Codable, Equatable {
     public let type = MobileProtocol.Tag.error
     public let commandId: String?
     public let message: String
-    public init(commandId: String?, message: String) { self.commandId = commandId; self.message = message }
-    private enum CodingKeys: String, CodingKey { case type, commandId, message }
+    /// Machine-readable refusal reason (`task_disabled`, `desktop_only`, `tier_refused`, ...; see
+    /// `MobileRefusalCode`). Additive and optional: an older phone ignores it and still shows `message`,
+    /// an older Mac never sends it.
+    public let code: String?
+    public init(commandId: String?, message: String, code: String? = nil) {
+        self.commandId = commandId; self.message = message; self.code = code
+    }
+    private enum CodingKeys: String, CodingKey { case type, commandId, message, code }
 }
 
 // MARK: - llm-chat history sync (Mac sheet + iPhone Chat tab)
