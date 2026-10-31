@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 12 | 6 | 14 | 32 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 12 | 7 | 13 | 32 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 87 | 24 | 68 | 179 |  |
+| Total | 87 | 25 | 67 | 179 |  |
 
 ## How the surfaces connect
 
@@ -104,8 +104,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Phase 0 report: GO with four conditions; graph 59.8 fps at 10k, 50.9-56.5 fps at 50k, Node core runs unchanged (`docs/superpowers/plans/2026-10-25-tauri-phase0-report.md`) (me)
 - [x] Design tokens generated for every web surface from `schema/design/tokens.json` only (`scripts/gen-design-tokens.mjs`; the regex-over-Swift desktop generator is gone, drift gate in `make contract-gates` and `make test-desktop-node`); Mac pixel parity unverified (me)
 - [x] Chat renders incrementally, no dropped events in benches (Phase 0 condition 3) (me)
-- [~] Node sidecar: `desktop/src-tauri/src/core_host.rs`, `stage-core.mjs`, `PACKAGING.md`; spike only, not the packaged T6 deliverable and no Windows run (me)
-- [~] Do not bundle the SDK's `claude` binary (condition 2): the report measures 67 MB without it; whether the staging script enforces it is unverified (me)
+- [~] Node sidecar: `desktop/src-tauri/src/core_host.rs`, `stage-core.mjs`, `PACKAGING.md`; production lifecycle built (see the T6 line), no Windows run yet (me)
+- [~] Do not bundle the SDK's `claude` binary (condition 2): the report measures 67 MB without it; `stage-core.mjs` removes the SDK platform package and fails if a `claude` binary remains, `check-core-deps` re-verifies (me)
 - [ ] Phase 0 open: user-run autobench with the window frontmost, to confirm numbers and the 30 s hidden phase (you)
 - [ ] Phase 0 open: one Windows autobench run (graph >= 30 fps, sidecar start/quit, installer size) (you)
 - [ ] Phase 0 open: Accessibility grant to measure caption read cadence; optional Swift cold-start comparison (you)
@@ -117,7 +117,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] ui-kit parity bar: pixel-tolerance fixtures against the Mac render (decision U4; needs a headless browser and a Mac fixture render, not built; today DOM/ARIA, token, contrast and alias-drift tests plus 5 reviewed screenshots) (me)
 - [ ] K3 screens per kit on ui/kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
 - [ ] Tauri feature-off mechanism decided: build-time tree-shake plus runtime `/health features` (kit plan "Gates added") (you)
-- [ ] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6) (me)
+- [~] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6): supervised lifecycle (nonce health, bounded backoff restart, fatal state, tree stop via process group / Windows Job Object), `llm-ide-desktop` data dir, allowlisted env + widened PATH, pinned SHA-256-verified official Node per target, `smoke-core.mjs`, release workflow stages + smokes macOS arm64/x64, Windows, Linux; `core_status` extended additively (`restarting`, `restarts`, `fatal`, `claude*`); 79 cargo tests + macOS staged-core smoke and real-launcher run pass, Windows/Linux/x64 runs and Mac-KB import not done, see `desktop/PACKAGING.md` (me)
 - [x] Server finds the user's `claude` (`extension/providers/claude-path.mjs`: env, bundled, PATH + per-OS dirs, validated) for the SDK engine (`pathToClaudeCodeExecutable`) and CLI spawns; 9 fake-executable tests; no packaged-app run on any OS yet (me)
 - [x] Keychain / secret store per OS: `desktop/src-tauri/src/secrets.rs` (`keyring` 3.6.3, one backend per OS, generate-once JWT secret + vault key under `com.llmide.desktop`, env-only to the sidecar, fail closed, no plaintext fallback, memory backend via `LLMIDE_KEYCHAIN_BACKEND=memory`, `secrets_status` booleans only); 7 cargo tests, cargo check/test, 17 node tests, check:security, build pass; real Windows/Linux stores and a signed-app macOS run not verified, see `docs/how-to/desktop-secret-store.md` (me)
 - [~] Project open: host-run native folder dialog (`rfd` 0.17.2, no dialog/fs permission for the webview), canonicalised root, too-broad roots refused (Rust mirror of `broad-root.mjs`), bounded recent list, becomes the `read_graph_file` root, `NS*FolderUsageDescription` strings kept; 12 new cargo tests (34 total), `cargo check`, 17 node tests, check:security, build pass. Open: no GUI/dialog run, security-scoped bookmarks for sandboxed builds only documented (`desktop/PACKAGING.md`), sidecar does not yet follow the active root (me)
