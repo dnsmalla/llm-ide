@@ -147,5 +147,5 @@ test('/kb/complete is advertised and rate-limited like /chat', async () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.mjs'), 'utf8');
   assert.match(src, /^\s*'\/kb\/complete',$/m);
   assert.match(src, /url === '\/kb\/complete'\)\s+return 'llmFast'/);
-  assert.match(src, /const SERVER_API_VERSION = (8[8-9]|9\d);/);
+  assert.match(src, /const SERVER_API_VERSION = (8[8-9]|9\d|[1-9]\d\d);/);
 });
