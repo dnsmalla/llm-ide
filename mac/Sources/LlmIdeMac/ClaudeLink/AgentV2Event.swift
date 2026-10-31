@@ -335,6 +335,9 @@ enum AgentV2Event: Sendable, Equatable {
     /// `notice` kind `session_budget` (server API v91): the chat crossed 80 percent of its token
     /// limit, or reached it.
     case sessionBudget(ChatSessionBudgetNotice, text: String)
+    /// `notice` kind `workspace_trust` (server API v95): the turn's folder is not trusted, so its own
+    /// executable config was not loaded. A `data` that does not decode falls back to `.notice`.
+    case workspaceTrust(ChatWorkspaceTrustNotice, text: String)
     /// `{"type":"sdk","sdkType":…}` (observation passthrough) OR an event
     /// type this build doesn't know: the payload is the raw type string so
     /// new upstream capabilities stay observable on the wire.
@@ -447,6 +450,9 @@ enum AgentV2Event: Sendable, Equatable {
             let limit: Int?
             let remaining: Int?
             let level: String?
+            let path: String?
+            struct Skip: Decodable { let kind: String; let name: String; let file: String?; let withheld: Bool? }
+            let skipped: [Skip]?
         }
         var event: AgentV2Event? {
             guard let d = data else { return nil }
@@ -464,6 +470,13 @@ enum AgentV2Event: Sendable, Equatable {
                 guard let used = d.used, let limit = d.limit, let level = d.level else { return nil }
                 return .sessionBudget(
                     ChatSessionBudgetNotice(used: used, limit: limit, remaining: d.remaining ?? max(0, limit - used), level: level),
+                    text: text)
+            case "workspace_trust":
+                guard let path = d.path, !path.isEmpty else { return nil }
+                return .workspaceTrust(
+                    ChatWorkspaceTrustNotice(
+                        path: path, text: text,
+                        skipped: (d.skipped ?? []).map { .init(kind: $0.kind, name: $0.name, file: $0.file ?? "", withheld: $0.withheld ?? false) }),
                     text: text)
             default:
                 return nil

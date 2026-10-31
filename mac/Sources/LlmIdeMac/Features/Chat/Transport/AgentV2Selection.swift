@@ -216,6 +216,10 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         get { v2.onSessionBudget }
         set { v2.onSessionBudget = newValue }
     }
+    var onWorkspaceTrust: (@MainActor (ChatWorkspaceTrustNotice) -> Void)? {
+        get { v2.onWorkspaceTrust }
+        set { v2.onWorkspaceTrust = newValue }
+    }
 
     init(v2: AgentV2Transport,
          capableProviders: @escaping () -> Set<String> = { AgentV2Selection.liveAgentCapableProviders() }) {

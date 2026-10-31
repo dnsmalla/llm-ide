@@ -417,6 +417,11 @@ struct CodeAssistantPanel: View {
                 onExecutePlan: { messageId, payload in executeSavedPlan(payload, messageId: messageId) },
                 onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) }
             )
+            if let trustNotice = engine.workspaceTrustNotice {
+                Divider().background(theme.current.border)
+                WorkspaceTrustBanner(api: api, notice: trustNotice) { engine.workspaceTrustNotice = nil }
+                    .id(trustNotice.path)
+            }
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }
             if !attachmentState.attachments.isEmpty,

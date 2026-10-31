@@ -177,6 +177,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// only; a server without the router never sends them.
     var onRouteSwitch: (@MainActor (ChatRouteSwitchNotice) -> Void)?
     var onSessionBudget: (@MainActor (ChatSessionBudgetNotice) -> Void)?
+    /// `workspace_trust` notice (API v95): the turn's folder is untrusted.
+    var onWorkspaceTrust: (@MainActor (ChatWorkspaceTrustNotice) -> Void)?
 
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
@@ -473,6 +475,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onRouteSwitch?(notice)
             case .sessionBudget(let notice, _):
                 self.onSessionBudget?(notice)
+            case .workspaceTrust(let notice, _):
+                self.onWorkspaceTrust?(notice)
             case .sdk:
                 break  // unknown/passthrough types: observable on the wire, not actionable here
             }

@@ -69,6 +69,7 @@ public enum AgentV2Conformance {
     public enum DecodedNotice: Equatable, Sendable {
         case routeSwitch(ChatRouteSwitchNotice)
         case sessionBudget(ChatSessionBudgetNotice)
+        case workspaceTrust(ChatWorkspaceTrustNotice)
         case plain(kind: String, level: String)
         case other
     }
@@ -78,6 +79,7 @@ public enum AgentV2Conformance {
         switch event {
         case .routeSwitch(let n, _): return .routeSwitch(n)
         case .sessionBudget(let n, _): return .sessionBudget(n)
+        case .workspaceTrust(let n, _): return .workspaceTrust(n)
         case .notice(let kind, let level, _): return .plain(kind: kind, level: level)
         default: return .other
         }
@@ -190,7 +192,7 @@ extension AgentV2Event {
             // renders kind/level/text only (runner ALLOWED_UNDECODED).
             return ["kind", "level", "text"]
 
-        case .routeSwitch, .sessionBudget:
+        case .routeSwitch, .sessionBudget, .workspaceTrust:
             // `data` is decoded for these two kinds (the schema types it as a free object, so the
             // report names the leaf the runner sees).
             return ["kind", "level", "text", "data"]

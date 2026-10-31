@@ -382,6 +382,9 @@ final class ChatEngine {
     /// completed it instead). Cleared at the start of the next turn; the
     /// transcript renders it dismissibly next to the error bubble.
     var agentV2Notice: String?
+    /// The latest `workspace_trust` notice: this chat's folder is untrusted. Shown as a banner with an
+    /// explicit "Trust this folder" action; cleared when the user decides, dismisses it, or the folder changes.
+    var workspaceTrustNotice: ChatWorkspaceTrustNotice?
     /// The mode the SERVER resolved for the current/last turn — live from the
     /// Agent engine's `mode_set` event (right after the agent starts) and
     /// again from every engine's turn result (the earliest the legacy stream
@@ -593,6 +596,7 @@ final class ChatEngine {
         }
         engineTransport.onRouteSwitch = { [weak self] notice in self?.route.apply(notice) }
         engineTransport.onSessionBudget = { [weak self] notice in self?.route.apply(notice) }
+        engineTransport.onWorkspaceTrust = { [weak self] notice in self?.workspaceTrustNotice = notice }
     }
 
     // MARK: - Turn lifecycle
@@ -732,6 +736,7 @@ final class ChatEngine {
         // described the PREVIOUS turn — a new turn starting means it has
         // served its purpose.
         agentV2Notice = nil
+        workspaceTrustNotice = nil
         // Same reasoning: a leftover resolution from the PREVIOUS turn must
         // not survive into this one, or a repeat value (e.g. "execute" again
         // after Auto released back) assigns unchanged and `.onChange` never
@@ -1012,6 +1017,7 @@ final class ChatEngine {
     private func followUpRoundTrip() async {
         statusText = ""
         agentV2Notice = nil
+        workspaceTrustNotice = nil
         // Captured once, fixed for this whole invocation, and declared
         // OUTSIDE the do block below — see runTurn's matching comment for
         // why the catch clause must compare against this exact id instead

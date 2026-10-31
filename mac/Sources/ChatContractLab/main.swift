@@ -2343,6 +2343,12 @@ do {
            "other notice kinds are untouched")
     expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"session_budget","level":"info","text":"t","data":{"used":1,"limit":2}}"#)) == .plain(kind: "session_budget", level: "info"),
            "a budget notice missing its level stays plain")
+    let wt = N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"workspace_trust","level":"warning","text":"t","data":{"path":"/p","trusted":false,"skipped":[{"kind":"mcp-stdio","name":"srv","file":".mcp.json","withheld":true},{"kind":"hooks","name":"PreToolUse","file":".claude/settings.json","withheld":false}]}}"#))
+    expect(wt == .workspaceTrust(ChatWorkspaceTrustNotice(path: "/p", text: "t", skipped: [
+        .init(kind: "mcp-stdio", name: "srv", file: ".mcp.json", withheld: true),
+        .init(kind: "hooks", name: "PreToolUse", file: ".claude/settings.json", withheld: false)])), "workspace_trust decodes with its data")
+    expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"workspace_trust","level":"info","text":"t"}"#)) == .plain(kind: "workspace_trust", level: "info"),
+           "a workspace_trust notice with no data stays plain")
     expect(N.decodedNotice(forJSON: json("not json")) == nil, "garbage does not decode")
 }
 
