@@ -26,7 +26,7 @@ test("Shell renders landmarks, skip link, section nav and a visible starting sta
   assert.match(out, /<main id="shell-main"[^>]*tabindex="-1"/);
   assert.match(out, /<footer class="sh-statusbar"/);
   assert.match(out, /role="status"[^>]*>[\s\S]*Starting core/);
-  for (const l of ["Chat", "Explorer", "Library", "Settings", "Code Graph", "Spike"]) assert.match(out, new RegExp(`>${l}<`));
+  for (const l of ["Chat", "Explorer", "Library", "Settings", "Code Graph", "Doc Gen", "Visual", "Spike"]) assert.match(out, new RegExp(`>${l}<`));
   assert.match(out, /aria-current="page"/);
   // disabled placeholders are announced as disabled and not tabbable
   assert.match(out, /aria-disabled="true"[^>]*tabindex="-1"[\s\S]*Issues/);

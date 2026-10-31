@@ -1,6 +1,6 @@
 // Section registry and navigation state. Pure (no React, no DOM) so it is tested with node.
 
-export type SectionId = "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "docgen" | "autotasks" | "spike";
+export type SectionId = "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "docgen" | "visual" | "autotasks" | "spike";
 
 export interface SectionDef {
   id: SectionId;
@@ -20,7 +20,8 @@ export const SECTIONS: readonly SectionDef[] = [
   { id: "settings", label: "Settings", enabled: true, shortcut: 4 },
   { id: "graph", label: "Code Graph", enabled: true },
   { id: "issues", label: "Issues & Gantt", enabled: false, note: "Planned for a later phase" },
-  { id: "docgen", label: "Doc Gen", enabled: false, note: "Planned for a later phase" },
+  { id: "docgen", label: "Doc Gen", enabled: true },
+  { id: "visual", label: "Visual", enabled: true },
   { id: "autotasks", label: "Auto Tasks", enabled: false, note: "Planned for a later phase" },
   { id: "spike", label: "Spike", enabled: true, note: "Phase 0 bench, graph, terminal and editor spikes (developer tool)" },
 ];

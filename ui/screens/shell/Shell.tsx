@@ -19,6 +19,7 @@ const ICONS: Record<SectionId, ReactNode> = {
   graph: <GraphIcon />,
   issues: <ChartIcon />,
   docgen: <EditorIcon />,
+  visual: <ChartIcon />,
   autotasks: <HomeIcon />,
   spike: <BenchIcon />,
 };

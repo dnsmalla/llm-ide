@@ -6,7 +6,10 @@ import type { SectionId, SectionProps } from "./sections";
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
-const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{chat,explorer,library,settings,graph}/index.tsx");
+const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{chat,explorer,library,settings,graph,docgen}/index.tsx");
+// Sections whose module is not `../<id>/index.tsx`: Visual shares the Doc Gen folder.
+const VISUAL = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../docgen/visual.tsx");
+const ENTRY_OVERRIDE: Readonly<Record<string, string>> = { visual: "../docgen/visual.tsx" };
 
 function Missing({ name }: { name: string }) {
   return (
@@ -21,7 +24,7 @@ const cache = new Map<string, LazyExoticComponent<ComponentType<SectionProps>>>(
 
 /** The lazy component for a section, or null when there is no screen module for it. */
 export function screenFor(id: SectionId, label: string): LazyExoticComponent<ComponentType<SectionProps>> | null {
-  const loader: Loader | undefined = GLOB[`../${id}/index.tsx`];
+  const loader: Loader | undefined = Object.hasOwn(ENTRY_OVERRIDE, id) ? VISUAL[ENTRY_OVERRIDE[id]!] : GLOB[`../${id}/index.tsx`];
   if (!loader) return null;
   let c = cache.get(id);
   if (!c) {
