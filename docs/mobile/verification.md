@@ -100,10 +100,13 @@ the "Turned off on the Mac" message and must not advertise the screen.
 | F2 | Files with the switch off, then on | denied message, then a listing; no `.git`, secret or key file shown |
 | F3 | Issues, Source Control, Usage, Activity | read OK; Comment on issues off by default and refused until enabled |
 | F4 | **Auto Task run with the task disabled on the Mac** (turn **Auto Task control** on, leave Implement issues off, tap Run) | phone shows "turned off on your Mac" (`task_disabled`); nothing starts |
-| F5 | Run a task that is enabled (Review code) | starts without a dialog |
+| F5 | Run a read-only task that is enabled (Review code, Review doc, Review conflicts) | starts without a dialog |
 | F6 | **Implement issues enabled on the Mac, Run from the phone** | phone shows "Waiting for you to approve this on your Mac"; a Mac dialog names the task, project and issue numbers, default button Cancel; Cancel gives "You cancelled this on your Mac"; no answer for 120 s denies; Allow once starts it |
 | F7 | Review & merge from the phone | same dialog naming the branches and target; nothing is pushed without Allow once |
-| F8 | Spam three Run requests quickly | one dialog at a time; a fourth within 5 minutes gives "asked too often" |
+| F7a | **Every registry T1/T2 task from the phone:** Source update, Sources to issues, Update issues, Loop engineering, Generate doc, a custom task; Loop Start and Start stage; Doc Gen run | each shows a Mac dialog naming the task and project (T2: implement issues and review & merge, and custom tasks that can write, show the exact issue ids or branches; a list over 20 says "and N more (total)"); Cancel, no answer (120 s) or busy refuses and nothing runs. The Swift tier table is pinned to `schema/bus/registry.json` by `PhoneApprovalPolicyTests` |
+| F7b | **Run all from the phone** | refused with "Run one task at a time from your phone" (`tier_refused`); the phone runs one named task at a time. Run all still works on the Mac |
+| F7c | Approve Implement issues, but add a pending issue (or a fix branch) on the Mac while the dialog is up | after Allow once, "What this would run changed ... Ask again"; nothing runs; ask again to see the new list |
+| F8 | Spam three Run requests quickly (any task ids: the limit is per Mac, not per task) | one dialog at a time; a fourth within 5 minutes gives "asked too often" |
 | F9 | **Template edit attempt** (in the phone's Auto Task setup, edit and save a template, change a task's folder or skill, flip a task's toggle) | each fails with "only available on your Mac" (`desktop_only`); the Mac's template and settings are unchanged; the phone still lists templates and settings |
 | F10 | **Tier refusals:** a message type the Mac does not know (a newer phone), and a desktop-only type | answered with a refusal (`unknown_type`, `desktop_only`) in the phone's error text, never a silent drop; the Mac log shows "Tier gate refused" |
 | F11 | Explorer chat edit switch on while the Mac chip is **Bypass** | the phone turn still asks before edits and shell commands (never Bypass) |

@@ -79,6 +79,8 @@ Receipt gate (`decideReceipt`, pure, tested by `fixtures/tiers`): unknown kind r
 | `loop.run` | T1 | no | loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step |
 | `custom.run` | T1 | no | saved custom tasks live in the Mac app; Node has no store for a `customTaskId` |
 
+**Mac-side mirror (phone approvals).** The Mac host keeps a Swift table, `PhoneApprovalPolicy` (`mac/Sources/LlmIdeMac/Core/Contracts/`), that maps each phone-startable task to its registry kind and tier: `sources.update`, `issues.from_notes` and `loop.run` T1 (so Source update, Sources to issues, Update issues, Loop engineering, Loop Start and Start stage, and Doc Gen run), `issues.implement` T2 (Implement issues and Review & merge, the ship step), and `custom.run` T1 for a read-only custom task, escalated to T2 for any that can write (default T2 when unknown). `PhoneApprovalPolicyTests` parses this registry and fails on any mismatch, so the registry stays the single source of truth. The phone never answers the Mac's dialog; one dialog at a time and the 3-per-5-minutes limit are per Mac, not per task; no answer in 120 s is a denial. A phone cannot run all tasks at once: it names one.
+
 An unavailable kind is registered (it shows in `GET /bus/kinds` with its reason) and answers 501 `KIND_NOT_AVAILABLE`; nothing is stubbed as success. The six kinds replace the Mac's 13 Auto Task cases (audit section 3).
 
 `review` with `conflicts` asks git first (`ls-files -u`, `diff --check`) and makes **no model call** when git finds nothing.
