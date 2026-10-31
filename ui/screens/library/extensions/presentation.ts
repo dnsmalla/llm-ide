@@ -82,6 +82,7 @@ export function orderKinds(kinds: readonly string[]): string[] {
 export function consentTitle(kind: string): string {
   switch (kind) {
     case "hook":
+    case "hooks":
       return "Hooks";
     case "mcp":
       return "MCP servers";
@@ -97,6 +98,7 @@ export function consentTitle(kind: string): string {
 export function consentRuns(kind: string): string {
   switch (kind) {
     case "hook":
+    case "hooks":
       return "Shell commands that run on your machine when the assistant triggers an event.";
     case "mcp":
       return "MCP servers the assistant can start or connect to and call tools on.";

@@ -268,3 +268,56 @@ test("5,000 installed items render a bounded number of options", async () => {
   assert.ok(n > 0 && n < 40, `mounted ${n}`);
   assert.match(out, />5,000</);
 });
+
+// ---- legacy panes -------------------------------------------------------------------------------
+const hx = (n) => JSON.parse(readFileSync(join(REPO, "schema/http/fixtures/health-auth", `${n}.json`), "utf8")).response;
+const legacy = async (kind, routes) => {
+  const model = new X.LegacyModel(X.createLegacyApi({ async request(method, path) { const r = routes[`${method} ${path}`]; return r ? { status: 200, body: r() } : { status: 404, body: {} }; } }), kind);
+  await model.load();
+  return model;
+};
+
+test("mcp pane: list with a labelled switch per row, consent badge, the command is shown as text", async () => {
+  const model = await legacy("mcp-plugins", { "GET /auth/me/mcp-plugins": () => hx("get-auth-me-mcp-plugins-200") });
+  const out = html(h(X.LegacyView, { model }));
+  assert.match(out, /role="list" aria-label="MCP Plugins"/);
+  assert.match(out, /role="switch" aria-checked="false"/);
+  assert.match(out, /<label for="ext-leg-mcp-plugins-filesystem"><span class="ext-sr">Filesystem: <\/span>Off<\/label>/);
+  assert.match(out, /No consent yet/);
+  assert.match(out, /npx -y @modelcontextprotocol\/server-filesystem@2\.0\.1 \/tmp/);
+});
+
+test("mcp consent sheet: dialog naming what runs; Apply disabled until the box is ticked", async () => {
+  const model = await legacy("mcp-plugins", { "GET /auth/me/mcp-plugins": () => hx("get-auth-me-mcp-plugins-200") });
+  await model.setEnabled("filesystem", true);
+  let out = html(h(X.LegacyView, { model }));
+  assert.match(out, /role="dialog" aria-modal="true" aria-labelledby="ext-leg-title"/);
+  assert.match(out, /Allow Filesystem to run\?/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*aria-disabled="true"[^>]*>Allow and switch on</);
+  model.tickMcp(true);
+  out = html(h(X.LegacyView, { model }));
+  assert.ok(!/<button[^>]*disabled=""[^>]*>Allow and switch on</.test(out));
+});
+
+test("plugin pane: hook trust badge and a Review hooks button; the sheet lists each kind with a checkbox label", async () => {
+  const plugin = { name: "runner", displayName: "Runner", enabled: true, format: "claude", hookCount: 1, declaresHooks: true, executableKinds: ["monitors"], hookNotes: ["note <b>x</b>"], hooksTrusted: false };
+  const model = await legacy("plugins", { "GET /auth/me/plugins": () => ({ plugins: [plugin] }) });
+  let out = html(h(X.LegacyView, { model }));
+  assert.match(out, /Hooks not trusted/);
+  assert.match(out, /aria-label="Review and trust hooks of Runner"/);
+  model.requestHookTrust("runner");
+  out = html(h(X.LegacyView, { model }));
+  assert.match(out, /Trust the hooks of Runner\?/);
+  assert.match(out, /<label for="ext-leg-hook-hooks"><strong>Hooks<\/strong>/);
+  assert.match(out, /<label for="ext-leg-hook-monitors">/);
+  assert.ok(out.includes("note &lt;b&gt;x&lt;/b&gt;"));
+});
+
+test("llm sources pane: counts as text, empty state when none", async () => {
+  const model = await legacy("llm-sources", { "GET /auth/me/llm-sources": () => hx("get-auth-me-llm-sources-200") });
+  const out = html(h(X.LegacyView, { model }));
+  assert.match(out, /Central Skills/);
+  assert.match(out, /60 skills · 1 agents · 15 commands/);
+  const none = await legacy("llm-sources", { "GET /auth/me/llm-sources": () => ({ sources: [] }) });
+  assert.match(html(h(X.LegacyView, { model: none })), /No LLM sources are registered/);
+});

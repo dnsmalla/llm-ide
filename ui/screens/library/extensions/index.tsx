@@ -7,6 +7,8 @@ import type { CoreClient } from "../../shell/core";
 import type { LibraryExtension } from "../LibraryNav";
 import { createExtensionsApi, type ExtCore, type ExtensionsApi } from "./api.ts";
 import { ExtensionsScreen } from "./ExtensionsScreen";
+import { createLegacyApi, LegacyScreen } from "./LegacyPane";
+import type { LegacyApi } from "./legacy.ts";
 
 /** The shell's core client as the Extensions screen's request function. It keeps error bodies (the screen maps codes). */
 export function extCoreFrom(client: Pick<CoreClient, "requestRaw">): ExtCore {
@@ -21,8 +23,13 @@ export function extCoreFrom(client: Pick<CoreClient, "requestRaw">): ExtCore {
 export function libraryExtensions(client: Pick<CoreClient, "requestRaw">, base: readonly LibraryExtension[]): LibraryExtension[] {
   let api: ExtensionsApi | null = null;
   const getApi = (): ExtensionsApi => (api ??= createExtensionsApi(extCoreFrom(client)));
+  let legacy: LegacyApi | null = null;
+  const getLegacy = (): LegacyApi => (legacy ??= createLegacyApi(extCoreFrom(client)));
   const renderers: Record<string, () => ReactNode> = {
     extensions: () => <ExtensionsScreen api={getApi()} />,
+    plugins: () => <LegacyScreen api={getLegacy()} kind="plugins" />,
+    "llm-sources": () => <LegacyScreen api={getLegacy()} kind="llm-sources" />,
+    "mcp-plugins": () => <LegacyScreen api={getLegacy()} kind="mcp-plugins" />,
   };
   return base.map((e) => (renderers[e.id] ? { ...e, render: renderers[e.id] } : e));
 }
