@@ -100,6 +100,14 @@ const SKIP_RULES = [
     when: (fx) => /^(GET|POST) \/kb\/google\//.test(fx.endpoint) && (fx.status === 403 || fx.status === 409),
   },
   {
+    // iCal feed connector: every success, and every error that needs a stored feed or the feed host, was recorded from the
+    // real handlers (tests/ical-routes.test.mjs). The replay user owns no feed, and a replayed add would store a secret.
+    why: 'iCal feeds: needs a stored feed or the feed host; covered by tests/ical-routes.test.mjs',
+    when: (fx) => /\/kb\/calendar-ical\//.test(fx.endpoint)
+      && !(fx.status === 400 && /sources-400|options-400|id-400/.test(fx.file)) && !(fx.status === 404 && /unknown|other-users-source/.test(fx.file))
+      && !/get-kb-calendar-ical-sources-200-empty/.test(fx.file),
+  },
+  {
     why: 'rate limit (429): needs a bucket exhausted by earlier calls',
     when: (fx) => fx.status === 429,
   },
