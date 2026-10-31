@@ -30,7 +30,8 @@ export default defineConfig({
       // Phase 3 screens live in ../ui/screens/<name> (one owner per folder; see ui/screens/README.md).
       { find: /^@llmide\/screens\/(.*)$/, replacement: fileURLToPath(new URL("../ui/screens/", import.meta.url)) + "$1" },
     ],
-    dedupe: ["react", "react-dom"],
+    // graphology and sigma are imported by ui/screens/graph (outside desktop/): resolve them from here too.
+    dedupe: ["react", "react-dom", "graphology", "sigma"],
   },
   optimizeDeps: {
     esbuildOptions: {

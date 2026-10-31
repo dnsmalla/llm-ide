@@ -113,12 +113,12 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
   s = nav.navReducer(s, { type: "select", id: "chat" });
   assert.deepEqual([s.active, s.visited], ["chat", ["chat", "library"]]);
   const before = s;
-  assert.equal(nav.navReducer(s, { type: "select", id: "graph" }), before, "disabled placeholder");
+  assert.equal(nav.navReducer(s, { type: "select", id: "issues" }), before, "disabled placeholder");
   assert.equal(nav.navReducer(s, { type: "select", id: "nope" }), before);
   assert.equal(nav.navReducer(s, { type: "select", id: "chat" }), before, "same section: same object (no re-render)");
   const back = nav.navReducer(nav.initialNav("chat"), { type: "step", delta: -1 });
   assert.equal(back.active, "spike", "wraps to the last selectable item");
-  assert.equal(nav.initialNav("graph").active, "chat");
+  assert.equal(nav.initialNav("issues").active, "chat");
 });
 
 test("navigation: shortcuts, nav keys, launch section", () => {

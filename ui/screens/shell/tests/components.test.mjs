@@ -26,16 +26,16 @@ test("Shell renders landmarks, skip link, section nav and a visible starting sta
   assert.match(out, /<main id="shell-main"[^>]*tabindex="-1"/);
   assert.match(out, /<footer class="sh-statusbar"/);
   assert.match(out, /role="status"[^>]*>[\s\S]*Starting core/);
-  for (const l of ["Chat", "Explorer", "Library", "Settings", "Spike"]) assert.match(out, new RegExp(`>${l}<`));
+  for (const l of ["Chat", "Explorer", "Library", "Settings", "Code Graph", "Spike"]) assert.match(out, new RegExp(`>${l}<`));
   assert.match(out, /aria-current="page"/);
   // disabled placeholders are announced as disabled and not tabbable
-  assert.match(out, /aria-disabled="true"[^>]*tabindex="-1"[\s\S]*Code Graph/);
+  assert.match(out, /aria-disabled="true"[^>]*tabindex="-1"[\s\S]*Issues/);
 });
 
 test("Shell with an initial section marks it current; unknown/disabled falls back to Chat", () => {
   const cur = (init) => /aria-current="page"[^>]*>[\s\S]*?<span class="sh-nav-label">([^<]*)/.exec(html(h(Shell, { initialSection: init, spike: () => null })))[1];
   assert.equal(cur("library"), "Library");
-  assert.equal(cur("graph"), "Chat");
+  assert.equal(cur("issues"), "Chat");
 });
 
 test("CoreDownPanel: restarting is a polite status, fatal is an alert with guidance, claude notice shown", () => {

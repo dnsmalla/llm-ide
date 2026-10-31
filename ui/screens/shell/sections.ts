@@ -18,7 +18,7 @@ export const SECTIONS: readonly SectionDef[] = [
   { id: "explorer", label: "Explorer", enabled: true, shortcut: 2 },
   { id: "library", label: "Library", enabled: true, shortcut: 3 },
   { id: "settings", label: "Settings", enabled: true, shortcut: 4 },
-  { id: "graph", label: "Code Graph", enabled: false, note: "Planned for a later phase" },
+  { id: "graph", label: "Code Graph", enabled: true },
   { id: "issues", label: "Issues & Gantt", enabled: false, note: "Planned for a later phase" },
   { id: "docgen", label: "Doc Gen", enabled: false, note: "Planned for a later phase" },
   { id: "autotasks", label: "Auto Tasks", enabled: false, note: "Planned for a later phase" },

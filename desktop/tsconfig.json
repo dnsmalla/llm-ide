@@ -16,6 +16,8 @@
     "paths": {
       "@llmide/ui-kit": ["../ui/kit/src/index.ts"],
       "@llmide/screens/*": ["../ui/screens/*"],
+      "graphology": ["./node_modules/graphology"],
+      "sigma": ["./node_modules/sigma"],
       "react": ["./node_modules/@types/react"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
       "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime"]

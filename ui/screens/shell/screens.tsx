@@ -6,7 +6,7 @@ import type { SectionId, SectionProps } from "./sections";
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
-const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{chat,explorer,library,settings}/index.tsx");
+const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{chat,explorer,library,settings,graph}/index.tsx");
 
 function Missing({ name }: { name: string }) {
   return (
