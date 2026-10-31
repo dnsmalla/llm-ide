@@ -286,3 +286,24 @@ test("re-summarise: cancel writes nothing; an edit during summarising is a confl
   assert.equal(b.fake.files.get(REL)!.text, MEETING + "user edit\n");
   void meetingText;
 });
+
+test("checkExternal: a read that raced our own save never replaces the saved text with stale disk text", async () => {
+  const { host, ed } = mk("one\n");
+  await ed.load();
+  const real = host.open.bind(host);
+  let release!: () => void;
+  const hold = new Promise<void>((r) => (release = r));
+  let first = true;
+  host.open = async (rel: string) => {
+    const o = await real(rel); // reads the OLD note ...
+    if (first) { first = false; await hold; } // ... and is delivered after the save below finished
+    return o;
+  };
+  const check = ed.checkExternal();
+  ed.edit("two\n");
+  assert.equal(await ed.save(), true);
+  release();
+  await check;
+  assert.equal(ed.getSnapshot().draft, "two\n");
+  assert.equal(ed.getSnapshot().phase, "clean");
+});

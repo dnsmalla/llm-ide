@@ -91,6 +91,9 @@ export class EditorSession {
   }
 
   /** Reads the note from disk, replacing any draft. */
+  /** Bumped when a save starts and when it lands: lets `checkExternal` discard a read that raced a write. */
+  private writeSeq = 0;
+
   async load(): Promise<void> {
     const g = ++this.gen;
     this.set({ phase: "loading", error: null, justSaved: false });
@@ -128,12 +131,14 @@ export class EditorSession {
       return true; // nothing to write: opening a note never rewrites it
     }
     const g = this.gen;
+    this.writeSeq++;
     const text = this.fileText();
     const draftAtStart = this.snap.draft;
     this.set({ phase: "saving", error: null });
     try {
       const saved = await this.deps.queue.run(this.snap.rel, () => this.deps.host.save(this.snap.rel, text, base.bom, base.hash, force));
       if (g !== this.gen) return false;
+      this.writeSeq++;
       this.base = { norm: toLf(text), hash: saved.hash, bom: base.bom };
       this.deps.onWritten(saved, text);
       // Edits typed while the save was in flight stay as a new draft on top of the saved base.
@@ -185,9 +190,11 @@ export class EditorSession {
     const base = this.base;
     if (base === null || this.snap.phase === "saving" || this.snap.phase === "loading") return;
     const g = this.gen;
+    const w = this.writeSeq;
     try {
       const o = await this.deps.host.open(this.snap.rel);
-      if (g !== this.gen || o.hash === this.base?.hash) return;
+      // A save started or finished while this read was in flight: what it read may be older than our own write.
+      if (g !== this.gen || w !== this.writeSeq || this.base !== base || o.hash === this.base?.hash) return;
       if (this.snap.phase === "clean" || (this.snap.phase === "dirty" && this.snap.draft === base.norm)) {
         const eol = detectEol(o.text);
         const norm = toLf(o.text);
