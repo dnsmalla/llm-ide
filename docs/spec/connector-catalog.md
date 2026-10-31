@@ -32,7 +32,7 @@ Not covered: Box, Slack, Email and Git ingestion internals (see [knowledge-base]
 | id | authKind | pipelineReady | Ingestion path |
 |---|---|---|---|
 | `gdrive` | `google-oauth` | false | REST connector built, see [google-connectors](google-connectors.md); the catalog flag and the Mac screen are not wired (slice G5/G6) |
-| `gcal` | `google-oauth` | false | REST connector built, see [google-connectors](google-connectors.md); the catalog flag and the Mac screen are not wired (slice G5/G6) |
+| `gcal` | `google-oauth` | false | REST connector built, see [google-connectors](google-connectors.md), and a no-OAuth iCal feed connector (the calendar's secret iCal address), see [calendar-ical](calendar-ical.md); the catalog flag and the Mac screen are not wired (slice G5/G6) |
 | `miro` | `miro-oauth` | true | MCP-backed (section 4) |
 | `box` | `box-ccg` | true | Pattern A, `extension/connectors/box.mjs` |
 | `slack` | `slack-oauth` | true | `extension/connectors/slack-source.mjs` |
