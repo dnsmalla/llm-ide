@@ -281,6 +281,7 @@ pub struct DiscardResult {
     pub trashed: u32,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 enum Plan {
     Restore(String),
     Trash(String),
@@ -342,11 +343,80 @@ fn discard_prompt(plan: &[Plan]) -> String {
     s
 }
 
+/// What a path looks like right now: file = SHA-256 of its content (size+mtime past 64 MB), folder = a bounded
+/// digest of its entries' names, kinds, sizes and mtimes, symlink = its target. Taken before the confirm
+/// dialog and compared after it, so a file edited while the dialog was open is never discarded.
+fn fingerprint(root: &Path, rel: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::time::UNIX_EPOCH;
+    const FILE_HASH_MAX: u64 = 64 * 1024 * 1024;
+    const DIR_ENTRIES_MAX: usize = 20_000;
+    let mtime = |m: &std::fs::Metadata| m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    let mut h = Sha256::new();
+    let mut stack = vec![root.join(rel)];
+    let mut seen = 0usize;
+    while let Some(p) = stack.pop() {
+        seen += 1;
+        if seen > DIR_ENTRIES_MAX {
+            h.update(b"[truncated]");
+            break;
+        }
+        let name = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().into_owned();
+        h.update(name.as_bytes());
+        match std::fs::symlink_metadata(&p) {
+            Err(_) => h.update(b"|missing"),
+            Ok(m) if m.file_type().is_symlink() => {
+                h.update(b"|link|");
+                h.update(std::fs::read_link(&p).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default().as_bytes());
+            }
+            Ok(m) if m.is_dir() => {
+                h.update(b"|dir");
+                let mut kids: Vec<_> = std::fs::read_dir(&p).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+                kids.sort();
+                stack.extend(kids.into_iter().rev());
+            }
+            Ok(m) => {
+                h.update(format!("|file|{}|{}", m.len(), mtime(&m)).as_bytes());
+                if m.len() <= FILE_HASH_MAX {
+                    if let Ok(mut f) = std::fs::File::open(&p) {
+                        let mut buf = [0u8; 64 * 1024];
+                        while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
+                            if n == 0 {
+                                break;
+                            }
+                            h.update(&buf[..n]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn fingerprints(root: &Path, plan: &[Plan]) -> Vec<String> {
+    plan.iter().map(|p| fingerprint(root, match p {
+        Plan::Restore(n) | Plan::Trash(n) => n,
+    })).collect()
+}
+
 /// `confirm` is the native dialog (host) or a stub (tests); it is asked once with the full list.
 pub fn discard(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool) -> R<DiscardResult> {
+    discard_with(root, paths, confirm, &crate::trash_guard::OsTrash)
+}
+
+/// `discard` through an injectable trash. After the dialog the plan and every file's fingerprint are
+/// re-checked: anything that changed while the user was deciding aborts with `changed_since_confirm` and
+/// nothing is touched.
+pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash_guard::Trasher) -> R<DiscardResult> {
     let plan = plan_discard(root, paths)?;
+    let before = fingerprints(root, &plan);
     if !confirm(&discard_prompt(&plan)) {
         return gerr("cancelled", "discard cancelled");
+    }
+    let again = plan_discard(root, paths).map_err(|_| FsError { code: "changed_since_confirm", message: "the files changed while the dialog was open; nothing was discarded".into() })?;
+    if again != plan || fingerprints(root, &again) != before {
+        return gerr("changed_since_confirm", "the files changed while the dialog was open; nothing was discarded");
     }
     let restore: Vec<&str> = plan.iter().filter_map(|p| if let Plan::Restore(n) = p { Some(n.as_str()) } else { None }).collect();
     let mut res = DiscardResult { restored: 0, trashed: 0 };
@@ -358,7 +428,7 @@ pub fn discard(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool) ->
     }
     for p in &plan {
         if let Plan::Trash(n) = p {
-            crate::fs_ops::delete(root, n)?;
+            crate::fs_ops::delete_with(root, n, trasher)?;
             res.trashed += 1;
         }
     }
@@ -717,9 +787,13 @@ fn native_ask(title: &'static str, accept: &'static str) -> impl Fn(&str) -> boo
     move |text: &str| crate::confirm::ask(title, text, accept, true)
 }
 
+/// One native destructive dialog at a time, and not more often than a person can read them: a page that
+/// loops over `git_discard` / `git_checkout` gets `busy` / `rate_limited` instead of a stream of dialogs.
+static DESTRUCTIVE_DIALOGS: crate::confirm::DialogGuard = crate::confirm::DialogGuard::new(1_500, 10);
+
 #[tauri::command]
 pub async fn git_discard(paths: Vec<String>) -> R<DiscardResult> {
-    blocking(move |root| discard(&root, &paths, &native_ask("Discard changes?", "Discard"))).await
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| discard(&root, &paths, &native_ask("Discard changes?", "Discard")))).await
 }
 
 #[tauri::command]
@@ -739,7 +813,7 @@ pub async fn git_branches() -> R<BranchList> {
 
 #[tauri::command]
 pub async fn git_checkout(name: String) -> R<()> {
-    blocking(move |root| checkout(&root, &name, &native_ask("Switch branch?", "Switch"))).await
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| checkout(&root, &name, &native_ask("Switch branch?", "Switch")))).await
 }
 
 #[tauri::command]
@@ -972,6 +1046,60 @@ mod tests {
         g(&r, &["add", "a.txt"]);
         assert_eq!(code(discard(&r, &["a.txt".into()], &yes)), "nothing_to_discard");
         assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "staged\n");
+    }
+
+    #[test]
+    fn a_file_edited_while_the_dialog_is_open_is_not_discarded() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("discard-race");
+        fs::write(r.join("a.txt"), "one\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "i"]);
+        fs::write(r.join("a.txt"), "edited\n").unwrap();
+        fs::write(r.join("u.txt"), "u\n").unwrap();
+        let bin = r.parent().unwrap().join(format!("{}-bin", r.file_name().unwrap().to_string_lossy()));
+        let fake = crate::trash_guard::tests::FakeTrash::into(&bin);
+        // The user keeps typing while the dialog is open.
+        let edit_during = |_: &str| {
+            fs::write(r.join("a.txt"), "edited AND then more work\n").unwrap();
+            true
+        };
+        assert_eq!(code(discard_with(&r, &["a.txt".into()], &edit_during, &fake)), "changed_since_confirm");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "edited AND then more work\n", "the new work was not thrown away");
+        // An untracked file replaced meanwhile is not trashed either.
+        let replace_during = |_: &str| {
+            fs::write(r.join("u.txt"), "somebody else wrote this\n").unwrap();
+            true
+        };
+        assert_eq!(code(discard_with(&r, &["u.txt".into()], &replace_during, &fake)), "changed_since_confirm");
+        assert!(r.join("u.txt").exists() && fake.seen.borrow().is_empty());
+        // An unchanged world still discards, through the injected trash.
+        let res = discard_with(&r, &["a.txt".into(), "u.txt".into()], &yes, &fake).unwrap();
+        assert_eq!(res, DiscardResult { restored: 1, trashed: 1 });
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "one\n");
+        assert!(!r.join("u.txt").exists());
+        // A refusing trash leaves the untracked file in place.
+        fs::write(r.join("v.txt"), "v\n").unwrap();
+        let refusing = crate::trash_guard::tests::FakeTrash::refusing();
+        assert_eq!(code(discard_with(&r, &["v.txt".into()], &yes, &refusing)), "trash_unavailable");
+        assert!(r.join("v.txt").exists());
+    }
+
+    #[test]
+    fn a_folder_changing_while_the_dialog_is_open_is_detected() {
+        let d = scratch("fp");
+        fs::create_dir_all(d.join("dir/sub")).unwrap();
+        fs::write(d.join("dir/sub/f.txt"), "1").unwrap();
+        let a = fingerprint(&d, "dir");
+        assert_eq!(a, fingerprint(&d, "dir"), "stable");
+        fs::write(d.join("dir/sub/f.txt"), "2").unwrap();
+        assert_ne!(a, fingerprint(&d, "dir"), "content");
+        let b = fingerprint(&d, "dir");
+        fs::write(d.join("dir/new.txt"), "").unwrap();
+        assert_ne!(b, fingerprint(&d, "dir"), "new entry");
+        assert_ne!(fingerprint(&d, "dir"), fingerprint(&d, "missing"));
     }
 
     #[test]

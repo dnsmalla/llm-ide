@@ -60,6 +60,42 @@ impl RateLimit {
     }
 }
 
+/// One native destructive dialog at a time plus a rate limit, for commands a page could call in a loop.
+pub(crate) struct DialogGuard {
+    limit: RateLimit,
+    open: std::sync::atomic::AtomicBool,
+}
+
+impl DialogGuard {
+    pub(crate) const fn new(min_gap_ms: u64, per_minute: usize) -> Self {
+        Self { limit: RateLimit::new(min_gap_ms, per_minute), open: std::sync::atomic::AtomicBool::new(false) }
+    }
+
+    /// Runs `f` (which shows the dialog) unless another one is open (`busy`) or the page is asking too fast
+    /// (`rate_limited`). The open flag is released on every path, a panic included.
+    pub(crate) fn run<T>(&self, f: impl FnOnce() -> Result<T, FsError>) -> Result<T, FsError> {
+        self.run_at(now_ms(), f)
+    }
+
+    pub(crate) fn run_at<T>(&self, now: u64, f: impl FnOnce() -> Result<T, FsError>) -> Result<T, FsError> {
+        use std::sync::atomic::Ordering;
+        if !self.limit.allow_at(now) {
+            return Err(herr("rate_limited", "too many confirmation requests; wait a moment"));
+        }
+        if self.open.swap(true, Ordering::SeqCst) {
+            return Err(herr("busy", "a confirmation is already open"));
+        }
+        struct Release<'a>(&'a std::sync::atomic::AtomicBool);
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _release = Release(&self.open);
+        f()
+    }
+}
+
 /// Single line of plain text: control and invisible format characters (bidi overrides,
 /// zero-width joiners, BOM, tag characters) are dropped, whitespace runs collapse to one
 /// space, capped at `max` characters.
@@ -226,6 +262,28 @@ mod tests {
         assert!(r.allow_at(1_300));
         assert!(!r.allow_at(1_500), "per-minute cap");
         assert!(r.allow_at(61_100), "old hits age out");
+    }
+
+    #[test]
+    fn dialog_guard_allows_one_at_a_time_and_rate_limits() {
+        let g = DialogGuard::new(100, 10);
+        // nested call = a second dialog while the first is open
+        let r: Result<u8, FsError> = g.run_at(1_000, || {
+            let inner: Result<u8, FsError> = g.run_at(1_200, || Ok(2));
+            assert_eq!(inner.unwrap_err().code, "busy");
+            Ok(1)
+        });
+        assert_eq!(r.unwrap(), 1);
+        // released afterwards (even after an error): next call past the gap works
+        assert_eq!(g.run_at(1_300, || -> Result<u8, FsError> { Err(herr("x", "y")) }).unwrap_err().code, "x");
+        assert_eq!(g.run_at(1_500, || Ok(3)).unwrap(), 3);
+        // too fast, and the per-minute cap
+        assert_eq!(g.run_at(1_501, || Ok(4)).unwrap_err().code, "rate_limited");
+        assert_eq!(g.run_at(1_700, || Ok(5)).unwrap(), 5);
+        let capped = DialogGuard::new(0, 2);
+        assert!(capped.run_at(1_000, || Ok(1)).is_ok() && capped.run_at(1_001, || Ok(1)).is_ok());
+        assert_eq!(capped.run_at(1_002, || Ok(1)).unwrap_err().code, "rate_limited", "per-minute cap");
+        assert!(capped.run_at(62_000, || Ok(1)).is_ok(), "ages out");
     }
 
     #[test]
