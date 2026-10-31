@@ -177,6 +177,9 @@ pub struct CoreStatus {
     pub claude_source: Option<String>,
     /// Additive: user-facing install hint when `claude` is `missing`.
     pub claude_notice: Option<String>,
+    /// Additive: absolute path of the redacted failure log (`core.log`). The PATH only, never its
+    /// contents; the file exists only after a core failure has been recorded.
+    pub core_log_path: Option<String>,
 }
 
 /// What one spawn needs; produced by a [`Launcher`].
@@ -298,6 +301,7 @@ impl CoreHost {
             claude: s.claude.state,
             claude_source: s.claude.source.clone(),
             claude_notice: s.claude.notice.clone(),
+            core_log_path: lock(&self.inner.data_dir).as_ref().map(|d| d.join(LOG_FILE).to_string_lossy().into_owned()),
         }
     }
 
@@ -723,14 +727,14 @@ fn spawn_url(port: u16) -> String {
 }
 
 /// 32 random bytes, hex.
-fn random_nonce() -> Result<String, String> {
+pub(crate) fn random_nonce() -> Result<String, String> {
     let mut buf = [0u8; 32];
     getrandom::fill(&mut buf).map_err(|e| format!("cannot generate a launch nonce: {e}"))?;
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Equality without an early exit on the first differing byte.
-fn ct_eq(a: &str, b: &str) -> bool {
+pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
@@ -921,6 +925,11 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
         .env("LLMIDE_ENGINE_PREWARM", "0")
         .env("LLMIDE_BACKUP_INTERVAL_HOURS", "0");
+    // Host prefs fixed at this launch (token switches default off; only the exact value `on`).
+    let host_features = std::env::var("LLMIDE_FEATURES").ok();
+    for (k, v) in crate::prefs::core_env_pairs(&crate::prefs::launch(), host_features.as_deref()) {
+        cmd.env(k, v);
+    }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone()] })
 }
 

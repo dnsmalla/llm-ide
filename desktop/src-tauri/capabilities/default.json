@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), project open (host-run folder dialog, no dialog/fs plugin permission), tray + fixed-template notifications (no notification plugin permission), terminal, open_external_url (validated, confirmed links), reveal_in_os (project-scoped), attach_* (host file picker, opaque handles), bypass_confirm (native dialog). No fs/shell/opener/http plugin, no wildcard permissions.",
+  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), project open (host-run folder dialog, no dialog/fs plugin permission), tray + fixed-template notifications (no notification plugin permission), terminal, open_external_url (validated, confirmed links), reveal_in_os (project-scoped), attach_* (host file picker, opaque handles), bypass_confirm and trust_confirm (native dialogs with fixed text), pick_folder (+ single-use redeem), get_prefs/set_prefs (strict typed host prefs). No fs/shell/opener/http plugin, no wildcard permissions.",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-start-dragging",
@@ -64,6 +64,10 @@
     "allow-note-rename",
     "allow-notes-delete-many",
     "allow-source-pick-folder",
+    "allow-pick-folder",
+    "allow-pick-folder-redeem",
+    "allow-get-prefs",
+    "allow-set-prefs",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",
@@ -76,6 +80,7 @@
     "allow-attach-pick-files",
     "allow-attach-read",
     "allow-attach-release",
-    "allow-bypass-confirm"
+    "allow-bypass-confirm",
+    "allow-trust-confirm"
   ]
 }

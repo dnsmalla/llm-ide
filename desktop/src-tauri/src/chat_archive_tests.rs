@@ -513,3 +513,30 @@ fn the_remote_is_loopback_only_and_never_follows_redirects() {
     std::thread::sleep(Duration::from_millis(100));
     assert!(target.accept().is_err(), "the redirect target was contacted");
 }
+
+// ---- the archive policy (the desktop's ltaMode pref) -----------------------------------------------
+
+#[test]
+fn shadow_verifies_and_receipts_but_never_purges() {
+    let f = fixture();
+    let report = archiver(&f).with_policy(ArchivePolicy::Shadow).quit(Duration::from_secs(5));
+    let st = f.core.state.lock().unwrap();
+    assert!(st.receipts.contains_key(A), "the good chat is receipted");
+    assert!(st.log.iter().all(|l| !l.starts_with("purge:")), "shadow never purges: {:?}", st.log);
+    assert!(st.working.contains_key(A), "working state is untouched");
+    assert!(report.purged.is_empty());
+}
+
+#[test]
+fn off_runs_no_quit_archive_and_the_sweep_only_forwards_deletes() {
+    let f = fixture();
+    let a = archiver(&f).with_policy(ArchivePolicy::Off);
+    let q = a.quit(Duration::from_secs(5));
+    assert!(q.purged.is_empty());
+    assert!(f.core.state.lock().unwrap().log.is_empty(), "off: no receipt or purge");
+    assert_eq!(*f.core.calls.lock().unwrap(), 0, "off: the core is not even asked for working state");
+    // the sweep still forwards the pending delete (delete-everywhere is not an archive step)
+    let s = archiver(&f).with_policy(ArchivePolicy::Off).sweep(Duration::from_secs(5));
+    assert_eq!(s.tombstones_sent, 1);
+    assert!(f.core.state.lock().unwrap().log.is_empty());
+}

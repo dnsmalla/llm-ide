@@ -325,16 +325,33 @@ pub enum RunMode {
     Sweep,
 }
 
+/// How far the archive goes (the desktop's `ltaMode` pref, fixed per launch).
+/// `Off`: the quit run does not exist and the start sweep only forwards pending deletes.
+/// `Shadow`: verify and record receipts, but never purge the server's working state.
+/// `On`: the full verify, receipt, purge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArchivePolicy {
+    Off,
+    Shadow,
+    On,
+}
+
 pub struct Archiver<R: LifecycleRemote> {
     store: ChatStore,
     remote: R,
     journal: Journal,
     now: fn() -> f64,
+    policy: ArchivePolicy,
 }
 
 impl<R: LifecycleRemote> Archiver<R> {
     pub fn new(store: ChatStore, remote: R, journal_path: Option<PathBuf>) -> Self {
-        Self { store, remote, journal: Journal::new(journal_path), now: now_unix }
+        Self { store, remote, journal: Journal::new(journal_path), now: now_unix, policy: ArchivePolicy::On }
+    }
+
+    pub fn with_policy(mut self, policy: ArchivePolicy) -> Self {
+        self.policy = policy;
+        self
     }
 
     #[cfg(test)]
@@ -399,6 +416,10 @@ impl<R: LifecycleRemote> Archiver<R> {
             report
         };
 
+        if self.policy == ArchivePolicy::Off {
+            // Pending deletes were forwarded above; nothing else is archived while the mode is off.
+            return finish(doc, report, true);
+        }
         if left(&deadline).is_zero() {
             report.deadline_hit = true;
             return finish(doc, report, false);
@@ -482,7 +503,11 @@ impl<R: LifecycleRemote> Archiver<R> {
         self.journal.write(&doc);
 
         // 3. purge working state, only for receipted chats.
-        let ids: Vec<String> = verified.iter().filter(|e| e.receipted).map(|e| e.id.clone()).collect();
+        let ids: Vec<String> = if self.policy == ArchivePolicy::Shadow {
+            Vec::new() // shadow: verified and receipted, never purged
+        } else {
+            verified.iter().filter(|e| e.receipted).map(|e| e.id.clone()).collect()
+        };
         let mut purged_ids: Vec<String> = Vec::new();
         let mut i = 0;
         while i < ids.len() {

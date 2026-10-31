@@ -140,6 +140,55 @@ pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
     out.map_err(|e| herr("io", format!("task failed: {e}")))
 }
 
+// ---- trust_confirm ------------------------------------------------------------------------
+
+pub const TRUST_PATH_MAX_CHARS: usize = 300;
+static TRUST_LIMIT: RateLimit = RateLimit::new(1_000, 10);
+static TRUST_OPEN: Mutex<bool> = Mutex::new(false);
+
+/// A folder path the dialog may name: absolute (unix `/...`, Windows `C:\...` or `\\server\...`), no NUL.
+pub(crate) fn valid_trust_path(path: &str) -> bool {
+    let b = path.as_bytes();
+    !path.is_empty()
+        && path.len() <= 4096
+        && !path.contains('\0')
+        && (path.starts_with('/') || path.starts_with("\\\\") || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')))
+}
+
+/// The dialog text. The template is FIXED; only the folder path is quoted (control and bidi characters
+/// removed, capped). The page's own title and body text never reach the dialog.
+pub(crate) fn trust_text(path: &str) -> String {
+    let shown = sanitize_line(path, TRUST_PATH_MAX_CHARS);
+    format!(
+        "Trust this folder?\n\n\u{201C}{shown}\u{201D}\n\nChats in a trusted folder start the MCP servers its .mcp.json \
+         defines, and those programs run on this computer with your permissions. Only trust a folder \
+         whose contents you wrote or have reviewed."
+    )
+}
+
+/// Native, modal confirmation for trusting a project folder. Default button: Cancel. The webview can
+/// only say which path it is about to trust; it cannot change the text or press the button.
+#[tauri::command]
+pub async fn trust_confirm(path: String) -> Result<bool, FsError> {
+    if !valid_trust_path(&path) {
+        return Err(herr("invalid", "not an absolute folder path"));
+    }
+    if !TRUST_LIMIT.allow() {
+        return Err(herr("rate_limited", "too many confirmation requests"));
+    }
+    {
+        let mut open = TRUST_OPEN.lock().unwrap_or_else(|p| p.into_inner());
+        if *open {
+            return Err(herr("busy", "a confirmation is already open"));
+        }
+        *open = true;
+    }
+    let text = trust_text(&path);
+    let out = tauri::async_runtime::spawn_blocking(move || ask("Trust this folder?", &text, "Trust folder", true)).await;
+    *TRUST_OPEN.lock().unwrap_or_else(|p| p.into_inner()) = false;
+    out.map_err(|e| herr("io", format!("task failed: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +229,27 @@ mod tests {
         assert!(accepted(&M::Custom("Open".into()), "Open"));
         for no in [M::Custom("Cancel".into()), M::Cancel, M::Ok, M::Yes, M::No, M::Custom("open".into())] {
             assert!(!accepted(&no, "Open"), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn trust_text_is_a_fixed_template_naming_the_sanitised_path() {
+        let t = trust_text("/Users/me/proj\u{202E}evil\nline");
+        assert!(t.starts_with("Trust this folder?"));
+        assert!(t.contains("\u{201C}/Users/me/proj evil") || t.contains("\u{201C}/Users/me/projevil"), "{t}");
+        assert!(!t.contains('\u{202E}') && !t.contains("proj\nevil"));
+        assert!(t.contains(".mcp.json") && t.contains("run on this computer"));
+        let long = trust_text(&format!("/{}", "a".repeat(2000)));
+        assert!(long.chars().count() < 700);
+    }
+
+    #[test]
+    fn only_absolute_paths_are_accepted_for_the_trust_dialog() {
+        for ok in ["/Users/me/proj", "C:\\work\\p", "c:/work/p", "\\\\srv\\share\\p"] {
+            assert!(valid_trust_path(ok), "{ok}");
+        }
+        for bad in ["", "relative/path", "~/proj", "proj", "/a\0b", "C:", "file:///etc"] {
+            assert!(!valid_trust_path(bad), "{bad:?}");
         }
     }
 }

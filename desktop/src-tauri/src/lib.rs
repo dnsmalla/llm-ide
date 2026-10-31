@@ -18,6 +18,7 @@ mod notes_write;
 mod os_open;
 mod proc_tree;
 mod project;
+mod prefs;
 mod project_search;
 mod pty;
 mod secrets;
@@ -149,8 +150,8 @@ where
 
 /// Starts `$SHELL -l` in a pty; output arrives on `on_data` as raw batches.
 #[tauri::command]
-async fn pty_spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<pty::Spawned, String> {
-    pty_blocking(move || pty::spawn(cols, rows, on_data)).await
+async fn pty_spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<pty::Spawned, String> {
+    pty_blocking(move || pty::spawn(cols, rows, on_data, on_exit)).await
 }
 
 /// What the Terminal panel shows before any shell exists: feature toggle, consent state, shell name.
@@ -268,6 +269,8 @@ pub fn run() {
                     }
                 }
             }
+            // Host prefs are read once, before the core is spawned: they decide its environment.
+            prefs::init(fsutil::desktop_data_dir().ok().and_then(|d| fsutil::private_dir(&d).ok()));
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);
             }
@@ -362,12 +365,17 @@ pub fn run() {
             notes_write::note_rename,
             notes_write::notes_delete_many,
             source_pick::source_pick_folder,
+            source_pick::pick_folder,
+            source_pick::pick_folder_redeem,
+            prefs::get_prefs,
+            prefs::set_prefs,
             os_open::open_external_url,
             os_open::reveal_in_os,
             attach::attach_pick_files,
             attach::attach_read,
             attach::attach_release,
-            confirm::bypass_confirm
+            confirm::bypass_confirm,
+            confirm::trust_confirm
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");

@@ -80,12 +80,17 @@ const COMMANDS: &[&str] = &[
     "note_rename",
     "notes_delete_many",
     "source_pick_folder",
+    "pick_folder",
+    "pick_folder_redeem",
+    "get_prefs",
+    "set_prefs",
     "open_external_url",
     "reveal_in_os",
     "attach_pick_files",
     "attach_read",
     "attach_release",
     "bypass_confirm",
+    "trust_confirm",
 ];
 
 fn main() {

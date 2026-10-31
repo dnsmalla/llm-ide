@@ -104,7 +104,7 @@ impl ChatService {
                 if let Ok((store, url, tok)) = svc.snapshot() {
                     if let Ok(remote) = HttpRemote::new(&url, &tok) {
                         let jp = lock(&svc.0.bound).as_ref().map(|b| b.journal_path.clone());
-                        let report = Archiver::new(store, remote, jp).sweep(SWEEP_CAP);
+                        let report = Archiver::new(store, remote, jp).with_policy(crate::prefs::archive_policy()).sweep(SWEEP_CAP);
                         *lock(&svc.0.last_sweep) = Some(report);
                     }
                 }
@@ -121,6 +121,10 @@ impl ChatService {
     /// The quit run (once per process). Returns what it did, `None` when no session was bound or it
     /// already ran. Bounded by `cap`.
     pub fn quit_archive(&self, cap: Duration) -> Option<ArchiveReport> {
+        // Archiving off (the default): there is no quit run at all.
+        if crate::prefs::archive_policy() == crate::chat_archive::ArchivePolicy::Off {
+            return None;
+        }
         if self.0.quit_started.swap(true, Ordering::SeqCst) {
             return None;
         }
@@ -130,7 +134,7 @@ impl ChatService {
             (b.store.clone(), b.core_url.clone(), b.token.clone(), b.journal_path.clone())
         };
         let remote = HttpRemote::new(&url, &tok).ok()?;
-        let report = Archiver::new(store, remote, Some(jp)).quit(cap);
+        let report = Archiver::new(store, remote, Some(jp)).with_policy(crate::prefs::archive_policy()).quit(cap);
         *lock(&self.0.last_quit) = Some(report.clone());
         Some(report)
     }

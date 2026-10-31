@@ -59,9 +59,10 @@ pub fn feature_enabled(raw: Option<&str>, key: &str) -> bool {
     }
 }
 
-/// The Terminal feature toggle, read from the host's environment (never the webview).
+/// The Terminal feature toggle: the host's own `LLMIDE_FEATURES` AND the persisted pref as it was at
+/// launch (`prefs.json`); never a value the webview supplies per call.
 pub fn terminal_enabled() -> bool {
-    feature_enabled(std::env::var("LLMIDE_FEATURES").ok().as_deref(), "terminal")
+    crate::prefs::terminal_enabled(std::env::var("LLMIDE_FEATURES").ok().as_deref())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -353,7 +354,7 @@ fn get(id: u32) -> Result<Shared, String> {
 
 /// Starts `$SHELL -l` in a new pty and returns its id and name. Output is sent to
 /// `on_data` as raw bytes (see `Response`): one message per batch.
-pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned, String> {
+pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<Spawned, String> {
     authorize()?;
     if lock_table().len() >= MAX_SESSIONS {
         return Err(format!("too many terminals (max {MAX_SESSIONS})"));
@@ -427,7 +428,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
         .and_then(|_| {
             thread::Builder::new()
                 .name(format!("pty-flush-{id}"))
-                .spawn(move || flush_loop(rx, on_data, flow))
+                .spawn(move || flush_loop(rx, on_data, flow, on_exit))
         });
     if let Err(e) = started {
         if let Some(s) = lock_table().remove(&id) {
@@ -466,7 +467,15 @@ fn read_loop(id: u32, mut reader: Box<dyn Read + Send>, tx: SyncSender<Vec<u8>>)
 
 /// Collects chunks into batches and sends each batch as one raw `Response`
 /// (an ArrayBuffer on the JS side). Raw bytes avoid JSON number arrays and base64.
-fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>, flow: Arc<Flow>) {
+/// When the shell's output has ended (it exited) the final batch is flushed and then `on_exit` fires once,
+/// so the tab can say "(exited)" at once instead of on the next write. A webview that is gone or a
+/// session that was killed (the flow was closed) simply never receives it.
+fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>, flow: Arc<Flow>, on_exit: Channel<serde_json::Value>) {
+    flush_until_end(rx, &out, &flow);
+    let _ = on_exit.send(serde_json::json!({ "exited": true }));
+}
+
+fn flush_until_end(rx: mpsc::Receiver<Vec<u8>>, out: &Channel<Response>, flow: &Flow) {
     let mut batch: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
     let mut due = Instant::now();
     loop {
@@ -481,17 +490,17 @@ fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>, flow: Arc<Flo
                     due = Instant::now() + FLUSH_INTERVAL;
                 }
                 batch.extend_from_slice(&chunk);
-                if batch.len() >= FLUSH_BYTES && !send_batch(&out, &mut batch, &flow) {
+                if batch.len() >= FLUSH_BYTES && !send_batch(out, &mut batch, flow) {
                     return;
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                if !send_batch(&out, &mut batch, &flow) {
+                if !send_batch(out, &mut batch, flow) {
                     return;
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
-                send_batch(&out, &mut batch, &flow);
+                send_batch(out, &mut batch, flow);
                 return;
             }
         }
