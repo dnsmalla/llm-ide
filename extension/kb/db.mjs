@@ -1039,6 +1039,8 @@ export function deleteUserCascade(userId) {
       'chat_session_route', 'provider_learned_limits',
       // migration 0055 — core job runner
       'jobs',
+      // migrations 0056, 0057 — workspace trust, per-user extension allowlist
+      'workspace_trust', 'ext_source_allowlist',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }

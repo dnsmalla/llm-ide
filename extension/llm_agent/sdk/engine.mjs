@@ -74,6 +74,7 @@ import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage, mapContextUsage } from './events.mjs';
 import { adoptEnabled } from './adopt.mjs';
 import { readMcpServerStatus, mcpStatusNotice } from './mcp-status.mjs';
+import { workspaceTrustForTurn, workspaceTrustNotice } from '../extensions/workspace-trust.mjs';
 import { cachedEffortLevels } from './models.mjs';
 import { buildLlmIdeServer, v2ToolDefinitionChars } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -1718,8 +1719,15 @@ export async function runAgentV2Turn(
   runTurnShadow(userId, mode, loadedExtensionIdentities(userSet, pluginDelivery, userMcp), {
     computeOpts: { nativeEnabled: nativePluginsEnabled(userId), cwd: queryOptions.cwd },
   });
+  // Workspace trust (extensions/workspace-trust.mjs): in a folder the user has not trusted, the folder's own
+  // `.mcp.json` servers that start a process are withheld (the CLI reads that file from cwd) and a notice names
+  // what was skipped. Nothing changes for a folder that carries none, a trusted folder, or LLMIDE_WORKSPACE_TRUST=off.
+  const wsTrust = workspaceTrustForTurn(userId, workspaceRoot);
+  const wsTrustNotice = workspaceTrustNotice(wsTrust);
+  if (wsTrustNotice) onEvent?.(wsTrustNotice);
   const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
+    ...(wsTrust.withheld.length ? { strictMcpConfig: true } : {}),
     // A gateway (Anthropic-compatible custom provider) may not accept the
     // effort parameter; leave that turn at its backend's own default.
     ...(gatewayBaseUrl && queryOptions.effort ? { effort: undefined } : {}),

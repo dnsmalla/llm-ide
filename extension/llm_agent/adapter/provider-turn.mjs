@@ -28,6 +28,7 @@ import { personaForMode } from '../modes/mode-personas.mjs';
 import { abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { buildProviderTools, normalizeWorkspaceRoot } from './tool-bridge.mjs';
 import { mountMcpTools } from './mcp-mount.mjs';
+import { workspaceTrustForTurn, workspaceTrustNotice } from '../extensions/workspace-trust.mjs';
 
 const log = logger.child({ component: 'provider-turn' });
 const MAX_HISTORY = 40;
@@ -96,6 +97,9 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   try { workspaceRoot = normalizeWorkspaceRoot(agentContext?.workspaceRoot); }
   catch (e) { throw new ProviderTurnError('VALIDATION_FAILED', e.message, 400); }
   agentContext = { ...agentContext, workspaceRoot: workspaceRoot || undefined };
+  // Workspace trust: this path never reads project config, so nothing is withheld; an untrusted folder that carries
+  // executable config gets the same info notice the Claude engine shows (extensions/workspace-trust.mjs).
+  const wsTrustNotice = workspaceTrustNotice(workspaceTrustForTurn(userId, workspaceRoot));
 
   // One decision, at the start; never revisited mid-stream.
   const pick = pickTurnProvider(userId, { provider, model, needsTools, db });
@@ -119,6 +123,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
 
   const sessionKey = randomUUID();
   const send = (ev) => { if (!signal?.aborted) onEvent(ev); };
+  if (wsTrustNotice) send(wsTrustNotice);
   if (pick.switched) {
     send({ type: 'notice', kind: 'provider_fallback', level: 'warning',
       text: `${pick.reason}. This turn runs on ${conn.name} (${active.model}).`,

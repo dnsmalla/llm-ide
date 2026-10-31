@@ -37,3 +37,9 @@ export function shadowEnabled() {
 }
 export function catalogEnabled() { return !OFF.has(read('LLMIDE_EXT_CATALOG')); }
 export function scanEnabled() { return read('LLMIDE_EXT_SCAN') !== 'off'; }
+
+//   LLMIDE_WORKSPACE_TRUST  default ON: a project folder's own executable config (a `.mcp.json` that starts
+//                           a local process) is only used in a folder the user explicitly trusted
+//                           (PUT /auth/me/workspace-trust). `off` is the operator's kill switch: exact legacy
+//                           behaviour, no detection, no notice.
+export function workspaceTrustEnabled() { return !OFF.has(read('LLMIDE_WORKSPACE_TRUST')); }
