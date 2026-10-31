@@ -211,7 +211,7 @@ test("a remembered missing route is retried after a minute, so an updated core i
   let now = 0;
   const calls: number[] = [];
   const c = new SearchController({
-    run: async (q) => { calls.push(now); if (calls.length === 1) throw new SearchRequestError(404); return [{ rel: "a.md", title: "A", snippet: "", date: "", kind: "note" }]; },
+    run: async () => { calls.push(now); if (calls.length === 1) throw new SearchRequestError(404); return [{ rel: "a.md", title: "A", snippet: "", date: "", kind: "note" }]; },
     onChange: () => {}, debounceMs: 0, now: () => now,
     setTimer: (fn) => { queueMicrotask(fn); return 1; }, clearTimer: () => {},
   });
