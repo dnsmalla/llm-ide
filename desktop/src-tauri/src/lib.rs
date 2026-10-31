@@ -39,13 +39,24 @@ use tauri::{Manager, RunEvent};
 /// the Vite dev server. Any other navigation (a link, a redirect, `location=`) is
 /// blocked so the webview, which holds the IPC grants, can never show remote content.
 fn navigation_allowed(url: &tauri::Url) -> bool {
+    navigation_allowed_for(fsutil::current_os(), cfg!(debug_assertions), url)
+}
+
+/// Per-OS origin rule (pure, so every OS is testable anywhere). The packaged webview's origin is
+/// `tauri://localhost` on macOS and Linux and `http(s)://tauri.localhost` on Windows ONLY: accepting the
+/// other OS's form would let a page on a look-alike origin (or a port) pass the guard. No port is ever allowed
+/// for the app's own origin; the Vite dev server (`http://127.0.0.1:5173`) only in debug builds.
+fn navigation_allowed_for(os: fsutil::Os, debug: bool, url: &tauri::Url) -> bool {
+    if url.username() != "" || url.password().is_some() {
+        return false;
+    }
     match url.scheme() {
-        "tauri" => url.host_str() == Some("localhost"),
+        "tauri" => os != fsutil::Os::Windows && url.host_str() == Some("localhost") && url.port().is_none(),
         "http" | "https" => {
-            if url.host_str() == Some("tauri.localhost") {
+            if os == fsutil::Os::Windows && url.host_str() == Some("tauri.localhost") && url.port().is_none() {
                 return true;
             }
-            cfg!(debug_assertions) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(5173)
+            debug && url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(5173)
         }
         "about" => url.as_str() == "about:blank",
         _ => false,
@@ -402,23 +413,59 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::navigation_allowed;
+    use super::{navigation_allowed, navigation_allowed_for};
+    use crate::fsutil::Os;
 
     fn url(s: &str) -> tauri::Url {
         s.parse().unwrap()
     }
 
+    const COMMON_BAD: [&str; 14] = [
+        "https://example.com/", "http://127.0.0.1:3456/health", "http://localhost/", "file:///etc/passwd",
+        "javascript:alert(1)", "data:text/html,hi", "tauri://evil/", "http://tauri.localhost.evil.com/",
+        "about:srcdoc", "blob:http://tauri.localhost/x", "ftp://tauri.localhost/", "tauri://user@localhost/",
+        "http://user:pw@tauri.localhost/", "tauri://localhost.evil.com/",
+    ];
+
     #[test]
     fn only_the_apps_own_origin_may_be_navigated_to() {
-        for ok in ["tauri://localhost/index.html", "http://tauri.localhost/", "https://tauri.localhost/x", "about:blank"] {
-            assert!(navigation_allowed(&url(ok)), "{ok}");
+        for ok in ["tauri://localhost/index.html", "about:blank"] {
+            assert!(navigation_allowed_for(Os::Mac, false, &url(ok)), "{ok}");
         }
-        for bad in [
-            "https://example.com/", "http://127.0.0.1:3456/health", "http://localhost/", "file:///etc/passwd",
-            "javascript:alert(1)", "data:text/html,hi", "tauri://evil/", "http://tauri.localhost.evil.com/",
-            "about:srcdoc", "blob:http://tauri.localhost/x", "ftp://tauri.localhost/",
-        ] {
-            assert!(!navigation_allowed(&url(bad)), "{bad}");
+        for bad in COMMON_BAD {
+            for os in [Os::Mac, Os::Linux, Os::Windows] {
+                assert!(!navigation_allowed_for(os, false, &url(bad)), "{os:?} {bad}");
+            }
         }
+        // whichever OS runs the tests, the wrapper agrees with the per-OS rule
+        assert_eq!(navigation_allowed(&url("about:blank")), true);
+    }
+
+    #[test]
+    fn macos_and_linux_accept_only_the_tauri_scheme() {
+        for os in [Os::Mac, Os::Linux] {
+            assert!(navigation_allowed_for(os, false, &url("tauri://localhost/")));
+            for bad in ["http://tauri.localhost/", "https://tauri.localhost/x", "tauri://localhost:8080/", "http://tauri.localhost:80/"] {
+                assert!(!navigation_allowed_for(os, false, &url(bad)), "{os:?} {bad}");
+            }
+        }
+    }
+
+    #[test]
+    fn windows_accepts_only_http_or_https_tauri_localhost_without_a_port() {
+        for ok in ["http://tauri.localhost/", "https://tauri.localhost/index.html", "about:blank"] {
+            assert!(navigation_allowed_for(Os::Windows, false, &url(ok)), "{ok}");
+        }
+        for bad in ["tauri://localhost/", "http://tauri.localhost:3456/", "https://tauri.localhost:1/", "http://tauri.localhost.evil.com/"] {
+            assert!(!navigation_allowed_for(Os::Windows, false, &url(bad)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_dev_server_is_a_debug_build_only_and_port_exact() {
+        assert!(navigation_allowed_for(Os::Mac, true, &url("http://127.0.0.1:5173/")));
+        assert!(!navigation_allowed_for(Os::Mac, false, &url("http://127.0.0.1:5173/")));
+        assert!(!navigation_allowed_for(Os::Mac, true, &url("http://127.0.0.1:5174/")));
+        assert!(!navigation_allowed_for(Os::Mac, true, &url("https://127.0.0.1:5173/")));
     }
 }
