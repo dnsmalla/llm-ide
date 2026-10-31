@@ -125,20 +125,18 @@ export default function RepositoriesSection() {
     }
   };
 
-  const repoFolderName = (r: SavedRepo): string => {
+  const repoFolderName = (r: SavedRepo): string | null => {
     const fromUrl = /^(?:https?:\/\/[^/]+\/)?([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(r.url.trim())?.[1];
     if (fromUrl) return fromUrl.split("/")[1]!;
-    return repoTitle(r).replace(/[^A-Za-z0-9._-]+/g, "-");
+    const name = r.displayName.trim();
+    return name ? name.replace(/[^A-Za-z0-9._-]+/g, "-") : null;
   };
   const cloneDestination = (r: SavedRepo): string | null => {
     if (r.clonePath.trim()) return r.clonePath.trim();
-    return codeDir ? `${codeDir}/${repoFolderName(r)}` : null;
+    const name = repoFolderName(r);
+    return codeDir && name ? `${codeDir}/${name}` : null;
   };
-  const addRepo = () => edit((c) => {
-    const next = addSavedRepo(c, provider.id);
-    const row = next.saved[provider.id][next.saved[provider.id].length - 1];
-    return codeDir && row ? updateSavedRepo(next, provider.id, row.id, { clonePath: `${codeDir}/${repoFolderName(row)}` }) : next;
-  });
+  const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
   const patchRepo = (r: SavedRepo, patch: Partial<SavedRepo>) => edit((c) => updateSavedRepo(c, provider.id, r.id, patch));
   const urlError = (r: SavedRepo): string | null => (r.url.trim() ? validateRepoUrl(r.url) : null);
 
@@ -289,7 +287,7 @@ export default function RepositoriesSection() {
                     <span className="st-label">Clone path (optional)</span>
                     <input className="st-input" value={r.clonePath} placeholder={cloneDestination(r) ?? "Where the Mac would clone it; not used yet"} spellCheck={false} onChange={(e) => patchRepo(r, { clonePath: e.target.value })} />
                   </label>
-                  {codeDir ? (
+                  {codeDir && cloneDestination(r) ? (
                     <p className="st-hint">
                       Clone destination: <code>{cloneDestination(r)}</code>{" "}
                       {r.clonePath.trim() ? null : <Button onClick={() => patchRepo(r, { clonePath: cloneDestination(r) ?? "" })}>Use project code folder</Button>}
