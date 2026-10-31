@@ -46,6 +46,8 @@ fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 /// Process-wide handle so the panic hook can reach the spawned child.
 static CORE: OnceLock<CoreHost> = OnceLock::new();
+/// Kept for the process lifetime; dropping it would release the single-instance lock.
+static INSTANCE_LOCK: OnceLock<fsutil::InstanceLock> = OnceLock::new();
 
 #[tauri::command]
 fn ping() -> &'static str {
@@ -215,6 +217,22 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // One instance per data dir: two first-run instances would race on the
+            // keychain secrets and the DB. (Benches opt out and run on a temp setup.)
+            if autobench_mode().is_none() {
+                if let Ok(dir) = app.path().app_data_dir() {
+                    let dir = fsutil::private_dir(&dir)?;
+                    match fsutil::acquire_instance_lock(&dir) {
+                        Ok(lock) => {
+                            let _ = INSTANCE_LOCK.set(lock);
+                        }
+                        Err(e) => {
+                            eprintln!("{e}; exiting");
+                            return Err(e.into());
+                        }
+                    }
+                }
+            }
             tray::setup(app.handle());
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();

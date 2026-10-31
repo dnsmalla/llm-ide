@@ -51,6 +51,34 @@ pub fn write_private_atomic(path: &Path, body: &[u8], max: usize) -> Result<(), 
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// Holds the single-instance lock for the life of the process (drop releases it).
+#[derive(Debug)]
+pub struct InstanceLock(#[allow(dead_code)] std::fs::File);
+
+/// Takes an exclusive, non-blocking lock on `<dir>/instance.lock`. `Err` means another
+/// instance of the app is running with the same data dir: two first-run instances would
+/// otherwise race to create (and overwrite) the keychain secrets and the DB.
+pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
+    let path = dir.join("instance.lock");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let f = opts.open(&path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: flock on a descriptor we own; the lock dies with the descriptor.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err("LLM-IDE is already running".into());
+        }
+    }
+    Ok(InstanceLock(f))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +121,15 @@ mod tests {
         assert_eq!(std::fs::read(&f).unwrap(), b"{}");
         assert!(write_private_atomic(&f, &[b'a'; 17], 16).is_err());
         assert_eq!(std::fs::read(&f).unwrap(), b"{}", "a refused write leaves the old file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_second_instance_cannot_take_the_lock_until_the_first_drops_it() {
+        let d = private_dir(&scratch("lock")).unwrap();
+        let first = acquire_instance_lock(&d).unwrap();
+        assert!(acquire_instance_lock(&d).unwrap_err().contains("already running"));
+        drop(first);
+        assert!(acquire_instance_lock(&d).is_ok());
     }
 }
