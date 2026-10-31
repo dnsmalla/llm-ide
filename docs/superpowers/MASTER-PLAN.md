@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 9 | 5 | 13 | 27 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 10 | 5 | 13 | 28 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 84 | 21 | 69 | 174 |  |
+| Total | 85 | 21 | 69 | 175 |  |
 
 ## How the surfaces connect
 
@@ -120,6 +120,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Keychain / secret store per OS: `desktop/src-tauri/src/secrets.rs` (`keyring` 3.6.3, one backend per OS, generate-once JWT secret + vault key under `com.llmide.desktop`, env-only to the sidecar, fail closed, no plaintext fallback, memory backend via `LLMIDE_KEYCHAIN_BACKEND=memory`, `secrets_status` booleans only); 7 cargo tests, cargo check/test, 17 node tests, check:security, build pass; real Windows/Linux stores and a signed-app macOS run not verified, see `docs/how-to/desktop-secret-store.md` (me)
 - [~] Project open: host-run native folder dialog (`rfd` 0.17.2, no dialog/fs permission for the webview), canonicalised root, too-broad roots refused (Rust mirror of `broad-root.mjs`), bounded recent list, becomes the `read_graph_file` root, `NS*FolderUsageDescription` strings kept; 12 new cargo tests (34 total), `cargo check`, 17 node tests, check:security, build pass. Open: no GUI/dialog run, security-scoped bookmarks for sandboxed builds only documented (`desktop/PACKAGING.md`), sidecar does not yet follow the active root (me)
 - [~] Tray / menu-bar presence and notifications: tray menu (Show, project name, Quit), left-click toggle, close-to-tray default off, `notify` limited to 2 fixed templates (capped plain text, rate limited, no notification permission granted to the webview), no auto-start; `tauri-plugin-notification` 2.4.0; cargo tests pass. Open: not run in a GUI, Windows/Linux untested, Linux needs `libayatana-appindicator3-dev` in CI (see `desktop/PACKAGING.md`) (me)
+- [x] Host security review fixes: terminal behind a native consent dialog + Terminal toggle read in Rust with a scrubbed shell env; spawned-core identity by per-launch nonce (`x-llmide-nonce` on `/health`, additive), no redirects, adopted `:3456` core flagged `adopted_unverified`; DB in the 0700 app data dir; redacted `core.log` instead of raw tails in `core_status`; graph read via fd (O_NOFOLLOW + F_GETPATH, 32 MB); hardened CSP + navigation guard; `check-capabilities` fail-open fixed (+`--product`, core allowlist); `stage-core` kb allowlist + staged-tree verification; broad-root lists extended (Rust + JS parity); server git/npm children scrubbed (`core/child-env.mjs`); single-instance lock. 58 cargo tests, 29+ node tests; no GUI run, see `desktop/PACKAGING.md` (me)
 - [ ] Live caption capture per OS: macOS AX first, Windows next, Linux best-effort (Tauri plan risks) (me)
 - [ ] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel (me)
 - [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)

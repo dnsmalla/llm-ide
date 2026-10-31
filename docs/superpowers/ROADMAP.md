@@ -66,7 +66,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | L3 | Docs-kit K2-K4. | Release cadence. |
 | L4 | Other kits in plan order: work, workspace, capture, automation (job runner first), sync. | Kit-by-kit plan. |
 | L5 | Graph layout in Rust/WASM (spike: 16% faster, shared kernel). | Revisit with the Tauri work. |
-| L6 | Tauri desktop + relay (ADR 0018). | PoC gate. |
+| L6 | Tauri desktop + relay (ADR 0018). | PoC gate. Host security review fixes landed (see MASTER-PLAN S2). |
 
 ## Loose ends
 

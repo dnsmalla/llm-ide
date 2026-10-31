@@ -31,7 +31,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Status, schema version, uptime, endpoint list, enabled `features` |
+| `GET` | `/health` | Status, schema version, uptime, endpoint list, enabled `features`. When the server was started with `LLMIDE_CORE_NONCE` (the desktop host does this) it also echoes it as the `x-llmide-nonce` response header, so the host can tell its own server from another process on the port. Header only; the body is unchanged |
 | `GET` | `/launch-app` | Deep link into the macOS app |
 | `POST` | `/auth/register` | Create an account |
 | `POST` | `/auth/login` | Exchange password for access + refresh tokens |
