@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    { "id": "file:src/app.ts", "title": "app.ts", "kind": "file", "position": { "x": 0, "y": 0 }, "metadata": { "path": "src/app.ts", "language": "typescript" } },
+    { "id": "symbol:src/app.ts#start", "title": "start", "kind": "symbol", "metadata": { "symbolKind": "function" } },
+    { "id": "file:src/db.ts", "title": "db.ts", "kind": "file", "metadata": { "path": "src/db.ts" } }
+  ],
+  "edges": [
+    { "fromId": "file:src/app.ts", "toId": "symbol:src/app.ts#start", "kind": "contains", "confidence": "EXTRACTED" },
+    { "fromId": "file:src/app.ts", "toId": "file:src/db.ts", "kind": "imports", "confidence": "EXTRACTED" }
+  ],
+  "layers": [],
+  "tour": []
+}
