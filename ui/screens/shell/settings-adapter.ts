@@ -160,7 +160,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
     : {};
   const host: SettingsHost = {
     async diagnostics(): Promise<DiagnosticsInfo> {
-      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: d.coreStatus()?.core_log_path ?? null, platform: d.platform() };
+      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: d.coreStatus()?.core_log_path ?? null, platform: d.platform(), coreUrl: d.coreStatus()?.url ?? null };
     },
     getTheme: () => d.theme.get(),
     setTheme: (t) => {

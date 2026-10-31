@@ -185,6 +185,10 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /No log entries yet/);
   assert.match(out, /Refresh log/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Clear log<\/button>/, "nothing to clear before a log exists");
+  assert.match(out, /Managed backend/);
+  assert.match(out, /Start on launch: always/);
+  assert.match(out, /no editable server URL, Node binary, project folder or launch toggle/);
+  assert.doesNotMatch(out, /<input/, "the desktop backend is managed; no dead config fields");
 });
 
 test("Connections: the catalog card explains selection vs credentials and has no credential inputs", () => {

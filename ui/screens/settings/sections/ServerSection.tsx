@@ -69,6 +69,23 @@ export default function ServerSection() {
       ) : <p className="st-hint" role="status">Loading...</p>}
       <div className="st-row"><Button label="Refresh backend status" onClick={load}>Refresh</Button></div>
 
+      <div className="st-note">
+        <span className="st-label">Managed backend</span>
+        {info?.coreUrl ? (
+          <div className="st-row">
+            <span className="st-hint">Server URL</span>
+            <code className="st-pre st-grow">{info.coreUrl}</code>
+            <Button onClick={() => void host.copyText(info.coreUrl ?? "").then(() => setNotice("Copied."), () => setLogError("The clipboard is not available."))}>Copy</Button>
+          </div>
+        ) : <p className="st-hint">Server URL: starting…</p>}
+        <p className="st-hint">
+          Start on launch: always. The desktop app starts and supervises the core bundled inside it, so it has no
+          editable server URL, Node binary, project folder or launch toggle, and no Kill &amp; Restart — those configure a
+          source-checkout backend in the Mac app. A crashed core is restarted automatically with a bounded backoff.
+        </p>
+        {notice ? <p className="st-ok" role="status">{notice}</p> : null}
+      </div>
+
       {host.coreLog ? (
         <div className="st-stack">
           <span className="st-label">{LOG_TEXT.title}</span>

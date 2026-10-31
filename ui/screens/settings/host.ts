@@ -16,6 +16,8 @@ export interface DiagnosticsInfo {
   coreTrust: CoreTrust;
   coreLogPath: string | null;
   platform: string;
+  /** The core URL this launch is using (desktop-managed; absent on older hosts). */
+  coreUrl?: string | null;
 }
 
 /** One optional component the host can install on demand (the Mermaid diagram renderer today). */

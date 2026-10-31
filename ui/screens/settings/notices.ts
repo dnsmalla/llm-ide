@@ -60,7 +60,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   "doc-gen":
     "On the Mac a beta switch chooses between the server and the folder on disk. The desktop has only the server path (the core's docs routes over the project's templates/ and commands/ folders), so the switch has one state and is not shown.",
   server:
-    "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and owns the core, the log viewer above is real, and a manual restart is not offered yet.",
+    "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and supervises the core bundled inside it: the live server URL, status and log are real, but those editable paths and a manual Kill & Restart do not apply and are not shown as dead controls.",
   updates:
     "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
   general:
