@@ -2,6 +2,7 @@ mod ax_probe;
 mod core_host;
 mod graph_file;
 mod pty;
+mod secrets;
 mod sse_replay;
 
 use std::sync::OnceLock;
@@ -185,6 +186,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             core_host::core_status,
+            secrets::secrets_status,
             read_graph_file,
             bench,
             bench_done,

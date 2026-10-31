@@ -216,12 +216,18 @@ impl CoreHost {
         std::fs::create_dir_all(&db_dir)
             .map_err(|e| format!("cannot create {}: {e}", db_dir.display()))?;
         let db_path = db_dir.join("poc.db");
+        // Fail closed: no secrets, no sidecar. Values go in the child's env only.
+        let secrets = crate::secrets::default_backend()
+            .and_then(|b| crate::secrets::load_or_create(b.as_ref()))
+            .map_err(|e| e.to_string())?;
 
         let mut child = Command::new(&node)
             .arg(rt.root.join("extension").join("server.mjs"))
             .current_dir(rt.root.join("extension"))
             .env("LLMIDE_PORT", SPAWN_PORT.to_string())
             .env("LLMIDE_DB_PATH", &db_path)
+            .env("LLMIDE_JWT_SECRET", &secrets.jwt_secret)
+            .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
             .env("LLMIDE_ENGINE_PREWARM", "0")
             .env("LLMIDE_BACKUP_INTERVAL_HOURS", "0")
             .stdin(Stdio::null())

@@ -22,8 +22,18 @@ ureq = { version = "=2.12.1", default-features = false }
 ctrlc = { version = "=3.5.2", features = ["termination"] }
 libc = "=0.2.191"
 portable-pty = "=0.9.0"
+getrandom = "=0.3.4"
 
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"
 objc2-app-kit = { version = "=0.3.2", features = ["NSApplication"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+
+# OS secret stores (see docs/how-to/desktop-secret-store.md). One entry per OS so
+# each build links only its own backend; no default features (no plaintext fallback).
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
