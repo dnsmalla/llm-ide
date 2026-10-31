@@ -14,6 +14,8 @@ import { rebuildIndex } from "./index-rebuild.ts";
 import { LibraryStore } from "./library-store.ts";
 import { makeSearchRun } from "./search.ts";
 import { LibraryScreen } from "./LibraryScreen";
+import { EXTENSION_PLACEHOLDERS } from "./LibraryNav";
+import { libraryExtensions } from "./extensions/index.tsx";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
@@ -47,5 +49,6 @@ export default function Library({ active }: SectionProps) {
       rebuildIndex(records, { host, core: indexCoreFrom(shellCore) }, report, signal),
     [host],
   );
-  return <LibraryScreen store={store} host={host} runRebuild={runRebuild} onOpenExternal={openExternal} active={active} hostAvailable={shellHost.isAvailable()} />;
+  const extensions = useMemo(() => libraryExtensions(shellCore, EXTENSION_PLACEHOLDERS), []);
+  return <LibraryScreen store={store} host={host} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={shellHost.isAvailable()} />;
 }
