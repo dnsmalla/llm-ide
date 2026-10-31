@@ -15,12 +15,12 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 13 | 3 | 2 | 18 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 83 | 21 | 69 | 173 |  |
+| Total | 84 | 21 | 69 | 174 |  |
 
 ## How the surfaces connect
 
@@ -125,7 +125,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)
 - [ ] Screen-by-screen parity checklist against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
-- [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch (me)
+- [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design written, no code (`plans/2026-10-31-phase7-desktop-control-design.md`, `cc77f428`), independent review next (me)
 
 ## S3. Mobile (iPhone native, PWA)
 
@@ -166,7 +166,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Phone PWA (installable, offline read, queue) (me)
 - [ ] Extension read/queue through the relay when the desktop is off (me)
 - [ ] Relay contract added to `schema/http` with conformance tests (kit plan: contract group "relay (new)") (me)
-- [~] Connector catalog: phase 1 verified shipped (catalog, per-user selection, `/auth/me/connectors*` routes, Library and selection-gated Settings, Miro MCP ingest, tests exist); open: gdrive/gcal MCP descriptors (`pipelineReady: false`), Miro tool names are unverified guesses, no spec file (`plans/2026-10-31-status-audit.md` (b)) (me)
+- [~] Connector catalog: phase 1 verified shipped (catalog, per-user selection, `/auth/me/connectors*` routes, Library and selection-gated Settings, Miro MCP ingest, tests exist); open: gdrive/gcal MCP descriptors (`pipelineReady: false`), Miro tool names are unverified guesses; spec written (`docs/spec/connector-catalog.md`, `de7d1f38`); audit in `plans/2026-10-31-status-audit.md` (b) (me)
 
 ## S5. Chrome extension
 
@@ -208,6 +208,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
 - [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)
+- [x] K0 maps for ui-kit and os-kit (`docs/kits/ui-kit.md`, `docs/kits/os-kit.md`, `c8d7b8a5`; numbered decisions U1 to U6 and S1 to S6 for the user) (me)
 - [x] Flaky tests under full-gate load hardened: `index-routes.http` 1 MB body (`e8f11cad`), `loop-contract-lab` probe timeout and Explorer watch tests (`87764821`); 10/10 under artificial load (me)
 
 ## S7. Data and storage
@@ -281,7 +282,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Independent security review fixes (server): workspace trust fails closed (strict MCP for every untrusted folder, parents, remote servers, stricter trust roots), raw commits verified on the repo (`COMMIT_NOT_IN_REPO`), apply bound to the preview (`UPDATE_CHANGED`), server-owned shared index refresh, uninstall/repair/apply locking, job runner and process-group hardening, lazy integrity check at load (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
-- [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log (me)
+- [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design written, no code (`plans/2026-10-31-phase7-desktop-control-design.md`, `cc77f428`), independent review next (me)
 
 ## S10. Release and CI
 
