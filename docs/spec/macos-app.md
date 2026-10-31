@@ -354,6 +354,17 @@ Triggers, all sharing one config per project: `manual` (`Features/Loop/Views/Loo
 
 ---
 
+### Extensions catalog screen (`Features/Extensions`)
+
+The Library sidebar's **Extensions** section (`ExtensionsLibrarySectionKind.catalog`, one row tagged `LibrarySelection.extensionsCatalog`) opens `ExtensionsCatalogView` through the Extensions registry seams (no Library to Extensions reference). It uses only the 13 routes under `/auth/me/extensions/` (spec `extensions-catalog.md` §9-9b). Models and client calls are in `Core/Networking/API/LlmIdeAPIClient+Extensions.swift` (`Ext*` types, `ExtensionsCatalogAPI` protocol, decoded from `schema/http/fixtures/extensions/` by `make api-gates`); rules in `Models/ExtensionsCatalogPresentation.swift`; state in `Services/ExtensionsCatalogModel.swift`.
+
+- **Installed:** items grouped by kind (skill, plugin, mcp, llm-source) with an enable switch, member checkboxes, trust, scan-warning, "runs code" and "update available" badges; Check for updates, Review update (preview sheet: file diff, new executable kinds flagged, scan delta, then Apply), Rollback, Repair, Remove.
+- **Consent:** switching on an item that declares `hook`/`mcp`/`lsp`/`bin`, or applying an update that needs it, opens a sheet naming each kind and what would run; the button stays disabled until every kind is ticked, and only the ticked kinds are sent as `consents`.
+- **Browse:** reads the server's cached catalog (search and kind filter); Refresh is the only action that contacts GitHub or the MCP registry. Entries are `installable` or browse-only with the server's reason.
+- **Install:** a GitHub URL (and optional folder), user-initiated; the result shows owner/repo, the full pinned commit and the scan findings as warnings. Installed items start off.
+- **No automatic network:** appearing runs `GET installed` and `GET catalog` only. Errors map to plain text: `CATALOG_DISABLED` shows a "catalog is off" banner; `SOURCE_NOT_ALLOWED` tells the user to add the repository to `LLMIDE_EXT_ALLOWED_SOURCES` on the server (until the Settings screen exists).
+- Tests: `ExtensionsCatalogTests` (fixture decoding, presentation, view-model flows with a fake API).
+
 ## §4 Server IPC
 
 ### Base URL and authentication

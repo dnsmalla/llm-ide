@@ -26,7 +26,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | # | Task | State |
 |---|---|---|
 | P7 | Retire `llm_agent/runtime/`: relocate survivors by owner (memory, modes, tools, plan), delete dead code, zero behaviour change. | 2 commits local (`844b1213`, `ece843c6`); agent finishing gates; then short review, gate, push, rebuild. |
-| E4 | Extensions catalog P6 to P9 (Mac screen, allowlist Settings UI, Workspace Trust, rollout); plan `plans/2026-10-31-extensions-catalog.md`. | P4, P4b and the P5 server half done (updates, rollback, repair, indexes, search, active view, API 94); the Mac Extensions screen, allowlist Settings UI and Workspace Trust remain. |
+| E4 | Extensions catalog P6 to P9 (Mac screen, allowlist Settings UI, Workspace Trust, rollout); plan `plans/2026-10-31-extensions-catalog.md`. | P4, P4b and the P5 server half done (updates, rollback, repair, indexes, search, active view, API 94); the Mac Extensions screen is built (installed/browse/install, consent, update preview, rollback, repair; real-app check pending); the allowlist Settings UI and Workspace Trust remain. |
 | V1 | Provider settings live-app verification (DeepSeek connection, router and tools switches) [me]. | Pending. |
 | B1 | Bench runs once Y1 is given [me, with you]. | Pending Y1. |
 | N1 | Night-push job: nightly push of local `main` commits [me]. | Built (`746b94f9`); **you install it**: `scripts/nightly-push.sh --help` lists the three commands (mkdir logs, copy plist to LaunchAgents, `launchctl bootstrap`) and the optional `sudo pmset` wake. |
