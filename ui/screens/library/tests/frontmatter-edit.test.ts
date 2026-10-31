@@ -110,3 +110,12 @@ test("a single-scalar tags value is upgraded to a list on add", () => {
   const out = addTags("---\ntags: solo\n---\n", ["two"]);
   assert.equal(out, "---\ntags:\n- solo\n- two\n---\n");
 });
+
+test("an empty header is empty: tags go into the header, never into a later `---` in the body", () => {
+  const src = "---\n---\nbody\n\n---\nhr above\n";
+  const out = addTags(src, ["x"]);
+  assert.ok(out.startsWith("---\ntags:\n- x\n---\nbody\n\n---\nhr above\n"), JSON.stringify(out));
+  const crlf = addTags("---\r\n---\r\nbody\r\n---\r\n", ["x"]);
+  assert.ok(crlf.startsWith("---\r\ntags:\r\n- x\r\n---\r\nbody"), JSON.stringify(crlf));
+  assert.equal(setKey("---\n---\nb\n---\n", "k", "v"), "---\nk: v\n---\nb\n---\n");
+});

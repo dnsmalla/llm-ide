@@ -32,6 +32,10 @@ export function locateHeader(text: string): Located | null {
   const crlf = text.startsWith("---\r\n");
   if (!crlf && !text.startsWith("---\n")) return null;
   const openEnd = crlf ? 5 : 4;
+  // An EMPTY header (`---\n---\n`): the closing fence is the very next line. Searching from openEnd for "\n---" would
+  // skip it and close at a later `---` in the BODY, so a write would land in the body. (The Mac's
+  // MarkdownFrontmatter.split has that quirk on the read side; the writer must not inherit it.)
+  if (text.startsWith("---", openEnd)) return { openEnd, closeStart: openEnd, eol: crlf ? "\r\n" : "\n" };
   // Same quirk as the Mac: the close must be a "\n---" inside what follows the opening fence.
   const nl = text.indexOf("\n---", openEnd);
   if (nl < 0) return null;
