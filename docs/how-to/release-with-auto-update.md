@@ -166,13 +166,17 @@ On a test machine running the previous version:
 If verification fails (signature/key mismatch), Sparkle aborts with a
 clear error. Don't ship the appcast entry until you've verified once.
 
+## Build number (`CFBundleVersion`)
+
+Sparkle orders builds by `CFBundleVersion`. `mac/Scripts/build-number.sh` is the only place it is computed, called by `mac/Scripts/build.sh` locally and by the `Compute build number` step of `.github/workflows/mac-release.yml`: the commit count of `HEAD`, which only grows on `main`. Run it directly to see what the next build will use: `mac/Scripts/build-number.sh`. To force a higher number set `LLMIDE_BUILD_NUMBER=<n>`; a value below the commit count is refused. Tested by `extension/tests/scripts-build-number.test.mjs`.
+
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
 | "Update Error — A connection failure occurred" | `SUFeedURL` missing in Info.plist or unreachable from the client |
 | "The update is improperly signed" | `SUPublicEDKey` in the running binary doesn't match the key used by `sign_update` |
-| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion`. `build.sh` sets `CFBundleVersion` to `LLMIDE_BUILD_NUMBER`, else the git commit count, else 1; `appcast.sh` reads it from the built `.app` so the two always match |
+| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion`. Local and CI builds share ONE source, `mac/Scripts/build-number.sh`: the commit count (`git rev-list --count HEAD`). `LLMIDE_BUILD_NUMBER` may only raise it (it must be a positive integer >= the commit count, otherwise the build fails); a shallow clone without an override fails too (CI uses `fetch-depth: 0`). `appcast.sh` reads the number back from the built `.app`, so the two always match. Builds made before this change by CI used the run number, which is lower than the commit count, so the first build under the new rule orders after all of them |
 | "Check for Updates…" is greyed out | Sparkle's `canCheckForUpdates` flips false during an in-flight check. Wait 30s. |
 
 ## Key rotation (advanced)

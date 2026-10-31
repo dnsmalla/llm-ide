@@ -42,21 +42,11 @@ if [ -z "$VERSION" ]; then
 fi
 
 # CFBundleVersion = Sparkle's comparison key (must increase every release).
-# LLMIDE_BUILD_NUMBER overrides; else git commit count; else 1.
-if [ -n "${LLMIDE_BUILD_NUMBER:-}" ]; then
-  BUILD_NUMBER="$LLMIDE_BUILD_NUMBER"
-  case "$BUILD_NUMBER" in
-    *[!0-9]*|0*)
-      echo -e "${RED}[build] LLMIDE_BUILD_NUMBER must be a positive integer (got '$BUILD_NUMBER')${NC}" >&2
-      exit 1 ;;
-  esac
-elif BUILD_NUMBER=$(git -C "$PROJ_DIR" rev-list --count HEAD 2>/dev/null) && [ -n "$BUILD_NUMBER" ]; then
-  if [ -n "${CI:-}" ] && [ "$BUILD_NUMBER" = "1" ]; then
-    echo -e "${RED}[build] WARN: CI shallow-clone git fallback yielded CFBundleVersion=1; set LLMIDE_BUILD_NUMBER (e.g. github.run_number) so Sparkle can order builds${NC}" >&2
-  fi
-else
-  echo -e "${YELLOW}[build]${NC} WARN: git rev-list failed and LLMIDE_BUILD_NUMBER unset; falling back to CFBundleVersion=1" >&2
-  BUILD_NUMBER=1
+# One source for local and CI: the commit count (mac/Scripts/build-number.sh);
+# LLMIDE_BUILD_NUMBER may only raise it, never lower it.
+if ! BUILD_NUMBER=$("$SCRIPT_DIR/build-number.sh"); then
+  echo -e "${RED}[build] could not determine a build number${NC}" >&2
+  exit 1
 fi
 
 # Check for --clean-all flag
