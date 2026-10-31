@@ -243,9 +243,60 @@ pub fn is_secret_env(name: &str) -> bool {
     PREFIXES.iter().any(|p| u.starts_with(p)) || WORDS.iter().any(|w| u.contains(w))
 }
 
-/// The environment handed to the shell: the host's, minus secrets.
+/// Variables that change what a program loads or runs at start-up. Never inherited by a child the host spawns.
+fn is_loader_or_startup_env(name: &str) -> bool {
+    let u = name.to_ascii_uppercase();
+    ["DYLD_", "LD_", "GIT_"].iter().any(|p| u.starts_with(p))
+        || ["BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "NODE_OPTIONS", "PYTHONSTARTUP", "PYTHONPATH", "PERL5OPT", "RUBYOPT", "IFS", "CDPATH"].contains(&u.as_str())
+}
+
+/// For short-lived helper children (the OS link/file opener): the host's environment minus secrets and
+/// minus anything that changes what a program loads at start-up.
+pub fn scrubbed_env(source: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
+    source.filter(|(k, _)| !is_secret_env(k) && !is_loader_or_startup_env(k)).collect()
+}
+
+/// Exact names a terminal shell inherits (case-insensitive on Windows).
+const SHELL_ENV_ALLOW: [&str; 8] = ["HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "COLORTERM", "TMPDIR"];
+/// A Windows shell cannot start without these.
+const SHELL_ENV_ALLOW_WINDOWS: [&str; 16] = [
+    "SYSTEMROOT", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMSPEC", "PATHEXT",
+    "HOMEDRIVE", "HOMEPATH", "USERNAME", "USERDOMAIN", "TEMP", "TMP",
+];
+
+/// `PATH` with relative, empty and duplicate entries dropped (a `.` or `bin` entry would run a program planted
+/// in whatever directory the shell is in).
+pub fn sanitize_path(path: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let kept: Vec<std::path::PathBuf> = std::env::split_paths(path).filter(|d| d.is_absolute() && seen.insert(d.clone())).collect();
+    std::env::join_paths(kept).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// The environment handed to the terminal shell, an ALLOWLIST: `HOME`, `USER`, `LOGNAME`, `SHELL`, a sanitised
+/// `PATH`, `LANG`/`LC_*`, `TERM`, `COLORTERM`, `TMPDIR` (plus the few variables a Windows shell cannot start
+/// without). Everything else is dropped: server and provider secrets, `SSH_AUTH_SOCK` (the user's loaded
+/// keys), proxies, `DYLD_*`/`LD_*` injection, `BASH_ENV`/`ENV`/`ZDOTDIR`/`PROMPT_COMMAND` start-up hooks,
+/// `NODE_OPTIONS`, `GIT_*` and whatever else the parent process happened to carry.
 pub fn shell_env(source: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
-    source.filter(|(k, _)| !is_secret_env(k)).collect()
+    shell_env_for(cfg!(windows), source)
+}
+
+pub fn shell_env_for(windows: bool, source: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (k, v) in source {
+        let key = if windows { k.to_ascii_uppercase() } else { k.clone() };
+        if key == "PATH" {
+            let p = sanitize_path(&v);
+            if !p.is_empty() {
+                out.push((k, p));
+            }
+        } else if SHELL_ENV_ALLOW.contains(&key.as_str()) || key.starts_with("LC_") || (windows && SHELL_ENV_ALLOW_WINDOWS.contains(&key.as_str())) {
+            if !is_secret_env(&k) && !is_loader_or_startup_env(&k) {
+                out.push((k, v));
+            }
+        }
+    }
+    out
 }
 
 /// Result of `spawn`: the session id and the shell's name (basename of its path).
@@ -853,16 +904,46 @@ mod tests {
         assert_eq!((w.as_str(), args.len()), ("C:\\x\\cmd.exe", 0), "no PowerShell on disk: COMSPEC, no -l");
     }
 
+    fn env(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
     #[test]
-    fn shell_env_drops_secrets_and_keeps_the_basics() {
-        let src = [
-            ("PATH", "/usr/bin"), ("HOME", "/h"), ("SHELL", "/bin/zsh"), ("LANG", "C"), ("SSH_AUTH_SOCK", "/s"),
-            ("LLMIDE_JWT_SECRET", "x"), ("LLMIDE_VAULT_KEY", "x"), ("ANTHROPIC_API_KEY", "x"),
+    fn shell_env_is_an_allowlist() {
+        let src = env(&[
+            ("PATH", "/usr/bin"), ("HOME", "/h"), ("SHELL", "/bin/zsh"), ("LANG", "C"), ("LC_ALL", "C"), ("LC_CTYPE", "UTF-8"), ("TERM", "xterm"),
+            ("COLORTERM", "truecolor"), ("TMPDIR", "/t"), ("USER", "a"), ("LOGNAME", "a"),
+            // everything below must go
+            ("SSH_AUTH_SOCK", "/s"), ("LLMIDE_JWT_SECRET", "x"), ("LLMIDE_VAULT_KEY", "x"), ("ANTHROPIC_API_KEY", "x"),
             ("OPENAI_API_KEY", "x"), ("GITHUB_TOKEN", "x"), ("DB_PASSWORD", "x"), ("AWS_SECRET_ACCESS_KEY", "x"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()));
-        let kept: Vec<String> = shell_env(src).into_iter().map(|(k, _)| k).collect();
-        assert_eq!(kept, ["PATH", "HOME", "SHELL", "LANG", "SSH_AUTH_SOCK"]);
+            ("DYLD_INSERT_LIBRARIES", "/evil.dylib"), ("DYLD_LIBRARY_PATH", "/x"), ("LD_PRELOAD", "/evil.so"), ("LD_LIBRARY_PATH", "/x"),
+            ("BASH_ENV", "/evil.sh"), ("ENV", "/evil.sh"), ("ZDOTDIR", "/evil"), ("PROMPT_COMMAND", "evil"), ("NODE_OPTIONS", "--require /evil.js"),
+            ("GIT_SSH_COMMAND", "evil"), ("GIT_CONFIG_GLOBAL", "/evil"), ("HTTP_PROXY", "http://p"), ("XDG_CONFIG_HOME", "/c"), ("EDITOR", "vim"),
+            ("PYTHONSTARTUP", "/evil.py"), ("LC_EVIL_SECRET_TOKEN", "x"),
+        ]);
+        let kept: Vec<String> = shell_env(src.into_iter()).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kept, ["PATH", "HOME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "TMPDIR", "USER", "LOGNAME"]);
+    }
+
+    #[test]
+    fn shell_path_is_sanitised() {
+        assert_eq!(sanitize_path("/usr/bin:.:bin::/usr/bin:/opt/x"), "/usr/bin:/opt/x");
+        assert_eq!(sanitize_path("relative:also/relative"), "");
+        let out = shell_env(env(&[("PATH", ".:rel"), ("HOME", "/h")]).into_iter());
+        assert_eq!(out, env(&[("HOME", "/h")]), "a PATH with no absolute entry is not passed at all");
+    }
+
+    #[test]
+    fn windows_shells_keep_the_variables_they_need_case_insensitively() {
+        let src = env(&[("SystemRoot", "C:\\Windows"), ("ComSpec", "C:\\cmd.exe"), ("Path", "C:\\Windows"), ("APPDATA", "C:\\a"), ("OPENAI_API_KEY", "x"), ("SSH_AUTH_SOCK", "x")]);
+        let kept: Vec<String> = shell_env_for(true, src.into_iter()).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kept, ["SystemRoot", "ComSpec", "APPDATA"]);
+    }
+
+    #[test]
+    fn helper_children_get_the_scrubbed_environment() {
+        let src = env(&[("PATH", "/usr/bin"), ("HOME", "/h"), ("DISPLAY", ":0"), ("DBUS_SESSION_BUS_ADDRESS", "u"), ("DYLD_INSERT_LIBRARIES", "x"), ("NODE_OPTIONS", "x"), ("GITHUB_TOKEN", "x"), ("GIT_DIR", "/x")]);
+        let kept: Vec<String> = scrubbed_env(src.into_iter()).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kept, ["PATH", "HOME", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS"], "the opener keeps the desktop-session variables xdg-open needs");
     }
 }

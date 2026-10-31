@@ -416,8 +416,12 @@ mod tests {
         assert_eq!(parse_recent(&many, MAX_RECENT).len(), MAX_RECENT);
     }
 
+    /// `ACTIVE` is process-global: tests that open projects take turns.
+    static ACTIVE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn activate_sets_root_persists_recent_and_revalidates() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let dir = scratch("data");
         let proj = scratch("act").join("proj");
         fs::create_dir_all(&proj).unwrap();
@@ -438,6 +442,7 @@ mod tests {
 
     #[test]
     fn opening_a_project_stops_the_file_watcher_of_the_previous_one() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let dir = scratch("data-watch");
         let old = scratch("watch-old").join("proj");
         let new = scratch("watch-new").join("proj");
