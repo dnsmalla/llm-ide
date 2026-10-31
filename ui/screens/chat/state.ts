@@ -102,6 +102,8 @@ export interface ChatState {
   budget: SessionBudget | null;
   queue: string[];
   turnSeq: number;
+  /** The workspace root the running turn was SENT with (what the core scopes approvals and rules to); null when unknown (a reattached turn). */
+  turnWorkspaceRoot: string | null;
   /** Events applied in the current turn (observability / tests). */
   applied: number;
   /** Unknown or malformed events seen in the current turn. */
@@ -111,7 +113,7 @@ export interface ChatState {
 export function initialState(sessionId: string): ChatState {
   return {
     sessionId, messages: [], hasMoreOlder: false, oldestSeq: null, phase: "idle", error: null, resolvedMode: null, model: null,
-    context: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, applied: 0, ignored: 0,
+    context: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, turnWorkspaceRoot: null, applied: 0, ignored: 0,
   };
 }
 
@@ -122,7 +124,7 @@ export type Action =
   | { type: "reattach_cancel" }
   | { type: "marker"; kind: string; level: "info" | "warning" | "error"; text: string }
   | { type: "replay_ended" }
-  | { type: "send"; id: string; text: string; /** Retry: drop the failed turn's bubbles first. */ replaceFailed?: boolean }
+  | { type: "send"; id: string; text: string; /** Retry: drop the failed turn's bubbles first. */ replaceFailed?: boolean; /** The root the turn is sent with (pinned for approval scoping). */ workspaceRoot?: string }
   | { type: "events"; events: readonly AgentEvent[]; malformed?: number }
   | { type: "stream_end" }
   | { type: "abort_requested" }
@@ -198,7 +200,7 @@ function capText(text: string, cap: number): { text: string; clipped: boolean } 
   return text.length > cap ? { text: text.slice(0, cap), clipped: true } : { text, clipped: false };
 }
 
-function startTurn(s: ChatState, id: string, text: string): ChatState {
+function startTurn(s: ChatState, id: string, text: string, workspaceRoot: string | null = null): ChatState {
   const all: Message[] = [
     ...s.messages,
     { role: "user", id: `${id}-u`, text },
@@ -209,7 +211,7 @@ function startTurn(s: ChatState, id: string, text: string): ChatState {
   const oldest = messages.find((m) => m.seq !== undefined)?.seq ?? s.oldestSeq;
   return {
     ...s, messages, hasMoreOlder: s.hasMoreOlder || over, oldestSeq: over ? oldest : s.oldestSeq,
-    phase: "streaming", error: null, turnSeq: s.turnSeq + 1, applied: 0, ignored: 0, pendingApprovals: [], resolvedMode: null,
+    phase: "streaming", error: null, turnSeq: s.turnSeq + 1, turnWorkspaceRoot: workspaceRoot, applied: 0, ignored: 0, pendingApprovals: [], resolvedMode: null,
   };
 }
 
@@ -250,7 +252,7 @@ export function reduce(state: ChatState, action: Action): ChatState {
         if (state.queue.length >= MAX_QUEUE) return state;
         return { ...state, queue: [...state.queue, action.text] };
       }
-      return startTurn(action.replaceFailed ? dropFailedTurn(state) : state, action.id, action.text);
+      return startTurn(action.replaceFailed ? dropFailedTurn(state) : state, action.id, action.text, action.workspaceRoot ?? null);
     }
     case "reattach": {
       // A turn running on the core that this client did not start (webview reload): a streaming reply bubble, no user bubble.
@@ -261,7 +263,7 @@ export function reduce(state: ChatState, action: Action): ChatState {
       const oldest = messages.find((m) => m.seq !== undefined)?.seq ?? state.oldestSeq;
       return {
         ...state, messages, hasMoreOlder: state.hasMoreOlder || over, oldestSeq: over ? oldest : state.oldestSeq,
-        phase: "streaming", error: null, turnSeq: state.turnSeq + 1, applied: 0, ignored: 0, pendingApprovals: [], resolvedMode: null,
+        phase: "streaming", error: null, turnSeq: state.turnSeq + 1, turnWorkspaceRoot: null, applied: 0, ignored: 0, pendingApprovals: [], resolvedMode: null,
       };
     }
     case "reattach_cancel": {

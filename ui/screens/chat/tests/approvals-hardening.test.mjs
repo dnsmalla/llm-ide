@@ -1,7 +1,7 @@
 // Review hardening of the approvals UI (H1-H3, H8, H9, M1-M3, M12, LOW). Each block was written as a failing test first.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { loadChat, h, renderToStaticMarkup as html } from "./helpers.mjs";
+import { loadChat, h, renderToStaticMarkup as html, fakeCore, sse, until, tick, fixtures } from "./helpers.mjs";
 
 let A;
 before(async () => { A = (await loadChat("approvals-hardening")).approvals; });
@@ -136,4 +136,20 @@ test("H1: a freshly mounted card has its decision buttons disabled until the dwe
 test("H1: the head of the queue changing gives the next card its own dwell (cards are keyed by request id)", async () => {
   const src = (await import("node:fs")).readFileSync(new URL("../approvals/ApprovalsPanel.tsx", import.meta.url), "utf8");
   assert.match(src, /<ApprovalCard\s+key=\{head\.requestId\}/);
+});
+
+// ---- M1 the turn's workspace root is pinned ----
+test("M1: the root a turn was SENT with is pinned in chat state, even when the project later changes", async () => {
+  const C = await loadChat("approvals-hardening-ctl");
+  const FX = Object.fromEntries(fixtures().map((f) => [f.name.replace(".json", ""), f.json]));
+  const core = fakeCore({ streams: [[sse(FX.init, FX.mode_set), sse({ type: "delta", text: "Hello" }), sse(FX.usage, FX.result)]] });
+  const store = new C.MemoryChatStore(); store.seed("a", "A");
+  let root = "/proj-one";
+  const ctl = new C.ChatController({ core, store, workspaceRoot: () => root, newId: (() => { let n = 0; return () => `t${++n}`; })(), sleep: () => tick(1), abortGraceMs: 30 });
+  ctl.send("a", "hi", { mode: "auto", model: "m", provider: "anthropic", permissionMode: "ask" });
+  assert.equal(ctl.getState("a").turnWorkspaceRoot, "/proj-one");
+  root = "/proj-two";
+  assert.equal(ctl.getState("a").turnWorkspaceRoot, "/proj-one", "a later project switch does not move it");
+  await until(() => ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1)?.status === "done");
+  assert.equal(C.initialState("x").turnWorkspaceRoot, null);
 });

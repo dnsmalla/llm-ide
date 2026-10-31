@@ -240,7 +240,7 @@ export class ChatController {
     const wasBusy = r.state.phase === "streaming" || r.state.phase === "aborting";
     const workspaceRoot = this.deps.workspaceRoot();
     const before = r.state.queue.length;
-    this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text: trimmed, replaceFailed: isRetry });
+    this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text: trimmed, replaceFailed: isRetry, workspaceRoot });
     if (wasBusy) {
       // Snapshot everything now: the entry is sent later with ITS OWN options and project, never the next message's.
       if (r.state.queue.length > before) r.queued.push({ text: trimmed, opts: { ...opts }, workspaceRoot });
@@ -506,7 +506,7 @@ export class ChatController {
       // Out of step with the reducer (never expected): do not guess options for it, give the text back.
       if (!entry || entry.text !== text) { this.restoreDraft(id, text); continue; }
       if (entry.workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); continue; }
-      this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text });
+      this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text, workspaceRoot: entry.workspaceRoot });
       void this.runTurn(id, text, entry.opts, entry.workspaceRoot);
       return;
     }
