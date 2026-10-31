@@ -72,7 +72,7 @@ function dump(dir) {
     if (k === 'state') return 'EXAMPLE_STATE';
     if (k === 'redirectPort') return 54321;
     if (k === 'batchId') return '0123456789abcdef01234567';
-    if (k === 'accountId') return '0123456789ab';
+    if (k === 'accountId') return typeof v === 'string' && /^[a-f0-9]{12}$/.test(v) ? '0123456789ab' : v;
     if (k === 'lastRunAt') return '2025-11-01T00:00:00.000Z';
     if (k === 'email') return 'me@example.com';
     if (k === 'clientSecret') return 'example-client-secret';

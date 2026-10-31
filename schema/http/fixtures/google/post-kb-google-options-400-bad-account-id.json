@@ -3,7 +3,7 @@
   "status": 400,
   "request": {
     "body": {
-      "accountId": "0123456789ab",
+      "accountId": "xyz",
       "product": "gmail",
       "options": {}
     }

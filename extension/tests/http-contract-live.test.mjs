@@ -93,6 +93,13 @@ const SKIP_RULES = [
     ),
   },
   {
+    // Google connectors: the replay user has no connected account and owns no OAuth flow, and a connect needs the real
+    // loopback flow with Google answering. The 403 (another user's flow) and the 409s (product not granted, reconnect needed,
+    // run in flight, unknown batch) need that state; they were recorded from the real handlers (tests/google-routes.test.mjs).
+    why: 'Google connectors: needs a connected account or another user\'s flow; covered by tests/google-routes.test.mjs',
+    when: (fx) => /^(GET|POST) \/kb\/google\//.test(fx.endpoint) && (fx.status === 403 || fx.status === 409),
+  },
+  {
     why: 'rate limit (429): needs a bucket exhausted by earlier calls',
     when: (fx) => fx.status === 429,
   },
