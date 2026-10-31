@@ -652,7 +652,7 @@ function setCORS(req, res) {
   // is unchanged — this only permits methods for already-allowed origins.
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Max-Age', '600');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-ID');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-ID, X-Llmide-Client, X-Llmide-Host-Nonce, X-Llmide-Host-Approval');
   res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID');
   // Security headers — minimal but meaningful for an API server.
   res.setHeader('X-Content-Type-Options', 'nosniff');

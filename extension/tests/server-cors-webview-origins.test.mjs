@@ -37,7 +37,11 @@ async function withServer(corsEnv, fn) {
       const r = await fetch(`http://127.0.0.1:${port}/health`, { method, headers: { Origin: origin, ...(method === 'OPTIONS' ? { 'Access-Control-Request-Method': 'GET' } : {}) } });
       return r.headers.get('access-control-allow-origin');
     };
-    return await fn(acao);
+    const allowHeaders = async (origin) => {
+      const r = await fetch(`http://127.0.0.1:${port}/health`, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' } });
+      return r.headers.get('access-control-allow-headers') || '';
+    };
+    return await fn(acao, allowHeaders);
   } finally { child.kill('SIGKILL'); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -61,5 +65,12 @@ test('a wildcard in the env is not a wildcard', async () => {
   await withServer('*', async (acao) => {
     assert.equal(await acao('https://evil.example'), null);
     assert.equal(await acao('tauri://localhost'), null);
+  });
+});
+
+test('the preflight allows the desktop UI headers (host proof, client class, Bypass approval), or every authenticated desktop request fails as a network error', async () => {
+  await withServer(WEBVIEW.join(','), async (_acao, allowHeaders) => {
+    const h = (await allowHeaders('tauri://localhost')).toLowerCase().split(',').map((x) => x.trim());
+    for (const need of ['content-type', 'authorization', 'x-llmide-client', 'x-llmide-host-nonce', 'x-llmide-host-approval']) assert.ok(h.includes(need), `${need} in ${h.join(',')}`);
   });
 });
