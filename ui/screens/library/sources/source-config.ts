@@ -99,7 +99,7 @@ export function validateBox(c: BoxConfig): Problems<BoxConfig> {
 
 export function validateGithub(c: GithubIssuesConfig): Problems<GithubIssuesConfig> {
   const p: Problems<GithubIssuesConfig> = {};
-  if (!/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(c.repo.trim())) p.repo = "Use owner/name, for example acme/website.";
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/.test(c.repo.trim())) p.repo = "Use owner/name, for example acme/website.";
   if (!["open", "closed", "all"].includes(c.state)) p.state = "Choose open, closed or all.";
   return p;
 }
