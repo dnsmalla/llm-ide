@@ -8,6 +8,7 @@ mod chat_store;
 mod confirm;
 mod core_env;
 mod core_host;
+mod foreign_core;
 mod fs_ops;
 mod fs_watch;
 mod git;

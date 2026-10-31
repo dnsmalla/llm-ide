@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::foreign_core::{self, ForeignCore};
 use crate::fsutil;
 use crate::proc_tree::ManagedChild;
 
@@ -57,8 +58,12 @@ const CLAUDE_FALLBACK_NOTICE: &str = "Claude Code was not found on this computer
 #[derive(Clone, Debug)]
 pub struct Tuning {
     pub ports: Vec<u16>,
-    /// Adopt a healthy server already on :3456 instead of spawning.
+    /// Adopt a healthy server already on `live_port` instead of spawning. Off in release builds
+    /// unless `LLMIDE_ADOPT_CORE=1`: an adopted core is unverifiable and the release CSP does not
+    /// allow it, so by default a foreign :3456 server is only reported, never used.
     pub adopt: bool,
+    /// The live-server port that is probed (3456; tests point it at a fake).
+    pub live_port: u16,
     pub ready_deadline: Duration,
     pub term_grace: Duration,
     pub health_interval: Duration,
@@ -77,7 +82,12 @@ impl Default for Tuning {
     fn default() -> Self {
         Self {
             ports: SPAWN_PORTS.to_vec(),
-            adopt: std::env::var("LLMIDE_POC_FORCE_SPAWN").as_deref() != Ok("1"),
+            adopt: default_adopt(
+                cfg!(debug_assertions),
+                std::env::var("LLMIDE_ADOPT_CORE").ok().as_deref(),
+                std::env::var("LLMIDE_POC_FORCE_SPAWN").ok().as_deref(),
+            ),
+            live_port: LIVE_PORT,
             ready_deadline: READY_DEADLINE,
             term_grace: TERM_GRACE,
             health_interval: Duration::from_secs(5),
@@ -90,6 +100,15 @@ impl Default for Tuning {
             claude_recheck: Duration::from_secs(30),
         }
     }
+}
+
+/// Adopt policy. Release: only with `LLMIDE_ADOPT_CORE=1`. Debug: the dev default (adopt unless
+/// `LLMIDE_POC_FORCE_SPAWN=1`), and `LLMIDE_ADOPT_CORE=1` always wins.
+pub(crate) fn default_adopt(debug: bool, adopt_env: Option<&str>, force_spawn: Option<&str>) -> bool {
+    if adopt_env == Some("1") {
+        return true;
+    }
+    debug && adopt_env != Some("0") && force_spawn != Some("1")
 }
 
 /// What a restart should do after a crash.
@@ -180,6 +199,13 @@ pub struct CoreStatus {
     /// Additive: absolute path of the redacted failure log (`core.log`). The PATH only, never its
     /// contents; the file exists only after a core failure has been recorded.
     pub core_log_path: Option<String>,
+    /// Additive: a server this app did not start holds the live port (:3456). It is never used or
+    /// stopped. `null` when none was seen.
+    pub foreign_core: Option<ForeignCore>,
+    /// Additive: machine-readable failure reason (`ports_busy`); `null` otherwise.
+    pub error_code: Option<&'static str>,
+    /// Additive: the spawn ports this app tried (set with `ports_busy`).
+    pub ports_tried: Vec<u16>,
 }
 
 /// What one spawn needs; produced by a [`Launcher`].
@@ -226,6 +252,9 @@ struct Status {
     restart_at: Option<Instant>,
     fatal: bool,
     claude: ClaudeInfo,
+    foreign: Option<ForeignCore>,
+    error_code: Option<&'static str>,
+    ports_tried: Vec<u16>,
     /// Set by `shutdown`; a spawn that finishes afterwards is killed at once.
     closing: bool,
 }
@@ -273,6 +302,9 @@ impl CoreHost {
                     restart_at: None,
                     fatal: false,
                     claude: ClaudeInfo::unknown(),
+                    foreign: None,
+                    error_code: None,
+                    ports_tried: Vec::new(),
                     closing: false,
                 }),
                 child: Mutex::new(None),
@@ -324,6 +356,9 @@ impl CoreHost {
             claude_source: s.claude.source.clone(),
             claude_notice: s.claude.notice.clone(),
             core_log_path: lock(&self.inner.data_dir).as_ref().map(|d| d.join(LOG_FILE).to_string_lossy().into_owned()),
+            foreign_core: s.foreign.clone(),
+            error_code: s.error_code,
+            ports_tried: s.ports_tried.clone(),
         }
     }
 
@@ -365,21 +400,28 @@ impl CoreHost {
         let started = Instant::now();
         let t = &self.inner.tuning;
 
-        if t.adopt && matches!(probe(LIVE_PORT, PROBE_TIMEOUT), Probe::Healthy { .. }) {
-            eprintln!("core: adopting existing server on 127.0.0.1:{LIVE_PORT} (identity unverified)");
+        let live_healthy = matches!(probe(t.live_port, PROBE_TIMEOUT), Probe::Healthy { .. });
+        if t.adopt && live_healthy {
+            eprintln!("core: adopting existing server on 127.0.0.1:{} (identity unverified)", t.live_port);
             let ms = started.elapsed().as_millis() as u64;
             self.set_ready(
-                format!("http://127.0.0.1:{LIVE_PORT}"),
+                format!("http://127.0.0.1:{}", t.live_port),
                 true,
                 ms,
                 "adopted_unverified",
                 Some(format!(
-                    "Using an external core already running on port {LIVE_PORT}. Its identity cannot be \
-                     verified; only continue if you started it."
+                    "Using an external core already running on port {}. Its identity cannot be \
+                     verified; only continue if you started it.",
+                    t.live_port
                 )),
             );
             self.refresh_claude();
             return;
+        }
+        if live_healthy {
+            // Not ours (we have no nonce for it) and not adopted: report it, start our own core.
+            eprintln!("core: ignoring a foreign server on 127.0.0.1:{} (not adopted)", t.live_port);
+            self.note_foreign(t.live_port);
         }
 
         let Some(data_dir) = lock(&self.inner.data_dir).clone() else {
@@ -469,12 +511,14 @@ impl CoreHost {
         };
         lock(&self.inner.literals).push(nonce.clone());
         let mut last = String::from("no port tried");
+        let mut busy = 0usize;
         for &port in &t.ports {
             if self.is_closing() {
                 return Started::Closed;
             }
             if port_in_use(port) {
                 last = format!("port {port} is in use");
+                busy += 1;
                 continue;
             }
             lock(&self.inner.log).clear();
@@ -488,11 +532,31 @@ impl CoreHost {
         if self.is_closing() {
             return Started::Closed;
         }
-        self.set_failed(
-            spawn_url(t.ports[t.ports.len() - 1]),
-            format!("could not start the core: {last}"),
-        );
+        let all_busy = busy == t.ports.len();
+        self.set_failed(spawn_url(t.ports[t.ports.len() - 1]), format!("could not start the core: {last}"));
+        if all_busy {
+            let first = t.ports.first().copied().unwrap_or(0);
+            let last_port = t.ports.last().copied().unwrap_or(0);
+            let mut s = lock(&self.inner.status);
+            s.error_code = Some("ports_busy");
+            s.ports_tried = t.ports.clone();
+            s.error = Some(format!("Ports {first}-{last_port} are busy: free one of them or restart"));
+        }
         Started::Failed
+    }
+
+    /// Records a foreign server on the live port, then fills in pid/command best-effort off-thread.
+    fn note_foreign(&self, port: u16) {
+        lock(&self.inner.status).foreign = Some(ForeignCore::detected(port));
+        let host = self.clone();
+        thread::spawn(move || {
+            if let Some((pid, cmd)) = foreign_core::lookup_owner(port) {
+                let mut s = lock(&host.inner.status);
+                if let Some(f) = s.foreign.take() {
+                    s.foreign = Some(f.with_owner(pid, cmd));
+                }
+            }
+        });
     }
 
     /// Spawns on `port` and waits for a /health that echoes `nonce`.
@@ -682,6 +746,8 @@ impl CoreHost {
             s.trust = trust;
             s.nonce = None;
             s.notice = notice;
+            s.error_code = None;
+            s.ports_tried.clear();
         }
         println!(
             "BENCH {{\"name\":\"core_ms_to_healthy\",\"value\":{ms},\"unit\":\"ms\",\"adopted\":{adopted}}}"
@@ -695,6 +761,8 @@ impl CoreHost {
         s.state = Phase::Failed;
         s.pid = None;
         s.error = Some(error);
+        s.error_code = None;
+        s.ports_tried.clear();
     }
 
     /// A webview-safe failure message: the raw output tail never goes into
@@ -1186,6 +1254,7 @@ mod tests {
         Tuning {
             ports,
             adopt: false,
+            live_port: 1,
             ready_deadline: Duration::from_secs(10),
             term_grace: Duration::from_millis(500),
             health_interval: Duration::from_millis(100),
@@ -1332,6 +1401,86 @@ process.on('SIGTERM', () => process.exit(0));
         fn drop(&mut self) {
             self.host.shutdown();
         }
+    }
+
+    fn never_launcher() -> Launcher {
+        Arc::new(|_| Err("must not launch".into()))
+    }
+
+    fn no_claude() -> ClaudeProbe {
+        Arc::new(|_| ClaudeInfo::unknown())
+    }
+
+    #[test]
+    fn adopt_policy_is_off_in_release_unless_explicit() {
+        assert!(!default_adopt(false, None, None), "release default");
+        assert!(!default_adopt(false, Some("0"), None));
+        assert!(default_adopt(false, Some("1"), None), "explicit opt-in");
+        assert!(default_adopt(true, None, None), "debug keeps the dev flow");
+        assert!(!default_adopt(true, None, Some("1")), "force-spawn still wins in debug");
+        assert!(default_adopt(true, Some("1"), Some("1")));
+        assert!(!default_adopt(true, Some("0"), None));
+    }
+
+    #[test]
+    fn adoption_happens_only_when_enabled() {
+        let (port, _) = fake(|| ok_with(""));
+        let t = Tuning { live_port: port, adopt: true, ..tuning_fast(vec![1]) };
+        let host = CoreHost::with(t, never_launcher(), no_claude());
+        host.start_in_background(Some(std::env::temp_dir()));
+        let end = Instant::now() + Duration::from_secs(5);
+        while host.status().state != Phase::Ready && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let s = host.status();
+        assert!(s.adopted && s.trust == "adopted_unverified" && s.foreign_core.is_none(), "{s:?}");
+        assert!(host.verified_url().is_none());
+    }
+
+    #[test]
+    fn a_foreign_core_is_ignored_and_our_own_is_started_on_the_next_port() {
+        let (live, hits) = fake(|| ok_with(""));
+        let ports = free_ports(2);
+        let t = Tuning { live_port: live, adopt: false, ..tuning_fast(ports.clone()) };
+        let Some(f) = Fake::new("foreign", "ok", t) else { return };
+        let s = f.wait_for("ready", 15, |s| s.state == Phase::Ready);
+        assert!(!s.adopted && s.trust == "spawned", "{s:?}");
+        assert_eq!(s.url, format!("http://127.0.0.1:{}", ports[0]));
+        let fc = s.foreign_core.expect("foreign core is reported");
+        assert!(fc.detected && fc.port == live && fc.notice.contains("not used by this app"));
+        assert!(hits.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+        assert!(f.host.verified_url().is_some(), "only the spawned core gets credentials");
+        assert!(s.error_code.is_none());
+    }
+
+    #[test]
+    fn all_spawn_ports_busy_fails_with_ports_busy_and_the_ports_tried() {
+        let ls: Vec<TcpListener> = (0..3).map(|_| TcpListener::bind("127.0.0.1:0").unwrap()).collect();
+        let ports: Vec<u16> = ls.iter().map(|l| l.local_addr().unwrap().port()).collect();
+        let t = Tuning { live_port: 1, ..tuning_fast(ports.clone()) };
+        let host = CoreHost::with(t, never_launcher(), no_claude());
+        host.start_in_background(Some(std::env::temp_dir()));
+        let end = Instant::now() + Duration::from_secs(10);
+        while host.status().state != Phase::Failed && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let s = host.status();
+        assert_eq!(s.state, Phase::Failed, "{s:?}");
+        assert_eq!(s.error_code, Some("ports_busy"));
+        assert_eq!(s.ports_tried, ports);
+        assert!(s.error.unwrap().contains("busy"));
+        drop(ls);
+    }
+
+    #[test]
+    fn core_status_serializes_the_new_fields_additively() {
+        let host = CoreHost::with(tuning_fast(vec![1]), never_launcher(), no_claude());
+        let v = serde_json::to_value(host.status()).unwrap();
+        assert!(v["foreign_core"].is_null() && v["error_code"].is_null() && v["ports_tried"].as_array().unwrap().is_empty());
+        host.note_foreign(3456);
+        let v = serde_json::to_value(host.status()).unwrap();
+        assert_eq!(v["foreign_core"]["port"], 3456);
+        assert_eq!(v["foreign_core"]["detected"], true);
     }
 
     #[cfg(unix)]
