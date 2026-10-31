@@ -24,6 +24,7 @@ import { createWriteHost } from "./write/write-host.ts";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
+import { publicHttpsUrl } from "./safe-url.ts";
 export { LibraryStore } from "./library-store.ts";
 
 /** One store for the app: the shell keeps this screen mounted, so there is nothing to dispose. */
@@ -41,7 +42,8 @@ function app(): NonNullable<typeof singleton> {
  *  parity checklist): until it lands the click shows a notice instead of navigating the webview. */
 async function openExternal(url: string): Promise<void> {
   if (!shellHost.isAvailable()) {
-    window.open(url, "_blank", "noopener,noreferrer");
+    const safe = publicHttpsUrl(url);
+    if (safe) window.open(safe, "_blank", "noopener,noreferrer");
     return;
   }
   await invokeHost("open_external_url", { url });
