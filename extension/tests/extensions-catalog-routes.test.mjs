@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { repoArchive } from './helpers/tar-fixture.mjs';
+import { repoArchive, withCompare } from './helpers/tar-fixture.mjs';
 
 process.env.NODE_ENV = 'test';
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -26,10 +26,10 @@ const archives = new Map([
   [`https://codeload.github.com/acme/tidy/tar.gz/${SHA}`, repoArchive({ 'SKILL.md': SKILL })],
   [`https://codeload.github.com/acme/runner/tar.gz/${SHA}`, repoArchive(PLUGIN)],
 ]);
-_setPinnedFetchForTests(async (url) => {
+_setPinnedFetchForTests(withCompare(async (url) => {
   const hit = archives.get(String(url));
   return hit ? new Response(hit, { status: 200 }) : new Response('nope', { status: 404 });
-});
+}));
 
 function call(method, url, body, user = { id: 'u1' }) {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
@@ -112,13 +112,13 @@ const SHA2 = 'f'.repeat(40);
 const SKILL2 = '---\nname: Tidy\n---\nTidy harder.\n';
 const heads = new Map();
 const registryBody = JSON.stringify({ servers: [{ server: { name: 'io.github.acme/notes', description: 'Notes', repository: { url: 'https://github.com/acme/notes' } } }] });
-_setPinnedFetchForTests(async (url) => {
+_setPinnedFetchForTests(withCompare(async (url) => {
   const u = String(url);
   if (heads.has(u)) return new Response(heads.get(u), { status: 200 });
   if (u.startsWith('https://registry.modelcontextprotocol.io/')) return new Response(registryBody, { status: 200 });
   const hit = archives.get(u);
   return hit ? new Response(hit, { status: 200 }) : new Response('nope', { status: 404 });
-});
+}));
 
 test('P5 routes belong to the extension dispatcher; reads are GET, steps are POST', async () => {
   for (const p of ['catalog?q=x', 'catalog/refresh', 'active', 'updates', 'updates/check', 'update/preview', 'update', 'rollback', 'repair']) {

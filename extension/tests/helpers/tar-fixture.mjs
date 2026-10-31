@@ -49,7 +49,19 @@ export function repoArchive(files, root = 'repo-0123456') {
 /** A fetch that serves fixtures by URL and records every URL asked for. */
 export function fixtureFetch(routes) {
   const calls = [];
+  const compareCalls = [];
   const fn = async (url, init = {}) => {
+    // Commit-reachability checks (compare API) are tracked apart from `calls`; by default every commit is "behind"
+    // (reachable) unless the routes name that exact URL (or a `compare:` prefix key).
+    const cm = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/compare\/(.+)\.\.\.([0-9a-f]{40})(?:\?|$)/.exec(String(url));
+    if (cm) {
+      compareCalls.push({ url: String(url), init });
+      const hit = routes[String(url)] ?? routes[`compare:${cm[1]}/${cm[2]}:${cm[4]}`];
+      if (hit === undefined) return new Response(JSON.stringify({ status: 'behind', merge_base_commit: { sha: cm[4] } }), { status: 200 });
+      if (typeof hit === 'function') return hit(url, init);
+      if (hit instanceof Response) return hit;
+      return new Response(hit, { status: 200 });
+    }
     calls.push({ url: String(url), init });
     const hit = routes[String(url)];
     if (hit === undefined) return new Response('not found', { status: 404 });
@@ -58,5 +70,15 @@ export function fixtureFetch(routes) {
     return new Response(hit, { status: 200 });
   };
   fn.calls = calls;
+  fn.compareCalls = compareCalls;
   return fn;
+}
+
+/** Wrap an ad-hoc fetch fixture so commit-reachability (compare API) checks answer "behind" (reachable). */
+export function withCompare(inner) {
+  return async (url, init) => {
+    const m = /\/compare\/.+\.\.\.([0-9a-f]{40})(?:\?|$)/.exec(String(url));
+    if (m && String(url).startsWith('https://api.github.com/')) return new Response(JSON.stringify({ status: 'behind', merge_base_commit: { sha: m[1] } }), { status: 200 });
+    return inner(url, init);
+  };
 }

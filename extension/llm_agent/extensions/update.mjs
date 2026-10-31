@@ -25,7 +25,7 @@ import { mkdirSync, renameSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { makePinnedFetch } from '../../server/pinned-fetch.mjs';
-import { parseRepoUrl, resolveCommit, downloadArchive, isCommitSha, validRef } from './sources/github.mjs';
+import { parseRepoUrl, resolveCommit, verifyCommitInRepo, downloadArchive, isCommitSha, validRef } from './sources/github.mjs';
 import { sourceAllowedFor } from './allowlist.mjs';
 import { extractTarGz } from './sources/tar.mjs';
 import { inspectTree } from './inspect.mjs';
@@ -100,6 +100,10 @@ function requireCatalog() {
 async function targetCommit(rec, commit, deps, { resolveIfMissing }) {
   if (commit !== undefined && commit !== null && commit !== '') {
     if (!isCommitSha(commit)) throw new InstallError('invalid_commit', 'commit must be 40 hex characters');
+    const repo = sourceOf(rec);
+    if (!repo) throw new InstallError('invalid_url', 'this item has no GitHub source');
+    try { await verifyCommitInRepo({ owner: repo.owner, repo: repo.repo, ref: rec.source.ref, commit }, { fetch: pinnedFetch(deps), signal: deps.signal }); }
+    catch (err) { throw mapFetchError(err); }
     return commit;
   }
   if (isCommitSha(rec.update?.latest)) return rec.update.latest;

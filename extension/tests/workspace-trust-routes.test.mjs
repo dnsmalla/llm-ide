@@ -139,11 +139,11 @@ test('allowlist: the operator ceiling is honoured over HTTP', async () => {
 });
 
 test('install honours a user addition and nothing else', async () => {
-  const { repoArchive } = await import('./helpers/tar-fixture.mjs');
+  const { repoArchive, withCompare } = await import('./helpers/tar-fixture.mjs');
   const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
   const SHA = 'c'.repeat(40);
-  _setPinnedFetchForTests(async (url) => String(url) === `https://codeload.github.com/zoo/tidy/tar.gz/${SHA}`
-    ? new Response(repoArchive({ 'SKILL.md': '---\nname: Tidy\n---\nTidy up.\n' }), { status: 200 }) : new Response('nope', { status: 404 }));
+  _setPinnedFetchForTests(withCompare(async (url) => String(url) === `https://codeload.github.com/zoo/tidy/tar.gz/${SHA}`
+    ? new Response(repoArchive({ 'SKILL.md': '---\nname: Tidy\n---\nTidy up.\n' }), { status: 200 }) : new Response('nope', { status: 404 })));
   const body = { url: 'https://github.com/zoo/tidy', commit: SHA };
   const refused = await call('POST', '/auth/me/extensions/install', body);
   assert.equal(refused.status, 403);

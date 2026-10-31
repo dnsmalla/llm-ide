@@ -217,3 +217,14 @@ test('catalog switched off refuses every network step', async () => {
     await rejects(upd.repair('u11', it.id), 'catalog_disabled');
   } finally { delete process.env.LLMIDE_EXT_CATALOG; }
 });
+
+test('H2: an explicit commit for preview/apply and a raw SHA for install must be on the repo (fork-network SHA refused)', async () => {
+  const it = await install('u-h2', 'acme', 'tidy', { 'SKILL.md': SKILL1 }, S1);
+  const fork = net({ [url('acme', 'tidy', S3)]: repoArchive({ 'SKILL.md': SKILL2 }), [`compare:acme/tidy:${S3}`]: new Response('{"status":"diverged"}', { status: 200 }) });
+  await rejects(upd.previewUpdate('u-h2', it.id, { commit: S3, fetch: fork }), 'commit_not_in_repo');
+  await rejects(upd.applyUpdate('u-h2', it.id, { commit: S3, fetch: fork }), 'commit_not_in_repo');
+  assert.equal(fork.calls.length, 0, 'the archive is never downloaded for an unverified commit');
+  const down = net({ [`compare:acme/tidy:${S3}`]: new Response('', { status: 503 }) });
+  await rejects(upd.previewUpdate('u-h2', it.id, { commit: S3, fetch: down }), 'verify_unavailable');
+  await rejects(inst.installFromGithub({ userId: 'u-h2', url: 'https://github.com/acme/tidy', commit: S3 }, { fetch: fork }), 'commit_not_in_repo');
+});

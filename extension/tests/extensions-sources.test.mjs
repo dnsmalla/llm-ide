@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
 import { makeTarGz, repoArchive, fixtureFetch } from './helpers/tar-fixture.mjs';
 import { extractTarGz, ArchiveError, safeRelativePath, ARCHIVE_LIMITS } from '../llm_agent/extensions/sources/tar.mjs';
-import { parseRepoUrl, resolveCommit, downloadArchive, sourceAllowed, SourceError } from '../llm_agent/extensions/sources/github.mjs';
+import { parseRepoUrl, resolveCommit, downloadArchive, sourceAllowed, SourceError, validRef } from '../llm_agent/extensions/sources/github.mjs';
 import { scanTree } from '../llm_agent/extensions/scan.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -61,10 +61,12 @@ test('github: only github.com/<owner>/<repo> parses', () => {
   }
 });
 
-test('github: a supplied commit is used as the pin and no request is made', async () => {
+test('github: a supplied commit is verified against the repo, then used as the pin', async () => {
   const f = fixtureFetch({});
   assert.equal(await resolveCommit({ owner: 'o', repo: 'r', commit: SHA }, { fetch: f }), SHA);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.compareCalls.length, 1);
+  assert.match(f.compareCalls[0].url, new RegExp(`/repos/o/r/compare/HEAD\\.\\.\\.${SHA}`));
   await assert.rejects(resolveCommit({ owner: 'o', repo: 'r', commit: 'main' }, { fetch: f }), (e) => e.code === 'invalid_commit');
 });
 
@@ -132,4 +134,29 @@ test('scan: findings are capped and binaries are not read as text', () => {
   assert.equal(many.length, 200);
   const bin = new Map([['img.png', Buffer.from([0x89, 0, 1, 2])], ['tool', Buffer.from([0, 1, 2])]]);
   assert.deepEqual(scanTree(bin).map((x) => x.file), ['tool']);
+});
+
+test('github: a fork-network commit (diverged/ahead/404) is refused as COMMIT_NOT_IN_REPO', async () => {
+  const cmp = (st, extra = {}) => new Response(JSON.stringify({ status: st, ...extra }), { status: 200 });
+  for (const hit of [cmp('diverged'), cmp('ahead'), cmp('behind', { merge_base_commit: { sha: 'f'.repeat(40) } }), new Response('nf', { status: 404 }), new Response('x', { status: 422 })]) {
+    const f = fixtureFetch({ [`compare:o/r:${SHA}`]: hit });
+    await assert.rejects(resolveCommit({ owner: 'o', repo: 'r', commit: SHA }, { fetch: f }), (e) => e instanceof SourceError && e.code === 'commit_not_in_repo');
+  }
+  const ok = fixtureFetch({ [`compare:o/r:${SHA}`]: cmp('identical') });
+  assert.equal(await resolveCommit({ owner: 'o', repo: 'r', commit: SHA }, { fetch: ok }), SHA);
+  const named = fixtureFetch({});
+  await resolveCommit({ owner: 'o', repo: 'r', ref: 'release/v1', commit: SHA }, { fetch: named });
+  assert.match(named.compareCalls[0].url, /compare\/release\/v1\.\.\./);
+});
+
+test('github: verification fails CLOSED and retryable when the API is unavailable', async () => {
+  for (const hit of [new Response('limit', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }), new Response('', { status: 429 }), new Response('', { status: 503 }), new Response('<html>', { status: 200 }), () => { throw new Error('socket'); }]) {
+    const f = fixtureFetch({ [`compare:o/r:${SHA}`]: hit });
+    await assert.rejects(resolveCommit({ owner: 'o', repo: 'r', commit: SHA }, { fetch: f }), (e) => e instanceof SourceError && e.code === 'verify_unavailable');
+  }
+});
+
+test('github: only branch and tag refs are valid (no pull/N/head or other namespaces)', () => {
+  for (const ok of ['main', 'release/v1', 'heads/x', 'tags/v1', 'refs/heads/x', 'refs/tags/v1']) assert.equal(validRef(ok), true, ok);
+  for (const bad of ['pull/12/head', 'refs/pull/12/head', 'pull/1/merge', 'refs/changes/1', 'refs/notes/x', 'merge-requests/1/head', 'refs/remotes/x']) assert.equal(validRef(bad), false, bad);
 });

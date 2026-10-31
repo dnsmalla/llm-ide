@@ -41,9 +41,14 @@ export function parseRepoUrl(url) {
 
 export const isCommitSha = (v) => typeof v === 'string' && SHA_RE.test(v);
 
+// Only branch and tag names: `main`, `release/v1`, `heads/x`, `tags/v1`, `refs/heads/x`, `refs/tags/v1`.
+// `pull/N/head`, `refs/pull/...`, `merge-requests/...` and other namespaces name commits that may live in a FORK.
+const FORBIDDEN_REF_NS = /^(?:refs\/)?(?:pull|pulls|merge-requests|merge|changes|notes|remotes|stash|keep-around|replace)(?:\/|$)/i;
 export function validRef(ref) {
   return typeof ref === 'string' && REF_RE.test(ref) && !ref.startsWith('-') && !ref.startsWith('/') && !ref.endsWith('/')
-    && !ref.split('/').some((s) => s === '' || s === '.' || s === '..');
+    && !ref.split('/').some((s) => s === '' || s === '.' || s === '..')
+    && !FORBIDDEN_REF_NS.test(ref)
+    && (!ref.startsWith('refs/') || /^refs\/(?:heads|tags)\//.test(ref));
 }
 
 export async function readCapped(res, max) {
@@ -82,11 +87,12 @@ function guarded(fetchImpl, host) {
  * now, and the result is what is recorded.
  */
 export async function resolveCommit({ owner, repo, ref, commit }, { fetch: fetchImpl, signal } = {}) {
+  if (ref !== undefined && ref !== null && ref !== '' && !validRef(ref)) throw new SourceError('invalid_ref', 'invalid ref');
   if (commit !== undefined && commit !== null && commit !== '') {
     if (!isCommitSha(commit)) throw new SourceError('invalid_commit', 'commit must be 40 hex characters');
+    await verifyCommitInRepo({ owner, repo, ref, commit }, { fetch: fetchImpl, signal });
     return commit;
   }
-  if (ref !== undefined && ref !== null && ref !== '' && !validRef(ref)) throw new SourceError('invalid_ref', 'invalid ref');
   const seg = (ref ? String(ref) : 'HEAD').split('/').map(encodeURIComponent).join('/');
   const res = await guarded(fetchImpl, GITHUB_API_HOST)(`/repos/${owner}/${repo}/commits/${seg}`,
     { signal, headers: { accept: 'application/vnd.github.sha' } });
@@ -95,6 +101,34 @@ export async function resolveCommit({ owner, repo, ref, commit }, { fetch: fetch
   const text = (await readCapped(res, MAX_API_BYTES)).toString('utf8').trim();
   if (!SHA_RE.test(text)) throw new SourceError('upstream', 'GitHub did not return a commit');
   return text;
+}
+
+const MAX_COMPARE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A raw commit must be reachable from the repository's default branch (or the named ref). codeload serves any
+ * commit in the repo's FORK NETWORK, so without this an allowlisted owner/repo plus an attacker fork's SHA would
+ * install attacker bytes under the allowlisted publisher's trust. Fails CLOSED: an unavailable API (rate limit,
+ * outage) is a retryable error, never an accept.
+ */
+export async function verifyCommitInRepo({ owner, repo, ref, commit }, { fetch: fetchImpl, signal } = {}) {
+  const baseSeg = (ref ? String(ref) : 'HEAD').split('/').map(encodeURIComponent).join('/');
+  let res;
+  try {
+    res = await guarded(fetchImpl, GITHUB_API_HOST)(`/repos/${owner}/${repo}/compare/${baseSeg}...${commit}?per_page=1`,
+      { signal, headers: { accept: 'application/vnd.github+json' } });
+  } catch (err) {
+    if (err instanceof SourceError || err?.name === 'AbortError' || err?.code === 'SSRF_BLOCKED') throw err;
+    throw new SourceError('verify_unavailable', 'could not verify that commit with GitHub; try again');
+  }
+  if (res.status === 404 || res.status === 422) throw new SourceError('commit_not_in_repo', 'that commit is not on the default branch or the named ref of this repository');
+  if (!res.ok) throw new SourceError('verify_unavailable', `GitHub could not verify that commit (${res.status}); try again later`);
+  let j;
+  try { j = JSON.parse((await readCapped(res, MAX_COMPARE_BYTES)).toString('utf8')); }
+  catch { throw new SourceError('verify_unavailable', 'GitHub returned an unreadable answer while verifying that commit; try again'); }
+  const reachable = (j?.status === 'identical' || j?.status === 'behind')
+    && (j?.merge_base_commit?.sha === undefined || j.merge_base_commit.sha === commit);
+  if (!reachable) throw new SourceError('commit_not_in_repo', 'that commit is not on the default branch or the named ref of this repository');
 }
 
 /** The gzip'd tar of the repo AT the commit. */
