@@ -126,7 +126,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)
 - [ ] Screen-by-screen parity checklist against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
-- [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design written, no code (`plans/2026-10-31-phase7-desktop-control-design.md`, `cc77f428`), independent review next (me)
+- [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 
 ## S3. Mobile (iPhone native, PWA)
 
@@ -283,7 +283,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Independent security review fixes (server): workspace trust fails closed (strict MCP for every untrusted folder, parents, remote servers, stricter trust roots), raw commits verified on the repo (`COMMIT_NOT_IN_REPO`), apply bound to the preview (`UPDATE_CHANGED`), server-owned shared index refresh, uninstall/repair/apply locking, job runner and process-group hardening, lazy integrity check at load (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
-- [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design written, no code (`plans/2026-10-31-phase7-desktop-control-design.md`, `cc77f428`), independent review next (me)
+- [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 
 ## S10. Release and CI
 
