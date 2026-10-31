@@ -895,8 +895,44 @@ impl ChatStore {
         self.my_pending_deletes().len()
     }
 
+    /// Fail-closed read: a missing file is empty, but an unparseable or oversized one is an error (a copy
+    /// is set aside once, the original is left alone) so no write ever replaces tombstones we cannot read.
+    fn read_pending_checked(&self) -> Result<PendingDoc> {
+        let p = self.pending_path();
+        let meta = match std::fs::metadata(&p) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(PendingDoc::default()),
+            Err(e) => return Err(io_err("stat pending deletes", &e)),
+        };
+        let corrupt = || StoreError::new("pending_corrupt", "the pending-deletes file is unreadable; fix or remove it (a copy was kept)");
+        if meta.len() > SMALL_FILE_MAX {
+            return Err(corrupt());
+        }
+        let bytes = read_small(&p, SMALL_FILE_MAX).map_err(|e| io_err("read pending deletes", &e))?;
+        match serde_json::from_slice::<PendingDoc>(&bytes) {
+            Ok(d) => Ok(d),
+            Err(_) => {
+                self.copy_pending_aside(&bytes);
+                Err(corrupt())
+            }
+        }
+    }
+
+    /// One copy per distinct content (named by a digest prefix), at most 10 kept.
+    fn copy_pending_aside(&self, bytes: &[u8]) {
+        use sha2::{Digest, Sha256};
+        let digest: String = Sha256::digest(bytes).iter().take(8).map(|b| format!("{b:02x}")).collect();
+        let dir = &self.inner.layout.base;
+        let prefix = format!("{PENDING_FILE}.corrupt-");
+        let existing = std::fs::read_dir(dir).map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&prefix)).count()).unwrap_or(0);
+        let target = dir.join(format!("{prefix}{digest}"));
+        if existing < 10 && !target.exists() {
+            let _ = write_atomic(&target, bytes);
+        }
+    }
+
     fn update_pending(&self, f: impl FnOnce(&mut PendingDoc)) -> Result<()> {
-        let mut doc = self.read_pending();
+        let mut doc = self.read_pending_checked()?;
         f(&mut doc);
         let body = serde_json::to_vec(&doc).map_err(|_| StoreError::new("io", "encode tombstones"))?;
         write_atomic(&self.pending_path(), &body)
@@ -914,7 +950,7 @@ impl ChatStore {
 
     pub fn remove_tombstone(&self, id: &str) -> Result<()> {
         let _lock = self.lock()?;
-        if !self.read_pending().deletes.iter().any(|e| e.id.eq_ignore_ascii_case(id)) {
+        if !self.read_pending_checked()?.deletes.iter().any(|e| e.id.eq_ignore_ascii_case(id)) {
             return Ok(());
         }
         self.update_pending(|d| d.deletes.retain(|e| !e.id.eq_ignore_ascii_case(id)))
@@ -1130,7 +1166,8 @@ impl ChatStore {
         let id = self.id_arg(obj.get("id").and_then(Value::as_str).unwrap_or(""))?;
         validate_session(&obj)?;
         let _lock = self.lock()?;
-        if self.tombstoned_ids().contains(&id) {
+        let pending = self.read_pending_checked()?;
+        if pending.deletes.iter().filter_map(|d| canonical_chat_id(&d.id)).any(|d| d == id) {
             return Err(StoreError::new("deleted", "this chat was deleted"));
         }
         let path = self.file_path(&id);

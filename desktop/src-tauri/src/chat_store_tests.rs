@@ -754,3 +754,42 @@ fn quarantine_growth_is_bounded() {
         assert_eq!(moved.is_some(), i < MAX_QUARANTINED, "{i}");
     }
 }
+
+
+// ---- a corrupt tombstone file fails closed ---------------------------------------------------------
+
+#[test]
+fn a_corrupt_pending_deletes_file_is_kept_and_blocks_writes_until_resolved() {
+    let t = Tmp::new("pending-corrupt");
+    let s = store(&t, "u1");
+    s.save(session(ID1, 2), SaveMode::Replace, None, true).unwrap();
+    s.delete(ID1).unwrap();
+    let p = t.0.join(PENDING_FILE);
+    let good = std::fs::read(&p).unwrap();
+    let bad = b"{\"deletes\": [ {\"id\": \"AAAAAAAA-0000-4000-8000-000000000001\" truncated".to_vec();
+    std::fs::write(&p, &bad).unwrap();
+    // saving a chat that might have been deleted is refused (it could resurrect it) ...
+    assert_eq!(s.save(session(ID1, 1), SaveMode::Replace, None, true).unwrap_err().code, "pending_corrupt");
+    // ... and so is anything that would overwrite the tombstone file
+    s.save(session(ID2, 1), SaveMode::Replace, None, true).unwrap_err();
+    assert_eq!(s.delete(ID2).unwrap_err().code, "pending_corrupt");
+    assert_eq!(s.remove_tombstone(ID1).unwrap_err().code, "pending_corrupt");
+    assert_eq!(std::fs::read(&p).unwrap(), bad, "the corrupt file was not overwritten");
+    // one copy aside, however many times it is hit
+    let copies = || std::fs::read_dir(&t.0).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("pending-deletes.json.corrupt-")).count();
+    assert_eq!(copies(), 1);
+    // resolved by the user: it works again
+    std::fs::write(&p, &good).unwrap();
+    s.save(session(ID2, 1), SaveMode::Replace, None, true).unwrap();
+}
+
+#[test]
+fn an_oversized_pending_deletes_file_fails_closed_too() {
+    let t = Tmp::new("pending-huge");
+    let s = store(&t, "u1");
+    let p = t.0.join(PENDING_FILE);
+    let f = std::fs::File::create(&p).unwrap();
+    f.set_len(SMALL_FILE_MAX + 1).unwrap();
+    assert_eq!(s.save(session(ID1, 1), SaveMode::Replace, None, true).unwrap_err().code, "pending_corrupt");
+    assert_eq!(std::fs::metadata(&p).unwrap().len(), SMALL_FILE_MAX + 1);
+}
