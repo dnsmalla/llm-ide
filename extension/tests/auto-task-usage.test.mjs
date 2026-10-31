@@ -82,7 +82,7 @@ test('missing sources are reported, not thrown', () => {
   const s = summarize({ historyPath: '/nonexistent/h.json', dbPath: '/nonexistent/data.db' });
   assert.equal(s.historyFound, false);
   assert.equal(s.ledgerFound, false);
-  assert.match(formatReport(s), /not found/);
+  assert.match(formatReport(s), /does not exist/);
 });
 
 test('the CLI prints counts only and leaves the database untouched', () => {
@@ -103,7 +103,81 @@ test('db path precedence and argument parsing', () => {
   assert.equal(resolveDbPath({ db: '/a.db', env: { LLMIDE_DB_PATH: '/b.db' } }), '/a.db');
   assert.equal(resolveDbPath({ env: { LLMIDE_DB_PATH: '/b.db', LLMIDE_DATA_DIR: '/d' } }), '/b.db');
   assert.equal(resolveDbPath({ env: { LLMIDE_DATA_DIR: '/d' } }), path.join('/d', 'data.db'));
-  assert.equal(resolveDbPath({ env: {}, root: '/r' }), path.join('/r', 'kb', 'data.db'));
+  assert.equal(resolveDbPath({ env: {}, root: '/r', home: '/nonexistent-home' }), path.join('/r', 'kb', 'data.db'));
   assert.deepEqual(parseArgs(['--json', '--db', 'x']), { json: true, db: 'x' });
   assert.throws(() => parseArgs(['--nope']), /unknown argument/);
 });
+
+// ---- security review LOW items ------------------------------------------------------------------------------------
+
+const withTmp = (fn) => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atu-')); try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); } };
+
+test('a hostile history record cannot corrupt the counters (own-property checks, fixed status set)', () => withTmp((dir) => {
+  const history = path.join(dir, 'h.json');
+  const rec = (taskId, status, trigger) => ({ taskId, status, trigger, finishedAt: '2026-10-30T10:00:00Z' });
+  fs.writeFileSync(history, JSON.stringify([
+    rec('a', 'last', 'byTrigger'), rec('a', 'runs', 'constructor'), rec('a', 'toString', '__proto__'), rec('a', 'success', 'cron'),
+    rec('__proto__', 'success', 'manual'), rec('constructor', 'failed', 'phone'),
+  ]));
+  const s = summarize({ historyPath: history, dbPath: path.join(dir, 'none.db') });
+  const a = s.rows.find((r) => r.task === 'a');
+  assert.equal(a.historyRuns, 4, 'runs counts records, not a status named runs');
+  assert.equal(a.lastRun, '2026-10-30', 'a status named last never clobbers the date');
+  assert.equal(a.successRate, 100);
+  assert.equal(a.cronRuns, 1);
+  assert.equal(s.rows.find((r) => r.task === '__proto__').historyRuns, 1);
+  assert.equal(s.rows.find((r) => r.task === 'constructor').phoneRuns, 1);
+  assert.equal(Object.keys(Object.prototype).length, 0, 'Object.prototype untouched');
+}));
+
+test('control characters and bidi marks in a task id are stripped before anything is printed', () => withTmp((dir) => {
+  const history = path.join(dir, 'h.json');
+  fs.writeFileSync(history, JSON.stringify([{ taskId: '\u001b[31mred\u0007\nINJECTED\u202Etxt', status: 'success', trigger: 'manual', finishedAt: '2026-10-30T10:00:00Z' }]));
+  const s = summarize({ historyPath: history, dbPath: path.join(dir, 'none.db') });
+  const report = formatReport(s);
+  // eslint-disable-next-line no-control-regex
+  assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(report), 'no control character in the report');
+  assert.ok(!/[\u202a-\u202e\u2066-\u2069\u200b-\u200f]/.test(report), 'no bidi or zero-width mark');
+  assert.ok(!report.includes('\u001b'));
+  assert.ok(s.rows.some((r) => r.task.includes('red') && !r.task.includes('\n')));
+  // a ledger endpoint is cleaned the same way
+  const dbPath = path.join(dir, 'data.db');
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE usage_ledger (id INTEGER PRIMARY KEY, ts TEXT, source TEXT, endpoint TEXT)');
+  db.prepare('INSERT INTO usage_ledger (ts, source, endpoint) VALUES (?,?,?)').run('2026-10-30 09:00:00', 'auto-task', 'auto-task:x\u001b[2Jy\u0007');
+  db.close();
+  const s2 = summarize({ historyPath: history, dbPath });
+  assert.ok(!formatReport(s2).includes('\u001b'));
+}));
+
+test('every failure prints its reason, not a bare "not found"', () => withTmp((dir) => {
+  const write = (name, body) => { const f = path.join(dir, name); fs.writeFileSync(f, body); return f; };
+  const none = path.join(dir, 'missing');
+  const cases = [
+    [{ historyPath: none, dbPath: none }, [/does not exist/, /does not exist/]],
+    [{ historyPath: write('bad.json', '{not json'), dbPath: write('junk.db', 'this is not a sqlite file at all, just text') }, [/not valid JSON/, /(not a SQLite database|sqlite error)/i]],
+    [{ historyPath: write('shape.json', '{"x":1}'), dbPath: write('empty.db', '') }, [/no records array/, /(no usage_ledger table|empty)/]],
+  ];
+  for (const [args, wants] of cases) {
+    const report = formatReport(summarize(args));
+    assert.ok(!/not found/.test(report), report);
+    for (const w of wants) assert.match(report, w, report);
+    assert.ok(report.includes(args.dbPath), 'the path that was tried is printed');
+  }
+  // a DB without the ledger table
+  const noTable = path.join(dir, 'notable.db');
+  new Database(noTable).close();
+  assert.match(formatReport(summarize({ historyPath: none, dbPath: noTable })), /no usage_ledger table/);
+}));
+
+test('default DB path: the app\'s system/data.db when it exists, else the repo kb/data.db; the path used is printed', () => withTmp((home) => {
+  const appDb = path.join(home, 'Library', 'Application Support', 'llm-ide', 'system', 'data.db');
+  assert.equal(resolveDbPath({ env: {}, root: '/r', home }), path.join('/r', 'kb', 'data.db'), 'absent: the repo fallback');
+  fs.mkdirSync(path.dirname(appDb), { recursive: true });
+  new Database(appDb).close();
+  assert.equal(resolveDbPath({ env: {}, root: '/r', home }), appDb);
+  assert.equal(resolveDbPath({ env: { LLMIDE_DB_PATH: '/b.db' }, root: '/r', home }), '/b.db', 'env still wins');
+  const s = summarize({ historyPath: path.join(home, 'none'), dbPath: appDb });
+  assert.ok(formatReport(s).includes(appDb), 'the report names the path it read');
+  assert.equal(s.dbPath, appDb);
+}));
