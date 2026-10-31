@@ -368,3 +368,19 @@ test("actions: shapes sent to the core, defensive decoding, secrets only where d
   assert.deepEqual(await mcpStatus(core, "miro", "m1", never), { connected: true, status: "complete" });
   assert.deepEqual(await mcpTest(core, "miro", never), { server: "miro", tools: ["list_boards", "get_board_items"] });
 });
+
+import { SUMMARIZE_TIMEOUT_MS, sourcesCoreFrom, summarizeCoreFrom } from "../sources/adapter.ts";
+
+test("core adapters: requests go through the shell client with method, body, signal and timeout; nothing else", async () => {
+  const seen: { path: string; opts: Record<string, unknown> }[] = [];
+  const client = { requestRaw: async (path: string, opts: Record<string, unknown>) => (seen.push({ path, opts }), { status: 200, body: { ok: true } }) };
+  const r = await sourcesCoreFrom(client).call("POST", "/kb/box/test", { a: 1 }, never, 60_000);
+  assert.deepEqual(r, { status: 200, body: { ok: true } });
+  assert.deepEqual(Object.keys(seen[0]!.opts).sort(), ["body", "method", "signal", "timeoutMs"]);
+  await sourcesCoreFrom(client).call("GET", "/auth/me/secrets", undefined, never);
+  assert.ok(!("timeoutMs" in seen[1]!.opts), "the client's default timeout applies when none is given");
+  await summarizeCoreFrom(client).summarize({ transcript: "t" }, never);
+  assert.equal(seen[2]!.path, "/kb/summarize");
+  assert.equal(seen[2]!.opts.timeoutMs, SUMMARIZE_TIMEOUT_MS);
+  assert.ok(SUMMARIZE_TIMEOUT_MS > 180_000, "longer than the server's 3 minute ceiling");
+});
