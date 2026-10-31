@@ -49,6 +49,26 @@ const CoreChip = memo(function CoreChip() {
         <span className="sh-dot" aria-hidden="true" />
         {view.label}
       </span>
+      {view.hints.map((h) => (
+        <button
+          key={h.id}
+          type="button"
+          className="sh-statusbar-item"
+          data-hint={h.id}
+          data-level={h.level}
+          aria-label={h.command ? `${h.text} Press to copy the command.` : h.text}
+          title={h.text}
+          onClick={() => {
+            try {
+              if (h.command) void navigator.clipboard?.writeText(h.command);
+            } catch {
+              /* clipboard unavailable */
+            }
+          }}
+        >
+          {h.id === "foreign_core" ? "Other server on :3456" : "Ports busy"}
+        </button>
+      ))}
       {view.claudeNotice && (
         <button type="button" className="sh-statusbar-item sh-warning" title={`${view.claudeNotice} Open Settings.`} onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" })}>
           Claude Code not found

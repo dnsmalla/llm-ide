@@ -79,3 +79,5 @@
   .sh-spinner { animation: none; }
   .sh-app * { transition: none !important; animation: none !important; }
 }
+.sh-hint { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--tok-color-border, currentColor); max-width: 60ch; text-align: left; }
+.sh-hint code { font-family: var(--tok-font-mono, monospace); overflow-wrap: anywhere; }

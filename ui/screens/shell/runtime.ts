@@ -5,6 +5,7 @@ import { host, invokeHost, isHostAvailable } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
+import { describeCoreErrorFor } from "./core-explain";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 
@@ -49,3 +50,8 @@ coreStatusStore.subscribe(() => {
   if (lastBind !== "" && key !== lastBind) core.republishAccessToken();
   lastBind = key;
 });
+
+/** Error text for a failed core call, explained by the last known core status (see core-explain.ts). */
+export function describeCoreError(e: unknown, fallback?: string): string {
+  return describeCoreErrorFor(e, coreStatusStore.getSnapshot().status, fallback);
+}

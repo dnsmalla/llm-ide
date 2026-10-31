@@ -6,7 +6,8 @@
 export * from "./host";
 export * from "./core";
 export * from "./status-view";
-export { coreStatusStore, core, chatBinding } from "./runtime";
+export { coreStatusStore, core, chatBinding, describeCoreError } from "./runtime";
+export { describeCoreErrorFor, coreNotReadyReason } from "./core-explain";
 export type { ChatBinding, BindSnapshot, BindState } from "./chat-binding";
 export { useCoreSession, useCoreStatusView, useActiveProject } from "./use-shell";
 export { useStoreSelector } from "./hooks";

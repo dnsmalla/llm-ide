@@ -176,7 +176,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {gate === "login" && (
             <div className="sh-overlay">
-              <LoginPanel client={core} gate={trustGate} />
+              <LoginPanel client={core} gate={trustGate} getStatus={() => coreStatusStore.getSnapshot().status} />
             </div>
           )}
         </main>

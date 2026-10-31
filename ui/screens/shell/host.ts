@@ -30,6 +30,19 @@ export interface CoreStatus {
   claude_notice: string | null;
   /** Absolute path of the redacted core failure log (path only; the file exists after a failure). */
   core_log_path: string | null;
+  /** Additive: a server this app did NOT start holds the live port. It is never used or stopped. */
+  foreign_core: ForeignCore | null;
+  /** Additive: machine-readable failure reason, e.g. `ports_busy`. */
+  error_code: string | null;
+  /** Additive: the spawn ports the host tried (with `ports_busy`). */
+  ports_tried: number[];
+}
+
+export interface ForeignCore {
+  port: number;
+  detected: boolean;
+  pid: number | null;
+  command: string | null;
 }
 
 /** Mirrors `ProjectInfo` in src-tauri/src/project.rs. */
@@ -81,6 +94,17 @@ const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed
 const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const asNum = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+const asPort = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v > 0 && v < 65536 ? v : null);
+
+function normalizeForeign(raw: unknown): ForeignCore | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const port = asPort(r.port);
+  if (r.detected !== true || port === null) return null;
+  const pid = asNum(r.pid);
+  return { port, detected: true, pid: pid !== null && Number.isInteger(pid) && pid > 0 ? pid : null, command: asStr(r.command) };
+}
+
 /** Defensive decode of `core_status`: unknown state -> `failed`, missing additive fields -> defaults. */
 export function normalizeCoreStatus(raw: unknown): CoreStatus {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -103,6 +127,9 @@ export function normalizeCoreStatus(raw: unknown): CoreStatus {
     claude_source: asStr(r.claude_source),
     claude_notice: asStr(r.claude_notice),
     core_log_path: asStr(r.core_log_path),
+    foreign_core: normalizeForeign(r.foreign_core),
+    error_code: asStr(r.error_code),
+    ports_tried: Array.isArray(r.ports_tried) ? r.ports_tried.map(asPort).filter((p): p is number => p !== null).slice(0, 8) : [],
   };
 }
 

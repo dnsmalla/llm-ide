@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { CoreError, isAbortError, type CoreClient } from "./core";
-import type { StatusView } from "./status-view";
+import { describeCoreErrorFor } from "./core-explain";
+import type { CoreStatus } from "./host";
+import type { StatusHint, StatusView } from "./status-view";
 import type { TrustGate } from "./trust-gate";
 
 /** Names the unverified core and the risk; credentials are held back until the user agrees. */
@@ -16,6 +18,32 @@ export function UntrustedCoreNotice({ url, onConfirm }: { url: string | null; on
       <button type="button" className="sh-button" onClick={onConfirm}>
         I started it, trust this core for this session
       </button>
+    </div>
+  );
+}
+
+/** Copies text to the clipboard when the webview allows it; never throws. The app never runs the command. */
+function copyText(text: string): void {
+  try {
+    void navigator.clipboard?.writeText(text);
+  } catch {
+    /* clipboard unavailable: the command is shown on screen anyway */
+  }
+}
+
+/** One explanation with a copyable command. Text only: there is deliberately no button that runs anything. */
+export function HintNote({ hint }: { hint: StatusHint }) {
+  return (
+    <div className="sh-hint" role="note" data-hint={hint.id} data-level={hint.level}>
+      <p className="sh-panel-text">{hint.text}</p>
+      {hint.command && (
+        <p className="sh-panel-text">
+          <code>{hint.command}</code>{" "}
+          <button type="button" className="sh-button" aria-label={`Copy command: ${hint.command}`} onClick={() => copyText(hint.command ?? "")}>
+            Copy
+          </button>
+        </p>
+      )}
     </div>
   );
 }
@@ -36,6 +64,9 @@ export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: ()
       ) : (
         <p className="sh-panel-text sh-muted">Your windows and drafts are kept. This screen updates by itself.</p>
       )}
+      {view.hints.map((h) => (
+        <HintNote key={h.id} hint={h} />
+      ))}
       {view.claudeNotice && <StatusBanner severity="warning" message={view.claudeNotice} />}
       <button
         type="button"
@@ -54,7 +85,7 @@ export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: ()
 }
 
 /** Sign-in / create-account panel. Credentials go to the core only; nothing is stored here. */
-export function LoginPanel({ client, gate }: { client: CoreClient; gate?: TrustGate }) {
+export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; gate?: TrustGate; getStatus?: () => CoreStatus | null }) {
   const trust = useSyncExternalStore(
     (l) => (gate ? gate.subscribe(l) : () => undefined),
     () => (gate ? gate.view() : null),
@@ -105,7 +136,7 @@ export function LoginPanel({ client, gate }: { client: CoreClient; gate?: TrustG
       form.reset();
     } catch (err) {
       if (isAbortError(err)) return;
-      setError(err instanceof CoreError ? err.message : "Sign-in failed.");
+      setError(err instanceof CoreError ? describeCoreErrorFor(err, getStatus ? getStatus() : null) : "Sign-in failed.");
       const pw = form.elements.namedItem("password");
       if (pw instanceof HTMLInputElement) pw.value = "";
     } finally {

@@ -15,7 +15,12 @@ export const INITIAL_STATUS_STATE: StatusState = Object.freeze({ status: null, p
 export function statusEqual(a: CoreStatus | null, b: CoreStatus | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  for (const k of Object.keys(a) as (keyof CoreStatus)[]) if (a[k] !== b[k]) return false;
+  for (const k of Object.keys(a) as (keyof CoreStatus)[]) {
+    if (a[k] === b[k]) continue;
+    // Object/array fields are rebuilt on every poll: compare by value so an unchanged status stays equal.
+    if (typeof a[k] === "object" && a[k] !== null && JSON.stringify(a[k]) === JSON.stringify(b[k])) continue;
+    return false;
+  }
   return true;
 }
 
