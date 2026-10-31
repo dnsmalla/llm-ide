@@ -11,10 +11,13 @@
 # Needs network on the first run (pinned official Node download, npm ci, cargo crates). Nothing here launches
 # the app and nothing calls a model. Output: desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app
 #
-# Signing: the app is signed AD-HOC (`codesign --sign -`), which is all a locally built app needs. Hardened
-# runtime and entitlements are NOT used: they matter only for a Developer ID signature + notarization, which
-# would need `com.apple.security.cs.allow-jit` and `com.apple.security.cs.disable-library-validation` for the
-# bundled node and better-sqlite3 (see docs/how-to/desktop-signing-decisions.md).
+# Signing: prefers a local Apple Development identity when one exists, so the Keychain approval a rebuild needs
+# (the host reads the core's JWT/vault secrets) survives later builds — an ad-hoc signature changes every time
+# and macOS asks again. Falls back to ad-hoc when there is no identity, or with LLMIDE_ADHOC_SIGN=1.
+# Set LLMIDE_CODESIGN_IDENTITY to pick a specific identity. Hardened runtime and entitlements are NOT used: they
+# matter only for a Developer ID signature + notarization, which would need `com.apple.security.cs.allow-jit`
+# and `com.apple.security.cs.disable-library-validation` for the bundled node and better-sqlite3
+# (see docs/how-to/desktop-signing-decisions.md).
 set -euo pipefail
 
 DMG=0; CHECKS=1; SMOKE=1
@@ -89,9 +92,19 @@ if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
   chmod 600 "$APP/Contents/Resources/source-root.txt"
 fi
 
-step "Ad-hoc sign"
+step "Sign"
 # Re-sign the whole bundle in one pass so the seal covers the bundled core. No hardened runtime (see header).
-codesign --force --deep --sign - "$APP"
+IDENTITY="${LLMIDE_CODESIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && [ "${LLMIDE_ADHOC_SIGN:-0}" != "1" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development:/{print $2; exit}')"
+fi
+if [ -n "$IDENTITY" ]; then
+  echo "identity: $IDENTITY"
+  codesign --force --deep --sign "$IDENTITY" "$APP"
+else
+  echo "identity: ad-hoc (no Apple Development identity; LLMIDE_ADHOC_SIGN=1 forces this)"
+  codesign --force --deep --sign - "$APP"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 step "Verify the bundle"

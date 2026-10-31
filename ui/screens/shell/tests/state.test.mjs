@@ -114,13 +114,13 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
   s = nav.navReducer(s, { type: "select", id: "chat" });
   assert.deepEqual([s.active, s.visited], ["chat", ["welcome", "library", "chat"]]);
   const before = s;
-  for (const id of ["issues", "gantt", "loop", "autotasks", "conflicts"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
+  for (const id of ["gantt", "loop", "autotasks", "conflicts"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
   assert.equal(nav.navReducer(s, { type: "select", id: "nope" }), before);
   assert.equal(nav.navReducer(s, { type: "select", id: "chat" }), before, "same section: same object (no re-render)");
   assert.equal(nav.navReducer(s, { type: "select", id: "spike" }), before, "Spike is not selectable without developer tools");
   const back = nav.navReducer(nav.initialNav("welcome"), { type: "step", delta: -1 });
   assert.equal(back.active, "settings", "wraps to the last selectable item (Settings, not Spike)");
-  assert.equal(nav.initialNav("issues").active, "welcome");
+  assert.equal(nav.initialNav("issues").active, "issues");
   nav.setDevTools(true);
   assert.equal(nav.navReducer(s, { type: "select", id: "spike" }).active, "spike", "developer tools make Spike selectable");
   assert.equal(nav.navReducer(nav.initialNav("welcome"), { type: "step", delta: -1 }).active, "spike");
@@ -139,7 +139,8 @@ test("section registry: toolbar sections first in the Mac's order; Settings last
   nav.enableDevToolsForSession();
   assert.equal(nav.devToolsEnabled(), true, "a spike launch shows its item for this session");
   nav.setDevTools(false);
-  for (const id of ["autotasks", "conflicts", "issues", "gantt", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
+  for (const id of ["autotasks", "conflicts", "gantt", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
+  assert.equal(nav.SECTIONS.find((d) => d.id === "issues").enabled, true, "Issues is a real screen now");
 });
 
 test("navigation: shortcuts, nav keys, launch section", () => {

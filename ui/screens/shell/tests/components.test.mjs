@@ -32,7 +32,7 @@ test("Shell renders landmarks, skip link, top toolbar and a visible starting sta
   for (const l of ["Chat", "Settings"]) assert.doesNotMatch(out, new RegExp(`class="sh-tool-label">${l}<`), `${l} is not a toolbar item (Mac: status bar / account menu)`);
   assert.doesNotMatch(out, />Spike</, "the developer-only item is hidden by default");
   assert.match(out, /aria-current="page"/);
-  assert.match(out, /aria-disabled="true"[^>]*>[\s\S]*?Issues/);
+  assert.match(out, /aria-disabled="true"[^>]*>[\s\S]*?Auto Tasks/);
   assert.match(out, /data-platform="(macos|windows|linux|other)"/);
   assert.doesNotMatch(out, /data-overlay-titlebar/, "no desktop host in node: no traffic-light inset");
   assert.doesNotMatch(out, /aria-label="Activity feed|Account:/, "signed out: no bell, no account menu");
@@ -41,7 +41,8 @@ test("Shell renders landmarks, skip link, top toolbar and a visible starting sta
 test("Shell with an initial section marks it current; unknown/disabled falls back to Home", () => {
   const cur = (init) => /aria-label="Home" aria-current="page"|data-tb-id="(\w+)"[^>]*aria-current="page"|aria-current="page"[^>]*data-tb-id="(\w+)"/.exec(html(h(Shell, { initialSection: init, spike: () => null })));
   assert.equal(cur("library")[1] ?? cur("library")[2], "library");
-  assert.match(cur("issues")[0], /aria-label="Home"/);
+  assert.equal(cur("issues")[1] ?? cur("issues")[2], "issues");
+  assert.match(cur("gantt")[0], /aria-label="Home"/);
   assert.match(cur(null)[0], /aria-label="Home"/);
 });
 

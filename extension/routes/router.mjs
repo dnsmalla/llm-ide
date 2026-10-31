@@ -551,9 +551,12 @@ export async function handleKB(req, res) {
         return true;
       }
       try {
+        // The Mac passes its stored token; the desktop keeps the token in the vault only and sends no body
+        // token, so fall back to the vault's github.token rather than demanding a credential from the page.
+        const token = body.token || getSecret(kb.getDb(), userId, 'github.token') || undefined;
         const result = await indexGithubIssues(userId, {
           repo: body.repo,
-          token: body.token,
+          token,
           state: body.state,
         });
         sendJSON(res, 200, { ok: true, ...result });

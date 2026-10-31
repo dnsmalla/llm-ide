@@ -11,6 +11,7 @@ import { installChatDock, type ChatDockProps } from "./chat-dock";
 declare const __FEATURE_FILE_EXPLORER__: boolean | undefined;
 declare const __FEATURE_CODE_GRAPH_3D__: boolean | undefined;
 declare const __FEATURE_DOC_GEN__: boolean | undefined;
+declare const __FEATURE_GANTT_ISSUES__: boolean | undefined;
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
@@ -35,6 +36,7 @@ const loaders: Partial<Record<SectionId, Loader>> = {
 };
 if (typeof __FEATURE_FILE_EXPLORER__ === "undefined" || __FEATURE_FILE_EXPLORER__) loaders.explorer = () => import("../explorer/index.tsx");
 if (typeof __FEATURE_CODE_GRAPH_3D__ === "undefined" || __FEATURE_CODE_GRAPH_3D__) loaders.graph = () => import("../graph/index.tsx");
+if (typeof __FEATURE_GANTT_ISSUES__ === "undefined" || __FEATURE_GANTT_ISSUES__) loaders.issues = () => import("../issues/index.tsx");
 if (typeof __FEATURE_DOC_GEN__ === "undefined" || __FEATURE_DOC_GEN__) {
   loaders.docgen = () => import("../docgen/index.tsx");
   loaders.visual = () => import("../docgen/visual.tsx");
