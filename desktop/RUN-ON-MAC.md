@@ -59,40 +59,50 @@ Try these in order. Note anything that differs in the bug-report template at the
 1. **Sign in or create an account.** On the empty local core you see a sign-in / create-account panel. Create an
    account (any email, a password of your choice; it stays on this Mac). The status bar should read ready and
    Settings > About should say "Spawned by this app (identity verified)".
-2. **Open a project.** Use Open folder in the status bar (a native dialog). Pick a small scratch folder, not
-   your home folder: the home folder, `/` and system folders are refused on purpose.
-3. **Chat.** Open Chat and send a short message such as "Say hi in five words." Watch the reply stream in.
+2. **Welcome.** After signing in, with no project open, the first page is Welcome: a "New project" card, an
+   "Open existing project" card, a short explanation of what a project is, your recent projects and "New here?
+   Open the guide". It must not be a blank or disabled page. Open the guide and close it.
+3. **New project.** Type a name (for example `scratch-1`) and press Choose location. Pick a small parent folder
+   (not your home folder, `/` or a system folder: those are refused). A folder `scratch-1` is created there with
+   `system/`, `llm-doc/`, `source/`, `code/`, `data/`, README.md and CLAUDE.md, and the app lands on Explorer. If
+   the skills kit is missing you see a yellow notice, not an error. Try the same name again: it must be refused
+   ("already exists") and leave the folder alone.
+4. **Open and close.** Open the status bar project menu: Close project returns to Welcome and the project is
+   still in Recent projects. Open it again from the list. Move or rename its folder in Finder and look at
+   Welcome: the entry is greyed with a reason; Forget removes it from the list only (the folder is untouched).
+   Open existing project picks an existing folder the same way (use a small scratch folder).
+5. **Chat.** Open Chat and send a short message such as "Say hi in five words." Watch the reply stream in.
    If it fails with a message about Claude Code, run `claude login` in a terminal (or add a provider key in
    Settings > Providers) and use Retry. Try the mode picker and the model picker.
-4. **Approvals.** Switch the permission mode to Ask and ask for "Create a file hello.txt containing hi". An
+6. **Approvals.** Switch the permission mode to Ask and ask for "Create a file hello.txt containing hi". An
    approval card should appear; try Deny once and Allow once once. Choose Bypass once: a native dialog (default
    button Cancel) must appear first. Cancel it.
-5. **Trust banner.** Make a scratch folder with a `.mcp.json` (for example
+7. **Trust banner.** Make a scratch folder with a `.mcp.json` (for example
    `{"mcpServers":{"demo":{"command":"echo","args":["hi"]}}}`), open it as the project and start a chat.
    A banner says the folder is untrusted and what was not loaded. Choose "Trust this folder...", confirm in the
    in-page dialog, then in the native dialog (it names the folder; default button Cancel). Press Cancel once
    (nothing is trusted), then repeat and confirm.
-6. **Explorer.** Open Explorer: expand the tree, open a file, edit and save (Cmd+S). Then edit the same file
+8. **Explorer.** Open Explorer: expand the tree, open a file, edit and save (Cmd+S). Then edit the same file
    from a terminal (`echo x >> file`) while the app has unsaved changes: the app must offer to reload or keep
    yours, never silently overwrite. Try rename, new file, delete (goes to the Trash). Delete a chat: a native dialog asks first and says a copy is kept for 30 days in the chat folder (`.deleted`).
-7. **Search.** Cmd+Shift+F: search for a word, open a result at its line.
-8. **Terminal.** Open the terminal dock in Explorer and start a shell. A native consent dialog appears the
+9. **Search.** Cmd+Shift+F: search for a word, open a result at its line.
+10. **Terminal.** Open the terminal dock in Explorer and start a shell. A native consent dialog appears the
    first time (its default button is Cancel; Allow terminal is the other one); refuse once (the dock shows a denied state with Try again), then allow. The approval lasts 30 minutes: after that a new terminal asks again and typing into an old one is refused. Type `exit`: the tab must
    say "(exited)" at once. Settings > Features has a Terminal switch (applies at next start).
-9. **Source Control.** In a scratch repo (`git init` there, add a file) open it as the project, go to the Source
+11. **Source Control.** In a scratch repo (`git init` there, add a file) open it as the project, go to the Source
    Control panel, stage, write a message and commit. Confirm with `git log` in the terminal.
-10. **Library.** Open Library, choose a notes folder (native dialog), see the notes listed. Try search, then the
+12. **Library.** Open Library, choose a notes folder (native dialog), see the notes listed. Try search, then the
     index rebuild (it reports progress and never deletes), and open a note to edit and save it. Connections
     (Email, Slack, Box, Repositories, Connectors) can be left alone; a secret you type is write-only.
-11. **Extensions.** Library > Extensions: the installed list, the catalog, and the consent sheet before anything
+13. **Extensions.** Library > Extensions: the installed list, the catalog, and the consent sheet before anything
     that can run code is enabled. Do not install anything you do not want.
-12. **Settings.** Visit every section: Providers, Model routing (the router, token limit, prompt shortening and
+14. **Settings.** Visit every section: Providers, Model routing (the router, token limit, prompt shortening and
     provider-limit switches apply at next start), Agent history (the archiving mode off / shadow / on and
     "applies the next time you open the app"), Extensions trust (Add folder opens a native dialog), Appearance
     (Dark, Light, Midnight), Workspace, Features, Account (sign out keeps your data), About (copy diagnostics).
-13. **Quit and relaunch.** Cmd+Q, open the app again, sign in if asked: your chat list and the chat you had open
+15. **Quit and relaunch.** Cmd+Q, open the app again, sign in if asked: your chat list and the chat you had open
     must be there.
-14. **Core crash and restart (your action).** In Activity Monitor find the `node` process whose parent is
+16. **Core crash and restart (your action).** In Activity Monitor find the `node` process whose parent is
     LLM-IDE (or `ps -ef | grep "extension/server.mjs"`) and force-quit it. The status bar should show restarting
     and then ready within a few seconds, and Chat should offer Retry. Five crashes within five minutes put the
     app in a "failed" state on purpose (no restart loop); quit and reopen to clear it.
