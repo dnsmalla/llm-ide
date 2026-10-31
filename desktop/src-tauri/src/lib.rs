@@ -2,6 +2,7 @@ mod ax_probe;
 mod core_env;
 mod core_host;
 mod fs_ops;
+mod fs_watch;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
@@ -205,6 +206,7 @@ pub fn run() {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 pty::kill_all();
                 pty::reset_consent();
+                fs_watch::stop_all();
             }
         })
         .on_window_event(|window, event| {
@@ -269,6 +271,9 @@ pub fn run() {
             fs_ops::fs_create,
             fs_ops::fs_rename,
             fs_ops::fs_delete,
+            fs_watch::fs_watch_start,
+            fs_watch::fs_watch_set,
+            fs_watch::fs_watch_stop,
             tray::notify,
             tray::tray_status,
             tray::tray_set_close_to_tray,
