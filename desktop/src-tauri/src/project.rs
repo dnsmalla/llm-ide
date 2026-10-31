@@ -297,6 +297,126 @@ pub fn project_recent(app: tauri::AppHandle) -> Result<Vec<ProjectInfo>, String>
     Ok(valid_recent(&data_dir(&app)?).iter().map(|r| info(r)).collect())
 }
 
+// ---- new project, close, recent management -------------------------------------------------
+
+/// One entry of the recent list as the Welcome page shows it.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct RecentEntry {
+    pub name: String,
+    pub root: String,
+    /// `ok`, `missing` (gone or not a folder, maybe an unmounted volume) or `refused` (too broad now).
+    pub status: &'static str,
+    /// Why an entry cannot be opened; plain text.
+    pub reason: Option<String>,
+    /// Index to pass to `project_open_recent` (only for `ok` entries).
+    pub open_index: Option<usize>,
+    /// Index in the stored list, for `project_forget_recent`.
+    pub stored_index: usize,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct RecentList {
+    pub entries: Vec<RecentEntry>,
+    /// True when the stored list existed but could not be read (unreadable, oversized or not a list).
+    pub reset: bool,
+}
+
+/// Raw list with a status per entry. Pure on a directory so it is testable.
+pub fn recent_with_status(dir: &Path) -> RecentList {
+    let f = recent_file(dir);
+    let reset = match std::fs::metadata(&f) {
+        Ok(m) if m.is_file() && m.len() <= RECENT_FILE_MAX_BYTES => {
+            serde_json::from_str::<Vec<serde_json::Value>>(&std::fs::read_to_string(&f).unwrap_or_default()).is_err()
+        }
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let mut open_index = 0usize;
+    let entries = load_recent(dir)
+        .into_iter()
+        .enumerate()
+        .map(|(stored_index, p)| {
+            let path = Path::new(&p);
+            match validate_root(path) {
+                Ok(real) => {
+                    let e = RecentEntry { name: display_name(&real), root: real.to_string_lossy().into_owned(), status: "ok", reason: None, open_index: Some(open_index), stored_index };
+                    open_index += 1;
+                    e
+                }
+                Err(err) => {
+                    let (status, reason) = if !path.exists() {
+                        let unmounted = path.components().nth(1).map(|c| c.as_os_str() == "Volumes").unwrap_or(false);
+                        ("missing", if unmounted { "The volume is not mounted, or the folder was moved or deleted.".to_string() } else { "The folder was moved or deleted.".to_string() })
+                    } else if err.contains("too broad") {
+                        ("refused", "This folder is too broad to open as a project.".to_string())
+                    } else {
+                        ("missing", "This is no longer a folder.".to_string())
+                    };
+                    let name: String = path.file_name().and_then(|n| n.to_str()).unwrap_or("project").chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect();
+                    RecentEntry { name, root: p.chars().filter(|c| !c.is_control()).collect(), status, reason: Some(reason), open_index: None, stored_index }
+                }
+            }
+        })
+        .collect();
+    RecentList { entries, reset }
+}
+
+/// Removes entry `index` from the stored list when it still names `root` (a stale index changes nothing).
+/// Only the list is edited: no file or folder is touched.
+pub fn forget_recent_in(dir: &Path, index: usize, root: &str) -> Result<bool, String> {
+    let list = load_recent(dir);
+    if list.get(index).map(String::as_str) != Some(root) {
+        return Ok(false);
+    }
+    let mut next = list;
+    next.remove(index);
+    save_recent(dir, &next)?;
+    Ok(true)
+}
+
+/// Clears the active project (the recent list is kept). Nothing on disk is touched.
+fn deactivate() {
+    if let Ok(mut g) = ACTIVE.lock() {
+        *g = None;
+    }
+    crate::fs_watch::stop_all();
+}
+
+/// Recent projects with a status each, plus whether the stored list had to be ignored.
+#[tauri::command]
+pub fn project_recent_all(app: tauri::AppHandle) -> Result<RecentList, String> {
+    Ok(recent_with_status(&data_dir(&app)?))
+}
+
+/// Drops one entry from the recent list (never deletes anything on disk). `false` when the list changed meanwhile.
+#[tauri::command]
+pub fn project_forget_recent(app: tauri::AppHandle, index: usize, root: String) -> Result<bool, String> {
+    forget_recent_in(&data_dir(&app)?, index, &root)
+}
+
+/// Closes the active project: back to "no project". Never deletes or changes any file.
+#[tauri::command]
+pub fn project_close(app: tauri::AppHandle) {
+    deactivate();
+    crate::tray::set_project_label(&app, None);
+}
+
+/// New project: validates `name`, opens a host folder dialog for the PARENT, creates `<parent>/<name>`,
+/// scaffolds it like the Mac app and makes it the active project. `None` when the user cancels.
+#[tauri::command]
+pub async fn project_create(app: tauri::AppHandle, name: String) -> Result<Option<ProjectInfo>, String> {
+    let name = crate::project_scaffold::validate_name(&name)?;
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title(format!("Choose where to create \"{name}\""))
+        .pick_folder()
+        .await;
+    let Some(handle) = picked else { return Ok(None) };
+    let root = crate::project_scaffold::create_project(handle.path(), &name)?;
+    let info = activate(&data_dir(&app)?, &root)?;
+    crate::tray::set_project_label(&app, Some(&info.name));
+    Ok(Some(info))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -459,5 +579,77 @@ mod tests {
     fn display_name_is_capped_and_clean() {
         let long = format!("/x/{}", "a".repeat(200));
         assert_eq!(display_name(Path::new(&long)).chars().count(), NAME_MAX_CHARS);
+    }
+
+    #[test]
+    fn recent_status_marks_missing_and_refused_entries_and_numbers_open_indexes() {
+        let dir = scratch("rs-data");
+        let a = scratch("rs-a").join("alpha");
+        let b = scratch("rs-b").join("beta");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let gone = scratch("rs-gone").join("gone");
+        let list = vec![
+            fs::canonicalize(&a).unwrap().to_string_lossy().into_owned(),
+            gone.to_string_lossy().into_owned(),
+            "/".to_string(),
+            fs::canonicalize(&b).unwrap().to_string_lossy().into_owned(),
+        ];
+        save_recent(&dir, &list).unwrap();
+        let r = recent_with_status(&dir);
+        assert!(!r.reset);
+        let st: Vec<_> = r.entries.iter().map(|e| e.status).collect();
+        assert_eq!(st, ["ok", "missing", "refused", "ok"]);
+        assert_eq!(r.entries.iter().map(|e| e.open_index).collect::<Vec<_>>(), [Some(0), None, None, Some(1)]);
+        // the open index agrees with what project_open_recent resolves
+        assert_eq!(valid_recent(&dir).len(), 2);
+        assert_eq!(r.entries[3].name, "beta");
+        assert!(r.entries[1].reason.as_deref().unwrap().contains("moved or deleted"));
+        assert!(r.entries[2].reason.as_deref().unwrap().contains("too broad"));
+        assert_eq!(r.entries.iter().map(|e| e.stored_index).collect::<Vec<_>>(), [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn recent_reset_flag_covers_unreadable_oversized_and_non_list_files() {
+        let dir = scratch("rs-reset");
+        assert!(!recent_with_status(&dir).reset, "no file is not a reset");
+        fs::write(recent_file(&dir), "{broken").unwrap();
+        assert!(recent_with_status(&dir).reset);
+        fs::write(recent_file(&dir), "{\"a\":1}").unwrap();
+        assert!(recent_with_status(&dir).reset);
+        fs::write(recent_file(&dir), vec![b' '; 70 * 1024]).unwrap();
+        assert!(recent_with_status(&dir).reset);
+        fs::write(recent_file(&dir), "[]").unwrap();
+        assert!(!recent_with_status(&dir).reset);
+    }
+
+    #[test]
+    fn forgetting_edits_the_list_only_and_ignores_stale_indexes() {
+        let dir = scratch("rs-forget");
+        let keep = scratch("rs-keep").join("proj");
+        fs::create_dir_all(&keep).unwrap();
+        fs::write(keep.join("data.txt"), "precious").unwrap();
+        let root = fs::canonicalize(&keep).unwrap().to_string_lossy().into_owned();
+        save_recent(&dir, &[root.clone(), "/p/other".to_string()]).unwrap();
+        assert!(!forget_recent_in(&dir, 1, &root).unwrap(), "index names a different root: nothing changes");
+        assert!(!forget_recent_in(&dir, 9, &root).unwrap());
+        assert_eq!(load_recent(&dir).len(), 2);
+        assert!(forget_recent_in(&dir, 0, &root).unwrap());
+        assert_eq!(load_recent(&dir), vec!["/p/other".to_string()]);
+        assert_eq!(fs::read_to_string(keep.join("data.txt")).unwrap(), "precious", "no file was touched");
+    }
+
+    #[test]
+    fn closing_clears_the_active_root_and_keeps_the_recent_list() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let dir = scratch("close-data");
+        let proj = scratch("close").join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        activate(&dir, &proj).unwrap();
+        assert!(active_root().is_some());
+        deactivate();
+        assert!(active_root().is_none());
+        assert_eq!(valid_recent(&dir).len(), 1);
+        assert!(proj.is_dir());
     }
 }

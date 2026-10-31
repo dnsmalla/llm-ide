@@ -23,6 +23,7 @@ mod notes_write;
 mod os_open;
 mod proc_tree;
 mod project;
+mod project_scaffold;
 mod prefs;
 mod project_search;
 mod pty;
@@ -254,6 +255,10 @@ macro_rules! product_handlers {
                 project::project_open_recent,
                 project::project_active,
                 project::project_recent,
+                project::project_recent_all,
+                project::project_forget_recent,
+                project::project_close,
+                project::project_create,
                 fs_ops::fs_list_dir,
                 fs_ops::fs_read_file,
                 fs_ops::fs_read_range,

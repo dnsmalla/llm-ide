@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), project open (host-run folder dialog, no dialog/fs plugin permission), tray + fixed-template notifications (no notification plugin permission), terminal, open_external_url (validated, confirmed links), reveal_in_os (project-scoped), attach_* (host file picker, opaque handles), bypass_confirm and trust_confirm (native dialogs with fixed text), pick_folder (+ single-use redeem), get_prefs/set_prefs (strict typed host prefs). No fs/shell/opener/http plugin, no wildcard permissions.",
+  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), project open, create (scaffolded like the Mac app), close, forget-recent (host-run folder dialog, no dialog/fs plugin permission), tray + fixed-template notifications (no notification plugin permission), terminal, open_external_url (validated, confirmed links), reveal_in_os (project-scoped), attach_* (host file picker, opaque handles), bypass_confirm and trust_confirm (native dialogs with fixed text), pick_folder (+ single-use redeem), get_prefs/set_prefs (strict typed host prefs). No fs/shell/opener/http plugin, no wildcard permissions.",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-start-dragging",
@@ -14,6 +14,10 @@
     "allow-project-open-recent",
     "allow-project-active",
     "allow-project-recent",
+    "allow-project-recent-all",
+    "allow-project-forget-recent",
+    "allow-project-close",
+    "allow-project-create",
     "allow-fs-list-dir",
     "allow-fs-read-file",
     "allow-fs-read-range",
