@@ -36,7 +36,7 @@ All routes are token-protected and per user; another user's source id is 404 `IC
 
 Limits: at most **10 feeds per user** (409 `ICAL_TOO_MANY_SOURCES`), the same address twice is 409 `ICAL_DUPLICATE` (compared through the vault, no hash of the URL is stored), one sync per feed at a time (409 `ICAL_SYNC_RUNNING`), request bodies 16 KiB.
 
-**Error codes**
+Error codes:
 
 | Code | HTTP | When |
 |---|---|---|
