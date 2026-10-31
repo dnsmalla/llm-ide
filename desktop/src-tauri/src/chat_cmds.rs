@@ -44,7 +44,13 @@ struct Svc {
     /// A page cannot wipe the store: one delete every 1.5 s, 10 a minute, one native dialog at a time.
     delete_limit: RateLimit,
     delete_open: AtomicBool,
+    /// One-time tokens minted after a native "replace with fewer messages" confirmation: (chat id, token, expiry ms).
+    truncate_tokens: Mutex<Vec<(String, String, u64)>>,
+    truncate_limit: RateLimit,
 }
+
+/// How long a truncation confirmation stays usable.
+pub const TRUNCATE_TOKEN_TTL_MS: u64 = 60_000;
 
 impl Default for Svc {
     fn default() -> Self {
@@ -56,6 +62,8 @@ impl Default for Svc {
             quit_started: AtomicBool::new(false),
             delete_limit: RateLimit::new(1_500, 10),
             delete_open: AtomicBool::new(false),
+            truncate_tokens: Mutex::new(Vec::new()),
+            truncate_limit: RateLimit::new(1_500, 10),
         }
     }
 }
@@ -187,6 +195,9 @@ pub struct SaveArgs {
     pub session: Value,
     /// `replace` (default) or `append`.
     pub mode: Option<String>,
+    /// Host-minted one-time token (from `chat_confirm_truncate`) that allows a `replace` to drop more than half
+    /// of a chat's messages. Without it such a save is refused (`truncation_needs_confirm`).
+    pub allow_truncate: Option<String>,
     /// Required for `append`: the message count the caller last saw.
     pub expected_count: Option<usize>,
     /// Required when the chat already exists: the revision from the last load or save.
@@ -272,7 +283,82 @@ pub async fn chat_save(svc: State<'_, ChatService>, args: SaveArgs) -> Result<Sa
         (Some("append"), None) => return Err(err("invalid", "append needs expectedCount")),
         _ => return Err(err("invalid", "mode must be replace or append")),
     };
-    blocking(move || store.save(args.session, mode, args.expected_revision.as_deref(), args.touch.unwrap_or(true))).await
+    let svc = svc.inner().clone();
+    blocking(move || {
+        let id = args.session.get("id").and_then(Value::as_str).and_then(crate::chat_store::canonical_chat_id);
+        let allow = match (&args.allow_truncate, &id) {
+            (Some(tok), Some(id)) => svc.consume_truncate_token(id, tok),
+            _ => false,
+        };
+        store.save_with(args.session, mode, args.expected_revision.as_deref(), args.touch.unwrap_or(true), allow)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfirmTruncateArgs {
+    pub id: String,
+    /// The message count the caller wants to keep (shown in the dialog).
+    pub new_count: usize,
+}
+
+pub(crate) fn truncate_text(title: &str, old: usize, new: usize) -> String {
+    let t = crate::confirm::sanitize_line(title, 80);
+    let quoted = if t.is_empty() { "this chat".to_string() } else { format!("\u{201C}{t}\u{201D}") };
+    format!("Replace the saved copy of {quoted}?\n\nIt currently has {old} messages and the app wants to save {new}. The other messages would be lost.")
+}
+
+impl ChatService {
+    pub(crate) fn mint_truncate_token_at(&self, id: &str, now: u64) -> String {
+        let tok = crate::core_host::random_nonce().unwrap_or_default();
+        let mut v = lock(&self.0.truncate_tokens);
+        v.retain(|(_, _, exp)| *exp > now);
+        v.truncate(3);
+        v.push((id.to_string(), tok.clone(), now + TRUNCATE_TOKEN_TTL_MS));
+        tok
+    }
+
+    pub(crate) fn consume_truncate_token_at(&self, id: &str, token: &str, now: u64) -> bool {
+        let mut v = lock(&self.0.truncate_tokens);
+        v.retain(|(_, _, exp)| *exp > now);
+        match v.iter().position(|(i, t, _)| i == id && !token.is_empty() && crate::core_host::ct_eq(t, token)) {
+            Some(p) => {
+                v.remove(p);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn consume_truncate_token(&self, id: &str, token: &str) -> bool {
+        self.consume_truncate_token_at(id, token, crate::confirm::now_ms())
+    }
+
+    /// Native, Cancel-first confirmation for a save that drops messages; returns a one-time token for `chat_save`.
+    pub(crate) fn confirm_truncate(&self, raw_id: &str, new_count: usize, confirm: &dyn Fn(&str) -> bool) -> Result<String, StoreError> {
+        let store = self.store()?;
+        let id = crate::chat_store::canonical_chat_id(raw_id).ok_or_else(|| err("invalid_id", "chat id is not a UUID"))?;
+        if !self.0.truncate_limit.allow() {
+            return Err(err("rate_limited", "too many confirmation requests"));
+        }
+        let old = store.message_count_of(&id).unwrap_or(0);
+        let title = store.title_of(&id).unwrap_or_default();
+        if !confirm(&truncate_text(&title, old, new_count)) {
+            return Err(err("declined", "the replace was not confirmed"));
+        }
+        Ok(self.mint_truncate_token_at(&id, crate::confirm::now_ms()))
+    }
+}
+
+#[tauri::command]
+pub async fn chat_confirm_truncate(svc: State<'_, ChatService>, args: ConfirmTruncateArgs) -> Result<String, StoreError> {
+    let svc = svc.inner().clone();
+    blocking(move || {
+        let ask = |text: &str| crate::confirm::ask("Replace this chat?", text, "Replace chat", true);
+        svc.confirm_truncate(&args.id, args.new_count, &ask)
+    })
+    .await
 }
 
 /// Text of the native delete dialog: fixed template, the chat's own title (read from the file, sanitised) quoted.
@@ -369,6 +455,20 @@ mod tests {
 
     fn layout(t: &Tmp) -> impl Fn(&str) -> Result<StoreLayout, String> + '_ {
         move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions"), shared_with_mac: false })
+    }
+
+    #[test]
+    fn truncation_tokens_are_single_use_bound_to_the_chat_and_expire() {
+        let svc = ChatService::new();
+        let a = "AAAAAAAA-0000-4000-8000-000000000001";
+        let b = "AAAAAAAA-0000-4000-8000-000000000002";
+        let tok = svc.mint_truncate_token_at(a, 1_000);
+        assert!(!svc.consume_truncate_token_at(b, &tok, 1_001), "bound to the chat");
+        assert!(svc.consume_truncate_token_at(a, &tok, 1_001));
+        assert!(!svc.consume_truncate_token_at(a, &tok, 1_002), "single use");
+        let tok = svc.mint_truncate_token_at(a, 1_000);
+        assert!(!svc.consume_truncate_token_at(a, &tok, 1_000 + TRUNCATE_TOKEN_TTL_MS), "expired");
+        assert!(!svc.consume_truncate_token_at(a, "forged", 1_001));
     }
 
     #[test]

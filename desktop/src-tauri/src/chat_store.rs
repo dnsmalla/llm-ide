@@ -1083,6 +1083,12 @@ impl ChatStore {
 
     /// Validates and writes a chat. See the module docs for the conflict rules.
     pub fn save(&self, session: Value, mode: SaveMode, expected_revision: Option<&str>, touch: bool) -> Result<SaveOutcome> {
+        self.save_with(session, mode, expected_revision, touch, false)
+    }
+
+    /// `save`, with `allow_truncate` = a human confirmed that a `Replace` may drop more than half of the
+    /// stored messages (without it such a save is refused, `truncation_needs_confirm`).
+    pub fn save_with(&self, session: Value, mode: SaveMode, expected_revision: Option<&str>, touch: bool, allow_truncate: bool) -> Result<SaveOutcome> {
         let mut obj = match session {
             Value::Object(m) => m,
             _ => return Err(StoreError::new("invalid", "session must be an object")),
@@ -1163,6 +1169,11 @@ impl ChatStore {
             obj.insert("id".into(), Value::String(id.clone()));
             obj.insert("storeVersion".into(), Value::from(2));
         } else if let Some(old) = stored {
+            let had = old.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
+            let now_n = obj.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
+            if is_truncation(had, now_n) && !allow_truncate {
+                return Err(StoreError::new("truncation_needs_confirm", "this save would drop more than half of the stored messages; confirm it first"));
+            }
             // Replace keeps keys this build does not model (a newer Mac field) unless the caller sets them.
             for (k, v) in old {
                 if k != "messages" && !obj.contains_key(&k) {
@@ -1204,6 +1215,16 @@ impl ChatStore {
             c.dirty = true;
         }
         Ok(existed)
+    }
+
+    /// Number of messages in the stored file (for a confirmation dialog); `None` when unreadable.
+    pub fn message_count_of(&self, id: &str) -> Option<usize> {
+        let f = File::open(self.file_path(id)).ok()?;
+        let size = f.metadata().ok()?.len();
+        match parse_header(&f, size, id) {
+            Parsed::Ok { summary, .. } => Some(summary.message_count),
+            _ => None,
+        }
     }
 
     /// The chat's title as stored (for a confirmation dialog); `None` when unreadable. Not logged.
@@ -1427,6 +1448,11 @@ fn ensure_dir(dir: &Path) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => crate::fsutil::private_dir(dir).map(|_| ()).map_err(|e| StoreError::new("io", e)),
         Err(e) => Err(io_err("stat store dir", &e)),
     }
+}
+
+/// A replace that keeps fewer than half of a chat of more than four messages.
+pub fn is_truncation(old: usize, new: usize) -> bool {
+    old > 4 && new * 2 < old
 }
 
 /// (id, deleted-at, path) of every well-formed entry in the recoverable folder, newest first.

@@ -67,6 +67,7 @@ const COMMANDS: &[&str] = &[
     "chat_load",
     "chat_save",
     "chat_delete",
+    "chat_confirm_truncate",
     "chat_archive_status",
     "notes_root_get",
     "notes_root_choose",

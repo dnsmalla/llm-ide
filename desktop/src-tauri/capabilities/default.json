@@ -74,6 +74,7 @@
     "allow-chat-load",
     "allow-chat-save",
     "allow-chat-delete",
+    "allow-chat-confirm-truncate",
     "allow-chat-archive-status",
     "allow-open-external-url",
     "allow-reveal-in-os",

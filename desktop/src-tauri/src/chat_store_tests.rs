@@ -694,3 +694,28 @@ fn trash_retention_and_count_are_bounded() {
     assert!(kept.len() <= TRASH_MAX_ENTRIES, "{}", kept.len());
     assert!(kept.iter().any(|k| k.0 == ID1), "the newest copy always survives");
 }
+
+
+// ---- replace may not silently truncate -----------------------------------------------------------
+
+#[test]
+fn replace_refuses_a_big_message_count_drop_unless_explicitly_allowed() {
+    let t = Tmp::new("trunc");
+    let s = store(&t, "alice");
+    let first = s.save(session(ID1, 10), SaveMode::Replace, None, true).unwrap();
+    // 10 -> 0 and 10 -> 4 are drops of more than half
+    for n in [0usize, 4] {
+        let e = s.save(session(ID1, n), SaveMode::Replace, Some(&first.revision), true).unwrap_err();
+        assert_eq!(e.code, "truncation_needs_confirm", "10 -> {n}");
+    }
+    assert_eq!(s.load(ID1, None, 100).unwrap().total, 10, "nothing was written");
+    // a small shrink and any growth are fine
+    let r = s.save(session(ID1, 6), SaveMode::Replace, Some(&first.revision), true).unwrap();
+    let r = s.save(session(ID1, 12), SaveMode::Replace, Some(&r.revision), true).unwrap();
+    // small chats (<= 4 messages) can be emptied: nothing meaningful to lose
+    let small = s.save(session(ID2, 4), SaveMode::Replace, None, true).unwrap();
+    s.save(session(ID2, 0), SaveMode::Replace, Some(&small.revision), true).unwrap();
+    // with the explicit allowance (a host-confirmed token in the app) the drop goes through
+    let r = s.save_with(session(ID1, 2), SaveMode::Replace, Some(&r.revision), true, true).unwrap();
+    assert_eq!(r.message_count, 2);
+}
