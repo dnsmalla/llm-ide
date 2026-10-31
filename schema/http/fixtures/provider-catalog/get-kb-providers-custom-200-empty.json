@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /kb/providers/custom",
+  "status": 200,
+  "response": {
+    "providers": []
+  }
+}

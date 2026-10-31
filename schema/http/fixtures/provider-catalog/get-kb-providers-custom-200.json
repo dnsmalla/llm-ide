@@ -1,0 +1,31 @@
+{
+  "endpoint": "GET /kb/providers/custom",
+  "status": 200,
+  "description": "One managed connection and one Mac-synced provider with an Anthropic door. Never a key.",
+  "response": {
+    "providers": [
+      {
+        "id": "ac-glm",
+        "provider": "custom:ac-glm",
+        "name": "GLM gateway",
+        "baseURL": "https://gw.example.com/anthropic",
+        "kind": "anthropic-compatible",
+        "allowPrivate": false,
+        "enabled": true,
+        "hasKey": true,
+        "source": "connection"
+      },
+      {
+        "id": "zai",
+        "provider": "custom:zai",
+        "name": "Z.AI",
+        "baseURL": "https://api.z.ai/api/anthropic",
+        "kind": "anthropic-compatible",
+        "allowPrivate": false,
+        "enabled": true,
+        "hasKey": true,
+        "source": "synced"
+      }
+    ]
+  }
+}

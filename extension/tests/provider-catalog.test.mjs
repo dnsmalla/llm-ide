@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { catalogEntries, catalogEntry, isChatModel, modelCapability, TOOL_MODES } from '../server/provider-catalog.mjs';
 import { assertProviderBaseUrl } from '../server/base-url-guard.mjs';
 
-const WANT = ['openai', 'google', 'mistral', 'groq', 'deepseek', 'openrouter', 'xai', 'cerebras', 'together', 'ollama', 'openai-compatible'];
+const WANT = ['openai', 'google', 'mistral', 'groq', 'deepseek', 'openrouter', 'xai', 'cerebras', 'together', 'ollama', 'openai-compatible', 'anthropic-compatible'];
 
 test('the catalog lists every provider the plan names, once each', () => {
   const ids = catalogEntries().map((e) => e.id);

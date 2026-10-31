@@ -39,9 +39,12 @@ function parseList(entry, data) {
   return out;
 }
 
-function authHeaders(apiKey) {
+function authHeaders(apiKey, entry) {
   // The keyless placeholder is not a credential; do not send it.
-  return apiKey && apiKey !== 'not-required' ? { Authorization: `Bearer ${apiKey}` } : {};
+  if (!apiKey || apiKey === 'not-required') return {};
+  // An Anthropic-format gateway takes the key as x-api-key (many also accept a bearer token, so both are sent).
+  if (entry?.listKind === 'anthropic') return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', Authorization: `Bearer ${apiKey}` };
+  return { Authorization: `Bearer ${apiKey}` };
 }
 
 // The base URL again, under the posture that is in force NOW (a connection made
@@ -65,9 +68,9 @@ export async function fetchLiveModels(conn, apiKey, { fetchImpl, signal } = {}) 
   const doFetch = fetchImpl || makePinnedFetch({ allowPrivate: conn.allowPrivate });
   let res;
   try {
-    res = await doFetch(joinBaseUrl(conn.baseURL, 'models'), {
+    res = await doFetch(joinBaseUrl(conn.baseURL, entry.listKind === 'anthropic' ? 'v1/models' : 'models'), {
       method: 'GET',
-      headers: { ...authHeaders(apiKey), accept: 'application/json' },
+      headers: { ...authHeaders(apiKey, entry), accept: 'application/json' },
       redirect: 'error',
       signal: signal || AbortSignal.timeout(15_000),
     });

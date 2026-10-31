@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 200,
+  "description": "A Claude-compatible endpoint: catalogId anthropic-compatible, the Anthropic Messages base URL, a slug. The id is ac-<slug>, so a chat on it runs on the Agent engine.",
+  "request": {
+    "body": {
+      "catalogId": "anthropic-compatible",
+      "apiKey": "sk-fixture-not-a-real-key-000000",
+      "baseURL": "https://gw.example.com/anthropic",
+      "slug": "glm",
+      "name": "GLM gateway"
+    }
+  },
+  "response": {
+    "ok": true,
+    "connection": {
+      "id": "ac-glm",
+      "provider": "custom:ac-glm",
+      "catalogId": "anthropic-compatible",
+      "name": "GLM gateway",
+      "baseURL": "https://gw.example.com/anthropic",
+      "allowPrivate": false,
+      "enabled": true,
+      "hasKey": true
+    }
+  }
+}

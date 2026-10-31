@@ -1,5 +1,5 @@
 {
-  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (404 PROVIDER_NOT_CONNECTED, 403 PROVIDER_BLOCKED when the network guard refuses the provider's address, 400 PROVIDER_NO_KEY | VALIDATION_FAILED). A turn is never refused for lack of tools: with tools off, or on a model that cannot call them, a tool mode runs as plain chat and the stream opens with a notice event of kind tools_unavailable (data.reason tools_off | model_lacks_tools). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts.",
+  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (404 PROVIDER_NOT_CONNECTED, 403 PROVIDER_BLOCKED when the network guard refuses the provider's address, 400 PROVIDER_NO_KEY | VALIDATION_FAILED). A turn is never refused for lack of tools: with tools off, or on a model that cannot call them, a tool mode runs as plain chat and the stream opens with a notice event of kind tools_unavailable (data.reason tools_off | model_lacks_tools). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts. Claude-compatible endpoints (API 99): GET /kb/providers/custom lists the caller's endpoints of kind anthropic-compatible (connections made with catalogId 'anthropic-compatible' through the existing connect and disconnect routes, plus the Mac-synced custom providers that have an Anthropic door, read-only); the entry is not part of the GET /kb/providers/catalog list, so that shape is unchanged. Never a key, only hasKey.",
   "$defs": {
     "Connection": {
       "type": "object",
@@ -16,7 +16,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "cat-<catalog id>[-<slug>]; also the vault key stem"
+          "description": "cat-<catalog id>[-<slug>], or ac-<slug> for a Claude-compatible endpoint; also the vault key stem"
         },
         "provider": {
           "type": "string",
@@ -223,6 +223,61 @@
           "description": "A connection id (cat-...) or its provider string (custom:cat-...)"
         }
       }
+    },
+    "ClaudeCompatible": {
+      "type": "object",
+      "required": [
+        "id",
+        "provider",
+        "name",
+        "baseURL",
+        "kind",
+        "allowPrivate",
+        "enabled",
+        "hasKey",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ac-<slug> for a connection; the Mac-synced provider's own id for source 'synced'"
+        },
+        "provider": {
+          "type": "string",
+          "description": "The provider id a chat pins: custom:<id>. A turn on it runs on the Agent engine (the Claude Agent SDK pointed at baseURL), never the OpenAI-form adapter."
+        },
+        "name": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string",
+          "description": "The Anthropic Messages base URL (the SDK appends /v1/messages)"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "anthropic-compatible"
+          ]
+        },
+        "allowPrivate": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "hasKey": {
+          "type": "boolean",
+          "description": "A key is stored. The key itself is never returned"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "connection",
+            "synced"
+          ],
+          "description": "connection: managed through POST /kb/providers/catalog/connect (catalogId 'anthropic-compatible', baseURL, slug, name, apiKey, allowPrivate) and /disconnect (id). synced: from the Mac's custom-provider sync, listed read-only."
+        }
+      }
     }
   },
   "endpoints": {
@@ -298,6 +353,27 @@
                 "toolsSuggested": {
                   "type": "boolean"
                 }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/providers/custom": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "providers"
+          ],
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ClaudeCompatible"
               }
             }
           }

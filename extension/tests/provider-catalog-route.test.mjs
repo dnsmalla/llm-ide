@@ -61,7 +61,7 @@ test('catalog lists every provider with no connection for a fresh user, switches
   const res = await call(a, 'GET', '/kb/providers/catalog');
   assert.equal(res.statusCode, 200);
   const b = res.json();
-  assert.equal(b.providers.length, 11);
+  assert.equal(b.providers.length, 11, 'the Claude-compatible entry is not in the Mac-facing list');
   assert.ok(b.providers.every((p) => p.connections.length === 0));
   assert.deepEqual(b.settings, { toolsEnabled: false, fallbackEnabled: false, fallbackOrder: [], toolOverrides: {}, egressAutoApprove: false });
 });

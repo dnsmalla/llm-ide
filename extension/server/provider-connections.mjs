@@ -27,6 +27,10 @@ const MAX_CONNECTIONS = 20;
 const MAX_ORDER = 20;
 const MAX_OVERRIDES = 400;
 const ID_PREFIX = 'cat-';
+// Claude-compatible (Anthropic Messages) endpoints: their chats run on the Agent engine, not the OpenAI-form adapter, so
+// their provider id (`custom:ac-<slug>`) must not carry the adapter's `custom:cat-` prefix.
+const AC_PREFIX = 'ac-';
+export const ANTHROPIC_COMPATIBLE = 'anthropic-compatible';
 const SLUG_RE = /^[a-z0-9]{1,24}$/;
 const KEYLESS_PLACEHOLDER = 'not-required';
 
@@ -79,6 +83,11 @@ function normalizeSettings(s) {
     }
   }
   return out;
+}
+
+/** 'anthropic-compatible' for a Claude-compatible endpoint, else 'openai-compatible'. */
+export function kindOf(catalogId) {
+  return catalogEntry(catalogId)?.kind === ANTHROPIC_COMPATIBLE ? ANTHROPIC_COMPATIBLE : 'openai-compatible';
 }
 
 function publicView(c, db, userId) {
@@ -140,12 +149,14 @@ export function connectProvider(userId, { catalogId, apiKey, baseURL, slug, name
   if (!userId) throw new Error('connectProvider requires a userId');
   const entry = catalogEntry(catalogId);
   if (!entry) throw Object.assign(new Error(`Unknown catalog provider '${String(catalogId).slice(0, 40)}'`), { code: 'NOT_FOUND' });
-  let id = `${ID_PREFIX}${entry.id}`;
+  const acEntry = entry.kind === ANTHROPIC_COMPATIBLE;
+  let id = acEntry ? AC_PREFIX.slice(0, -1) : `${ID_PREFIX}${entry.id}`;
   if (entry.customBaseURL) {
     const s = slug == null || slug === '' ? 'default' : String(slug).toLowerCase();
     if (!SLUG_RE.test(s)) throw Object.assign(new Error('slug must be 1-24 lowercase letters or digits'), { code: 'VALIDATION_FAILED' });
     id = `${id}-${s}`;
   }
+  if (acEntry && !/^ac-[a-z0-9]{1,24}$/.test(id)) throw Object.assign(new Error('bad connection id'), { code: 'VALIDATION_FAILED' });
   const state = read(db, userId);
   const existing = state.connections.find((c) => c.id === id);
   if (!existing && state.connections.length >= MAX_CONNECTIONS) {
@@ -210,9 +221,20 @@ export function disconnectProvider(userId, idOrProvider, db = getDb()) {
  * `custom:cat-…` resolves through resolveCustomProviderDispatch unchanged.
  */
 export function connectionAsCustomProvider(providerId, userId, db = getDb()) {
-  if (typeof providerId !== 'string' || !providerId.startsWith(`custom:${ID_PREFIX}`)) return undefined;
+  if (typeof providerId !== 'string' || !(providerId.startsWith(`custom:${ID_PREFIX}`) || providerId.startsWith(`custom:${AC_PREFIX}`))) return undefined;
   const c = read(db, userId).connections.find((x) => `custom:${x.id}` === providerId);
   if (!c) return undefined;
+  if (kindOf(c.catalogId) === ANTHROPIC_COMPATIBLE) {
+    // The Agent SDK's CLI dials this URL itself, so the connect-time pinned fetch cannot protect it: the literal
+    // address check runs again here, under the operator posture in force NOW, on every dispatch.
+    let blockedReason = null;
+    try { assertProviderBaseUrl(c.baseURL, { allowPrivate: c.allowPrivate === true && privateProvidersAllowed() }); }
+    catch (e) { blockedReason = String(e?.message || e).slice(0, 200); }
+    return {
+      id: c.id, name: c.name, baseURL: c.baseURL, vaultKey: vaultKeyFor(c.id), models: [],
+      isOpenAICompatible: false, isEnabled: c.enabled !== false, anthropicBaseURL: c.baseURL, ...(blockedReason ? { blockedReason } : {}),
+    };
+  }
   return {
     id: c.id, name: c.name, baseURL: c.baseURL, vaultKey: vaultKeyFor(c.id), models: [],
     isOpenAICompatible: true, isEnabled: c.enabled !== false, anthropicBaseURL: null,

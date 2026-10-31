@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 98
+  x-api-version: 99
 servers:
   - url: "https://{host}"
     variables:
@@ -11539,6 +11539,30 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/providers/custom:
+    get:
+      tags:
+        - "provider-catalog"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "providers"
+                properties:
+                  providers:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ClaudeCompatible"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/providers/models:
     post:
       summary: "Fetch the current chat model list for a provider"
@@ -14570,6 +14594,47 @@ components:
           type: "number"
         updatedAt:
           type: "number"
+    ClaudeCompatible:
+      type: "object"
+      required:
+        - "id"
+        - "provider"
+        - "name"
+        - "baseURL"
+        - "kind"
+        - "allowPrivate"
+        - "enabled"
+        - "hasKey"
+        - "source"
+      properties:
+        id:
+          type: "string"
+          description: "ac-<slug> for a connection; the Mac-synced provider's own id for source 'synced'"
+        provider:
+          type: "string"
+          description: "The provider id a chat pins: custom:<id>. A turn on it runs on the Agent engine (the Claude Agent SDK pointed at baseURL), never the OpenAI-form adapter."
+        name:
+          type: "string"
+        baseURL:
+          type: "string"
+          description: "The Anthropic Messages base URL (the SDK appends /v1/messages)"
+        kind:
+          type: "string"
+          enum:
+            - "anthropic-compatible"
+        allowPrivate:
+          type: "boolean"
+        enabled:
+          type: "boolean"
+        hasKey:
+          type: "boolean"
+          description: "A key is stored. The key itself is never returned"
+        source:
+          type: "string"
+          enum:
+            - "connection"
+            - "synced"
+          description: "connection: managed through POST /kb/providers/catalog/connect (catalogId 'anthropic-compatible', baseURL, slug, name, apiKey, allowPrivate) and /disconnect (id). synced: from the Mac's custom-provider sync, listed read-only."
     ClaudeSource:
       type: "object"
       required:
@@ -14741,7 +14806,7 @@ components:
       properties:
         id:
           type: "string"
-          description: "cat-<catalog id>[-<slug>]; also the vault key stem"
+          description: "cat-<catalog id>[-<slug>], or ac-<slug> for a Claude-compatible endpoint; also the vault key stem"
         provider:
           type: "string"
           description: "The provider id dispatch uses: custom:<id>"

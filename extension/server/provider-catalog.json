@@ -110,6 +110,14 @@
       "docsUrl": "",
       "notes": "Any server that implements /v1/chat/completions and /v1/models: LM Studio, vLLM, a plain gateway, a self-hosted FreeLLMAPI proxy. A private-network address needs an explicit opt-in.",
       "models": []
+    },
+    {
+      "id": "anthropic-compatible", "name": "Claude-compatible endpoint", "kind": "anthropic-compatible", "baseURL": "", "keyRequired": true, "local": false, "allowPrivate": true, "customBaseURL": true,
+      "listKind": "anthropic", "toolsDefault": true, "toolPatterns": [".*"],
+      "chatPatterns": [".*"], "excludePatterns": [],
+      "docsUrl": "",
+      "notes": "A gateway that speaks the Anthropic Messages API (Z.AI GLM at .../api/anthropic, DeepSeek at .../anthropic, Ollama, a LiteLLM proxy). Chats run on the Agent engine (the Claude Agent SDK pointed at this URL), with its tools; the one-shot completion paths do not use it. A private-network address needs an explicit opt-in.",
+      "models": []
     }
   ]
 }

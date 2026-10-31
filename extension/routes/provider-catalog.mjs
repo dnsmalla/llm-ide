@@ -1,6 +1,7 @@
 // Provider catalog routes (agent-kit K1 Phase 6):
 //
 //   GET  /kb/providers/catalog              catalog + this user's connections + settings
+//   GET  /kb/providers/custom               the Claude-compatible (Anthropic Messages) endpoints: connections of kind 'anthropic-compatible' + the Mac-synced custom providers that have an Anthropic door (key presence only)
 //   POST /kb/providers/catalog/connect      { catalogId, apiKey?, baseURL?, slug?, name?, allowPrivate? }
 //   POST /kb/providers/catalog/disconnect   { id }
 //   POST /kb/providers/catalog/test         { id }                (free GET /models)
@@ -17,8 +18,10 @@ import { getDb } from '../kb/db.mjs';
 import { sendJSON, readBody, onClientDisconnect } from '../core/utils.mjs';
 import { catalogEntries } from '../server/provider-catalog.mjs';
 import {
-  listConnections, getConnection, connectProvider, disconnectProvider, getSettings, updateSettings,
+  listConnections, getConnection, connectProvider, disconnectProvider, getSettings, updateSettings, kindOf,
 } from '../server/provider-connections.mjs';
+import { getSecret } from '../server/vault.mjs';
+import { listCustomProviders } from '../server/custom-providers.mjs';
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
 import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
 import { migrateLegacyProviderKeys, migrationView, legacyKeyFor } from '../providers/legacy-key-migration.mjs';
@@ -44,12 +47,32 @@ async function body(req, res, limit = 64 * 1024) {
 
 function catalogView(userId, db) {
   const all = listConnections(userId, db);
-  return catalogEntries().map((e) => ({
+  // The Claude-compatible entry is not part of this list (the Mac's Settings renders every entry as an OpenAI-form
+  // provider): it is connected by id through /connect and listed by GET /kb/providers/custom.
+  return catalogEntries().filter((e) => e.kind !== 'anthropic-compatible').map((e) => ({
     id: e.id, name: e.name, baseURL: e.baseURL, keyRequired: e.keyRequired, local: e.local === true,
     customBaseURL: e.customBaseURL === true, allowPrivate: e.allowPrivate === true,
     docsUrl: e.docsUrl || '', notes: e.notes || '',
     connections: all.filter((c) => c.catalogId === e.id),
   }));
+}
+
+/**
+ * The user's Claude-compatible endpoints. `source: 'connection'` ones are managed here (connect with catalogId
+ * 'anthropic-compatible', disconnect by id); `source: 'synced'` ones come from the Mac's custom-provider sync and are
+ * listed read-only. Never a key: only `hasKey`.
+ */
+function listClaudeCompatible(userId, db) {
+  const out = listConnections(userId, db)
+    .filter((c) => kindOf(c.catalogId) === 'anthropic-compatible')
+    .map((c) => ({ id: c.id, provider: c.provider, name: c.name, baseURL: c.baseURL, kind: 'anthropic-compatible', allowPrivate: c.allowPrivate, enabled: c.enabled, hasKey: c.hasKey, source: 'connection' }));
+  for (const p of listCustomProviders(userId, db)) {
+    if (!p.anthropicBaseURL) continue;
+    let hasKey = false;
+    try { hasKey = !!getSecret(db, userId, p.vaultKey); } catch { hasKey = false; }
+    out.push({ id: p.id, provider: `custom:${p.id}`, name: p.name, baseURL: p.anthropicBaseURL, kind: 'anthropic-compatible', allowPrivate: false, enabled: p.isEnabled !== false, hasKey, source: 'synced' });
+  }
+  return out;
 }
 
 /**
@@ -65,6 +88,10 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
     // First use after the upgrade: carry the user's existing provider keys over (once, non-destructive).
     const migration = migrationView(migrateLegacyProviderKeys(userId, { db }));
     sendJSON(res, 200, { providers: catalogView(userId, db), settings: getSettings(userId, db), ...(migration ? { migration } : {}) });
+    return true;
+  }
+  if (m === 'GET' && path === '/kb/providers/custom') {
+    sendJSON(res, 200, { providers: listClaudeCompatible(userId, db) });
     return true;
   }
   if (m === 'GET' && path === '/kb/providers/settings') {

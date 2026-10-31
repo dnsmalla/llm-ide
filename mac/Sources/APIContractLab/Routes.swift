@@ -160,6 +160,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /kb/plan/delete", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("DELETE /kb/review/delete", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /", "no Mac caller (see schema/http/INVENTORY.md)"),
+    ("GET /kb/providers/custom", "no Mac caller; the Tauri Settings lists Claude-compatible endpoints through it (API 99)"),
     ("GET /kb/index/search", "no Mac caller; the Tauri Library searches note bodies through it (API 98)"),
     ("GET /agent/v2/turns", "no Mac caller; the Tauri desktop lists running turns after a webview reload (API 96)"),
     ("GET /agent/v2/turns/stream", "server-sent event replay; no Mac caller (the Tauri desktop re-attaches after a webview reload)"),

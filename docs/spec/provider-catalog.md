@@ -13,7 +13,7 @@ Not covered here: the Claude path (`llm_agent/sdk/`, see [claude-linker](../expl
 
 | File | Role |
 |---|---|
-| `extension/server/provider-catalog.json` | The catalog: 11 entries (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, generic OpenAI-compatible endpoint) |
+| `extension/server/provider-catalog.json` | The catalog: 12 entries (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, generic OpenAI-compatible endpoint, Claude-compatible endpoint); `GET /kb/providers/catalog` lists the first 11 |
 | `extension/server/provider-catalog.mjs` | Loads the catalog; chat-model filter; `modelCapability()`; `TOOL_MODES` |
 | `extension/server/ip-classifier.mjs` | The one classifier for every IP spelling |
 | `extension/server/base-url-guard.mjs` | Literal base-URL guard, operator gate, `joinBaseUrl` |
@@ -97,6 +97,7 @@ All token-protected, additive, in `ALL_ENDPOINTS`. Shapes: `schema/http/provider
 | `POST /kb/providers/catalog/test` | `{ id }` | One free `GET <base>/models`. Always 200 `{ ok, detail, modelCount? }`; `detail` is redacted |
 | `POST /kb/providers/catalog/models` | `{ id, refresh? }` | `{ models:[{ id, toolsSupported, toolsSource, streaming, contextWindow }], source, detail? }` |
 | `GET` and `PUT /kb/providers/settings` | `toolsEnabled`, `fallbackEnabled`, `egressAutoApprove` (all default false), the order, the overrides | PUT is a patch; unknown fields ignored |
+| `GET /kb/providers/custom` | none | `{ providers:[{ id, provider, name, baseURL, kind, allowPrivate, enabled, hasKey, source }] }`: the caller's Claude-compatible endpoints, never a key. See "Claude-compatible endpoints" below |
 | `POST /kb/providers/turn` | A tool-capable turn (SSE) | See §7 |
 
 Rate limits: `test` and `models` use `llmFast`; `connect`, `disconnect` and `PUT settings` use `kbWrite`; `turn` uses `agentTurn`. `test` and `models` have a 30 s route budget.
@@ -191,3 +192,13 @@ Settings has two sections for models, replacing four (Model Providers, Custom Pr
 - [ ] Every magic number, timeout, cap, regex, and crypto parameter is stated.
 - [ ] Spot-check: one representative piece rebuilt from this page alone matches source.
 - [ ] Structured facts link to their extractor-generated reference page (no hand-copied drift).
+
+## Claude-compatible endpoints (API 99)
+
+A gateway that speaks the Anthropic Messages API (Z.AI GLM, DeepSeek's `/anthropic`, Ollama, a LiteLLM proxy) is the built-in catalog entry `anthropic-compatible` (`kind: 'anthropic-compatible'`). It needs **no new dependency**: the Agent SDK already talks Anthropic Messages, so a chat on such an endpoint runs on the Agent engine with `ANTHROPIC_BASE_URL` pointed at it (`resolveAgentEngineAuth`), the same door the Mac's `anthropicBaseURL` custom providers use. The Vercel AI adapter (`@ai-sdk/openai-compatible` only) is not involved, so `@ai-sdk/anthropic` is not needed.
+
+- **Save and delete** reuse the catalog semantics: `POST /kb/providers/catalog/connect { catalogId: 'anthropic-compatible', baseURL, slug, name?, apiKey, allowPrivate? }` and `/disconnect { id }`. A key is required; the slug is 1 to 24 lowercase letters or digits; the id is `ac-<slug>` and the provider `custom:ac-<slug>`. The `ac-` prefix (not `cat-`) is what keeps the chat on the Agent engine: `engineOf` in `extension/kb/chat-route.mjs` classifies only `custom:cat-` as the adapter. The key lives in the vault under `custom.ac-<slug>.apiKey`, as for every connection.
+- **List**: `GET /kb/providers/custom` returns the caller's endpoints with `hasKey` only; `source: 'connection'` ones are managed here, `source: 'synced'` ones are the Mac's custom providers that have an Anthropic door (read-only). The entry is hidden from `GET /kb/providers/catalog`, so the Mac's Settings (which renders every listed entry as an OpenAI-form provider) is unchanged.
+- **Guards**: the same SSRF and operator gate as the OpenAI-style endpoint (https and public hosts by default; `http` and private hosts need `allowPrivate` and `LLMIDE_ALLOW_PRIVATE_PROVIDERS`; link-local and metadata never; no credentials, query or fragment). `/test` and `/models` list `<base>/v1/models` with `x-api-key` through the pinned fetch (no redirects). **Limit:** the Agent SDK's CLI subprocess dials the URL itself, so the connect-time pinned fetch cannot protect a turn; the literal address check re-runs on every dispatch under the operator posture then in force (`blocked`), but a hostname's DNS answer at turn time is the CLI's own resolution. Operators who cannot accept that leave private providers off and use only well-known gateways.
+- **Not covered**: the one-shot completion paths (`/kb/complete`, tier-routed background roles) send OpenAI-form requests to a non-catalog `custom:` provider's `baseURL`, which for these endpoints is the Anthropic URL, so they fail upstream rather than work; use the Agent engine (chat) with these endpoints.
+- Tests: `extension/tests/claude-compatible-providers.test.mjs`.

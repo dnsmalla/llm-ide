@@ -220,7 +220,7 @@ export function providerApiKey(userId, provider) {
 // Returns `{ apiKey, baseUrl, name, anthropicBaseUrl }` on success (the last is
 // the provider's optional Anthropic-format endpoint, null when it has none —
 // consumed only by the Agent SDK engine), or `{ error, message }`
-// (error ∈ 'not_found' | 'disabled' | 'no_key'); the caller surfaces `message`.
+// (error ∈ 'not_found' | 'disabled' | 'blocked' | 'no_key'); the caller surfaces `message`.
 // `db` defaults to the live DB; tests pass an in-memory store. A vault read
 // failure (e.g. a key that somehow isn't allow-listed) degrades to `no_key`
 // rather than throwing into the model call.
@@ -233,6 +233,9 @@ export function resolveCustomProviderDispatch(provider, userId, db = getDb()) {
   if (cp.isEnabled === false) {
     return { error: 'disabled',
       message: `${cp.name} is disabled. Enable it in Settings → Model Providers.` };
+  }
+  if (cp.blockedReason) {
+    return { error: 'blocked', message: `${cp.name} is blocked: ${cp.blockedReason}` };
   }
   let apiKey = null;
   try { apiKey = userId ? getSecret(db, userId, cp.vaultKey) || null : null; }

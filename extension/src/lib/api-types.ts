@@ -1550,7 +1550,7 @@ export type PlanTask = {
 };
 
 export type Connection = {
-  /** cat-<catalog id>[-<slug>]; also the vault key stem */
+  /** cat-<catalog id>[-<slug>], or ac-<slug> for a Claude-compatible endpoint; also the vault key stem */
   id: string;
   /** The provider id dispatch uses: custom:<id> */
   provider: string;
@@ -1618,6 +1618,23 @@ export type ModelCapability = {
 export type ConnectionId = {
   /** A connection id (cat-...) or its provider string (custom:cat-...) */
   id?: string;
+};
+
+export type ClaudeCompatible = {
+  /** ac-<slug> for a connection; the Mac-synced provider's own id for source 'synced' */
+  id: string;
+  /** The provider id a chat pins: custom:<id>. A turn on it runs on the Agent engine (the Claude Agent SDK pointed at baseURL), never the OpenAI-form adapter. */
+  provider: string;
+  name: string;
+  /** The Anthropic Messages base URL (the SDK appends /v1/messages) */
+  baseURL: string;
+  kind: "anthropic-compatible";
+  allowPrivate: boolean;
+  enabled: boolean;
+  /** A key is stored. The key itself is never returned */
+  hasKey: boolean;
+  /** connection: managed through POST /kb/providers/catalog/connect (catalogId 'anthropic-compatible', baseURL, slug, name, apiKey, allowPrivate) and /disconnect (id). synced: from the Mac's custom-provider sync, listed read-only. */
+  source: "connection" | "synced";
 };
 
 export type ModelLimit = {
@@ -6337,6 +6354,15 @@ export type GetKbProvidersCatalogResponse200 = {
 
 export type GetKbProvidersCatalogResponse401 = CommonError;
 
+/** Request parts for `GET /kb/providers/custom` (schema/http/provider-catalog.schema.json). */
+export type GetKbProvidersCustomRequest = Record<string, never>;
+
+export type GetKbProvidersCustomResponse200 = {
+  providers: ClaudeCompatible[];
+};
+
+export type GetKbProvidersCustomResponse401 = CommonError;
+
 /** Request parts for `POST /kb/providers/catalog/connect` (schema/http/provider-catalog.schema.json). */
 export type PostKbProvidersCatalogConnectRequest = {
   body: {
@@ -8828,6 +8854,13 @@ export interface ApiEndpoints {
     responses: {
       200: GetKbProvidersCatalogResponse200;
       401: GetKbProvidersCatalogResponse401;
+    };
+  };
+  "GET /kb/providers/custom": {
+    request: GetKbProvidersCustomRequest;
+    responses: {
+      200: GetKbProvidersCustomResponse200;
+      401: GetKbProvidersCustomResponse401;
     };
   };
   "POST /kb/providers/catalog/connect": {

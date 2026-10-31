@@ -303,7 +303,8 @@ const HOST = config.host;
 //   v96 — re-attach to a running chat turn (additive; per user, memory only). GET /agent/v2/turns → { turns:[{ sessionId, startedAt, mode }] } (the caller's running turns, oldest first; another user's are never listed); GET /agent/v2/turns/stream?sessionId=&after= → SSE replay of the running (or just-ended, 60 s) turn: every buffered event after the `after`-th (a count, default 0), then live events, `id: <seq>` on each frame, ends when the turn ends; a first `replay_info` { gap, dropped, ended } event when the bounded ring (2000 events / 4 MB per turn, 64 turns, 4 readers per turn) dropped events the reader asked for | 400 VALIDATION_FAILED | 404 NO_TURN (also another user's session) | 429 TOO_MANY_READERS. Nothing is ever written to disk. POST /agent/v2/stream accepts `detach: true` (default false): the turn then keeps running when its own stream drops (a webview reload) and is stopped only by POST /agent/v2/cancel; without it a dropped stream stops the turn as before. Both GETs ride the 'kbWrite' rate bucket.
 //   v97 — chat history paging (additive): GET /kb/chat/sessions/:id?beforeSeq=&limit= — with `beforeSeq` (integer >= 1, else 400 VALIDATION_FAILED) the page is the newest `limit` (default 200, max 2000) messages whose seq is below it, so older history pages without re-reading the newest; absent, the newest page exactly as before. Every session answer gains `hasMore` (true when older messages remain below the page).
 //   v98 — note index full-text search and more note kinds (additive; no migration: note_index.kind is free text). GET /kb/index/search?q=&limit=&projectId= → { results:[{ noteKey, title, snippet, date, kind, projectId }] } (kind 'note' FTS rows of the caller only, best match first; limit 1-50, default 20; q 1-200 characters, a query with no 2+ character word answers an empty list; snippet is plain text of about 200 characters around the first matched word, secrets redacted again, control, bidi and zero-width characters removed; projectId omitted = every project) | 400 VALIDATION_FAILED. POST /kb/index/notes now accepts `kind` in meeting|note|email|slack|document|repo|plan|other (default meeting; anything else 400). Rides the 'kbWrite' rate bucket.
-const SERVER_API_VERSION = 98;
+//   v99 — Claude-compatible (Anthropic Messages) endpoints, additive and without a new dependency. The built-in provider catalog gains the entry `anthropic-compatible` (kind 'anthropic-compatible', custom base URL, key required, private network only with the same opt-in and operator gate as the OpenAI-style custom endpoint); it is connected through the existing POST /kb/providers/catalog/connect { catalogId:'anthropic-compatible', baseURL, slug, name, apiKey, allowPrivate? } and removed through /disconnect, and is NOT part of the GET /kb/providers/catalog list (that shape is unchanged). Its connection id is `ac-<slug>`, provider `custom:ac-<slug>`: a chat on it runs on the Agent engine (the Claude Agent SDK pointed at the URL through ANTHROPIC_BASE_URL), never the OpenAI-form adapter, and the base URL is re-checked (https, no credentials, address class, operator gate) on every dispatch (`blocked` otherwise). /test and /models list `<base>/v1/models` with x-api-key through the pinned fetch. GET /kb/providers/custom → { providers:[{ id, provider, name, baseURL, kind:'anthropic-compatible', allowPrivate, enabled, hasKey, source:'connection'|'synced' }] } (the caller's own; 'synced' = the Mac's custom providers that have an Anthropic door, read-only; never a key). Rides the 'kbWrite' rate bucket.
+const SERVER_API_VERSION = 99;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -386,6 +387,7 @@ const ALL_ENDPOINTS = [
   '/kb/providers/catalog/disconnect',
   '/kb/providers/catalog/test',
   '/kb/providers/catalog/models',
+  '/kb/providers/custom',
   '/kb/providers/settings',
   '/kb/providers/turn',
   '/kb/agent-sdk',
@@ -478,7 +480,7 @@ function rateLimitProfile(url, method) {
     // to avoid burning through Slack's per-method rate limit and causing
     // collateral SLACK_FETCH_FAILED errors on unrelated /kb/slack/fetch calls.
     if (path === '/kb/slack/conversations') return 'dispatch';
-    if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search') return 'kbWrite';
+    if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —
