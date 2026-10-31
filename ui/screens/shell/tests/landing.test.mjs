@@ -25,6 +25,14 @@ test("opening a first project lands on home, closing returns to Welcome, switchi
   assert.equal(landing.landingFor({ ...base, prev: null, now: null }), null);
 });
 
+test("a home whose feature is off resolves to Library, like the Mac's resolveHome", () => {
+  const all = new Set(["agent_chat", "file_explorer", "code_graph_3d", "gantt_issues", "terminal", "doc_gen", "mobile_sync", "auto_tasks"]);
+  assert.equal(landing.selectHome("graph", all), "graph");
+  assert.equal(landing.selectHome("docgen", new Set(["agent_chat", "terminal"])), "library");
+  assert.equal(landing.selectHome("chat", new Set(["agent_chat"])), "chat", "Chat is still a valid home when enabled");
+  assert.equal(landing.selectHome("explorer", new Set(["agent_chat"])), "library");
+});
+
 test("home preference: default Explorer, only available sections, storage failures are harmless", () => {
   assert.equal(landing.readHome(), "explorer");
   assert.equal(landing.resolveHome("graph"), "graph");

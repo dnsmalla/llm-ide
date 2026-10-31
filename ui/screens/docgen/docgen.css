@@ -26,7 +26,7 @@
 .dg-muted { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .dg-note { padding: 4px 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); font-size: var(--tok-type-caption-size); }
 .dg-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.dg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--tok-color-border); }
+.dg-tabs, .dg-roots { display: flex; gap: 2px; border-bottom: 1px solid var(--tok-color-border); }
 .dg-tab { font: inherit; color: var(--tok-color-text-muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 12px; cursor: pointer; }
 .dg-tab[aria-selected="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
 .dg-pane { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; padding-top: var(--tok-space-sm); }

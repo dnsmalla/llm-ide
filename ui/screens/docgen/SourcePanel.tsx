@@ -32,6 +32,20 @@ export interface SourcePanelProps {
 
 type Tab = "notes" | "files" | "paste";
 
+/** The Mac's Doc Gen sources are the code, LLM-doc and data Library categories (Visual: data and code only). The
+ * Files tab therefore roots at those folders and cannot climb above them, instead of browsing the whole project. */
+const SOURCE_ROOTS: Record<"doc" | "visual", readonly { path: string; label: string }[]> = {
+  doc: [
+    { path: "code", label: "Code" },
+    { path: "llm-doc", label: "LLM Doc" },
+    { path: "data", label: "Data" },
+  ],
+  visual: [
+    { path: "data", label: "Data" },
+    { path: "code", label: "Code" },
+  ],
+};
+
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i;
 
 export function SourcePanel(p: SourcePanelProps): ReactNode {
@@ -75,7 +89,8 @@ interface DirEntryRow {
 }
 
 function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }: SourcePanelProps): ReactNode {
-  const [dir, setDir] = useState("");
+  const roots = SOURCE_ROOTS[surface];
+  const [dir, setDir] = useState(roots[0]!.path);
   const [rows, setRows] = useState<DirEntryRow[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -147,11 +162,20 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
     );
   };
 
-  const crumbs = dir === "" ? "Project root" : dir;
+  const root = roots.find((r) => dir === r.path || dir.startsWith(`${r.path}/`)) ?? roots[0]!;
+  const rel = dir === root.path ? "" : dir.slice(root.path.length + 1);
+  const crumbs = rel === "" ? root.label : `${root.label} / ${rel}`;
   return (
     <div className="dg-files">
+      <div className="dg-roots" role="tablist" aria-label="Source categories">
+        {roots.map((r) => (
+          <button key={r.path} type="button" role="tab" aria-selected={root.path === r.path} className="dg-tab" onClick={() => setDir(r.path)}>
+            {r.label}
+          </button>
+        ))}
+      </div>
       <div className="dg-bar">
-        <button type="button" className="dg-btn" disabled={dir === ""} onClick={() => setDir(dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "")}>
+        <button type="button" className="dg-btn" disabled={dir === root.path} onClick={() => setDir(rel.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : root.path)}>
           Up
         </button>
         <span className="dg-crumbs" title={crumbs}>

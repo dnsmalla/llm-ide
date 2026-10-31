@@ -47,8 +47,8 @@ export interface Layout {
   starts: number[];
 }
 
-/** Rows visible with the root's children at depth 0. */
-export function buildLayout(state: TreeState): Layout {
+/** Rows visible with the root's children at depth 0. `base` is the tree's root dir ("" for the project root). */
+export function buildLayout(state: TreeState, base = ""): Layout {
   const segs: Seg[] = [];
   const starts: number[] = [];
   let count = 0;
@@ -90,7 +90,7 @@ export function buildLayout(state: TreeState): Layout {
       if (runStart < page.length) push({ kind: "run", entries: page, from: runStart, to: page.length, depth }, page.length - runStart);
     }
   };
-  walk("", 0);
+  walk(base, 0);
   return { count, segs, starts };
 }
 

@@ -5,7 +5,7 @@ import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
-import { HOME_CHOICES, readHome, storeHome } from "./landing";
+import { HOME_CHOICES, readHome, selectHome, storeHome } from "./landing";
 import { SECTIONS, type SectionId } from "./sections";
 import { isSectionEnabled } from "./features";
 import { safeText } from "./safe-text";
@@ -53,7 +53,9 @@ const HomePicker = memo(function HomePicker() {
   const features = useFeatures();
   const [home, setHome] = useState<SectionId>(() => readHome());
   const choices = HOME_CHOICES.filter((id) => isSectionEnabled(id, features.usable));
-  const label = SECTIONS.find((s) => s.id === home)?.label ?? "Explorer";
+  // The status shows the section a project would really open on, not a stored choice whose feature is off.
+  const effective = selectHome(home, features.usable);
+  const label = SECTIONS.find((s) => s.id === effective)?.label ?? "Explorer";
   return (
     <MenuButton
       ariaLabel={`Home page: ${label}. Choose the section a project opens on`}
@@ -62,7 +64,7 @@ const HomePicker = memo(function HomePicker() {
       items={choices.map((id) => ({
         id,
         label: SECTIONS.find((s) => s.id === id)?.label ?? id,
-        checked: id === home,
+        checked: id === effective,
         onSelect: () => {
           storeHome(id);
           setHome(id);

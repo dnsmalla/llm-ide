@@ -10,7 +10,7 @@ import { StatusBar } from "./StatusBar";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, type SectionDef, type SectionId } from "./sections";
-import { landingFor, readHome } from "./landing";
+import { landingFor, readHome, selectHome } from "./landing";
 import { core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
@@ -88,13 +88,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const prevRoot = useRef<string | null | undefined>(undefined);
   const projectRoot = project?.root ?? null;
   const overridden = useRef(initialSection != null);
-  // A home section whose feature is off (or was not compiled in) falls back to Explorer, then Chat, then Welcome.
-  const usableHome = (): SectionId => {
-    const stored = readHome();
-    if (isSectionEnabled(stored, features.usable)) return stored;
-    for (const id of ["explorer", "chat"] as const) if (isSectionEnabled(id, features.usable)) return id;
-    return "welcome";
-  };
+  // A home section whose feature is off (or was not compiled in) falls back to Library, as the Mac's resolveHome does.
+  const usableHome = (): SectionId => selectHome(readHome(), features.usable);
   useEffect(() => {
     if (!projectLoaded) return;
     const home = usableHome();

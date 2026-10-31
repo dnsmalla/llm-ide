@@ -16,7 +16,7 @@ async function setup(files, opts = {}) {
   editor.mount(null, {
     onDirty: (p, d) => c.onEditorDirty(p, d), onSave: (p) => void c.save(p), onEvict: () => {},
   });
-  await c.init("/proj");
+  await c.init("/proj", opts.treeBase);
   await settle();
   return { fs, editor, c, kv };
 }
@@ -28,6 +28,20 @@ test("init lists the root and starts the watcher with root and .git", async () =
   assert.equal(c.getSnapshot().watchMode, "native");
   await settle();
   assert.deepEqual(fs.state.watched.sort(), ["", ".git"]);
+});
+
+test("the tree can be rooted at the project's code/ folder (the Mac's Explorer root)", async () => {
+  const { c, fs } = await setup({ "code/src/main.rs": "m", "code/README.md": "r", "notes/a.md": "n", "system/x.txt": "x" }, { treeBase: "code" });
+  assert.equal(c.getSnapshot().treeBase, "code");
+  assert.deepEqual(rows(c), ["code/src", "code/README.md"], "only code/ is listed; notes/ and system/ are not");
+  await settle();
+  assert.deepEqual(fs.state.watched.sort(), ["", ".git", "code"]);
+});
+
+test("a missing code/ folder falls back to the project root", async () => {
+  const { c } = await setup({ "app/main.swift": "m", "README.md": "r" }, { treeBase: "code" });
+  assert.equal(c.getSnapshot().treeBase, "");
+  assert.deepEqual(rows(c), ["app", "README.md"]);
 });
 
 test("expanding loads the folder lazily; collapsing prunes its listing", async () => {

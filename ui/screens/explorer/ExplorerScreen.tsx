@@ -177,7 +177,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   }, [controller]);
 
   useEffect(() => {
-    void controller.init(projectRoot).then(() => {
+    void controller.init(projectRoot, "code").then(() => {
       const w = controller.getTreeWidth();
       if (w) setWidth(w);
     });
@@ -206,7 +206,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   );
 
   const targetDir = (path: string | null): string => {
-    if (path === null) return "";
+    if (path === null) return snap.treeBase;
     const e = findEntry(snap, path);
     return e?.kind === "dir" ? path : parentOf(path);
   };

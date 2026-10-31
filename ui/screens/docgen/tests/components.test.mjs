@@ -140,6 +140,18 @@ test("SourcePanel: tablist semantics; selection summary with token estimate; emp
   assert.match(vis, /to describe or diagram/);
 });
 
+test("SourcePanel files are rooted at the Mac's source categories, never the project root", () => {
+  const fs = { list: async () => ({ path: "", entries: [], total: 0, next_offset: null, skipped: 0 }) };
+  const base = { env: { notes: null, fs }, selection: new E.SourceSelection(), note: null, surface: "doc", onAdd: noop, onRemove: noop, onClear: noop, onPaste: () => true, initialViewport: 0 };
+  const doc = html(h(E.SourcePanel, base));
+  for (const l of ["Code", "LLM Doc", "Data"]) assert.match(doc, new RegExp(`>${l}<`), `${l} category`);
+  assert.doesNotMatch(doc, /Project root/, "no whole-project browsing");
+  const vis = html(h(E.SourcePanel, { ...base, surface: "visual" }));
+  assert.match(vis, />Data</);
+  assert.match(vis, />Code</);
+  assert.doesNotMatch(vis, />LLM Doc</, "Visual sources are data and code only");
+});
+
 test("TemplateManager: dialog semantics, built-ins are read-only, delete asks first, form validates", () => {
   const props = { templates: [tpl("Mine"), tpl("Kit", ["A"], { isProjectTemplate: false })], busy: false, error: null, onSave: async () => null, onDelete: async () => true, onClose: noop };
   const list = html(h(E.TemplateManager, props));

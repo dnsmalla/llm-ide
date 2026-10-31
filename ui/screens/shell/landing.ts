@@ -1,6 +1,7 @@
 // Where the shell lands: the Welcome page while no project is open, the user's home section once one is.
 // Pure (storage access is wrapped and optional) so it is tested with node.
 import { isSelectable, type SectionId } from "./sections";
+import { isSectionEnabled, type AppFeature } from "./features";
 
 /**
  * Sections that can be the project home. The Mac offers any toolbar section (default Code Graph); the desktop
@@ -37,6 +38,16 @@ export function storeHome(id: SectionId): void {
 /** A stored or requested home that is unusable falls back to Explorer. */
 export function resolveHome(pref: string | null | undefined): SectionId {
   return isHomeChoice(pref) ? pref : DEFAULT_HOME;
+}
+
+/**
+ * The section a project actually opens on when the stored home's feature is off or not compiled.
+ * The Mac's `ShellSection.resolveHome` falls back to Library (a section with no feature key), so the
+ * desktop does too instead of landing on a hidden or half-built section.
+ */
+export function selectHome(pref: SectionId, usable: ReadonlySet<AppFeature>): SectionId {
+  if (isSectionEnabled(pref, usable)) return pref;
+  return isSectionEnabled("library", usable) ? "library" : "welcome";
 }
 
 export interface LandingInput {

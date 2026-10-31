@@ -37,6 +37,8 @@ export interface Notice {
 
 export interface ExplorerSnapshot {
   root: string | null;
+  /** The tree's root, relative to `root` (the Mac Explorer roots at the project's `code/`; "" = project root). */
+  treeBase: string;
   tree: TreeState;
   layout: Layout;
   selection: Selection;
@@ -87,6 +89,7 @@ export class ExplorerController {
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshing = new Set<string>();
   private treeWidth: number | null = null;
+  private treeBase = "";
 
   constructor(deps: ControllerDeps) {
     this.fs = deps.fs;
@@ -107,16 +110,18 @@ export class ExplorerController {
   };
 
   private blank(root: string | null): ExplorerSnapshot {
-    const tree = emptyTree(this.pageSize);
+    const tree = withExpanded(emptyTree(this.pageSize), this.treeBase, true);
     return {
-      root, tree, layout: root === null ? { count: 0, segs: [], starts: [] } : buildLayout(tree), selection: NO_SELECTION, focusPath: null, tabs: emptyTabs, docs: new Map(), git: null,
+      root, treeBase: this.treeBase, tree,
+      layout: root === null ? { count: 0, segs: [], starts: [] } : buildLayout(tree, this.treeBase),
+      selection: NO_SELECTION, focusPath: null, tabs: emptyTabs, docs: new Map(), git: null,
       diffPath: null, watchMode: "off", notice: null, showHidden: false, hideIgnored: false, version: 0,
     };
   }
 
   private set(patch: Partial<ExplorerSnapshot>): void {
     const next = { ...this.snap, ...patch, version: this.snap.version + 1 };
-    if (patch.tree && !patch.layout) next.layout = buildLayout(next.tree);
+    if (patch.tree && !patch.layout) next.layout = buildLayout(next.tree, this.treeBase);
     this.snap = next;
     for (const l of [...this.listeners]) l();
   }
@@ -135,18 +140,31 @@ export class ExplorerController {
 
   // ---- lifecycle ------------------------------------------------------------------------
 
-  /** (Re)open for a project root; null closes. Everything from the previous root is dropped. */
-  async init(root: string | null): Promise<void> {
+  /**
+   * (Re)open for a project root; null closes. Everything from the previous root is dropped. `treeBase` is the tree's
+   * root relative to the project (the Mac Explorer shows the project's `code/` folder, not the whole project); when
+   * that folder does not exist the tree falls back to the project root.
+   */
+  async init(root: string | null, treeBase = ""): Promise<void> {
     const gen = ++this.gen;
     this.clearTimers();
     void this.fs.watchStop().catch(() => undefined);
     this.pendingText.clear();
+    let base = root && treeBase ? treeBase : "";
+    if (base) {
+      try {
+        await this.fs.list(base, { offset: 0, limit: 1, show_hidden: false, gitignore: true, hide_ignored: true });
+      } catch {
+        base = "";
+      }
+    }
+    this.treeBase = base;
     this.snap = this.blank(root);
     for (const l of [...this.listeners]) l();
     if (!root) return;
     const session = loadSession(this.kv, root);
     this.treeWidth = session.treeWidth;
-    let tree = emptyTree(this.pageSize);
+    let tree = withExpanded(emptyTree(this.pageSize), this.treeBase, true);
     for (const p of session.expanded) tree = withExpanded(tree, p, true);
     const tabs = session.tabs ? restoreTabs(session.tabs) : emptyTabs;
     this.set({ tree, tabs });
@@ -207,7 +225,7 @@ export class ExplorerController {
   }
 
   private async ensureExpandedLoaded(gen: number): Promise<void> {
-    const todo = ["", ...unloadedExpanded(this.snap.tree)].filter((p) => !this.snap.tree.dirs.has(p) && !this.snap.tree.dirs.get(p)?.loading.has(0));
+    const todo = [this.treeBase, ...unloadedExpanded(this.snap.tree)].filter((p) => !this.snap.tree.dirs.has(p) && !this.snap.tree.dirs.get(p)?.loading.has(0));
     await Promise.all(todo.map((p) => this.loadPage(p, 0, gen)));
   }
 
@@ -271,7 +289,7 @@ export class ExplorerController {
         // The folder is gone: forget it and refresh its parent.
         if (err.code === "not_found" || err.code === "not_a_directory") {
           this.set({ tree: invalidate(withExpanded(this.snap.tree, dir, false), dir) });
-          if (dir !== "") void this.refreshDir(parentOf(dir));
+          if (dir !== "" && dir !== this.treeBase) void this.refreshDir(parentOf(dir));
         }
       }
     } finally {
@@ -719,7 +737,7 @@ export class ExplorerController {
     if (this.snap.watchMode === "off") return;
     if (this.watchTimer) clearTimeout(this.watchTimer);
     this.watchTimer = setTimeout(() => {
-      const want = new Set<string>(["", ".git"]);
+      const want = new Set<string>(["", ".git", this.treeBase]);
       for (const t of this.snap.tabs.tabs) want.add(parentOf(t.id));
       for (const p of this.snap.tree.expanded) if (this.snap.tree.dirs.has(p)) want.add(p);
       void this.fs.watchSet([...want].slice(0, 500)).catch(() => undefined);
