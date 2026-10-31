@@ -21,6 +21,12 @@
     "allow-pty-write",
     "allow-pty-resize",
     "allow-pty-ack",
-    "allow-pty-kill"
+    "allow-pty-kill",
+    "allow-notes-root-get",
+    "allow-notes-root-choose",
+    "allow-notes-root-clear",
+    "allow-notes-list",
+    "allow-notes-read",
+    "allow-notes-heads"
   ]
 }

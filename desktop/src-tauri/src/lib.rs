@@ -3,6 +3,7 @@ mod core_env;
 mod core_host;
 mod fsutil;
 mod graph_file;
+mod notes_fs;
 mod proc_tree;
 mod project;
 mod pty;
@@ -277,7 +278,13 @@ pub fn run() {
             sse_replay::sse_replay_start,
             sse_replay::sse_replay_stop,
             sse_replay::sse_channel_stream,
-            ax_probe::ax_probe
+            ax_probe::ax_probe,
+            notes_fs::notes_root_get,
+            notes_fs::notes_root_choose,
+            notes_fs::notes_root_clear,
+            notes_fs::notes_list,
+            notes_fs::notes_read,
+            notes_fs::notes_heads
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");

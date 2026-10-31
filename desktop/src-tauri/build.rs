@@ -31,6 +31,12 @@ const COMMANDS: &[&str] = &[
     "sse_replay_stop",
     "sse_channel_stream",
     "ax_probe",
+    "notes_root_get",
+    "notes_root_choose",
+    "notes_root_clear",
+    "notes_list",
+    "notes_read",
+    "notes_heads",
 ];
 
 fn main() {
