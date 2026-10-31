@@ -47,6 +47,13 @@ const BY_CODE: Record<string, (ctx?: ErrorContext) => string> = {
   feature_disabled: () => "That feature is turned off in this build.",
   UNREACHABLE: () => "Could not reach the backend. Check that it is running and try again.",
   ABORTED: () => "The request was cancelled.",
+  TIMEOUT: () => "The backend did not answer in time. It may be busy; try again.",
+  UNTRUSTED_CORE: () => "This app has not verified the core it is talking to yet. Open the status bar and confirm the core, or restart the app so it starts its own.",
+  NO_SESSION: () => "You are not signed in. Sign in again.",
+  SESSION_EXPIRED: () => "Your session expired. Sign in again.",
+  UNSAFE_URL: () => "The app refused to contact a core that is not on this computer.",
+  BAD_RESPONSE: () => "The backend sent an answer this version of the app could not read. Update the app or the backend.",
+  BAD_REQUEST: () => "The app built a request it is not allowed to send. Please report this.",
 };
 
 const BY_STATUS = (status: number): string => {

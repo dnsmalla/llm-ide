@@ -46,6 +46,10 @@ export async function call(client: CoreClient, method: "GET" | "POST" | "PUT" | 
   } catch (e) {
     if (e instanceof ApiError) throw e;
     if (signal?.aborted) throw new ApiError(0, "ABORTED");
+    // Keep the shell's own code (UNTRUSTED_CORE, NO_SESSION, TIMEOUT, ...): only a genuine NETWORK failure means "unreachable".
+    const code = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+    const status = typeof e === "object" && e !== null && typeof (e as { status?: unknown }).status === "number" ? (e as { status: number }).status : 0;
+    if (typeof code === "string" && /^[A-Z_]{3,32}$/.test(code) && code !== "NETWORK") throw new ApiError(status, code);
     throw new ApiError(0, "UNREACHABLE");
   }
   if (res.status < 200 || res.status >= 300) throw toApiError(res);
