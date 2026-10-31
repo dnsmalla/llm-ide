@@ -334,7 +334,7 @@ test("a managed endpoint can be tested, switched off and removed through the cat
   const client = fakeClient({
     ...catalogRoutes(),
     "GET /kb/providers/custom": () => ({ status: 200, body: customBody() }),
-    "POST /kb/providers/catalog/test": (b) => ({ status: 200, body: { ok: true, detail: "ok sk-fixture-not-a-real-key-000000", modelCount: 3 } }),
+    "POST /kb/providers/catalog/test": () => ({ status: 200, body: { ok: true, detail: "ok sk-fixture-not-a-real-key-000000", modelCount: 3 } }),
     "POST /kb/providers/catalog/connect": () => reply("provider-catalog/post-kb-providers-catalog-connect-200-claude-compatible.json"),
     "POST /kb/providers/catalog/disconnect": () => ({ status: 200, body: { ok: true, removed: true } }),
   });
