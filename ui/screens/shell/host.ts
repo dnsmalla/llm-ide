@@ -51,6 +51,46 @@ export interface ProjectInfo {
   root: string;
 }
 
+/** One recent project as the host lists it (`project_recent_all`): paths and reasons are untrusted text. */
+export interface RecentEntry {
+  name: string;
+  root: string;
+  /** `ok` can be opened; `missing` (moved, deleted, volume not mounted) and `refused` (too broad) cannot. */
+  status: "ok" | "missing" | "refused";
+  /** Why it cannot be opened (host wording), or null. */
+  reason: string | null;
+  /** Index for `projectOpenRecent` (only `ok` entries). */
+  openIndex: number | null;
+  /** Position in the stored list, for `projectForgetRecent`. */
+  storedIndex: number;
+}
+
+export interface RecentList {
+  entries: RecentEntry[];
+  /** The stored list was unreadable and was ignored: the user should be told it was reset. */
+  reset: boolean;
+}
+
+export const MAX_RECENT_SHOWN = 20;
+
+/** Defensive decode of `project_recent_all`: anything malformed reads as an empty list. */
+export function decodeRecentList(raw: unknown): RecentList {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const list = Array.isArray(r.entries) ? r.entries : [];
+  const entries: RecentEntry[] = [];
+  for (const e of list.slice(0, MAX_RECENT_SHOWN)) {
+    if (!e || typeof e !== "object") continue;
+    const o = e as Record<string, unknown>;
+    if (typeof o.root !== "string" || typeof o.name !== "string") continue;
+    const status = o.status === "ok" || o.status === "missing" || o.status === "refused" ? o.status : "missing";
+    const storedIndex = typeof o.stored_index === "number" && Number.isInteger(o.stored_index) && o.stored_index >= 0 ? o.stored_index : -1;
+    const openIndex = typeof o.open_index === "number" && Number.isInteger(o.open_index) && o.open_index >= 0 ? o.open_index : null;
+    if (storedIndex < 0) continue;
+    entries.push({ name: o.name, root: o.root, status: status === "ok" && openIndex === null ? "missing" : status, reason: asStr(o.reason), openIndex: status === "ok" ? openIndex : null, storedIndex });
+  }
+  return { entries, reset: r.reset === true };
+}
+
 /** What `invoke` needs; the default talks to Tauri, tests inject their own. */
 export interface HostBridge {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -170,6 +210,33 @@ export const host = {
   async projectActive(): Promise<ProjectInfo | null> {
     if (!isHostAvailable()) return null;
     return invokeHost<ProjectInfo | null>("project_active");
+  },
+
+  /**
+   * New project: the host opens a folder dialog for the PARENT, creates `<parent>/<name>` and scaffolds it
+   * like the Mac app, then makes it active. `null` when the user cancels. The name is validated again by the host.
+   */
+  async projectCreate(name: string): Promise<ProjectInfo | null> {
+    if (!isHostAvailable()) return null;
+    return invokeHost<ProjectInfo | null>("project_create", { name });
+  },
+
+  /** Close the active project (no project open). Never deletes or changes any file. */
+  async projectClose(): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("project_close");
+  },
+
+  /** Recent list with a status per entry (missing/moved folders are reported, not dropped). */
+  async projectRecentAll(): Promise<RecentList> {
+    if (!isHostAvailable()) return { entries: [], reset: false };
+    return decodeRecentList(await invokeHost<unknown>("project_recent_all"));
+  },
+
+  /** Removes one entry from the recent list only (never touches files). `false` when the list changed meanwhile. */
+  async projectForgetRecent(storedIndex: number, root: string): Promise<boolean> {
+    if (!Number.isInteger(storedIndex) || storedIndex < 0) throw new RangeError("recent project index must be a non-negative integer");
+    return (await invokeHost<unknown>("project_forget_recent", { index: storedIndex, root })) === true;
   },
 
   /** Recent projects, newest first (host-owned list). */
