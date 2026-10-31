@@ -367,7 +367,18 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
         break;
       case "tool_result":
         if (target) {
-          const i = target.parts.findIndex((p) => p.kind === "tool" && p.id === ev.toolUseId);
+          // Match by id only. An empty id matches nothing; an id carried by two tool calls is ambiguous, so the
+          // result is NOT attached to either (the first one would be wrong half the time) and a notice says so.
+          let i = -1, matches = 0;
+          if (ev.toolUseId) {
+            target.parts.forEach((p, j) => { if (p.kind === "tool" && p.id === ev.toolUseId) { if (i < 0) i = j; matches++; } });
+          }
+          if (matches > 1) {
+            i = -1;
+            if (target.notices.length < MAX_NOTICES_PER_MESSAGE && !target.notices.some((n) => n.kind === "duplicate_tool_id")) {
+              target.notices.push({ kind: "duplicate_tool_id", level: "warning", text: "A tool result matched more than one tool call and was not attached.", count: 1, visible: true });
+            }
+          }
           if (i >= 0) {
             const p = target.parts[i] as ToolPart;
             const c = capText(ev.text, TOOL_STATE_CAP);

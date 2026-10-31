@@ -150,3 +150,18 @@ test("10k-token reply reduces fast and keeps a small open tail", () => {
   assert.ok(part.sealed.length > 200);
   assert.ok((part.open + part.line).length < 400);
 });
+
+test("tool_result: empty ids match nothing, duplicate ids are not attached to the first tool and are flagged", () => {
+  const toolStart = (index, id) => ({ type: "tool_use_start", index, id, name: "Read" });
+  const result = (toolUseId) => ({ type: "tool_result", toolUseId, isError: false, text: "out", truncated: false });
+  // empty ids: a result with an empty id must not land on a tool that also has none
+  let s = c.reduce(start(), { type: "events", events: [toolStart(0, ""), result("")] });
+  assert.equal(last(s).parts[0].result, null);
+  // duplicate ids: ambiguous, nothing attached, a visible warning
+  s = c.reduce(start(), { type: "events", events: [toolStart(0, "dup"), toolStart(1, "dup"), toolStart(2, "ok"), result("dup"), result("ok")] });
+  const [a, b, d] = last(s).parts;
+  assert.equal(a.result, null); assert.equal(b.result, null);
+  assert.equal(d.result.text, "out", "a unique id still matches");
+  assert.ok(last(s).notices.some((n) => n.kind === "duplicate_tool_id" && n.level === "warning"));
+  assert.equal(last(s).notices.filter((n) => n.kind === "duplicate_tool_id").length, 1);
+});
