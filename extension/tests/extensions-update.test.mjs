@@ -136,7 +136,7 @@ test('apply: a consent carried in the request keeps the prior state; a plain ite
 test('apply: only one older version is kept, members the user unchecked stay unchecked, missing update refused', async () => {
   const it = await install('u6', 'acme', 'runner', PLUG_BASE, S1);
   inst.setInstalledMembers('u6', it.id, ['skill:a'], false);
-  await rejects(upd.applyUpdate('u6', it.id, { fetch: net({}) }), 'not_found');
+  await rejects(upd.applyUpdate('u6', it.id, { fetch: net({}) }), 'update_changed');
   await upd.applyUpdate('u6', it.id, { commit: S2, fetch: net({ [url('acme', 'runner', S2)]: repoArchive(PLUG_HOOK) }) });
   const r = await upd.applyUpdate('u6', it.id, { commit: S3, fetch: net({ [url('acme', 'runner', S3)]: repoArchive(PLUG_MCP) }) });
   assert.equal(r.item.previous.pinnedCommit, S2);
@@ -227,4 +227,57 @@ test('H2: an explicit commit for preview/apply and a raw SHA for install must be
   const down = net({ [`compare:acme/tidy:${S3}`]: () => new Response('', { status: 503 }) });
   await rejects(upd.previewUpdate('u-h2', it.id, { commit: S3, fetch: down }), 'verify_unavailable');
   await rejects(inst.installFromGithub({ userId: 'u-h2', url: 'https://github.com/acme/tidy', commit: S3 }, { fetch: fork }), 'commit_not_in_repo');
+});
+
+test('M1: apply without a commit applies only the last preview, and only while it is unchanged (else UPDATE_CHANGED)', async () => {
+  upd._clearPreviewsForTests();
+  const it = await install('u-m1', 'acme', 'tidy', { 'SKILL.md': SKILL1 }, S1);
+  const archives = { [url('acme', 'tidy', S2)]: repoArchive({ 'SKILL.md': SKILL2 }), [url('acme', 'tidy', S3)]: repoArchive({ 'SKILL.md': `${SKILL2}more\n` }) };
+  // a check found S2, but nothing was previewed: refuse
+  await upd.checkUpdates('u-m1', { fetch: net({ [head('acme', 'tidy')]: S2 }) });
+  await rejects(upd.applyUpdate('u-m1', it.id, { fetch: net(archives) }), 'update_changed');
+  // preview S2, then a later check finds S3: the preview no longer describes "latest"
+  await upd.previewUpdate('u-m1', it.id, { fetch: net(archives) });
+  await upd.checkUpdates('u-m1', { fetch: net({ [head('acme', 'tidy')]: S3 }) });
+  await rejects(upd.applyUpdate('u-m1', it.id, { fetch: net(archives) }), 'update_changed');
+  // another user's preview never counts
+  upd._clearPreviewsForTests();
+  await upd.previewUpdate('u-m1', it.id, { fetch: net(archives) });
+  await rejects(upd.applyUpdate('u-m1-other', it.id, { fetch: net(archives) }), 'not_found');
+  // preview then apply (unchanged) applies exactly the previewed commit, once
+  const r = await upd.applyUpdate('u-m1', it.id, { fetch: net(archives) });
+  assert.equal(r.update.to, S3);
+  await rejects(upd.applyUpdate('u-m1', it.id, { fetch: net(archives) }), 'update_changed');
+});
+
+function gated(inner) {
+  let release; const gate = new Promise((r) => { release = r; });
+  const fn = async (u, i) => { if (String(u).startsWith('https://codeload.github.com/')) await gate; return inner(u, i); };
+  fn.release = release;
+  return fn;
+}
+
+test('M3: uninstall takes the item lock (busy while an update or repair is in flight) and re-reads under it', async () => {
+  upd._clearPreviewsForTests();
+  const it = await install('u-m3', 'acme', 'tidy', { 'SKILL.md': SKILL1 }, S1);
+  const g = gated(net({ [url('acme', 'tidy', S2)]: repoArchive({ 'SKILL.md': SKILL2 }) }));
+  const pending = upd.applyUpdate('u-m3', it.id, { commit: S2, fetch: g });
+  await rejects(Promise.resolve().then(() => inst.uninstall('u-m3', it.id)), 'busy');
+  g.release();
+  assert.equal((await pending).update.to, S2, 'the update completed; the record was not torn out from under it');
+  assert.ok(installedMod.readInstalled('u-m3').items.has(it.id));
+
+  // repair in flight (bytes deleted) blocks an uninstall the same way
+  fs.rmSync(dirOf('u-m3', it.id, S2), { recursive: true, force: true });
+  const g2 = gated(net({ [url('acme', 'tidy', S2)]: repoArchive({ 'SKILL.md': SKILL2 }) }));
+  const rep = upd.repair('u-m3', it.id, { fetch: g2 });
+  await rejects(Promise.resolve().then(() => inst.uninstall('u-m3', it.id)), 'busy');
+  g2.release();
+  assert.equal((await rep).repaired, true);
+
+  // uninstall first, then a racing update/repair finds nothing
+  inst.uninstall('u-m3', it.id);
+  await rejects(upd.applyUpdate('u-m3', it.id, { commit: S3, fetch: net({}) }), 'not_found');
+  await rejects(upd.repair('u-m3', it.id, { fetch: net({}) }), 'not_found');
+  assert.equal(fs.existsSync(installedMod.itemStoreDir('u-m3', it.id)), false);
 });

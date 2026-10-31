@@ -65,7 +65,7 @@ const STATUS = {
   invalid_url: 400, invalid_ref: 400, invalid_commit: 400, invalid_path: 400, invalid_member: 400, invalid_user: 400,
   not_found: 404, catalog_disabled: 404, source_not_allowed: 403, consent_required: 409, already_installed: 409, busy: 409,
   invalid_source: 400, too_many_sources: 400, source_exceeds_ceiling: 403,
-  already_current: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
+  already_current: 409, update_changed: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
   marketplace: 422, nothing_installable: 422, unsafe_path: 422, too_large: 422, bad_archive: 422,
   commit_not_in_repo: 422, verify_unavailable: 503,
   blocked: 403, upstream: 502, redirect_refused: 502, aborted: 499, state_unreadable: 500, write_failed: 500,

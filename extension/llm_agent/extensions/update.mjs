@@ -51,6 +51,21 @@ function need(userId, id) {
   return rec;
 }
 
+// What the LAST preview for a user+item showed. An apply without an explicit commit applies exactly that, and only
+// while nothing it was based on changed (the item's pinned commit, the commit a later check found). In memory on
+// purpose: a restart means "preview again".
+const PREVIEW_TTL_MS = 60 * 60 * 1000;
+const MAX_PREVIEWS = 1000;
+const previews = new Map();
+const pkey = (userId, id) => `${userId}\u0000${id}`;
+function rememberPreview(userId, id, p) {
+  const now = Date.now();
+  for (const [k, v] of previews) if (now - v.at > PREVIEW_TTL_MS) previews.delete(k);
+  if (previews.size >= MAX_PREVIEWS) previews.delete(previews.keys().next().value);
+  previews.set(pkey(userId, id), { ...p, at: now });
+}
+export function _clearPreviewsForTests() { previews.clear(); }
+
 function snapshot(rec) {
   const out = {};
   for (const k of SNAPSHOT_FIELDS) if (rec[k] !== undefined) out[k] = rec[k];
@@ -175,6 +190,7 @@ export async function previewUpdate(userId, id, { commit, fetch: fetchImpl, sign
   const rec = need(userId, id);
   const to = await targetCommit(rec, commit, { fetch: fetchImpl, signal }, { resolveIfMissing: true });
   if (to === rec.pinnedCommit) throw new InstallError('already_current', 'already at this commit', { commit: to });
+  const fromCheck = !(commit !== undefined && commit !== null && commit !== '') && isCommitSha(rec.update?.latest) && rec.update.latest === to;
   const f = pinnedFetch({ fetch: fetchImpl });
   const cand = await loadCandidate(userId, rec, to, { fetch: f, signal });
   const cur = readTreeFromDisk(join(itemStoreDir(userId, id), rec.pinnedCommit));
@@ -194,6 +210,7 @@ export async function previewUpdate(userId, id, { commit, fetch: fetchImpl, sign
   const newExecutableMembers = cand.info.members.filter((m) => m.executable && !oldMembers.has(m.memberId)).map((m) => ({ memberId: m.memberId, type: m.type, name: m.name }));
   const wasEnabled = readOverlay(userId).items.get(id)?.enabled === true;
   const consentKinds = cand.info.executableKinds;
+  rememberPreview(userId, id, { from: rec.pinnedCommit, to, fromCheck });
   return {
     id, from: rec.pinnedCommit, to,
     version: { from: rec.version ?? null, to: cand.info.version },
@@ -244,14 +261,29 @@ const grants = (kinds, given, sha) => {
   return Object.fromEntries(kinds.filter((k) => g.has(k)).map((k) => [k, { grantedAt: at, commit: sha }]));
 };
 
-/** Move an item to a new commit. The previous version stays on disk for rollback. */
+/**
+ * Move an item to a new commit. The previous version stays on disk for rollback.
+ * Bound to what was previewed: with no `commit`, only the commit of the LAST preview for this user+item is applied,
+ * and only if the item and the check result are unchanged since (else 409 UPDATE_CHANGED: preview again).
+ * An explicit `commit` is applied as given (verified to be on the repo). The record is re-read under the lock.
+ */
 export async function applyUpdate(userId, id, { commit, consents = [], fetch: fetchImpl, signal } = {}) {
   requireCatalog();
-  const rec = need(userId, id);
-  const to = await targetCommit(rec, commit, { fetch: fetchImpl, signal }, { resolveIfMissing: false });
-  if (to === rec.pinnedCommit) throw new InstallError('already_current', 'already at this commit', { commit: to });
+  need(userId, id);
   const unlock = lockFor(userId, id);
   try {
+    const rec = need(userId, id);
+    let to;
+    if (commit !== undefined && commit !== null && commit !== '') {
+      to = await targetCommit(rec, commit, { fetch: fetchImpl, signal }, { resolveIfMissing: false });
+    } else {
+      const p = previews.get(pkey(userId, id));
+      const stale = !p || Date.now() - p.at > PREVIEW_TTL_MS || p.from !== rec.pinnedCommit
+        || (p.fromCheck && rec.update?.latest !== p.to);
+      if (stale) throw new InstallError('update_changed', 'what this update would change was not previewed, or it changed since; preview it again', { id });
+      to = p.to;
+    }
+    if (to === rec.pinnedCommit) throw new InstallError('already_current', 'already at this commit', { commit: to });
     const cand = await loadCandidate(userId, rec, to, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
     const findings = scanEnabled() ? scanTree(cand.files, { skipped: cand.skipped }) : [];
     const src = validateSource({ kind: 'git', url: cand.repo.url, commit: to, ...(rec.source.ref ? { ref: rec.source.ref } : {}) });
@@ -280,6 +312,7 @@ export async function applyUpdate(userId, id, { commit, consents = [], fetch: fe
     if (isCommitSha(dropSha) && dropSha !== to && dropSha !== rec.pinnedCommit) removeStore(join(itemDir, dropSha), userId);
     if (parseItemId(id).kind === 'plugin') removeViewsFor(userId, parseItemId(id).name);
     clearInstalledRuntimeCache();
+    previews.delete(pkey(userId, id));
     const settled = settleEnabled(userId, id, next, wasEnabled);
     return { ok: true, item: view(userId, id), update: { from: rec.pinnedCommit, to, ...settled } };
   } finally { unlock(); }
@@ -321,6 +354,9 @@ export async function repair(userId, id, { fetch: fetchImpl, signal } = {}) {
   if (before.status === 'ok') return { ok: true, repaired: false, status: 'ok', item: view(userId, id) };
   const unlock = lockFor(userId, id);
   try {
+    // Re-read under the lock: an uninstall or update may have landed since the check above.
+    const held = need(userId, id);
+    if (held.pinnedCommit !== rec.pinnedCommit) throw new InstallError('update_changed', 'the item changed while waiting; try again', { id });
     const cand = await loadCandidate(userId, rec, rec.pinnedCommit, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
     const hash = treeHash(cand.files);
     if (rec.integrity && hash !== rec.integrity) throw new InstallError('integrity_mismatch', 'the downloaded files differ from what was installed; not restoring them', { commit: rec.pinnedCommit });

@@ -208,15 +208,22 @@ export function removeStore(dir, userId) {
   rmSync(target, { recursive: true, force: true });
 }
 
+/** Takes the same per-item lock as install/update/repair, so an uninstall never interleaves with one in flight. */
 export function uninstall(userId, id) {
-  const installed = readInstalled(userId);
-  if (!installed.items.has(id)) throw new InstallError('not_found', 'not installed');
-  if (installed.corrupt) throw new InstallError('state_unreadable', 'the installed-extensions record cannot be read');
-  removeStore(itemStoreDir(userId, id), userId);
-  if (parseItemId(id)?.kind === 'plugin') removeViewsFor(userId, parseItemId(id).name);
-  removeInstalled(userId, id);
-  clearItem(userId, id);
-  return { ok: true };
+  const lock = `${userId}\u0000${id}`;
+  if (busy.has(lock)) throw new InstallError('busy', 'this item is being changed; try again in a moment');
+  busy.add(lock);
+  try {
+    // Re-read under the lock: the record is judged as it is now, not as it was when the request arrived.
+    const installed = readInstalled(userId);
+    if (!installed.items.has(id)) throw new InstallError('not_found', 'not installed');
+    if (installed.corrupt) throw new InstallError('state_unreadable', 'the installed-extensions record cannot be read');
+    removeStore(itemStoreDir(userId, id), userId);
+    if (parseItemId(id)?.kind === 'plugin') removeViewsFor(userId, parseItemId(id).name);
+    removeInstalled(userId, id);
+    clearItem(userId, id);
+    return { ok: true };
+  } finally { busy.delete(lock); }
 }
 
 /** Account deletion: records, switches and bytes of one user. Best effort, never throws. */
