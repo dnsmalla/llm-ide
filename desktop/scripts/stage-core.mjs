@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { removeSdkBinaryPackages, sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
+import { isSecretName, makeCopyFilter, verifyStagedCore } from './stage-filter.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const REPO = resolve(DESKTOP, '..');
@@ -44,10 +45,8 @@ if (linked.includes('libnode')) {
 const SKIP_TOP = new Set(['node_modules', 'tests', 'src', 'dist', 'docs', 'scripts', 'eslint.config.mjs',
   'tsconfig.json', 'vite.config.ts', 'CLAUDE.md', 'README.md']);
 const SKIP_FILE = /(\.db(-wal|-shm|-journal)?|\.log(\.old)?|\.DS_Store)$/;
-// Secrets and local agent state must never ship in the app: .env files (but
-// not .env.example), .dev-secrets*, .claude/ directories, and key material.
-const SKIP_SECRET = /^(\.env(\..+)?|\.dev-secrets.*|\.claude|.+\.(pem|key))$/;
-const isSecretName = (name) => SKIP_SECRET.test(name) && name !== '.env.example';
+// Secrets and local agent state must never ship in the app (see stage-filter.mjs, which also
+// allowlists what may enter kb/ and verifies the finished stage).
 
 function dirBytes(dir) {
   let total = 0;
@@ -90,11 +89,12 @@ try {
 }
 
 // 2. Extension source (runtime files only), then production deps.
+const copyFilter = makeCopyFilter(join(REPO, 'extension'), { skipFile: SKIP_FILE });
 for (const name of readdirSync(join(REPO, 'extension'))) {
   if (SKIP_TOP.has(name) || SKIP_FILE.test(name) || isSecretName(name)) continue;
   cpSync(join(REPO, 'extension', name), join(extOut, name), {
     recursive: true,
-    filter: (src) => !SKIP_FILE.test(basename(src)) && !isSecretName(basename(src)),
+    filter: copyFilter,
   });
 }
 for (const f of ['package.json', 'package-lock.json']) {
@@ -138,6 +138,16 @@ if (sdkBinaryAllowed()) {
   const leftover = verifyNoSdkBinary(OUT);
   if (leftover.length) {
     console.error(`staging failed: the SDK claude binary must not be bundled:\n  ${leftover.join('\n  ')}`);
+    process.exit(1);
+  }
+}
+
+// Final gate: nothing that must never ship (live DBs, backups, secrets, log files, symlinks
+// leaving the tree) may be in the stage, whatever the copy filters did.
+{
+  const bad = verifyStagedCore(OUT);
+  if (bad.length) {
+    console.error(`staging failed: the stage contains files that must not ship:\n  ${bad.join('\n  ')}`);
     process.exit(1);
   }
 }
