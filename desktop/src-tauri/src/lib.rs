@@ -1,5 +1,6 @@
 mod ax_probe;
 mod core_host;
+mod fsutil;
 mod graph_file;
 mod project;
 mod pty;
@@ -191,7 +192,7 @@ pub fn run() {
             }) {
                 eprintln!("core: signal handler not installed: {e}");
             }
-            setup_host.start_in_background();
+            setup_host.start_in_background(app.path().app_data_dir().ok());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

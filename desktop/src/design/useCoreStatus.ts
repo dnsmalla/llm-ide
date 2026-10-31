@@ -9,6 +9,9 @@ export interface CoreStatus {
   ms_to_healthy: number | null;
   state: "starting" | "ready" | "failed";
   error: string | null;
+  /** `spawned` = nonce verified; `adopted_unverified` = an external core we could not verify. */
+  trust: "pending" | "spawned" | "adopted_unverified";
+  notice: string | null;
 }
 
 const POLL_MS = 1000;

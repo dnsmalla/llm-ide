@@ -18,7 +18,7 @@ export function AppStatusBar({ status, pollError, theme, onTheme, projectName }:
 
   const core = !status
     ? `core: starting… ${pollError ?? ""}`
-    : `core: ${status.state} · ${status.url.replace("http://", "")} · ${status.adopted ? "adopted" : "spawned"} · ${status.ms_to_healthy ?? "-"} ms`;
+    : `core: ${status.state} · ${status.url.replace("http://", "")} · ${status.adopted ? "adopted (unverified)" : "spawned"} · ${status.ms_to_healthy ?? "-"} ms`;
 
   return (
     <div className="ui-statusbar" data-state={status?.state ?? "starting"}>
@@ -29,7 +29,7 @@ export function AppStatusBar({ status, pollError, theme, onTheme, projectName }:
           <ChevronIcon />
         </span>
       </button>
-      <span className="ui-statusbar-core" title={status?.error ?? undefined}>
+      <span className="ui-statusbar-core" title={status?.error ?? status?.notice ?? undefined}>
         {core}
       </span>
       <span className="ui-statusbar-spacer" />
