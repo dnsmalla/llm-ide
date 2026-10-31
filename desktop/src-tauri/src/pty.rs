@@ -31,6 +31,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::ipc::{Channel, Response};
 
+#[cfg(debug_assertions)]
 use crate::core_host;
 
 /// A batch is sent as soon as it holds this many bytes...

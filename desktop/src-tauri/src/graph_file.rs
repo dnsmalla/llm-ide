@@ -18,6 +18,7 @@ pub const GRAPH_FILE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Used when neither `LLMIDE_POC_PROJECT_ROOT` nor `LLMIDE_POC_GRAPH` is set: the
 /// spike's default project (the frontend's default graph path lives under it).
+#[cfg(debug_assertions)]
 const DEFAULT_PROJECT_REL: &str = "Desktop/LLM/code/affiliate";
 
 /// The active project root: the folder opened through `project_open*` (host dialog).
