@@ -7,14 +7,15 @@ before(async () => { c = await loadChat("bypass"); });
 
 const FX = Object.fromEntries(fixtures().map((f) => [f.name.replace(".json", ""), f.json]));
 const turn = () => [sse(FX.init, FX.mode_set), sse({ type: "delta", text: "ok" }), sse(FX.usage, FX.result)];
-const tok = (n = 1) => `v1.${1900000000000 + n}.${"a".repeat(31)}${n % 10}.${"b".repeat(63)}${n % 10}`;
+const tok = (n = 1) => `v2.${1900000000000 + n}.${"a".repeat(31)}${n % 10}.${"b".repeat(63)}${n % 10}`;
 const forbidden = () => Object.assign(new Error("Bypass needs a fresh approval from the desktop app"), { status: 403, code: "HOST_APPROVAL_REQUIRED" });
 
 function gateWith(tokens, extra = {}) {
   let t = 1_000;
   const dialogs = [];
-  const gate = c.createBypassGate({ now: () => t, confirmSigned: async (s) => { dialogs.push(s); const v = tokens.shift(); if (v instanceof Error) throw v; return v ?? null; }, ...extra });
-  return { gate, dialogs, advance: (ms) => (t += ms) };
+  const asked = [];
+  const gate = c.createBypassGate({ now: () => t, confirmSigned: async (chatId, s) => { dialogs.push(s); asked.push(chatId); const v = tokens.shift(); if (v instanceof Error) throw v; return v ?? null; }, ...extra });
+  return { gate, dialogs, asked, advance: (ms) => (t += ms) };
 }
 function make(core, bypass) {
   const store = new c.MemoryChatStore();
@@ -57,7 +58,7 @@ test("decline: nothing held, no header, Bypass is sent as Ask", async () => {
 });
 
 test("a host error, a malformed token or a non-string reply all count as a decline", async () => {
-  for (const v of [new Error("boom"), "not-a-token", "v1.1.2.3", 7, undefined]) {
+  for (const v of [new Error("boom"), "not-a-token", "v2.1.2.3", tok(1).replace("v2.", "v1."), 7, undefined]) {
     const { gate } = gateWith([v]);
     assert.equal(await gate.request("a", "s"), "declined");
     assert.deepEqual(gate.prepare("a", "bypass"), { permissionMode: "ask" });
@@ -200,7 +201,7 @@ test("no token in any controller state, snapshot or log output after a Bypass tu
   assert.ok(!JSON.stringify(ctl.getState("a")).includes(needle));
   assert.ok(!JSON.stringify(streams(core)[0].body).includes(needle));
   assert.ok(!logs.join("\n").includes(needle));
-  assert.ok(!JSON.stringify(Object.keys(gate)).includes("v1."));
+  assert.ok(!JSON.stringify(Object.keys(gate)).includes("v2."));
   for (const k of Object.keys(gate)) assert.ok(!String(gate[k]).includes(needle));
 });
 
@@ -213,4 +214,11 @@ test("ModeBanner: red BYPASS ON only while the grant is live, otherwise 'needs a
   assert.match(pending, /data-mode="bypass-pending"/);
   assert.match(pending, /needs approval/);
   assert.doesNotMatch(pending, /BYPASS ON/);
+});
+
+test("the host is asked to sign for THIS chat (the token is chat-bound), and a legacy v1 token is dropped unseen", async () => {
+  const { gate, asked } = gateWith([tok(20), tok(21).replace("v2.", "v1.")]);
+  assert.equal(await gate.request("chat-a", "s"), "approved");
+  assert.equal(await gate.request("chat-b", "s"), "declined", "v1 shape is not accepted");
+  assert.deepEqual(asked, ["chat-a", "chat-b"]);
 });

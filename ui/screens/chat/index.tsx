@@ -64,7 +64,7 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   // is refused there. The token lives inside this gate's memory only.
   const bypass = useMemo(
     () => (shellHost.isAvailable()
-      ? createBypassGate({ confirmSigned: (summary) => invokeHost<string | null>("bypass_confirm_signed", { summary }).then((t) => (typeof t === "string" ? t : null), () => null) })
+      ? createBypassGate({ confirmSigned: (chatId, summary) => invokeHost<string | null>("bypass_confirm_signed", { chatId, summary }).then((t) => (typeof t === "string" ? t : null), () => null) })
       : null),
     [],
   );

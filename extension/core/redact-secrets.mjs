@@ -26,7 +26,7 @@ export const SECRET_PATTERNS = [
   /apiKey=[A-Za-z0-9_-]+/gi,                  // apiKey=<value> in query strings
   /\bya29\.[A-Za-z0-9._-]{20,}/g,             // Google OAuth2 access token
   /\b1\/\/[A-Za-z0-9_-]{20,}/g,               // Google OAuth2 refresh token (1//...)
-  /\bv1\.\d{10,15}\.[0-9a-f]{32}\.[0-9a-f]{64}\b/g, // host-signed approval token (core/host-approval.mjs)
+  /\bv[12]\.\d{10,15}\.[0-9a-f]{32}\.[0-9a-f]{64}\b/g, // host-signed approval token (v1 legacy, v2 chat-bound) (core/host-approval.mjs)
 ];
 
 const MARKER = '[REDACTED]';

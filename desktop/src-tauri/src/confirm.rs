@@ -30,6 +30,36 @@ pub(crate) fn herr(code: &'static str, message: impl Into<String>) -> FsError {
     FsError { code, message: message.into() }
 }
 
+/// "A native dialog of this kind is open". `acquire` hands out a guard that clears the flag when it is DROPPED, so an
+/// early return, a panic or a cancelled future can never leave the flag stuck on (which would block the dialog until
+/// the app restarts).
+pub(crate) struct OpenFlag(std::sync::atomic::AtomicBool);
+
+pub(crate) struct OpenGuard<'a>(&'a OpenFlag);
+
+impl OpenFlag {
+    pub(crate) const fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// `Some(guard)` when no dialog was open (and now one is); `None` when one already is.
+    pub(crate) fn acquire(&self) -> Option<OpenGuard<'_>> {
+        use std::sync::atomic::Ordering;
+        (!self.0.swap(true, Ordering::SeqCst)).then_some(OpenGuard(self))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_open(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for OpenGuard<'_> {
+    fn drop(&mut self) {
+        (self.0).0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Minimum `min_gap_ms` between accepted calls and at most `per_minute` in any 60 s window.
 pub(crate) struct RateLimit {
     min_gap_ms: u64,
@@ -150,7 +180,7 @@ pub(crate) fn accepted(result: &rfd::MessageDialogResult, accept: &str) -> bool 
 
 pub const SUMMARY_MAX_CHARS: usize = 120;
 static BYPASS_LIMIT: RateLimit = RateLimit::new(1_000, 6);
-static BYPASS_OPEN: Mutex<bool> = Mutex::new(false);
+static BYPASS_OPEN: OpenFlag = OpenFlag::new();
 
 /// The dialog text for a summary. The template is fixed; only the quoted detail varies.
 pub(crate) fn bypass_text(summary: &str) -> String {
@@ -169,16 +199,9 @@ async fn bypass_dialog(summary: Option<String>) -> Result<bool, FsError> {
     if !BYPASS_LIMIT.allow() {
         return Err(herr("rate_limited", "too many confirmation requests"));
     }
-    {
-        let mut open = BYPASS_OPEN.lock().unwrap_or_else(|p| p.into_inner());
-        if *open {
-            return Err(herr("busy", "a confirmation is already open"));
-        }
-        *open = true;
-    }
+    let _open = BYPASS_OPEN.acquire().ok_or_else(|| herr("busy", "a confirmation is already open"))?;
     let text = bypass_text(summary.as_deref().unwrap_or(""));
     let out = tauri::async_runtime::spawn_blocking(move || ask("Turn on Bypass permissions?", &text, "Turn on Bypass", true)).await;
-    *BYPASS_OPEN.lock().unwrap_or_else(|p| p.into_inner()) = false;
     out.map_err(|e| herr("io", format!("task failed: {e}")))
 }
 
@@ -189,22 +212,33 @@ pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
     bypass_dialog(summary).await
 }
 
-/// Same dialog; on accept returns a 60 s, single-use, host-signed approval token (see
-/// `host_approval`) for the core's `x-llmide-host-approval` header, else `None`.
-/// The core cannot verify it yet (blocked-by item), so this is UX-only until it does.
+/// The signed variant, as a pure step after the dialog: validates the chat id and mints the chat-bound token.
+/// `None` when the chat id cannot be bound (the host never signs for a malformed id).
+pub(crate) fn mint_bypass_token(chat_id: &str) -> Result<String, FsError> {
+    let purpose = crate::host_approval::bypass_purpose(chat_id).ok_or_else(|| herr("invalid", "not a valid chat id"))?;
+    crate::host_approval::mint(&purpose).map_err(|e| herr("io", e))
+}
+
+/// Same dialog for ONE chat; on accept returns a 60 s, single-use, host-signed token (format v2, purpose
+/// `bypass:<chatId>`, see `host_approval`) for the core's `x-llmide-host-approval` header, else `None`. The core refuses
+/// the token for any other chat, requires `x-llmide-client: desktop-ui` and the bus host proof alongside it. An
+/// invalid chat id is refused BEFORE the dialog is shown.
 #[tauri::command]
-pub async fn bypass_confirm_signed(summary: Option<String>) -> Result<Option<String>, FsError> {
+pub async fn bypass_confirm_signed(chat_id: String, summary: Option<String>) -> Result<Option<String>, FsError> {
+    if crate::host_approval::bypass_purpose(&chat_id).is_none() {
+        return Err(herr("invalid", "not a valid chat id"));
+    }
     if !bypass_dialog(summary).await? {
         return Ok(None);
     }
-    crate::host_approval::mint(crate::host_approval::PURPOSE_BYPASS).map(Some).map_err(|e| herr("io", e))
+    mint_bypass_token(&chat_id).map(Some)
 }
 
 // ---- trust_confirm ------------------------------------------------------------------------
 
 pub const TRUST_PATH_MAX_CHARS: usize = 300;
 static TRUST_LIMIT: RateLimit = RateLimit::new(1_000, 10);
-static TRUST_OPEN: Mutex<bool> = Mutex::new(false);
+static TRUST_OPEN: OpenFlag = OpenFlag::new();
 
 /// A folder path the dialog may name: absolute (unix `/...`, Windows `C:\...` or `\\server\...`), no NUL.
 pub(crate) fn valid_trust_path(path: &str) -> bool {
@@ -236,22 +270,50 @@ pub async fn trust_confirm(path: String) -> Result<bool, FsError> {
     if !TRUST_LIMIT.allow() {
         return Err(herr("rate_limited", "too many confirmation requests"));
     }
-    {
-        let mut open = TRUST_OPEN.lock().unwrap_or_else(|p| p.into_inner());
-        if *open {
-            return Err(herr("busy", "a confirmation is already open"));
-        }
-        *open = true;
-    }
+    let _open = TRUST_OPEN.acquire().ok_or_else(|| herr("busy", "a confirmation is already open"))?;
     let text = trust_text(&path);
     let out = tauri::async_runtime::spawn_blocking(move || ask("Trust this folder?", &text, "Trust folder", true)).await;
-    *TRUST_OPEN.lock().unwrap_or_else(|p| p.into_inner()) = false;
     out.map_err(|e| herr("io", format!("task failed: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_flag_is_released_on_drop_even_after_a_panic_or_early_return() {
+        let f = OpenFlag::new();
+        {
+            let _g = f.acquire().expect("first");
+            assert!(f.is_open());
+            assert!(f.acquire().is_none(), "second is refused while open");
+        }
+        assert!(!f.is_open(), "released on drop");
+        let f = std::sync::Arc::new(OpenFlag::new());
+        let f2 = f.clone();
+        let r = std::thread::spawn(move || {
+            let _g = f2.acquire().unwrap();
+            panic!("boom");
+        })
+        .join();
+        assert!(r.is_err());
+        assert!(!f.is_open(), "released after a panic");
+        assert!(f.acquire().is_some());
+    }
+
+    #[test]
+    fn the_signed_bypass_token_is_chat_bound_and_refuses_a_bad_chat_id() {
+        let t = mint_bypass_token("chat-9").unwrap();
+        assert!(t.starts_with("v2."));
+        let key = crate::host_approval::key().unwrap();
+        let v = crate::host_approval::Verifier::default();
+        let now = now_ms();
+        assert!(!v.verify_at(key, &t, "bypass:chat-8", now), "another chat");
+        assert!(v.verify_at(key, &t, "bypass:chat-9", now));
+        for bad in ["", "a|b", "a b"] {
+            assert_eq!(mint_bypass_token(bad).unwrap_err().code, "invalid");
+        }
+    }
 
     #[test]
     fn rate_limit_gap_and_window() {

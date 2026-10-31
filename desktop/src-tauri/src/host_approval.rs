@@ -1,21 +1,20 @@
 //! Host-signed approval tokens (HOST HALF only).
 //!
-//! `bypass_confirm` is advisory today: a compromised webview that never calls it can still ask the
-//! core for `permission-mode=bypass`, because the core cannot tell that a human clicked. This
-//! module lets the host PROVE the click: after the native Cancel-first dialog is accepted the host
-//! mints a short-lived, single-use token signed with a per-launch random key that only the host
-//! and the core it spawned know (`LLMIDE_HOST_APPROVAL_KEY`, passed to the spawned core only;
-//! never to an adopted core, never to a terminal shell, never logged).
+//! `bypass_confirm` is advisory: a compromised webview that never calls it can still ask the core for
+//! `permission-mode=bypass`, because the core cannot tell that a human clicked. This module lets the host PROVE the
+//! click: after the native Cancel-first dialog is accepted the host mints a short-lived, single-use token signed with a
+//! per-launch random key that only the host and the core it spawned know (`LLMIDE_HOST_APPROVAL_KEY`, passed to the
+//! spawned core only; never to an adopted core, never to a terminal shell, never logged).
 //!
-//! Token (ASCII): `v1.<expiry_ms>.<nonce_hex>.<mac_hex>` where
-//! `mac = HMAC-SHA256(key_bytes, "llmide-host-approval/v1|<purpose>|<expiry_ms>|<nonce_hex>")`,
-//! `key_bytes` = the hex-decoded `LLMIDE_HOST_APPROVAL_KEY`, `purpose` = `bypass`.
-//! Lifetime 60 s. The verifier must also remember used nonces until expiry (single use).
+//! Token format v2 (ASCII): `v2.<expiry_ms>.<nonce_hex>.<mac_hex>` where
+//! `mac = HMAC-SHA256(key_bytes, "llmide-host-approval/v2|<purpose>|<expiry_ms>|<nonce_hex>")`,
+//! `key_bytes` = the hex-decoded `LLMIDE_HOST_APPROVAL_KEY` and `purpose` = `bypass:<chatId>`: the approval is BOUND TO
+//! ONE CHAT (`chatId` must match `[A-Za-z0-9_.:-]{1,128}`, so the `|` separator cannot be smuggled in). Lifetime 60 s.
+//! The verifier must also remember used nonces until expiry (single use). The legacy v1 format (purpose `bypass`, not
+//! chat-bound) is no longer minted; the core accepts it only with `LLMIDE_HOST_APPROVAL_COMPAT=1`.
 //!
-//! STATUS: UX-only until the core verifies it (blocked-by item, see docs/ and desktop/PACKAGING.md):
-//! the core must reject `permission-mode=bypass` requests that lack a valid
-//! `x-llmide-host-approval` header when `LLMIDE_HOST_APPROVAL_KEY` is set. This task does not
-//! change `extension/**`.
+//! Enforced by the core (extension/core/host-approval.mjs): with `LLMIDE_HOST_APPROVAL_KEY` set, a Bypass request needs a
+//! valid token for ITS chat, `x-llmide-client: desktop-ui` and the bus host proof (`bus_proof`, below).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -24,6 +23,17 @@ use sha2::{Digest, Sha256};
 
 pub const TOKEN_TTL_MS: u64 = 60_000;
 pub const PURPOSE_BYPASS: &str = "bypass";
+pub const FORMAT: &str = "v2";
+
+/// A chat id a Bypass approval may be bound to.
+pub fn valid_chat_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+}
+
+/// The purpose a Bypass token for `chat_id` signs (`bypass:<chatId>`), or `None` for an id that cannot be bound.
+pub fn bypass_purpose(chat_id: &str) -> Option<String> {
+    valid_chat_id(chat_id).then(|| format!("{PURPOSE_BYPASS}:{chat_id}"))
+}
 
 static KEY: OnceLock<[u8; 32]> = OnceLock::new();
 
@@ -95,14 +105,14 @@ pub fn host_bus_proof(window: tauri::Window, host: tauri::State<'_, crate::core_
 }
 
 fn signed_part(purpose: &str, expiry: u64, nonce: &str) -> String {
-    format!("llmide-host-approval/v1|{purpose}|{expiry}|{nonce}")
+    format!("llmide-host-approval/{FORMAT}|{purpose}|{expiry}|{nonce}")
 }
 
 /// Mints a token for `purpose` valid for `TOKEN_TTL_MS` from `now`.
 pub fn mint_with(key: &[u8], purpose: &str, now: u64, nonce_hex: &str) -> String {
     let expiry = now + TOKEN_TTL_MS;
     let mac = hmac_sha256(key, signed_part(purpose, expiry, nonce_hex).as_bytes());
-    format!("v1.{expiry}.{nonce_hex}.{}", to_hex(&mac))
+    format!("{FORMAT}.{expiry}.{nonce_hex}.{}", to_hex(&mac))
 }
 
 pub fn mint(purpose: &str) -> Result<String, String> {
@@ -130,7 +140,7 @@ impl Verifier {
     pub fn verify_at(&self, key: &[u8], token: &str, purpose: &str, now: u64) -> bool {
         let parts: Vec<&str> = token.split('.').collect();
         let [ver, exp, nonce, mac] = parts[..] else { return false };
-        if ver != "v1" || nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if ver != FORMAT || nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
             return false;
         }
         let Ok(expiry) = exp.parse::<u64>() else { return false };
@@ -171,6 +181,7 @@ mod tests {
         let key = [7u8; 32];
         let v = Verifier::default();
         let t = mint_with(&key, PURPOSE_BYPASS, 1_000, NONCE);
+        assert!(t.starts_with("v2."));
         assert!(v.verify_at(&key, &t, PURPOSE_BYPASS, 2_000));
         assert!(!v.verify_at(&key, &t, PURPOSE_BYPASS, 2_001), "single use");
         let t2 = mint_with(&key, PURPOSE_BYPASS, 1_000, "ffeeddccbbaa99887766554433221100");
@@ -187,10 +198,43 @@ mod tests {
         let mut parts: Vec<String> = t.split('.').map(String::from).collect();
         parts[1] = (1_000 + TOKEN_TTL_MS + 5_000).to_string(); // extended lifetime
         assert!(!v.verify_at(&key, &parts.join("."), PURPOSE_BYPASS, 1_500), "forged expiry");
-        for bad in ["", "v1", "v2.1.2.3", "v1.x.y.z", &format!("v1.99999.{NONCE}."), &format!("{t}.extra")] {
+        for bad in ["", "v2", "v1.1.2.3", "v3.1.2.3", "v1.x.y.z", &format!("v1.99999.{NONCE}."), &format!("{t}.extra")] {
             assert!(!v.verify_at(&key, bad, PURPOSE_BYPASS, 1_500), "{bad:?}");
         }
         assert!(v.verify_at(&key, &t, PURPOSE_BYPASS, 1_500), "the genuine token still works");
+    }
+
+    #[test]
+    fn a_bypass_token_is_bound_to_its_chat() {
+        let key = [7u8; 32];
+        let v = Verifier::default();
+        let a = bypass_purpose("chat-A").unwrap();
+        let b = bypass_purpose("chat-B").unwrap();
+        let t = mint_with(&key, &a, 1_000, NONCE);
+        assert!(!v.verify_at(&key, &t, &b, 1_500), "another chat");
+        assert!(!v.verify_at(&key, &t, PURPOSE_BYPASS, 1_500), "the unbound purpose");
+        assert!(v.verify_at(&key, &t, &a, 1_500));
+        // The v1 format is gone: a v1-shaped token never verifies here.
+        let v1 = format!("v1.{}.{NONCE}.{}", 1_000 + TOKEN_TTL_MS, "0".repeat(64));
+        assert!(!v.verify_at(&key, &v1, &a, 1_500));
+    }
+
+    #[test]
+    fn only_well_formed_chat_ids_can_be_bound() {
+        for ok in ["a", "chat-1", "8f14e45f-ceea-467a-9575-0f1b8c6f1a2b", "a.b_c:d-e"] {
+            assert!(bypass_purpose(ok).is_some(), "{ok}");
+        }
+        for bad in ["", "a|b", "a b", "a\n", "é", &"x".repeat(129), "a/b"] {
+            assert!(bypass_purpose(bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_core_vector_for_a_chat_bound_v2_token() {
+        // Same vector extension/tests/host-approval-bypass.test.mjs derives with node:crypto.
+        let key = [7u8; 32];
+        let t = mint_with(&key, "bypass:chat-1", 1_000, NONCE);
+        assert_eq!(t, "v2.61000.00112233445566778899aabbccddeeff.0812187205bd5c594faa3dfc1b307c35ce8831e7de6742e4c851be971a546764");
     }
 
     #[test]

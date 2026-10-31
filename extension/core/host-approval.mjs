@@ -1,10 +1,15 @@
 // Host-signed approval tokens, the core half (docs/spec/api-server.md "Host approval", desktop/PACKAGING.md).
 //
-// The Tauri host mints `v1.<expiry_ms>.<nonce_hex32>.<mac_hex64>` after a native Cancel-first dialog, where
-//   mac = HMAC-SHA256(key, "llmide-host-approval/v1|<purpose>|<expiry_ms>|<nonce_hex32>")
-// and `key` is the hex-decoded LLMIDE_HOST_APPROVAL_KEY the host passes ONLY to the core it spawned. Purpose today:
-// `bypass`. The token carries no user id and no core nonce: the key is per launch and per spawned core, so a token
-// can never work on another core, and it is 60 s and single use. (A user binding would need a host format change.)
+// Format v2 (current). The Tauri host mints `v2.<expiry_ms>.<nonce_hex32>.<mac_hex64>` after a native Cancel-first
+// dialog, where
+//   mac = HMAC-SHA256(key, "llmide-host-approval/v2|<purpose>|<expiry_ms>|<nonce_hex32>")
+// and `key` is the hex-decoded LLMIDE_HOST_APPROVAL_KEY the host passes ONLY to the core it spawned. The purpose of a
+// Bypass approval is `bypass:<chatId>`: the token is BOUND TO ONE CHAT (chatId matches CHAT_ID_RE, so the `|` separator
+// can never be smuggled into the signed text). It carries no user id and no core nonce: the key is per launch and per
+// spawned core, so a token can never work on another core, and it is 60 s and single use.
+//
+// Format v1 (legacy, `v1.<expiry>.<nonce>.<mac>` over "llmide-host-approval/v1|bypass|..."): not bound to a chat. Accepted
+// ONLY when LLMIDE_HOST_APPROVAL_COMPAT=1 (default off) for a host that has not been updated yet.
 //
 // Verifier rules: strict shape, constant-time MAC compare, expiry in (now, now + 60 s + 5 s skew], the nonce is
 // remembered until expiry (single use; a bounded in-memory map that fails closed when full). The key and tokens are
@@ -51,29 +56,42 @@ export function verifyBusHostProof(req, env = process.env) {
   return crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex'));
 }
 
-const TOKEN_RE = /^v1\.(\d{1,15})\.([0-9a-f]{32})\.([0-9a-f]{64})$/;
+const TOKEN_RE = /^(v1|v2)\.(\d{1,15})\.([0-9a-f]{32})\.([0-9a-f]{64})$/;
+/** A chat id a Bypass token can be bound to (the host refuses others). */
+export const CHAT_ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
+export const bypassPurpose = (chatId) => `bypass:${chatId}`;
 
-export function signedPart(purpose, expiry, nonce) {
-  return `llmide-host-approval/v1|${purpose}|${expiry}|${nonce}`;
+export function signedPart(purpose, expiry, nonce, version = 'v2') {
+  return `llmide-host-approval/${version}|${purpose}|${expiry}|${nonce}`;
 }
 
 export function createHostApprovalVerifier({ now = Date.now } = {}) {
   const used = new Map(); // nonce -> expiry
   return {
-    /** True at most once per valid, unexpired token for `purpose`. */
-    verify(token, key, purpose = 'bypass') {
-      if (typeof token !== 'string' || token.length > 200 || !Buffer.isBuffer(key)) return false;
+    /**
+     * True at most once per valid, unexpired token for `purpose` (v2: the full purpose, `bypass:<chatId>`). A v1 token
+     * has no chat binding: it is accepted only with `compat` and only for a `bypass:` purpose (it signed plain `bypass`).
+     */
+    verify(token, key, purpose, { compat = false } = {}) {
+      if (typeof token !== 'string' || token.length > 200 || !Buffer.isBuffer(key) || typeof purpose !== 'string') return false;
       const m = TOKEN_RE.exec(token);
       if (!m) return false;
-      const expiry = Number(m[1]);
+      const version = m[1];
+      let signedPurpose = purpose;
+      if (version === 'v1') {
+        if (!compat || !purpose.startsWith('bypass:')) return false;
+        signedPurpose = 'bypass';
+      } else if (purpose.includes('|')) return false;
+      const expiry = Number(m[2]);
+      const nonce = m[3];
       const t = now();
       if (!Number.isSafeInteger(expiry) || t >= expiry || expiry > t + TOKEN_TTL_MS + CLOCK_SKEW_MS) return false;
-      const want = crypto.createHmac('sha256', key).update(signedPart(purpose, expiry, m[2])).digest();
-      const got = Buffer.from(m[3], 'hex');
+      const want = crypto.createHmac('sha256', key).update(signedPart(signedPurpose, expiry, nonce, version)).digest();
+      const got = Buffer.from(m[4], 'hex');
       if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return false;
       for (const [n, e] of used) if (e <= t) used.delete(n);
-      if (used.has(m[2]) || used.size >= MAX_USED_NONCES) return false;
-      used.set(m[2], expiry);
+      if (used.has(nonce) || used.size >= MAX_USED_NONCES) return false;
+      used.set(nonce, expiry);
       return true;
     },
     _size: () => used.size,
@@ -84,11 +102,11 @@ export function createHostApprovalVerifier({ now = Date.now } = {}) {
 export const hostApprovalVerifier = createHostApprovalVerifier();
 
 /** Verifies the request header against the env key; false when the header is absent or repeated. */
-export function verifyRequestApproval(req, { env = process.env, verifier = hostApprovalVerifier, purpose = 'bypass' } = {}) {
+export function verifyRequestApproval(req, { env = process.env, verifier = hostApprovalVerifier, purpose } = {}) {
   const key = hostApprovalKey(env);
   const h = req.headers?.[HOST_APPROVAL_HEADER];
-  if (!key || typeof h !== 'string') return false;
-  return verifier.verify(h.trim(), key, purpose);
+  if (!key || typeof h !== 'string' || typeof purpose !== 'string') return false;
+  return verifier.verify(h.trim(), key, purpose, { compat: env.LLMIDE_HOST_APPROVAL_COMPAT === '1' });
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -99,8 +117,12 @@ const CAPPED_SURFACES = new Set(['extension', 'phone', 'mobile', 'ios', 'ios-nat
  * extension, a relay bridge), a non-desktop surface, or a non-loopback peer.
  */
 export function bypassForbiddenOrigin(req, agentContext) {
+  // The grant path requires an explicit `x-llmide-client: desktop-ui` (an absent header is not enough) ...
   const declared = req.headers?.['x-llmide-client'];
-  if (declared !== undefined && String(declared).trim().toLowerCase() !== 'desktop-ui') return true;
+  if (typeof declared !== 'string' || declared.trim().toLowerCase() !== 'desktop-ui') return true;
+  // ... and the bus host proof (derived from the approval key; the same proof the command bus requires for desktop-ui),
+  // so a bearer-token holder that merely claims desktop-ui cannot reach Bypass.
+  if (!verifyBusHostProof(req)) return true;
   const surface = typeof agentContext?.surface === 'string' ? agentContext.surface.trim().toLowerCase() : '';
   if (CAPPED_SURFACES.has(surface)) return true;
   const peer = req.socket?.remoteAddress;

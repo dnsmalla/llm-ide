@@ -7,7 +7,8 @@ export const GRANT_TTL_MS = 30 * 60 * 1000;
 export const APPROVAL_HEADER = "x-llmide-host-approval";
 export const BYPASS_NEEDS_APPROVAL_NOTICE = "Bypass needs your approval again. The chat is back on Ask.";
 
-export type SignedConfirm = (summary: string) => Promise<string | null>;
+/** Asks the host for a token bound to `chatId` (format v2, purpose `bypass:<chatId>`); null when the user declined. */
+export type SignedConfirm = (chatId: string, summary: string) => Promise<string | null>;
 
 export interface BypassGate {
   /** Native confirmation for this chat. "approved" means a token is now held for the next turn; a decline changes nothing. */
@@ -31,8 +32,9 @@ export interface BypassGate {
 
 interface Entry { token: string | null; until: number | null }
 
-// The host's token shape; anything else is dropped unseen (a compromised host reply must not reach a header).
-const TOKEN = /^v1\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/;
+// The host's token shape (v2, chat-bound); anything else, v1 included, is dropped unseen (a compromised host reply must
+// not reach a header).
+const TOKEN = /^v2\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/;
 
 export function createBypassGate(o: { confirmSigned: SignedConfirm; now?: () => number }): BypassGate {
   const now = o.now ?? Date.now;
@@ -51,7 +53,7 @@ export function createBypassGate(o: { confirmSigned: SignedConfirm; now?: () => 
     async request(chatId, summary) {
       if (liveEntry(chatId)) return "approved"; // already approved: no second dialog
       let token: string | null = null;
-      try { token = await o.confirmSigned(summary); } catch { token = null; }
+      try { token = await o.confirmSigned(chatId, summary); } catch { token = null; }
       if (typeof token !== "string" || !TOKEN.test(token)) return "declined";
       entries.set(chatId, { token, until: null });
       fire();

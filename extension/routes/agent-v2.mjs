@@ -32,7 +32,7 @@ import {
 } from '../kb/agent-sessions.mjs';
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
-import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants } from '../core/host-approval.mjs';
+import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { createNoticeEffects } from '../llm_agent/sdk/notice-effects.mjs';
@@ -392,7 +392,7 @@ function gateBypassRequest(req, res, userId, body, chatSessionId, agentContext) 
     return false;
   }
   // A fresh token (re)starts the chat's grant; without one, only a live grant carries the turn.
-  const viaToken = verifyRequestApproval(req);
+  const viaToken = CHAT_ID_RE.test(chatSessionId) && verifyRequestApproval(req, { purpose: bypassPurpose(chatSessionId) });
   if (viaToken) bypassGrants.grant(userId, chatSessionId);
   if (!viaToken && !bypassGrants.has(userId, chatSessionId)) {
     audit('agent.bypass_refused', 'denied', { reason: 'host_approval_required' });

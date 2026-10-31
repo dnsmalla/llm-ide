@@ -255,7 +255,7 @@ test("H7: an untrusted core never receives credentials or a token publish", asyn
   assert.equal(calls.length, before);
 });
 
-const APPROVAL = `v1.1900000000001.${"a".repeat(32)}.${"b".repeat(64)}`;
+const APPROVAL = `v2.1900000000001.${"a".repeat(32)}.${"b".repeat(64)}`;
 const sseOk = () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"t":1}\n\n')); c.close(); } }), { headers: { "content-type": "text/event-stream" } });
 
 test("extra headers: only the host-approval header with the host's token shape; everything else is refused unsent", async () => {
@@ -264,7 +264,7 @@ test("extra headers: only the host-approval header with the host's token shape; 
   const sent = calls.length;
   const bad = [
     { Authorization: "Bearer evil" }, { authorization: "x" }, { Cookie: "a=b" }, { Host: "evil" }, { "Content-Type": "text/html" },
-    { "x-llmide-host-approval": "v1.1.2.3" }, { "x-llmide-host-approval": `${APPROVAL}\r\nX: y` }, { "x-llmide-host-approval": 5 },
+    { "x-llmide-host-approval": "v2.1.2.3" }, { "x-llmide-host-approval": APPROVAL.replace("v2.", "v1.") }, { "x-llmide-host-approval": `${APPROVAL}\r\nX: y` }, { "x-llmide-host-approval": 5 },
     { "x-llmide-host-approval": APPROVAL, "x-other": "1" }, { __proto__: null, constructor: APPROVAL },
   ];
   for (const headers of bad) {

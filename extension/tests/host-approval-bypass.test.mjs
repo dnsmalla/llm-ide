@@ -28,49 +28,57 @@ const { redactSecrets } = await import('../core/redact-secrets.mjs');
 
 const KEY_HEX = crypto.randomBytes(32).toString('hex');
 const KEY = Buffer.from(KEY_HEX, 'hex');
-const mint = ({ key = KEY, purpose = 'bypass', now = Date.now(), ttl = 60_000, nonce = crypto.randomBytes(16).toString('hex') } = {}) => {
+const BUS_PROOF = H.busHostProof({ LLMIDE_HOST_APPROVAL_KEY: KEY_HEX });
+const desk = { 'x-llmide-client': 'desktop-ui', [H.BUS_PROOF_HEADER]: BUS_PROOF };
+// v2 is chat-bound (purpose `bypass:<chat>`); v1 is the legacy unbound format (accepted only with LLMIDE_HOST_APPROVAL_COMPAT=1).
+const mint = ({ key = KEY, chat = 'c', purpose, version = 'v2', now = Date.now(), ttl = 60_000, nonce = crypto.randomBytes(16).toString('hex') } = {}) => {
   const expiry = now + ttl;
-  const mac = crypto.createHmac('sha256', key).update(`llmide-host-approval/v1|${purpose}|${expiry}|${nonce}`).digest('hex');
-  return `v1.${expiry}.${nonce}.${mac}`;
+  const p = purpose ?? (version === 'v2' ? `bypass:${chat}` : 'bypass');
+  const mac = crypto.createHmac('sha256', key).update(`llmide-host-approval/${version}|${p}|${expiry}|${nonce}`).digest('hex');
+  return `${version}.${expiry}.${nonce}.${mac}`;
 };
+const P = 'bypass:c';
 
 // ---- verifier (unit) ---------------------------------------------------------------------------------------------
 test('verifier: a valid token passes once, the replay is refused', () => {
   const v = H.createHostApprovalVerifier();
   const t = mint();
-  assert.equal(v.verify(t, KEY), true);
-  assert.equal(v.verify(t, KEY), false);
+  assert.equal(v.verify(t, KEY, P), true);
+  assert.equal(v.verify(t, KEY, P), false);
 });
 
 test('verifier: expired, far-future, wrong key, wrong purpose, tampered and malformed tokens are refused', () => {
   const clock = { t: 1_000_000 };
   const v = H.createHostApprovalVerifier({ now: () => clock.t });
   const at = (o) => mint({ now: clock.t, ...o });
-  assert.equal(v.verify(at({ ttl: -1 }), KEY), false, 'expired');
-  assert.equal(v.verify(at({ ttl: 60_000 + 5_001 }), KEY), false, 'lifetime beyond 60 s + skew');
-  assert.equal(v.verify(at({ ttl: 60_000 + 5_000 }), KEY), true, 'skew tolerated');
-  assert.equal(v.verify(at({ key: crypto.randomBytes(32) }), KEY), false, 'wrong key');
-  assert.equal(v.verify(at({ purpose: 'terminal' }), KEY), false, 'other purpose');
+  assert.equal(v.verify(at({ ttl: -1 }), KEY, P), false, 'expired');
+  assert.equal(v.verify(at({ ttl: 60_000 + 5_001 }), KEY, P), false, 'lifetime beyond 60 s + skew');
+  assert.equal(v.verify(at({ ttl: 60_000 + 5_000 }), KEY, P), true, 'skew tolerated');
+  assert.equal(v.verify(at({ key: crypto.randomBytes(32) }), KEY, P), false, 'wrong key');
+  assert.equal(v.verify(at({ purpose: 'terminal' }), KEY, P), false, 'other purpose');
+  assert.equal(v.verify(at({ chat: 'other-chat' }), KEY, P), false, 'bound to another chat');
+  assert.equal(v.verify(at({}), KEY, 'bypass:c|x'), false, 'a purpose with the separator is never verifiable');
   const good = at({});
   const [ver, exp, nonce, mac] = good.split('.');
-  assert.equal(v.verify([ver, Number(exp) + 1, nonce, mac].join('.'), KEY), false, 'expiry tampered');
-  assert.equal(v.verify([ver, exp, '0'.repeat(32), mac].join('.'), KEY), false, 'nonce tampered');
-  assert.equal(v.verify([ver, exp, nonce, mac.replace(/.$/, mac.endsWith('0') ? '1' : '0')].join('.'), KEY), false, 'mac tampered');
-  for (const bad of ['', 'v1', `v2.${exp}.${nonce}.${mac}`, `${good}.x`, good.toUpperCase(), undefined, null, 42, 'x'.repeat(5000)]) {
-    assert.equal(v.verify(bad, KEY), false, `malformed ${String(bad).slice(0, 12)}`);
+  assert.equal(v.verify([ver, Number(exp) + 1, nonce, mac].join('.'), KEY, P), false, 'expiry tampered');
+  assert.equal(v.verify([ver, exp, '0'.repeat(32), mac].join('.'), KEY, P), false, 'nonce tampered');
+  assert.equal(v.verify([ver, exp, nonce, mac.replace(/.$/, mac.endsWith('0') ? '1' : '0')].join('.'), KEY, P), false, 'mac tampered');
+  for (const bad of ['', 'v2', `v3.${exp}.${nonce}.${mac}`, `${good}.x`, good.toUpperCase(), undefined, null, 42, 'x'.repeat(5000)]) {
+    assert.equal(v.verify(bad, KEY, P), false, `malformed ${String(bad).slice(0, 12)}`);
   }
-  assert.equal(v.verify(good, null), false, 'no key');
-  assert.equal(v.verify(good, KEY), true, 'the untampered token still works (failed attempts burn nothing)');
+  assert.equal(v.verify(good, null, P), false, 'no key');
+  assert.equal(v.verify(good), false, 'no purpose');
+  assert.equal(v.verify(good, KEY, P), true, 'the untampered token still works (failed attempts burn nothing)');
 });
 
 test('verifier: used nonces are pruned at expiry and the set is bounded (fails closed when full)', () => {
   const clock = { t: 5_000_000 };
   const v = H.createHostApprovalVerifier({ now: () => clock.t });
-  for (let i = 0; i < H.MAX_USED_NONCES; i++) assert.equal(v.verify(mint({ now: clock.t }), KEY), true);
+  for (let i = 0; i < H.MAX_USED_NONCES; i++) assert.equal(v.verify(mint({ now: clock.t }), KEY, P), true);
   assert.equal(v._size(), H.MAX_USED_NONCES);
-  assert.equal(v.verify(mint({ now: clock.t }), KEY), false, 'full: refused, never evicts a live nonce');
+  assert.equal(v.verify(mint({ now: clock.t }), KEY, P), false, 'full: refused, never evicts a live nonce');
   clock.t += 61_000;
-  assert.equal(v.verify(mint({ now: clock.t }), KEY), true, 'expired entries pruned');
+  assert.equal(v.verify(mint({ now: clock.t }), KEY, P), true, 'expired entries pruned');
   assert.equal(v._size(), 1);
 });
 
@@ -81,7 +89,30 @@ test('key parsing: only 64 hex characters, anything else verifies nothing', () =
   assert.equal(H.hostApprovalKey({ LLMIDE_HOST_APPROVAL_KEY: 'zz' }), null);
   assert.deepEqual(H.hostApprovalKey({ LLMIDE_HOST_APPROVAL_KEY: KEY_HEX }), KEY);
   const t = mint();
-  assert.equal(H.verifyRequestApproval({ headers: { [H.HOST_APPROVAL_HEADER]: t } }, { env: { LLMIDE_HOST_APPROVAL_KEY: 'zz' }, verifier: H.createHostApprovalVerifier() }), false);
+  assert.equal(H.verifyRequestApproval({ headers: { [H.HOST_APPROVAL_HEADER]: t } }, { env: { LLMIDE_HOST_APPROVAL_KEY: 'zz' }, verifier: H.createHostApprovalVerifier(), purpose: P }), false);
+});
+
+test('verifier: a v1 token is refused by default and accepted only with the compat switch (and still only once, for a bypass purpose)', () => {
+  const v1 = () => mint({ version: 'v1' });
+  const req = (t) => ({ headers: { [H.HOST_APPROVAL_HEADER]: t } });
+  const env = (compat) => ({ LLMIDE_HOST_APPROVAL_KEY: KEY_HEX, ...(compat ? { LLMIDE_HOST_APPROVAL_COMPAT: '1' } : {}) });
+  assert.equal(H.verifyRequestApproval(req(v1()), { env: env(false), verifier: H.createHostApprovalVerifier(), purpose: P }), false);
+  const verifier = H.createHostApprovalVerifier();
+  const t = v1();
+  assert.equal(H.verifyRequestApproval(req(t), { env: env(true), verifier, purpose: P }), true);
+  assert.equal(H.verifyRequestApproval(req(t), { env: env(true), verifier, purpose: P }), false, 'single use');
+  assert.equal(H.verifyRequestApproval(req(v1()), { env: env(true), verifier, purpose: 'terminal' }), false, 'not a bypass purpose');
+  assert.equal(H.verifyRequestApproval(req(mint()), { env: env(false), verifier: H.createHostApprovalVerifier() }), false, 'no purpose given');
+});
+
+test('verifier: a v2 token minted for chat A is refused for chat B and works for chat A once', () => {
+  const t = mint({ chat: 'chat-A' });
+  const verifier = H.createHostApprovalVerifier();
+  const env = { LLMIDE_HOST_APPROVAL_KEY: KEY_HEX };
+  const req = { headers: { [H.HOST_APPROVAL_HEADER]: t } };
+  assert.equal(H.verifyRequestApproval(req, { env, verifier, purpose: H.bypassPurpose('chat-B') }), false);
+  assert.equal(H.verifyRequestApproval(req, { env, verifier, purpose: H.bypassPurpose('chat-A') }), true);
+  assert.equal(H.verifyRequestApproval(req, { env, verifier, purpose: H.bypassPurpose('chat-A') }), false);
 });
 
 // ---- route (table driven) ----------------------------------------------------------------------------------------
@@ -103,14 +134,18 @@ function makeRes() {
 }
 let n = 0;
 const user = registerUser(getDb(), { email: 'host-approval@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-async function stream({ chat, who = user, permissionMode, headers, surface, remoteAddress, env = { LLMIDE_HOST_APPROVAL_KEY: KEY_HEX }, extra = {} }) {
+async function stream({ chat: chatIn, who = user, permissionMode, headers: headersIn, token, desktop = true, surface, remoteAddress, env = { LLMIDE_HOST_APPROVAL_KEY: KEY_HEX }, extra = {} }) {
+  const chat = chatIn || `chat-ha-${++n}`;
+  // token: a mint function of the chat id, a string, or undefined; desktop adds the desktop-ui class + bus host proof
+  const tok = typeof token === 'function' ? token(chat) : token;
+  const headers = { ...(desktop ? desk : {}), ...(tok ? { [H.HOST_APPROVAL_HEADER]: tok } : {}), ...(headersIn || {}) };
   const saved = process.env.LLMIDE_HOST_APPROVAL_KEY;
   if (env?.LLMIDE_HOST_APPROVAL_KEY) process.env.LLMIDE_HOST_APPROVAL_KEY = env.LLMIDE_HOST_APPROVAL_KEY; else delete process.env.LLMIDE_HOST_APPROVAL_KEY;
   try {
     let seen = null;
     const res = makeRes();
     const body = { message: 'go', mode: 'execute', ...(permissionMode === undefined ? {} : { permissionMode }), ...extra,
-      agentContext: { chatSessionId: chat || `chat-ha-${++n}`, workspaceRoot: WS, ...(surface ? { surface } : {}) } };
+      agentContext: { chatSessionId: chat, workspaceRoot: WS, ...(surface ? { surface } : {}) } };
     await handleAgentV2Routes(makeReq({ body, user: who, headers, remoteAddress }), res, {
       runTurn: async (args) => { seen = args; return { result: { subtype: 'success' }, usageTotals: {} }; },
     });
@@ -120,31 +155,33 @@ async function stream({ chat, who = user, permissionMode, headers, surface, remo
   }
 }
 const auditRows = (action) => getDb().prepare('SELECT * FROM audit_log WHERE action = ? ORDER BY id').all(action);
-const hdr = (t) => ({ [H.HOST_APPROVAL_HEADER]: t });
 
 const REFUSED = [
-  ['header missing', () => ({})],
-  ['empty header', () => hdr('')],
-  ['expired', () => hdr(mint({ ttl: -1 }))],
-  ['wrong key', () => hdr(mint({ key: crypto.randomBytes(32) }))],
-  ['tampered payload', () => { const [a, e, nn, m] = mint().split('.'); return hdr([a, Number(e) + 1, nn, m].join('.')); }],
-  ['other purpose', () => hdr(mint({ purpose: 'terminal' }))],
-  ['garbage', () => hdr('not-a-token')],
+  ['header missing', () => undefined],
+  ['empty header', () => ''],
+  ['expired', (chat) => mint({ chat, ttl: -1 })],
+  ['wrong key', (chat) => mint({ chat, key: crypto.randomBytes(32) })],
+  ['tampered payload', (chat) => { const [a, e, nn, m] = mint({ chat }).split('.'); return [a, Number(e) + 1, nn, m].join('.'); }],
+  ['other purpose', (chat) => mint({ chat, purpose: 'terminal' })],
+  ['minted for another chat (v2 is chat-bound)', () => mint({ chat: 'some-other-chat' })],
+  ['legacy v1 (compat is off by default)', () => mint({ version: 'v1' })],
+  ['garbage', () => 'not-a-token'],
 ];
 for (const [name, mk] of REFUSED) {
   test(`stream bypass with host key: ${name} is refused 403 HOST_APPROVAL_REQUIRED before any turn`, async () => {
-    const r = await stream({ permissionMode: 'bypass', headers: mk() });
+    const r = await stream({ permissionMode: 'bypass', token: mk });
     assert.equal(r.res.statusCode, 403);
     assert.equal(r.res.json().error.code, 'HOST_APPROVAL_REQUIRED');
     assert.equal(r.ran, false);
-    assert.ok(!r.res._body.includes('v1.'), 'no token echoed');
+    assert.ok(!/v[12]\./.test(r.res._body), 'no token echoed');
   });
 }
 
-test('stream bypass with host key: a valid token runs the turn as bypass once, audited approvedBy host; the replay is refused', async () => {
-  const t = mint();
+test('stream bypass with host key: a valid chat-bound token runs the turn as bypass once, audited approvedBy host; the replay is refused', async () => {
+  const chat = 'chat-once';
+  const t = mint({ chat });
   const before = auditRows('agent.bypass_turn').length;
-  const ok = await stream({ permissionMode: 'bypass', headers: hdr(t) });
+  const ok = await stream({ chat, permissionMode: 'bypass', token: t });
   assert.equal(ok.res.statusCode, 200);
   assert.equal(ok.permissionMode, 'bypass');
   const rows = auditRows('agent.bypass_turn');
@@ -155,10 +192,18 @@ test('stream bypass with host key: a valid token runs the turn as bypass once, a
   assert.equal(String(last.user_id), String(user.id));
   assert.deepEqual(JSON.parse(last.detail), { approvedBy: 'host', via: 'token' });
   assert.ok(!JSON.stringify(last).includes(t), 'the token is never in the audit row');
-  const replay = await stream({ permissionMode: 'bypass', headers: hdr(t) });
+  const replay = await stream({ chat: 'chat-once-2', permissionMode: 'bypass', token: t });
   assert.equal(replay.res.statusCode, 403);
   assert.equal(replay.ran, false);
   assert.ok(auditRows('agent.bypass_refused').length >= 1);
+});
+
+test('stream bypass: a legacy v1 token works only with LLMIDE_HOST_APPROVAL_COMPAT=1', async () => {
+  process.env.LLMIDE_HOST_APPROVAL_COMPAT = '1';
+  try {
+    const r = await stream({ chat: 'chat-compat', permissionMode: 'bypass', token: mint({ version: 'v1' }) });
+    assert.equal(r.permissionMode, 'bypass');
+  } finally { delete process.env.LLMIDE_HOST_APPROVAL_COMPAT; }
 });
 
 test('stream bypass with host key: phone, extension, relay and remote origins are capped at Ask even with a valid token', async () => {
@@ -170,19 +215,25 @@ test('stream bypass with host key: phone, extension, relay and remote origins ar
     ['extension surface', { surface: 'extension' }],
     ['phone surface', { surface: 'phone' }],
     ['remote peer', { remoteAddress: '203.0.113.9' }],
+    // M2: no client header at all, or desktop-ui WITHOUT the host proof, is not the desktop
+    ['no x-llmide-client header', { desktop: false, headers: { [H.BUS_PROOF_HEADER]: BUS_PROOF } }],
+    ['desktop-ui without the host proof', { desktop: false, headers: { 'x-llmide-client': 'desktop-ui' } }],
+    ['desktop-ui with a wrong proof', { desktop: false, headers: { 'x-llmide-client': 'desktop-ui', [H.BUS_PROOF_HEADER]: 'ab'.repeat(32) } }],
+    ['desktop-ui with the /health nonce as proof', { desktop: false, headers: { 'x-llmide-client': 'desktop-ui', [H.BUS_PROOF_HEADER]: 'ef'.repeat(24) } }],
   ];
   for (const [name, o] of cases) {
-    const t = mint();
-    const r = await stream({ permissionMode: 'bypass', ...o, headers: { ...(o.headers || {}), ...hdr(t) } });
+    const chat = `chat-cap-${++n}`;
+    const t = mint({ chat });
+    const r = await stream({ chat, permissionMode: 'bypass', ...o, token: t });
     assert.equal(r.res.statusCode, 200, name);
     assert.equal(r.permissionMode, 'ask', name);
     // the token was not spent by a capped request
-    const again = H.createHostApprovalVerifier().verify(t, KEY);
-    assert.equal(again, true, `${name}: token untouched`);
+    assert.equal(H.createHostApprovalVerifier().verify(t, KEY, H.bypassPurpose(chat)), true, `${name}: token untouched`);
   }
   assert.ok(auditRows('agent.bypass_capped').length >= cases.length);
-  const desktop = await stream({ permissionMode: 'bypass', headers: { 'x-llmide-client': 'desktop-ui', ...hdr(mint()) }, remoteAddress: '127.0.0.1' });
-  assert.equal(desktop.permissionMode, 'bypass', 'a declared desktop-ui on loopback with a token is the allowed path');
+  const chat = 'chat-desktop-ok';
+  const desktop = await stream({ chat, permissionMode: 'bypass', token: mint({ chat }), remoteAddress: '127.0.0.1' });
+  assert.equal(desktop.permissionMode, 'bypass', 'desktop-ui + host proof on loopback with a chat-bound token is the allowed path');
 });
 
 test('stream with host key: non-bypass modes need no token and pass through unchanged', async () => {
@@ -195,9 +246,9 @@ test('stream with host key: non-bypass modes need no token and pass through unch
 });
 
 test('legacy: with LLMIDE_HOST_APPROVAL_KEY unset bypass behaves exactly as before, header ignored', async () => {
-  const plain = await stream({ permissionMode: 'bypass', env: null });
-  const withHdr = await stream({ permissionMode: 'bypass', env: null, headers: hdr('garbage') });
-  const withCap = await stream({ permissionMode: 'bypass', env: null, headers: { 'x-llmide-client': 'ios-native' }, remoteAddress: '203.0.113.9' });
+  const plain = await stream({ permissionMode: 'bypass', env: null, desktop: false });
+  const withHdr = await stream({ permissionMode: 'bypass', env: null, desktop: false, headers: { [H.HOST_APPROVAL_HEADER]: 'garbage' } });
+  const withCap = await stream({ permissionMode: 'bypass', env: null, desktop: false, headers: { 'x-llmide-client': 'ios-native' }, remoteAddress: '203.0.113.9' });
   for (const r of [plain, withHdr, withCap]) {
     assert.equal(r.res.statusCode, 200);
     assert.equal(r.permissionMode, 'bypass');
@@ -209,9 +260,9 @@ test('legacy: with LLMIDE_HOST_APPROVAL_KEY unset bypass behaves exactly as befo
 });
 
 test('malformed key: the host is assumed present and every bypass fails closed', async () => {
-  const r = await stream({ permissionMode: 'bypass', env: { LLMIDE_HOST_APPROVAL_KEY: 'not-hex' }, headers: hdr(mint()) });
-  assert.equal(r.res.statusCode, 403);
-  assert.equal(r.ran, false);
+  const r = await stream({ permissionMode: 'bypass', env: { LLMIDE_HOST_APPROVAL_KEY: 'not-hex' }, token: (chat) => mint({ chat }) });
+  assert.ok(r.permissionMode !== 'bypass');
+  assert.equal(r.res.statusCode === 403 || r.permissionMode === 'ask', true);
 });
 
 // ---- entry points ------------------------------------------------------------------------------------------------
@@ -269,7 +320,7 @@ test('redaction: the header, the key and a token in free text never survive reda
 // ---- per-chat grant (a token per Bypass enable, not per message) ---------------------------------------------------
 test('grant: a valid token enables Bypass for that chat only; other chats, other users, a mode switch and expiry end it', async () => {
   const other = registerUser(getDb(), { email: 'host-approval-2@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-  const first = await stream({ chat: 'chat-grant-1', permissionMode: 'bypass', headers: hdr(mint()) });
+  const first = await stream({ chat: 'chat-grant-1', permissionMode: 'bypass', token: (c) => mint({ chat: c }) });
   assert.equal(first.permissionMode, 'bypass');
   const second = await stream({ chat: 'chat-grant-1', permissionMode: 'bypass' });
   assert.equal(second.permissionMode, 'bypass', 'next message of the same chat needs no new token');
@@ -290,7 +341,9 @@ test('grant: a valid token enables Bypass for that chat only; other chats, other
 });
 
 test('grant: a capped origin never gains or uses Bypass through a grant', async () => {
-  await stream({ chat: 'chat-grant-3', permissionMode: 'bypass', headers: hdr(mint()) });
-  const phone = await stream({ chat: 'chat-grant-3', permissionMode: 'bypass', headers: { 'x-llmide-client': 'ios-native' } });
+  await stream({ chat: 'chat-grant-3', permissionMode: 'bypass', token: (c) => mint({ chat: c }) });
+  const phone = await stream({ chat: 'chat-grant-3', permissionMode: 'bypass', desktop: false, headers: { 'x-llmide-client': 'ios-native' } });
   assert.equal(phone.permissionMode, 'ask');
+  const noProof = await stream({ chat: 'chat-grant-3', permissionMode: 'bypass', desktop: false, headers: { 'x-llmide-client': 'desktop-ui' } });
+  assert.equal(noProof.permissionMode, 'ask', 'a live grant is not usable without the host proof');
 });

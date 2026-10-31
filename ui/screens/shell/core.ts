@@ -66,11 +66,11 @@ export function isLoopbackUrl(url: string): boolean {
 /**
  * Extra per-call headers a caller may add. Everything else (Authorization, Content-Type, Host...) is refused,
  * so no screen can use `headers` to smuggle credentials or change routing. The Bypass approval token is the only entry:
- * it must have the host's exact shape (`v1.<expiry_ms>.<nonce hex32>.<mac hex64>`) and only ever goes to a core the
+ * it must have the host's exact shape (`v2.<expiry_ms>.<nonce hex32>.<mac hex64>`) and only ever goes to a core the
  * trust gate allows (a spawned or user-confirmed one).
  */
 export const EXTRA_HEADER_ALLOWLIST: Readonly<Record<string, RegExp>> = Object.freeze({
-  "x-llmide-host-approval": /^v1\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/,
+  "x-llmide-host-approval": /^v2\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/,
   // Command-bus host proof (`host_bus_proof`, 64 hex) and the class it vouches for. Normally attached by the client itself
   // (`hostProof` option); a caller passing them must use the exact shape, and they only go to a trusted core.
   "x-llmide-host-nonce": /^[0-9a-f]{64}$/,
