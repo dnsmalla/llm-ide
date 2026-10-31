@@ -2,6 +2,7 @@
 // turn runs, queue while streaming. File attachments need a host dialog command (the page never supplies a
 // path): `onAttach` is optional and the button is hidden without it.
 import { useRef } from "react";
+import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
 
 export interface ComposerProps {
@@ -37,6 +38,9 @@ export function nextRecall(history: readonly string[], cursor: number | null, di
 
 export function Composer(p: ComposerProps) {
   const recall = useRef<number | null>(null);
+  const ime = useRef<ImeGuard | null>(null);
+  if (!ime.current) ime.current = new ImeGuard();
+  const guard = ime.current;
   const tooLong = p.draft.length > MAX_MESSAGE_CHARS;
   const blocked = p.extras?.blockedReason ?? null;
   const canSend = p.draft.trim().length > 0 && !tooLong && !p.disabledReason && !blocked;
@@ -63,9 +67,12 @@ export function Composer(p: ComposerProps) {
         {...p.extras?.textareaProps}
         className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : "Message"}
         onChange={(e) => p.onDraft(e.target.value)}
+        onCompositionStart={guard.onCompositionStart} onCompositionEnd={guard.onCompositionEnd}
         onKeyDown={(e) => {
+          // Keys that belong to the input method (commit/cancel a conversion) do nothing here: no send, no menu pick, no Stop.
+          if (guard.isIme(e)) return;
           if (p.extras?.onKeyDown(e)) return;
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           else if (e.key === "Escape" && p.busy) { e.preventDefault(); p.onStop(); }
           else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && (p.draft === "" || recall.current !== null)) {
             const r = nextRecall(p.history, recall.current, e.key === "ArrowUp" ? "up" : "down");

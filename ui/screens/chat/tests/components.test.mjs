@@ -174,3 +174,22 @@ test("source rules: no dangerouslySetInnerHTML, innerHTML, eval, <img>, remote U
     }
   }
 });
+
+test("IME: the committing Enter after compositionend (keyCode 229, isComposing false) is not a send; Escape does not stop during composition", () => {
+  let now = 1000;
+  const g = new c.ImeGuard(() => now);
+  const enter = { key: "Enter", keyCode: 13, nativeEvent: { isComposing: false, keyCode: 13 } };
+  assert.equal(g.isIme(enter), false, "a plain Enter is a send");
+  // typing a conversion: keydowns during composition
+  g.onCompositionStart();
+  assert.equal(g.isIme({ key: "Process", keyCode: 229, nativeEvent: { isComposing: true } }), true);
+  assert.equal(g.isIme({ key: "Escape", keyCode: 27, nativeEvent: { isComposing: false } }), true, "Escape cancels the conversion, it does not stop the turn");
+  // WKWebView: compositionend first, then the committing Enter keydown
+  now += 5; g.onCompositionEnd();
+  now += 3;
+  assert.equal(g.isIme({ key: "Enter", keyCode: 229, nativeEvent: { isComposing: false, keyCode: 229 } }), true, "keyCode 229");
+  assert.equal(g.isIme(enter), true, "even reported as 13, it is inside the commit window");
+  now += 500;
+  assert.equal(g.isIme(enter), false, "a later, deliberate Enter sends");
+  assert.equal(g.isIme({ key: "Enter", keyCode: 13, nativeEvent: { isComposing: true } }), true, "Chrome isComposing");
+});

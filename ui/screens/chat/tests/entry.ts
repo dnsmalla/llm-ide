@@ -16,6 +16,7 @@ export * from "../Pickers";
 export * from "../ChatScreen";
 export * as approvals from "../approvals";
 export * from "../slash/sanitize";
+export * from "../ime";
 export * from "../slash/builtins";
 export * from "../slash/rank";
 export * from "../slash/trigger";
