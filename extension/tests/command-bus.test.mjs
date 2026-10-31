@@ -847,3 +847,43 @@ test('M5: one user cannot occupy every slot: the per-user concurrent limit leave
     busRef = bus; bus.start();
   }
 });
+
+// ---- L1: size caps are in BYTES, not UTF-16 units ----
+
+test('L1: capResult keeps the serialized result under maxResultBytes for multibyte and escape-heavy text', async () => {
+  const { capResult } = await import('../routes/bus/executor.mjs');
+  const max = REGISTRY.limits.maxResultBytes;
+  for (const ch of ['日', '😀', '"', '\n', 'a']) {
+    const r = capResult({ focus: 'code', engine: 'x', text: ch.repeat(max), truncated: false });
+    const bytes = Buffer.byteLength(JSON.stringify(r), 'utf8');
+    assert.ok(bytes <= max, `${JSON.stringify(ch)}: ${bytes} > ${max}`);
+    assert.equal(r.truncated, true);
+    assert.ok(!r.text.includes('�'), 'no split character');
+  }
+  const small = capResult({ text: '日本語', truncated: false });
+  assert.equal(small.text, '日本語');
+  assert.notEqual(small.truncated, true);
+});
+
+test('L1: engine text is capped at MAX_ENGINE_TEXT BYTES (100k three-byte characters are 300 KB)', async () => {
+  const text = '日'.repeat(100_000); // 100000 chars < 262144 chars, but 300000 bytes
+  const r = await engines.runTask({ userId: A, engine: { provider: 'custom:cat-x' }, prompt: 'p', cwd: REPO, deps: { completeViaAdapter: async () => text } });
+  assert.ok(Buffer.byteLength(r.text, 'utf8') <= engines.MAX_ENGINE_TEXT);
+  assert.equal(r.truncated, true);
+  assert.ok(!r.text.includes('�'));
+});
+
+test('L1: chunk events carry the whole text in valid UTF-8 pieces', async () => {
+  await reset();
+  control.text = '日本語です。'.repeat(9000); // ~162 KB of multibyte text
+  try {
+    const r = await call('POST', '/bus/commands', cmd());
+    const id = r.body.command.id;
+    await until(async () => (await call('GET', `/bus/commands/${id}`)).body.command.state === 'succeeded');
+    const ev = await sse(`/bus/commands/${id}/events`);
+    const got = ev.events.filter((e) => e.type === 'chunk').map((e) => e.payload.text).join('');
+    const result = (await call('GET', `/bus/commands/${id}`)).body.command.result.text;
+    assert.equal(got, result, 'the chunks add up to the result text');
+    for (const e of ev.events.filter((x) => x.type === 'chunk')) assert.ok(Buffer.byteLength(JSON.stringify(e.payload), 'utf8') <= 16 * 1024);
+  } finally { control.text = 'Finding: none\nNo findings.'; }
+});

@@ -16,6 +16,7 @@ import { redactValue } from '../../kb/bus-store.mjs';
 import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { validate } from './schema-validate.mjs';
 import { runReview } from './review.mjs';
+import { truncateUtf8, chunkUtf8 } from './bytes.mjs';
 import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 
 export const busEnabled = () => String(process.env.LLMIDE_BUS || '').toLowerCase() !== 'off';
@@ -45,12 +46,22 @@ export function eventResult(result) {
   return out;
 }
 
-function capResult(result) {
+/** The whole serialized result stays within maxResultBytes (bytes, JSON escapes included); only `text` is cut. */
+export function capResult(result) {
   const r = redactValue(result);
   const max = LIMITS.maxResultBytes;
-  if (Buffer.byteLength(JSON.stringify(r), 'utf8') > max && typeof r.text === 'string') {
-    r.text = r.text.slice(0, Math.max(0, max - 2048));
+  const size = () => Buffer.byteLength(JSON.stringify(r), 'utf8');
+  if (size() > max && typeof r.text === 'string') {
     r.truncated = true;
+    const full = r.text;
+    // Binary search the longest text prefix (in UTF-8 bytes) whose serialized result fits.
+    let lo = 0; let hi = Buffer.byteLength(full, 'utf8');
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      r.text = truncateUtf8(full, mid);
+      if (size() <= max) lo = mid; else hi = mid - 1;
+    }
+    r.text = truncateUtf8(full, lo);
   }
   return r;
 }
@@ -112,7 +123,7 @@ export function createBus({
       else fail('kind_not_available');
       if (signal.aborted) return undefined;
       result = capResult(result);
-      for (let i = 0, text = result.text || ''; i < text.length && i < 40 * 8000; i += 8000) emit('chunk', { text: text.slice(i, i + 8000) });
+      for (const piece of chunkUtf8(result.text || '', 8000, 40)) emit('chunk', { text: piece });
       return result;
     } catch (e) {
       const code = codeOf(e);

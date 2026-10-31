@@ -24,6 +24,7 @@
 //     CLI's own login only, once they are enabled.
 //   - a missing login or key is a typed error (engine_not_logged_in, engine_no_key), never a silent fallback to another engine.
 import crypto from 'node:crypto';
+import { truncateUtf8 } from './bytes.mjs';
 import { redactSecrets } from '../../core/redact-secrets.mjs';
 import {
   cliInvocation, providerApiKey, minimalCliEnv,
@@ -59,7 +60,7 @@ const AUTH_HINT = /(not logged in|log ?in|authenticat|unauthori[sz]ed|credential
 
 const capText = (t) => {
   const s = redactSecrets(String(t ?? ''));
-  return Buffer.byteLength(s, 'utf8') > MAX_ENGINE_TEXT ? { text: s.slice(0, MAX_ENGINE_TEXT), truncated: true } : { text: s, truncated: false };
+  return Buffer.byteLength(s, 'utf8') > MAX_ENGINE_TEXT ? { text: truncateUtf8(s, MAX_ENGINE_TEXT), truncated: true } : { text: s, truncated: false };
 };
 
 /** `git status` signature of a checkout, or null when cwd is not one. Never writes (no optional locks). */
