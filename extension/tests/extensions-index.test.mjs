@@ -155,3 +155,28 @@ test('unknown source and a corrupt cache file', async () => {
   assert.ok(r.results.every((x) => x.error === 'state_unreadable'), 'a corrupt cache is never overwritten');
   assert.equal(fs.readFileSync(idx.indexFilePath(), 'utf8'), '{nope');
 });
+
+test('M2: one user disconnecting never fails or throttles the shared refresh other users get; user force is self-throttled', async () => {
+  fs.rmSync(idx.indexFilePath(), { force: true });
+  const now = Date.parse('2027-06-01T00:00:00Z');
+  let release; const gate = new Promise((r) => { release = r; });
+  let hits = 0;
+  const f = async (u) => { hits += 1; await gate; return new Response(JSON.stringify(REGISTRY), { status: 200 }); };
+  const acA = new AbortController();
+  const a = idx.refreshIndexes({ userId: 'A', sourceId: 'mcp-registry', signal: acA.signal, fetch: f, now });
+  const b = idx.refreshIndexes({ userId: 'B', sourceId: 'mcp-registry', fetch: f, now });
+  acA.abort();
+  await assert.rejects(a, (e) => e.name === 'AbortError');
+  release();
+  const rb = await b;
+  assert.deepEqual([rb.results[0].status, rb.results[0].count], ['refreshed', 2], 'B is unaffected by A leaving');
+  assert.equal(hits, 1, 'one shared fetch');
+  assert.equal(idx.sourceStatuses(now).find((s) => s.id === 'mcp-registry').error, undefined, 'no poisoned error record');
+  // force: honoured once per user per window, then a plain refresh (fresh)
+  const f2 = fixtureFetch({ [REG]: () => new Response(JSON.stringify(REGISTRY), { status: 200 }) });
+  const later = now + 10 * 60 * 1000;
+  assert.equal((await idx.refreshIndexes({ userId: 'A', force: true, sourceId: 'mcp-registry', fetch: f2, now: later })).results[0].status, 'refreshed');
+  const again = await idx.refreshIndexes({ userId: 'A', force: true, sourceId: 'mcp-registry', fetch: f2, now: later + 2 * 60 * 1000 });
+  assert.equal(again.results[0].status, 'fresh', 'a second force inside the window is just a normal (cached) refresh');
+  assert.equal(f2.calls.length, 1);
+});

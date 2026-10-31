@@ -34,6 +34,10 @@ import { catalogEnabled } from './flags.mjs';
 export const REGISTRY_HOST = 'registry.modelcontextprotocol.io';
 export const INDEX_TTL_MS = 6 * 60 * 60 * 1000;
 export const REFRESH_THROTTLE_MS = 60 * 1000;
+// A shared fetch is server-owned: it never rides one user's request signal, and has its own deadline.
+export const REFRESH_TIMEOUT_MS = 90 * 1000;
+// A user's `force` is honoured at most this often per source; more often it is treated as a plain refresh.
+export const FORCE_PER_USER_MS = 5 * 60 * 1000;
 export const LIMITS = Object.freeze({ entriesPerSource: 1500, name: 120, description: 300, registryPages: 3, registryBytes: 2 * 1024 * 1024 });
 
 /** @type {ReadonlyArray<{ id: string, title: string, kind: string, repo?: string, dir?: string }>} */
@@ -171,11 +175,12 @@ async function fetchSource(src, f, signal, known) {
 const inflight = new Map();
 const errorCode = (err) => {
   if (err?.code === 'SSRF_BLOCKED') return 'blocked';
-  if (err?.name === 'AbortError') return 'aborted';
+  if (err?.name === 'AbortError') return 'timeout';
   return typeof err?.code === 'string' && /^[a-z_]{3,30}$/.test(err.code) ? err.code : 'upstream';
 };
 
 async function refreshOne(src, { force, fetch: f, signal, now }) {
+  // `signal` here is the SERVER's (timeout) signal, never a requesting user's.
   const cache = readCache();
   if (cache.corrupt) return { id: src.id, status: 'error', error: 'state_unreadable' };
   const known = cache.sources[src.id];
@@ -196,19 +201,46 @@ async function refreshOne(src, { force, fetch: f, signal, now }) {
   return record.error ? { id: src.id, status: 'error', error: record.error, count: record.entries?.length ?? 0 } : { id: src.id, status: 'refreshed', count: record.entries.length };
 }
 
+const forcedAt = new Map();
+
+/** Resolve with `p`, or reject with an AbortError for THIS caller only when `signal` aborts. The shared work goes on. */
+function raceAbort(p, signal) {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then((v) => { signal.removeEventListener('abort', onAbort); resolve(v); }, (e) => { signal.removeEventListener('abort', onAbort); reject(e); });
+  });
+}
+
 /**
  * Refresh one or all index sources (user-initiated). Per-source isolation:
  * every source gets a result, a failure keeps the previous entries.
+ * The fetch is shared and SERVER-owned (own timeout): a caller's `signal` only stops that caller waiting, so one
+ * client disconnecting never fails, poisons or throttles the result other users get. `force` from a user
+ * (`userId` given) is honoured at most once per FORCE_PER_USER_MS per source.
  */
-export async function refreshIndexes({ sourceId, force = false, fetch: fetchImpl, signal, now = Date.now() } = {}) {
+export async function refreshIndexes({ sourceId, force = false, userId, fetch: fetchImpl, signal, now = Date.now() } = {}) {
   if (!catalogEnabled()) { const e = new Error('the extensions catalog is switched off'); e.code = 'catalog_disabled'; throw e; }
   const list = sourceId ? SEED_SOURCES.filter((s) => s.id === sourceId) : SEED_SOURCES;
   if (sourceId && !list.length) { const e = new Error('unknown index source'); e.code = 'not_found'; throw e; }
   const f = fetchImpl ?? makePinnedFetch({ allowPrivate: false });
   const results = [];
   for (const src of list) {
-    if (!inflight.has(src.id)) inflight.set(src.id, refreshOne(src, { force, fetch: f, signal, now }).finally(() => inflight.delete(src.id)));
-    results.push(await inflight.get(src.id));
+    let doForce = force === true;
+    if (doForce && userId) {
+      const k = `${userId}\u0000${src.id}`;
+      if (now - (forcedAt.get(k) ?? -Infinity) < FORCE_PER_USER_MS) doForce = false;
+      else { forcedAt.set(k, now); if (forcedAt.size > 5000) forcedAt.delete(forcedAt.keys().next().value); }
+    }
+    if (!inflight.has(src.id)) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
+      timer.unref?.();
+      inflight.set(src.id, refreshOne(src, { force: doForce, fetch: f, signal: ac.signal, now }).finally(() => { clearTimeout(timer); inflight.delete(src.id); }));
+    }
+    results.push(await raceAbort(inflight.get(src.id), signal));
   }
   return { results };
 }

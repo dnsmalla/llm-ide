@@ -168,7 +168,7 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
         send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'source must be a string and force a boolean' } }); return;
       }
       const ac = abortOnClose(req, res);
-      try { send(res, 200, await refreshIndexes({ sourceId: body.source, force: body.force === true, signal: ac.signal })); }
+      try { send(res, 200, await refreshIndexes({ sourceId: body.source, force: body.force === true, userId, signal: ac.signal })); }
       catch (err) {
         if (err?.code === 'not_found') throw new InstallError('not_found', 'unknown index source');
         if (err?.code === 'catalog_disabled') throw new InstallError('catalog_disabled', 'the extensions catalog is switched off');
