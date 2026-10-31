@@ -33,14 +33,14 @@ function Row({ index, message, host, measure }: { index: number; message: Messag
   return <div ref={ref} role="listitem" className="chat-row"><MessageView m={message} host={host} /></div>;
 }
 
-export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScrollTop, onScrollState, onOpenLink, onCopy, empty }: Props) {
+export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScrollTop, onScrollState, onOpenLink, onCopy, files, empty }: Props) {
   const keyOf = useCallback((i: number) => messages[i]?.id ?? String(i), [messages]);
   const { scrollRef, range, measure, offsets, scrollTop, viewport } = useVirtualList(messages.length, keyOf, MESSAGE_ESTIMATE_PX);
   const stick = useRef(initialScrollTop === null);
   const loading = useRef(false);
   const firstId = useRef<string | null>(null);
   const lastCount = useRef(0);
-  const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy }), [onOpenLink, onCopy]);
+  const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy, files }), [onOpenLink, onCopy, files]);
 
   // Report position upward (per-chat scroll memory) and track "following the stream".
   useEffect(() => {

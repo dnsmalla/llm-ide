@@ -5,9 +5,36 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
 import type { AssistantMessage, Message, Notice, TextPart, ToolPart } from "./state";
 
+export interface FileRefs {
+  /** Project-relative path for a path found in a tool's arguments, or null when it is not inside the open project. */
+  resolve(raw: string): string | null;
+  open(rel: string): void;
+}
+
 export interface MessageHost {
   onOpenLink?: (href: string) => void;
   onCopy?: (text: string) => void;
+  /** "Open in Explorer" for tool calls that name a file. */
+  files?: FileRefs;
+}
+
+const PATH_KEYS = ["file_path", "path", "filePath", "notebook_path"] as const;
+
+/** The file a tool call names (`file_path`/`path` argument), from the raw args JSON. Never throws; capped. */
+export function fileArgOf(args: string): string | null {
+  if (!args || args.length > 20_000) return null;
+  try {
+    const o: unknown = JSON.parse(args);
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      for (const k of PATH_KEYS) {
+        const v = (o as Record<string, unknown>)[k];
+        if (typeof v === "string" && v.length > 0 && v.length <= 4096 && !v.includes("\0")) return v;
+      }
+    }
+  } catch {
+    // partial or non-JSON arguments while streaming
+  }
+  return null;
 }
 
 /** Characters of a tool output shown before "Show more"; each step reveals this much more. */
@@ -33,12 +60,14 @@ function prettyArgs(args: string): string {
   try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args; }
 }
 
-export function ToolCard({ tool }: { tool: ToolPart }) {
+export function ToolCard({ tool, files }: { tool: ToolPart; files?: FileRefs }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(TOOL_PREVIEW_CHARS);
   const state = tool.result === null ? "running" : tool.result.isError ? "failed" : "done";
   const bodyId = `tool-${tool.id || tool.index}`;
   const res = tool.result ? clipPreview(tool.result.text, shown) : null;
+  const fileRaw = files && !tool.argsTruncated ? fileArgOf(tool.args) : null;
+  const fileRel = fileRaw !== null && files ? files.resolve(fileRaw) : null;
   const args = clipPreview(prettyArgs(tool.args), TOOL_ARGS_PREVIEW_CHARS * (shown / TOOL_PREVIEW_CHARS));
   return (
     <div className="chat-tool" data-state={state}>
@@ -48,6 +77,9 @@ export function ToolCard({ tool }: { tool: ToolPart }) {
       </button>
       {open && (
         <div id={bodyId} className="chat-tool-body">
+          {fileRel !== null && files && (
+            <button type="button" className="chat-link-btn" onClick={() => files.open(fileRel)}>Open in Explorer</button>
+          )}
           {tool.args && <pre className="chat-tool-args" aria-label="Arguments">{args.text}{args.rest > 0 ? "\n…" : ""}</pre>}
           {res && <pre className="chat-tool-out" aria-label="Output">{res.text}{res.rest > 0 ? "\n…" : ""}</pre>}
           {res && res.rest > 0 && (
@@ -75,7 +107,7 @@ function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
     <article className="chat-msg chat-assistant" aria-label="Assistant message" aria-busy={live}>
       {m.parts.map((p, i) => p.kind === "text"
         ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
-        : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} />)}
+        : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
       {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
       {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
       {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}

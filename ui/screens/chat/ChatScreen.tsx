@@ -14,12 +14,15 @@ import {
 } from "./route";
 import type { ChatState } from "./state";
 import type { ChatStore, SessionSummary } from "./store";
+import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
   openLink: (href: string) => void;
   copy: (text: string) => void;
+  /** "Open in Explorer" for files named by tool calls; absent = no button. */
+  files?: FileRefs;
   /** Host file dialog; absent = the Attach button is hidden (checklist row stays open). */
   attachFiles?: () => void;
   /** Native confirmation for Bypass (once per app run). Resolve true to proceed. */
@@ -164,7 +167,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             <MessageList
               key={activeId} messages={state.messages} hasMoreOlder={state.hasMoreOlder} onLoadOlder={onLoadOlder}
               initialScrollTop={controller.getView(activeId).stickToBottom ? null : controller.getView(activeId).scrollTop}
-              onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy}
+              onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files}
               empty={<p className="chat-muted chat-pad">Ask anything. Mode and model are below.</p>}
             />
             {state.tasks.length > 0 && (
