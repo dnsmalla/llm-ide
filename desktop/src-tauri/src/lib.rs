@@ -17,6 +17,7 @@ mod notes_write;
 mod os_open;
 mod proc_tree;
 mod project;
+mod project_search;
 mod pty;
 mod secrets;
 mod sse_replay;
@@ -288,6 +289,8 @@ pub fn run() {
             fs_watch::fs_watch_start,
             fs_watch::fs_watch_set,
             fs_watch::fs_watch_stop,
+            project_search::project_search_start,
+            project_search::project_search_cancel,
             git::git_status,
             git::git_diff,
             git::git_show,

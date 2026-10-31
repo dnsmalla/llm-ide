@@ -33,6 +33,8 @@ trash = "=5.2.9"
 sha2 = "=0.10.9"
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
 url = "=2.5.8"
+# Project search (S-H): linear-time matcher (MIT OR Apache-2.0); already in the lock via ignore.
+regex = "=1.13.1"
 
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -2147,6 +2147,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "portable-pty",
+ "regex",
  "rfd",
  "serde",
  "serde_json",

@@ -183,7 +183,7 @@ pub fn rel_of(root: &Path, abs: &Path) -> String {
 
 // ---- verified file open ---------------------------------------------------------------
 
-fn open_nofollow(p: &Path, write: bool) -> std::io::Result<File> {
+pub(crate) fn open_nofollow(p: &Path, write: bool) -> std::io::Result<File> {
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
     if write {
@@ -198,12 +198,12 @@ fn open_nofollow(p: &Path, write: bool) -> std::io::Result<File> {
 }
 
 #[cfg(unix)]
-fn nlink(m: &Metadata) -> u64 {
+pub(crate) fn nlink(m: &Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     m.nlink()
 }
 #[cfg(not(unix))]
-fn nlink(_: &Metadata) -> u64 {
+pub(crate) fn nlink(_: &Metadata) -> u64 {
     1
 }
 

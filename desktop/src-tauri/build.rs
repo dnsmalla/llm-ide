@@ -23,6 +23,8 @@ const COMMANDS: &[&str] = &[
     "fs_watch_start",
     "fs_watch_set",
     "fs_watch_stop",
+    "project_search_start",
+    "project_search_cancel",
     "git_status",
     "git_diff",
     "git_show",
