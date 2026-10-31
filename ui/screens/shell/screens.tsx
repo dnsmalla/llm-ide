@@ -6,7 +6,7 @@ import type { SectionId, SectionProps } from "./sections";
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
-const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{chat,explorer,library,settings,graph,docgen}/index.tsx");
+const GLOB = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../{welcome,chat,explorer,library,settings,graph,docgen}/index.tsx");
 // Sections whose module is not `../<id>/index.tsx`: Visual shares the Doc Gen folder.
 const VISUAL = import.meta.glob<{ default?: ComponentType<SectionProps> }>("../docgen/visual.tsx");
 const ENTRY_OVERRIDE: Readonly<Record<string, string>> = { visual: "../docgen/visual.tsx" };

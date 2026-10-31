@@ -6,6 +6,8 @@
 .sh-skip:focus { top: var(--tok-space-md); }
 
 .sh-titlebar { flex: none; display: flex; align-items: center; gap: var(--tok-space-md); height: 44px; box-sizing: border-box; padding: 0 var(--tok-space-md) 0 84px; /* clears the macOS traffic lights */ background: var(--tok-color-surface); border-bottom: 1px solid var(--tok-color-border); -webkit-user-select: none; user-select: none; }
+.sh-title-button { border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; font-weight: 500; cursor: pointer; }
+.sh-title-button:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
 .sh-title { color: var(--tok-color-text-muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sh-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; }
 .sh-icon-button:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
@@ -81,3 +83,12 @@
 }
 .sh-hint { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--tok-color-border, currentColor); max-width: 60ch; text-align: left; }
 .sh-hint code { font-family: var(--tok-font-mono, monospace); overflow-wrap: anywhere; }
+
+/* "Needs a project" card (NoProjectCard) and the post-action notice. */
+.np { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: var(--tok-space-xl); overflow: auto; }
+.np-card { max-width: 440px; display: flex; flex-direction: column; gap: var(--tok-space-md); padding: var(--tok-space-xl); border: 1px solid var(--tok-color-border); border-radius: 12px; background: var(--tok-color-surface); }
+.np-title { margin: 0; font-size: 17px; font-weight: 600; }
+.np-text { margin: 0; line-height: 1.45; color: var(--tok-color-text-muted); }
+.np-actions { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); }
+.sh-notice { flex: none; display: flex; align-items: flex-start; gap: var(--tok-space-md); padding: var(--tok-space-sm) var(--tok-space-md); border-bottom: 1px solid var(--tok-color-border); background: color-mix(in srgb, var(--tok-color-warning) 12%, var(--tok-color-surface)); }
+.sh-notice p { margin: 0; flex: 1; line-height: 1.4; overflow-wrap: anywhere; }
