@@ -8,7 +8,7 @@
     "build": "node ../scripts/gen-design-tokens.mjs --check && tsc --noEmit && vite build",
     "tauri": "tauri",
     "tokens": "node ../scripts/gen-design-tokens.mjs",
-    "test": "node --test scripts/*.test.mjs ../ui/screens/shell/tests/*.test.mjs",
+    "test": "node --test --experimental-strip-types scripts/*.test.mjs ../ui/screens/shell/tests/*.test.mjs ../ui/screens/settings/tests/*.test.*",
     "check:security": "node scripts/check-capabilities.mjs && node scripts/check-dompurify.mjs"
   },
   "dependencies": {

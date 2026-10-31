@@ -36,6 +36,9 @@ export interface SettingsHost {
   setLtaMode?(mode: "off" | "shadow" | "on"): Promise<void>;
   /** The mode this launch runs with, to show "applies at next start". */
   launchLtaMode?(): "off" | "shadow" | "on";
+  /** Per-chat router and token-cap switches: host prefs read when the backend next starts. */
+  getRoutePrefs?(): Promise<{ router: boolean; cap: boolean }>;
+  setRoutePrefs?(prefs: { router: boolean; cap: boolean }): Promise<void>;
   /** Sign-in/out through the shell's core client, which owns the tokens. */
   signIn?(email: string, password: string): Promise<void>;
   signOut?(): Promise<void>;
