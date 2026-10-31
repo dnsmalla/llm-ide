@@ -37,12 +37,6 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Set these per Loop when you create it; the Mac app's defaults do not carry over to the desktop.",
     blockedBy: "Needs the Loop screen on the desktop and a host preference store for the defaults (the Mac keeps them in UserDefaults).",
   },
-  "doc-gen": {
-    mac: "A switch to list, save and delete Doc Gen template and command files through the server instead of from the folder on disk (beta).",
-    status: "Planned",
-    meanwhile: "Doc Gen keeps working as it does today; the server-files switch is simply not offered yet.",
-    blockedBy: "Needs a host preference (the Mac keeps docGenUseServerStore in UserDefaults) and the Doc Gen screen to honour it.",
-  },
   "self-heal": {
     mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
     status: "Managed in the Mac app",
@@ -67,6 +61,8 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
     "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:
     "On the Mac this group also holds the workspace profile (feature presets) and per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
+  "doc-gen":
+    "On the Mac a beta switch chooses between the server and the folder on disk. The desktop has only the server path (the core's docs routes over the project's templates/ and commands/ folders), so the switch has one state and is not shown.",
   server:
     "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and owns the core, the log viewer above is real, and a manual restart is not offered yet.",
   updates:
