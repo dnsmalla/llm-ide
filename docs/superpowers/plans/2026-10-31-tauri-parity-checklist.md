@@ -92,18 +92,24 @@ How to use: one row per behaviour. **Mac** is the reference (Swift source named 
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Providers: list, add, verify key, catalog connect and test, write-only keys | yes (`ProvidersSection, ProviderForms`) | - |  |
-| Model routing: roles, switches, per-role models | yes (`ModelRoutingSection`) | - |  |
+| Providers: list, add, verify key, catalog connect and test, write-only keys | yes (`ProvidersSection, ProviderForms`) | ~ | `ui/screens/settings/sections/ProvidersSection.tsx`, `providers-model.ts`; tests "connect flow: the key goes in the POST body once", "remove needs the connection's name typed", "1,000+ connections", "ProvidersSection with a loaded catalog". Catalog connections only; the Claude-compatible add is listed but disabled (no core list/save route, see blocked-by in the Phase 3 report); the Mac's legacy built-in key rows are not ported |
+| Model routing: roles, switches, per-role models | yes (`ModelRoutingSection`) | ~ | `RoutingSection.tsx`, `routing-model.ts`; tests "routing: draft starts from the loaded table", "removing a tier resets roles". Server tiers and roles (strong/standard/cheap, subagents/internal/loop) only; Mac-local chat-mode roles are not ported. Router/token-cap switches need host prefs (placeholder until S-A) |
 | Backend: status, port, restart | yes (`BackendSettingsSection`) | - |  |
 | Preferences | yes (`PreferencesSettingsSection`) | - |  |
 | Tool approvals: stored rules, delete | yes (`ToolApprovalsSettingsSection`) | - |  |
 | Agent SDK settings | yes (`AgentSdkSettingsSection`) | - |  |
 | Token saving | yes (`TokenSavingSettingsSection`) | - |  |
-| Agent history card | yes (`AgentHistorySettingsCard`) | - |  |
+| Agent history card | yes (`AgentHistorySettingsCard`) | ~ | `AgentHistorySection.tsx`, `agent-history-model.ts`; tests "Clear = dry run, then the real clear with the signed preview id", "a stale preview is counted again", "Agent history ClearSheet" (typed DELETE gate) |
 | Memory | yes (`MemorySettingsSection`) | - |  |
 | Paths | yes (`PathsSettingsSection`) | - |  |
-| Live-then-archive setting | yes (`LiveThenArchiveSettingModel`) | - |  |
+| Live-then-archive setting | yes (`LiveThenArchiveSettingModel`) | ~ | `LtaControl` in `AgentHistorySection.tsx`, rules in `misc-model.ts` (test "live-then-archive: off-confirm rule"); the mode is a host pref, placeholder until the host exposes `getLtaMode/setLtaMode` |
 | Terminal toggle (read in Rust) | yes (`Terminal`) | - |  |
+| Extensions trust: folder trust list with consent, install allowlist (operator, ceiling, additions, ignored, effective) | yes (`ExtensionTrustSettingsCards`) | ~ | `ExtensionsTrustSection.tsx`, `trust-model.ts`; tests "trust list: trusting goes through the consent", "a load that started before an apply cannot overwrite it", "allowlist: edits are refused until the list has loaded", "normalizeSource" |
+| Appearance: theme Dark, Light, Midnight | yes (`PreferencesSettingsSection`) | ~ | `SimpleSections.tsx` `AppearanceSection`; host `getTheme/setTheme` placeholder until S-A prefs land |
+| Workspace: active project, notes folder | yes (`PathsSettingsSection`) | ~ | `WorkspaceSection`; read-only placeholders until the host commands land |
+| Features: enabled set from /health (read-only) | yes (`FeatureProfileSettingsView`) | ~ | `FeaturesSection`; test "features: null means all on" |
+| Account: sign in, sign out (keeps data) | yes (`LoginView`) | ~ | `AccountSection.tsx`; sign-in/out go through the shell host (placeholder until S-A) |
+| About and diagnostics: versions, core trust state, copy diagnostics without secrets | yes (`UpdatesSettingsSection`) | ~ | `AboutSection.tsx`, `buildDiagnostics`; tests "diagnostics carry versions and states but no secrets", "core trust states are told apart" |
 | feature profile and Apply & Rebuild (Mac-only mechanism; Tauri feature-off decision open) | yes (`FeatureRebuildService`) | defer |  |
 | Help guide, self-heal, updates card (T6), GitHub/GitLab provider cards | yes (`HelpGuideView`) | defer |  |
 
