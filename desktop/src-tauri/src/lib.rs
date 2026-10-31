@@ -1,7 +1,9 @@
 mod ax_probe;
+mod core_env;
 mod core_host;
 mod fsutil;
 mod graph_file;
+mod proc_tree;
 mod project;
 mod pty;
 mod secrets;
@@ -220,7 +222,7 @@ pub fn run() {
             // One instance per data dir: two first-run instances would race on the
             // keychain secrets and the DB. (Benches opt out and run on a temp setup.)
             if autobench_mode().is_none() {
-                if let Ok(dir) = app.path().app_data_dir() {
+                if let Ok(dir) = fsutil::desktop_data_dir() {
                     let dir = fsutil::private_dir(&dir)?;
                     match fsutil::acquire_instance_lock(&dir) {
                         Ok(lock) => {
@@ -233,6 +235,9 @@ pub fn run() {
                     }
                 }
             }
+            if let Ok(res) = app.path().resource_dir() {
+                core_host::set_resource_dir(res);
+            }
             tray::setup(app.handle());
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();
@@ -243,7 +248,7 @@ pub fn run() {
             }) {
                 eprintln!("core: signal handler not installed: {e}");
             }
-            setup_host.start_in_background(app.path().app_data_dir().ok());
+            setup_host.start_in_background(fsutil::desktop_data_dir().ok());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

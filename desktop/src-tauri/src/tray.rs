@@ -99,8 +99,8 @@ pub fn notify(app: AppHandle, kind: String, detail: Option<String>) -> Result<()
 
 // ---- close-to-tray setting ---------------------------------------------------------------
 
-fn settings_file(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join("tray-settings.json"))
+fn settings_file(_app: &AppHandle) -> Option<PathBuf> {
+    crate::fsutil::desktop_data_dir().ok().map(|d| d.join("tray-settings.json"))
 }
 
 /// A settings file larger than this is ignored.

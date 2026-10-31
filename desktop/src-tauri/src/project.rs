@@ -257,9 +257,8 @@ fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
 
 // ---- commands -------------------------------------------------------------------------------
 
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
-    app.path().app_data_dir().map_err(|e| e.to_string())
+fn data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    crate::fsutil::desktop_data_dir()
 }
 
 /// Opens the native folder dialog; `None` when the user cancels.

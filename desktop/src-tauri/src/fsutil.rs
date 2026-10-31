@@ -51,6 +51,59 @@ pub fn write_private_atomic(path: &Path, body: &[u8], max: usize) -> Result<(), 
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// Folder name of the desktop app's data. Deliberately NOT the Mac app's
+/// `llm-ide/system`: the two apps must not open the same SQLite DB or secrets.
+pub const DATA_DIR_NAME: &str = "llm-ide-desktop";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Os {
+    Mac,
+    Windows,
+    Linux,
+}
+
+pub const fn current_os() -> Os {
+    if cfg!(target_os = "macos") {
+        Os::Mac
+    } else if cfg!(windows) {
+        Os::Windows
+    } else {
+        Os::Linux
+    }
+}
+
+/// The stable per-OS data dir, from an env lookup (pure, so each OS is testable here):
+/// `LLMIDE_DESKTOP_DATA_DIR` (absolute) wins, else
+/// macOS `~/Library/Application Support/llm-ide-desktop`,
+/// Windows `%LOCALAPPDATA%\llm-ide-desktop` (local, not roaming: it holds a SQLite DB),
+/// Linux `$XDG_DATA_HOME` or `~/.local/share` + `/llm-ide-desktop`.
+/// It does not follow the bundle identifier, so renaming the PoC identifier never orphans data.
+pub fn data_dir_for(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, String> {
+    let get = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    if let Some(p) = get("LLMIDE_DESKTOP_DATA_DIR") {
+        let p = PathBuf::from(p);
+        return if p.is_absolute() { Ok(p) } else { Err("LLMIDE_DESKTOP_DATA_DIR must be an absolute path".into()) };
+    }
+    let abs = |v: String, what: &str| {
+        let p = PathBuf::from(v);
+        if p.is_absolute() { Ok(p) } else { Err(format!("{what} is not an absolute path")) }
+    };
+    let base = match os {
+        Os::Mac => abs(get("HOME").ok_or("HOME is not set")?, "HOME")?.join("Library").join("Application Support"),
+        Os::Windows => abs(get("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?, "LOCALAPPDATA")?,
+        Os::Linux => match get("XDG_DATA_HOME").filter(|v| PathBuf::from(v).is_absolute()) {
+            Some(x) => PathBuf::from(x),
+            None => abs(get("HOME").ok_or("HOME is not set")?, "HOME")?.join(".local").join("share"),
+        },
+    };
+    Ok(base.join(DATA_DIR_NAME))
+}
+
+/// The data dir for this machine and process environment.
+pub fn desktop_data_dir() -> Result<PathBuf, String> {
+    data_dir_for(current_os(), &|k| std::env::var(k).ok())
+}
+
 /// Holds the single-instance lock for the life of the process (drop releases it).
 #[derive(Debug)]
 pub struct InstanceLock(#[allow(dead_code)] std::fs::File);
@@ -67,7 +120,18 @@ pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let f = opts.open(&path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        opts.share_mode(0); // exclusive open: a second instance gets a sharing violation
+    }
+    let f = opts.open(&path).map_err(|e| {
+        if cfg!(windows) {
+            "LLM-IDE is already running".to_string()
+        } else {
+            format!("cannot open {}: {e}", path.display())
+        }
+    })?;
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -83,6 +147,7 @@ pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("llmide-fs-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -123,6 +188,36 @@ mod tests {
         assert_eq!(std::fs::read(&f).unwrap(), b"{}", "a refused write leaves the old file");
     }
 
+    #[test]
+    fn data_dir_is_stable_per_os_and_not_the_mac_apps() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+        };
+        let mac = data_dir_for(Os::Mac, &env(&[("HOME", "/Users/a")])).unwrap();
+        assert_eq!(mac, PathBuf::from("/Users/a/Library/Application Support/llm-ide-desktop"));
+        assert!(!mac.to_string_lossy().ends_with("llm-ide/system"));
+        let lin = data_dir_for(Os::Linux, &env(&[("HOME", "/home/a")])).unwrap();
+        assert_eq!(lin, PathBuf::from("/home/a/.local/share/llm-ide-desktop"));
+        let xdg = data_dir_for(Os::Linux, &env(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "/data")])).unwrap();
+        assert_eq!(xdg, PathBuf::from("/data/llm-ide-desktop"));
+        // A relative XDG_DATA_HOME is ignored per the XDG spec.
+        let rel = data_dir_for(Os::Linux, &env(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "rel")])).unwrap();
+        assert_eq!(rel, PathBuf::from("/home/a/.local/share/llm-ide-desktop"));
+        assert!(data_dir_for(Os::Mac, &env(&[])).is_err());
+        assert!(data_dir_for(Os::Mac, &env(&[("HOME", "relative")])).is_err());
+        let over = data_dir_for(Os::Mac, &env(&[("HOME", "/Users/a"), ("LLMIDE_DESKTOP_DATA_DIR", "/tmp/x")])).unwrap();
+        assert_eq!(over, PathBuf::from("/tmp/x"));
+        assert!(data_dir_for(Os::Mac, &env(&[("LLMIDE_DESKTOP_DATA_DIR", "x")])).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_data_dir_is_local_appdata() {
+        let env = |k: &str| (k == "LOCALAPPDATA").then(|| "C:\\Users\\a\\AppData\\Local".to_string());
+        let p = data_dir_for(Os::Windows, &env).unwrap();
+        assert!(p.ends_with(DATA_DIR_NAME));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_second_instance_cannot_take_the_lock_until_the_first_drops_it() {
@@ -130,6 +225,12 @@ mod tests {
         let first = acquire_instance_lock(&d).unwrap();
         assert!(acquire_instance_lock(&d).unwrap_err().contains("already running"));
         drop(first);
-        assert!(acquire_instance_lock(&d).is_ok());
+        // A concurrently running test may be between fork and exec and briefly hold a copy
+        // of the descriptor; the lock frees as soon as that exec closes it.
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while acquire_instance_lock(&d).is_err() {
+            assert!(std::time::Instant::now() < end, "lock never released");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
