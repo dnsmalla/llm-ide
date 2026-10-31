@@ -133,3 +133,91 @@ How to use: one row per behaviour. **Mac** is the reference (Swift source named 
 | fill in when rows start to flip | | | |
 
 Phase 3 exit needs every non-deferred row in sections 1 to 5 at `x+w` (see the plan, section 11).
+
+## 7. Code Graph (P5-G; plan `2026-10-31-tauri-phase5-macos-plan.md` section 5)
+
+Phase 5 rows close at `x` (macOS) for the macOS exit gate; `x+w` waits for the Windows pass after macOS.
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Open the project graph from `system/graph.json` (strict decoder, caps, unknown kinds map to other) | yes (`KnowledgeGraphService`, `GraphSessionStore`) | - |  |
+| 2D graph view, sigma/WebGL, pan and zoom at 30+ fps with 50k nodes | yes (`UAGraphView`, `CodeGraphCanvas`) | - |  |
+| Layout in a worker with the Rust kernel (WASM), cancel mid-layout, main thread never blocked over 50 ms | yes (Swift `GraphLayoutEngine`) | - |  |
+| Edges weighted and filtered at render, never pruned | yes (`EdgeWeight`) | - |  |
+| Search, select, focus neighbours, community colouring, node detail, open in Explorer | yes (`UAGraphView`) | - |  |
+| Labels by level of detail (zoom, rank, hover) | yes (`GraphNodeDisplayPolicy`) | - |  |
+| Rescan as a core job with progress and cancel | yes (`GraphAutoUpdater`, `LoopGraphRescanner`) | - |  |
+| 3D graph view | yes (`Graph3DView`, `CGSimulation3D`) | defer | Option B (WebGL 3D, graph-kit K3) after the macOS gate; Swift keeps it meanwhile |
+| Plugin graph engines (`graph-engine.json`) | yes (`PluginGraphEngine`) | defer | built-in engine only in Phase 5 |
+| Code note generation batch | yes (`CodeNoteService`) | defer | moves with the job runner |
+| Graph settings section | yes (`GraphSettingsSection`) | - |  |
+
+## 8. Issues and Gantt (P5-I; plan section 6)
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Connect GitHub, GitLab (write-only token into the core vault, never listed) | yes (Keychain, `RepoBackendFactory`) | - |  |
+| Connect Backlog and Linear | yes (dispatch targets in the core) | - |  |
+| Issue list: paged fetch, filters, saved views, "showing N of M", 10k windowed | yes (`RepoIssuesView`) | - |  |
+| Kanban with label-derived columns (`::` GitLab, `:` GitHub), windowed per column | yes (`RepoKanbanPanel`) | - |  |
+| Issue detail: safe markdown, comments, labels, assignee, no auto-loaded images | yes (`RepoIssueDetailSheet`) | - |  |
+| Schedule editor and overlay (`/kb/issue-schedule`) | yes (`IssueScheduleEditorSheet`) | - |  |
+| Gantt with row and time-window virtualisation, drag reschedule with rollback, 2,000 rows at 60 fps | yes (`GanttView`, `GanttViewModel`) | - |  |
+| Rate limit handling (Retry-After, reset time shown) | yes (`GitHubClient`) | - |  |
+| Repo allowlist enforced in the core | yes (`AllowlistedRepoBackend`) | - |  |
+| Existing-issue picker and recent issues grounding for Chat | yes (`IssueSeamRegistry`) | - |  |
+| GitLab dispatch target | no (Mac Issues UI only) | defer | work-kit W6: leave |
+
+## 9. Doc Gen and Visual (P5-D; plan section 7)
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Source tree with multi-select as an id set, fit notice, windowed at 10k | yes (`GenerationSourceTree`) | - |  |
+| Prompt bar with command, streaming generation, editor with preview | yes (`GenerationPromptBar`, `GenerationEditorPanel`) | - |  |
+| Save into Library through the host CAS write, guardrail result shown first | yes (`GenerationViewModel`) | - |  |
+| DOCX and markdown export through the core | yes (`/generate-docx`, export) | - |  |
+| Template manager (files under project `llm-doc/`), add, edit, delete | yes (`DocTemplateManagerSheet`, `GenerationTemplateSection`) | - |  |
+| Visual: Mermaid rendered from the bundled runtime in a sandboxed frame, strict mode, inert on hostile input | yes (`VisualView`, downloaded runtime) | - |  |
+| Chat panel embedded for generation chat and save chat output | yes (`GenerationSaveChatOutputRow`) | - |  |
+
+## 10. Live capture on macOS (P5-L; plan section 8)
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Capture helper binary in the signed bundle, JSON lines over stdio, versioned protocol, fake-helper tests | yes (`CaptionScraper`, `AXCaptionReader`) | - |  |
+| Permission status and guidance (Accessibility), revoke stops capture and keeps captured text | yes (`PermissionsView`, `PermissionsService`) | - |  |
+| Teams, Zoom, Meet captions at the 800 ms cadence with the same dedupe | yes (`CaptionDeltaState`, per-app scrapers) | - |  |
+| Live transcript view windowed to 20k lines, text only | yes (`TranscriptView`) | - |  |
+| Library meeting detail take-over while live (gate through a registry slot) | yes (`LiveCaptureGate`) | - |  |
+| Finalize writes the meeting file and acks with `lines` and `hash` | yes (`MeetingFileStore`, `LiveSessionMirror`) | - | waits for the user's real meetings |
+| Crash recovery of a partial meeting, no duplicates | yes (`PartialRecovery`) | - |  |
+| Auto capture on meeting start | yes (`AutoCaptureService`) | defer | after the manual flow is verified |
+| Meeting capture matrix view | yes (`MeetingCaptureMatrixView`) | defer |  |
+
+## 11. Loop and Auto Tasks (P5-A; plan section 10)
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Job runner routes: enqueue, list, get, cancel, stream; reconcile interrupted as aborted on boot | yes (`LoopRunQueue`, `LoopRunJournal.reconcileInterrupted`) | - |  |
+| Cron and scheduler with the Swift fixtures (timezone, DST), missed-run policy | yes (`CronExpression`, 60 s timer) | - |  |
+| Loop contract `system/loop.json` and journal `system/loop-runs/` readable both ways | yes (`LoopEngineConfigStore`, `LoopRunJournal`) | - |  |
+| Auto Task config exported one way, history and logs | yes (`AutoTaskConfigStore`, `TaskLogStore`) | - |  |
+| Stage detector and test map identical on fixtures | yes (`LoopStageDetector`) | - |  |
+| Repair scope guard, protected paths, verify approvals fail closed, adversarial corpus | yes (`RepairScopeGuard`, `VerifyApprovalStore`) | - | independent review required |
+| Runner: stages, repair via `/kb/loop/agent-run`, worktree, ship, cancel kills process group | yes (`LoopEngineRunner`) | - |  |
+| The 13 Auto Tasks and custom tasks on the SDK engine, metered | yes (`AutoCodeUpdateService`) | - |  |
+| Default loops (Regression, Test, System Check, Plan, Refactoring, Doc Optimization) | yes (`LoopTemplate`) | - |  |
+| Loop screen: runs windowed, live run, stage detail, journal paged, editor, New Loop wizard, run one stage | yes (`LoopEngineView`) | - |  |
+| Auto Tasks screen: config, schedule, model limits, task logs | yes (`AutoCodeView`, `ModelLimitsPanel`) | - |  |
+| Engine preference swift or core, default flips only after user-run real runs | no (new) | - |  |
+| Phone bridges for Loop and Auto Tasks | yes (`MobileLoopBridge`, `MobileAutoTaskBridge`) | defer | the Swift app keeps the phone until the relay |
+
+## 12. Home quick chat, System page, Mobile bridge (P5-H, P5-S, P5-M; plan section 9)
+
+| Row | Mac (source) | Tauri | Evidence |
+|---|---|---|---|
+| Menu-bar quick chat window opens by shortcut, same chat store, detached turn survives close | yes (`MenuBarChatView`, `QuickChatSendPolicy`) | - |  |
+| Quick window has a reduced capability set (no fs, shell, pty) | no (new) | - |  |
+| System page as a section over `GET /kb/os/state` and the stream, cap 429 explained | yes (`SystemView`, `SystemBridge`, `SystemEventStream`) | - |  |
+| System page cancel actions on running turns | yes (`SystemBridge`) | - |  |
+| Phone pairing and the `:3006` server | yes (`MobileControlManager`) | defer | the Tauri app does not host it; the Swift app keeps it until the relay; Settings shows a notice |

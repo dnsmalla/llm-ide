@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 13 | 17 | 13 | 43 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 13 | 17 | 14 | 44 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 89 | 35 | 67 | 191 |  |
+| Total | 89 | 35 | 68 | 192 |  |
 
 ## How the surfaces connect
 
@@ -140,6 +140,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Phase 3 adoption of the core routes in the screens, not GUI-verified: chat sends `detach: true`, re-attaches running turns through the replay stream (sequence-checked, micro-batched, gap marker, Stop works), pages history with `beforeSeq`/`hasMore`; Library search and an all-kinds index rebuild use `GET /kb/index/search` and the API 98 kinds; Settings adds Claude-compatible endpoints (API 99) with the limits in plain words; asserted against the real core in `ui/screens/shell/tests/e2e/`; a real-window reload with a long turn still to run (`plans/2026-10-31-tauri-parity-checklist.md` sections 3, 4, 5) (me)
 - [~] Phase 3 chat composer and plan flow (slice S-L), not GUI-verified: `/` menu over seven core-backed surfaces plus modes and models (windowed for 5,000+ rows, Swift built-in list drift test), `@` mentions (bounded index, folder browse for 100k-file projects, notes), attachments through `attach_*` with chunked reads and released handles, plan cards (save under `llm-doc/plans/`, edit, refine, execute with `planExecute`, 'Nothing to execute.'), edit diffs, mode badge, subagent chip, route history; blocked-by a core ended-chat marker, a note body route and a project file search route (`ui/screens/chat/{slash,mentions,attach,plan,badges}`, parity checklist section 2) (me)
 - [ ] Parity checklist all rows verified against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
+- [ ] Phase 5 (macOS first and finished, then Windows and Linux): Code Graph, Issues + Gantt, Doc Gen + Visual, Live capture helper, Loop + Auto Tasks on the core job runner, quick chat, System page; the Tauri app does not host `:3006` (the Swift app keeps the phone until the relay); exit gate = daily use on macOS except the named deferrals (`plans/2026-10-31-tauri-phase5-macos-plan.md`, parity sections 7 to 12) (me)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 
