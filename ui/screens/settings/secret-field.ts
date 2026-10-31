@@ -51,20 +51,18 @@ export function keyStatusLabel(hasKey: boolean | null, keyRequired: boolean): st
   return hasKey ? "Key stored" : "Key missing";
 }
 
-const TOKEN_LIKE = [
-  /\bsk-[A-Za-z0-9_-]{8,}/g, // provider-style keys
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
-  /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}(\.[A-Za-z0-9_-]*)?/g, // JWTs
-  /\b(api[_-]?key|token|secret|password)(["']?\s*[:=]\s*["']?)[^\s"',;]{4,}/gi,
-  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
-  /\bxox[abpr]-[A-Za-z0-9-]{8,}/g,
+const TOKEN_LIKE: { re: RegExp; to: string }[] = [
+  { re: /\bsk-[A-Za-z0-9_-]{8,}/g, to: "[redacted]" }, // provider-style keys
+  { re: /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, to: "Bearer [redacted]" },
+  { re: /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}(\.[A-Za-z0-9_-]*)?/g, to: "[redacted]" }, // JWTs
+  { re: /\b(api[_-]?key|token|secret|password)(["']?\s*[:=]\s*["']?)[^\s"',;]{4,}/gi, to: "$1$2[redacted]" },
+  { re: /\bgh[pousr]_[A-Za-z0-9]{16,}/g, to: "[redacted]" },
+  { re: /\bxox[abpr]-[A-Za-z0-9-]{8,}/g, to: "[redacted]" },
 ];
 
 /** Replaces anything that looks like a credential. Defence in depth for diagnostics and logs. */
 export function scrubSecrets(text: string): string {
   let out = text;
-  for (const re of TOKEN_LIKE) {
-    out = out.replace(re, (m, p1: string | undefined, p2: string | undefined) => (p1 && p2 !== undefined ? `${p1}${p2}[redacted]` : "[redacted]"));
-  }
+  for (const { re, to } of TOKEN_LIKE) out = out.replace(re, to);
   return out;
 }
