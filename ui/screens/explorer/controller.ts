@@ -508,6 +508,16 @@ export class ExplorerController {
     return this.save(path);
   }
 
+  /** Banner action "Keep mine" (changed on disk): keep the buffer and adopt the disk's hash, so the next save overwrites. */
+  async keepMineOnly(path: string): Promise<void> {
+    try {
+      const hash = (await this.fs.read(path)).hash;
+      this.patchDoc(path, (x) => ({ ...x, state: keepMine(x.state, hash) }));
+    } catch (e) {
+      this.notify("error", toFsError(e).message);
+    }
+  }
+
   /** Probe an open document after a change notification. */
   private async probeDoc(path: string): Promise<void> {
     const d = this.snap.docs.get(path);

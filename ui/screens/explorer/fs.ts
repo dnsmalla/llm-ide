@@ -152,7 +152,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 /** Real implementation over the Tauri commands. `watchStart` needs a Tauri Channel (see `channelFactory`). */
-export function createHostFs(channelFactory?: (onMessage: (b: WatchBatch) => void) => unknown): FsApi {
+export function createHostFs(channelFactory?: (onMessage: (b: WatchBatch) => void) => unknown | Promise<unknown>): FsApi {
   return {
     list: (path, opts = {}) => call("fs_list_dir", { req: { path, ...opts } }),
     read: (path, maxBytes) => call("fs_read_file", { req: { path, max_bytes: maxBytes ?? null } }),
@@ -166,7 +166,7 @@ export function createHostFs(channelFactory?: (onMessage: (b: WatchBatch) => voi
     remove: (path) => call("fs_delete", { path }),
     async watchStart(onBatch) {
       if (!channelFactory) throw new FsError("unavailable", "file watching needs the desktop host");
-      return call("fs_watch_start", { onEvent: channelFactory(onBatch) });
+      return call("fs_watch_start", { onEvent: await channelFactory(onBatch) });
     },
     watchSet: (dirs) => call("fs_watch_set", { dirs }),
     watchStop: () => call("fs_watch_stop"),

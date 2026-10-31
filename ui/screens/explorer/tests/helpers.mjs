@@ -28,6 +28,9 @@ export async function load(entryRel) {
     packages: "external",
     jsx: "automatic",
     logLevel: "silent",
+    loader: { ".css": "empty" },
+    // Desktop-side modules (Monaco, Tauri channel) are loaded lazily at run time, never in node tests.
+    external: ["../../../desktop/src/editor/explorerHost", "../../../desktop/src/editor/explorerBridge"],
     // Vite-only: no screens exist in node tests.
     define: { "import.meta.glob": "Object" },
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
