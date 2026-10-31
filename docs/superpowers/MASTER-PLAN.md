@@ -11,16 +11,16 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 11 | 6 | 13 | 30 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 12 | 6 | 14 | 32 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 13 | 3 | 2 | 18 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 13 | 4 | 1 | 18 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 86 | 23 | 68 | 177 |  |
+| Total | 87 | 24 | 68 | 179 |  |
 
 ## How the surfaces connect
 
@@ -102,7 +102,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] ADR 0018 written (status: **proposed**) (`375fc325`) (me)
 - [x] Phase 0 spike built and tracked on `main` (`desktop/`, 87 files; `23ff0813`, `d4e80fd1`, `4a73b581`) (me)
 - [x] Phase 0 report: GO with four conditions; graph 59.8 fps at 10k, 50.9-56.5 fps at 50k, Node core runs unchanged (`docs/superpowers/plans/2026-10-25-tauri-phase0-report.md`) (me)
-- [x] Design tokens generated for the desktop (`schema/design/tokens.json`, `desktop/scripts/gen-tokens.mjs`); Mac pixel parity unverified (me)
+- [x] Design tokens generated for every web surface from `schema/design/tokens.json` only (`scripts/gen-design-tokens.mjs`; the regex-over-Swift desktop generator is gone, drift gate in `make contract-gates` and `make test-desktop-node`); Mac pixel parity unverified (me)
 - [x] Chat renders incrementally, no dropped events in benches (Phase 0 condition 3) (me)
 - [~] Node sidecar: `desktop/src-tauri/src/core_host.rs`, `stage-core.mjs`, `PACKAGING.md`; spike only, not the packaged T6 deliverable and no Windows run (me)
 - [~] Do not bundle the SDK's `claude` binary (condition 2): the report measures 67 MB without it; whether the staging script enforces it is unverified (me)
@@ -113,7 +113,9 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Graph layout in Rust or WASM (condition 1; ForceAtlas2 in WKWebView is 4-7x slower than Node) (me)
 - [x] Monaco's vendored DOMPurify patched: vite redirects its import to pinned `dompurify` 3.4.17 (b1b3d17f); `npm run check:security` + `vite build` show no 3.4.15 in dist (me)
 - [x] Tauri capabilities scoped (AppManifest + explicit allow-*, no core:default/wildcards, `check-capabilities`), `read_graph_file` limited to the project root (8 cargo tests), terminal credit-based flow control (5 cargo tests); cargo check/test and 14 node tests pass, GUI launch and a real `yes` flood not run here (me)
-- [ ] ui-kit extraction and K3 screens per kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
+- [x] ui-kit extraction: `ui/kit` (`@llmide/ui-kit`) holds the tokens CSS, 8 promoted components and one Lucide icon set; the desktop consumes it, no spike behaviour change; 27 kit tests, `npm run build`, `check:security` green (`563c08da`, `4b7f4aa0`; decisions U1 to U6 provisional in `docs/kits/ui-kit.md` section 11) (me)
+- [ ] ui-kit parity bar: pixel-tolerance fixtures against the Mac render (decision U4; needs a headless browser and a Mac fixture render, not built; today DOM/ARIA, token, contrast and alias-drift tests plus 5 reviewed screenshots) (me)
+- [ ] K3 screens per kit on ui/kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
 - [ ] Tauri feature-off mechanism decided: build-time tree-shake plus runtime `/health features` (kit plan "Gates added") (you)
 - [ ] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6) (me)
 - [x] Server finds the user's `claude` (`extension/providers/claude-path.mjs`: env, bundled, PATH + per-OS dirs, validated) for the SDK engine (`pathToClaudeCodeExecutable`) and CLI spawns; 9 fake-executable tests; no packaged-app run on any OS yet (me)
@@ -207,7 +209,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Contract gates cover catalog connect `enabled` and `copyKeyFrom` (fixtures, regenerated types, OpenAPI, inventory) (me)
 - [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, 93 routed and 128 skipped of 221 fixture endpoints (70 no Mac caller, 51 Mac decodes through a private wrapper, 7 non-JSON); extensions routes now routed (`66bef1b9`); lab not run in the audit (`plans/2026-10-31-status-audit.md` (c)) (me)
 - [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
-- [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
+- [~] K1 per kit, in order (ui-kit done 2026-10-31): ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
 - [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)

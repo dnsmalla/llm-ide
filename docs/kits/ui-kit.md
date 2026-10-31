@@ -1,6 +1,6 @@
 # ui-kit
 
-Status: **K0 Map**, written 2026-10-31. No code was changed. Citations are `path:line` or path only; read on 2026-10-31 at `main` (`de7d1f38`). Counts say how they were taken (`wc -l`, `ls`, `git ls-files`). Section 9 lists where the migration plan's premises do not match the code; section 10 lists what was not verified.
+Status: **K0 Map** written 2026-10-31; **K1 done 2026-10-31** (section 11 records what changed). Sections 1 to 10 describe the tree before K1 and are kept as the K0 record. Citations are `path:line` or path only; read on 2026-10-31 at `main` (`de7d1f38`). Counts say how they were taken (`wc -l`, `ls`, `git ls-files`). Section 9 lists where the migration plan's premises do not match the code; section 10 lists what was not verified.
 
 ## 1. Purpose
 
@@ -132,3 +132,25 @@ Options and the recommended answer; the recommendation is mine.
 - Whether the five parity screenshots are current; no app was run.
 - `make contract-gates`, `swift test` and `npm run build` in `desktop/` were not run; only the two `--check` commands in section 2 were.
 - The count of 152 files using `theme.current` is a grep match, not an audit of every use.
+
+## 11. K1 outcome (2026-10-31): decisions and what shipped
+
+The user approved ADR 0018 for Phase 3 start and delegated U1 to U6 to the recommendations above. **All six are provisional**: they stand until a K3 screen proves one wrong, and any of them can be reopened by the user.
+
+| # | Decision (provisional) | Done in K1 |
+|---|---|---|
+| U1 | `tokens.json` is the only token source for every surface, desktop included | `desktop/scripts/gen-tokens.mjs` (regex over Swift) deleted; the desktop reads the kit's generated CSS. Drift gates: `node scripts/gen-design-tokens.mjs --check` in `make contract-gates`, `npm run build` and `make test-desktop-node`; the Swift gate is unchanged (same generator). |
+| U2 | Per-surface CSS from the same generator, one `--tok-*` naming scheme | Fifth and sixth generator outputs: `ui/kit/src/styles/tokens.generated.css` (web variant) and `ui/kit/src/themes.generated.ts`. The three older CSS copies stay byte-identical (the committed System-view bundle embeds one). The desktop variant naming (`--body`, `--font-*`) is retired. |
+| U3 | Shared React package at `ui/kit/` | `@llmide/ui-kit`: 8 components promoted from the spike (`Chip`, `EditorTabBar`, `FileTreeRow`, `LibrarySidebar`, `ResizableDivider`, `SectionChromeBar`, `SettingsSectionCard`, `StatusBanner`) plus icons and theme helpers. `AppStatusBar` stays in `desktop/` (it renders core status). The desktop consumes the kit through a Vite alias, no behaviour change. |
+| U4 | Parity bar is pixel tolerance on fixtures | **Not built.** Tests today: DOM/ARIA (server render), token values per theme, contrast, no raw colours, no remote-resource sinks, alias drift vs `Theme.swift`. Pixel diff needs a headless browser plus a Mac render of each fixture; neither is a light dependency, so it is a documented follow-up (K2) and the five reviewed screenshots remain the visual evidence. |
+| U5 | graph-kit keeps its own web theme; conformance check maps it onto `tokens.json` | `ui/kit/tests/tokens.test.mjs` compares graph-kit `web/src/theme.css` colour variables and theme ids with `tokens.json` (skips if the submodule is absent). It passes today. |
+| U6 | One open icon set for web surfaces; SF Symbols stay Mac-only | Lucide, `lucide-static` 1.65.0 pinned, ISC, glyphs vendored (27 icons), licence in `ui/kit/LICENSES/`. Glyph shapes in the spike screens changed from the hand-drawn stand-ins. |
+
+Findings while moving the code (R2 of section 8 held: nothing was added to the spike before the move):
+
+1. `.ui-icon-button`, `.ui-chrome-bar`, `.ui-chrome-title` and `.ui-chrome-spacer` were used by spike components but had no base CSS. The kit now styles them (a visible change to the toolbar toggles and banner dismiss buttons).
+2. The spike CSS resolved the platform text styles (callout 12 px, caption 10 px) itself; the shared generator now emits those web fallbacks in the kit CSS.
+3. Light theme `textMuted` on `body` measures 4.31:1 (WCAG AA 4.5). It is a `tokens.json` value that also drives the Mac; recorded as a known gap with a regression floor in `ui/kit/tests/contrast.test.mjs`.
+4. `ResizableDivider` was not keyboard operable; it is now (arrows, Home, End), and its label is a prop.
+
+Left for K3 screens: replace the `LibrarySidebar` demo content with real data, restructure `EditorTabBar` tab semantics, scope-able themes (needs `[data-theme]` selectors, not `:root[...]`), the Mac-side fixture render for pixel parity, and wiring the relay web view and phone PWA to the kit.
