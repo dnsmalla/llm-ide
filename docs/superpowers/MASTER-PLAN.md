@@ -12,7 +12,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 13 | 18 | 14 | 45 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
-| Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
+| Mobile (iPhone native, PWA) | 7 | 3 | 12 | 22 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 14 | 4 | 1 | 19 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 90 | 36 | 68 | 194 |  |
+| Total | 91 | 36 | 74 | 201 |  |
 
 ## How the surfaces connect
 
@@ -163,6 +163,13 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Background / reconnect behaviour verified on device (unverified) (you)
 - [ ] Phone works with the Mac off (needs relay, S4) (wait)
 - [ ] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait)
+- [x] Command bus spec written: one command/result contract for desktop, extension, iPhone (WS now, relay later) and PWA, tiers, catalogue, mobile audit (`plans/2026-10-31-command-bus-spec.md`) (me)
+- [ ] Command bus S1: contract schemas + conformance fixtures in `schema/` (additive) (me)
+- [ ] Command bus S2: Mac app maps WS messages to the envelope behind a flag, one tier gate, interim fixes (template/config/toggle desktop-only, enable flag checked) (me)
+- [ ] Command bus S3: core job API (`/bus/*`, six job kinds, execution-time re-check, engine interface) (me)
+- [ ] Command bus S4: iOS client rewritten as renderer over the envelope, old path kept one release (me)
+- [ ] Command bus S5: extension moves to the envelope (me)
+- [ ] Command bus S6: relay transport + TLS pin on the direct path (wait)
 - [~] sync-kit K0 map done (`docs/kits/sync-kit.md`, `845aa869`); K1-K4 not started (me)
 - [ ] Phone PWA served by the relay (decided: Q-WEB-1 = A; built last in sync-kit) (wait)
 
