@@ -17,10 +17,10 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
-| Agents, providers, extensions | 12 | 1 | 10 | 23 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
+| Agents, providers, extensions | 13 | 1 | 10 | 24 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
+| Security | 7 | 2 | 5 | 14 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 75 | 19 | 72 | 166 |  |
+| Total | 77 | 19 | 72 | 168 |  |
 
 ## How the surfaces connect
 
@@ -247,7 +247,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Extensions catalog P5 server half: updates with diff, per-commit re-consent, one-version rollback and repair `f45111d6`; index adapters, cache and search, active and updates views (API 94) `464c94be` (me)
 - [x] Extensions catalog P6 Mac screen: installed/browse/install, consent sheet, update preview, rollback, repair; models decode-checked by api-gates (plan 2026-10-31 16a) (me)
 - [ ] Extensions catalog P6 real-app check of the Extensions screen (you)
-- [ ] Extensions catalog P7-P9: allowlist Settings UI, Workspace Trust, rollout (plan 2026-10-31) (me)
+- [x] Extensions catalog per-user allowlist (server): GET/PUT `/auth/me/extensions/allowlist`, operator ceiling, API 95 (me)
+- [ ] Extensions catalog P7-P9: allowlist Settings UI, Workspace Trust Mac UI, rollout (plan 2026-10-31) (me)
 - [ ] Y1 bench go-ahead and runs: baselines, noise check, A/B per switch (USER-CHECKLIST A) (you)
 - [ ] Lean SDK configuration L1-L12 (compact prompt, drop Bash in execute, cache TTL, compaction, tool search); each bench-gated (X1) (me)
 - [ ] Token-affecting SDK adoption: `sessionStore`, Haiku search sub-agent, `Task*`, `skills`, `options.agent`, `resumeSessionAt` (X2) (me)
@@ -271,7 +272,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
 - [~] Relay: E2E design written with threat model (`93e8b083`); independent review, key rotation on revoke and no-plaintext tests are phases R1 to R4 of that design (me)
-- [ ] Workspace Trust: untrusted folders run no hooks, install scripts or MCP stdio servers (Tauri plan §8) (me)
+- [x] Workspace Trust server: per-user trust records, untrusted folders' `.mcp.json` stdio servers are not loaded and project hooks/plugins/skill scripts are named in a notice, `LLMIDE_WORKSPACE_TRUST=off` kill switch, API 95 (Tauri plan §8) (me)
+- [ ] Workspace Trust Mac UI (trust prompt, Settings list) and a real-app check (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
 - [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log (me)

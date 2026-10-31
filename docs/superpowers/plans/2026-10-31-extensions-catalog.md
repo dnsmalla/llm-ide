@@ -291,6 +291,8 @@ Sizing: about **P0 M, P1 L, P2 L, P3 M, P4 L, P5 L, P6 L, P7 M, P8 S+S, P9 M**; 
 | `LLMIDE_EXT_ADAPTER` | 0 until P8 | extensions on provider-adapter turns |
 | `LLMIDE_EXT_CATALOG` | 1 | 0 hides Browse and refuses install/update routes (404 `feature_disabled` style); installed items keep working |
 | `LLMIDE_EXT_ALLOWED_SOURCES` | official + community + pasted | operator allowlist |
+| `LLMIDE_EXT_ALLOWED_SOURCES_CEILING` | unset | optional operator ceiling on what a user may add to their own allowlist (API 95, spec 9c) |
+| `LLMIDE_WORKSPACE_TRUST` | on | `off` = exact legacy behaviour; on = an untrusted folder's `.mcp.json` stdio servers are not loaded on Claude turns (API 95, spec 9d) |
 | `LLMIDE_EXT_SCAN` | advisory | `off`/`advisory`/`block-unknown` |
 | Mac pref "Use the Extensions catalog screens" | on | off falls back to current screens |
 
