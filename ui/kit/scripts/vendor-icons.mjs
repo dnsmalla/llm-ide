@@ -24,6 +24,10 @@ export const ICONS = [
   'panel-left', 'triangle-alert', 'info', 'house', 'search', 'refresh-cw', 'folder', 'bell',
   'plus', 'audio-waveform', 'code', 'table', 'file-text', 'puzzle', 'chart-column',
   'audio-lines', 'chevrons-right', 'message-circle', 'check', 'chevron-down',
+  // Settings group headers (Mac SF Symbol -> nearest Lucide).
+  'sliders-horizontal', 'hammer', 'server', 'plug', 'circle-arrow-down', 'smartphone', 'globe',
+  'hand', 'package', 'leaf', 'key-round', 'repeat', 'hard-drive', 'rotate-ccw-clock', 'shield-check',
+  'list-checks', 'stethoscope', 'brain', 'git-branch', 'folder-cog',
 ];
 
 const lf = (t) => t.replace(/\r\n/g, '\n');
