@@ -75,7 +75,7 @@ test("cancellation: a new query aborts the in-flight request and its late answer
   one.resolve([hit("stale.md")]); // arrives after being superseded
   await h.tick();
   assert.equal(h.c.snapshot.phase, "searching");
-  assert.deepEqual(h.c.snapshot.hits, []);
+  assert.equal(h.c.snapshot.hits.length, 0);
   two.resolve([hit("fresh.md")]);
   await h.tick();
   assert.deepEqual(h.c.snapshot.hits.map((x) => x.rel), ["fresh.md"]);
