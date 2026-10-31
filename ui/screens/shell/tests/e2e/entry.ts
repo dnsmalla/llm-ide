@@ -10,4 +10,6 @@ export { TauriChatStore, APPLE_EPOCH_OFFSET } from "../../../chat/tauri-store.ts
 export { fileArgOf } from "../../../chat/MessageView.tsx";
 export { ProvidersApi, ProvidersModel } from "../../../settings/providers-model.ts";
 export { makeSearchRun } from "../../../library/search.ts";
-export { searchCoreFrom } from "../../../library/core-adapter.ts";
+export { searchCoreFrom, indexCoreFrom } from "../../../library/core-adapter.ts";
+export { rebuildIndex, IDLE_REBUILD } from "../../../library/index-rebuild.ts";
+export { recordFromEntry, applyHead } from "../../../library/notes-model.ts";

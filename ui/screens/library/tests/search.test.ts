@@ -195,7 +195,7 @@ test("decodeSearchHits: bad rows dropped, unsafe keys refused, tags stripped, bo
 });
 
 test("makeSearchRun: builds an encoded path, maps statuses and transport errors", async () => {
-  assert.equal(searchPath("a b&c=d/é", 500), "/kb/index/search?q=a%20b%26c%3Dd%2F%C3%A9&limit=100");
+  assert.equal(searchPath("a b&c=d/é", 500), "/kb/index/search?q=a%20b%26c%3Dd%2F%C3%A9&limit=50");
   const ac = new AbortController();
   const seen: string[] = [];
   const ok = makeSearchRun({ request: async (_m, path) => (seen.push(path), { status: 200, body: { results: [{ noteKey: "x.md", title: "X" }] } }) });
@@ -205,4 +205,38 @@ test("makeSearchRun: builds an encoded path, maps statuses and transport errors"
   await assert.rejects(nf("q", ac.signal), (e: unknown) => e instanceof SearchRequestError && e.status === 404);
   const down = makeSearchRun({ request: async () => { throw new Error("ECONNREFUSED"); } });
   await assert.rejects(down("q", ac.signal), (e: unknown) => e instanceof SearchRequestError && e.status === 0);
+});
+
+test("a remembered missing route is retried after a minute, so an updated core is picked up", async () => {
+  let now = 0;
+  const calls: number[] = [];
+  const c = new SearchController({
+    run: async (q) => { calls.push(now); if (calls.length === 1) throw new SearchRequestError(404); return [{ rel: "a.md", title: "A", snippet: "", date: "", kind: "note" }]; },
+    onChange: () => {}, debounceMs: 0, now: () => now,
+    setTimer: (fn) => { queueMicrotask(fn); return 1; }, clearTimer: () => {},
+  });
+  c.setQuery("alpha");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.snapshot.phase, "unavailable");
+  now = 30_000;
+  c.setQuery("alphas");
+  assert.equal(c.snapshot.phase, "unavailable", "still remembered inside the minute");
+  now = 61_000;
+  c.setQuery("alphab");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.snapshot.phase, "done");
+  assert.equal(c.snapshot.hits[0]!.kind, "note");
+});
+
+test("the real fixtures decode: hits with kind, and the empty answer", async () => {
+  const { readFileSync } = await import("node:fs");
+  const dir = new URL("../../../../schema/http/fixtures/index/", import.meta.url);
+  const ok = JSON.parse(readFileSync(new URL("get-kb-index-search-200.json", dir), "utf8"));
+  const hits = decodeSearchHits(ok.response);
+  assert.deepEqual(hits.map((h) => [h.rel, h.kind]), [["plans/roadmap.md", "note"]]);
+  assert.match(hits[0]!.snippet, /roadmap for the next quarter/);
+  const empty = JSON.parse(readFileSync(new URL("get-kb-index-search-200-empty.json", dir), "utf8"));
+  assert.deepEqual(decodeSearchHits(empty.response), []);
+  // decodeSearchHits ignores unknown kinds instead of passing them on
+  assert.equal(decodeSearchHits({ results: [{ noteKey: "a.md", kind: "<script>" }] })[0]!.kind, undefined);
 });

@@ -253,7 +253,7 @@ export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): 
         <SearchResults store={store} state={state} />
       </div>
       {search.phase === "unavailable" && store.searchAvailable && f.query.trim().length >= 2 && (
-        <StatusBanner severity="info" message="Full-text search is not available in this core yet. Filtering titles, paths and summaries only." />
+        <StatusBanner severity="info" message="This core has no note search yet (it needs a newer core). Filtering titles, paths and summaries only." />
       )}
       {rows.length === 0 ? (
         <Empty state={state} />
@@ -303,6 +303,7 @@ function SearchResults({ store, state }: { store: LibraryStore; state: LibrarySt
               <li key={h.rel}>
                 <button type="button" className="lib-hit" onClick={() => store.reveal(h.rel)}>
                   <span className="lib-hit-title">{h.title}</span>
+                  {h.kind && h.kind !== "meeting" && <span className="lib-muted lib-hit-kind"> {h.kind}</span>}
                   {h.snippet && <span className="lib-hit-snippet">{h.snippet}</span>}
                 </button>
               </li>

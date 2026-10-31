@@ -4,8 +4,11 @@
 // (`POST /kb/index/notes`). It NEVER prunes: nothing is deleted from the index in this slice.
 //
 // Shape mirrors the Mac's NoteIndexReconciler (same limits, same upsert body, contentHash = SHA-256
-// of the file bytes), so the two apps agree on what a note looks like. Only meeting notes are
-// indexable (the server accepts kind 'meeting' only); other notes are skipped and counted.
+// of the file bytes), so the two apps agree on what a note looks like. Every Markdown note is indexed with the
+// kind the core accepts since API 98 (meeting, email, slack, plan, document, repo, note, other); a meeting
+// still needs its frontmatter, the other kinds do not. Hidden paths, iCloud placeholders and oversize files are
+// skipped and counted. At most 50,000 notes go into one rebuild (the scan's own limit): the rest is counted
+// as left out and said so, never an error.
 //
 // Memory is bounded: phase 1 keeps only `{ noteKey, contentHash }` per note (50,000 notes is a few MB),
 // phase 3 re-reads just the missing/stale notes and drops each batch after sending it. Cancellable
@@ -31,7 +34,7 @@ export type RebuildPhase = "idle" | "reading" | "scanning" | "uploading" | "done
 
 export interface RebuildProgress {
   phase: RebuildPhase;
-  /** Meeting notes found to index. */
+  /** Notes found to index. */
   total: number;
   /** Files read and hashed so far. */
   hashed: number;
@@ -40,12 +43,19 @@ export interface RebuildProgress {
   missing: number;
   stale: number;
   uploaded: number;
-  /** Not indexable: not a meeting note, too large, no usable frontmatter, unreadable, in iCloud. */
+  /** Not indexable: not Markdown, hidden, too large, unreadable, in iCloud, a meeting without frontmatter. */
   skipped: number;
+  /** Indexable notes beyond the 50,000 one scan can take (left out of this rebuild). */
+  leftOut: number;
   error: "unavailable" | "unauthorized" | "too_many" | "failed" | null;
 }
 
-export const IDLE_REBUILD: RebuildProgress = { phase: "idle", total: 0, hashed: 0, chunksDone: 0, chunksTotal: 0, missing: 0, stale: 0, uploaded: 0, skipped: 0, error: null };
+export const IDLE_REBUILD: RebuildProgress = { phase: "idle", total: 0, hashed: 0, chunksDone: 0, chunksTotal: 0, missing: 0, stale: 0, uploaded: 0, skipped: 0, leftOut: 0, error: null };
+
+/** Most notes one rebuild scans (the core's 100 chunks of 500). */
+export const MAX_REBUILD_NOTES = SCAN_CHUNK_ENTRIES * SCAN_CHUNKS_MAX;
+
+export type IndexKind = "meeting" | "note" | "email" | "slack" | "document" | "repo" | "plan" | "other";
 
 export interface RebuildDeps {
   host: NotesHost;
@@ -70,13 +80,34 @@ function randomScanId(): string {
   return `scan-${[...a].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Which records the index can hold: meeting notes with frontmatter, readable and not in iCloud. */
-export function indexable(records: readonly NoteRecord[]): { keep: NoteRecord[]; skipped: number } {
-  const keep: NoteRecord[] = [];
+/** The index kind of a note, from where the Library classified it (the kinds the core accepts, API 98). */
+export function kindOf(r: NoteRecord): IndexKind {
+  const sid = r.sourceId;
+  if (sid === "meeting" || sid === "email" || sid === "slack") return sid;
+  if (sid.startsWith("doc:")) return /^plans?$/i.test(r.typeDir) ? "plan" : "document";
+  if (r.area === "source" && r.typeDir === "documents") return "document";
+  if (sid.startsWith("dir:")) return /^(repos?|git)$/i.test(r.typeDir) ? "repo" : "other";
+  return "note";
+}
+
+const hiddenPath = (rel: string): boolean => rel.split("/").some((seg) => seg.startsWith("."));
+
+/** Which records the index can hold: readable Markdown under the size cap, not hidden, not in iCloud (meetings need frontmatter). */
+export function indexable(records: readonly NoteRecord[]): { keep: NoteRecord[]; skipped: number; leftOut: number } {
+  let keep: NoteRecord[] = [];
   for (const r of records) {
-    if (r.sourceId === "meeting" && r.area !== "llm-doc" && !r.placeholder && r.hasFrontmatter && /\.md$/i.test(r.name) && r.size <= BODY_BYTES) keep.push(r);
+    if (r.placeholder || !/\.md$/i.test(r.name) || r.size > BODY_BYTES || hiddenPath(r.rel)) continue;
+    if (kindOf(r) === "meeting" && !r.hasFrontmatter) continue;
+    keep.push(r);
   }
-  return { keep, skipped: records.length - keep.length };
+  let leftOut = 0;
+  if (keep.length > MAX_REBUILD_NOTES) {
+    // Newest first: what is being worked on is what search should find.
+    keep.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.rel < b.rel ? -1 : 1));
+    leftOut = keep.length - MAX_REBUILD_NOTES;
+    keep = keep.slice(0, MAX_REBUILD_NOTES);
+  }
+  return { keep, skipped: records.length - keep.length - leftOut, leftOut };
 }
 
 /** Whole file text through bounded host reads; null when it cannot be read or changed size mid-read. */
@@ -100,7 +131,7 @@ export async function readWhole(host: NotesHost, rel: string, signal: AbortSigna
 
 export interface IndexNoteInput {
   noteKey: string;
-  kind: "meeting";
+  kind: IndexKind;
   title: string;
   date: string;
   durationSec: number;
@@ -108,17 +139,39 @@ export interface IndexNoteInput {
   body: string;
   contentHash: string;
   mtimeMs: number;
-  meta: { meetingId: string; platform: string; language: string };
+  meta: { meetingId?: string; platform: string; language?: string };
 }
 
 const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s);
 
-/** The upsert body for one note read now; null when it has no usable meeting frontmatter or is too large. */
-export function makeUpsertInput(rel: string, text: string, contentHash: string, mtimeMs: number): IndexNoteInput | null {
+/**
+ * The upsert body for one note read now; null when it is too large or, for a meeting, has no usable frontmatter.
+ * Without `rec` the note is a meeting (strict). With `rec` its kind comes from the Library's classification and a
+ * non-meeting note falls back to the record's title and date when the frontmatter has none.
+ */
+export function makeUpsertInput(rel: string, text: string, contentHash: string, mtimeMs: number, rec?: NoteRecord): IndexNoteInput | null {
   if (new TextEncoder().encode(text).length > BODY_BYTES) return null;
+  const kind: IndexKind = rec ? kindOf(rec) : "meeting";
   const parsed = parseNote(text);
-  if (!parsed.hasFrontmatter) return null;
   const d = parsed.data;
+  if (kind === "meeting") {
+    if (!parsed.hasFrontmatter) return null;
+  } else {
+    const title = fmString(d, "title") ?? rec!.title;
+    const started = fmDateMs(d, "started_at") ?? fmDateMs(d, "date") ?? (Number.isFinite(rec!.dateMs) ? rec!.dateMs : mtimeMs);
+    return {
+      noteKey: rel,
+      kind,
+      title: clip(title || rel.slice(rel.lastIndexOf("/") + 1), 500),
+      date: clip(new Date(started).toISOString(), 64),
+      durationSec: Math.max(0, fmInt(d, "duration_seconds") ?? 0),
+      participants: fmList(d, "participants").slice(0, 200).map((p) => clip(p, 200)),
+      body: parsed.body,
+      contentHash,
+      mtimeMs: Math.max(0, Math.trunc(mtimeMs)),
+      meta: { platform: clip(fmString(d, "platform") ?? fmString(d, "source") ?? "", 1000) },
+    };
+  }
   const title = fmString(d, "title");
   const started = fmDateMs(d, "started_at");
   if (title === null || started === null) return null;
@@ -173,8 +226,8 @@ type Reporter = (p: RebuildProgress) => void;
 export async function rebuildIndex(records: readonly NoteRecord[], deps: RebuildDeps, report: Reporter, signal: AbortSignal): Promise<RebuildProgress> {
   const sha = deps.sha256Hex ?? sha256HexWebCrypto;
   const projectId = deps.projectId ?? "";
-  const { keep, skipped } = indexable(records);
-  let p: RebuildProgress = { ...IDLE_REBUILD, phase: "reading", total: keep.length, skipped };
+  const { keep, skipped, leftOut } = indexable(records);
+  let p: RebuildProgress = { ...IDLE_REBUILD, phase: "reading", total: keep.length, skipped, leftOut };
   const emit = (patch: Partial<RebuildProgress>): void => {
     p = { ...p, ...patch };
     report(p);
@@ -185,8 +238,6 @@ export async function rebuildIndex(records: readonly NoteRecord[], deps: Rebuild
   };
   const cancelled = (): boolean => signal.aborted;
   emit({});
-
-  if (keep.length > SCAN_CHUNK_ENTRIES * SCAN_CHUNKS_MAX) return finish({ phase: "error", error: "too_many" });
 
   // Phase 1: read and hash every indexable note (bounded concurrency).
   const hashes = new Map<string, string>();
@@ -273,7 +324,7 @@ export async function rebuildIndex(records: readonly NoteRecord[], deps: Rebuild
     const expect = hashes.get(rel);
     if (!rec || !expect) continue;
     const text = await readWhole(deps.host, rel, signal);
-    const input = text !== null && (await sha(new TextEncoder().encode(text))) === expect ? makeUpsertInput(rel, text, expect, rec.mtimeMs) : null;
+    const input = text !== null && (await sha(new TextEncoder().encode(text))) === expect ? makeUpsertInput(rel, text, expect, rec.mtimeMs, rec) : null;
     if (input === null) {
       skippedNow += 1; // changed since it was hashed, or no usable frontmatter: the next rebuild picks it up
       continue;
@@ -299,7 +350,8 @@ export function rebuildMessage(p: RebuildProgress): string {
     case "uploading":
       return `Uploading ${p.uploaded} of ${p.missing + p.stale}`;
     case "done":
-      return p.uploaded === 0 ? "The index is up to date." : `Index rebuilt: ${p.uploaded} notes uploaded.`;
+      return (p.uploaded === 0 ? "The index is up to date." : `Index rebuilt: ${p.uploaded} notes uploaded.`)
+        + (p.leftOut > 0 ? ` ${p.leftOut} older notes were left out (one rebuild takes ${MAX_REBUILD_NOTES.toLocaleString("en-US")}).` : "");
     case "cancelled":
       return "Rebuild cancelled. Nothing was removed from the index.";
     case "error":
@@ -309,7 +361,7 @@ export function rebuildMessage(p: RebuildProgress): string {
         case "unauthorized":
           return "Sign in again to rebuild the index.";
         case "too_many":
-          return "More than 50,000 meeting notes: the index cannot take them in one scan.";
+          return "Too many notes for one scan.";
         default:
           return "The rebuild failed. The index was not changed beyond what was uploaded; run it again.";
       }

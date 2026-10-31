@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { applyHead, recordFromEntry, type NoteRecord } from "../notes-model.ts";
-import { batchUpserts, BATCH_NOTES, indexable, makeUpsertInput, rebuildIndex, rebuildMessage, readWhole, SCAN_CHUNK_ENTRIES, type IndexCore, type IndexNoteInput, type RebuildProgress } from "../index-rebuild.ts";
+import { batchUpserts, BATCH_NOTES, IDLE_REBUILD, indexable, kindOf, MAX_REBUILD_NOTES, makeUpsertInput, rebuildIndex, rebuildMessage, readWhole, SCAN_CHUNK_ENTRIES, type IndexCore, type IndexNoteInput, type RebuildProgress } from "../index-rebuild.ts";
 import { FakeHost, meetingText } from "./fake-host.ts";
 
 const sha = async (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
@@ -48,7 +48,7 @@ const run = (host: FakeHost, recs: NoteRecord[], core: IndexCore, signal = new A
   return rebuildIndex(recs, { host, core, sha256Hex: sha, newScanId: () => "scan-test-0001" }, (p) => progress.push(p), signal).then((final) => ({ final, progress }));
 };
 
-test("rebuild uploads only meeting notes the core lacks, never prunes, and reports progress", async () => {
+test("rebuild uploads the notes the core lacks (every kind), never prunes, and reports progress", async () => {
   const host = new FakeHost();
   host.add("source/meetings/a.md", meetingText(1));
   host.add("source/meetings/b.md", meetingText(2));
@@ -61,27 +61,32 @@ test("rebuild uploads only meeting notes the core lacks, never prunes, and repor
   const c = fakeCore({ "source/meetings/b.md": createHash("sha256").update(bText).digest("hex") }); // b is already indexed and current
   const { final, progress } = await run(host, recs, c.core);
   assert.equal(final.phase, "done");
-  assert.equal(final.total, 2, "a and b are the indexable meeting notes");
-  assert.equal(final.missing, 1);
+  assert.equal(final.total, 4, "a, b, the slack note and the generated doc are indexable; raw.txt and the iCloud stub are not");
+  assert.equal(final.missing, 3);
   assert.equal(final.stale, 0);
-  assert.equal(final.uploaded, 1);
-  assert.deepEqual(c.upserted.map((n) => n.noteKey), ["source/meetings/a.md"]);
-  assert.equal(c.upserted[0]!.kind, "meeting");
-  assert.equal(c.upserted[0]!.title, "Meeting 1");
-  assert.deepEqual(c.upserted[0]!.participants, ["Alice", "Bob"]);
-  assert.equal(c.upserted[0]!.durationSec, 0);
-  assert.deepEqual(c.upserted[0]!.meta, { meetingId: "m1", platform: "meet", language: "en" });
-  assert.equal(c.upserted[0]!.body.trim().startsWith("## Transcript"), true);
+  assert.equal(final.uploaded, 3);
+  const byKey = new Map(c.upserted.map((n) => [n.noteKey, n]));
+  assert.deepEqual([...byKey.keys()].sort(), ["llm-doc/meetings/g.md", "source/meetings/a.md", "source/meetings/s.md"]);
+  const a = byKey.get("source/meetings/a.md")!;
+  assert.equal(a.kind, "meeting");
+  assert.equal(a.title, "Meeting 1");
+  assert.deepEqual(a.participants, ["Alice", "Bob"]);
+  assert.equal(a.durationSec, 0);
+  assert.deepEqual(a.meta, { meetingId: "m1", platform: "meet", language: "en" });
+  assert.equal(a.body.trim().startsWith("## Transcript"), true);
+  assert.equal(byKey.get("source/meetings/s.md")!.kind, "slack");
+  assert.equal(byKey.get("llm-doc/meetings/g.md")!.kind, "document");
   const scan = c.log.filter((l) => l.path === "/kb/index/scan");
   assert.equal(scan.length, 1);
   assert.equal(scan[0]!.body.prune, false, "never prunes");
   assert.equal(scan[0]!.body.complete, true);
-  assert.equal(scan[0]!.body.totalEntries, 2);
+  assert.equal(scan[0]!.body.totalEntries, 4);
   assert.equal(scan[0]!.body.scanId, "scan-test-0001");
   assert.ok(!("projectId" in scan[0]!.body));
   assert.deepEqual(progress.map((p) => p.phase).filter((p, i, a) => a.indexOf(p) === i), ["reading", "scanning", "uploading", "done"]);
-  assert.equal(final.skipped, 4);
-  assert.match(rebuildMessage(final), /1 notes uploaded/);
+  assert.equal(final.skipped, 2);
+  assert.equal(final.leftOut, 0);
+  assert.match(rebuildMessage(final), /3 notes uploaded/);
   // Idempotent: a second run uploads nothing.
   const again = await run(host, recs, c.core);
   assert.equal(again.final.uploaded, 0);
@@ -186,18 +191,57 @@ test("makeUpsertInput: needs title and started_at; clips; keeps the body after t
   assert.equal(long.participants.length, 200);
 });
 
-test("indexable: only readable, non-placeholder meeting .md notes with frontmatter under the size cap", async () => {
+test("indexable: readable Markdown under the size cap, not hidden, not in iCloud; a meeting needs frontmatter", async () => {
   const host = new FakeHost();
   host.add("a.md", meetingText(1));
   host.add("b.md", meetingText(2, "slack"));
-  host.add("c.md", "# no frontmatter");
+  host.add("c.md", "# a plain note, no frontmatter");
   host.add("d.txt", meetingText(3));
-  host.add("llm-doc/meetings/e.md", meetingText(4));
+  host.add("llm-doc/plans/e.md", "# plan");
   host.add("f.md", "", { placeholder: true });
+  host.add(".git/notes.md", "# hidden dir");
+  host.add("src/.secret.md", "# hidden file");
+  host.add("source/meetings/nofm.md", "no frontmatter but in the meetings dir");
   const recs = await records(host);
-  const { keep, skipped } = indexable(recs);
-  assert.deepEqual(keep.map((r) => r.rel), ["a.md"]);
+  const { keep, skipped, leftOut } = indexable(recs);
+  assert.deepEqual(keep.map((r) => r.rel).sort(), ["a.md", "b.md", "c.md", "llm-doc/plans/e.md"]);
   assert.equal(skipped, 5);
+  assert.equal(leftOut, 0);
+});
+
+test("kinds follow the Library classification and non-meeting notes need no frontmatter", async () => {
+  const host = new FakeHost();
+  host.add("notes/idea.md", "# Big idea\n\nSearch me.");
+  host.add("llm-doc/plans/q4.md", "# Q4 plan");
+  host.add("llm-doc/guides/how.md", "# How");
+  host.add("source/emails/m.md", "---\ntitle: Re: budget\nplatform: email\n---\nbody");
+  host.add("source/repos/r.md", "# repo readme");
+  host.add("source/misc/x.md", "# other");
+  host.add("source/documents/d.md", "# doc");
+  const recs = await records(host);
+  const kinds = Object.fromEntries(recs.map((r) => [r.rel, kindOf(r)]));
+  assert.deepEqual(kinds, { "notes/idea.md": "note", "llm-doc/plans/q4.md": "plan", "llm-doc/guides/how.md": "document", "source/emails/m.md": "email", "source/repos/r.md": "repo", "source/misc/x.md": "other", "source/documents/d.md": "document" });
+  const idea = recs.find((r) => r.rel === "notes/idea.md")!;
+  const input = makeUpsertInput(idea.rel, host.files.get(idea.rel)!.text, "h", 5000.7, idea)!;
+  assert.equal(input.kind, "note");
+  assert.equal(input.title, "Big idea");
+  assert.match(input.date, /^\d{4}-\d\d-\d\dT/);
+  assert.equal(input.mtimeMs, 5000);
+  assert.deepEqual(input.meta, { platform: "" });
+  const mail = recs.find((r) => r.rel === "source/emails/m.md")!;
+  assert.equal(makeUpsertInput(mail.rel, host.files.get(mail.rel)!.text, "h", 1, mail)!.title, "Re: budget");
+});
+
+test("more than 50,000 notes: the newest 50,000 are scanned, the rest is counted as left out (no error)", () => {
+  const recs: NoteRecord[] = [];
+  for (let i = 0; i < MAX_REBUILD_NOTES + 7; i++) recs.push(recordFromEntry({ rel: `n/${String(i).padStart(6, "0")}.md`, size: 10, mtimeMs: i, placeholder: false }));
+  const { keep, skipped, leftOut } = indexable(recs);
+  assert.equal(keep.length, MAX_REBUILD_NOTES);
+  assert.equal(leftOut, 7);
+  assert.equal(skipped, 0);
+  assert.equal(Math.min(...keep.map((r) => r.mtimeMs)), 7, "the 7 oldest are the ones left out");
+  const done = { ...IDLE_REBUILD, phase: "done" as const, uploaded: 3, leftOut: 7 };
+  assert.match(rebuildMessage(done), /7 older notes were left out/);
 });
 
 test("readWhole reassembles a multi-chunk file and returns null for unreadable or aborted", async () => {

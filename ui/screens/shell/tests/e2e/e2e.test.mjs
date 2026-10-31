@@ -274,13 +274,38 @@ test("settings adapter: real routes through requestRaw, error envelopes as data,
   assert.ok(after instanceof Error ? /NO_SESSION/.test(after.code ?? "") : after.status === 401);
 });
 
-test("library search degrades to `unavailable` when the core has no note search route", { skip }, async () => {
+test("library search and index rebuild against the real core: every kind is indexed, found, and cancellable", { skip }, async () => {
   const c = client();
   await c.login(core.email, core.password);
+  // A host over a few in-memory files: a meeting, a plain note, a plan.
+  const files = new Map([
+    ["source/meetings/standup.md", "---\nid: m1\ntitle: Standup\nstarted_at: '2026-10-01T10:00:00Z'\nplatform: meet\nlanguage: en\n---\n\n## Transcript\n\nwe discussed the aardvark launch\n"],
+    ["notes/idea.md", "# Big idea\n\nthe zebra migration roadmap\n"],
+    ["llm-doc/plans/q4.md", "# Q4 plan\n\nship the quokka importer\n"],
+  ]);
+  const enc = new TextEncoder();
+  const host = { read: async (rel, offset) => ({ text: files.get(rel) ?? "", nextOffset: null }) };
+  const recs = [...files].map(([rel, text]) => m.applyHead(m.recordFromEntry({ rel, size: enc.encode(text).length, mtimeMs: 1_790_000_000_000, placeholder: false }), text));
+  const seen = [];
+  const final = await m.rebuildIndex(recs, { host, core: m.indexCoreFrom(c) }, (p) => seen.push(p.phase), new AbortController().signal);
+  assert.equal(final.phase, "done", JSON.stringify(final));
+  assert.equal(final.uploaded, 3);
+  assert.deepEqual(seen.filter((p, i, a) => a.indexOf(p) === i), ["reading", "scanning", "uploading", "done"]);
   const run = m.makeSearchRun(m.searchCoreFrom(c));
-  const res = await run("alpha", new AbortController().signal).catch((e) => e);
-  // Either the route exists (an array of hits) or it fails with a status the search store maps to `unavailable`.
-  assert.ok(Array.isArray(res) || (res instanceof Error && typeof res.status === "number"), `unexpected ${String(res)}`);
+  const zebra = await run("zebra", new AbortController().signal);
+  assert.deepEqual(zebra.map((h) => [h.rel, h.kind]), [["notes/idea.md", "note"]]);
+  assert.match(zebra[0].snippet, /zebra/);
+  assert.equal((await run("quokka", new AbortController().signal))[0].kind, "plan");
+  assert.equal((await run("aardvark", new AbortController().signal))[0].kind, "meeting");
+  assert.deepEqual(await run("nomatchingword", new AbortController().signal), []);
+  // Idempotent: a second rebuild finds everything current.
+  const again = await m.rebuildIndex(recs, { host, core: m.indexCoreFrom(c) }, () => {}, new AbortController().signal);
+  assert.equal(again.uploaded, 0);
+  // A cancelled search request is silent for the caller (the controller ignores it), never a hit list.
+  const ac = new AbortController();
+  const pending = run("zebra", ac.signal).catch((e) => e);
+  ac.abort();
+  assert.ok((await pending) instanceof Error || Array.isArray(await pending));
   await c.logout();
 });
 

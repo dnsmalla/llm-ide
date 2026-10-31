@@ -3,10 +3,12 @@
 // working) when the core has no note search route. Pure: timers and the request are injected, so
 // every transition is tested deterministically.
 //
-// Core contract (route NOT in the core yet, see the parity checklist, blocked-by):
-//   GET /kb/index/search?q=<text>&limit=<n>[&projectId=<id>] -> { results: [{ noteKey, title, snippet, date, kind }] }
+// Core contract (API 98, docs/spec/api-server.md 7d):
+//   GET /kb/index/search?q=<1-200 chars>&limit=<1-50>[&projectId=<id>] -> { results: [{ noteKey, title, snippet, date, kind, projectId }] }
 // scoped to the signed-in user, FTS over the derived note index. `/kb/search` cannot serve this:
 // it hides kind 'note' rows (extension/kb/db.mjs) and its `kind` filter accepts no 'note'.
+// A core without the route answers 404: search degrades to "unavailable" (the local filter keeps working) and asks
+// again after a minute, so an updated core is picked up without a restart of the app.
 
 export interface SearchHit {
   /** Path relative to the notes folder (the index's note key). */
@@ -15,7 +17,11 @@ export interface SearchHit {
   /** Plain text, tags stripped; render as text. */
   snippet: string;
   date: string;
+  /** The index kind (meeting, note, email, slack, document, repo, plan, other); absent in older answers. */
+  kind?: string;
 }
+
+const HIT_KINDS: ReadonlySet<string> = new Set(["meeting", "note", "email", "slack", "document", "repo", "plan", "other"]);
 
 export type SearchPhase = "idle" | "debouncing" | "searching" | "done" | "error" | "unavailable";
 
@@ -32,6 +38,8 @@ export const IDLE_SEARCH: SearchState = { query: "", phase: "idle", hits: [], er
 export const MIN_QUERY_CHARS = 2;
 export const MAX_QUERY_CHARS = 200;
 export const DEFAULT_DEBOUNCE_MS = 250;
+/** How long a missing route is remembered before the next search asks again. */
+export const UNAVAILABLE_RETRY_MS = 60_000;
 
 export type SearchRun = (query: string, signal: AbortSignal) => Promise<SearchHit[]>;
 
@@ -39,6 +47,7 @@ export interface SearchDeps {
   run: SearchRun;
   onChange: (s: SearchState) => void;
   debounceMs?: number;
+  now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
 }
@@ -65,6 +74,7 @@ export class SearchController {
   private disposed = false;
   /** Once the route is known to be missing, stop asking until `reset()`. */
   private unavailable = false;
+  private unavailableAt = 0;
   private readonly deps: SearchDeps;
   private readonly debounceMs: number;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
@@ -90,6 +100,7 @@ export class SearchController {
       this.set({ query: q, phase: "idle", hits: [], error: null });
       return;
     }
+    if (this.unavailable && (this.deps.now ?? Date.now)() - this.unavailableAt >= UNAVAILABLE_RETRY_MS) this.unavailable = false;
     if (this.unavailable) {
       this.set({ query: q, phase: "unavailable", hits: [], error: null });
       return;
@@ -157,6 +168,7 @@ export class SearchController {
       const status = e instanceof SearchRequestError ? e.status : 0;
       if (status === 404 || status === 405 || status === 501) {
         this.unavailable = true;
+        this.unavailableAt = (this.deps.now ?? Date.now)();
         this.set({ query: q, phase: "unavailable", hits: [], error: null });
       } else {
         const error = status === 0 ? "The core is not reachable." : status === 401 || status === 403 ? "Sign in again to search." : "Search failed. Try again.";
@@ -192,6 +204,7 @@ export function decodeSearchHits(body: unknown): SearchHit[] {
       title: plain(r.title, 300) || rel.slice(rel.lastIndexOf("/") + 1),
       snippet: plain(r.snippet, 400),
       date: typeof r.date === "string" ? r.date.slice(0, 40) : "",
+      ...(typeof r.kind === "string" && HIT_KINDS.has(r.kind) ? { kind: r.kind } : {}),
     });
     if (out.length >= 100) break;
   }
@@ -203,7 +216,8 @@ function plain(v: unknown, max: number): string {
 }
 
 export function searchPath(query: string, limit = 50): string {
-  return `/kb/index/search?q=${encodeURIComponent(query)}&limit=${Math.min(100, Math.max(1, limit))}`;
+  // The core answers 400 above 50: the cap is the route's, not ours.
+  return `/kb/index/search?q=${encodeURIComponent(query)}&limit=${Math.min(50, Math.max(1, Math.floor(limit)))}`;
 }
 
 /** The request the controller runs: a non-2xx or transport failure becomes a `SearchRequestError`. */
