@@ -50,6 +50,8 @@ const COMMANDS: &[&str] = &[
     "graph_path_override",
     "theme_override",
     "section_override",
+    "pty_status",
+    "pty_retry_consent",
     "pty_spawn",
     "pty_write",
     "pty_resize",

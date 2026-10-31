@@ -152,6 +152,20 @@ async fn pty_spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<p
     pty_blocking(move || pty::spawn(cols, rows, on_data)).await
 }
 
+/// What the Terminal panel shows before any shell exists: feature toggle, consent state, shell name.
+/// Never prompts and never spawns.
+#[tauri::command]
+fn pty_status() -> pty::Status {
+    pty::status()
+}
+
+/// "Try again" after a refused consent dialog: re-arms the dialog for the next `pty_spawn`
+/// (rate limited, only while refused). Does not spawn.
+#[tauri::command]
+fn pty_retry_consent() -> Result<pty::Status, String> {
+    pty::retry_consent()
+}
+
 #[tauri::command]
 async fn pty_write(id: u32, data: String) -> Result<(), String> {
     pty_blocking(move || pty::write(id, &data)).await
@@ -317,6 +331,8 @@ pub fn run() {
             graph_path_override,
             theme_override,
             section_override,
+            pty_status,
+            pty_retry_consent,
             pty_spawn,
             pty_write,
             pty_resize,

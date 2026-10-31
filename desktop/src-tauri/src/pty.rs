@@ -76,15 +76,51 @@ enum Consent {
 /// and `reset` (page load / window close) forgets everything.
 pub struct Gate {
     state: Mutex<Consent>,
+    /// Re-asks after a refusal: (count, last time). Cleared by `reset`.
+    retries: Mutex<(u32, Option<Instant>)>,
 }
+
+/// A refusal can be re-asked at most this often, and this many times per page load, so a page
+/// cannot turn the native dialog into a nag loop.
+const RETRY_GAP: Duration = Duration::from_secs(5);
+const RETRY_MAX: u32 = 5;
 
 impl Gate {
     pub const fn new() -> Self {
-        Gate { state: Mutex::new(Consent::Unasked) }
+        Gate { state: Mutex::new(Consent::Unasked), retries: Mutex::new((0, None)) }
     }
 
     pub fn reset(&self) {
         *lock(&self.state) = Consent::Unasked;
+        *lock(&self.retries) = (0, None);
+    }
+
+    /// `unasked` / `granted` / `denied`, for the UI's pre-explanation and denied state.
+    pub fn label(&self) -> &'static str {
+        match *lock(&self.state) {
+            Consent::Unasked => "unasked",
+            Consent::Granted => "granted",
+            Consent::Denied => "denied",
+        }
+    }
+
+    /// After a refusal, forgets it so the NEXT spawn asks again (user clicked "Try again").
+    /// Rate limited; only valid while denied.
+    pub fn retry(&self) -> Result<(), &'static str> {
+        let mut st = lock(&self.state);
+        if *st != Consent::Denied {
+            return Err("nothing to retry");
+        }
+        let mut r = lock(&self.retries);
+        if r.0 >= RETRY_MAX {
+            return Err("too many attempts; reload the app to try again");
+        }
+        if r.1.is_some_and(|t| t.elapsed() < RETRY_GAP) {
+            return Err("please wait a few seconds before trying again");
+        }
+        *r = (r.0 + 1, Some(Instant::now()));
+        *st = Consent::Unasked;
+        Ok(())
     }
 
     pub fn granted(&self) -> bool {
@@ -243,12 +279,50 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `$SHELL`, else zsh (the macOS default).
-fn login_shell() -> String {
-    std::env::var("SHELL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/bin/zsh".to_string())
+/// The shell to run and its arguments, per OS. Unix: `$SHELL -l` (else zsh on macOS, sh elsewhere,
+/// and a non-absolute `$SHELL` is ignored). Windows: Windows PowerShell under `%SystemRoot%`, else
+/// `%COMSPEC%`, else cmd.exe; no login flag.
+pub fn shell_command(windows: bool, macos: bool, env: &dyn Fn(&str) -> Option<String>) -> (String, Vec<&'static str>) {
+    if windows {
+        let root = env("SystemRoot").filter(|s| !s.is_empty()).unwrap_or_else(|| "C:\\Windows".to_string());
+        let ps = format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+        if std::path::Path::new(&ps).is_file() {
+            return (ps, vec!["-NoLogo"]);
+        }
+        let cmd = env("COMSPEC").filter(|s| !s.is_empty()).unwrap_or_else(|| format!("{root}\\System32\\cmd.exe"));
+        return (cmd, vec![]);
+    }
+    let fallback = if macos { "/bin/zsh" } else { "/bin/sh" };
+    let sh = env("SHELL").filter(|s| s.starts_with('/')).unwrap_or_else(|| fallback.to_string());
+    (sh, vec!["-l"])
+}
+
+fn login_shell() -> (String, Vec<&'static str>) {
+    shell_command(cfg!(windows), cfg!(target_os = "macos"), &|k| std::env::var(k).ok())
+}
+
+/// What the Terminal panel shows before anything is spawned.
+#[derive(Serialize)]
+pub struct Status {
+    /// The Terminal feature is on in the host's own `LLMIDE_FEATURES`.
+    pub enabled: bool,
+    /// `unasked` | `granted` | `denied`.
+    pub consent: &'static str,
+    /// Basename of the shell that would start.
+    pub shell: String,
+}
+
+pub fn status() -> Status {
+    Status { enabled: terminal_enabled(), consent: GATE.label(), shell: shell_name(&login_shell().0) }
+}
+
+/// "Try again" after a refusal: re-arms the consent dialog for the next spawn (rate limited).
+pub fn retry_consent() -> Result<Status, String> {
+    if !terminal_enabled() {
+        return Err("the Terminal feature is disabled".into());
+    }
+    GATE.retry().map_err(String::from)?;
+    Ok(status())
 }
 
 /// Active project root when one is open; else `$HOME`, else `/`. The repo root is a
@@ -293,13 +367,15 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
         })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let shell = login_shell();
+    let (shell, shell_args) = login_shell();
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env_clear();
     for (k, v) in shell_env(std::env::vars()) {
         cmd.env(k, v);
     }
-    cmd.arg("-l");
+    for a in shell_args {
+        cmd.arg(a);
+    }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     // A Finder-launched app has no locale; without one, UTF-8 output garbles.
@@ -630,6 +706,56 @@ mod tests {
         assert!(g.check(|| true), "a reload gives a fresh decision");
         g.reset();
         assert!(!g.granted(), "reset revokes");
+    }
+
+    #[test]
+    fn retry_only_after_a_refusal_and_is_rate_limited() {
+        let g = Gate::new();
+        assert!(g.retry().is_err(), "nothing to retry before asking");
+        assert!(!g.check(|| false));
+        assert_eq!(g.label(), "denied");
+        assert!(g.retry().is_ok());
+        assert_eq!(g.label(), "unasked");
+        assert!(g.check(|| true), "the next spawn asks again");
+        assert!(g.retry().is_err(), "granted: nothing to retry");
+        let g = Gate::new();
+        assert!(!g.check(|| false));
+        assert!(g.retry().is_ok());
+        assert!(!g.check(|| false));
+        assert!(g.retry().is_err(), "second retry inside the gap is refused");
+        g.reset();
+        assert_eq!(g.label(), "unasked");
+    }
+
+    fn clear_gap(g: &Gate) {
+        let mut r = lock(&g.retries);
+        r.1 = None;
+    }
+
+    #[test]
+    fn retry_count_is_capped_per_page_load() {
+        let g = Gate::new();
+        for _ in 0..RETRY_MAX {
+            assert!(!g.check(|| false));
+            clear_gap(&g); // skip the wait in the test
+            assert!(g.retry().is_ok());
+        }
+        assert!(!g.check(|| false));
+        clear_gap(&g);
+        assert!(g.retry().is_err());
+    }
+
+    #[test]
+    fn per_os_shell_selection() {
+        let e = |m: &'static [(&'static str, &'static str)]| {
+            move |k: &str| m.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+        };
+        assert_eq!(shell_command(false, true, &e(&[])), ("/bin/zsh".into(), vec!["-l"]));
+        assert_eq!(shell_command(false, false, &e(&[])), ("/bin/sh".into(), vec!["-l"]));
+        assert_eq!(shell_command(false, true, &e(&[("SHELL", "/opt/homebrew/bin/fish")])).0, "/opt/homebrew/bin/fish");
+        assert_eq!(shell_command(false, true, &e(&[("SHELL", "fish")])).0, "/bin/zsh", "a relative $SHELL is ignored");
+        let (w, args) = shell_command(true, false, &e(&[("SystemRoot", "C:\\NoSuchWin"), ("COMSPEC", "C:\\x\\cmd.exe")]));
+        assert_eq!((w.as_str(), args.len()), ("C:\\x\\cmd.exe", 0), "no PowerShell on disk: COMSPEC, no -l");
     }
 
     #[test]

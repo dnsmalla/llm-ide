@@ -45,6 +45,8 @@
     "allow-notify",
     "allow-tray-status",
     "allow-tray-set-close-to-tray",
+    "allow-pty-status",
+    "allow-pty-retry-consent",
     "allow-pty-spawn",
     "allow-pty-write",
     "allow-pty-resize",
