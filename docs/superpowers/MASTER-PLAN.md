@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 12 | 12 | 13 | 37 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 13 | 12 | 13 | 38 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 87 | 30 | 67 | 184 |  |
+| Total | 88 | 30 | 67 | 185 |  |
 
 ## How the surfaces connect
 
@@ -133,6 +133,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Phase 3 integration of the first four screens, not GUI-verified: Chat, Explorer, Library and Settings all mount in the shell (`index.tsx` default export with `SectionProps`); Settings gets a real `SettingsEnv` from the shell (`ui/screens/shell/settings-adapter.ts`: core client with error envelopes as data, diagnostics, theme, notes folder, sign-in/out); Chat uses the host chat file store through `TauriChatStore` with a session binding that follows sign-in, refresh, core restart and sign-out; typed shell bus for Open in Explorer and Settings links; an end-to-end harness starts the real core with the fake engine and drives login, binding, a streamed turn and the Settings adapter (`ui/screens/shell/tests/e2e/`, 14 tests); `desktop` node tests, `check:security`, `tsc` and `vite build` pass; open: LTA mode, route prefs and folder picker have no host command, attachments are not wired, chats held only on the server are not listed, and nothing ran in a real window (me)
 - [~] Phase 3 S-E Library read side built, not GUI-verified: notes folder host commands (`desktop/src-tauri/src/notes_fs.rs`, read-only, hardened open, 50k paging, iCloud placeholders), sections, virtualised list, safe markdown viewer, meeting detail, local filter, FTS state machine and index rebuild in `ui/screens/library/` with 107 node tests and 15 Rust tests; `GET /kb/index/search` and `open_external_url` now exist and the screen is wired to them via the shell; notes without `platform` show under Unsorted (parity row records the Mac difference) (`plans/2026-10-31-tauri-parity-checklist.md` section 4) (me)
 - [~] Phase 3 host commands for the UI owners built, not GUI-verified: `open_external_url`, `reveal_in_os`, `attach_pick_files`/`attach_read`/`attach_release`, `bypass_confirm` in `desktop/src-tauri/src/{os_open,attach,confirm}.rs`, each with its own `allow-*` grant and 17 Rust tests; no clipboard command (the webview's `navigator.clipboard` is enough); `open_external_url` and `bypass_confirm` are wired in Chat and Library; attachments are not wired; a real macOS/Windows/Linux GUI run is pending (`desktop/PACKAGING.md` "Host commands for the screens") (me)
+- [x] Phase 3 core routes for the screens (additive, API 96 to 99, fixtures with errors, `docs/spec/api-server.md` 7b to 7e): `GET /agent/v2/turns` + `GET /agent/v2/turns/stream` (memory-only bounded replay, `detach` stream flag), `GET /kb/chat/sessions/:id?beforeSeq=` (+ `hasMore`), `GET /kb/index/search` + note kinds beyond meeting, Claude-compatible endpoints (`anthropic-compatible` catalog entry, `GET /kb/providers/custom`, no new dependency); full tool results are not retained, so the UI keeps the truncation (me)
 - [ ] Parity checklist all rows verified against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)

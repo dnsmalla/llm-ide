@@ -310,6 +310,10 @@ A webview reload drops the `POST /agent/v2/stream` connection. Two additive rout
 
 `POST /kb/index/notes` accepts `kind` in `meeting` (default), `note`, `email`, `slack`, `document`, `repo`, `plan`, `other`; any other value is a 400. `note_index.kind` is a free-text column, so no migration was needed (head stays 0057) and an N-1 server simply stores the same rows. The Mac app's meeting indexing and shadow compare are unchanged: the shadow compare filters hits to known meeting ids.
 
+## 7e. Tool results beyond the stream's cap (not retained)
+
+The core caps a streamed `tool_result` at `MAX_TOOL_RESULT_CHARS` in `extension/llm_agent/sdk/events.mjs` and marks it `truncated: true`; the full text is not kept by any core store (the usage and tool-accounting tables record sizes only). There is therefore **no route to fetch the full result**, and none is planned: adding one would mean retaining unbounded, possibly secret tool output in memory or on disk. Clients keep the truncated text and show the `truncated` flag; the Tauri chat does the same (parity row "Tool activity list").
+
 ## 8. See also
 
 - [`../explanation/server-internals.md`](../explanation/server-internals.md) — narrative explanation of request flow, shutdown, and background tasks
