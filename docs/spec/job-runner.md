@@ -3,7 +3,7 @@ title: Core job runner — spec
 status: draft
 ---
 
-This is the contract for the Node-side job runner, the prerequisite for moving Loop and Auto Tasks (automation-kit) off the Mac app. It is a **library only**: nothing in boot or HTTP uses it yet, so no existing caller changes behaviour and no route, `ALL_ENDPOINTS` entry or API version bump is involved.
+This is the contract for the Node-side job runner, the prerequisite for moving Loop and Auto Tasks (automation-kit) off the Mac app. It is a library. Since API 100 the command bus ([command-bus](command-bus.md)) creates one runner after listen, calls `stop()` at shutdown and exposes it through `/bus/*`; the library itself is unchanged apart from two additive hooks: `enqueueJob` accepts an optional caller-chosen `id` (the bus gives a job its command's id) and `createJobRunner` accepts an optional `onSettled({ job, state, result, error })` callback that runs after the job row is settled (the bus appends its terminal event there; a throw in it never fails the settle).
 
 Not covered here: the Mac-side Loop and Auto Task engines, which keep running as they do today until automation-kit moves their logic.
 
@@ -54,6 +54,6 @@ States: `queued`, `running`, `succeeded`, `failed`, `cancelled`, `interrupted`. 
 
 - **Orphan children after a hard crash.** A SIGKILLed server cannot kill its children, and the table stores no pid (a reused pid could hit a stranger). The existing `providers/adapter/spawn-group.mjs` watchdog covers MCP launches only. Option: store the group id and verify the start time before killing on the next boot.
 - **Retry policy.** There is none; a failed job stays failed.
-- **Wiring.** Starting the runner after listen, calling `stop()` at shutdown, and the HTTP surface (enqueue, list, cancel) are left to the automation-kit step that first needs them.
+- **Wiring.** Done by the command bus (S3): started after listen behind `LLMIDE_BUS=off`, stopped at shutdown, HTTP surface `/bus/commands`. Only kinds with a Node handler are registered (`review` today).
 
 Tests: `extension/tests/job-runner.test.mjs` (fake handlers, no model calls).
