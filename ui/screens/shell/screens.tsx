@@ -3,6 +3,7 @@
 // resolved at build time, so each present screen becomes its own chunk loaded on first open.
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import type { SectionId, SectionProps } from "./sections";
+import { installChatDock, type ChatDockProps } from "./chat-dock";
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
@@ -38,3 +39,9 @@ export function screenFor(id: SectionId, label: string): LazyExoticComponent<Com
 }
 
 export { Missing as MissingScreen };
+
+// The Explorer's docked Code Assistant: the shell installs Chat's dock maker (Mac `FeatureCatalog.installChatSeams`),
+// so Explorer renders `ChatDockSlot` and never names the Chat screen. One chunk, loaded when the dock first opens.
+const DOCK = import.meta.glob<{ default: ComponentType<ChatDockProps> }>("../chat/dock.tsx");
+const dockLoader = DOCK["../chat/dock.tsx"];
+if (dockLoader) installChatDock(dockLoader);

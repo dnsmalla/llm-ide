@@ -17,3 +17,4 @@ export { shellBus, createShellBus, safeRelativePath, relativeToProject, type She
 export { getTheme, setTheme, subscribeTheme, seedThemeFromHost, hasStoredTheme, THEMES } from "./theme";
 export { projectStore } from "./project-store";
 export { devToolsEnabled, setDevTools, subscribeDevTools } from "./sections";
+export { ChatDockSlot, installChatDock, type ChatDockProps } from "./chat-dock";

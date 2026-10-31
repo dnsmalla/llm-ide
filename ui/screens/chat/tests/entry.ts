@@ -46,3 +46,5 @@ export * from "../plan/PlanCard";
 export * from "../plan/PlanArea";
 export * from "../badges/Badges";
 export * from "../badges/subagents";
+export * from "../ui-state";
+export * from "../DockHeader";

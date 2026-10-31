@@ -1,6 +1,6 @@
 // The Chat screen: session list, conversation, composer, pickers. Wiring only; the logic lives in the pure
 // modules (events, state, controller, route, virtual, markdown) and is tested without a DOM.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Composer, type ComposerProps } from "./Composer";
 import { ComposerWithExtras } from "./slash/ComposerWithExtras";
@@ -21,6 +21,8 @@ import {
   type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import type { ChatState } from "./state";
+import { createChatUiStore, type ChatPrefs, type ChatUiStore } from "./ui-state";
+import { DockHeader } from "./DockHeader";
 import type { ChatStore, SessionSummary } from "./store";
 import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
@@ -58,13 +60,20 @@ export interface ChatScreenProps {
   banner?: ReactNode | ((state: ChatState) => ReactNode);
   /** No project is open: the core needs a workspace root, so sending is disabled with a reason. */
   noProject?: boolean;
+  /**
+   * Chat UI choices shared with another screen (open chat, picker choices, permission, session-list revision). The Chat
+   * section and the Explorer dock pass the same store; absent = this screen keeps its own.
+   */
+  shared?: ChatUiStore;
+  /** Docked beside the editor (Explorer): no session column, a compact "Code Assistant" header with chat history and New chat. */
+  dock?: boolean;
+  /** Dock only: hides the dock (the header shows the button when this is given). */
+  onCollapse?: () => void;
 }
 
 const SESSION_PAGE = 100;
 
-interface ChatPrefs { mode: string; provider: string | null; model: string | null }
-
-export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false }: ChatScreenProps) {
+export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, dock = false, onCollapse }: ChatScreenProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -77,9 +86,14 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     setListError(describeError(e).message);
   }, []);
   const refreshHealth = useCallback(() => { const h = store.listHealth?.(); setUnreadable(h ? unreadableNotice(h) : null); }, [store]);
-  const [activeId, setActiveId] = useState<string | null>(initialSessionId);
-  const [prefs, setPrefs] = useState<Record<string, ChatPrefs>>({});
-  const [permission, setPermission] = useState<PermissionMode>("ask");
+  // One store for the open chat, picker choices and permission: shared with the other chat surface when given.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ui = useMemo(() => shared ?? createChatUiStore(initialSessionId), [shared]);
+  const uiState = useSyncExternalStore(ui.subscribe, ui.getSnapshot, ui.getSnapshot);
+  const { activeId, prefs, permission } = uiState;
+  const { setActiveId, setPrefs, setPermission } = ui;
+  const skipRev = useRef<number | null>(null);
+  const bumpSessions = useCallback(() => { ui.bumpSessions(); skipRev.current = ui.getSnapshot().sessionsRev; }, [ui]);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [route, setRoute] = useState<RouteView | null>(null);
@@ -89,13 +103,20 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.
+  const sessionsRev = uiState.sessionsRev;
   useEffect(() => {
+    if (skipRev.current === sessionsRev) return undefined; // our own change: the list is already up to date here
     const ac = new AbortController();
     store.listSessions({ limit: SESSION_PAGE, offset: 0 }, ac.signal)
       .then((s) => { setSessions(s); setHasMoreSessions(s.length === SESSION_PAGE); refreshHealth(); })
       .catch((e) => { if (!ac.signal.aborted) setListError(describeError(e).message); });
     return () => ac.abort();
-  }, [store, refreshHealth]);
+  }, [store, refreshHealth, sessionsRev]);
+
+  // Docked: no session column, so open the most recent chat when none is open yet.
+  useEffect(() => {
+    if (dock && !activeId && sessions.length > 0) setActiveId(sessions[0]!.id);
+  }, [dock, activeId, sessions, setActiveId]);
 
   const loadMoreSessions = useCallback(() => {
     if (loadingMore.current) return;
@@ -140,8 +161,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       const s = await store.createSession({});
       setSessions((cur) => [s, ...cur]);
       setActiveId(s.id);
+      bumpSessions();
     } catch (e) { reportStoreError(e); }
-  }, [store, reportStoreError]);
+  }, [store, reportStoreError, bumpSessions]);
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
@@ -158,8 +180,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [, bumpGate] = useState(0);
   useEffect(() => gate?.subscribe(() => bumpGate((n) => n + 1)), [gate]);
   useEffect(() => {
-    controller.onBypassRejected = (id) => { setPermission("ask"); if (id === activeIdRef.current) setNotice(BYPASS_NEEDS_APPROVAL_NOTICE); };
-    return () => { controller.onBypassRejected = null; };
+    const handler = (id: string) => { setPermission("ask"); if (id === activeIdRef.current) setNotice(BYPASS_NEEDS_APPROVAL_NOTICE); };
+    controller.onBypassRejected = handler;
+    // Two chat surfaces can share a controller: only the one that still owns the hook clears it.
+    return () => { if (controller.onBypassRejected === handler) controller.onBypassRejected = null; };
   }, [controller]);
   const activeIdRef = useRef<string | null>(activeId);
   activeIdRef.current = activeId;
@@ -186,18 +210,25 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   };
 
   return (
-    <div className="chat-screen">
-      <SessionList
+    <div className={dock ? "chat-screen chat-dock-mode" : "chat-screen"} data-dock={dock ? "" : undefined}>
+      {!dock && <SessionList
         sessions={sessions} activeId={activeId} busyIds={busyIds} hasMore={hasMoreSessions} onLoadMore={loadMoreSessions}
         onSelect={setActiveId} onNew={() => void newChat()}
-        onRename={(id, title) => { setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s))); store.renameSession(id, title).catch(reportStoreError); }}
+        onRename={(id, title) => { setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s))); store.renameSession(id, title).then(bumpSessions).catch(reportStoreError); }}
         onDelete={(id) => {
-          store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); })
+          store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); bumpSessions(); })
             .catch(reportStoreError);
         }}
         unreadableNotice={unreadable}
-      />
-      <section className="chat-main" aria-label="Chat">
+      />}
+      <section className="chat-main" aria-label={dock ? "Code Assistant" : "Chat"}>
+        {dock && (
+          <DockHeader
+            sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
+            onSelect={setActiveId} onNew={() => void newChat()} onCollapse={onCollapse}
+            onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
+          />
+        )}
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
@@ -212,7 +243,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               {state.model && <span className="chat-muted">{state.model}</span>}
               <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />
-              <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />
+              {!dock && <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />}
             </header>
             {remoteBusy && <StatusBanner severity="info" message="A turn is running for this chat on the core. Its live output cannot be shown here yet." />}
             {state.phase === "error" && state.error && (

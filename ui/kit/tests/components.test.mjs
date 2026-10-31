@@ -55,6 +55,20 @@ test("ResizableDivider: keyboard-focusable separator with value range and a name
   assert.equal(kit.clampWidth(900, 160, 520), 520);
 });
 
+test("ResizableDivider: a right-hand panel (invert) widens when dragged or keyed to the left", () => {
+  assert.equal(kit.dragWidth(300, 40, 160, 520), 340);
+  assert.equal(kit.dragWidth(300, 40, 160, 520, true), 260);
+  assert.equal(kit.dragWidth(300, -900, 160, 520, true), 520, "clamped");
+  assert.equal(kit.keyWidth("ArrowRight", 300, 160, 520, 16), 316);
+  assert.equal(kit.keyWidth("ArrowLeft", 300, 160, 520, 16), 284);
+  assert.equal(kit.keyWidth("ArrowLeft", 300, 160, 520, 16, true), 316);
+  assert.equal(kit.keyWidth("ArrowRight", 300, 160, 520, 16, true), 284);
+  assert.equal(kit.keyWidth("Home", 300, 160, 520, 16, true), 160);
+  assert.equal(kit.keyWidth("End", 300, 160, 520, 16), 520);
+  assert.equal(kit.keyWidth("x", 300, 160, 520, 16), null);
+  assert.equal(kit.keyWidth("ArrowLeft", Number.NaN, 160, 520, 16), 160, "non-finite snaps to the minimum");
+});
+
 test("SectionChromeBar: toolbar whose toggles carry pressed state and a state-specific name", () => {
   const out = html(h(kit.SectionChromeBar, { title: "Files", toggles: [{ id: "t", icon: "i", isOn: true, helpOn: "Hide tree", helpOff: "Show tree", onToggle() {} }] }));
   assert.match(out, /role="toolbar"/);

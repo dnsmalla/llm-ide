@@ -6,6 +6,22 @@ export function clampWidth(proposed: number, min: number, max: number): number {
   return Math.min(Math.max(proposed, min), Math.max(min, max));
 }
 
+/** Width after a drag of `dx` pixels from `startWidth`; a right-hand panel (`invert`) widens when dragged left. */
+export function dragWidth(startWidth: number, dx: number, min: number, max: number, invert = false): number {
+  return clampWidth(startWidth + (invert ? -dx : dx), min, max);
+}
+
+/** Width after a key press, or null when the key is not a resize key. Arrow keys follow the pointer direction. */
+export function keyWidth(key: string, width: number, min: number, max: number, step: number, invert = false): number | null {
+  const next =
+    key === "ArrowLeft" ? width + (invert ? step : -step)
+    : key === "ArrowRight" ? width + (invert ? -step : step)
+    : key === "Home" ? min
+    : key === "End" ? max
+    : null;
+  return next === null ? null : clampWidth(next, min, max);
+}
+
 interface Props {
   width: number;
   onWidthChange: (width: number) => void;
@@ -16,6 +32,8 @@ interface Props {
   label?: string;
   /** Pixels moved per arrow-key press. */
   keyboardStep?: number;
+  /** The panel is on the divider's right (a right-hand dock): dragging left widens it. */
+  invert?: boolean;
 }
 
 /**
@@ -24,7 +42,7 @@ interface Props {
  * The parent should lay out the column beside this divider; `width` is the
  * width of the column that precedes it.
  */
-export function ResizableDivider({ width, onWidthChange, min = 160, max = 520, label = "Resize panel", keyboardStep = 16 }: Props) {
+export function ResizableDivider({ width, onWidthChange, min = 160, max = 520, label = "Resize panel", keyboardStep = 16, invert = false }: Props) {
   const [dragging, setDragging] = useState(false);
   const start = useRef<{ x: number; width: number } | null>(null);
 
@@ -37,18 +55,13 @@ export function ResizableDivider({ width, onWidthChange, min = 160, max = 520, l
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const s = start.current;
     if (!s) return;
-    onWidthChange(clampWidth(s.width + (e.clientX - s.x), min, max));
+    onWidthChange(dragWidth(s.width, e.clientX - s.x, min, max, invert));
   };
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const next =
-      e.key === "ArrowLeft" ? width - keyboardStep
-      : e.key === "ArrowRight" ? width + keyboardStep
-      : e.key === "Home" ? min
-      : e.key === "End" ? max
-      : null;
+    const next = keyWidth(e.key, width, min, max, keyboardStep, invert);
     if (next === null) return;
     e.preventDefault();
-    onWidthChange(clampWidth(next, min, max));
+    onWidthChange(next);
   };
   const end = () => {
     start.current = null;

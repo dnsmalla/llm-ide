@@ -1,7 +1,7 @@
 // The Explorer section: file tree (left), editor tabs and Monaco (right). Wiring only; behaviour lives in
 // `controller.ts` and the pure models, which are tested without a DOM.
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Chip, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
+import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ExplorerController } from "./controller";
 import { ConfirmDialog, PromptDialog, UnsavedDialog } from "./Dialogs";
@@ -10,7 +10,9 @@ import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
 import { createHostFs, baseName, parentOf, type FsApi, type WatchBatch } from "./fs";
-import type { KV } from "./session";
+import { defaultKv, type KV } from "./session";
+import { ChatDockSlot } from "../shell/chat-dock";
+import { DOCK_MAX, DOCK_MIN, clampDockWidth, dockFits, readDockPrefs, writeDockPrefs, type DockPrefs } from "./dock-model";
 import { ExplorerTabBar } from "./TabBar";
 import { topLevel } from "./tree-model";
 import { DEFAULT_PANEL, isDockToggleKey, panelForKey, type PanelId } from "./panels";
@@ -92,6 +94,27 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     if (panel === "scm") setScmSeen(true);
   }, [panel]);
   const [focusSearch, setFocusSearch] = useState(0);
+  // The docked Code Assistant (right column): open by default like the Mac; width and open state remembered per viewer.
+  const dockKv = deps?.kv === undefined ? defaultKv() : deps.kv;
+  const [chatDock, setChatDock] = useState<DockPrefs>(() => readDockPrefs(dockKv));
+  const [viewportW, setViewportW] = useState(() => (typeof window === "undefined" ? 1600 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const dockWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dockLatest = useRef(chatDock);
+  dockLatest.current = chatDock;
+  useEffect(() => {
+    if (dockWriteTimer.current) clearTimeout(dockWriteTimer.current);
+    dockWriteTimer.current = setTimeout(() => writeDockPrefs(dockKv, chatDock), 250);
+    return () => {
+      if (dockWriteTimer.current) clearTimeout(dockWriteTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatDock]);
+  useEffect(() => () => writeDockPrefs(dockKv, dockLatest.current), [dockKv]);
   const [dockOpen, setDockOpen] = useState(false);
   const [dockEver, setDockEver] = useState(false);
   const [dockHeight, setDockHeight] = useState(DOCK_DEFAULT);
@@ -275,6 +298,9 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   }
 
   const name = baseName(projectRoot.replace(/[\\/]+$/, "")) || projectRoot;
+  const chatFits = dockFits(viewportW, width);
+  const chatVisible = chatDock.open && chatFits;
+  const chatWidth = clampDockWidth(chatDock.width, viewportW, width);
 
   return (
     <div className="ex-root" data-active={active} onKeyDown={onKeyDown}>
@@ -359,8 +385,35 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           <button type="button" className="ex-link tm-toggle" aria-expanded={dockOpen} aria-controls="tm-dock" title="Toggle terminal (Ctrl+`)" onClick={() => openDock(!dockOpen)}>
             Terminal
           </button>
+          <span className="ex-spacer" />
+          <button
+            type="button"
+            className="ex-link tm-toggle ex-chat-toggle"
+            aria-expanded={chatVisible}
+            aria-controls="ex-chat-dock"
+            disabled={!chatFits}
+            title={chatFits ? "Show or hide the Code Assistant" : "The window is too narrow for the Code Assistant"}
+            onClick={() => setChatDock((d) => ({ ...d, open: !d.open }))}
+          >
+            <Icon name="panel-right" size={13} /> Code Assistant
+          </button>
         </div>
       </div>
+      {chatVisible && (
+        <>
+          <ResizableDivider
+            width={chatWidth}
+            min={DOCK_MIN}
+            max={DOCK_MAX}
+            invert
+            label="Resize Code Assistant"
+            onWidthChange={(w) => setChatDock((d) => ({ ...d, width: clampDockWidth(w, viewportW, width) }))}
+          />
+          <aside id="ex-chat-dock" className="ex-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
+            <ChatDockSlot active={active} projectRoot={projectRoot} onCollapse={() => setChatDock((d) => ({ ...d, open: false }))} />
+          </aside>
+        </>
+      )}
 
       {menu && (
         <ContextMenu

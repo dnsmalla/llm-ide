@@ -81,3 +81,8 @@
 .ex-field-error { margin: 4px 0 0; color: var(--tok-color-danger); font-size: var(--tok-type-caption-size); }
 .ex-muted { color: var(--tok-color-text-muted); }
 @media (prefers-reduced-motion: reduce) { .ex-root * { transition: none !important; animation: none !important; } }
+
+/* Docked Code Assistant: a fixed-width column right of the editor (width from dock-model.ts, resizable). */
+.ex-chat { flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--tok-color-body); border-left: 1px solid var(--tok-color-border); overflow: hidden; }
+.ex-chat > * { flex: 1 1 auto; min-height: 0; }
+.ex-chat-toggle:disabled { opacity: 0.5; cursor: default; }

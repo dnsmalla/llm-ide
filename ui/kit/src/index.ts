@@ -6,7 +6,7 @@ export { Chip } from "./components/Chip";
 export { EditorTabBar, type EditorTab } from "./components/EditorTabBar";
 export { FileTreeRow, type GitStatus } from "./components/FileTreeRow";
 export { LibrarySidebar, SelectItemEmpty } from "./components/LibrarySidebar";
-export { ResizableDivider, clampWidth } from "./components/ResizableDivider";
+export { ResizableDivider, clampWidth, dragWidth, keyWidth } from "./components/ResizableDivider";
 export { SectionChromeBar, type SectionToggle } from "./components/SectionChromeBar";
 export { SettingsSectionCard } from "./components/SettingsSectionCard";
 export { StatusBanner, type Severity } from "./components/StatusBanner";
