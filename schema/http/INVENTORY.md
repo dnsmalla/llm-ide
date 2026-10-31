@@ -257,17 +257,17 @@ Endpoints with no client caller (53):
 | `/kb/index/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/index-routes.mjs:74` | `LlmIdeAPIClient+Index.swift` | - | - |
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
-| `/bus/commands` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/bus/bus-routes.mjs:119` | - | - | tests only |
-| `/bus/commands/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/bus/bus-routes.mjs:176` | - | - | tests only |
-| `/bus/commands/:id/events` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:190` | - | - | tests only |
-| `/bus/commands/:id/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:198` | - | - | tests only |
-| `/bus/commands/:id/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:202` | - | - | tests only |
-| `/bus/commands/:id/deny` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:208` | - | - | tests only |
-| `/bus/approvals` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:161` | - | - | tests only |
-| `/bus/kinds` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:140` | - | - | tests only |
-| `/bus/kinds/:kind` | ALL_ENDPOINTS | PUT | token | core | `extension/routes/bus/bus-routes.mjs:149` | - | - | tests only |
+| `/bus/commands` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/bus/bus-routes.mjs:142` | - | - | tests only |
+| `/bus/commands/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/bus/bus-routes.mjs:201` | - | - | tests only |
+| `/bus/commands/:id/events` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:215` | - | - | tests only |
+| `/bus/commands/:id/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:223` | - | - | tests only |
+| `/bus/commands/:id/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:236` | - | - | tests only |
+| `/bus/commands/:id/deny` | ALL_ENDPOINTS | POST | token | core | `extension/routes/bus/bus-routes.mjs:250` | - | - | tests only |
+| `/bus/approvals` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:186` | - | - | tests only |
+| `/bus/kinds` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:163` | - | - | tests only |
+| `/bus/kinds/:kind` | ALL_ENDPOINTS | PUT | token | core | `extension/routes/bus/bus-routes.mjs:172` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:757` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:758` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -277,7 +277,7 @@ Endpoints with no client caller (53):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:786` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:789` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |
@@ -350,7 +350,7 @@ Endpoints with no client caller (53):
 
 ## Consistency
 
-Checked: 240 roster entries, 766 Swift files, 52 extension source files.
+Checked: 240 roster entries, 767 Swift files, 52 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
