@@ -30,7 +30,8 @@ function freePort() {
   });
 }
 
-export async function startCore({ bootTimeoutMs = 40_000 } = {}) {
+/** `register: false` leaves the data directory empty (no user), for the first-run flow: the test registers through the shell client. */
+export async function startCore({ bootTimeoutMs = 40_000, register = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "llmide-e2e-"));
   const workspace = join(dir, "workspace");
   mkdirSync(workspace);
@@ -68,8 +69,10 @@ export async function startCore({ bootTimeoutMs = 40_000 } = {}) {
   }
   const email = `e2e+${randomUUID().slice(0, 8)}@example.com`;
   const password = randomBytes(18).toString("base64url");
-  const reg = await fetch(`${base}/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, displayName: "e2e" }) });
-  if (!reg.ok) throw new Error(`register failed: ${reg.status}`);
+  if (register) {
+    const reg = await fetch(`${base}/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, displayName: "e2e" }) });
+    if (!reg.ok) throw new Error(`register failed: ${reg.status}`);
+  }
   return {
     base, workspace, email, password,
     tail: (n = 3000) => output.slice(-n),
