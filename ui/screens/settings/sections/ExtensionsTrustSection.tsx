@@ -1,19 +1,11 @@
 import { useState } from "react";
-import { SettingsSectionCard, FolderIcon, PuzzleIcon, StatusBanner } from "@llmide/ui-kit";
+import { StatusBanner } from "@llmide/ui-kit";
 import { AllowlistModel, IGNORED_REASON, TRUST_CONSENT, TrustListModel, ceilingText } from "../trust-model.ts";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import { Button, ErrorText, Field, NeedsHost } from "../ui.tsx";
 
-export default function ExtensionsTrustSection() {
-  return (
-    <div className="st-stack">
-      <SettingsSectionCard icon={<FolderIcon />} title="Trusted folders" defaultExpanded><TrustedFolders /></SettingsSectionCard>
-      <SettingsSectionCard icon={<PuzzleIcon />} title="Install allowlist" defaultExpanded><Allowlist /></SettingsSectionCard>
-    </div>
-  );
-}
-
-function TrustedFolders() {
+/** The Mac's "Folder trust" group. */
+export function TrustedFolders() {
   const { client, host } = useEnv();
   const m = useModel(() => new TrustListModel(client));
   const s = useStore(m);
@@ -59,7 +51,8 @@ function TrustedFolders() {
   );
 }
 
-function Allowlist() {
+/** The Mac's "Extension sources" group. */
+export function Allowlist() {
   const { client } = useEnv();
   const m = useModel(() => new AllowlistModel(client));
   const s = useStore(m);

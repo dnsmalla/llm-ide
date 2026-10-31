@@ -1,11 +1,12 @@
 /* Settings screen. Tokens only (no raw colours); kit classes for cards and banners. */
 .st-root { display: flex; height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
-.st-nav { flex: none; width: 200px; box-sizing: border-box; padding: var(--tok-space-md); border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface); overflow-y: auto; }
-.st-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.st-nav-item { width: 100%; text-align: left; padding: var(--tok-space-sm) var(--tok-space-md); border: 0; border-radius: var(--tok-radius-sm); background: transparent; color: var(--tok-color-text-muted); font: inherit; cursor: pointer; }
-.st-nav-item:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
-.st-nav-item[aria-current="page"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-accent); }
-.st-main { flex: 1; min-width: 0; overflow-y: auto; padding: var(--tok-space-xl); display: flex; flex-direction: column; gap: var(--tok-space-lg); }
+.st-page { flex: 1; min-width: 0; overflow-y: auto; box-sizing: border-box; padding: var(--tok-space-lg); }
+.st-page > * { max-width: 720px; margin-inline: auto; }
+.st-page > .st-h1, .st-band-wrap > .st-h1 { color: var(--tok-color-text-muted); }
+.st-band-wrap { margin-top: var(--tok-space-xl); padding-top: var(--tok-space-md); border-top: 1px solid var(--tok-color-border); }
+.st-groups { list-style: none; margin: var(--tok-space-lg) auto; padding: 0; display: flex; flex-direction: column; gap: var(--tok-space-lg); }
+.st-group-h { margin: 0; font: inherit; }
+.st-group-btn:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 2px; border-radius: var(--tok-radius-sm); }
 .st-h1 { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
 .st-stack { display: flex; flex-direction: column; gap: var(--tok-space-md); }
 .st-row { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
