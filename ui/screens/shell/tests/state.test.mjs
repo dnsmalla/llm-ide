@@ -107,18 +107,39 @@ test("status store: a failing host call is reported, then recovers; start/stop a
 });
 
 test("navigation: select keeps visited sections, ignores disabled/unknown, steps wrap", () => {
+  nav.setDevTools(false);
   let s = nav.initialNav(null);
-  assert.deepEqual([s.active, s.visited], ["chat", ["chat"]]);
+  assert.deepEqual([s.active, s.visited], ["welcome", ["welcome"]], "nothing known: the Welcome page");
   s = nav.navReducer(s, { type: "select", id: "library" });
   s = nav.navReducer(s, { type: "select", id: "chat" });
-  assert.deepEqual([s.active, s.visited], ["chat", ["chat", "library"]]);
+  assert.deepEqual([s.active, s.visited], ["chat", ["welcome", "library", "chat"]]);
   const before = s;
-  assert.equal(nav.navReducer(s, { type: "select", id: "issues" }), before, "disabled placeholder");
+  for (const id of ["issues", "gantt", "loop", "autotasks"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
   assert.equal(nav.navReducer(s, { type: "select", id: "nope" }), before);
   assert.equal(nav.navReducer(s, { type: "select", id: "chat" }), before, "same section: same object (no re-render)");
-  const back = nav.navReducer(nav.initialNav("chat"), { type: "step", delta: -1 });
-  assert.equal(back.active, "spike", "wraps to the last selectable item");
-  assert.equal(nav.initialNav("issues").active, "chat");
+  assert.equal(nav.navReducer(s, { type: "select", id: "spike" }), before, "Spike is not selectable without developer tools");
+  const back = nav.navReducer(nav.initialNav("welcome"), { type: "step", delta: -1 });
+  assert.equal(back.active, "settings", "wraps to the last selectable item (Settings, not Spike)");
+  assert.equal(nav.initialNav("issues").active, "welcome");
+  nav.setDevTools(true);
+  assert.equal(nav.navReducer(s, { type: "select", id: "spike" }).active, "spike", "developer tools make Spike selectable");
+  assert.equal(nav.navReducer(nav.initialNav("welcome"), { type: "step", delta: -1 }).active, "spike");
+  nav.setDevTools(false);
+});
+
+test("nav order follows the Mac toolbar; Settings is last; Spike only with developer tools", () => {
+  nav.setDevTools(false);
+  const labels = nav.visibleSections().map((d) => d.label);
+  assert.deepEqual(labels, ["Home", "Explorer", "Code Graph", "Auto Tasks", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Chat", "Settings"]);
+  assert.equal(nav.devToolsEnabled(), false);
+  nav.setDevTools(true);
+  assert.equal(nav.visibleSections().at(-1).id, "spike");
+  assert.equal(nav.visibleSections().at(-2).id, "settings");
+  nav.setDevTools(false);
+  nav.enableDevToolsForSession();
+  assert.equal(nav.devToolsEnabled(), true, "a spike launch shows its item for this session");
+  nav.setDevTools(false);
+  for (const id of ["autotasks", "issues", "gantt", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
 });
 
 test("navigation: shortcuts, nav keys, launch section", () => {
@@ -135,6 +156,6 @@ test("navigation: shortcuts, nav keys, launch section", () => {
   assert.equal(nav.launchSection("all", null), "spike");
   assert.equal(nav.launchSection(null, "terminal"), "spike");
   assert.equal(nav.launchSection(null, "library"), "library");
-  assert.equal(nav.launchSection(null, "graphzzz"), "chat");
+  assert.equal(nav.launchSection(null, "graphzzz"), "welcome");
   assert.equal(nav.readStoredSection(), null, "no storage in node: no throw");
 });

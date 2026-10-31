@@ -1,20 +1,25 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { useActiveProject, useCoreStatusView } from "./use-shell";
+import { HOME_CHOICES, readHome, storeHome } from "./landing";
+import { SECTIONS, type SectionId } from "./sections";
+import { safeText } from "./safe-text";
 
 const ProjectSwitcher = memo(function ProjectSwitcher() {
-  const { project, recent, openFolder, openRecent, error, refresh } = useActiveProject();
+  const { project, recent, openFolder, openRecent, closeProject, error, refresh } = useActiveProject();
   const items: MenuItem[] = [
     ...recent.map((p, i) => ({
       id: `recent-${i}`,
-      label: p.name,
-      title: p.root,
+      label: safeText(p.name, 60),
+      title: safeText(p.root, 300),
       checked: project?.root === p.root,
       onSelect: () => void openRecent(i),
     })),
+    { id: "new", label: "New project…", onSelect: () => shellBus.publish({ type: "goto-section", section: "welcome", anchor: "new" }) },
     { id: "open", label: "Open Folder…", onSelect: () => void openFolder() },
+    { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void closeProject() },
   ];
   return (
     <>
@@ -26,7 +31,7 @@ const ProjectSwitcher = memo(function ProjectSwitcher() {
         onOpen={() => void refresh()}
       >
         <FolderIcon />
-        <span className="sh-ellipsis">{project?.name ?? "No project"}</span>
+        <span className="sh-ellipsis">{project ? safeText(project.name, 60) : "No project"}</span>
         <span className="sh-caret">
           <ChevronIcon />
         </span>
@@ -37,6 +42,33 @@ const ProjectSwitcher = memo(function ProjectSwitcher() {
         </span>
       )}
     </>
+  );
+});
+
+/** Which section a project lands on (stored per viewer; default Explorer). */
+const HomePicker = memo(function HomePicker() {
+  const [home, setHome] = useState<SectionId>(() => readHome());
+  const label = SECTIONS.find((s) => s.id === home)?.label ?? "Explorer";
+  return (
+    <MenuButton
+      ariaLabel={`Home page: ${label}. Choose the section a project opens on`}
+      className="sh-statusbar-item"
+      up
+      items={HOME_CHOICES.map((id) => ({
+        id,
+        label: SECTIONS.find((s) => s.id === id)?.label ?? id,
+        checked: id === home,
+        onSelect: () => {
+          storeHome(id);
+          setHome(id);
+        },
+      }))}
+    >
+      Home: {label}
+      <span className="sh-caret">
+        <ChevronIcon />
+      </span>
+    </MenuButton>
   );
 });
 
@@ -90,6 +122,7 @@ export const StatusBar = memo(function StatusBar({ theme, onTheme }: Props) {
       <ProjectSwitcher />
       <CoreChip />
       <span className="sh-spacer" />
+      <HomePicker />
       <MenuButton
         ariaLabel={`Theme: ${themeLabel}`}
         up

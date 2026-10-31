@@ -1,6 +1,6 @@
 // Section registry and navigation state. Pure (no React, no DOM) so it is tested with node.
 
-export type SectionId = "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "docgen" | "visual" | "autotasks" | "spike";
+export type SectionId = "welcome" | "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "gantt" | "loop" | "docgen" | "visual" | "autotasks" | "spike";
 
 export interface SectionDef {
   id: SectionId;
@@ -13,18 +13,87 @@ export interface SectionDef {
   shortcut?: number;
 }
 
+const SOON = "Planned for a later phase";
+
+/**
+ * Nav order follows the Mac toolbar (`ShellSection.toolbarOrder`): Explorer, Code Graph, Auto Tasks, Issues, Gantt,
+ * Loop, Doc Gen, Visual, Library. Review Conflicts has no desktop section yet. Home (the Welcome page) leads, Chat
+ * (a section here; the Mac embeds it in Explorer/Library, see the first-look audit) and Settings (the Mac's account
+ * menu) follow, and the developer-only Spike item is last and hidden unless developer tools are on.
+ */
 export const SECTIONS: readonly SectionDef[] = [
-  { id: "chat", label: "Chat", enabled: true, shortcut: 1 },
+  { id: "welcome", label: "Home", enabled: true },
   { id: "explorer", label: "Explorer", enabled: true, shortcut: 2 },
-  { id: "library", label: "Library", enabled: true, shortcut: 3 },
-  { id: "settings", label: "Settings", enabled: true, shortcut: 4 },
   { id: "graph", label: "Code Graph", enabled: true },
-  { id: "issues", label: "Issues & Gantt", enabled: false, note: "Planned for a later phase" },
+  { id: "autotasks", label: "Auto Tasks", enabled: false, note: SOON },
+  { id: "issues", label: "Issues", enabled: false, note: SOON },
+  { id: "gantt", label: "Gantt", enabled: false, note: SOON },
+  { id: "loop", label: "Loop", enabled: false, note: SOON },
   { id: "docgen", label: "Doc Gen", enabled: true },
   { id: "visual", label: "Visual", enabled: true },
-  { id: "autotasks", label: "Auto Tasks", enabled: false, note: "Planned for a later phase" },
+  { id: "library", label: "Library", enabled: true, shortcut: 3 },
+  { id: "chat", label: "Chat", enabled: true, shortcut: 1 },
+  { id: "settings", label: "Settings", enabled: true, shortcut: 4 },
   { id: "spike", label: "Spike", enabled: true, note: "Phase 0 bench, graph, terminal and editor spikes (developer tool)" },
 ];
+
+// ---- developer tools (the Spike item) ------------------------------------------------------------------------
+// A first-time user never needs Spike: it is hidden unless this is a dev build (`vite dev`), the user turned on
+// "developer tools" (storage flag below; Settings > About can call `setDevTools`), or this launch opened a spike route.
+
+const DEV_KEY = "llmide.devtools";
+let devSession = false;
+const devListeners = new Set<() => void>();
+
+function devFlagFromStorage(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DEV_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function devBuild(): boolean {
+  try {
+    return (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the developer-only Spike item is shown. */
+export function devToolsEnabled(): boolean {
+  return devSession || devBuild() || devFlagFromStorage();
+}
+
+/** Turn developer tools on or off (persisted per viewer; a storage failure keeps the choice for this session). */
+export function setDevTools(on: boolean): void {
+  devSession = on;
+  try {
+    if (on) globalThis.localStorage?.setItem(DEV_KEY, "1");
+    else globalThis.localStorage?.removeItem(DEV_KEY);
+  } catch {
+    // storage unavailable: session only
+  }
+  for (const l of [...devListeners]) l();
+}
+
+/** Show developer tools for this launch only (a spike launch override). Not persisted. */
+export function enableDevToolsForSession(): void {
+  if (devSession) return;
+  devSession = true;
+  for (const l of [...devListeners]) l();
+}
+
+export function subscribeDevTools(l: () => void): () => void {
+  devListeners.add(l);
+  return () => devListeners.delete(l);
+}
+
+/** Sections to list in the nav now (Spike only with developer tools). */
+export function visibleSections(): readonly SectionDef[] {
+  return devToolsEnabled() ? SECTIONS : SECTIONS.filter((s) => s.id !== "spike");
+}
 
 const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
 
@@ -33,13 +102,17 @@ export function isSectionId(v: unknown): v is SectionId {
 }
 
 export function isSelectable(id: string): id is SectionId {
-  return BY_ID.get(id)?.enabled === true;
+  const d = BY_ID.get(id);
+  return d?.enabled === true && (id !== "spike" || devToolsEnabled());
 }
 
 /** Sections reachable by keyboard navigation, in nav order. */
-export const SELECTABLE: readonly SectionDef[] = SECTIONS.filter((s) => s.enabled);
+export function selectableSections(): readonly SectionDef[] {
+  return visibleSections().filter((s) => s.enabled);
+}
 
-export const DEFAULT_SECTION: SectionId = "chat";
+/** What opens when nothing else is known: the Welcome page (it explains the next step). */
+export const DEFAULT_SECTION: SectionId = "welcome";
 
 export interface NavState {
   active: SectionId;
@@ -59,9 +132,10 @@ export function navReducer(state: NavState, action: NavAction): NavState {
   if (action.type === "select") {
     if (isSelectable(action.id)) id = action.id;
   } else {
-    const i = SELECTABLE.findIndex((s) => s.id === state.active);
-    const n = SELECTABLE.length;
-    id = SELECTABLE[(i + action.delta + n) % n]?.id ?? null;
+    const list = selectableSections();
+    const i = list.findIndex((s) => s.id === state.active);
+    const n = list.length;
+    id = list[(i + action.delta + n) % n]?.id ?? null;
   }
   if (id === null || id === state.active) return state;
   return { active: id, visited: state.visited.includes(id) ? state.visited : [...state.visited, id] };
@@ -88,7 +162,7 @@ export function sectionForShortcut(e: KeyLike): SectionId | null {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return null;
   if (!/^[1-9]$/.test(e.key)) return null;
   const n = Number(e.key);
-  return SECTIONS.find((s) => s.enabled && s.shortcut === n)?.id ?? null;
+  return selectableSections().find((s) => s.shortcut === n)?.id ?? null;
 }
 
 /** Roving-tabindex keys inside the nav list. */

@@ -5,13 +5,18 @@ import { CoreDownPanel, LoginPanel } from "./Panels";
 import { StatusBar } from "./StatusBar";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
-import { SECTIONS, SELECTABLE, initialNav, navKeyTarget, navReducer, readStoredSection, sectionForShortcut, storeSection, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, enableDevToolsForSession, initialNav, navKeyTarget, navReducer, sectionForShortcut, selectableSections, subscribeDevTools, visibleSections, type SectionDef, type SectionId } from "./sections";
+import { landingFor, readHome } from "./landing";
 import { core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
+import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
 
 const ICONS: Record<SectionId, ReactNode> = {
+  welcome: <HomeIcon />,
+  gantt: <ChartIcon />,
+  loop: <BenchIcon />,
   chat: <ChatIcon />,
   explorer: <FolderIcon />,
   library: <DocIcon />,
@@ -25,7 +30,7 @@ const ICONS: Record<SectionId, ReactNode> = {
 };
 
 export interface ShellProps {
-  /** Section to open (launch override); falls back to the last used one, then Chat. */
+  /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
   initialSection?: SectionId | null;
   /** Theme for this launch only (screenshot tooling); not persisted. */
   themeOverride?: ThemeId | null;
@@ -70,12 +75,18 @@ const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert,
 });
 
 export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
-  const [nav, dispatch] = useReducer(navReducer, undefined, () => initialNav(initialSection ?? readStoredSection()));
+  const [nav, dispatch] = useReducer(navReducer, undefined, () => {
+    if (initialSection === "spike") enableDevToolsForSession(); // a spike launch needs its own item
+    return initialNav(initialSection ?? null);
+  });
+  // Developer tools (the Spike item) can be switched on while the app runs: re-render the nav when they change.
+  const [, bumpDev] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => subscribeDevTools(() => bumpDev()), []);
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const [navOpen, setNavOpen] = useState(true);
   const view = useCoreStatusView();
   const session = useCoreSession();
-  const { project, loaded: projectLoaded } = useActiveProject();
+  const { project, loaded: projectLoaded, notice, dismissNotice } = useActiveProject();
   const everUsable = useRef(false);
   const main = useRef<HTMLElement>(null);
 
@@ -89,7 +100,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     return () => coreStatusStore.stop();
   }, []);
   useEffect(() => showTheme(theme), [theme]);
-  useEffect(() => storeSection(nav.active), [nav.active]);
+
+  // Landing: Welcome without a project, the home section with one. First load, then project open/close.
+  const prevRoot = useRef<string | null | undefined>(undefined);
+  const projectRoot = project?.root ?? null;
+  const overridden = useRef(initialSection != null);
+  useEffect(() => {
+    if (!projectLoaded) return;
+    const to = landingFor({ prev: prevRoot.current, now: projectRoot, home: readHome(), overridden: overridden.current });
+    prevRoot.current = projectRoot;
+    if (to) dispatch({ type: "select", id: to });
+  }, [projectLoaded, projectRoot]);
 
   // A restarted core invalidates nothing server-side; but a fatal one cannot refresh tokens: drop them.
   useEffect(() => {
@@ -121,10 +142,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
 
   const onSelect = useCallback((id: SectionId) => dispatch({ type: "select", id }), []);
   const onNavKey = useCallback((e: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const target = navKeyTarget(e.key, index, SELECTABLE.length);
+    const list = selectableSections();
+    const target = navKeyTarget(e.key, index, list.length);
     if (target === null) return;
     e.preventDefault();
-    const def = SELECTABLE[target];
+    const def = list[target];
     if (def) {
       dispatch({ type: "select", id: def.id });
       // Roving focus: move DOM focus to the newly current item after it renders.
@@ -146,15 +168,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <button type="button" className="sh-icon-button" aria-label={navOpen ? "Hide sidebar" : "Show sidebar"} aria-pressed={navOpen} onClick={() => setNavOpen((v) => !v)}>
           <SidebarIcon />
         </button>
-        <span className="sh-title" data-tauri-drag-region>
-          LLM-IDE{project ? ` · ${project.name}` : ""}
-        </span>
+        <button type="button" className="sh-title sh-title-button" title="Home" aria-label="Home" onClick={() => dispatch({ type: "select", id: "welcome" })}>
+          LLM-IDE{project ? ` · ${safeText(project.name, 60)}` : ""}
+        </button>
       </header>
       <div className="sh-body">
         {navOpen && (
           <nav className="sh-nav" aria-label="Sections">
             <ul>
-              {SECTIONS.map((def) => {
+              {visibleSections().map((def) => {
                 if (def.enabled) selectableIndex++;
                 return (
                   <NavItem key={def.id} def={def} active={nav.active === def.id} index={def.enabled ? selectableIndex : -1} onSelect={onSelect} onKey={onNavKey} />
@@ -165,6 +187,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         )}
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
+          {notice && gate === "open" && (
+            <div className="sh-notice" role="status" data-testid="project-notice">
+              <p>{safeText(notice, 400)}</p>
+              <button type="button" className="sh-button" onClick={dismissNotice}>Dismiss</button>
+            </div>
+          )}
           {mount &&
             SECTIONS.filter((s) => nav.visited.includes(s.id)).map((def) => (
               <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} inert={inert} spike={spike} />

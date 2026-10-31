@@ -14,11 +14,11 @@ test("no raw HTML, eval or remote resources in the shell slice", () => {
   }
 });
 
-test("tokens never touch web storage: only theme and section id are stored", () => {
+test("tokens never touch web storage: only theme, section id and home section are stored", () => {
   for (const [f, s] of sources) {
     const code = s.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
     if (/localStorage|sessionStorage|indexedDB|document\.cookie/.test(code)) {
-      assert.ok(["theme.ts", "sections.ts"].includes(f), `${f} uses web storage`);
+      assert.ok(["theme.ts", "sections.ts", "landing.ts"].includes(f), `${f} uses web storage`);
     }
   }
   const core = readFileSync(join(SHELL, "core.ts"), "utf8").replace(/\/\/.*$/gm, "");
