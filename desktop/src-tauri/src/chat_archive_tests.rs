@@ -412,7 +412,7 @@ pub(crate) fn serve(core: FakeCore, token: &'static str, user: &'static str) -> 
                         len = v.trim().parse().unwrap_or(0);
                     }
                     if lower.starts_with("authorization:") {
-                        auth = h.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+                        auth = h.split_once(':').map_or("", |x| x.1).trim().to_string();
                     }
                 }
                 let mut body = vec![0u8; len];

@@ -462,14 +462,13 @@ impl<R: LifecycleRemote> Archiver<R> {
         self.journal.write(&doc);
 
         // 2. receipts (the file's own digest), one per verified chat.
-        for i in 0..verified.len() {
+        for e in verified.iter_mut() {
             if left(&deadline).is_zero() {
                 report.deadline_hit = true;
                 break;
             }
-            let e = &verified[i];
             match self.remote.record_receipt(&e.id, &e.hash, e.count, left(&deadline)) {
-                Ok(()) => verified[i].receipted = true,
+                Ok(()) => e.receipted = true,
                 Err(err) => {
                     report.skipped.insert(e.id.clone(), "receiptFailed".into());
                     report.errors.push(format!("receipt: {}", err.label()));

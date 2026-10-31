@@ -248,7 +248,7 @@ fn another_users_chat_is_invisible_and_never_overwritten() {
     let bob = store(&t, "bob");
     alice.save(session(ID1, 2), SaveMode::Replace, None, true).unwrap();
     // an unowned (older) file is visible to both, as on the Mac
-    put(&t, ID2, &fixture("session-v2-no-engine-no-project.json").iter().copied().collect::<Vec<_>>());
+    put(&t, ID2, &fixture("session-v2-no-engine-no-project.json"));
     assert!(bob.list(&q(10)).unwrap().items.iter().all(|c| c.id != ID1));
     assert!(alice.list(&q(10)).unwrap().items.iter().any(|c| c.id == ID1));
     assert_eq!(bob.list(&q(10)).unwrap().total, 1);
