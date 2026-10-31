@@ -719,3 +719,38 @@ fn replace_refuses_a_big_message_count_drop_unless_explicitly_allowed() {
     let r = s.save_with(session(ID1, 2), SaveMode::Replace, Some(&r.revision), true, true).unwrap();
     assert_eq!(r.message_count, 2);
 }
+
+
+// ---- the Mac app's shared folder is never rearranged ----------------------------------------------
+
+#[test]
+fn unreadable_files_in_the_shared_mac_folder_are_reported_never_moved() {
+    let t = Tmp::new("shared-corrupt");
+    let lay = StoreLayout { base: t.0.clone(), sessions: t.0.join("sessions"), shared_with_mac: true };
+    let s = ChatStore::open(lay, "u1", None).unwrap();
+    put(&t, ID1, CORRUPT_BODY);
+    put(&t, ID2, &fixture("session-v2-no-engine-no-project.json"));
+    let page = s.list(&q(10)).unwrap();
+    assert_eq!((page.total, page.quarantined, page.unreadable), (1, 0, 1));
+    assert!(t.0.join("sessions").join(format!("{ID1}.json")).exists(), "the Mac's file stays where it is");
+    assert_eq!(s.quarantined_count(), 0);
+    // load reports it without moving it either, and still leaks nothing
+    let e = s.load(ID1, None, 5).unwrap_err();
+    assert_eq!(e.code, "corrupt");
+    assert!(t.0.join("sessions").join(format!("{ID1}.json")).exists());
+    // a second list does not re-parse into a different answer
+    assert_eq!(s.list(&q(10)).unwrap().unreadable, 1);
+}
+
+#[test]
+fn quarantine_growth_is_bounded() {
+    let t = Tmp::new("quarantine-cap");
+    let dir = t.0.join("sessions");
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..(MAX_QUARANTINED + 3) {
+        let id = format!("AAAAAAAA-0000-4000-8000-{i:012}");
+        std::fs::write(dir.join(format!("{id}.json")), b"junk").unwrap();
+        let moved = quarantine(&dir, &id);
+        assert_eq!(moved.is_some(), i < MAX_QUARANTINED, "{i}");
+    }
+}

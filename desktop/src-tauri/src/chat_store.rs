@@ -24,7 +24,12 @@
 //!   so a concurrent Mac write is detected as a conflict instead of lost. The Mac app does not
 //!   take the lock file today: against the Mac the revision check is the real protection;
 //! - a file that cannot be parsed is quarantined (`<UUID>.corrupt-<unix ts>`, same convention as
-//!   the Mac), never deleted; a file we merely do not understand (newer `storeVersion`) is left alone;
+//!   the Mac, at most `MAX_QUARANTINED`), never deleted, and ONLY in a folder this app owns: in the
+//!   Mac app's shared folder it is skipped and reported (`unreadable`); a file we merely do not
+//!   understand (newer `storeVersion`) is left alone;
+//! - a delete MOVES the file to `sessions/.deleted/` (30 days, 500 copies), it never removes it;
+//! - a `replace` that keeps fewer than half of a chat's messages (chats over 4 messages) needs an
+//!   explicit allowance (`truncation_needs_confirm`);
 //! - chat content is never logged and never placed in an error string.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -63,6 +68,8 @@ pub const DELETED_DIR: &str = ".deleted";
 pub const TRASH_RETENTION_SECS: u64 = 30 * 24 * 3600;
 /// Most recoverable copies kept; the oldest go first.
 pub const TRASH_MAX_ENTRIES: usize = 500;
+/// Most `*.corrupt-*` files this app keeps in its own folder.
+pub const MAX_QUARANTINED: usize = 200;
 
 // ---- errors ---------------------------------------------------------------------------------
 
@@ -754,6 +761,8 @@ pub struct ListPage {
     pub quarantined: usize,
     /// Files left alone because they are too large or in a shape this build does not read.
     pub unsupported: usize,
+    /// Files that do not parse in a folder this app does not own (the Mac app's): reported, never moved.
+    pub unreadable: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1003,7 +1012,7 @@ impl ChatStore {
                     continue;
                 }
             };
-            if p == Parsed::Invalid {
+            if p == Parsed::Invalid && !self.inner.layout.shared_with_mac {
                 if quarantine(&dir, id).is_some() {
                     quarantined += 1;
                 }
@@ -1025,6 +1034,7 @@ impl ChatStore {
             cache.dirty = true;
         }
         let mut unsupported = 0usize;
+        let mut unreadable = 0usize;
         let mut rows: Vec<&ChatSummary> = Vec::new();
         for (id, e) in cache.entries.iter() {
             match &e.parsed {
@@ -1044,7 +1054,7 @@ impl ChatStore {
                     rows.push(summary);
                 }
                 Parsed::Unsupported | Parsed::TooLarge => unsupported += 1,
-                Parsed::Invalid => {}
+                Parsed::Invalid => unreadable += 1,
             }
         }
         rows.sort_by(|a, b| b.last_used_at.partial_cmp(&a.last_used_at).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
@@ -1053,7 +1063,7 @@ impl ChatStore {
         let items: Vec<ChatSummary> = rows.into_iter().skip(q.offset).take(limit).cloned().collect();
         let has_more = q.offset + items.len() < total;
         self.save_index(&mut cache);
-        Ok(ListPage { items, total, has_more, quarantined, unsupported })
+        Ok(ListPage { items, total, has_more, quarantined, unsupported, unreadable })
     }
 
     // -- load --
@@ -1077,8 +1087,8 @@ impl ChatStore {
             Ok(d) => d,
             Err(e) if e.is_io() => return Err(classify(&e)),
             Err(_) => {
-                quarantine(&self.inner.layout.sessions, &id);
-                return Err(StoreError::new("corrupt", "chat file is unreadable and was set aside"));
+                self.set_aside(&id);
+                return Err(StoreError::new("corrupt", "chat file is unreadable"));
             }
         };
         let mut fields = doc.fields;
@@ -1090,8 +1100,8 @@ impl ChatStore {
             return Err(StoreError::new("not_found", "no such chat"));
         }
         if canonical_chat_id(fields.get("id").and_then(Value::as_str).unwrap_or("")).as_deref() != Some(id.as_str()) {
-            quarantine(&self.inner.layout.sessions, &id);
-            return Err(StoreError::new("corrupt", "chat file is unreadable and was set aside"));
+            self.set_aside(&id);
+            return Err(StoreError::new("corrupt", "chat file is unreadable"));
         }
         {
             let mut c = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -1279,6 +1289,14 @@ impl ChatStore {
         if count > *e {
             *e = count;
             c.dirty = true;
+        }
+    }
+
+    /// Quarantines an unreadable file, but only in a folder this app owns: the Mac app's shared folder is
+    /// never rearranged (a chat there that this build cannot read may be fine for the Mac).
+    fn set_aside(&self, id: &str) {
+        if !self.inner.layout.shared_with_mac {
+            quarantine(&self.inner.layout.sessions, id);
         }
     }
 
@@ -1537,6 +1555,12 @@ fn prune_trash(dir: &Path, now: u64) {
 
 /// Moves `<id>.json` to `<id>.corrupt-<unix ts>` (Mac convention). Never deletes.
 pub fn quarantine(sessions: &Path, id: &str) -> Option<PathBuf> {
+    // Bounded: past the cap files stay where they are (and are reported), so a flood of junk cannot
+    // grow the folder without limit.
+    let existing = std::fs::read_dir(sessions).map(|rd| rd.flatten().filter(|e| e.file_name().to_str().is_some_and(|n| n.contains(".corrupt-"))).count()).unwrap_or(0);
+    if existing >= MAX_QUARANTINED {
+        return None;
+    }
     let from = sessions.join(format!("{id}.json"));
     let ts = now_unix() as u64;
     for n in 0..100u32 {
