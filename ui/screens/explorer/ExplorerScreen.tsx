@@ -18,6 +18,7 @@ import { PanelTabs } from "./PanelTabs";
 import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
+import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
 import { TerminalDock, DOCK_DEFAULT, clampDock } from "./terminal/TerminalDock";
 import type { TerminalRuntime } from "./terminal/runtime-types";
@@ -268,10 +269,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   if (!projectRoot) {
     return (
       <div className="ex-root" data-active={active}>
-        <div className="ex-empty" role="status">
-          <p className="ex-empty-title">No project open</p>
-          <p className="ex-empty-hint">Open a project folder to browse and edit its files.</p>
-        </div>
+        <NoProjectCard what="browse files" hint="Open a project folder to browse and edit its files." />
       </div>
     );
   }

@@ -2,6 +2,7 @@
 // the title and the wording; both generate through the same core route, like the Mac app).
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { NoProjectCard } from "../shell/NoProjectCard";
 import { HistoryPanel } from "./HistoryPanel";
 import { estimateFit } from "./model.ts";
 import { ResultPanel } from "./ResultPanel";
@@ -47,10 +48,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   let body: ReactNode;
   if (s.setup === "no_project") {
     body = (
-      <div className="dg-empty">
-        <h2 className="dg-h2">Open a project first</h2>
-        <p className="dg-muted">{title} saves its output inside the project (<code>llm-doc/generated</code>) and reads templates from it.</p>
-      </div>
+      <NoProjectCard what={`use ${title}`} hint={`${title} saves its output inside the project (llm-doc/generated) and reads templates from it.`} />
     );
   } else if (s.setup === "loading") {
     body = (

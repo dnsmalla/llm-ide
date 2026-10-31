@@ -21,6 +21,7 @@ import { createHostAttach } from "./attach/host";
 import { createHostProjectFs } from "./mentions/project-fs";
 import { createMentionSearch } from "./mentions";
 import type { ComposeServices } from "./slash/extras";
+import { NoProjectCard } from "../shell/NoProjectCard";
 
 export { ChatScreen, type ChatHost, type ChatScreenProps } from "./ChatScreen";
 export { ChatController, type ControllerDeps, type SendOptions, type ChatView } from "./controller";
@@ -137,5 +138,7 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   const banner = useCallback((s: ChatState) => (
     <TrustBanner trust={s.workspaceTrust} core={transport} onTrusted={(path) => controller.trustGranted(s.sessionId, path)} nativeConfirm={nativeTrustConfirm} />
   ), [controller, transport, nativeTrustConfirm]);
-  return <ChatScreen controller={controller} store={store} core={transport} host={host} approvals={approvals} banner={banner} noProject={projectRoot === null} />;
+  // No project: one clear card with the two paths instead of a disabled composer (the sessions list returns with a project).
+  if (projectRoot === null) return <NoProjectCard what="chat" hint="Chats work inside a project: the assistant reads and edits the files of the open project." />;
+  return <ChatScreen controller={controller} store={store} core={transport} host={host} approvals={approvals} banner={banner} noProject={false} />;
 }

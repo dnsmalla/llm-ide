@@ -168,7 +168,7 @@ test("DocGenScreen server render: no project, ready states; landmarks and headin
   const env = { fs: null, notes: null };
   const none = html(h(E.DocGenScreen, { store, env, active: true, projectRoot: null, onOpenFile: noop, onOpenExternal: noop, onOpenSettings: noop }));
   assert.match(none, /<h1 class="dg-title">Doc Gen<\/h1>/);
-  assert.match(none, /Open a project first/);
+  assert.match(none, /Open or create a project to use Doc Gen/);
   await store.setProject("/proj");
   const ready = html(h(E.DocGenScreen, { store, env, active: true, projectRoot: "/proj", onOpenFile: noop, onOpenExternal: noop, onOpenSettings: noop, initialViewport: 200 }));
   assert.match(ready, /<section class="dg-setup" aria-label="Setup"/);

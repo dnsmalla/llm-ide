@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { GRAPH_CANDIDATES } from "./source.ts";
+import { NoProjectCard } from "../shell/NoProjectCard";
 
 export function LoadingState({ stage, onCancel }: { stage: string; onCancel: () => void }) {
   return (
@@ -53,10 +54,7 @@ export function EmptyState({ tried, onOpen, onRetry }: { tried: string[]; onOpen
 
 export function NoProjectState() {
   return (
-    <div className="gr-state">
-      <h2 className="gr-state-title">Open a project first</h2>
-      <p>The code graph belongs to a project. Open a project folder from the section list, then return here.</p>
-    </div>
+    <NoProjectCard what="see the code graph" hint="The code graph belongs to a project." />
   );
 }
 

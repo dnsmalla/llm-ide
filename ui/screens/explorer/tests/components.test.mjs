@@ -176,7 +176,7 @@ test("editor pane: read-only notice for files that are not UTF-8", async () => {
 
 test("screen: no project shows a message; with a project it has landmarks, labelled actions and an accessible divider", () => {
   const none = html(h(ExplorerScreen, { active: true, projectRoot: null }));
-  assert.match(none, /No project open/);
+  assert.match(none, /Open or create a project to browse files/);
   const fs = makeFs({});
   const out = html(h(ExplorerScreen, { active: true, projectRoot: "/Users/me/proj", deps: { fs, kv: null, loadEditor: () => Promise.reject(new Error("x")) } }));
   assert.match(out, /<aside[^>]*aria-label="Side panel"/);

@@ -32,7 +32,7 @@ test("empty state explains how to get a graph, names the file, offers a labelled
 
 test("too large, no project, loading and error states are announced and have a next step", () => {
   assert.match(html(h(G.TooLargeState, { onOpen: () => true })), /32 MB limit[\s\S]*GRAPH_FILE_MAX_BYTES/);
-  assert.match(html(h(G.NoProjectState)), /Open a project first/);
+  assert.match(html(h(G.NoProjectState)), /Open or create a project to see the code graph/);
   const l = html(h(G.LoadingState, { stage: "Laying out the graph", onCancel: noop }));
   assert.match(l, /role="status"[^>]*aria-live="polite"/);
   assert.match(l, />Cancel</);
@@ -134,7 +134,7 @@ test("screen states by phase: empty, no project, too large, error, loading", asy
   await e.load("/p");
   assert.match(render(e), /No code graph for this project yet/);
   const n = mk(async () => ""); await n.load(null);
-  assert.match(render(n), /Open a project first/);
+  assert.match(render(n), /Open or create a project to see the code graph/);
   const t = mk(async () => { throw new Error("graph.json is not a regular file within the size limit"); }); await t.load("/p");
   assert.match(render(t), /32 MB limit/);
   const bad = mk(async () => "{}"); await bad.load("/p");
