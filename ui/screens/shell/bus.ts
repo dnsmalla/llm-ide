@@ -23,7 +23,9 @@ const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file"
 
 /** Project-relative path check: no absolute form, no `..`, no NUL, bounded. Returns the normalised path or null. */
 export function safeRelativePath(raw: string): string | null {
-  if (typeof raw !== "string" || raw.length === 0 || raw.length > 4096 || raw.includes("\0")) return null;
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 4096) return null;
+  // Control characters (NUL, newlines, ESC, DEL...) and ':' (Windows drive letters and alternate data streams) never belong in a project-relative path.
+  if (/[\u0000-\u001f\u007f:]/.test(raw)) return null;
   const p = raw.replaceAll("\\", "/");
   if (p.startsWith("/") || /^[A-Za-z]:/.test(p)) return null;
   const parts: string[] = [];
@@ -44,9 +46,11 @@ export function relativeToProject(raw: string, projectRoot: string | null): stri
   const abs = p.startsWith("/") || /^[A-Za-z]:/.test(p);
   if (!abs) return safeRelativePath(p);
   const insensitive = /^[A-Za-z]:/.test(root); // Windows drive paths compare case-insensitively
-  const a = insensitive ? p.toLowerCase() : p;
-  const r = insensitive ? root.toLowerCase() : root;
-  if (!a.startsWith(r + "/")) return null;
+  // Compare the same-length prefix of the ORIGINAL text, case-folding only the two slices (lowercasing a whole
+  // string can change its length, which would misplace the slice below).
+  const head = p.slice(0, root.length);
+  const same = insensitive ? head.toLowerCase() === root.toLowerCase() : head === root;
+  if (!same || p[root.length] !== "/") return null;
   return safeRelativePath(p.slice(root.length + 1));
 }
 
