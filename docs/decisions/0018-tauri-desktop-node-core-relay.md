@@ -1,13 +1,20 @@
 ---
 title: "0018. Tauri desktop shell over the Node core, with a relay for phone and extension"
-status: proposed
+status: accepted (conditional, Phase 3 start)
 date: 2026-10-24
 ---
 
 # ADR 0018: Tauri desktop shell over the Node core, with a relay for phone and extension
 
-**Status:** Proposed — future direction, not scheduled. It becomes Accepted when
-Phase 0 of the plan passes its go/no-go criteria.
+**Status:** Accepted for the Phase 3 start, conditional (decided by the user,
+2026-10-31). It was Proposed (future direction) from 2026-10-24. The condition: the
+open Phase 0 measurements (a user-run autobench with the window frontmost; one Windows
+run with graph >= 30 fps, sidecar start/quit and installer size; an Accessibility grant
+to measure caption cadence) are recorded **before Phase 3 exits**, not before it
+starts. If the Windows run fails the gate, work pauses and the plan is revisited. This
+is acceptance to begin the Phase 3 screens, not a statement that the Phase 0 gate has
+passed: those measurements are still open. See the
+[Phase 3 plan](../superpowers/plans/2026-10-31-tauri-phase3-plan.md).
 **Date:** 2026-10-24
 
 ## Context
