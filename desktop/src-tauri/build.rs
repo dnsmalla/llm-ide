@@ -107,6 +107,8 @@ const COMMANDS: &[&str] = &[
     "mermaid_runtime_install",
     "mermaid_runtime_remove",
     "mermaid_runtime_read",
+    "rtk_status",
+    "rtk_install",
 ];
 
 fn main() {

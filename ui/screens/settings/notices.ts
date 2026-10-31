@@ -31,12 +31,6 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Pair and manage iPhones from the Mac app; the desktop app does not host the phone link yet.",
     blockedBy: "Mobile Control hosting is Swift (WebSocket server, Bonjour, PIN cache). Needs a desktop host service and host commands before any control can be real.",
   },
-  "token-saving": {
-    mac: "Installs and checks rtk, which shrinks shell output before Claude Code reads it (60 to 90 percent fewer tokens in your own Claude Code sessions).",
-    status: "Planned",
-    meanwhile: "Prompt compression, the per-chat router and the token cap are under Model routing. To use rtk, run brew install rtk and rtk init -g in a terminal.",
-    blockedBy: "Needs a host command that reports rtk's install state and runs the Homebrew install (a process the webview must not spawn).",
-  },
   "loop-defaults": {
     mac: "App-wide Loop defaults: how repairs that edit protected paths are handled, default stage timeouts, whether runs write a summary note, and the starting templates.",
     status: "Planned",

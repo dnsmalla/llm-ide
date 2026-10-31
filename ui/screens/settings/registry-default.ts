@@ -24,7 +24,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   general: dflt(() => import("./sections/GeneralSection.tsx")),
   "tool-permissions": dflt(() => import("./sections/ToolPermissionsSection.tsx")),
   "agent-sdk": dflt(() => import("./sections/AgentSdkSection.tsx")),
-  "token-saving": named(notices, "TokenSavingGroup"),
+  "token-saving": dflt(() => import("./sections/TokenSavingSection.tsx")),
   providers: dflt(() => import("./sections/ProvidersSection.tsx")),
   "model-routing": dflt(() => import("./sections/RoutingSection.tsx")),
   "loop-defaults": named(notices, "LoopDefaultsGroup"),

@@ -8,7 +8,7 @@
 //  - pickFolder: `pick_folder` (no side effect) then a single-use `pick_folder_redeem`; confirmTrust: `trust_confirm`.
 // Still not provided: nothing blocks a macOS build; Windows/Linux hosts share the same commands.
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
-import { decodeComponentStatus, decodeCoreLog } from "../settings/components-model";
+import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { CoreError, type CoreClient } from "./core";
@@ -115,6 +115,16 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async revealPath(relPath) {
           await d.invoke<unknown>("reveal_in_os", { relPath });
+        },
+        async rtkStatus() {
+          const s = decodeRtkStatus(await d.invoke<unknown>("rtk_status"));
+          if (!s) throw new Error("the desktop host returned an rtk status this app cannot read");
+          return s;
+        },
+        async installRtk() {
+          const s = decodeRtkStatus(await d.invoke<unknown>("rtk_install"));
+          if (!s) throw new Error("the desktop host returned an rtk status this app cannot read");
+          return s;
         },
       }
     : {};

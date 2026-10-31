@@ -63,6 +63,14 @@ export interface ProjectMemory {
   files: ProjectMemoryFile[];
 }
 
+/** rtk detection for the Token Saving group (it shrinks shell output for the user's own Claude Code). */
+export interface RtkStatus {
+  installed: boolean;
+  version: string | null;
+  /** Homebrew is present, so Install can run. */
+  canInstall: boolean;
+}
+
 export interface SettingsHost {
   /** Versions and core trust state (nonce verified = "spawned"). */
   diagnostics(): Promise<DiagnosticsInfo>;
@@ -101,6 +109,9 @@ export interface SettingsHost {
   projectMemory?(): Promise<ProjectMemory>;
   /** Reveals a project-relative path in the OS file manager (the host re-checks it against the root). */
   revealPath?(relPath: string): Promise<void>;
+  /** rtk (Token Saving): detect, and install through Homebrew behind the host's native confirmation. */
+  rtkStatus?(): Promise<RtkStatus>;
+  installRtk?(): Promise<RtkStatus>;
   /** The developer-tools switch (shows the Spike item in the toolbar): per viewer, applies at once. */
   getDevTools?(): boolean;
   setDevTools?(on: boolean): void;

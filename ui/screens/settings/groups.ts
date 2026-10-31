@@ -35,7 +35,7 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app" },
   { id: "tool-permissions", title: "Tool permissions", sf: "hand.raised", icon: "hand", status: "works", band: "app" },
   { id: "agent-sdk", title: "Claude Agent SDK", sf: "shippingbox", icon: "package", status: "works", band: "app" },
-  { id: "token-saving", title: "Token Saving", sf: "leaf", icon: "leaf", status: "host", band: "app" },
+  { id: "token-saving", title: "Token Saving", sf: "leaf", icon: "leaf", status: "works", band: "app" },
   { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
   { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
   { id: "loop-defaults", title: "Loop defaults", sf: "repeat", icon: "repeat", status: "host", band: "app" },

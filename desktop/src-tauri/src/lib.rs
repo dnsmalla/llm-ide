@@ -29,6 +29,7 @@ mod project_scaffold;
 mod prefs;
 mod project_search;
 mod pty;
+mod rtk;
 mod secrets;
 mod source_pick;
 #[cfg(feature = "spike")]
@@ -357,6 +358,8 @@ macro_rules! product_handlers {
                 mermaid_runtime::mermaid_runtime_install,
                 mermaid_runtime::mermaid_runtime_remove,
                 mermaid_runtime::mermaid_runtime_read,
+                rtk::rtk_status,
+                rtk::rtk_install,
             $($spike),*
         ]
     };

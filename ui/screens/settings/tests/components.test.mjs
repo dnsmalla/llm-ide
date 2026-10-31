@@ -42,6 +42,7 @@ before(async () => {
       repos: join(SETTINGS, "sections/RepositoriesSection.tsx"),
       paths: join(SETTINGS, "sections/PathsSection.tsx"),
       memory: join(SETTINGS, "sections/MemorySection.tsx"),
+      token: join(SETTINGS, "sections/TokenSavingSection.tsx"),
       componentsModel: join(SETTINGS, "components-model.ts"),
       sourcesModel: join(SETTINGS, "sources-model.ts"),
       projectModel: join(SETTINGS, "project-model.ts"),
@@ -65,7 +66,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -135,7 +136,7 @@ test("SettingsScreen: the real registry renders the Mac's 19 App groups in order
 });
 
 test("Mac-only and planned groups render an honest status card with no control (buttons, inputs, switches)", () => {
-  for (const [name, status] of [["BuildGroup", "Managed in the Mac app"], ["MobileGroup", "Managed in the Mac app"], ["SelfHealGroup", "Managed in the Mac app"], ["TokenSavingGroup", "Status: planned"], ["LoopDefaultsGroup", "Status: planned"], ["DocGenGroup", "Status: planned"]]) {
+  for (const [name, status] of [["BuildGroup", "Managed in the Mac app"], ["MobileGroup", "Managed in the Mac app"], ["SelfHealGroup", "Managed in the Mac app"], ["LoopDefaultsGroup", "Status: planned"], ["DocGenGroup", "Status: planned"]]) {
     const out = html(h(m.notices[name], {}, null));
     assert.ok(out.includes(status), name);
     assert.match(out, /role="group" aria-label="Status on the desktop"/);
@@ -208,6 +209,26 @@ test("Repositories: the allow-list card adds with the host folder dialog and rem
   const noPick = { client: e.client, host: { diagnostics: async () => ({}), copyText: async () => {} } };
   const bare = html(h(m.context.SettingsEnvProvider, { env: noPick }, h(m.repos.default)));
   assert.match(bare, /Adding a folder needs the desktop host/);
+});
+
+test("Token Saving: an rtk detection card whose install is host-run, with no process in the page", () => {
+  const e = {
+    client: {},
+    host: {
+      diagnostics: async () => ({}),
+      copyText: async () => {},
+      rtkStatus: async () => ({ installed: false, version: null, canInstall: true }),
+      installRtk: async () => ({ installed: true, version: "rtk 0.4.2", canInstall: true }),
+    },
+  };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.token.default)));
+  assert.match(out, /Checking for rtk/);
+  assert.match(out, /rtk shrinks shell command output/);
+  assert.match(out, /Check again/);
+  assert.ok(!/<input/.test(out), "no command or path input");
+  const noHost = { client: {}, host: { diagnostics: async () => ({}), copyText: async () => {} } };
+  const bare = html(h(m.context.SettingsEnvProvider, { env: noHost }, h(m.token.default)));
+  assert.match(bare, /needs the desktop host/);
 });
 
 test("Paths and Memory: read-only project views, labelled, with no path the page supplied", () => {

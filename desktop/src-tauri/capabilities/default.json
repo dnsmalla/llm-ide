@@ -97,6 +97,8 @@
     "allow-mermaid-runtime-status",
     "allow-mermaid-runtime-install",
     "allow-mermaid-runtime-remove",
-    "allow-mermaid-runtime-read"
+    "allow-mermaid-runtime-read",
+    "allow-rtk-status",
+    "allow-rtk-install"
   ]
 }

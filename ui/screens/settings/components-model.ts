@@ -2,7 +2,7 @@
 //   - Optional components: the on-demand Mermaid runtime (status, install, remove);
 //   - Server & Backend: the core's log tail (read, clear).
 // Decoders are defensive because the answers cross the IPC boundary; the renderer shows text only.
-import type { ComponentStatus, CoreLogText } from "./host.ts";
+import type { ComponentStatus, CoreLogText, RtkStatus } from "./host.ts";
 
 export const MERMAID_TEXT = {
   title: "Mermaid diagram renderer",
@@ -15,6 +15,30 @@ export const MERMAID_TEXT = {
   absent: "Not installed",
   declined: "Nothing changed.",
 } as const;
+
+export const RTK_TEXT = {
+  hint:
+    "rtk shrinks shell command output before Claude Code reads it, which cuts token use in your own Claude Code " +
+    "sessions. It does not change chats inside LLM-IDE.",
+  absent: "Not installed",
+  install: "Install rtk",
+  checking: "Checking for rtk...",
+  brewMissing: "Homebrew isn't installed. Install it from brew.sh, then come back here.",
+  enable:
+    "To turn it on, run `rtk init -g` in Terminal and restart Claude Code. Note: rtk then lets the commands it " +
+    "rewrites run without asking you, including `git push`.",
+  installing: "Installing with Homebrew — this can take a minute...",
+} as const;
+
+export function decodeRtkStatus(v: unknown): RtkStatus | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const version = o.version === null ? null : str(o.version, 120);
+  if (typeof o.installed !== "boolean" || typeof o.canInstall !== "boolean") return null;
+  if (o.version !== null && version === null) return null;
+  return { installed: o.installed, version, canInstall: o.canInstall };
+}
+
 
 export const LOG_TEXT = {
   title: "Backend log",

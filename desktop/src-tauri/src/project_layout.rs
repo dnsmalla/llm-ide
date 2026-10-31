@@ -35,12 +35,14 @@ pub struct Folder {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Paths {
     pub root: String,
     pub folders: Vec<Folder>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct MemoryFile {
     /// File name only (never a path the page supplied).
     pub name: String,
@@ -50,12 +52,14 @@ pub struct MemoryFile {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphFile {
     pub path: String,
     pub size_bytes: u64,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectMemory {
     pub root: String,
     /// The first graph.json that exists (`system/graph/graph.json`, then `system/graph.json`), if any.

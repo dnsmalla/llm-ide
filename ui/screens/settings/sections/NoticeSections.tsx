@@ -29,7 +29,6 @@ const make = (id: string): ComponentType => {
 
 export const BuildGroup = make("build");
 export const MobileGroup = make("mobile");
-export const TokenSavingGroup = make("token-saving");
 export const LoopDefaultsGroup = make("loop-defaults");
 export const DocGenGroup = make("doc-gen");
 export const SelfHealGroup = make("self-heal");

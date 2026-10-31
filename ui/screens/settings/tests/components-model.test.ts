@@ -6,6 +6,7 @@ import {
   componentStateLabel,
   decodeComponentStatus,
   decodeCoreLog,
+  decodeRtkStatus,
   shortPath,
   sizeLabel,
 } from "../components-model.ts";
@@ -61,6 +62,15 @@ test("labels: sizes, state and the short path for the log header", () => {
   assert.equal(componentStateLabel(status), "Installed");
   assert.equal(shortPath("/Users/a/Library/Application Support/llm-ide-desktop/core/server.log"), "…/core/server.log");
   assert.equal(shortPath("/x"), "/x");
+});
+
+test("rtk status: installed/version/canInstall, with a strict shape", () => {
+  assert.deepEqual(decodeRtkStatus({ installed: true, version: "rtk 0.4.2", canInstall: true }), { installed: true, version: "rtk 0.4.2", canInstall: true });
+  assert.deepEqual(decodeRtkStatus({ installed: false, version: null, canInstall: false }), { installed: false, version: null, canInstall: false });
+  assert.equal(decodeRtkStatus({ installed: true, version: 4, canInstall: true }), null);
+  assert.equal(decodeRtkStatus({ installed: true, version: null, canInstall: "yes" }), null);
+  assert.equal(decodeRtkStatus({ installed: true, version: "x".repeat(200), canInstall: true }), null);
+  assert.equal(decodeRtkStatus(null), null);
 });
 
 test("component errors: host codes become plain sentences; a raw string is kept but capped", () => {
