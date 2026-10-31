@@ -12,7 +12,7 @@ and each feature's `Views/`.
 | **Auto Tasks** | Task lanes, schedules, source updates, loop engineering/regression sweeps. | “Soon”. | Port the task cards and run controls. |
 | **Review Conflicts** | Left conflicts file tree (`FileTreePanel`), center diff/hunk staging, review actions. | “Soon”. | Port the conflict tree + diff (Explorer has the diff machinery). |
 | **Issues** | Board of repo issues (GitHub/GitLab) with create/edit/close; dispatch to trackers. | Real read + import: provider/state/search/repository filters, kanban columns from the label namespace (else Open/Closed), cards with links, and a GitHub import form that uses the token saved in Settings → Repositories (the server falls back to the vault token when the desktop sends none). GitLab import and create/edit/close are not in the desktop core yet and the card says so. | GitLab import; create/edit/comment/close with provider write clients. |
-| **Gantt** | Gantt timeline over issues (`/kb/issue-schedule`), filters. | “Soon”. | Timeline read model + view. |
+| **Gantt** | Gantt timeline over issues (`/kb/issue-schedule`), project/provider filters, day/week zoom, today marker, undated issues, schedule editing. | Real: cached issues merged with the scheduling overlay, day/week zoom, today/weekend tint, dependency marker, provider/repository filters, an undated list, and a schedule editor (start/due/estimate/dependencies) that writes the overlay via PUT/DELETE. | Dependencies as drawn arrows; provider-native GitLab dates. |
 | **Loop** | Loop runs, verification/repair dashboards, regression sweep. | “Soon”. | Loop runs + verify views. |
 | **Doc Gen** | Sources (Library categories Code / LLM Doc / Data), template, command/prompt, result + history; save to `llm-doc/`. | Real. Setup + Sources (same categories now), result/history, save, mermaid. | Step chrome and the Mac's refine/save-as-new affordances review. |
 | **Visual** | Same generation views, sources Data / Code, image viewer; save under `llm-doc/`. | Real. Same category restriction now. | Image viewer parity. |
@@ -27,6 +27,7 @@ and each feature's `Views/`.
 - Graph: a bounded file tree of the graph's paths in the left panel (folders first, click focuses the file through search, Clear); `path-tree.ts` with tests. This is the Mac's tree position, backed by graph content so no row is empty.
 - Graph: the Mac's System / Code graph page toggle (System default, persisted) and the System page itself — graph-kit's Agentic OS view mounted in-process with a desktop OsHost (state + cancel + filtered SSE feed, skills, project graph and file preview, shell navigation/file open), plus page/host tests.
 - Issues: read/import board (columns, filters, GitHub import through the vault token).
+- Gantt: timeline + scheduling overlay editor (start/due/estimate/dependencies).
 - Repositories settings rebuilt as the Mac's GitLab/GitHub card (see below).
 
 ## Repositories (Settings → Project)

@@ -42,7 +42,8 @@ test("Shell with an initial section marks it current; unknown/disabled falls bac
   const cur = (init) => /aria-label="Home" aria-current="page"|data-tb-id="(\w+)"[^>]*aria-current="page"|aria-current="page"[^>]*data-tb-id="(\w+)"/.exec(html(h(Shell, { initialSection: init, spike: () => null })));
   assert.equal(cur("library")[1] ?? cur("library")[2], "library");
   assert.equal(cur("issues")[1] ?? cur("issues")[2], "issues");
-  assert.match(cur("gantt")[0], /aria-label="Home"/);
+  assert.match(cur("loop")[0], /aria-label="Home"/);
+  assert.equal(cur("gantt")[1] ?? cur("gantt")[2], "gantt");
   assert.match(cur(null)[0], /aria-label="Home"/);
 });
 
