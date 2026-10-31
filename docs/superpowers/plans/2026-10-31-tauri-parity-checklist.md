@@ -8,16 +8,16 @@ How to use: one row per behaviour. **Mac** is the reference (Swift source named 
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Window opens, restores last section and project | yes (`ShellState, ContentView`) | - |  |
-| Section switcher lists the same sections in the same order (Library, Live, Explorer, Search, Review Conflicts, Source Control, Issues, Gantt, Visual, Doc Gen, Auto Tasks, Graph, Loop, Settings, System); sections of out-of-scope phases show disabled with a reason | yes (`ShellSection`) | - |  |
+| Window opens, restores last section and project | yes (`ShellState, ContentView`) | ~ | last section restored (`ui/screens/shell/sections.ts`, test "navigation: shortcuts, nav keys, launch section"); project is not auto-reopened, it is chosen from the host recent list |
+| Section switcher lists the same sections in the same order (Library, Live, Explorer, Search, Review Conflicts, Source Control, Issues, Gantt, Visual, Doc Gen, Auto Tasks, Graph, Loop, Settings, System); sections of out-of-scope phases show disabled with a reason | yes (`ShellSection`) | ~ | partial: Chat, Explorer, Library, Settings enabled, later sections listed as disabled "Soon" (`Shell.tsx`, test "Shell renders landmarks"); full Mac list not mirrored |
 | Section hidden when its feature is off (`/health` features, 404 `feature_disabled`) | yes (`ShellSection.backingFeature`) | - |  |
-| Home / default section resolution (`resolveHome`) | yes (`ShellState`) | - |  |
-| Toolbar: project name, open project, recent projects, status bar, activity bell | yes (`Shell/Chrome`) | - |  |
+| Home / default section resolution (`resolveHome`) | yes (`ShellState`) | ~ | `launchSection`, `initialNav` (test "navigation: select keeps visited sections") |
+| Toolbar: project name, open project, recent projects, status bar, activity bell | yes (`Shell/Chrome`) | ~ | project switcher in status bar via host commands, native Open Folder (`StatusBar.tsx`, `project-store.ts`, test "project store"); activity bell not built |
 | Deep links (`llmide://`) route to the right section | yes (`DeepLinkRouter`) | - |  |
-| Login, reconnect, welcome, recovery screens | yes (`LoginView, ReconnectView, Welcome, Recovery`) | - |  |
-| Backend status and restart (sidecar lifecycle equals BackendManager) | yes (`BackendManager`) | - |  |
-| Keyboard shortcuts for section switch and command palette | yes (`menus`) | - |  |
-| Theme: light, dark, midnight from tokens.json; side-by-side screenshot in `desktop/parity/` | yes (`ColorPalette`) | - |  |
+| Login, reconnect, welcome, recovery screens | yes (`LoginView, ReconnectView, Welcome, Recovery`) | ~ | sign-in/create-account panel and core-down panel (`Panels.tsx`, tests "LoginPanel", "CoreDownPanel"); welcome and recovery not built; tokens in memory only, sign in on every app start |
+| Backend status and restart (sidecar lifecycle equals BackendManager) | yes (`BackendManager`) | ~ | status bar and panel map starting/ready/restarting/failed/fatal and claude missing (`status-view.ts`, test "status view"); no manual restart control (host has no command) |
+| Keyboard shortcuts for section switch and command palette | yes (`menus`) | ~ | Ctrl/Cmd+1..4, roving arrows in nav, skip link (`sections.ts`); command palette not built |
+| Theme: light, dark, midnight from tokens.json; side-by-side screenshot in `desktop/parity/` | yes (`ColorPalette`) | ~ | Dark/Light/Midnight menu persisted in webview storage (`theme.ts`, test "theme storage"); side-by-side screenshot pending |
 | Window state, tray, close-to-tray default off, notifications (2 templates) | yes (`AppDelegate`) | - |  |
 
 ## 2. Chat panel (S-B, S-G, S-L)
