@@ -22,7 +22,19 @@ before(() => {
   repo = path.join(work, 'repo');
   const ext = path.join(repo, 'extension');
   fs.mkdirSync(ext, { recursive: true });
-  for (const d of COPY) if (fs.existsSync(path.join(EXT, d))) fs.cpSync(path.join(EXT, d), path.join(ext, d), { recursive: true });
+  // Source files only, and retry: other tests in the same run create and delete temp files under kb/ while this copies.
+  const isSource = (src) => fs.statSync(src, { throwIfNoEntry: false })?.isDirectory() || /\.(mjs|js|json|sql|md)$/.test(src);
+  for (const d of COPY) {
+    if (!fs.existsSync(path.join(EXT, d))) continue;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        fs.cpSync(path.join(EXT, d), path.join(ext, d), { recursive: true, filter: isSource });
+        break;
+      } catch (e) {
+        if (e.code !== 'ENOENT' || attempt >= 3) throw e;
+      }
+    }
+  }
   for (const f of ['server.mjs', 'package.json']) fs.copyFileSync(path.join(EXT, f), path.join(ext, f));
   fs.symlinkSync(path.join(EXT, 'node_modules'), path.join(ext, 'node_modules'));
   kb = path.join(repo, 'kb');
