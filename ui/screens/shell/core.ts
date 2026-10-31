@@ -101,6 +101,13 @@ export interface CoreClientOptions {
    * it goes only to a trusted core, never on public (`auth: false`) routes, and never into a log or the DOM.
    */
   hostProof?: () => string | null;
+  /**
+   * Called once per request/stream connect with its OUTCOME only (method, path, status or error code, duration). Never gets
+   * a body, header or token; the diagnostics log scrubs the path further. A throwing listener is ignored.
+   */
+  onOutcome?: (o: { method: string; path: string; status: number; result: string; ms: number; at: number; trust: string }) => void;
+  /** Trust state label for `onOutcome` (default `none`). */
+  trustLabel?: () => string;
 }
 
 export interface RequestOptions {
@@ -371,7 +378,28 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     return { body: JSON.stringify(body), type: "application/json" };
   };
 
+  /** `sendInner` plus one outcome record per call (the 401 retry inside it is not a second record). */
   async function send(path: string, opts: RequestOptions, retried: boolean, streamInit?: { accept: string; lastEventId?: string }): Promise<Response> {
+    const t0 = now();
+    const done = (status: number, result: string) => {
+      if (!options.onOutcome) return;
+      try {
+        options.onOutcome({ method: opts.method ?? "GET", path, status, result, ms: Math.max(0, Math.round(now() - t0)), at: t0, trust: options.trustLabel?.() ?? "none" });
+      } catch {
+        // diagnostics must never break a request
+      }
+    };
+    try {
+      const res = await sendInner(path, opts, retried, streamInit);
+      done(res.status, String(res.status));
+      return res;
+    } catch (e) {
+      done(typeof (e as { status?: unknown })?.status === "number" ? (e as { status: number }).status : 0, e instanceof CoreError ? e.code : "ERROR");
+      throw e;
+    }
+  }
+
+  async function sendInner(path: string, opts: RequestOptions, retried: boolean, streamInit?: { accept: string; lastEventId?: string }): Promise<Response> {
     const auth = opts.auth !== false;
     const headers: Record<string, string> = { Accept: streamInit?.accept ?? "application/json", ...checkExtraHeaders(opts.headers) };
     if (streamInit?.lastEventId) headers["Last-Event-ID"] = streamInit.lastEventId;
@@ -389,7 +417,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     if (res.status === 401 && auth && !retried && tokens) {
       await res.body?.cancel().catch(() => undefined);
       await doRefresh();
-      return send(path, opts, true, streamInit);
+      return sendInner(path, opts, true, streamInit);
     }
     if (res.status === 401 && auth) {
       drop();

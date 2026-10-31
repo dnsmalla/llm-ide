@@ -6,6 +6,7 @@ import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
 import { describeCoreErrorFor } from "./core-explain";
+import { diagnosticsLog } from "./diagnostics";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 
@@ -32,6 +33,8 @@ export const core = createCoreClient({
   },
   credentialsAllowed: () => trustGate.allowed(),
   hostProof: () => busProof.get(),
+  onOutcome: (o) => diagnosticsLog.record(o),
+  trustLabel: () => coreStatusStore.getSnapshot().status?.trust ?? "none",
 });
 
 // Confirming (or losing) trust changes whether the host may hold the token: re-publish only when now allowed.
