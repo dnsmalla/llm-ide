@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
+import { baseName, needsPatch, patchMonacoSource } from "./scripts/monaco-freeze-patch.ts";
 
 const appVersion = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "dev";
 
@@ -19,9 +20,22 @@ const useNpmDompurify = (): Plugin => ({
   },
 });
 
+// Tauri's `freezePrototype` freezes Object.prototype (a hardening we keep). Monaco assigns `toString` on plain
+// namespace objects in five files at module init; under a frozen prototype that throws and the editor never
+// loads ("Attempted to assign to readonly property."). Rewrite just those assignments to defineProperty.
+const freezeSafeMonaco = (): Plugin => ({
+  name: "llmide-monaco-frozen-prototype",
+  enforce: "pre",
+  transform(code, id) {
+    if (!needsPatch(id)) return null;
+    const next = patchMonacoSource(code, baseName(id));
+    return next === code ? null : { code: next, map: null };
+  },
+});
+
 // Tauri expects a fixed dev port (see src-tauri/tauri.conf.json devUrl).
 export default defineConfig({
-  plugins: [useNpmDompurify(), react()],
+  plugins: [useNpmDompurify(), freezeSafeMonaco(), react()],
   resolve: {
     // @llmide/ui-kit is consumed from source (../ui/kit): one React for kit and app.
     alias: [
@@ -43,6 +57,17 @@ export default defineConfig({
             build.onResolve({ filter: /\/dompurify\/dompurify\.js$/ }, async (args) => {
               if (!args.importer.replaceAll("\\", "/").includes("monaco-editor/esm/")) return null;
               return build.resolve("dompurify", { resolveDir: args.resolveDir, kind: args.kind });
+            });
+          },
+        },
+        {
+          // The frozen-prototype patch for the dev pre-bundle (same rewrite as the Vite plugin above).
+          name: "llmide-monaco-frozen-prototype",
+          setup(build) {
+            build.onLoad({ filter: /monaco-editor[\\/]esm[\\/].*\.js$/ }, (args) => {
+              if (!needsPatch(args.path)) return null;
+              const src = readFileSync(args.path, "utf8");
+              return { contents: patchMonacoSource(src, baseName(args.path)), loader: "js" };
             });
           },
         },
