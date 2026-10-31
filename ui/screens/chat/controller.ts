@@ -22,6 +22,10 @@ export interface SendOptions {
   language?: string;
   /** Skills the composer selected (slash menu); passed through verbatim. */
   skills?: unknown;
+  /** Files, notes and images the composer attached (`{ path, content }`; images are `[binary:<mime>]` + base64). */
+  attachments?: ReadonlyArray<{ path: string; content: string }>;
+  /** Set only when executing an approved saved plan (the core then injects the plan-execution skill). */
+  planExecute?: boolean;
   /** Resend from a fresh SDK session (after SESSION_UNRESUMABLE). */
   fresh?: boolean;
 }
@@ -316,6 +320,7 @@ export class ChatController {
       message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
       ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
       ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
       agentContext: { chatSessionId: id, workspaceRoot: this.deps.workspaceRoot(), surface: "desktop" },
     };
     let dropped = false;

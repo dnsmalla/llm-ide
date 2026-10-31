@@ -2,6 +2,7 @@
 // turn runs, queue while streaming. File attachments need a host dialog command (the page never supplies a
 // path): `onAttach` is optional and the button is hidden without it.
 import { useRef } from "react";
+import type { ComposerExtras, SendExtra } from "./slash/extras";
 
 export interface ComposerProps {
   draft: string;
@@ -11,11 +12,13 @@ export interface ComposerProps {
   queue: readonly string[];
   /** Past sent messages of this chat, newest last (Up/Down recall). */
   history: readonly string[];
-  onSend: (text: string) => void;
+  onSend: (text: string, extra?: SendExtra) => void;
   onStop: () => void;
   onDropQueued: (index: number) => void;
   onAttach?: () => void;
   disabledReason?: string | null;
+  /** Slash menu, @ mentions, skill chips and attachments (slash/extras.tsx); absent = the plain composer. */
+  extras?: ComposerExtras;
 }
 
 /** Longest message the composer accepts (the server caps a turn near 500k characters). */
@@ -35,8 +38,15 @@ export function nextRecall(history: readonly string[], cursor: number | null, di
 export function Composer(p: ComposerProps) {
   const recall = useRef<number | null>(null);
   const tooLong = p.draft.length > MAX_MESSAGE_CHARS;
-  const canSend = p.draft.trim().length > 0 && !tooLong && !p.disabledReason;
-  const send = () => { if (canSend) { recall.current = null; p.onSend(p.draft); p.onDraft(""); } };
+  const blocked = p.extras?.blockedReason ?? null;
+  const canSend = p.draft.trim().length > 0 && !tooLong && !p.disabledReason && !blocked;
+  const send = () => {
+    if (!canSend) return;
+    recall.current = null;
+    const prepared = p.extras ? p.extras.prepareSend(p.draft) : { text: p.draft, extra: undefined };
+    if (prepared) p.onSend(prepared.text, prepared.extra);
+    p.onDraft("");
+  };
   return (
     <form className="chat-composer" aria-label="Message composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
       {p.queue.length > 0 && (
@@ -47,10 +57,14 @@ export function Composer(p: ComposerProps) {
           ))}
         </ul>
       )}
+      {p.extras?.chips}
+      {p.extras?.menu}
       <textarea
+        {...p.extras?.textareaProps}
         className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : "Message"}
         onChange={(e) => p.onDraft(e.target.value)}
         onKeyDown={(e) => {
+          if (p.extras?.onKeyDown(e)) return;
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
           else if (e.key === "Escape" && p.busy) { e.preventDefault(); p.onStop(); }
           else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && (p.draft === "" || recall.current !== null)) {
@@ -60,9 +74,11 @@ export function Composer(p: ComposerProps) {
         }}
       />
       <div className="chat-composer-bar">
-        {p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
+        {p.extras?.toolbar}
+        {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
+        {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
         {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>

@@ -1,0 +1,87 @@
+[
+  {
+    "label": "/clear",
+    "aliases": [
+      "/reset",
+      "/new"
+    ],
+    "description": "Clear this conversation",
+    "insert": "/clear",
+    "action": {
+      "kind": "clearChat"
+    }
+  },
+  {
+    "label": "/model",
+    "aliases": [],
+    "description": "Switch the model for the current provider",
+    "insert": "/model ",
+    "action": {
+      "kind": "switchModel"
+    }
+  },
+  {
+    "label": "/config",
+    "aliases": [
+      "/settings"
+    ],
+    "description": "Open Settings",
+    "insert": "/config",
+    "action": {
+      "kind": "openSection",
+      "section": "settings"
+    }
+  },
+  {
+    "label": "/loop",
+    "aliases": [],
+    "description": "Open the Loop Engine",
+    "insert": "/loop",
+    "action": {
+      "kind": "openSection",
+      "section": "loopEngine"
+    }
+  },
+  {
+    "label": "/mcp",
+    "aliases": [],
+    "description": "Open Library → MCP Plugins",
+    "insert": "/mcp",
+    "action": {
+      "kind": "openSection",
+      "section": "library"
+    }
+  },
+  {
+    "label": "/plugin",
+    "aliases": [
+      "/plugins"
+    ],
+    "description": "Open Library → Plugins",
+    "insert": "/plugin",
+    "action": {
+      "kind": "openSection",
+      "section": "library"
+    }
+  },
+  {
+    "label": "/agents",
+    "aliases": [],
+    "description": "Open Library → Plugins (subagents)",
+    "insert": "/agents",
+    "action": {
+      "kind": "openSection",
+      "section": "library"
+    }
+  },
+  {
+    "label": "/hooks",
+    "aliases": [],
+    "description": "Open Library → Plugins (hook handlers & trust)",
+    "insert": "/hooks",
+    "action": {
+      "kind": "openSection",
+      "section": "library"
+    }
+  }
+]
