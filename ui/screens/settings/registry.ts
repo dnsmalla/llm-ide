@@ -3,6 +3,8 @@
 // without editing Settings. Components are loaded lazily (code-split), so a section's code
 // is fetched only when it is first opened.
 
+import type { IconName } from "@llmide/ui-kit";
+
 export type Loader<C> = () => Promise<{ default: C }>;
 
 export interface SectionDef<C> {
@@ -11,6 +13,10 @@ export interface SectionDef<C> {
   /** Lower first. Ties break by id so the order is stable. */
   order: number;
   load: Loader<C>;
+  /** Header glyph (kit Lucide set). Optional so a test registry can omit it. */
+  icon?: IconName;
+  /** "app" (default) always shows; "project" only while a project is open, like the Mac's Project block. */
+  band?: "app" | "project";
 }
 
 export interface CardDef<C> {
@@ -40,6 +46,11 @@ export class SettingsRegistry<C = unknown> {
     m.set(def.id, def);
     this.#cards.set(sectionId, m);
     this.#changed();
+  }
+
+  /** The groups of one band, in order. */
+  sectionsIn(band: "app" | "project"): SectionDef<C>[] {
+    return this.sections().filter((s) => (s.band ?? "app") === band);
   }
 
   sections(): SectionDef<C>[] {
