@@ -469,7 +469,17 @@ pub fn list_dir(root: &Path, req: &ListReq) -> R<ListResult> {
         let p = dir.join(&r.name);
         let lm = std::fs::symlink_metadata(&p).ok();
         let symlink = lm.as_ref().is_some_and(|m| m.file_type().is_symlink());
-        let meta = if symlink { std::fs::metadata(&p).ok() } else { lm };
+        // Never `metadata()` on a link: that would report the size, mtime and kind of a target outside the
+        // project. A link whose target resolves INSIDE the root shows that target (without following any
+        // further link); any other link shows as "other" with the link's own (empty) metadata.
+        let meta = if symlink {
+            match std::fs::canonicalize(&p) {
+                Ok(t) if inside(&t, root) => std::fs::symlink_metadata(&t).ok(),
+                _ => None,
+            }
+        } else {
+            lm
+        };
         let kind = match &meta {
             Some(m) if m.is_dir() => "dir",
             Some(m) if m.is_file() => "file",
@@ -1128,7 +1138,8 @@ mod tests {
         assert!(!out.join("new.txt").exists());
         // The link entry itself is listed (not followed) and can be renamed within the root.
         let l = list_dir(&root, &lr("")).unwrap();
-        assert!(l.entries.iter().any(|e| e.name == "link-file" && e.symlink && e.kind == "file"));
+        // (its target is outside the root, so the listing does not describe it: kind "other", no size)
+        assert!(l.entries.iter().any(|e| e.name == "link-file" && e.symlink && e.kind == "other" && e.size == 0));
         assert_eq!(rename(&root, &RenameReq { from: "link-file".into(), to: "renamed-link".into() }).unwrap(), "renamed-link");
         assert!(fs::symlink_metadata(root.join("renamed-link")).unwrap().file_type().is_symlink());
         // A link that stays inside the root works.
@@ -1294,6 +1305,28 @@ mod tests {
         assert_eq!(code(write_file(&root, &WriteReq { force: true, ..wr("alias", "x", None) })), "protected_path");
         assert_eq!(code(write_file(&root, &wr("d/hooks-new", "x", None))), "protected_path");
         assert_eq!(fs::read_to_string(root.join(".git/config")).unwrap(), "[core]\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn listing_a_link_never_reports_metadata_of_an_outside_target() {
+        let root = scratch("list-link");
+        let outside = scratch("list-link-out");
+        fs::write(outside.join("big.bin"), vec![0u8; 12345]).unwrap();
+        fs::create_dir(outside.join("secretdir")).unwrap();
+        fs::write(root.join("in.txt"), "inside").unwrap();
+        std::os::unix::fs::symlink(outside.join("big.bin"), root.join("to-file")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secretdir"), root.join("to-dir")).unwrap();
+        std::os::unix::fs::symlink(root.join("in.txt"), root.join("to-inside")).unwrap();
+        std::os::unix::fs::symlink("/definitely/missing", root.join("dangling")).unwrap();
+        let l = list_dir(&root, &lr("")).unwrap();
+        let get = |n: &str| l.entries.iter().find(|e| e.name == n).unwrap();
+        for out in ["to-file", "to-dir", "dangling"] {
+            let e = get(out);
+            assert!(e.symlink && e.kind == "other" && e.size == 0, "{out}: {} {} {}", e.kind, e.size, e.symlink);
+        }
+        let inside = get("to-inside");
+        assert!(inside.symlink && inside.kind == "file" && inside.size == 6);
     }
 
     #[test]

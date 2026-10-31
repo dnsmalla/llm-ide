@@ -277,6 +277,11 @@ pub(crate) fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std
     if !meta.is_file() {
         return Err(err("invalid_path", "not a regular file"));
     }
+    // A hard link may be another name for a file outside the notes folder: its path says nothing about where
+    // the bytes live, so it is never read (same rule as the project file reads).
+    if crate::fs_ops::nlink(&meta) > 1 {
+        return Err(err("hardlink", "the note has several hard links; refusing to read it"));
+    }
     if is_dataless(&meta) {
         return Err(err("not_downloaded", "the file is in the cloud and is not downloaded"));
     }
@@ -567,6 +572,18 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         // Under the real temp dir (a deep path), never "too broad".
         fs::canonicalize(&d).unwrap().join("notes")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_note_is_never_read() {
+        let root = scratch("hardlink-read");
+        let outside = root.parent().unwrap().join("outside-secret.md");
+        fs::write(&outside, "secret outside the notes folder").unwrap();
+        mk(&root, "plain.md", "fine");
+        fs::hard_link(&outside, root.join("linked.md")).unwrap();
+        assert!(open_in_root(&root, "plain.md").is_ok());
+        assert_eq!(open_in_root(&root, "linked.md").unwrap_err().split(':').next().unwrap(), "hardlink");
     }
 
     fn mk(root: &Path, rel: &str, body: &str) {
