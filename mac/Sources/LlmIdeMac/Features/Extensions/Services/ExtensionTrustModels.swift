@@ -18,11 +18,17 @@ final class WorkspaceTrustListModel {
     /// The folder the user is about to trust (a confirmation is showing).
     var pendingTrust: WorkspaceTrustItem?
 
+    /// Bumped by every apply; a load that started before the latest apply finished is stale.
+    private var changeGeneration = 0
+
     func load() async {
+        guard !loading else { return }
         loading = true
         defer { loading = false }
+        let started = changeGeneration
         do {
             let list = try await api.workspaceTrust()
+            guard started == changeGeneration, busy.isEmpty else { return }
             items = list.items
             enforced = list.enforced
             errorText = nil
@@ -46,7 +52,7 @@ final class WorkspaceTrustListModel {
     private func apply(_ item: WorkspaceTrustItem, trusted: Bool) async {
         guard !busy.contains(item.path) else { return }
         busy.insert(item.path)
-        defer { busy.remove(item.path) }
+        defer { busy.remove(item.path); changeGeneration += 1 }
         do {
             let r = try await api.setWorkspaceTrust(path: item.path, trusted: trusted)
             if let i = items.firstIndex(where: { $0.path == item.path }) { items[i] = r.item }
@@ -93,9 +99,15 @@ final class ExtensionAllowlistModel {
         }
     }
 
-    var canAdd: Bool { !saving && ExtensionAllowlistText.normalize(draft) != nil }
+    /// Add and remove replace the whole saved list, so they need the loaded list: a failed load
+    /// must never let an edit overwrite what is saved.
+    var isLoaded: Bool { allowlist != nil }
+    static let reloadFirst = "Reload first: the saved list has not been loaded, so it cannot be changed safely."
+
+    var canAdd: Bool { isLoaded && !saving && ExtensionAllowlistText.normalize(draft) != nil }
 
     func addDraft() async {
+        guard allowlist != nil else { errorText = Self.reloadFirst; return }
         guard let entry = ExtensionAllowlistText.normalize(draft) else {
             errorText = ExtensionAllowlistText.message(forCode: "INVALID_SOURCE", entry: draft.trimmingCharacters(in: .whitespaces))
             return
@@ -106,7 +118,8 @@ final class ExtensionAllowlistModel {
     }
 
     func remove(_ entry: String) async {
-        _ = await save((allowlist?.user ?? []).filter { $0 != entry }, entry: entry)
+        guard let current = allowlist else { errorText = Self.reloadFirst; return }
+        _ = await save(current.user.filter { $0 != entry }, entry: entry)
     }
 
     @discardableResult
@@ -129,7 +142,13 @@ final class ExtensionAllowlistModel {
 enum ExtensionAllowlistText {
     /// `owner/repo` or `owner/*`, lowercased, as GitHub names them; nil when it is neither.
     static func normalize(_ raw: String) -> String? {
-        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // A pasted GitHub URL names the same entry, as the server reads it.
+        for prefix in ["https://", "http://"] where s.hasPrefix(prefix) { s.removeFirst(prefix.count); break }
+        if s.hasPrefix("github.com/") { s.removeFirst("github.com/".count) }
+        while s.hasSuffix("/") { s.removeLast() }
+        if s.hasSuffix(".git") { s.removeLast(4) }
+        while s.hasSuffix("/") { s.removeLast() }
         let parts = s.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
         let name = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-_.")

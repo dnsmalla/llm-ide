@@ -78,12 +78,16 @@ struct ExtensionAllowlistSettingsCard: View {
                     listBlock("In effect", a.effective, empty: "Nothing is allowed yet.")
                 } else if model.errorText == nil {
                     SettingsHint("Loading…")
+                } else {
+                    Button("Reload") { Task { await model.load() } }
+                        .buttonStyle(.bordered).controlSize(.small)
                 }
                 HStack {
                     TextField("owner/repo or owner/*", text: $model.draft)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { Task { await model.addDraft() } }
                         .accessibilityLabel("Source to allow")
+                        .disabled(!model.isLoaded)
                     Button("Add") { Task { await model.addDraft() } }
                         .buttonStyle(.bordered).controlSize(.small)
                         .disabled(!model.canAdd)

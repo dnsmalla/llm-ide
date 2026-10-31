@@ -171,6 +171,42 @@ final class ExtensionTrustFlowTests: XCTestCase {
         XCTAssertFalse(model.items[0].trusted)
     }
 
+    func testFailedLoadNeverLetsAnEditReplaceTheSavedList() async {
+        let api = FakeTrustAPI()
+        api.failure = http(500, "X")
+        let model = ExtensionAllowlistModel(api: api)
+        await model.load()
+        XCTAssertFalse(model.isLoaded)
+        model.draft = "acme/tools"
+        XCTAssertFalse(model.canAdd)
+        await model.addDraft()
+        await model.remove("acme/tools")
+        XCTAssertTrue(api.allowlistPuts.isEmpty, "no PUT without a loaded list")
+        XCTAssertTrue(model.errorText?.contains("Reload first") == true)
+    }
+
+    func testPastedGithubUrlNormalisesLikeTheServer() {
+        for raw in ["https://github.com/Acme/Tools", "https://github.com/acme/tools.git", "github.com/acme/tools/",
+                    "http://github.com/Acme/Tools.git/"] {
+            XCTAssertEqual(ExtensionAllowlistText.normalize(raw), "acme/tools", raw)
+        }
+        XCTAssertEqual(ExtensionAllowlistText.normalize("https://github.com/acme/*"), "acme/*")
+        XCTAssertNil(ExtensionAllowlistText.normalize("https://github.com/acme"))
+    }
+
+    func testOverlappingLoadsAreCoalescedAndStaleLoadIgnoredAfterApply() async {
+        let api = FakeTrustAPI()
+        api.trust = WorkspaceTrustList(enforced: true, items: [WorkspaceTrustItem(path: "/a", trusted: false, updatedAt: "t")])
+        let model = WorkspaceTrustListModel(api: api)
+        async let one: Void = model.load()
+        async let two: Void = model.load()
+        _ = await (one, two)
+        XCTAssertEqual(model.items.count, 1)
+        await model.requestChange(model.items[0], trusted: true)
+        await model.confirmPendingTrust()
+        XCTAssertTrue(model.items[0].trusted)
+    }
+
     func testAllowlistAddRemoveAndErrors() async {
         let api = FakeTrustAPI()
         let model = ExtensionAllowlistModel(api: api)
