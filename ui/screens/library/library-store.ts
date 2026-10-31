@@ -219,7 +219,7 @@ export class LibraryStore {
       this.pending = this.pending.filter((r) => this.byRel.has(r));
       this.pendingSet = new Set(this.pending);
     }
-    const selectedGone = this.state.selectedRel !== null && !this.byRel.has(this.state.selectedRel);
+    const selectedGone = this.state.selectedRel !== null && !this.byRel.has(this.state.selectedRel) && !this.hasUnsaved?.();
     this.publish(loaded, { listingDone: true, selectedGone });
   }
 
@@ -248,7 +248,7 @@ export class LibraryStore {
       this.pendingSet = new Set(this.pending);
     }
     const sel = this.state.selectedRel;
-    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done", selectedGone: sel !== null && !this.byRel.has(sel) });
+    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done", selectedGone: sel !== null && !this.byRel.has(sel) && !this.hasUnsaved?.() });
   }
 
   /** A note was renamed or moved; it stays selected under its new path. */
@@ -354,12 +354,38 @@ export class LibraryStore {
 
   // ---- view state -----------------------------------------------------------------------
 
+  /**
+   * Set by the write side while a note has unsaved changes: return false to veto a selection change.
+   * `proceed` performs the vetoed change without asking again (the "discard changes" answer).
+   */
+  selectGuard: ((next: string | null, proceed: () => void) => boolean) | null = null;
+
+  /** True while the open note has unsaved edits: the list never deselects it underneath the editor. */
+  hasUnsaved: (() => boolean) | null = null;
+
+  private guarded(next: string | null, action: () => void): void {
+    const guard = this.selectGuard;
+    if (guard) {
+      const proceed = (): void => {
+        this.selectGuard = null;
+        try {
+          action();
+        } finally {
+          this.selectGuard = guard;
+        }
+      };
+      if (!guard(next, proceed)) return;
+    }
+    action();
+  }
+
   select(rel: string | null): void {
-    if (rel !== this.state.selectedRel) this.patch({ selectedRel: rel });
+    if (rel === this.state.selectedRel) return;
+    this.guarded(rel, () => this.patch({ selectedRel: rel }));
   }
 
   setSection(id: string | null): void {
-    this.patch({ sectionId: id, selectedRel: null });
+    this.guarded(null, () => this.patch({ sectionId: id, selectedRel: null }));
   }
 
   setFilters(f: Partial<Filters>): void {
@@ -389,7 +415,8 @@ export class LibraryStore {
   /** Jump to a note from a search hit: the section it lives in, then select it. */
   reveal(rel: string): void {
     const r = this.byRel.get(rel);
-    this.patch({ sectionId: r ? r.sourceId : this.state.sectionId, selectedRel: rel });
+    if (rel === this.state.selectedRel) return;
+    this.guarded(rel, () => this.patch({ sectionId: r ? r.sourceId : this.state.sectionId, selectedRel: rel }));
   }
 
   record(rel: string): NoteRecord | undefined {

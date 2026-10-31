@@ -1,0 +1,35 @@
+/* Library write side (S-I): editor, dialogs, selection bar. Uses the same tokens as library.css. */
+.lib-btn-danger { background: color-mix(in srgb, var(--tok-color-danger, #d6453d) 22%, var(--tok-color-surface2)); border-color: color-mix(in srgb, var(--tok-color-danger, #d6453d) 55%, var(--tok-color-border)); }
+.lib-list-actions { display: flex; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
+.lib-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); padding: var(--tok-space-xs) var(--tok-space-sm); background: color-mix(in srgb, var(--tok-color-accent) 12%, var(--tok-color-surface)); border-bottom: 1px solid var(--tok-color-border); font-size: var(--tok-type-caption-size); }
+.lib-bulk-spacer { flex: 1; }
+.lib-row[data-cursor="true"] { outline: 1px dashed var(--tok-color-accent); outline-offset: -2px; }
+.lib-note-actions { padding-bottom: var(--tok-space-sm); }
+.lib-editor { display: flex; flex-direction: column; gap: var(--tok-space-sm); height: 100%; min-height: 0; }
+.lib-editor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); }
+.lib-editor-single, .lib-editor-split { flex: 1; min-height: 320px; display: grid; gap: var(--tok-space-md); }
+.lib-editor-single { grid-template-columns: minmax(0, 1fr); }
+.lib-editor-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.lib-editor-text { width: 100%; height: 100%; min-height: 320px; box-sizing: border-box; resize: none; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); line-height: 1.5; color: inherit; background: var(--tok-color-editor-background, var(--tok-color-surface)); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-md); tab-size: 4; }
+.lib-editor-text:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.lib-editor-preview { overflow: auto; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-md); min-width: 0; }
+.lib-banner-actions { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.lib-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); padding: var(--tok-space-lg); }
+.lib-modal { width: min(520px, 100%); max-height: 90vh; overflow: auto; background: var(--tok-color-surface); color: var(--tok-color-text); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-lg); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
+.lib-modal-title { margin: 0 0 var(--tok-space-md); font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); overflow-wrap: anywhere; }
+.lib-modal-actions { display: flex; justify-content: flex-end; gap: var(--tok-space-sm); margin-top: var(--tok-space-md); }
+.lib-form { display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.lib-field { display: flex; flex-direction: column; gap: 2px; border: 0; padding: 0; margin: 0; }
+.lib-field > span, .lib-field > legend { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); padding: 0; }
+.lib-field input[type="text"], .lib-field input[type="password"], .lib-field input[type="number"], .lib-field select { font: inherit; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-xs) var(--tok-space-sm); }
+.lib-field input:focus-visible, .lib-field select:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.lib-radio { flex-direction: row; gap: var(--tok-space-md); align-items: center; }
+.lib-delete-list { margin: 0; padding-left: var(--tok-space-lg); max-height: 200px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.lib-check { display: flex; align-items: center; gap: var(--tok-space-sm); }
+.lib-pane { max-width: 720px; display: flex; flex-direction: column; gap: var(--tok-space-md); }
+.lib-pane h2 { margin: 0; }
+.lib-pane-section { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-md); background: var(--tok-color-surface); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.lib-pane-section h3 { margin: 0; font-size: var(--tok-type-section-size); font-weight: var(--tok-type-section-weight); text-transform: uppercase; letter-spacing: 0.4px; color: var(--tok-color-text-muted); }
+.lib-badge { display: inline-block; padding: 0 var(--tok-space-sm); border-radius: 999px; font-size: var(--tok-type-caption-size); border: 1px solid var(--tok-color-border); }
+.lib-badge[data-state="ok"] { border-color: var(--tok-color-accent); }
+@media (max-width: 900px) { .lib-editor-split { grid-template-columns: minmax(0, 1fr); } }

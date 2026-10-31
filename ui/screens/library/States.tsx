@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { notesErrorText, type NotesErrorCode } from "./host.ts";
 
-export function NoFolder({ onChoose, error, hostAvailable }: { onChoose: () => void; error: NotesErrorCode | null; hostAvailable: boolean }): ReactNode {
+export function NoFolder({ onChoose, error, hostAvailable, canWrite = false }: { onChoose: () => void; error: NotesErrorCode | null; hostAvailable: boolean; canWrite?: boolean }): ReactNode {
   return (
     <div className="lib-nofolder" role="region" aria-label="Choose a notes folder">
       <h2>Choose your notes folder</h2>
       <p className="lib-muted">
-        The Library reads meeting notes and source notes as files from one folder on this computer. It never changes them. Pick the folder the LLM-IDE
+        The Library reads meeting notes and source notes as files from one folder on this computer. {canWrite ? "It changes a note only when you edit, rename, tag or delete it (deleted notes go to the Trash)." : "It never changes them."} Pick the folder the LLM-IDE
         Mac app writes to, or any folder of Markdown notes.
       </p>
       {error && <StatusBanner severity={error === "invalid_root" ? "error" : "warning"} message={notesErrorText(error)} />}

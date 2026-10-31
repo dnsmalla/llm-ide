@@ -28,6 +28,8 @@ export interface LibraryNavProps {
   /** Selected Extensions entry id, or null when a notes section is shown. */
   extensionId: string | null;
   extensions: readonly LibraryExtension[];
+  /** Source connections (Email, Slack, Box, ...): a group of panes that open in the detail area. */
+  connections?: readonly LibraryExtension[];
   onSection: (id: string | null) => void;
   onExtension: (id: string) => void;
   onRefresh: () => void;
@@ -90,6 +92,25 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
             {docs.map((s) => (
               <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
             ))}
+          </ul>
+        </>
+      )}
+      {p.connections && p.connections.length > 0 && (
+        <>
+          <h3 className="lib-nav-group">
+            <WaveIcon /> Connections
+          </h3>
+          <ul className="lib-nav-list">
+            {p.connections.map((x) => {
+              const sel = p.extensionId === x.id;
+              return (
+                <li key={x.id}>
+                  <button type="button" className="lib-nav-item" aria-current={sel ? "page" : undefined} data-selected={sel} onClick={() => p.onExtension(x.id)}>
+                    <span className="lib-nav-label">{x.label}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

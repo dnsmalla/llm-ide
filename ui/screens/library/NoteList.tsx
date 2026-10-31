@@ -51,14 +51,22 @@ function Meta({ rec }: { rec: NoteRecord }): ReactNode {
   return <>{bits.join(" · ") || rec.rel}</>;
 }
 
+/** Multi-select mode (write side): clicks toggle membership instead of opening the note. */
+export interface BulkSelect {
+  selected: ReadonlySet<string>;
+  onToggle: (rel: string, shift: boolean) => void;
+  onSelectAll: () => void;
+}
+
 export interface NoteListProps {
   store: LibraryStore;
   state: LibraryState;
+  bulk?: BulkSelect | null;
   /** Initial viewport height when not measured (server rendering and tests). */
   initialHeight?: number;
 }
 
-export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600 }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
   const rows = store.rows();
@@ -101,6 +109,16 @@ export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): 
       const r = rows[i];
       if (r?.kind === "note") store.select(r.rec.rel);
     };
+    if (bulk && e.key === " " && state.selectedRel) {
+      e.preventDefault();
+      bulk.onToggle(state.selectedRel, e.shiftKey);
+      return;
+    }
+    if (bulk && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      bulk.onSelectAll();
+      return;
+    }
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
@@ -156,7 +174,8 @@ export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): 
       continue;
     }
     const rec = r.rec;
-    const selected = rec.rel === state.selectedRel;
+    const cursor = rec.rel === state.selectedRel;
+    const selected = bulk ? bulk.selected.has(rec.rel) : cursor;
     visible.push(
       <div
         key={rec.rel}
@@ -166,9 +185,15 @@ export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): 
         aria-label={`${rec.title}, ${formatDate(rec.dateMs)}`}
         className="lib-row"
         data-selected={selected}
+        data-cursor={bulk ? cursor : undefined}
         data-placeholder={rec.placeholder}
         style={{ top, height: ROW_HEIGHT }}
-        onClick={() => store.select(rec.rel)}
+        onClick={(e) => {
+          if (bulk) {
+            store.select(rec.rel);
+            bulk.onToggle(rec.rel, e.shiftKey);
+          } else store.select(rec.rel);
+        }}
       >
         <span className="lib-row-title">{rec.title}</span>
         <span className="lib-row-date">{formatDate(rec.dateMs)}</span>
@@ -262,6 +287,7 @@ export function NoteList({ store, state, initialHeight = 600 }: NoteListProps): 
           ref={scroller}
           className="lib-scroll"
           role="listbox"
+          aria-multiselectable={bulk ? true : undefined}
           tabIndex={0}
           aria-label={`${title}, ${noteCount} notes`}
           aria-activedescendant={state.selectedRel ? optionId(state.selectedRel) : undefined}
