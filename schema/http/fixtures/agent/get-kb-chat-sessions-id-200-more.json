@@ -1,0 +1,36 @@
+{
+  "endpoint": "GET /kb/chat/sessions/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f"
+    },
+    "query": {
+      "limit": "1"
+    }
+  },
+  "response": {
+    "session": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "title": "Renamed capture chat",
+      "surface": "any",
+      "mode": "ask",
+      "projectId": null,
+      "createdAt": 1792998701.62,
+      "updatedAt": 1792998701.639,
+      "messages": [
+        {
+          "seq": 2,
+          "role": "assistant",
+          "content": "The planner groups tasks by plan step.",
+          "meta": {
+            "model": "example-model"
+          },
+          "createdAt": 1792998701.639
+        }
+      ],
+      "hasMore": true
+    }
+  },
+  "description": "A page with more history below it: limit=1 over two messages returns the newest and hasMore true."
+}

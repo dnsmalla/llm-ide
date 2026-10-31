@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 96` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 97` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -299,6 +299,10 @@ A webview reload drops the `POST /agent/v2/stream` connection. Two additive rout
 - **`detach: true`** on `POST /agent/v2/stream` (default false) keeps the turn running when its own stream drops; only `POST /agent/v2/cancel` (or the turn ending) stops it. Without the flag a dropped stream aborts the turn exactly as before, so the Mac app is unchanged.
 - Both GETs use the `kbWrite` rate bucket; routes require the signed-in user like every `/agent/v2/*` route.
 - Tests: `extension/tests/turn-replay-routes.test.mjs`. Contract: `schema/http/agent.schema.json`.
+
+## 7c. Chat history paging (API 97)
+
+`GET /kb/chat/sessions/:id?beforeSeq=&limit=` (`extension/routes/chat.mjs`, `getChatSession` in `extension/kb/chat-sessions.mjs`): `limit` defaults to 200 and is capped at 2000; `beforeSeq` (integer >= 1, otherwise 400 `VALIDATION_FAILED`) returns the newest `limit` messages with `seq` below it, oldest first, so a client pages backwards with `beforeSeq = messages[0].seq`. Without `beforeSeq` the answer is the newest page as before. The session object gains `hasMore` (older messages remain). Scoped to the caller's own sessions (another user's id is 404). Contract: `schema/http/agent.schema.json`; test: `extension/tests/chat-sessions.test.mjs`.
 
 ## 8. See also
 

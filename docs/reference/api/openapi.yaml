@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 96
+  x-api-version: 97
 servers:
   - url: "https://{host}"
     variables:
@@ -6386,6 +6386,12 @@ paths:
           schema:
             type: "integer"
             default: 200
+        - name: "beforeSeq"
+          in: "query"
+          required: false
+          description: "Page older history: only messages with seq below this (integer >= 1) are considered and the newest `limit` of those return. Absent: the newest page, as before."
+          schema:
+            type: "string"
       responses:
         "200":
           description: "The session"
@@ -6407,6 +6413,7 @@ paths:
                       - "createdAt"
                       - "updatedAt"
                       - "messages"
+                      - "hasMore"
                     properties:
                       id:
                         type: "string"
@@ -6428,6 +6435,15 @@ paths:
                         type: "array"
                         items:
                           "$ref": "#/components/schemas/ChatMessage"
+                      hasMore:
+                        type: "boolean"
+                        description: "true when messages older than the first returned one remain; page again with beforeSeq set to that message's seq."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
         "404":
           description: "Session not found"
           content:

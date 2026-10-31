@@ -2039,6 +2039,10 @@
             "limit": {
               "type": "string",
               "description": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
+            },
+            "beforeSeq": {
+              "type": "string",
+              "description": "Page older history: only messages with seq below this (integer >= 1) are considered and the newest `limit` of those return. Absent: the newest page, as before."
             }
           }
         }
@@ -2060,7 +2064,8 @@
                 "projectId",
                 "createdAt",
                 "updatedAt",
-                "messages"
+                "messages",
+                "hasMore"
               ],
               "properties": {
                 "id": {
@@ -2092,12 +2097,19 @@
                   "items": {
                     "$ref": "#/$defs/ChatMessage"
                   }
+                },
+                "hasMore": {
+                  "type": "boolean",
+                  "description": "true when messages older than the first returned one remain; page again with beforeSeq set to that message's seq."
                 }
               }
             }
           }
         },
         "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "400": {
           "$ref": "_common#/$defs/Error"
         }
       }

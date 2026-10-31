@@ -18,7 +18,8 @@
       "projectId": null,
       "createdAt": 1792998701.62,
       "updatedAt": 1792998701.62,
-      "messages": []
+      "messages": [],
+      "hasMore": false
     }
   }
 }

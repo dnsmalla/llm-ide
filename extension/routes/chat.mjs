@@ -61,8 +61,19 @@ export async function handleChatRoutes(req, res, ctx) {
 
   // GET /kb/chat/sessions/:id
   if (req.method === 'GET' && sub === '') {
+    // beforeSeq (additive): page older history; absent = the newest page, exactly as before.
+    let beforeSeq;
+    if (u.searchParams.has('beforeSeq')) {
+      const raw = u.searchParams.get('beforeSeq');
+      beforeSeq = /^\d{1,15}$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isInteger(beforeSeq) || beforeSeq < 1) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'beforeSeq must be an integer >= 1' } });
+        return true;
+      }
+    }
     const session = getChatSession(userId, sessionId, {
       messageLimit: u.searchParams.has('limit') ? Number(u.searchParams.get('limit')) : undefined,
+      beforeSeq,
     });
     if (!session) {
       sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'session not found' } });

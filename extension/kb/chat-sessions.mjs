@@ -102,7 +102,12 @@ export function chatSessionExists(userId, sessionId) {
   return !!lazyPrepare(getDb(), 'SELECT 1 FROM chat_sessions WHERE user_id = ? AND id = ?').get(userId, sessionId);
 }
 
-export function getChatSession(userId, sessionId, { messageLimit } = {}) {
+/**
+ * One chat with its newest `messageLimit` messages (default 200, max 2000). With `beforeSeq` (an integer >= 1) the
+ * page is the newest `messageLimit` messages whose seq is below it, so older history pages without re-reading the
+ * newest ones. `hasMore` says whether older messages remain below the page.
+ */
+export function getChatSession(userId, sessionId, { messageLimit, beforeSeq } = {}) {
   requireUser(userId);
   const db = getDb();
   const row = lazyPrepare(db, `
@@ -115,16 +120,28 @@ export function getChatSession(userId, sessionId, { messageLimit } = {}) {
     Math.max(Number.isFinite(messageLimit) ? Number(messageLimit) : DEFAULT_MSG_LIMIT, 1),
     HARD_MSG_LIMIT,
   );
-  const msgRows = lazyPrepare(db, `
+  const before = Number.isInteger(beforeSeq) && beforeSeq >= 1 ? beforeSeq : null;
+  const found = (before === null
+    ? lazyPrepare(db, `
     SELECT seq, role, content, meta_json, created_at
       FROM chat_messages
      WHERE session_id = ? AND user_id = ?
      ORDER BY seq DESC
      LIMIT ?
-  `).all(sessionId, userId, cap);
+  `).all(sessionId, userId, cap + 1)
+    : lazyPrepare(db, `
+    SELECT seq, role, content, meta_json, created_at
+      FROM chat_messages
+     WHERE session_id = ? AND user_id = ? AND seq < ?
+     ORDER BY seq DESC
+     LIMIT ?
+  `).all(sessionId, userId, before, cap + 1));
+  const hasMore = found.length > cap;
+  const msgRows = hasMore ? found.slice(0, cap) : found;
   return {
     ...rowToSession(row),
     messages: msgRows.reverse().map(rowToMessage),
+    hasMore,
   };
 }
 

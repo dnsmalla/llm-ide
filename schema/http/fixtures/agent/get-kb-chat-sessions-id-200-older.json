@@ -1,0 +1,35 @@
+{
+  "endpoint": "GET /kb/chat/sessions/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f"
+    },
+    "query": {
+      "beforeSeq": "2",
+      "limit": "1"
+    }
+  },
+  "response": {
+    "session": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "title": "Renamed capture chat",
+      "surface": "any",
+      "mode": "ask",
+      "projectId": null,
+      "createdAt": 1792998701.62,
+      "updatedAt": 1792998701.639,
+      "messages": [
+        {
+          "seq": 1,
+          "role": "user",
+          "content": "Explain the planner.",
+          "meta": null,
+          "createdAt": 1792998701.636
+        }
+      ],
+      "hasMore": false
+    }
+  },
+  "description": "Older history: beforeSeq=2 with limit=1 returns the one message below seq 2; the response says nothing older remains."
+}

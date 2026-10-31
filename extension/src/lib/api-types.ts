@@ -2400,6 +2400,8 @@ export type GetKbChatSessionsIdRequest = {
   query: {
     /** Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000. */
     limit?: string;
+    /** Page older history: only messages with seq below this (integer >= 1) are considered and the newest `limit` of those return. Absent: the newest page, as before. */
+    beforeSeq?: string;
   };
   params: {
     id: string;
@@ -2416,8 +2418,12 @@ export type GetKbChatSessionsIdResponse200 = {
     createdAt: number;
     updatedAt: number;
     messages: ChatMessage[];
+    /** true when messages older than the first returned one remain; page again with beforeSeq set to that message's seq. */
+    hasMore: boolean;
   };
 };
+
+export type GetKbChatSessionsIdResponse400 = CommonError;
 
 export type GetKbChatSessionsIdResponse404 = CommonError;
 
@@ -7257,6 +7263,7 @@ export interface ApiEndpoints {
     request: GetKbChatSessionsIdRequest;
     responses: {
       200: GetKbChatSessionsIdResponse200;
+      400: GetKbChatSessionsIdResponse400;
       404: GetKbChatSessionsIdResponse404;
     };
   };

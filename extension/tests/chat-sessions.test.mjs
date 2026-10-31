@@ -97,3 +97,31 @@ test('clear messages empties transcript', () => {
   const loaded = db.getChatSession(u.id, session.id);
   assert.equal(loaded.messages.length, 0);
 });
+
+test('beforeSeq pages older history without re-reading the newest; hasMore says whether more remains; tenancy holds', () => {
+  reset();
+  const u = provision('page@example.test');
+  const other = provision('page-other@example.test');
+  const s = db.createChatSession(u.id, { title: 'Long', surface: 'extension', mode: 'transcript' });
+  for (let i = 1; i <= 10; i += 1) db.appendChatMessage(u.id, s.id, { role: i % 2 ? 'user' : 'assistant', content: `m${i}` });
+
+  const newest = db.getChatSession(u.id, s.id, { messageLimit: 4 });
+  assert.deepEqual(newest.messages.map((m) => m.content), ['m7', 'm8', 'm9', 'm10']);
+  assert.equal(newest.hasMore, true);
+
+  const older = db.getChatSession(u.id, s.id, { messageLimit: 4, beforeSeq: newest.messages[0].seq });
+  assert.deepEqual(older.messages.map((m) => m.content), ['m3', 'm4', 'm5', 'm6']);
+  assert.equal(older.hasMore, true);
+
+  const oldest = db.getChatSession(u.id, s.id, { messageLimit: 4, beforeSeq: older.messages[0].seq });
+  assert.deepEqual(oldest.messages.map((m) => m.content), ['m1', 'm2']);
+  assert.equal(oldest.hasMore, false);
+
+  // exactly the remaining count is not "more"; beyond the start is empty
+  assert.equal(db.getChatSession(u.id, s.id, { messageLimit: 10 }).hasMore, false);
+  assert.deepEqual(db.getChatSession(u.id, s.id, { beforeSeq: 1 }).messages, []);
+  // absent beforeSeq = unchanged newest page; a hostile value is ignored by the store (the route 400s it)
+  assert.equal(db.getChatSession(u.id, s.id, { beforeSeq: 'x' }).messages.length, 10);
+  // another user's session is not visible
+  assert.equal(db.getChatSession(other.id, s.id, { beforeSeq: 5 }), null);
+});

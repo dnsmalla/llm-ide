@@ -226,9 +226,9 @@ Endpoints with no client caller (42):
 | `/kb/agent/ask/history` | ALL_ENDPOINTS | DELETE, GET | token | core | `extension/routes/agent.mjs:289` | - | - | comments/docs only |
 | `/kb/chat/sessions` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/chat.mjs:22` | `LlmIdeAPIClient+ChatLifecycle.swift` | `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id` | ALL_ENDPOINTS | DELETE, GET, PATCH | token | core | `extension/routes/chat.mjs:46` | - | `unified-chat.ts` | - |
-| `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:103` | - | `unified-chat.ts` | - |
-| `/kb/chat/sessions/:id/archive/begin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/chat.mjs:128` | `LlmIdeAPIClient+ChatLifecycle.swift` | - | - |
-| `/kb/chat/sessions/:id/archive/commit` | ALL_ENDPOINTS | POST | token | core | `extension/routes/chat.mjs:156` | `LlmIdeAPIClient+ChatLifecycle.swift` | - | - |
+| `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:114` | - | `unified-chat.ts` | - |
+| `/kb/chat/sessions/:id/archive/begin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/chat.mjs:139` | `LlmIdeAPIClient+ChatLifecycle.swift` | - | - |
+| `/kb/chat/sessions/:id/archive/commit` | ALL_ENDPOINTS | POST | token | core | `extension/routes/chat.mjs:167` | `LlmIdeAPIClient+ChatLifecycle.swift` | - | - |
 | `/kb/live/unacked` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:37` | `LlmIdeAPIClient+Live.swift` | - | - |
 | `/kb/live/:id/ack` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:46` | - | - | comments/docs only |
 | `/kb/live/:id/status` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:67` | - | `App.tsx`, `capture-live.ts` | - |
@@ -244,7 +244,7 @@ Endpoints with no client caller (42):
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:728` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:729` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -254,7 +254,7 @@ Endpoints with no client caller (42):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:757` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:758` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |
