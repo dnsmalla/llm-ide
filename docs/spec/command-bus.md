@@ -67,6 +67,8 @@ Receipt gate (`decideReceipt`, pure, tested by `fixtures/tiers`): unknown kind r
 - The job lane is `write:<projectId>` for write kinds and `read:<kind>:<projectId>` otherwise; the runner's database lock allows one running job per user and lane, so two writers never touch one project at once.
 - Per user: at most 20 commands waiting for approval, at most 20 queued or running, the runner's 100 active jobs and 64 KiB payload.
 - Boot: the runner sweeps jobs a dead process left `running` (non-resumable kinds become `interrupted`), then the bus appends the missing terminal events (`interrupted`) and expires overdue approvals; the same sweep runs every minute and a read repairs a finished job that lacks a terminal event.
+- **Stuck lane (M5).** If the settle of a finished job throws (a database error in `finishJobSystem`), the row would stay `running` and hold its lane for good. The minute sweep therefore marks every `running` row that this process's runner does not hold (`runner.activeIds()`) and that started more than 30 s ago (`sweepStaleMs`) `interrupted`, appends its terminal `interrupted` event and pumps the queue (`kb/job-queue.mjs reapOrphanedRunningSystem`, `executor.sweepOrphans`).
+- **Fairness (M5).** The runner has 3 slots and one user may run at most 2 at once (`perUserLimit`, default slots minus one): a user who queues many commands cannot occupy every slot. The oldest queued job of another user is claimed instead (`claimNextJobSystem({ perUserLimit })`).
 
 ## 5. Kinds
 

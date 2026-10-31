@@ -15,7 +15,7 @@ import {
 export const DEFAULT_MAX_CONCURRENT = 2;
 export const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
-export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger, jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS, maxAttempts, onSettled } = {}) {
+export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger, jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS, maxAttempts, onSettled, perUserLimit } = {}) {
   const norm = (h) => (typeof h === 'function' ? { run: h, resumable: false } : h);
   const timeoutFor = (h) => (Number.isFinite(h?.timeoutMs) && h.timeoutMs > 0 ? h.timeoutMs : jobTimeoutMs);
   const table = new Map(Object.entries(handlers).map(([k, h]) => [k, norm(h)]));
@@ -88,7 +88,7 @@ export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CON
   function pump() {
     if (!started || stopping) return;
     while (active.size < limit) {
-      const job = claimNextJobSystem();
+      const job = claimNextJobSystem({ perUserLimit });
       if (!job) return;
       execute(job);
     }
@@ -126,6 +126,8 @@ export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CON
       started = false;
     },
     activeCount: () => active.size,
+    /** Ids of the jobs this runner holds right now (the bus sweep reaps 'running' rows that are not here). */
+    activeIds: () => [...active.keys()],
     get: getJob,
   };
 }

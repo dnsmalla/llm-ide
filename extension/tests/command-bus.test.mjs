@@ -783,3 +783,67 @@ test('M1: GET /bus/kinds lists only usable engines and reports the others as ava
   ]);
   for (const k of r.body.kinds.filter((x) => !x.available)) assert.deepEqual(k.engineStatus, []);
 });
+
+// ---- M5: a lane stuck after finishJobSystem throws, and one user filling every slot ----
+
+test('M5: a running job the runner no longer tracks is marked interrupted by the sweep, its terminal event written and its lane freed', async () => {
+  await reset();
+  const lone = newBus({}); // not started: the runner never pumps, so the test plays the lost-settle by hand
+  const r1 = lone.receive(A, cmd(), { client: 'desktop-ui' });
+  const claimed = q.claimNextJobSystem();
+  assert.equal(claimed.id, r1.command.id);
+  assert.equal(q.getJob(A, claimed.id).state, 'running');
+  assert.equal(lone.runner.activeIds().includes(claimed.id), false, 'the runner holds no such job');
+  // a second command on the same lane cannot start while the orphan holds it
+  const r2 = lone.receive(A, cmd(), { client: 'desktop-ui' });
+  assert.equal(q.claimNextJobSystem(), null, 'the lane is stuck');
+  // the sweep only reaps rows older than its stale window: a fresh row is left alone
+  lone.sweep();
+  assert.equal(q.getJob(A, claimed.id).state, 'running', 'inside the stale window');
+  const reaper = newBus({}); // same DB; sweepStaleMs 0 reaps at once
+  const swept = reaper.sweepOrphans({ staleMs: 0 });
+  assert.deepEqual(swept.map((x) => x.id), [claimed.id]);
+  assert.equal(q.getJob(A, claimed.id).state, 'interrupted');
+  const term = store.terminalEvent(A, claimed.id);
+  assert.equal(term.payload.code, 'interrupted');
+  assert.equal(store.getCommand(A, claimed.id).state, 'interrupted');
+  assert.equal(q.claimNextJobSystem().id, r2.command.id, 'the lane is free again');
+  await lone.stop();
+});
+
+test('M5: the minute sweep itself reaps orphans (sweepStaleMs option) and releases the lane', async () => {
+  await reset();
+  const b = createBus({ graceMs: 50, sweepStaleMs: 0, deps: { resolveProjectRoot: () => REPO, projectAllowed: () => true, runReview: fakeReview } });
+  const c1 = b.receive(A, cmd(), { client: 'desktop-ui' });
+  assert.equal(q.claimNextJobSystem().id, c1.command.id);
+  b.sweep();
+  assert.equal(q.getJob(A, c1.command.id).state, 'interrupted');
+  assert.equal(store.hasTerminal(A, c1.command.id), true);
+});
+
+test('M5: one user cannot occupy every slot: the per-user concurrent limit leaves room for another user', async () => {
+  await reset();
+  Object.assign(PROJECTS, { 'proj-3': REPO, 'proj-4': REPO, 'proj-5': REPO });
+  let release;
+  control.gate = new Promise((r) => { release = r; });
+  const b = newBus({});
+  busRef = b; b.start();
+  try {
+    for (const p of ['proj-1', 'proj-2', 'proj-3', 'proj-4']) assert.equal((await call('POST', '/bus/commands', cmd({ args: { focus: 'code', projectId: p } }))).status, 202);
+    await until(() => b.runner.activeCount() >= 2);
+    await sleep(150);
+    const runningOf = (u) => main.getDb().prepare("SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND state = 'running'").get(u).n;
+    assert.equal(runningOf(A), 2, 'A is capped below the total slots');
+    assert.ok(b.runner.activeCount() < 3, 'one slot is held back for others');
+    assert.equal((await call('POST', '/bus/commands', cmd({ args: { focus: 'code', projectId: 'proj-5' } }), { user: B })).status, 202);
+    await until(() => runningOf(B) === 1);
+    assert.equal(runningOf(A), 2);
+    assert.equal(b.runner.activeCount(), 3);
+  } finally {
+    release();
+    await sleep(100);
+    control.gate = null;
+    await b.stop();
+    busRef = bus; bus.start();
+  }
+});

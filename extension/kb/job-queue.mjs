@@ -76,14 +76,18 @@ export function requestCancel(userId, id) {
  * skipping lanes in `busyLanes` is unnecessary: the partial unique index makes
  * the DB the lane lock. Returns the claimed job or null.
  */
-export function claimNextJobSystem() {
+export function claimNextJobSystem({ perUserLimit } = {}) {
   const db = getDb();
+  // Fairness: with `perUserLimit`, a user that already has that many jobs running is skipped, so one user cannot take
+  // every runner slot (the oldest job of ANOTHER user is claimed instead). Unset = no per-user cap (the original rule).
+  const cap = Number.isInteger(perUserLimit) && perUserLimit > 0 ? perUserLimit : 1_000_000;
   return db.transaction(() => {
     const row = db.prepare(`
       SELECT q.* FROM jobs q
       WHERE q.state = 'queued'
         AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.user_id = q.user_id AND r.lane = q.lane AND r.state = 'running')
-      ORDER BY q.created_at, q.rowid LIMIT 1`).get();
+        AND (SELECT COUNT(*) FROM jobs u WHERE u.user_id = q.user_id AND u.state = 'running') < ?
+      ORDER BY q.created_at, q.rowid LIMIT 1`).get(cap);
     if (!row) return null;
     db.prepare("UPDATE jobs SET state='running', started_at=?, updated_at=?, attempts=attempts+1 WHERE id=? AND state='queued'")
       .run(nowIso(), nowIso(), row.id);
@@ -121,6 +125,29 @@ export function sweepInterruptedSystem(resumableKinds = [], { maxAttempts = MAX_
           out.requeued.push(id);
         }
       } else { end(id, 'interrupted', 'server_restarted'); out.interrupted.push(id); }
+    }
+    return out;
+  })();
+}
+
+/**
+ * Rows still 'running' that this process's runner does not hold (`activeIds`): the settle that should have finished them
+ * threw (a DB error), so they would hold their lane (the unique running index) forever. Marks those started more than
+ * `staleMs` ago `interrupted` (error 'interrupted') and returns `[{ id, userId }]`. The window keeps a job that was
+ * claimed a moment ago, before the runner registered it, safe.
+ */
+export function reapOrphanedRunningSystem(activeIds = [], { staleMs = 30_000, now = Date.now() } = {}) {
+  const db = getDb();
+  const cutoff = new Date(now - staleMs).toISOString();
+  const held = new Set(activeIds);
+  return db.transaction(() => {
+    const rows = db.prepare("SELECT id, user_id FROM jobs WHERE state = 'running' AND started_at IS NOT NULL AND started_at <= ?").all(cutoff);
+    const out = [];
+    for (const r of rows) {
+      if (held.has(r.id)) continue;
+      const w = db.prepare("UPDATE jobs SET state='interrupted', error='interrupted', finished_at=?, updated_at=? WHERE id=? AND state='running'")
+        .run(nowIso(), nowIso(), r.id);
+      if (w.changes > 0) out.push({ id: r.id, userId: r.user_id });
     }
     return out;
   })();

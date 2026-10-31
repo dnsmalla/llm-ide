@@ -9,6 +9,7 @@ import {
   createCommand, getCommand, getCommandArgs, approveCommand, denyCommand, cancelPending, expireStale, expireStaleAllSystem,
   ensureTerminal, appendEvent, terminalFor, backfillTerminalsSystem, purgeOldCommandsSystem, isKindEnabled, ERROR_CODES,
 } from '../../kb/bus-store.mjs';
+import { reapOrphanedRunningSystem } from '../../kb/job-queue.mjs';
 import { resolveProjectRoot } from '../../kb/project-roots.mjs';
 import { buildTrustedRoots, isWithinRoots, isTooBroadRoot } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import { redactValue } from '../../kb/bus-store.mjs';
@@ -66,7 +67,12 @@ export { confirmMatches };
  * @param {object} [o.logger]
  * @param {object} [o.deps] test seams: { resolveProjectRoot, projectAllowed, runReview, engineDeps, handlers }
  */
-export function createBus({ logger, deps = {}, maxConcurrent = 2, graceMs = 2000, sweepMs = 60_000, jobTimeoutMs } = {}) {
+export function createBus({
+  logger, deps = {}, maxConcurrent = 3, perUserLimit, graceMs = 2000, sweepMs = 60_000, sweepStaleMs = 30_000, jobTimeoutMs,
+} = {}) {
+  // Fairness: one user may run at most `perUserLimit` commands at once (default: all slots but one), so a user who
+  // queues many commands cannot occupy every slot and starve the others.
+  const userLimit = Number.isInteger(perUserLimit) && perUserLimit > 0 ? perUserLimit : Math.max(1, maxConcurrent - 1);
   const log = (level, event, data) => { try { logger?.[level]?.(event, data); } catch { /* best effort */ } };
   const projectRootFor = deps.resolveProjectRoot ?? resolveProjectRoot;
   const projectAllowed = deps.projectAllowed ?? ((userId, root) => {
@@ -122,7 +128,7 @@ export function createBus({ logger, deps = {}, maxConcurrent = 2, graceMs = 2000
   Object.assign(handlers, deps.handlers || {});
 
   const runner = createJobRunner({
-    handlers, maxConcurrent, graceMs, logger, ...(jobTimeoutMs ? { jobTimeoutMs } : {}),
+    handlers, maxConcurrent, perUserLimit: userLimit, graceMs, logger, ...(jobTimeoutMs ? { jobTimeoutMs } : {}),
     onSettled: ({ job, state, result, error }) => {
       const ev = terminalFor(state, state === 'succeeded' ? { ...eventResult(result) } : undefined, error);
       if (ev) appendEvent(job.userId, job.id, { ...ev, terminal: true });
@@ -130,7 +136,24 @@ export function createBus({ logger, deps = {}, maxConcurrent = 2, graceMs = 2000
   });
 
   let timer = null;
-  const sweep = () => { try { expireStaleAllSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); } catch (e) { log('warn', 'bus_sweep_failed', { error: String(e?.message || e) }); } };
+  /**
+   * A job still 'running' that this runner does not hold means its settle threw (finishJobSystem failed): the lane would
+   * stay locked for good. Mark it interrupted, write its terminal event and let the queue move on.
+   * @returns {{ id: string, userId: string }[]} the reaped jobs
+   */
+  function sweepOrphans({ staleMs = sweepStaleMs } = {}) {
+    const reaped = reapOrphanedRunningSystem(runner.activeIds(), { staleMs });
+    for (const { id, userId } of reaped) {
+      log('warn', 'bus_orphan_reaped', { id });
+      try { ensureTerminal(userId, id); } catch (e) { log('warn', 'bus_orphan_terminal_failed', { error: String(e?.message || e) }); }
+    }
+    if (reaped.length) runner.pump();
+    return reaped;
+  }
+  const sweep = () => {
+    try { sweepOrphans(); expireStaleAllSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); }
+    catch (e) { log('warn', 'bus_sweep_failed', { error: String(e?.message || e) }); }
+  };
 
   function receive(userId, rawFrame, { client }) {
     if (!rawFrame || typeof rawFrame !== 'object' || Array.isArray(rawFrame)) throw new BusError(400, 'VALIDATION_FAILED', 'body must be a JSON object');
@@ -227,7 +250,7 @@ export function createBus({ logger, deps = {}, maxConcurrent = 2, graceMs = 2000
 
   return {
     runner,
-    receive, approve, deny, cancel,
+    receive, approve, deny, cancel, sweepOrphans,
     start() {
       const swept = runner.start();
       sweep();
