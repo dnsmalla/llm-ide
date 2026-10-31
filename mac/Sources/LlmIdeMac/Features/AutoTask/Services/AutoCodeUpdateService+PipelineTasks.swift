@@ -693,6 +693,36 @@ extension AutoCodeUpdateService {
     /// True when the user's per-task enable checkbox is on for `task`. Drives
     /// the `enabledOrder` loop in `run()` (per-task manual runs via `runSingle`
     /// ignore this — they run the task regardless).
+    /// What the person at the Mac is shown before a PHONE-started implement / review-merge may run: the
+    /// project and the exact issue numbers or branches, read from the Mac's own state (never from the phone).
+    func phoneApprovalDetails(for tasks: [AutoTask]) async -> [String] {
+        var lines = ["Project: \(projectStore?.activeProject?.bundle.displayName ?? "none open")"]
+        guard let resolved = resolveBackendAndProject() else {
+            lines.append("Repository: not linked, so the run would stop immediately.")
+            return lines
+        }
+        let gitRoot = resolved.gitRoot
+        for task in tasks {
+            switch task {
+            case .implementIssues:
+                let ids = registry.pendingEntries(repoKey: Self.registryRepoKey(resolved))
+                    .compactMap(\.issueIid).prefix(20).map { "#\($0)" }
+                lines.append("Implement issues: " + (ids.isEmpty ? "none pending" : ids.joined(separator: ", ")))
+                lines.append("Edits code and commits on local fix/* branches, only for issues labelled for approval.")
+            case .reviewMerge:
+                let defaultBranch = await Task.detached { Self.defaultBranch(at: gitRoot) }.value
+                let branches = await Task.detached {
+                    Self.reviewMergeCandidates(defaultBranch: defaultBranch, at: gitRoot)
+                }.value
+                lines.append("Push, then open an MR/PR into \(defaultBranch): "
+                             + (branches.isEmpty ? "no branches waiting" : branches.prefix(20).joined(separator: ", ")))
+            default:
+                lines.append(task.label)
+            }
+        }
+        return lines
+    }
+
     func isTaskEnabled(_ task: AutoTask) -> Bool {
         switch task {
         case .sourceUpdate:      return autoTaskSettings.runSourceUpdate

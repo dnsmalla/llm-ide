@@ -65,6 +65,11 @@ protocol MobileBridgeHosting: AnyObject {
     /// Answer `commandId` with "Auto-tasks not configured" and log it under `logLabel`.
     func replyNotConfigured(commandId: String, logLabel: String)
 
+    /// Ask the person at the Mac to confirm a phone-started action in a native modal (default Cancel,
+    /// denies after 120 s, one dialog at a time, rate limited). Suspends until answered; everything but
+    /// `.approved` is a refusal. The dialog text comes from the Mac side only, never from the phone.
+    func requestDesktopApproval(_ request: PhoneDesktopApprovalRequest) async -> PhoneDesktopApprovalOutcome
+
     /// Decode an `auto_task_*` frame. Nil when `type` is not an Auto Task
     /// message; a recognised type whose payload did not decode comes back with
     /// a nil payload, so the bridge still runs its own checks first.

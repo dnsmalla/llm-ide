@@ -43,6 +43,10 @@ extension MobileControlManager: MobileBridgeHosting {
         reply(CommandError(commandId: commandId, message: message, code: code))
     }
 
+    func requestDesktopApproval(_ request: PhoneDesktopApprovalRequest) async -> PhoneDesktopApprovalOutcome {
+        await desktopApproval.request(request)
+    }
+
     /// Exhaustive so a new `MobileBridgeAccess` case cannot compile without
     /// naming the switch it maps to.
     private static func phoneAccess(for access: MobileBridgeAccess) -> PhoneAccess {

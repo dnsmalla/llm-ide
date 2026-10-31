@@ -13,6 +13,9 @@ final class PhoneBridgeSpyHost: MobileBridgeHosting {
     var autoTaskReplies: [MobileAutoTaskReply] = []
     var commandErrors: [(commandId: String, message: String, code: String?)] = []
     var infoLines: [String] = []
+    /// Scripted answers for `requestDesktopApproval`, consumed in order; empty means `.approved`.
+    var approvalOutcomes: [PhoneDesktopApprovalOutcome] = []
+    var approvalRequests: [PhoneDesktopApprovalRequest] = []
 
     func isPhoneAccessAllowed(_ access: MobileBridgeAccess) -> Bool {
         allowed.contains(String(describing: access))
@@ -33,6 +36,11 @@ final class PhoneBridgeSpyHost: MobileBridgeHosting {
     func sendAutoTaskReply(_ reply: MobileAutoTaskReply) { autoTaskReplies.append(reply) }
     func decodeLoopRequest(type: String, data: Data?) -> MobileLoopRequest? { nil }
     func sendLoopReply(_ reply: MobileLoopReply) {}
+    func requestDesktopApproval(_ request: PhoneDesktopApprovalRequest) async -> PhoneDesktopApprovalOutcome {
+        approvalRequests.append(request)
+        return approvalOutcomes.isEmpty ? .approved : approvalOutcomes.removeFirst()
+    }
+
     /// The last ack the phone received, if any.
     var lastAck: (ok: Bool, message: String?, code: String?)? {
         for reply in autoTaskReplies.reversed() {

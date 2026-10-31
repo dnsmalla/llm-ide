@@ -241,6 +241,8 @@ final class AutoTaskStore: ObservableObject {
         case "auto_task_ack":
             if let ack = try? JSONDecoder().decode(AutoTaskAck.self, from: data) {
                 if ack.ok {
+                    // "Waiting for approval on your Mac": not an error, show it as the action status.
+                    if ack.code == "awaiting_desktop_approval", let msg = ack.message { setActionStatus(msg) }
                     autoTaskList()
                     autoTaskHistory()
                     autoTaskLogsList()

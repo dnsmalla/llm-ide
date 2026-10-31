@@ -95,14 +95,6 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 return true
             }
             if let m = run {
-                // Four-way branch, mirroring the toggle handler above:
-                // built-in task / custom task / no task = global run / an
-                // unrecognized non-nil id (e.g. the phone still shows a
-                // since-deleted custom task) — the last case must NOT fall
-                // through to a global run-all, which would be a surprising
-                // and wrong response to "run this one specific task".
-                var started = false
-                var unrecognized = false
                 // A phone run honours the task's OWN enable flag. It used to ignore it, so a phone with
                 // Auto Task control on could start implement/review-merge although both were off on the Mac.
                 if let raw = m.task, let t = AutoTask(rawValue: raw), !ac.isTaskEnabled(t) {
@@ -114,36 +106,25 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                     refuseDisabled(label: custom.name, id: custom.id)
                     return true
                 }
-                if let raw = m.task, let t = AutoTask(rawValue: raw) {
-                    started = ac.runSingle(t, trigger: .phone)
-                    if started {
-                        host?.logInfo("Auto-task run single: \(t.rawValue)")
+                // Implement and review-merge write code / push: the phone only REQUESTS them; the person
+                // at the Mac confirms the exact task, project and issue/branch ids in a native modal.
+                let risky = Self.tasksNeedingDesktopApproval(taskId: m.task, isEnabled: ac.isTaskEnabled)
+                if !risky.isEmpty {
+                    guard !ac.hasScheduledRun else {
+                        host?.sendAutoTaskReply(.ack(ok: false,
+                                                     message: "Auto Tasks is already running on your Mac. Tap Stop first."))
+                        return true
                     }
-                } else if let raw = m.task,
-                          let custom = scopedCustomTasks().first(where: { $0.id == raw }) {
-                    started = ac.runSingleCustom(custom, trigger: .phone)
-                    if started {
-                        host?.logInfo("Custom auto-task run: \(custom.name)")
+                    host?.sendAutoTaskReply(.ack(
+                        ok: true, message: "Waiting for you to approve this on your Mac.",
+                        code: MobileRefusalCode.awaitingDesktopApproval))
+                    let projectId = host?.projectStore?.activeProject?.bundle.id
+                    Task { [weak self] in
+                        await self?.runAfterDesktopApproval(task: m.task, risky: risky, projectId: projectId)
                     }
-                } else if m.task == nil {
-                    started = ac.runNow(trigger: .phone)
-                    if started {
-                        host?.logInfo("Auto-task run now")
-                    }
-                } else {
-                    unrecognized = true
-                    host?.logError("auto_task_run: unknown task id \(m.task ?? "?")")
+                    return true
                 }
-                if unrecognized {
-                    host?.replyCommandError(commandId: "auto_task_run",
-                                            message: "That task no longer exists on your Mac. Refresh the task list.")
-                } else if started {
-                    replyAutoTaskStateOrAck()
-                } else {
-                    host?.logInfo("Auto-task run ignored — already running on Mac")
-                    host?.sendAutoTaskReply(.ack(ok: false,
-                                                 message: "Auto Tasks is already running on your Mac. Tap Stop first."))
-                }
+                startPhoneRun(task: m.task, ac: ac)
             } else {
                 host?.logDecodeFailure(type: type, data: data)
                 host?.replyCommandError(commandId: "auto_task_run",
@@ -289,6 +270,92 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         host?.replyCommandError(commandId: commandId,
                                 message: "\(what) is only available on your Mac.",
                                 code: MobileRefusalCode.desktopOnly)
+    }
+
+    /// Built-ins that edit code or leave the machine when run: a phone may not start them without the
+    /// person at the Mac confirming. A single-task run names one; a run-all names every one that is enabled.
+    static let desktopApprovalTasks: [AutoTask] = [.implementIssues, .reviewMerge]
+
+    static func tasksNeedingDesktopApproval(taskId: String?, isEnabled: (AutoTask) -> Bool) -> [AutoTask] {
+        if let taskId {
+            guard let t = AutoTask(rawValue: taskId) else { return [] }
+            return desktopApprovalTasks.contains(t) ? [t] : []
+        }
+        return desktopApprovalTasks.filter(isEnabled)
+    }
+
+    /// Ask on the Mac, then start the run only if it was approved AND the world is still what was asked.
+    /// Re-checks at execution time: the Phone-access switch, the task's enable flag, the active project and
+    /// that nothing else started meanwhile.
+    private func runAfterDesktopApproval(task: String?, risky: [AutoTask], projectId: String?) async {
+        guard let ac = autoCode, let host else { return }
+        let lines = await ac.phoneApprovalDetails(for: risky)
+        let names = risky.map(\.label).joined(separator: " and ")
+        let outcome = await host.requestDesktopApproval(
+            PhoneDesktopApprovalRequest(title: "Run \(names) from your iPhone?", lines: lines))
+        switch outcome {
+        case .approved:
+            break
+        case .denied:
+            host.sendAutoTaskReply(.ack(ok: false, message: "You cancelled this on your Mac.",
+                                        code: MobileRefusalCode.desktopDenied))
+            return
+        case .timedOut:
+            host.sendAutoTaskReply(.ack(ok: false, message: "Not approved on your Mac in time, so nothing ran.",
+                                        code: MobileRefusalCode.desktopApprovalTimeout))
+            return
+        case .busy:
+            host.sendAutoTaskReply(.ack(ok: false,
+                                        message: "Your Mac is already asking for a confirmation, or was asked too often. Try again later.",
+                                        code: MobileRefusalCode.desktopApprovalBusy))
+            return
+        }
+        guard controlAllowed else {
+            host.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
+            return
+        }
+        guard risky.allSatisfy({ ac.isTaskEnabled($0) }) else {
+            host.sendAutoTaskReply(.ack(ok: false, message: "A task was turned off on your Mac meanwhile.",
+                                        code: MobileRefusalCode.taskDisabled))
+            return
+        }
+        guard host.projectStore?.activeProject?.bundle.id == projectId else {
+            host.sendAutoTaskReply(.ack(ok: false, message: "The project changed on your Mac meanwhile, so nothing ran."))
+            return
+        }
+        startPhoneRun(task: task, ac: ac)
+    }
+
+    /// Start the run the phone asked for (all checks are done) and report the outcome.
+    private func startPhoneRun(task: String?, ac: AutoCodeUpdateService) {
+        // Four-way branch: built-in task / custom task / no task = global run / an unrecognized non-nil id
+        // (e.g. the phone still shows a since-deleted custom task) — the last case must NOT fall through to
+        // a global run-all, which would be a surprising response to "run this one specific task".
+        var started = false
+        var unrecognized = false
+        if let raw = task, let t = AutoTask(rawValue: raw) {
+            started = ac.runSingle(t, trigger: .phone)
+            if started { host?.logInfo("Auto-task run single: \(t.rawValue)") }
+        } else if let raw = task, let custom = scopedCustomTasks().first(where: { $0.id == raw }) {
+            started = ac.runSingleCustom(custom, trigger: .phone)
+            if started { host?.logInfo("Custom auto-task run: \(custom.name)") }
+        } else if task == nil {
+            started = ac.runNow(trigger: .phone)
+            if started { host?.logInfo("Auto-task run now") }
+        } else {
+            unrecognized = true
+            host?.logError("auto_task_run: unknown task id \(task ?? "?")")
+        }
+        if unrecognized {
+            host?.replyCommandError(commandId: "auto_task_run",
+                                    message: "That task no longer exists on your Mac. Refresh the task list.")
+        } else if started {
+            replyAutoTaskStateOrAck()
+        } else {
+            host?.logInfo("Auto-task run ignored — already running on Mac")
+            host?.sendAutoTaskReply(.ack(ok: false,
+                                         message: "Auto Tasks is already running on your Mac. Tap Stop first."))
+        }
     }
 
     /// Typed refusal for a phone run of a task that is switched off on the Mac.

@@ -96,6 +96,8 @@ final class MobileControlManager {
 
     /// The Mac-side switches deciding what the phone may do (Settings → Mobile Control → Phone access).
     let phoneAccess = PhoneAccessSettings()
+    /// Native confirmation for phone-started actions that write code, push, or patch the checkout.
+    let desktopApproval = PhoneDesktopApprovalGate()
 
     /// Kept so the shell can inject the "is a run active?" guard (see `MobileProjectBridge.busyReason`).
     var projectBridge: MobileProjectBridge?
