@@ -55,9 +55,13 @@ export function toMessages(rows: readonly StoredMessage[]): Message[] {
 export const SERVER_LIST_CAP = 200;
 export const SERVER_MESSAGE_CAP = 2000;
 
+function isStoredMessage(m: unknown): m is StoredMessage {
+  if (typeof m !== "object" || m === null) return false;
+  const r = m as Record<string, unknown>;
+  return Number.isInteger(r.seq) && (r.seq as number) >= 1 && (r.role === "user" || r.role === "assistant" || r.role === "system") && typeof r.content === "string";
+}
+
 export class HttpChatStore implements ChatStore {
-  /** Highest seq seen per chat: the server has no `before` cursor, so older pages are a larger newest-N read. */
-  private readonly newest = new Map<string, number>();
   constructor(private readonly core: CoreTransport) {}
 
   async listSessions(opts: { limit: number; offset: number }, signal?: AbortSignal): Promise<SessionSummary[]> {
@@ -79,28 +83,32 @@ export class HttpChatStore implements ChatStore {
 
   async deleteSession(id: string, signal?: AbortSignal): Promise<void> {
     await this.core.json("DELETE", `/kb/chat/sessions/${encodeURIComponent(id)}`, undefined, signal);
-    this.newest.delete(id);
   }
 
+  /**
+   * One page, O(page): `?limit=` is the newest page, `?beforeSeq=&limit=` the page just older than a seq (core API 97),
+   * so an older page never re-reads the newest N and history has no dead end past the 2,000-message read cap.
+   */
   async loadMessages(id: string, opts: { limit: number; beforeSeq?: number }, signal?: AbortSignal): Promise<MessagePage> {
-    const newest = this.newest.get(id) ?? 0;
-    const span = opts.beforeSeq === undefined ? 0 : Math.max(0, newest - opts.beforeSeq + 1);
-    const fetchLimit = Math.min(SERVER_MESSAGE_CAP, opts.limit + span);
-    const res = await this.core.json<{ session?: { messages?: StoredMessage[] } }>(
-      "GET", `/kb/chat/sessions/${encodeURIComponent(id)}?limit=${fetchLimit}`, undefined, signal);
-    const all = res?.session?.messages;
-    if (!Array.isArray(all)) throw new CoreHttpError(502, "BAD_RESPONSE", "Unexpected chat session");
-    if (all.length) this.newest.set(id, Math.max(newest, all[all.length - 1].seq));
-    const older = opts.beforeSeq === undefined ? all : all.filter((m) => m.seq < opts.beforeSeq!);
-    const page = older.slice(Math.max(0, older.length - opts.limit));
-    // More exist when the read was full (the server may hold more) or rows older than the page are in hand.
-    const hasMore = page.length > 0 && (older.length > page.length || (all.length >= fetchLimit && page[0].seq > 1));
-    return { messages: page, hasMore };
+    const limit = Math.max(1, Math.min(SERVER_MESSAGE_CAP, Math.floor(opts.limit)));
+    const cursor = opts.beforeSeq !== undefined ? `&beforeSeq=${Math.max(1, Math.floor(opts.beforeSeq))}` : "";
+    const res = await this.core.json<{ session?: { messages?: unknown; hasMore?: unknown } }>(
+      "GET", `/kb/chat/sessions/${encodeURIComponent(id)}?limit=${limit}${cursor}`, undefined, signal);
+    const raw = res?.session?.messages;
+    if (!Array.isArray(raw)) throw new CoreHttpError(502, "BAD_RESPONSE", "Unexpected chat session");
+    // Rows are checked, not trusted: a malformed row is skipped; an older core that ignores beforeSeq cannot repeat a page.
+    let rows = raw.filter(isStoredMessage);
+    if (opts.beforeSeq !== undefined) rows = rows.filter((m) => m.seq < opts.beforeSeq!);
+    // The cap that matters is the page: a core answering more than asked is cut to the newest `limit` rows.
+    if (rows.length > limit) rows = rows.slice(rows.length - limit);
+    const flag = res.session?.hasMore;
+    // An older core (no hasMore) is guessed from a full read; with API 97 the flag is exact.
+    const hasMore = typeof flag === "boolean" ? flag && rows.length > 0 : rows.length >= limit && rows[0].seq > 1;
+    return { messages: rows, hasMore };
   }
 
   async appendMessage(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }, signal?: AbortSignal): Promise<void> {
-    const res = await this.core.json<{ seq?: number }>("POST", `/kb/chat/sessions/${encodeURIComponent(id)}/messages`, msg, signal);
-    if (typeof res?.seq === "number") this.newest.set(id, Math.max(this.newest.get(id) ?? 0, res.seq));
+    await this.core.json("POST", `/kb/chat/sessions/${encodeURIComponent(id)}/messages`, msg, signal);
   }
 }
 

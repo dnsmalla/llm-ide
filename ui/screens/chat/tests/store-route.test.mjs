@@ -82,7 +82,7 @@ test("route wrappers hit the contract routes", async () => {
 function fakeServer(total) {
   const rows = Array.from({ length: total }, (_, i) => ({ seq: i + 1, role: i % 2 ? "assistant" : "user", content: `m${i + 1}`, meta: null, createdAt: 1 }));
   return fakeCore({ json: {
-    "GET /kb/chat/sessions/s1": (_b, path) => { const lim = Number(new URL(path, "http://x").searchParams.get("limit")); return { session: { id: "s1", messages: rows.slice(Math.max(0, rows.length - Math.min(lim, 2000))) } }; },
+    "GET /kb/chat/sessions/s1": (_b, path) => { const q = new URL(path, "http://x").searchParams; const lim = Math.min(Number(q.get("limit")), 2000); const older = q.has("beforeSeq") ? rows.filter((r) => r.seq < Number(q.get("beforeSeq"))) : rows; const page = older.slice(Math.max(0, older.length - lim)); return { session: { id: "s1", messages: page, hasMore: older.length > page.length } }; },
     "GET /kb/chat/sessions": (_b, path) => ({ sessions: Array.from({ length: Math.min(Number(new URL(path, "http://x").searchParams.get("limit")), 200) }, (_, i) => ({ id: `x${i}`, title: "t", updatedAt: 1 })) }),
     "PATCH /kb/chat/sessions/s1": { ok: true },
     "DELETE /kb/chat/sessions/s1": { ok: true },
@@ -90,7 +90,7 @@ function fakeServer(total) {
   } });
 }
 
-test("HttpChatStore pages older messages with the server's newest-N read", async () => {
+test("HttpChatStore pages older messages with beforeSeq", async () => {
   const core = fakeServer(450);
   const store = new c.HttpChatStore(core);
   const p1 = await store.loadMessages("s1", { limit: 100 });
