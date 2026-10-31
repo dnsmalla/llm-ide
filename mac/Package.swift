@@ -133,6 +133,9 @@ if autoTasksIncluded {
         "AutoCodeUpdateServiceReviewSkipTests.swift",
         "CustomAutoTaskProjectScopeTests.swift",
         "MobileAutoTaskBridgeScopeTests.swift",
+        "PhoneBridgeSpyHost.swift",
+        "PhoneAutoTaskRunGateTests.swift",
+        "PhoneAutoTaskApprovalFlowTests.swift",
         "AutoCodeUpdateServiceCLITests.swift",
         "AutoCodeUpdateServiceComposedPromptTests.swift",
         "AutoCodeUpdateServiceCronTests.swift",
@@ -238,6 +241,7 @@ if mobileIncluded {
     libExcludes.append("Features/MobileControl")
     let mobileTestExcludes: Set<String> = [
         "MobilePairingFrameTests.swift",
+        "PhoneDesktopApprovalGateTests.swift",
         "MobileWebSocketServerBindTests.swift",
         "MobileWebSocketServerRebindTests.swift",
         "MobileWebSocketServerRoutingTests.swift",
