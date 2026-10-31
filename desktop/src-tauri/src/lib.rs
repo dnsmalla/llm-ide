@@ -13,6 +13,7 @@ mod git;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
+mod notes_write;
 mod os_open;
 mod proc_tree;
 mod project;
@@ -322,6 +323,11 @@ pub fn run() {
             notes_fs::notes_list,
             notes_fs::notes_read,
             notes_fs::notes_heads,
+            notes_write::note_open,
+            notes_write::note_save,
+            notes_write::note_create,
+            notes_write::note_rename,
+            notes_write::notes_delete_many,
             os_open::open_external_url,
             os_open::reveal_in_os,
             attach::attach_pick_files,

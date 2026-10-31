@@ -6,7 +6,7 @@
 //  * Only the last message object is replaced per applied batch; every older message is shared.
 //  * Memory is bounded: tool output kept in state is capped (TOOL_STATE_CAP), the in-memory message
 //    window is capped (MAX_MESSAGES_IN_MEMORY, oldest dropped on append and `hasMoreOlder` set).
-import type { AgentEvent, Question, TaskItem } from "./events";
+import type { AgentEvent, ApprovalSuggestion, Question, TaskItem } from "./events";
 
 export const TOOL_STATE_CAP = 20_000;
 export const TOOL_ARGS_CAP = 8_000;
@@ -66,7 +66,16 @@ export interface PendingApproval {
   toolName?: string;
   argsSummary?: string | null;
   args?: Record<string, unknown> | null;
+  /** The rule "always allow" would store (absent = Allow once only). */
+  suggestion?: ApprovalSuggestion | null;
   questions?: Question[];
+}
+
+/** The latest `workspace_trust` notice: the project folder is untrusted and what was withheld (names only). */
+export interface WorkspaceTrustState {
+  path: string;
+  text: string;
+  skipped: Array<{ kind: string; name: string; file: string; withheld: boolean }>;
 }
 
 export interface SessionBudget { used: number; limit: number; remaining: number; level: string }
@@ -87,6 +96,9 @@ export interface ChatState {
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null;
   tasks: TaskItem[];
   pendingApprovals: PendingApproval[];
+  /** The SDK session id off `init`: a decision is POSTed against it (the server checks tenancy on it). */
+  sdkSessionId: string | null;
+  workspaceTrust: WorkspaceTrustState | null;
   budget: SessionBudget | null;
   queue: string[];
   turnSeq: number;
@@ -99,7 +111,7 @@ export interface ChatState {
 export function initialState(sessionId: string): ChatState {
   return {
     sessionId, messages: [], hasMoreOlder: false, oldestSeq: null, phase: "idle", error: null, resolvedMode: null, model: null,
-    context: null, usage: null, tasks: [], pendingApprovals: [], budget: null, queue: [], turnSeq: 0, applied: 0, ignored: 0,
+    context: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, applied: 0, ignored: 0,
   };
 }
 
@@ -114,7 +126,11 @@ export type Action =
   | { type: "transport_error"; code: string; message: string; retryable: boolean }
   | { type: "dequeue" }
   | { type: "drop_queued"; index: number }
-  | { type: "clear_error" };
+  | { type: "clear_error" }
+  /** S-G: a decision was accepted by the core (the card goes; `approval_resolved` is then a no-op). */
+  | { type: "approval_answered"; requestId: string }
+  /** S-G: the folder was trusted; clears the banner only if the notice still names this path. */
+  | { type: "trust_granted"; path: string };
 
 // --- text -----------------------------------------------------------------------------------
 
@@ -255,6 +271,11 @@ export function reduce(state: ChatState, action: Action): ChatState {
       return { ...state, queue: state.queue.slice(1) };
     case "drop_queued":
       return { ...state, queue: state.queue.filter((_, i) => i !== action.index) };
+    case "approval_answered":
+      return state.pendingApprovals.some((a) => a.requestId === action.requestId)
+        ? { ...state, pendingApprovals: state.pendingApprovals.filter((a) => a.requestId !== action.requestId) } : state;
+    case "trust_granted":
+      return state.workspaceTrust && state.workspaceTrust.path === action.path ? { ...state, workspaceTrust: null } : state;
     case "clear_error":
       return state.phase === "error" ? { ...state, phase: "idle", error: null } : { ...state, error: null };
   }
@@ -278,6 +299,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
     switch (ev.type) {
       case "init":
         if (ev.model) next.model = ev.model;
+        if (ev.sessionId) next.sdkSessionId = ev.sessionId;
         break;
       case "mode_set":
         next.resolvedMode = ev.mode;
@@ -325,6 +347,17 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
         next.tasks = ev.tasks;
         break;
       case "notice": {
+        if (ev.kind === "workspace_trust" && ev.data && typeof ev.data === "object") {
+          const d = ev.data as Record<string, unknown>;
+          if (typeof d.path === "string" && d.trusted !== true) {
+            const skipped = Array.isArray(d.skipped) ? d.skipped.flatMap((x) => {
+              const o = x as Record<string, unknown> | null;
+              return o && typeof o.kind === "string" && typeof o.name === "string"
+                ? [{ kind: o.kind, name: o.name, file: typeof o.file === "string" ? o.file : "", withheld: o.withheld === true }] : [];
+            }).slice(0, 50) : [];
+            next.workspaceTrust = { path: d.path, text: ev.text, skipped };
+          }
+        }
         if (ev.kind === "session_budget" && ev.data && typeof ev.data === "object") {
           const d = ev.data as Record<string, unknown>;
           if (typeof d.used === "number" && typeof d.limit === "number") {
@@ -342,7 +375,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
       case "approval_request":
         if (!next.pendingApprovals.some((a) => a.requestId === ev.requestId)) {
           next.pendingApprovals = [...next.pendingApprovals, ev.kind === "ToolApproval"
-            ? { requestId: ev.requestId, kind: ev.kind, toolName: ev.toolName, argsSummary: ev.argsSummary, args: ev.args }
+            ? { requestId: ev.requestId, kind: ev.kind, toolName: ev.toolName, argsSummary: ev.argsSummary, args: ev.args, suggestion: ev.suggestion ?? null }
             : { requestId: ev.requestId, kind: ev.kind, questions: ev.questions }];
         }
         break;

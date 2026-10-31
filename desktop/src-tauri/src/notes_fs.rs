@@ -143,7 +143,7 @@ fn save_root(dir: &Path, root: &Path) -> Result<(), String> {
 
 /// The root to use now: the one accepted through `notes_root_choose` this session, else the
 /// persisted one (re-validated), else (debug builds only) `LLMIDE_NOTES_ROOT`.
-fn current_root() -> Result<PathBuf, String> {
+pub(crate) fn current_root() -> Result<PathBuf, String> {
     if let Some(r) = ROOT.lock().ok().and_then(|g| g.clone()) {
         return Ok(r);
     }
@@ -176,7 +176,7 @@ fn rel_segments(rel: &str) -> Result<Vec<&str>, String> {
     Ok(segs)
 }
 
-fn canonical_root(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn canonical_root(root: &Path) -> Result<PathBuf, String> {
     let root = std::fs::canonicalize(root).map_err(|e| err("no_root", format!("notes folder is not available: {e}")))?;
     // Re-evaluated on every call: the root may have been swapped for a symlink to a broad directory.
     if crate::project::is_too_broad(&root.to_string_lossy(), crate::project::home_dir().as_deref()) {
@@ -232,7 +232,7 @@ fn is_dataless(_: &std::fs::Metadata) -> bool {
     false
 }
 
-fn mtime_ms(m: &std::fs::Metadata) -> i64 {
+pub(crate) fn mtime_ms(m: &std::fs::Metadata) -> i64 {
     m.modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -241,7 +241,7 @@ fn mtime_ms(m: &std::fs::Metadata) -> i64 {
 }
 
 /// Opens `rel` inside `root` (see the module docs) and returns the open file and its metadata.
-fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std::fs::Metadata), String> {
+pub(crate) fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std::fs::Metadata), String> {
     let segs = rel_segments(rel)?;
     let root = canonical_root(root)?;
     let mut joined = root.clone();
@@ -364,7 +364,7 @@ pub fn read_heads(root: &Path, rels: &[String], head_max: usize) -> Result<Vec<N
 
 const NOTE_EXTS: [&str; 3] = ["md", "markdown", "txt"];
 
-fn is_note_name(name: &str) -> bool {
+pub(crate) fn is_note_name(name: &str) -> bool {
     if name.ends_with(".partial.md") {
         return false;
     }

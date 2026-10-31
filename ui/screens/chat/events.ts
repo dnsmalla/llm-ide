@@ -5,6 +5,8 @@
 export interface TaskItem { id: string; title: string; status: string }
 export interface ContextCategory { name: string; kind: string; tokens: number }
 export interface QuestionOption { label: string; description?: string; preview?: string }
+/** What "always allow" would store, as the server offers it (scope `session` = edits for this chat, `project` = a prefix/tool rule). */
+export interface ApprovalSuggestion { toolName?: string; pattern?: string; scope: "session" | "project"; label?: string }
 export interface Question { question: string; header?: string; multiSelect: boolean; options: QuestionOption[] }
 
 export type AgentEvent =
@@ -19,7 +21,7 @@ export type AgentEvent =
   | { type: "result"; subtype: string | null; costUsd: number | null; numTurns: number | null; durationMs: number | null; sessionId: string | null; stopReason: string | null }
   | { type: "sdk"; sdkType: string | null }
   | { type: "notice"; kind: string; level: "info" | "warning" | "error"; text: string; data: unknown }
-  | { type: "approval_request"; requestId: string; kind: "ToolApproval"; toolName: string; argsSummary: string | null; args: Record<string, unknown> | null }
+  | { type: "approval_request"; requestId: string; kind: "ToolApproval"; toolName: string; argsSummary: string | null; args: Record<string, unknown> | null; suggestion?: ApprovalSuggestion | null }
   | { type: "approval_request"; requestId: string; kind: "AskUserQuestion"; questions: Question[] }
   | { type: "approval_resolved"; requestId: string; outcome: string }
   | { type: "mode_set"; mode: string }
@@ -73,6 +75,14 @@ function questionsOf(v: unknown): Question[] | null {
     out.push({ question: q.question, ...(str(q.header) ? { header: q.header } : {}), multiSelect: q.multiSelect === true, options });
   }
   return out;
+}
+
+function suggestionOf(v: unknown): ApprovalSuggestion | null {
+  if (!isObj(v) || (v.scope !== "session" && v.scope !== "project")) return null;
+  return {
+    scope: v.scope, ...(str(v.toolName) ? { toolName: v.toolName } : {}),
+    ...(str(v.pattern) ? { pattern: v.pattern } : {}), ...(str(v.label) ? { label: v.label } : {}),
+  };
 }
 
 function categoriesOf(v: unknown): ContextCategory[] | null {
@@ -154,6 +164,7 @@ export function decodeEvent(raw: unknown): DecodeResult {
         return good({
           type: "approval_request", requestId: raw.requestId, kind: "ToolApproval", toolName: raw.toolName,
           argsSummary: strOrNull(raw.argsSummary) ? raw.argsSummary : null, args: isObj(raw.args) ? raw.args : null,
+          suggestion: suggestionOf(raw.suggestion),
         });
       }
       return bad();

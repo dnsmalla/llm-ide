@@ -38,6 +38,8 @@ export interface ControllerDeps {
   abortGraceMs?: number;
 }
 
+export type DecisionResult = { ok: true } | { ok: false; code: string; message: string; permanent: boolean };
+
 /** Per-chat UI state kept out of the reducer: it never affects a turn. */
 export interface ChatView { draft: string; scrollTop: number | null; stickToBottom: boolean }
 
@@ -165,6 +167,37 @@ export class ChatController {
   }
 
   clearError(id: string): void { this.dispatch(id, { type: "clear_error" }); }
+
+  /** S-G: records that the folder was trusted (clears the banner if the notice still names `path`). */
+  trustGranted(id: string, path: string): void { this.dispatch(id, { type: "trust_granted", path }); }
+
+  /**
+   * S-G: answers a parked approval or question through `POST /agent/v2/decision`. Fails closed: with no running turn,
+   * no SDK session id, or an unreachable core nothing is sent as allowed and the result says why. `permanent` means
+   * the request can never be answered (expired, unknown, another session): the card must not offer a retry.
+   */
+  async decide(id: string, req: { requestId: string; action: "allow" | "deny" | "always-allow" | "answer"; answers?: Record<string, string>; feedback?: string }): Promise<DecisionResult> {
+    const s = this.rt(id).state;
+    if (s.phase !== "streaming") return { ok: false, code: "TURN_ENDED", message: "The turn has ended, so this request can no longer be answered.", permanent: true };
+    if (!s.pendingApprovals.some((a) => a.requestId === req.requestId)) return { ok: false, code: "NOT_PENDING", message: "This request is no longer waiting.", permanent: true };
+    if (!s.sdkSessionId) return { ok: false, code: "NO_SESSION", message: "Cannot confirm: no session id for this turn. Nothing was allowed.", permanent: false };
+    try {
+      await this.deps.core.json("POST", "/agent/v2/decision", {
+        requestId: req.requestId, sdkSessionId: s.sdkSessionId, action: req.action,
+        ...(req.action === "answer" ? { answers: req.answers ?? {} } : {}),
+        ...(req.action === "deny" && req.feedback?.trim() ? { feedback: req.feedback.trim().slice(0, 2000) } : {}),
+      });
+    } catch (e) {
+      const h = httpLike(e);
+      if (h && (h.code === "DECISION_EXPIRED" || h.code === "DECISION_UNKNOWN" || h.code === "DECISION_FORBIDDEN")) {
+        return { ok: false, code: h.code, message: h.code === "DECISION_FORBIDDEN" ? "The core no longer accepts an answer for this request (session mismatch)." : "This request timed out on the core and can no longer be answered.", permanent: true };
+      }
+      const d = describeError(e);
+      return { ok: false, code: d.code, message: `Cannot confirm: ${d.message}. Nothing was allowed.`, permanent: false };
+    }
+    this.dispatch(id, { type: "approval_answered", requestId: req.requestId });
+    return { ok: true };
+  }
   dropQueued(id: string, index: number): void { this.dispatch(id, { type: "drop_queued", index }); }
 
   abort(id: string): void {
