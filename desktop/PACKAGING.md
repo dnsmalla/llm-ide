@@ -323,3 +323,55 @@ Threat model: a compromised webview (XSS through model output) that holds the `m
 - **Removal (F9).** Every removal goes through `trash_guard::Trasher`: NSFileManager on macOS, a fixed-drive check on Windows (a drive without a Recycle Bin would make `FOF_ALLOWUNDO` delete permanently, so it is refused with `trash_unavailable`), and no permanent-delete fallback anywhere (tests inject a refusing trash). Not compiled or run on Windows here.
 - **Smaller hardening (LOW).** New files use a no-replace rename (`link`+`unlink` where `RENAME_EXCL` is missing); notes folders are created through a verified parent descriptor (`mkdirat`); directory listings never report metadata of a link target outside the project; hard-linked notes are not read; the file watcher stops on project switch; `mailto:` with an encoded CR/LF is refused; `.svc .docker .k8s .consul .ts.net .cluster.local` are not public sites; the archive digest uses `sha2`; git branch validation is checked against `git check-ref-format`.
 - **CSP.** `script-src 'self' 'wasm-unsafe-eval'` (WebAssembly compile only, for the Code Graph layout kernel; no `unsafe-eval`, no `unsafe-inline`) in the release and dev CSP; the graph worker is a same-origin file (`worker-src 'self' blob:` already existed for Monaco). Pinned by `scripts/check-csp.test.mjs`.
+
+## Mermaid diagram renderer (optional, install on demand)
+
+Doc Gen and Visual show a ` ```mermaid ` fence as source text. The renderer (mermaid.min.js, 3.4 MB, MIT) is NOT shipped;
+the user can install it once from the fence itself. Same release and SHA-256 as the Mac app's pin.
+
+Pin: `src-tauri/resources/mermaid.pin.json` (embedded with `include_str!`; the webview can not change it).
+Version `11.17.2`, `https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js`, 3,572,661 bytes, SHA-256
+`581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8`, licence MIT, verified 2026-10-31 (HTTP 200, no redirect).
+
+Host (`src-tauri/src/mermaid_runtime.rs`, three commands, main window only):
+
+- `mermaid_runtime_status`: installed? version, size. Re-hashes the stored file.
+- `mermaid_runtime_install`: native Cancel-first dialog (fixed text: host, version, size, "once", "app data folder"); only
+  an exact accept downloads. One URL, validated to be exactly the pin's shape (host allowlist `cdn.jsdelivr.net`, no port,
+  no userinfo, exact version). Transfer is the OS `curl` (`/usr/bin/curl`, `System32\curl.exe`) with `-q`, `--proto =https`,
+  `--tlsv1.2`, `--max-redirs 0`, `--max-filesize`, 15 s connect and 120 s total timeouts, a scrubbed environment and no
+  stdin (the crate set has no TLS stack; adding rustls needs a dependency decision, and crates.io was out of scope).
+  A redirect, a non-200 status or an oversize body is refused. The body (8 MB cap) must hash to the pin BEFORE anything is
+  stored (fail closed). Stored atomically (temp file, fsync, rename) with 0600 as `<data dir>/runtime/mermaid-<ver>.js`;
+  a failed write removes its temp file and keeps the previous file; other versions are pruned. Rate limited, one install at a time.
+- `mermaid_runtime_read`: the verified bytes, re-hashed on EVERY read, symlinks refused, size capped. The host never runs them.
+
+Webview (`ui/screens/docgen/mermaid/`): `MermaidView` shows the source first and a button
+"Install diagram renderer (about N KB, once)"; it never reads or renders on mount without an install. Installed: the
+runtime text is inlined into a `srcdoc` and run in a throwaway `<iframe sandbox="allow-scripts">` (no same-origin, forms,
+popups, top navigation or downloads). The frame has its own meta CSP (`default-src 'none'`, scripts only by SHA-256,
+`connect-src 'none'`, `frame-src 'none'`, images and fonts `data:` only). The diagram text goes in by `postMessage` only
+(never into HTML), after the pre-filter removes `%%{init|initialize|config}%%` directives, YAML front matter and `click`
+lines (100 KB cap). The frame initialises mermaid with `securityLevel: 'strict'`, `htmlLabels: false`,
+`startOnLoad: false`, a `secure` key list so no in-text directive can change those, and re-reads the level after each
+render. The frame answers with SVG text; the PARENT sanitises it again with an allowlist (no script, foreignObject,
+image, style with `url()` other than `#id`, `href` other than `#fragment`, `on*`), caps it at 2 MB, and shows it as an
+`<img src=blob:>` (revoked on unmount). 10 s render timeout (frame removed), one frame at a time.
+
+CSP (`tauri.conf.json`, release and dev): `script-src` gains exactly two hashes (the pinned runtime and the fixed boot
+script, `BOOT_JS` in `mermaid/frame.ts`), plus `frame-src about:` for srcdoc frames. A srcdoc frame inherits the app's CSP,
+so both policies must admit the scripts; neither allows `unsafe-inline`. `check-csp.test.mjs` pins both hashes (the boot hash
+is recomputed from the source) and that the pin matches the Mac app's. Bumping Mermaid means changing the pin
+(`url`, `sha256`, `sha256_base64`, `bytes`) and the runtime hash in both CSP strings together; the test fails otherwise.
+
+Verified without a window: pre-filter, SVG sanitiser (many hostile fixtures), message protocol, srcdoc builder, the boot
+script run in a `vm` against a fake mermaid (strict level pinned and re-checked, foreign sources and bad messages ignored),
+queue and timeout, host decode, component markup, and in Rust the installer with an injected fetcher (tampered, oversize,
+redirect, partial write, atomic replace, re-verify on read).
+
+Only a real window can verify: that WebKit admits the inline scripts by hash in a `sandbox="allow-scripts"` srcdoc frame
+under the inherited CSP and `frame-src about:`; that mermaid lays out text inside the off-screen frame; that diagrams look right
+as `<img>` in both themes (htmlLabels are off, so any diagram type that insists on `foreignObject` loses its labels because
+the sanitiser drops that element); the native confirm dialog; the real download through `curl` (offline, proxy-only
+networks and certificate errors surface as "download failed", the app uses no proxy settings). Run the app, open a Visual
+result with a mermaid fence, press Install, and check the diagram and an adversarial one (`click`, `%%{init` loose).
