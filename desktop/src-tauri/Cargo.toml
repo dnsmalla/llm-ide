@@ -31,6 +31,8 @@ notify = "=8.2.1"
 ignore = "=0.4.25"
 trash = "=5.2.9"
 sha2 = "=0.10.9"
+# Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
+url = "=2.5.8"
 
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]

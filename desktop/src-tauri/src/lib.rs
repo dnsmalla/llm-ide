@@ -1,8 +1,10 @@
+mod attach;
 mod ax_probe;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;
 mod chat_store;
+mod confirm;
 mod core_env;
 mod core_host;
 mod fs_ops;
@@ -11,6 +13,7 @@ mod git;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
+mod os_open;
 mod proc_tree;
 mod project;
 mod pty;
@@ -213,6 +216,8 @@ pub fn run() {
                 pty::kill_all();
                 pty::reset_consent();
                 fs_watch::stop_all();
+                // The webview that held the attachment tokens is gone.
+                attach::clear();
             }
         })
         .on_window_event(|window, event| {
@@ -316,7 +321,13 @@ pub fn run() {
             notes_fs::notes_root_clear,
             notes_fs::notes_list,
             notes_fs::notes_read,
-            notes_fs::notes_heads
+            notes_fs::notes_heads,
+            os_open::open_external_url,
+            os_open::reveal_in_os,
+            attach::attach_pick_files,
+            attach::attach_read,
+            attach::attach_release,
+            confirm::bypass_confirm
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");

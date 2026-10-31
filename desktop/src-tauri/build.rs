@@ -58,6 +58,12 @@ const COMMANDS: &[&str] = &[
     "notes_list",
     "notes_read",
     "notes_heads",
+    "open_external_url",
+    "reveal_in_os",
+    "attach_pick_files",
+    "attach_read",
+    "attach_release",
+    "bypass_confirm",
 ];
 
 fn main() {
