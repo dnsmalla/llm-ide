@@ -28,7 +28,7 @@ public struct AutoTaskTemplateInfo: Codable, Equatable, Identifiable {
 
 /// One task's saved settings. Absent fields mean "not set".
 public struct AutoTaskConfigInfo: Codable, Equatable, Identifiable {
-    /// `AutoTask.rawValue` or `CustomAutoTask.id`.
+    /// `AutoTask.rawValue`. (Custom tasks are desktop-only since 2026-10-31: the Mac never sends or accepts them; old phones that still decode a custom id just see none.)
     public let taskId: String
     public let inputPath: String?
     public let outputPath: String?
