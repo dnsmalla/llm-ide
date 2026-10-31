@@ -42,9 +42,6 @@ pub const QUIT_CAP: Duration = Duration::from_secs(6);
 pub const SWEEP_CAP: Duration = Duration::from_secs(25);
 /// One remote call never waits longer than this, whatever time is left.
 const CALL_CAP: Duration = Duration::from_secs(3);
-/// A file may look this much older than the server's last use before a purge is refused
-/// (same as the Mac's `ChatArchiveLogic.fileAgeTolerance`).
-const FILE_AGE_TOLERANCE_SECS: f64 = 120.0;
 const PURGE_BATCH: usize = 100;
 /// Most chats one run will look at.
 const MAX_CANDIDATES: usize = 5_000;
@@ -467,8 +464,16 @@ impl<R: LifecycleRemote> Archiver<R> {
                 report.skipped.insert(id, "emptyFile".into());
                 continue;
             }
-            if let (Some(server), Some(used)) = (ws.updated_at.as_deref().and_then(parse_server_time), facts.last_used_apple) {
-                if used + APPLE_EPOCH_UNIX < server - FILE_AGE_TOLERANCE_SECS {
+            // Never fewer messages than this store has seen for the chat: a truncated (even freshly
+            // touched) file must not let the server's longer working state be purged.
+            if facts.message_count < facts.high_water {
+                report.skipped.insert(id, "fewerMessagesThanSeen".into());
+                continue;
+            }
+            // The FILE's mtime (not the header's lastUsedAt, which a page can write) must not be older than
+            // the server's last use. No slack: the server stamps whole seconds, the file is saved after a turn.
+            if let Some(server) = ws.updated_at.as_deref().and_then(parse_server_time) {
+                if facts.mtime_unix.is_none_or(|m| m < server) {
                     report.skipped.insert(id, "fileOlderThanServer".into());
                     continue;
                 }

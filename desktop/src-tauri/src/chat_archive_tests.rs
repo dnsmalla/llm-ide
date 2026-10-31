@@ -123,6 +123,9 @@ fn fixture() -> Fixture {
     let mut c = session(C, 2);
     c["lastUsedAt"] = json!(apple_now - 3600.0);
     s.save(c, SaveMode::Replace, None, false).unwrap();
+    // ... and the FILE itself was last written an hour ago (the archive compares the file's mtime)
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    std::fs::File::options().write(true).open(t.0.join("sessions").join(format!("{C}.json"))).unwrap().set_modified(old).unwrap();
     s.save(session(D, 2), SaveMode::Replace, None, true).unwrap();
     s.delete(D).unwrap();
     // the deleted chat's file is back (a late write)
@@ -539,4 +542,55 @@ fn off_runs_no_quit_archive_and_the_sweep_only_forwards_deletes() {
     let s = archiver(&f).with_policy(ArchivePolicy::Off).sweep(Duration::from_secs(5));
     assert_eq!(s.tombstones_sent, 1);
     assert!(f.core.state.lock().unwrap().log.is_empty());
+}
+
+
+// ---- truncation and clock guards ---------------------------------------------------------------
+
+fn run_one(f: &Fixture, _id: &str) -> ArchiveReport {
+    Archiver::new(f.store.clone(), f.core.clone(), None).sweep(Duration::from_secs(5))
+}
+
+#[test]
+fn a_truncated_but_freshly_touched_file_never_lets_the_server_state_be_purged() {
+    let f = fixture();
+    // The store has vouched for 10 messages; then something rewrites the file with 3 (fresh mtime).
+    f.store.save(session(A, 10), SaveMode::Replace, Some(&f.store.load(A, None, 5).unwrap().revision), true).unwrap();
+    let body = serde_json::to_vec(&{
+        let mut s = session(A, 3);
+        s["ownerUserId"] = json!("u1");
+        s
+    })
+    .unwrap();
+    std::fs::write(f.t.0.join("sessions").join(format!("{A}.json")), body).unwrap();
+    let report = run_one(&f, A);
+    assert_eq!(report.skipped.get(A).map(String::as_str), Some("fewerMessagesThanSeen"));
+    let st = f.core.state.lock().unwrap();
+    assert!(st.working.contains_key(A), "the server's longer state is still there");
+    assert!(!st.log.iter().any(|l| l.contains(A) && (l.starts_with("receipt") || l.starts_with("purge"))), "{:?}", st.log);
+}
+
+#[test]
+fn there_is_no_clock_slack_between_the_file_and_the_server() {
+    let f = fixture();
+    // The server saw activity 30 s after the file was written: that used to pass inside a 120 s tolerance.
+    let file_mtime = std::fs::metadata(f.t.0.join("sessions").join(format!("{A}.json"))).unwrap().modified().unwrap();
+    let later = file_mtime.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as f64 + 30.0;
+    f.core.state.lock().unwrap().working.insert(A.to_string(), iso_utc(later).replace('T', " ").replace('Z', ""));
+    let report = run_one(&f, A);
+    assert_eq!(report.skipped.get(A).map(String::as_str), Some("fileOlderThanServer"));
+}
+
+#[test]
+fn a_header_lastused_in_the_future_does_not_fake_freshness() {
+    let f = fixture();
+    // The page can write any lastUsedAt; only the file's mtime counts.
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    let p = f.t.0.join("sessions").join(format!("{A}.json"));
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    v["lastUsedAt"] = json!(crate::chat_store::now_apple() + 86_400.0);
+    std::fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
+    std::fs::File::options().write(true).open(&p).unwrap().set_modified(old).unwrap();
+    let report = run_one(&f, A);
+    assert_eq!(report.skipped.get(A).map(String::as_str), Some("fileOlderThanServer"));
 }

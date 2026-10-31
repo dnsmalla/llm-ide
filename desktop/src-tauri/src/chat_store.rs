@@ -727,6 +727,10 @@ struct Inner {
 struct IndexCache {
     #[serde(default)]
     entries: HashMap<String, CacheEntry>,
+    /// Highest message count this store has seen (or itself wrote, or a human confirmed lowering) per
+    /// chat. The archive never purges server state for a file with fewer messages than this.
+    #[serde(default)]
+    high_water: HashMap<String, usize>,
     #[serde(skip)]
     loaded: bool,
     #[serde(skip)]
@@ -790,6 +794,10 @@ pub struct SaveOutcome {
 /// What the archive protocol needs to know about a chat file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveFacts {
+    /// The file's own modification time (unix seconds), not a header field a page can write.
+    pub mtime_unix: Option<f64>,
+    /// Highest message count seen for this chat (0 = never seen).
+    pub high_water: usize,
     pub exists: bool,
     pub decoded: bool,
     pub owned_by_user: bool,
@@ -1006,6 +1014,16 @@ impl ChatStore {
             cache.entries.insert(id.clone(), CacheEntry { mtime_ns: *m, size: *s, parsed: p });
             cache.dirty = true;
         }
+        let counts: Vec<(String, usize)> = cache.entries.iter().filter_map(|(id, e)| if let Parsed::Ok { summary, .. } = &e.parsed { Some((id.clone(), summary.message_count)) } else { None }).collect();
+        for (id, n) in counts {
+            Self::raise_high_water(&mut cache, &id, n);
+        }
+        let live_ids: HashSet<String> = cache.entries.keys().cloned().collect();
+        let hw_before = cache.high_water.len();
+        cache.high_water.retain(|k, _| live_ids.contains(k));
+        if cache.high_water.len() != hw_before {
+            cache.dirty = true;
+        }
         let mut unsupported = 0usize;
         let mut rows: Vec<&ChatSummary> = Vec::new();
         for (id, e) in cache.entries.iter() {
@@ -1074,6 +1092,12 @@ impl ChatStore {
         if canonical_chat_id(fields.get("id").and_then(Value::as_str).unwrap_or("")).as_deref() != Some(id.as_str()) {
             quarantine(&self.inner.layout.sessions, &id);
             return Err(StoreError::new("corrupt", "chat file is unreadable and was set aside"));
+        }
+        {
+            let mut c = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
+            self.load_index(&mut c);
+            Self::raise_high_water(&mut c, &id, tail.total);
+            self.save_index(&mut c);
         }
         fields.insert("messages".into(), Value::Array(tail.messages));
         Ok(LoadedChat { session: Value::Object(fields), total: tail.total, start: tail.start, revision: revision_of(&meta) })
@@ -1190,6 +1214,7 @@ impl ChatStore {
             return Err(StoreError::new("too_large", "chat exceeds the size limit"));
         }
         write_atomic(&path, &body)?;
+        self.set_high_water(&id, count);
         let meta = std::fs::metadata(&path).map_err(|e| io_err("stat chat", &e))?;
         Ok(SaveOutcome { revision: revision_of(&meta), message_count: count, last_used_at: obj.get("lastUsedAt").and_then(Value::as_f64).unwrap_or(0.0) })
     }
@@ -1214,6 +1239,9 @@ impl ChatStore {
         if c.entries.remove(&id).is_some() {
             c.dirty = true;
         }
+        if c.high_water.remove(&id).is_some() {
+            c.dirty = true;
+        }
         Ok(existed)
     }
 
@@ -1234,6 +1262,23 @@ impl ChatStore {
         match parse_header(&f, size, id) {
             Parsed::Ok { summary, owner } if owner.as_deref().is_none_or(|o| o == self.user_id()) => Some(summary.title),
             _ => None,
+        }
+    }
+
+    /// Records the count this store itself vouches for (a save, including a confirmed shrink).
+    fn set_high_water(&self, id: &str, count: usize) {
+        let mut c = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
+        self.load_index(&mut c);
+        c.high_water.insert(id.to_string(), count);
+        c.dirty = true;
+        self.save_index(&mut c);
+    }
+
+    fn raise_high_water(c: &mut IndexCache, id: &str, count: usize) {
+        let e = c.high_water.entry(id.to_string()).or_insert(0);
+        if count > *e {
+            *e = count;
+            c.dirty = true;
         }
     }
 
@@ -1304,14 +1349,20 @@ impl ChatStore {
     pub fn archive_facts(&self, raw_id: &str) -> Result<ArchiveFacts> {
         let id = self.id_arg(raw_id)?;
         let path = self.file_path(&id);
-        let missing = ArchiveFacts { exists: false, decoded: false, owned_by_user: true, message_count: 0, last_used_apple: None, hash: None };
+        let hw = {
+            let mut c = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
+            self.load_index(&mut c);
+            c.high_water.get(&id).copied().unwrap_or(0)
+        };
+        let missing = ArchiveFacts { mtime_unix: None, high_water: hw, exists: false, decoded: false, owned_by_user: true, message_count: 0, last_used_apple: None, hash: None };
         let meta = match std::fs::symlink_metadata(&path) {
             Ok(m) if m.is_file() => m,
             Ok(_) => return Ok(ArchiveFacts { exists: true, ..missing }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(missing),
             Err(e) => return Err(io_err("stat chat", &e)),
         };
-        let exists_only = ArchiveFacts { exists: true, ..missing };
+        let mtime_unix = Some(mtime_ns(&meta) as f64 / 1e9);
+        let exists_only = ArchiveFacts { exists: true, mtime_unix, ..missing };
         if meta.len() > MAX_READ_BYTES {
             return Ok(exists_only);
         }
@@ -1323,6 +1374,8 @@ impl ChatStore {
         let owner = doc.fields.get("ownerUserId").and_then(Value::as_str);
         let id_ok = canonical_chat_id(doc.fields.get("id").and_then(Value::as_str).unwrap_or("")).as_deref() == Some(id.as_str());
         Ok(ArchiveFacts {
+            mtime_unix,
+            high_water: hw,
             exists: true,
             decoded: id_ok,
             owned_by_user: owner.is_none_or(|o| o == self.user_id()),
