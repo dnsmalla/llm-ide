@@ -87,3 +87,7 @@ well-known per-OS install dirs, each validated with a `--version` probe) and the
 passes it as `pathToClaudeCodeExecutable`. When nothing is found the turn fails with an
 `ENGINE_ERROR` telling the user to install Claude Code and run `claude login`. Still open:
 a real packaged-app run on all three OSes (Tauri plan T6).
+
+## Secrets
+
+The JWT secret and vault key live in the OS credential store and reach the sidecar through its environment only; see [docs/how-to/desktop-secret-store.md](../docs/how-to/desktop-secret-store.md).
