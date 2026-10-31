@@ -27,6 +27,8 @@ const REDACT_KEYS = new Set([
   'refreshToken', 'resetToken', 'accessToken', 'idToken',
   'code',          // OAuth authorization codes
   'privateKey', 'clientSecret', 'masterKey', 'encryptionKey',
+  // Host-signed approval (core/host-approval.mjs): the header's name and its key.
+  'x-llmide-host-approval', 'hostApproval', 'hostApprovalKey', 'LLMIDE_HOST_APPROVAL_KEY',
 ]);
 
 // Pattern-based fallback: also redact any key whose name contains these
