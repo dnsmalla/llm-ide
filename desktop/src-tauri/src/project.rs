@@ -231,11 +231,9 @@ fn load_recent(dir: &Path) -> Vec<String> {
 }
 
 fn save_recent(dir: &Path, list: &[String]) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    crate::fsutil::private_dir(dir)?;
     let body = serde_json::to_string(list).map_err(|e| e.to_string())?;
-    let tmp = dir.join("recent-projects.json.tmp");
-    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, recent_file(dir)).map_err(|e| e.to_string())
+    crate::fsutil::write_private_atomic(&recent_file(dir), body.as_bytes(), RECENT_FILE_MAX_BYTES as usize)
 }
 
 /// Recent entries that still validate (exist, are folders, not too broad).
