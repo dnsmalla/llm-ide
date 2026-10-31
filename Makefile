@@ -361,3 +361,4 @@ docs-check:
 	$(PY) docs/_scripts/check_rate_limit_mapping.py
 	$(PY) docs/_scripts/check_spec_citations.py
 	$(PY) docs/_scripts/check_spec_values.py
+	node scripts/user-needs.mjs --check

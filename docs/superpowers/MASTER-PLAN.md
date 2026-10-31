@@ -1,5 +1,7 @@
 # Master plan: desktop, mobile, web and extension
 
+**Your needs are indexed in [USER-NEEDS.md](USER-NEEDS.md)** (every item that only you can run or decide, with commands, open and done counts). This page keeps the `(you)` tags; that page is the checklist.
+
 Created 2026-10-30 from the repo as of `a3897732`. This is the **living** total plan: what each surface needs to be complete, what exists, what is not done. Detail lives in the linked plans; this page is the one place to look. Principle (user, 2026-10-29): **professional quality over speed**; no gate is compressed to hit a date.
 
 Legend: `- [x]` done (the repo evidences it) · `- [~]` partial · `- [ ]` not done. Owner tags: **(me)** the agent can do it, **(you)** needs the user (decision, real login, real device, money), **(wait)** time-gated (real usage or data must accumulate). "unverified" means a doc claims it and this page could not confirm it in the code or a run. Evidence is a commit hash or a repo path.

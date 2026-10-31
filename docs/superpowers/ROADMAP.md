@@ -61,28 +61,15 @@ Pushed state is `origin/main` at `6f51e1e6`.
 
 ## 3. Waiting on YOU
 
-| # | Item | Notes |
-|---|---|---|
-| Y1 | **Real-app first run** of the Tauri app: follow the checklist in `desktop/RUN-ON-MAC.md` (build with `scripts/build-desktop-mac.sh`, sign up on the local core, open a scratch project, try Chat, Explorer, terminal, Library, Settings, Extensions, Code Graph, Doc Gen). Report differences with its bug template. | No screen has ever been seen in the real app; every "built" row depends on this. |
-| Y2 | **Device tests**: `docs/mobile/verification.md` F-rows (tier gating, approvals) and, once the TLS slice is built, the on-device TLS items (ATS check, legacy path, packet capture). | Needs an iPhone on the same network. |
-| Y3 | **Phase 3 exit conditions**: Mac autobench with the window frontmost (confirms 30 s hidden phase), one Windows run (graph at least 30 fps, sidecar start and quit, installer size), Accessibility grant for caption cadence. | A failed Windows run pauses work (ADR 0018 condition). |
-| Y4 | **Bench go-ahead and runs** (`USER-CHECKLIST.md` section A: baselines, noise check, A/B per switch). | Unblocks every token-saving change in section 4. |
-| Y5 | Run `node scripts/auto-task-usage.mjs --db "$HOME/Library/Application Support/llm-ide/system/data.db"` and tell me the counts. Read-only. | Decides which Auto Tasks get cut or merged (audit: 5 keep, 5 merge, 3 remove). |
-| Y6 | **Create a Google Cloud OAuth client** (desktop type, your own project, test users = your accounts, consent screen in Testing): checklist is in the Google plan section 7 and the setup guide that G6 will add. Needed for any live Google run. | Without it only fixtures run. Expect 7-day refresh-token expiry while the app is in Testing. |
-| Y7 | Manual checks from `USER-CHECKLIST.md` section B for the Swift app (12-step quit/relaunch with `lta.mode=on`, Providers and Model routing, chat cap chip). | Gates turning `lta.mode` on by default. |
-| Y8 | Optional: install the nightly push job (`scripts/nightly-push.sh --help` lists the three commands). Until then I push only when you say. | |
-| Y9 | Stale processes: if the Swift app or any server holds port 3456 or 3457, quit it from the app (I never kill processes). | The Tauri app adopts a 3456 core as "unverified". |
+The full list (what, why it needs you, exact steps, effort, open and done counts, open decisions with recommendations, delegated decisions, later needs) is **[USER-NEEDS.md](USER-NEEDS.md)**. Detailed procedures stay in [USER-CHECKLIST.md](USER-CHECKLIST.md). The top five today:
 
-**Decisions still open** (only the unanswered ones; each with my recommendation; answering "go with your recommendation" is enough):
+1. **UN-001** Real-app first run of the Tauri app (`desktop/RUN-ON-MAC.md`): every "built" row depends on it.
+2. **UN-002** iPhone device tests (`docs/mobile/verification.md` F-rows).
+3. **UN-003** `node scripts/auto-task-usage.mjs --db "$HOME/Library/Application Support/llm-ide/system/data.db"` and tell me the counts (2 minutes).
+4. **UN-004** Swift app manual checks (USER-CHECKLIST section B), which gate turning `lta.mode` on by default.
+5. **UN-011** Token bench go-ahead (USER-CHECKLIST section A): unblocks every token-saving change.
 
-- **Q-G1 to Q-G3 (Google):** bring-your-own client now; replace Gmail IMAP OAuth with the REST connector and revoke the old token; Drive metadata for everything and content only for ticked folders.
-- **Q-I1 to Q-I3 (Issues core):** paste tokens once into Settings (write-only); Gantt write-back overlay only in v1; allow a bounded, rebuildable per-user issue cache in SQLite with purge on disconnect.
-- **Command bus Q2 to Q6:** ship the interim Swift fixes (several already shipped); explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
-- **Mobile TLS Q1 to Q4:** ship TLS before the bus, one release of cleartext fallback, "Reset security identity" as the only rotation, keep `NSAllowsLocalNetworking` for one release.
-- **Phase 5 questions:** 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after); approve the one Swift addition for the Live capture helper; Windows/Linux order; when you will record real meetings.
-- **Mermaid runtime** (bundled, isolated frame; Visual shows source until a pinned runtime is vendored), **DOCX route and host save dialog** (core `/generate-docx` plus a native Save As so the webview never gets a write path), **custom-task approval** (custom tasks stay desktop-approved; phone may only enqueue a saved custom task's id): I recommend yes to all three. I could not confirm in the plans whether you answered these; treat as open.
-- **Relay D6** (host: VPS first behind a storage interface) is decided at the start of R2; **X1** (no password at the relay; account bound to the desktop's signing key) and **X2** (book the external review during R0) need your nod.
-- Older: Q19 (notes without `platform`), Q16 (search latency at 50k notes), knowledge-kit Q1-Q14 (esp. Q6, Q9, Q12-Q13), ledger step B go/no-go, Tauri feature-off mechanism.
+Open decisions (only the unanswered ones, each with a recommendation) are section B of USER-NEEDS; answering "go with your recommendation" is enough.
 
 ## 4. Next (ordered)
 

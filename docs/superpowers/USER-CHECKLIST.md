@@ -1,5 +1,7 @@
 # Your checklist: bench runs and manual app checks
 
+**The index of everything that needs you is [USER-NEEDS.md](USER-NEEDS.md); this page holds the detailed procedures (bench commands, the 30-minute manual checks).**
+
 Written 2026-10-30, after the end-to-end build of live-then-archive and agent-kit K1 (Phases 0-7). Everything below needs you (a real login, a real app, real money or plan limits). Nothing here is run by the agents.
 
 ## A. Bench plan (token-affecting changes are OFF until you decide)
@@ -51,6 +53,6 @@ Before you start: quit any server on port 3456 (`lsof -nP -iTCP:3456 -sTCP:LISTE
 
 Tell me which steps fail, or "all fine". Any problem: switch back to `lta.mode` Shadow (nothing is deleted in shadow).
 
-## C. Decisions still open (see docs/superpowers/ROADMAP.md, "Waiting on you")
+## C. Decisions still open (tracked in [USER-NEEDS.md](USER-NEEDS.md) section B)
 
 Q19 (notes without `platform` are invisible in Library), Q16 (search latency at 50k notes), knowledge-kit Q1-Q14 (unanswered), ledger step B go/no-go. Meeting work waits until you use meetings.
