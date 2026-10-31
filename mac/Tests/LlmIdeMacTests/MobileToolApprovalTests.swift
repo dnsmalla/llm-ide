@@ -37,6 +37,35 @@ final class MobileToolApprovalTests: XCTestCase {
         XCTAssertEqual(write.contentPreview, "hi")
     }
 
+    /// The phone can only allow once or deny: no "always allow" rule and no Bypass can come from its answer.
+    @MainActor
+    func testPhoneAnswerCanOnlyAllowOnceOrDeny() throws {
+        XCTAssertEqual(MobileControlManager.phoneToolDecisionAction(allow: true), "allow")
+        XCTAssertEqual(MobileControlManager.phoneToolDecisionAction(allow: false), "deny")
+        let wire = try JSONEncoder().encode(ToolApprovalAnswer(commandId: "c", requestId: "r", allow: true))
+        let keys = Set(try XCTUnwrap(JSONSerialization.jsonObject(with: wire) as? [String: Any]).keys)
+        XCTAssertEqual(keys, ["type", "commandId", "requestId", "allow"], "no field could carry always-allow or a mode")
+        // A hostile phone adding extra keys changes nothing: they are not decoded.
+        let sneaky = Data(#"{"type":"tool_approval_answer","commandId":"c","requestId":"r","allow":true,"always":true,"mode":"bypass","action":"allow_always"}"#.utf8)
+        let decoded = try JSONDecoder().decode(ToolApprovalAnswer.self, from: sneaky)
+        XCTAssertEqual(decoded, ToolApprovalAnswer(commandId: "c", requestId: "r", allow: true))
+    }
+
+    /// The relayed prompt carries the tool name and the one-line summary the Mac card shows, plus every
+    /// preview field; a field that could not be shown in full sets `truncated` (and the Mac then refuses Allow).
+    func testRelayedPromptNeverDropsTheToolOrSummary() {
+        let req = MobileToolApproval.request(
+            from: approval(AgentV2ApprovalArgs(filePath: "/a", oldString: "o", newString: "n", contentPreview: nil,
+                                               totalChars: nil, command: nil, truncated: true,
+                                               replaceAll: nil, exists: nil), tool: "Edit", summary: "Edit a"),
+            commandId: "c")
+        XCTAssertEqual(req.toolName, "Edit")
+        XCTAssertEqual(req.summary, "Edit a")
+        XCTAssertEqual(req.oldString, "o")
+        XCTAssertEqual(req.newString, "n")
+        XCTAssertTrue(req.truncated)
+    }
+
     func testOversizedFieldsAreCappedAndFlaggedAndStayFast() {
         let huge = String(repeating: "x", count: 200_000)
         let started = Date()

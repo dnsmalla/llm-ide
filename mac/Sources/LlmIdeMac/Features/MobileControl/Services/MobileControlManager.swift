@@ -1487,6 +1487,10 @@ final class MobileControlManager {
         return nil
     }
 
+    /// The ONLY decisions a phone can send for a tool prompt: allow this one call, or deny. Never an
+    /// "always allow" project rule and never a mode change (Bypass): those stay desktop-only decisions.
+    nonisolated static func phoneToolDecisionAction(allow: Bool) -> String { allow ? "allow" : "deny" }
+
     private func handleToolApprovalAnswer(_ answer: ToolApprovalAnswer) async {
         let entry = pendingPhoneApprovals[answer.commandId]
         let pending = entry?.engine.parkedApproval
@@ -1509,7 +1513,7 @@ final class MobileControlManager {
         }
         truncatedToolRequestIds.remove(answer.requestId)
         append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.toolName ?? "tool")")
-        let submitError = await entry.engine.submitPhoneToolDecision(action: answer.allow ? "allow" : "deny")
+        let submitError = await entry.engine.submitPhoneToolDecision(action: Self.phoneToolDecisionAction(allow: answer.allow))
         pendingPhoneApprovals.removeValue(forKey: answer.commandId)
         await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
                                            reason: submitError))
