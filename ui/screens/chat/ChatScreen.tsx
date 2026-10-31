@@ -23,6 +23,7 @@ import type { ChatState } from "./state";
 import type { ChatStore, SessionSummary } from "./store";
 import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
+import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE, unreadableNotice } from "./tauri-store";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -61,6 +62,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [unreadable, setUnreadable] = useState<string | null>(null);
+  // Errors the user caused or can ignore are not alarms: a declined confirm is silent, bookkeeping is an info notice.
+  const reportStoreError = useCallback((e: unknown) => {
+    if (isDeclined(e)) return;
+    if (isPendingCorrupt(e)) { setNotice(PENDING_CORRUPT_NOTICE); return; }
+    setListError(describeError(e).message);
+  }, []);
+  const refreshHealth = useCallback(() => { const h = store.listHealth?.(); setUnreadable(h ? unreadableNotice(h) : null); }, [store]);
   const [activeId, setActiveId] = useState<string | null>(initialSessionId);
   const [prefs, setPrefs] = useState<Record<string, ChatPrefs>>({});
   const [permission, setPermission] = useState<PermissionMode>("ask");
@@ -77,10 +87,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useEffect(() => {
     const ac = new AbortController();
     store.listSessions({ limit: SESSION_PAGE, offset: 0 }, ac.signal)
-      .then((s) => { setSessions(s); setHasMoreSessions(s.length === SESSION_PAGE); })
+      .then((s) => { setSessions(s); setHasMoreSessions(s.length === SESSION_PAGE); refreshHealth(); })
       .catch((e) => { if (!ac.signal.aborted) setListError(describeError(e).message); });
     return () => ac.abort();
-  }, [store]);
+  }, [store, refreshHealth]);
 
   const loadMoreSessions = useCallback(() => {
     if (loadingMore.current) return;
@@ -125,8 +135,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       const s = await store.createSession({});
       setSessions((cur) => [s, ...cur]);
       setActiveId(s.id);
-    } catch (e) { setListError(describeError(e).message); }
-  }, [store]);
+    } catch (e) { reportStoreError(e); }
+  }, [store, reportStoreError]);
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
@@ -151,13 +161,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       <SessionList
         sessions={sessions} activeId={activeId} busyIds={busyIds} hasMore={hasMoreSessions} onLoadMore={loadMoreSessions}
         onSelect={setActiveId} onNew={() => void newChat()}
-        onRename={(id, title) => { setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s))); store.renameSession(id, title).catch((e) => setListError(describeError(e).message)); }}
+        onRename={(id, title) => { setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s))); store.renameSession(id, title).catch(reportStoreError); }}
         onDelete={(id) => {
           store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); })
-            .catch((e) => setListError(describeError(e).message));
+            .catch(reportStoreError);
         }}
+        unreadableNotice={unreadable}
       />
       <section className="chat-main" aria-label="Chat">
+        {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         <ModeBanner mode={permission} />
         {typeof banner === "function" ? banner(state) : banner}

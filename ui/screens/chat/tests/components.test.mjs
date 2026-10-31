@@ -204,3 +204,9 @@ test("windowBlocks: a message renders within the cap, cut at a line end, the res
   const big = c.windowBlocks(["y\n".repeat(2_000_000)], c.RENDER_CAP_CHARS);
   assert.ok(big.blocks[0].length <= c.RENDER_CAP_CHARS && big.hidden > 0);
 });
+
+test("SessionList: the unreadable footer row renders when the host reports unreadable chats", () => {
+  const out = html(h(c.SessionList, listProps(1, { unreadableNotice: "3 chats could not be read (not touched)" })));
+  assert.match(out, /3 chats could not be read \(not touched\)/);
+  assert.doesNotMatch(html(h(c.SessionList, listProps(1))), /could not be read/);
+});

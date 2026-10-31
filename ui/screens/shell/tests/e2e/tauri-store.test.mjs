@@ -85,3 +85,68 @@ test("timestamps convert between Apple reference seconds and epoch seconds", asy
   assert.equal(row.id, s.id);
   assert.ok(Math.abs(row.createdAt - 1_800_000_000) < 5, `createdAt ${row.createdAt}`);
 });
+
+async function chatWith(store, host, n) {
+  const s = await store.createSession({ title: "big" });
+  for (let i = 0; i < n; i++) await store.appendMessage(s.id, { role: i % 2 ? "assistant" : "user", content: `m${i}` });
+  return s;
+}
+
+test("a declined delete is a clean DECLINED cancel: chat stays, nothing is retried", async () => {
+  const { store, host } = await boundStore();
+  const s = await store.createSession({ title: "keep" });
+  host.knobs.declineDelete = true;
+  await assert.rejects(store.deleteSession(s.id), (e) => m.isDeclined(e) && e.message === "Cancelled");
+  assert.equal(host.calls.filter((c) => c.command === "chat_delete").length, 1);
+  assert.equal(host.files.has(s.id), true);
+  assert.equal((await store.listSessions({ limit: 5, offset: 0 })).length, 1);
+});
+
+test("a Replace that drops more than half of a chat over 4 messages confirms first and passes the token", async () => {
+  const { store, host } = await boundStore();
+  const s = await chatWith(store, host, 8);
+  await store.replaceMessages(s.id, [{ role: "user", content: "only" }]);
+  const cmds = host.calls.map((c) => c.command);
+  assert.ok(cmds.indexOf("chat_confirm_truncate") > -1 && cmds.indexOf("chat_confirm_truncate") < cmds.lastIndexOf("chat_save"));
+  const confirm = host.calls.find((c) => c.command === "chat_confirm_truncate");
+  assert.deepEqual(confirm.args.args, { id: s.id, newCount: 1 });
+  assert.match(host.calls.at(-1).args.args.allowTruncate, /^tok/);
+  assert.equal(host.files.get(s.id).doc.messages.length, 1);
+});
+
+test("a declined truncate confirm saves nothing and is not retried; small shrinks skip the dialog", async () => {
+  const { store, host } = await boundStore();
+  const s = await chatWith(store, host, 8);
+  host.knobs.declineTruncate = true;
+  await assert.rejects(store.replaceMessages(s.id, []), (e) => m.isDeclined(e));
+  assert.equal(host.files.get(s.id).doc.messages.length, 8);
+  assert.equal(host.calls.filter((c) => c.command === "chat_confirm_truncate").length, 1);
+  assert.equal(m.needsTruncateConfirm(8, 4), false);
+  assert.equal(m.needsTruncateConfirm(8, 3), true);
+  assert.equal(m.needsTruncateConfirm(4, 0), false);
+  const before = host.calls.filter((c) => c.command === "chat_confirm_truncate").length;
+  await store.replaceMessages(s.id, host.files.get(s.id).doc.messages.slice(0, 5));
+  assert.equal(host.calls.filter((c) => c.command === "chat_confirm_truncate").length, before);
+});
+
+test("pending_corrupt on save or delete shows the non-alarming bookkeeping notice, never raw host text", async () => {
+  const { store, host } = await boundStore();
+  const s = await store.createSession({ title: "x" });
+  host.knobs.pendingCorrupt = true;
+  await assert.rejects(store.deleteSession(s.id), (e) => m.isPendingCorrupt(e) && e.message === m.PENDING_CORRUPT_NOTICE);
+  await assert.rejects(store.appendMessage(s.id, { role: "user", content: "a" }), (e) => m.isPendingCorrupt(e) && !/raw host/.test(e.message));
+  assert.match(m.PENDING_CORRUPT_NOTICE, /core\.log \/ Settings > Diagnostics/);
+});
+
+test("unreadable and unsupported files are counted and worded, never hidden", async () => {
+  const { store, host } = await boundStore();
+  await store.createSession({});
+  assert.equal(m.unreadableNotice(store.listHealth()), null);
+  host.knobs.unreadable = 2;
+  host.knobs.unsupported = 1;
+  await store.listSessions({ limit: 5, offset: 0 });
+  assert.deepEqual(store.listHealth(), { unreadable: 2, unsupported: 1 });
+  const text = m.unreadableNotice(store.listHealth());
+  assert.match(text, /2 chats could not be read \(not touched\)/);
+  assert.match(text, /1 chat uses a format this version does not read/);
+});

@@ -13,6 +13,8 @@ export interface SessionListProps {
   /** More sessions exist on the core than are loaded. */
   hasMore: boolean;
   onLoadMore: () => void;
+  /** Footer row text for chats the host could not list (never hidden silently). */
+  unreadableNotice?: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
   onRename: (id: string, title: string) => void;
@@ -98,6 +100,7 @@ export function SessionList(props: SessionListProps) {
           })}
         </div>
       </div>
+      {props.unreadableNotice && <p className="chat-muted chat-pad chat-sessions-footer" role="status">{props.unreadableNotice}</p>}
     </nav>
   );
 }

@@ -30,7 +30,17 @@ export interface MessagePage {
   hasMore: boolean;
 }
 
+/** Files a listing could not show. Never hidden: the list renders a footer from this. */
+export interface ListHealth {
+  /** Chat files that do not parse (left untouched). */
+  unreadable: number;
+  /** Chat files in a shape or size this build does not read (left untouched). */
+  unsupported: number;
+}
+
 export interface ChatStore {
+  /** Counts from the most recent listSessions (stores that can know them). */
+  listHealth?(): ListHealth;
   listSessions(opts: { limit: number; offset: number }, signal?: AbortSignal): Promise<SessionSummary[]>;
   createSession(opts: { title?: string; projectId?: string | null; mode?: string }, signal?: AbortSignal): Promise<SessionSummary>;
   renameSession(id: string, title: string, signal?: AbortSignal): Promise<void>;

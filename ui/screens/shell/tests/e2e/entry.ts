@@ -6,7 +6,7 @@ export { createSettingsEnv, settingsClientFrom } from "../../settings-adapter.ts
 export { coreTransportFrom } from "../../../chat/adapter.ts";
 export { ChatController } from "../../../chat/controller.ts";
 export { HttpChatStore, MemoryChatStore } from "../../../chat/store.ts";
-export { TauriChatStore, APPLE_EPOCH_OFFSET } from "../../../chat/tauri-store.ts";
+export { TauriChatStore, APPLE_EPOCH_OFFSET, isDeclined, isPendingCorrupt, needsTruncateConfirm, unreadableNotice, PENDING_CORRUPT_NOTICE } from "../../../chat/tauri-store.ts";
 export { fileArgOf } from "../../../chat/MessageView.tsx";
 export { ProvidersApi, ProvidersModel } from "../../../settings/providers-model.ts";
 export { makeSearchRun } from "../../../library/search.ts";

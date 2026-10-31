@@ -9,7 +9,7 @@
 // Mapping: a stored message's `seq` is its 1-based index in the file; ids are upper-case UUIDs; the file's
 // timestamps are Apple reference-date seconds (we convert to epoch seconds, as SessionSummary uses).
 import { CoreHttpError } from "./transport";
-import type { ChatStore, MessagePage, SessionSummary, StoredMessage } from "./store";
+import type { ChatStore, ListHealth, MessagePage, SessionSummary, StoredMessage } from "./store";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -57,8 +57,35 @@ export function toStoreError(e: unknown): CoreHttpError {
   const code = e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "io";
   const status = code === "not_found" || code === "deleted" ? 404 : code === "conflict" ? 409 : code === "invalid" ? 400 : code === "too_large" ? 413 : code === "not_bound" || code === "core_unavailable" ? 503 : 500;
   // The host's message never contains chat content, but the UI maps by code anyway.
-  const message = e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : code;
+  let message = e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : code;
+  if (code === "pending_corrupt") message = PENDING_CORRUPT_NOTICE;
+  if (code === "declined") message = "Cancelled";
   return new CoreHttpError(status, code.toUpperCase(), message);
+}
+
+/** Shown (as a notice, not an alarm) when the host's delete bookkeeping file needs a person to look at it. */
+export const PENDING_CORRUPT_NOTICE = "Delete bookkeeping needs attention: see core.log / Settings > Diagnostics";
+
+/** The user said no in a native confirm: a clean cancel, not an error. Never retried automatically. */
+export function isDeclined(e: unknown): boolean {
+  return e instanceof CoreHttpError && e.code === "DECLINED";
+}
+
+/** Notice kind for a store error the UI shows as information rather than a failure. */
+export function isPendingCorrupt(e: unknown): boolean {
+  return e instanceof CoreHttpError && e.code === "PENDING_CORRUPT";
+}
+
+/** The host refuses a Replace that drops more than half of a chat of more than 4 messages without a confirm token. */
+export function needsTruncateConfirm(oldCount: number, newCount: number): boolean {
+  return oldCount > 4 && newCount * 2 < oldCount;
+}
+
+export function unreadableNotice(h: ListHealth): string | null {
+  const parts: string[] = [];
+  if (h.unreadable > 0) parts.push(`${h.unreadable} ${h.unreadable === 1 ? "chat" : "chats"} could not be read (not touched)`);
+  if (h.unsupported > 0) parts.push(`${h.unsupported} ${h.unsupported === 1 ? "chat uses" : "chats use"} a format this version does not read (not touched)`);
+  return parts.length ? parts.join(". ") : null;
 }
 
 function newChatId(): string {
@@ -98,6 +125,7 @@ export class TauriChatStore implements ChatStore {
   private readonly tracked = new Map<string, Tracked>();
   private readonly tails = new Map<string, Promise<unknown>>();
   private readonly now: () => number;
+  private health: ListHealth = { unreadable: 0, unsupported: 0 };
   constructor(private readonly o: TauriChatStoreOptions) {
     this.now = o.now ?? Date.now;
   }
@@ -123,10 +151,16 @@ export class TauriChatStore implements ChatStore {
     return run;
   }
 
+  listHealth(): ListHealth {
+    return { ...this.health };
+  }
+
   async listSessions(opts: { limit: number; offset: number }, signal?: AbortSignal): Promise<SessionSummary[]> {
     if (signal?.aborted) return [];
-    const page = await this.call<{ items?: HostSummary[] }>("chat_list", { args: { offset: Math.max(0, opts.offset), limit: Math.max(1, opts.limit) } });
+    const page = await this.call<{ items?: HostSummary[]; unreadable?: number; unsupported?: number }>("chat_list", { args: { offset: Math.max(0, opts.offset), limit: Math.max(1, opts.limit) } });
     if (!Array.isArray(page?.items)) throw new CoreHttpError(502, "BAD_RESPONSE", "Unexpected chat list");
+    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+    this.health = { unreadable: n(page.unreadable), unsupported: n(page.unsupported) };
     return page.items.map((s) => ({
       id: s.id,
       title: s.title,
@@ -168,6 +202,23 @@ export class TauriChatStore implements ChatStore {
     await this.serial(id, async () => {
       await this.call("chat_delete", { args: { id } });
       this.tracked.delete(id);
+    });
+  }
+
+  /**
+   * Replace the stored messages. A shrink of more than half of a chat of more than 4 messages asks the host for a
+   * native confirm first and passes its one-time token. A declined confirm rejects with DECLINED (a clean cancel);
+   * neither a decline nor a host refusal is retried here.
+   */
+  async replaceMessages(id: string, messages: Record<string, unknown>[]): Promise<void> {
+    await this.serial(id, async () => {
+      const t = this.tracked.get(id) ?? (await this.refresh(id));
+      const args: Record<string, unknown> = { session: { id, scope: t.scope, title: t.title, messages }, mode: "replace", expectedRevision: t.revision };
+      if (needsTruncateConfirm(t.count, messages.length)) {
+        args.allowTruncate = await this.call<string>("chat_confirm_truncate", { args: { id, newCount: messages.length } });
+      }
+      const out = await this.call<HostSaved>("chat_save", { args });
+      this.tracked.set(id, { ...t, count: out.messageCount, revision: out.revision });
     });
   }
 

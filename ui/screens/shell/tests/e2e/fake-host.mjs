@@ -2,8 +2,10 @@
 // enforces the same rules the UI relies on: bound session required, compare-and-swap on a revision, append with
 // the expected count, scope/title validation, paging by index. The real commands are covered by the Rust tests.
 export function createFakeChatHost({ token = null } = {}) {
+  const knobs = { declineDelete: false, declineTruncate: false, pendingCorrupt: false, unreadable: 0, unsupported: 0 };
   const calls = [];
   const files = new Map(); // id -> { doc, rev }
+  const tokens = new Set();
   let bound = null;
   let rev = 0;
   const fail = (code, message = code) => Object.assign(new Error(message), { code, message });
@@ -24,7 +26,7 @@ export function createFakeChatHost({ token = null } = {}) {
         const items = all.slice(a.offset ?? 0, (a.offset ?? 0) + (a.limit ?? 50)).map((d) => ({
           id: d.id, title: d.title, scope: d.scope, projectId: d.projectId ?? null, createdAt: d.createdAt, lastUsedAt: d.lastUsedAt, messageCount: d.messages.length,
         }));
-        return { items, total: all.length, hasMore: (a.offset ?? 0) + items.length < all.length };
+        return { items, total: all.length, hasMore: (a.offset ?? 0) + items.length < all.length, quarantined: 0, unsupported: knobs.unsupported, unreadable: knobs.unreadable };
       }
       case "chat_load": {
         need();
@@ -36,7 +38,8 @@ export function createFakeChatHost({ token = null } = {}) {
       }
       case "chat_save": {
         need();
-        const { session, mode, expectedCount, expectedRevision } = args.args;
+        const { session, mode, expectedCount, expectedRevision, allowTruncate } = args.args;
+        if (knobs.pendingCorrupt) throw fail("pending_corrupt", "raw host text");
         if (!SCOPES.includes(session.scope)) throw fail("invalid", "scope");
         if (typeof session.title !== "string") throw fail("invalid", "title");
         const old = files.get(session.id);
@@ -50,14 +53,26 @@ export function createFakeChatHost({ token = null } = {}) {
           doc = { ...old.doc };
           for (const k of ["title", "scope"]) if (k in session) doc[k] = session[k];
           doc.messages = [...old.doc.messages, ...session.messages];
-        } else doc = { ...session };
+        } else {
+          if (old && old.doc.messages.length > 4 && session.messages.length * 2 < old.doc.messages.length) {
+            if (!allowTruncate || !tokens.delete(`${session.id}:${allowTruncate}`)) throw fail("truncation_needs_confirm");
+          }
+          doc = { ...session };
+        }
         doc.lastUsedAt = (doc.lastUsedAt ?? 0) + 1;
         files.set(session.id, { doc, rev: ++rev });
         return { revision: String(rev), messageCount: doc.messages.length, lastUsedAt: doc.lastUsedAt };
       }
-      case "chat_delete": { need(); const existed = files.delete(args.args.id); return { existed, tombstone: "done" }; }
+      case "chat_confirm_truncate": {
+        need();
+        if (knobs.declineTruncate) throw fail("declined");
+        const tok = `tok${++rev}`;
+        tokens.add(`${args.args.id}:${tok}`);
+        return tok;
+      }
+      case "chat_delete": { need(); if (knobs.pendingCorrupt) throw fail("pending_corrupt"); if (knobs.declineDelete) throw fail("declined"); const existed = files.delete(args.args.id); return { existed, tombstone: "done" }; }
       default: throw fail("unknown_command", command);
     }
   };
-  return { invoke, calls, files, isBound: () => bound !== null, bumpExternally(id) { const f = files.get(id); if (f) f.rev = ++rev; } };
+  return { invoke, calls, files, knobs, isBound: () => bound !== null, bumpExternally(id) { const f = files.get(id); if (f) f.rev = ++rev; } };
 }
