@@ -952,8 +952,14 @@ pub fn rename(root: &Path, req: &RenameReq) -> R<String> {
 
 /// Moves the entry to the OS trash. Never deletes permanently, never follows a final symlink.
 pub fn delete(root: &Path, rel: &str) -> R<()> {
+    delete_with(root, rel, &crate::trash_guard::OsTrash)
+}
+
+/// `delete` through an injectable trash. There is no permanent-delete fallback: a refusing trash leaves the
+/// entry untouched and the error is `trash_unavailable`.
+pub fn delete_with(root: &Path, rel: &str, trasher: &dyn crate::trash_guard::Trasher) -> R<()> {
     let target = resolve_entry(root, rel)?;
-    trash::delete(&target).map_err(|e| FsError { code: "trash_unavailable", message: format!("cannot move to trash: {e}") })
+    trasher.trash(&target).map_err(|e| FsError { code: e.code, message: e.message })
 }
 
 // ---- Tauri commands ---------------------------------------------------------------------
@@ -1268,6 +1274,37 @@ mod tests {
         assert_eq!(code(write_file(&root, &WriteReq { force: true, ..wr("alias", "x", None) })), "protected_path");
         assert_eq!(code(write_file(&root, &wr("d/hooks-new", "x", None))), "protected_path");
         assert_eq!(fs::read_to_string(root.join(".git/config")).unwrap(), "[core]\n");
+    }
+
+    #[test]
+    fn delete_never_falls_back_to_a_permanent_delete() {
+        use crate::trash_guard::tests::FakeTrash;
+        let root = scratch("del-fake");
+        fs::write(root.join("keep.txt"), "precious").unwrap();
+        fs::create_dir(root.join("dir")).unwrap();
+        fs::write(root.join("dir/inner.txt"), "inner").unwrap();
+        // A trash that cannot take the item: error, and the item is exactly where it was.
+        let refusing = FakeTrash::refusing();
+        assert_eq!(code(delete_with(&root, "keep.txt", &refusing)), "trash_unavailable");
+        assert_eq!(code(delete_with(&root, "dir", &refusing)), "trash_unavailable");
+        assert_eq!(fs::read_to_string(root.join("keep.txt")).unwrap(), "precious");
+        assert_eq!(fs::read_to_string(root.join("dir/inner.txt")).unwrap(), "inner");
+        assert_eq!(refusing.seen.borrow().len(), 2, "the trash was the only thing asked");
+        // A working trash receives the item (moved, content intact), nothing is removed otherwise.
+        let bin = scratch("del-bin");
+        let ok = FakeTrash::into(&bin);
+        delete_with(&root, "keep.txt", &ok).unwrap();
+        assert!(!root.join("keep.txt").exists());
+        assert_eq!(fs::read_to_string(bin.join("1-keep.txt")).unwrap(), "precious");
+        // A symlink is trashed itself, never its target.
+        #[cfg(unix)]
+        {
+            let outside = scratch("del-outside");
+            fs::write(outside.join("target.txt"), "t").unwrap();
+            std::os::unix::fs::symlink(outside.join("target.txt"), root.join("lnk")).unwrap();
+            delete_with(&root, "lnk", &ok).unwrap();
+            assert_eq!(fs::read_to_string(outside.join("target.txt")).unwrap(), "t");
+        }
     }
 
     #[test]

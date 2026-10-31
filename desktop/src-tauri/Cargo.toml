@@ -53,7 +53,7 @@ keyring = { version = "=3.6.3", default-features = false, features = ["apple-nat
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 # Job Object (KILL_ON_JOB_CLOSE) so quitting or crashing the host kills the whole core tree; see proc_tree.rs.
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }

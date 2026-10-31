@@ -103,18 +103,7 @@ pub struct DeleteOutcome {
 
 // ---- trash seam ------------------------------------------------------------------------------
 
-pub trait Trasher {
-    fn trash(&self, path: &Path) -> Result<(), String>;
-}
-
-/// The real OS trash. Never a permanent delete.
-pub struct OsTrash;
-
-impl Trasher for OsTrash {
-    fn trash(&self, path: &Path) -> Result<(), String> {
-        trash::delete(path).map_err(|e| err("trash_unavailable", format!("cannot move to trash: {e}")))
-    }
-}
+pub use crate::trash_guard::{OsTrash, Trasher};
 
 // ---- validation ------------------------------------------------------------------------------
 
@@ -313,7 +302,7 @@ pub fn delete_note(root: &Path, rel: &str, trasher: &dyn Trasher) -> Result<(), 
     if !m.is_file() && !m.file_type().is_symlink() {
         return Err(err("not_regular", "only note files can be deleted here"));
     }
-    trasher.trash(&target)
+    trasher.trash(&target).map_err(|e| err(e.code, e.message))
 }
 
 /// Moves up to `BULK_MAX` notes to the trash; one failure does not stop the rest.
@@ -397,13 +386,13 @@ mod tests {
         }
     }
     impl Trasher for FakeTrash {
-        fn trash(&self, p: &Path) -> Result<(), String> {
+        fn trash(&self, p: &Path) -> Result<(), crate::trash_guard::TrashError> {
             self.calls.borrow_mut().push(p.to_path_buf());
             if self.fail {
-                return Err(err("trash_unavailable", "no trash here"));
+                return Err(crate::trash_guard::unavailable("no trash here"));
             }
             let n = self.calls.borrow().len();
-            fs::rename(p, self.dir.join(format!("{n}-{}", p.file_name().unwrap().to_string_lossy()))).map_err(|e| err("io", e))
+            fs::rename(p, self.dir.join(format!("{n}-{}", p.file_name().unwrap().to_string_lossy()))).map_err(|e| crate::trash_guard::unavailable(e.to_string()))
         }
     }
 

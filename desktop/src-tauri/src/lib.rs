@@ -28,6 +28,7 @@ mod secrets;
 mod source_pick;
 #[cfg(feature = "spike")]
 mod sse_replay;
+mod trash_guard;
 mod tray;
 
 use std::sync::OnceLock;
