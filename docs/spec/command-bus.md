@@ -22,6 +22,8 @@ Not covered: the Swift transport host (S2), the iOS renderer (S4), the extension
 | `extension/kb/bus-store.mjs`, migration `0058_command_bus.sql` | persistence: `bus_commands`, `job_events`, `bus_kind_flags` |
 | `extension/kb/job-queue.mjs`, `job-runner.mjs` | the existing job runner ([job-runner](job-runner.md)), now started by the bus |
 
+The schema validator looks every key up as an OWN property (`Object.hasOwn`): a body key named `constructor`, `toString`, `valueOf`, `hasOwnProperty` or `__proto__` is an additional property and is refused `INVALID_ARGS` for the envelope and for every `kinds.<kind>.args` (`extension/tests/bus-schema-proto.test.mjs`).
+
 `extension/routes/bus/registry.json` and `command.schema.json` are byte-identical copies (the extension must not read `schema/` at run time); the gate fails when they differ.
 
 ## 2. Envelopes
