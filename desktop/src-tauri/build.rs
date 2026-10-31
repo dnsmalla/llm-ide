@@ -79,6 +79,7 @@ const COMMANDS: &[&str] = &[
     "note_create",
     "note_rename",
     "notes_delete_many",
+    "source_pick_folder",
     "open_external_url",
     "reveal_in_os",
     "attach_pick_files",

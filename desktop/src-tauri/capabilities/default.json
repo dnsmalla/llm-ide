@@ -63,6 +63,7 @@
     "allow-note-create",
     "allow-note-rename",
     "allow-notes-delete-many",
+    "allow-source-pick-folder",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",

@@ -21,6 +21,7 @@ mod project;
 mod project_search;
 mod pty;
 mod secrets;
+mod source_pick;
 mod sse_replay;
 mod tray;
 
@@ -360,6 +361,7 @@ pub fn run() {
             notes_write::note_create,
             notes_write::note_rename,
             notes_write::notes_delete_many,
+            source_pick::source_pick_folder,
             os_open::open_external_url,
             os_open::reveal_in_os,
             attach::attach_pick_files,
