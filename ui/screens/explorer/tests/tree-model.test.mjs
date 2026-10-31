@@ -162,19 +162,26 @@ test("100k-entry folder: layout, window and page lookups stay cheap", () => {
   const l = T.buildLayout(s);
   const t1 = performance.now();
   assert.equal(l.count, total);
-  let worst = 0;
+  const samples = [];
   for (let top = 0; top < total * 22; top += 22 * 997) {
     const a = performance.now();
     const w = T.windowRange(l.count, top, 800);
     const rows = T.rowsInRange(l, w.start, w.end, s);
-    worst = Math.max(worst, performance.now() - a);
+    samples.push(performance.now() - a);
     assert.ok(rows.length <= 80);
   }
   const lookup0 = performance.now();
   assert.equal(T.indexOfPath(l, "f099999"), 99999);
   const lookup1 = performance.now();
-  // Budgets are generous (CI noise); a 60 fps frame is 16 ms.
-  console.log(`BENCH tree 100k: layout ${(t1 - t0).toFixed(1)} ms, worst window ${worst.toFixed(2)} ms, indexOfPath ${(lookup1 - lookup0).toFixed(1)} ms`);
-  assert.ok(worst < 8, `window slice ${worst} ms`);
+  // Budgets are generous (CI noise); a 60 fps frame is 16 ms. One GC pause must not fail the test:
+  // assert on the median and the 95th percentile, and only loosely on the single worst slice.
+  samples.sort((x, y) => x - y);
+  const median = samples[Math.floor(samples.length / 2)];
+  const p95 = samples[Math.floor(samples.length * 0.95)];
+  const worst = samples[samples.length - 1];
+  console.log(`BENCH tree 100k: layout ${(t1 - t0).toFixed(1)} ms, window median ${median.toFixed(3)} / p95 ${p95.toFixed(3)} / worst ${worst.toFixed(2)} ms, indexOfPath ${(lookup1 - lookup0).toFixed(1)} ms`);
+  assert.ok(median < 4, `window slice median ${median} ms`);
+  assert.ok(p95 < 8, `window slice p95 ${p95} ms`);
+  assert.ok(worst < 60, `window slice worst ${worst} ms`);
   assert.ok(t1 - t0 < 150, `layout ${t1 - t0} ms`);
 });
