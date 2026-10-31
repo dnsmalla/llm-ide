@@ -18,6 +18,8 @@ export interface ExplorerDeps {
   fs?: FsApi;
   kv?: KV | null;
   loadEditor?: () => Promise<EditorHost>;
+  /** Hands the controller to the section entry (cross-screen "open file" requests); called with null on unmount. */
+  onController?: (c: ExplorerController | null) => void;
 }
 
 type Dialog =
@@ -54,6 +56,12 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [width, setWidth] = useState(280);
+
+  useEffect(() => {
+    deps?.onController?.(controller);
+    return () => deps?.onController?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller]);
 
   useEffect(() => {
     void controller.init(projectRoot).then(() => {
