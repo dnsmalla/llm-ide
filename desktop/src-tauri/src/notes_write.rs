@@ -232,6 +232,38 @@ pub fn save_note(root: &Path, req: &SaveReq) -> Result<SavedNote, String> {
     Ok(saved(root, &req.rel, r))
 }
 
+/// Creates the folder `dir` through a descriptor of its PARENT that is verified to be inside `root`: a parent
+/// swapped for a link between the check and the create cannot redirect the new folder (`mkdirat`). Where
+/// descriptors are not available it is a plain `create_dir`.
+#[cfg(unix)]
+fn mkdir_pinned(root: &Path, dir: &Path) -> std::io::Result<()> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    };
+    let pf = std::fs::File::open(parent)?;
+    match crate::graph_file::fd_path(&pf) {
+        Some(real) if real.starts_with(root) => {}
+        Some(_) => return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "parent is outside the notes folder")),
+        None if cfg!(any(target_os = "macos", target_os = "linux")) => return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cannot verify the parent folder")),
+        None => {}
+    }
+    let c = CString::new(name.as_bytes()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: `pf` is an open directory descriptor and `c` a valid NUL-terminated name.
+    if unsafe { libc::mkdirat(pf.as_raw_fd(), c.as_ptr(), 0o777) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn mkdir_pinned(_root: &Path, dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(dir)
+}
+
 /// Creates the missing folders of `segs[..n-1]` one level at a time, each verified inside `root`.
 fn ensure_parents(root: &Path, dirs: &[&str]) -> Result<(), String> {
     let mut cur = root.to_path_buf();
@@ -248,7 +280,7 @@ fn ensure_parents(root: &Path, dirs: &[&str]) -> Result<(), String> {
             }
             Ok(_) => return Err(err("invalid_path", format!("{d} is a file, not a folder"))),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir(&cur).map_err(|e| err("io", format!("cannot create folder: {e}")))?;
+                mkdir_pinned(root, &cur).map_err(|e| err("io", format!("cannot create folder: {e}")))?;
             }
             Err(e) => return Err(err("io", e)),
         }
