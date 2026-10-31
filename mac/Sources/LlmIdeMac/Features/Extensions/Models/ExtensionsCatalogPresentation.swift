@@ -120,6 +120,18 @@ enum ExtensionsCatalogPresentation {
             return "This item can run code. Consent to each kind first."
         case "UPSTREAM":
             return "GitHub could not be reached or answered with an error. Try again later."
+        case "COMMIT_NOT_IN_REPO":
+            return "That commit is not on the repository's default branch or the named ref, so it was refused."
+        case "VERIFY_UNAVAILABLE":
+            return "GitHub could not confirm that commit right now. Nothing changed. Try again in a minute."
+        case "UPDATE_CHANGED":
+            return "That update changed while you were reviewing it. Review it again."
+        case "INVALID_REF":
+            return "That branch or tag name is not valid."
+        case "INVALID_COMMIT":
+            return "That commit id is not valid."
+        case "STATE_UNREADABLE":
+            return "The installed record could not be read, so nothing was changed."
         case "TOO_LARGE":
             return "That repository is larger than the install limits allow."
         default:
