@@ -18,11 +18,11 @@ const mkEnv = () => {
 };
 const count = (s, re) => (s.match(re) ?? []).length;
 
-test("connection entries: five panes with stable ids, and the nav shows them under Connections", async () => {
+test("connection entries: six panes with stable ids, and the nav shows them under Connections", async () => {
   const env = mkEnv();
   const list = L.sourceConnections(env);
-  assert.deepEqual(list.map((x) => x.label), ["Email", "Slack", "Box", "Repositories", "Connectors"]);
-  assert.equal(new Set(list.map((x) => x.id)).size, 5);
+  assert.deepEqual(list.map((x) => x.label), ["Email", "Google", "Slack", "Box", "Repositories", "Connectors"]);
+  assert.equal(new Set(list.map((x) => x.id)).size, 6);
   assert.ok(list.every((x) => typeof x.render === "function"));
   const host = new L.FakeHost();
   host.add("source/meetings/2026/10/a.md", L.meetingText(1));
@@ -31,7 +31,7 @@ test("connection entries: five panes with stable ids, and the nav shows them und
   await L.settle(store);
   const out = html(h(L.LibraryScreen, { store, host, connections: list }));
   assert.match(out, /<h3 class="lib-nav-group">[\s\S]*?Connections<\/h3>/);
-  for (const label of ["Email", "Slack", "Box", "Repositories", "Connectors"]) assert.match(out, new RegExp(`<span class="lib-nav-label">${label}</span>`));
+  for (const label of ["Email", "Google", "Slack", "Box", "Repositories", "Connectors"]) assert.match(out, new RegExp(`<span class="lib-nav-label">${label}</span>`));
   const none = html(h(L.LibraryScreen, { store, host }));
   assert.ok(!none.includes("Connections</h3>"));
 });
@@ -45,7 +45,9 @@ test("email pane: labelled region and fields, secret input is write-only, both a
   assert.match(out, /Your normal account password does not work/);
   assert.match(out, /forward-only/);
   assert.match(out, /saved as note files in your notes folder/);
-  assert.match(out, /<legend>Sign in with<\/legend>/);
+  assert.ok(!out.includes("Sign in with Google"), "the legacy full-mailbox Google sign-in is gone from the Email pane");
+  assert.ok(!out.includes("<legend>Sign in with</legend>"));
+  assert.match(out, /Google connection in this list is the safer route/);
   assert.match(out, /Not set up/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Fetch new mail<\/button>/, "cannot fetch before settings are saved");
   assert.match(out, /<button[^>]*disabled=""[^>]*>Save<\/button>/, "cannot save an empty secret");
@@ -53,16 +55,14 @@ test("email pane: labelled region and fields, secret input is write-only, both a
   assert.match(out, /imap\.gmail\.com/);
 });
 
-test("email pane (google): sign-in route text, bring-your-own-client disclosure, secret field is a password input", () => {
+test("email pane: settings saved with the old Google sign-in are shown as app-password settings with a plain warning; no Google OAuth control", () => {
   const stored = { getItem: () => JSON.stringify({ email: { host: "imap.gmail.com", port: 993, secure: true, user: "me@example.com", mailbox: "INBOX", authMethod: "google", lookbackDays: 7 } }), setItem() {} };
   const out = html(h(L.EmailPane, { env: { ...mkEnv(), storage: stored } }));
-  assert.match(out, /testing mode/);
-  assert.match(out, /<summary>Use my own Google client<\/summary>/);
-  assert.match(out, /Client secret \(sent once to the core&#x27;s vault, never shown again\)[\s\S]*?<input type="password" autoComplete="off" spellCheck="false"/);
-  assert.match(out, />Sign in with Google<\/button>/);
-  assert.match(out, /Disconnect…/);
-  assert.match(out, /<button[^>]*>Fetch new mail<\/button>/);
-  assert.ok(!/<button[^>]*disabled=""[^>]*>Fetch new mail/.test(out), "saved and valid settings can fetch");
+  assert.match(out, /old Google sign-in, which is no longer offered here/);
+  assert.ok(!out.includes("Use my own Google client"));
+  assert.ok(!out.includes(">Sign in with Google<"));
+  assert.match(out, /<input id="secret-email\.imapPassword" type="password"/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Fetch new mail<\/button>/, "must save again before fetching");
 });
 
 test("slack, box, repos, connectors panes: regions, honest patterns, disabled-until-valid actions", () => {

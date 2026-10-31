@@ -49,6 +49,12 @@ async function openExternal(url: string): Promise<void> {
   await invokeHost("open_external_url", { url });
 }
 
+/** Opens a Google sign-in page through the host opener. Resolves false when the user declines its first-use prompt. */
+async function openAuth(url: string): Promise<boolean> {
+  if (!shellHost.isAvailable()) return false;
+  return (await invokeHost<boolean>("open_external_url", { url })) === true;
+}
+
 export default function Library({ active }: SectionProps) {
   const { store, host, writeHost } = useMemo(app, []);
   const runRebuild = useCallback(
@@ -67,6 +73,8 @@ export default function Library({ active }: SectionProps) {
             core: sourcesCoreFrom(shellCore),
             write: withCreatedHook(writeHost, (saved, text) => store.noteWritten(saved, text)),
             openExternal,
+            openAuth,
+            hasNotesRoot: async () => (await host.rootGet()) !== null,
             pickFolder: async () => {
               const r = await invokeHost<{ path: string; name: string } | null>("source_pick_folder");
               return r && typeof r.path === "string" ? { path: r.path, name: typeof r.name === "string" ? r.name : "" } : null;

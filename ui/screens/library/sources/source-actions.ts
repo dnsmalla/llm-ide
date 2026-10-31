@@ -1,8 +1,8 @@
 // One-shot actions of the source panes (test a connection, sign in, index, list/add/remove). Each is a thin,
 // typed wrapper over a core route that decodes the answer defensively and throws `SourceError` on any failure.
 // Credentials are never arguments here except the two documented write-once cases (Box/Slack/Email secrets go
-// through `saveSecret`; the Google bring-your-own client secret goes in the body of `/auth/google/start`, which
-// stores it in the vault server-side).
+// through `saveSecret`; the Google connection's bring-your-own client secret goes in the body of `POST /kb/google/start`, see
+// sources/google/google-core.ts; the legacy `/auth/google/start` is no longer called from this UI).
 
 import { callOk, SourceError, type SourcesCore } from "./source-core.ts";
 import type { BoxConfig, EmailConfig, GithubIssuesConfig } from "./source-config.ts";
@@ -69,10 +69,6 @@ export function decodeOAuthStart(b: unknown): OAuthStart {
   return { authUrl: r.authUrl, state: r.state };
 }
 
-export async function googleStart(core: SourcesCore, own: { clientId: string; clientSecret: string } | null, signal: AbortSignal): Promise<OAuthStart> {
-  return decodeOAuthStart(await callOk<unknown>(core, "POST", "/auth/google/start", own ?? {}, signal, SHORT));
-}
-
 export interface OAuthStatus {
   status: "pending" | "complete" | "error" | "unknown";
   /** Account label from the provider (email or team name): shown as text. */
@@ -84,10 +80,6 @@ export function decodeOAuthStatus(b: unknown): OAuthStatus {
   const s = r.status;
   const status = s === "pending" || s === "complete" || s === "error" ? s : "unknown";
   return { status, account: str(r.email) || str(r.teamName) || null };
-}
-
-export async function googleStatus(core: SourcesCore, state: string, signal: AbortSignal): Promise<OAuthStatus> {
-  return decodeOAuthStatus(await callOk<unknown>(core, "GET", `/auth/google/status?state=${encodeURIComponent(state)}`, undefined, signal, SHORT));
 }
 
 // ---- slack -----------------------------------------------------------------------------------

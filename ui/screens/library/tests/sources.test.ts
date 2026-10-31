@@ -298,7 +298,7 @@ test("mcp connector: tolerant shaping, notes under source/<id>, ids marked seen,
   assert.equal(IDLE_FETCH.phase, "idle");
 });
 
-import { addRepo, decodeOAuthStart, decodeOAuthStatus, googleStart, indexBox, indexGithubIssues, indexRepo, listCatalog, listRepos, mcpStart, mcpStatus, mcpTest, pollUntil, removeRepo, selectConnector, slackConversations, slackStart, testBox, testEmail, testSlack } from "../sources/source-actions.ts";
+import { addRepo, decodeOAuthStart, decodeOAuthStatus, indexBox, indexGithubIssues, indexRepo, listCatalog, listRepos, mcpStart, mcpStatus, mcpTest, pollUntil, removeRepo, selectConnector, slackConversations, slackStart, testBox, testEmail, testSlack } from "../sources/source-actions.ts";
 
 test("polling: returns the first non-null, times out, cancels, and never busy-loops", async () => {
   let t = 0;
@@ -322,7 +322,6 @@ test("actions: shapes sent to the core, defensive decoding, secrets only where d
   core.on("POST /kb/email/test", ok({ ok: true, mailbox: "INBOX", total: 10, recent: 2 }));
   core.on("POST /kb/slack/test", ok({ ok: true, team: "Acme", user: "bot" }));
   core.on("POST /auth/slack/start", ok({ authUrl: "https://slack.com/oauth", state: "s1" }));
-  core.on("POST /auth/google/start", ok({ authUrl: "https://accounts.google.com/x", state: "g1" }));
   core.on("GET /kb/slack/conversations", ok({ channels: [{ id: "C0123ABCD", name: "general" }, { name: "no id" }, 7], complete: false }));
   core.on("POST /kb/box/test", ok({ ok: true, folderName: "Specs", itemCount: 12 }));
   core.on("POST /kb/connect-box", ok({ ok: true, indexed: 40, files: 9, skipped: 1, truncated: true }));
@@ -345,9 +344,6 @@ test("actions: shapes sent to the core, defensive decoding, secrets only where d
   assert.deepEqual(await testSlack(core, null, never), { team: "Acme", user: "bot" });
   assert.deepEqual(core.to("/kb/slack/test")[0]!.body, {});
   assert.equal((await slackStart(core, never)).state, "s1");
-  assert.equal((await googleStart(core, null, never)).state, "g1");
-  await googleStart(core, { clientId: "id", clientSecret: "sec" }, never);
-  assert.deepEqual(core.to("/auth/google/start")[1]!.body, { clientId: "id", clientSecret: "sec" });
   assert.deepEqual(await slackConversations(core, never), { channels: [{ id: "C0123ABCD", name: "general" }], complete: false });
   const B = { ...DEFAULT_BOX, clientId: "abc123XYZ", subjectId: "9" };
   assert.deepEqual(await testBox(core, B, never), { folderName: "Specs", itemCount: 12 });

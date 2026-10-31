@@ -14,7 +14,7 @@ import { Dialog } from "../write/Dialog";
 import type { WriteHost } from "../write/write-host.ts";
 import { fetchEmail, fetchMcp, fetchMessage, fetchSlack, IDLE_FETCH, startEmailFromNow, type FetchProgress } from "./ingest.ts";
 import {
-  addRepo, googleStart, googleStatus, indexBox, indexGithubIssues, indexRepo, listCatalog, listRepos, mcpStart, mcpStatus, mcpTest, pollUntil, removeRepo, selectConnector, slackConversations, slackStart, slackStatus, testBox, testEmail, testSlack,
+  addRepo, indexBox, indexGithubIssues, indexRepo, listCatalog, listRepos, mcpStart, mcpStatus, mcpTest, pollUntil, removeRepo, selectConnector, slackConversations, slackStart, slackStatus, testBox, testEmail, testSlack,
   type CatalogEntry, type RepoEntry,
 } from "./source-actions.ts";
 import {
@@ -23,6 +23,9 @@ import {
 } from "./source-config.ts";
 import { linkState, linkStateText, listSecretKeys, mapThrown, saveSecret, SourceError, sourceErrorText, type LinkState, type SourceSecretKey, type SourcesCore } from "./source-core.ts";
 import * as T from "./source-text.ts";
+import { GooglePane } from "./google/GooglePane";
+import { GuideCard } from "./google/EasySetup";
+import * as EZ from "./google/easy.ts";
 
 export interface PaneEnv {
   core: SourcesCore;
@@ -34,6 +37,10 @@ export interface PaneEnv {
   /** Native folder dialog for repositories; null when not in the desktop app. */
   pickFolder: (() => Promise<{ path: string; name: string } | null>) | null;
   now?: () => number;
+  /** Opens a Google sign-in address through the host opener; false when the user declined its prompt. Falls back to `openExternal`. */
+  openAuth?: (url: string) => Promise<boolean>;
+  /** True when a notes folder is chosen (Gmail notes cannot be saved without one). Unset: not checked. */
+  hasNotesRoot?: () => Promise<boolean>;
 }
 
 // ---- shared pieces ---------------------------------------------------------------------------
@@ -233,8 +240,10 @@ function PersistNote({ persisted }: { persisted: boolean }): ReactNode {
 export function EmailPane({ env }: { env: PaneEnv }): ReactNode {
   const { configs, update, persisted } = usePersisted(env);
   const vault = useVaultKeys(env);
-  const [cfg, setCfg] = useState<EmailConfig>(configs.email ?? DEFAULT_EMAIL);
-  const [saved, setSaved] = useState(configs.email !== null);
+  const legacyGoogle = configs.email?.authMethod === "google";
+  // The old Gmail-over-IMAP sign-in (full-mailbox scope) is not offered here any more: the Google pane replaces it.
+  const [cfg, setCfg] = useState<EmailConfig>(configs.email ? { ...configs.email, authMethod: "password" } : DEFAULT_EMAIL);
+  const [saved, setSaved] = useState(configs.email !== null && !legacyGoogle);
   const [info, setInfo] = useState<string | null>(null);
   const [progress, setProgress] = useState<FetchProgress>(IDLE_FETCH);
   const [disconnect, setDisconnect] = useState(false);
@@ -245,7 +254,7 @@ export function EmailPane({ env }: { env: PaneEnv }): ReactNode {
     setCfg((c) => ({ ...c, [k]: v }));
     setSaved(false);
   };
-  const state = linkState(configs.email !== null, vault.keys, ["email.imapPassword", "google.email.refreshToken"]);
+  const state = linkState(configs.email !== null, vault.keys, ["email.imapPassword"]);
   const saveSettings = (): void => {
     if (!valid) return;
     update({ email: cfg });
@@ -256,21 +265,6 @@ export function EmailPane({ env }: { env: PaneEnv }): ReactNode {
     void task.run(async (signal) => {
       await startEmailFromNow(env.core, signal, (env.now ?? Date.now)());
       setInfo("From now on, new mail will be imported when you fetch.");
-    });
-  };
-  const google = (own: { clientId: string; clientSecret: string } | null): void => {
-    void task.run(async (signal) => {
-      const s = await googleStart(env.core, own, signal);
-      await env.openExternal(s.authUrl);
-      setInfo("Finish signing in to Google in your browser. This window waits for up to 5 minutes.");
-      const st = await pollUntil(async () => {
-        const r = await googleStatus(env.core, s.state, signal);
-        if (r.status === "error") throw new SourceError("upstream_auth");
-        return r.status === "complete" ? r : null;
-      }, { intervalMs: 2000, maxMs: 300_000, signal });
-      setInfo(`Signed in${st.account ? ` as ${st.account}` : ""}. Settings use Google sign-in; save them, then fetch.`);
-      set("authMethod", "google");
-      vault.refresh();
     });
   };
   return (
@@ -313,40 +307,21 @@ export function EmailPane({ env }: { env: PaneEnv }): ReactNode {
           <input type="checkbox" checked={cfg.markRead} onChange={(e) => set("markRead", e.target.checked)} /> Mark fetched messages as read
         </label>
         {cfg.markRead && <p className="lib-muted">{T.EMAIL_MARK_READ}</p>}
-        <fieldset className="lib-field lib-radio">
-          <legend>Sign in with</legend>
-          <label>
-            <input type="radio" name="email-auth" checked={cfg.authMethod === "password"} onChange={() => set("authMethod", "password")} /> App password
-          </label>
-          <label>
-            <input type="radio" name="email-auth" checked={cfg.authMethod === "google"} onChange={() => set("authMethod", "google")} /> Google sign-in
-          </label>
-        </fieldset>
-        {cfg.authMethod === "password" ? (
-          <>
-            <p className="lib-muted">{T.EMAIL_APP_PASSWORD}</p>
-            <SecretField
-              env={env}
-              label="App password"
-              secretKey="email.imapPassword"
-              kind="email"
-              saved={vault.keys.has("email.imapPassword")}
-              onSaved={vault.refresh}
-              onTest={async (typed, signal) => {
-                const r = await testEmail(env.core, cfg, typed, signal);
-                return `Connected to ${r.mailbox || "the mailbox"}: ${r.total.toLocaleString()} messages, ${r.recent.toLocaleString()} recent. The value was not saved.`;
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <p className="lib-muted">{T.EMAIL_GOOGLE}</p>
-            <button type="button" className="lib-btn" onClick={() => google(null)} disabled={task.busy}>
-              Sign in with Google
-            </button>
-            <GoogleOwnClient disabled={task.busy} onStart={google} />
-          </>
-        )}
+        {legacyGoogle && <StatusBanner severity="warning" message={T.EMAIL_GOOGLE_MOVED} />}
+        <p className="lib-muted">{T.EMAIL_APP_PASSWORD}</p>
+        <SecretField
+          env={env}
+          label="App password"
+          secretKey="email.imapPassword"
+          kind="email"
+          saved={vault.keys.has("email.imapPassword")}
+          onSaved={vault.refresh}
+          onTest={async (typed, signal) => {
+            const r = await testEmail(env.core, cfg, typed, signal);
+            return `Connected to ${r.mailbox || "the mailbox"}: ${r.total.toLocaleString()} messages, ${r.recent.toLocaleString()} recent. The value was not saved.`;
+          }}
+        />
+        <p className="lib-muted">{T.EMAIL_GOOGLE_POINTER}</p>
         <div className="lib-editor-bar">
           <button type="button" className="lib-btn lib-btn-primary" onClick={saveSettings} disabled={!valid || saved}>
             Save settings
@@ -422,33 +397,85 @@ export function EmailPane({ env }: { env: PaneEnv }): ReactNode {
   );
 }
 
-function GoogleOwnClient({ disabled, onStart }: { disabled: boolean; onStart: (own: { clientId: string; clientSecret: string }) => void }): ReactNode {
-  const [id, setId] = useState("");
-  const [secret, setSecret] = useState("");
-  const ok = /^[A-Za-z0-9._-]{10,200}$/.test(id.trim()) && secret !== "" && secret.length <= 512 && secret === secret.trim();
+// ---- Gmail easy card (app password over IMAP; the Email pane's routes, fewer fields) ----------
+
+/** Gmail with an app password: address + write-only app password, then Save / Fetch. Reuses the Email source's
+ *  settings, vault key (`email.imapPassword`), test route and fetch runner, so the Email pane shows the same mailbox. */
+export function GmailEasyCard({ env }: { env: PaneEnv }): ReactNode {
+  const { configs, update, persisted } = usePersisted(env);
+  const vault = useVaultKeys(env);
+  const existing = configs.email;
+  const [address, setAddress] = useState(existing && /@(gmail|googlemail)\.com$/i.test(existing.user) ? existing.user : "");
+  const [saved, setSaved] = useState(existing !== null && existing.host === "imap.gmail.com");
+  const [info, setInfo] = useState<string | null>(null);
+  const [progress, setProgress] = useState<FetchProgress>(IDLE_FETCH);
+  const task = useTask();
+  const addrProblem = address === "" ? null : EZ.validateGmailAddress(address);
+  const cfg: EmailConfig = { ...DEFAULT_EMAIL, ...(existing && existing.host === "imap.gmail.com" ? existing : null), host: "imap.gmail.com", port: 993, secure: true, user: address.trim(), authMethod: "password" };
+  const state = linkState(saved, vault.keys, ["email.imapPassword"]);
   return (
-    <details>
-      <summary>Use my own Google client</summary>
-      <div className="lib-form">
-        <Field label="Client ID">
-          <input type="text" autoComplete="off" value={id} onChange={(e) => setId(e.target.value)} />
-        </Field>
-        <Field label="Client secret (sent once to the core's vault, never shown again)">
-          <input type="password" autoComplete="off" spellCheck={false} value={secret} onChange={(e) => setSecret(e.target.value)} />
-        </Field>
+    <section className="lib-pane-section" aria-label="Easy setup: Gmail">
+      <h3>
+        Gmail <Badge state={state} />
+      </h3>
+      <GuideCard guide={EZ.GMAIL_GUIDE} notes={EZ.GMAIL_NOTES} />
+      <p className="lib-muted">
+        Where to find it: {EZ.GMAIL_WHERE}.{" "}
+        <button type="button" className="lib-link-btn" onClick={() => EZ.isGoogleAccountHome(EZ.GOOGLE_ACCOUNT_HOME) && void env.openExternal(EZ.GOOGLE_ACCOUNT_HOME).catch(() => setInfo("Opening links is not available yet."))}>
+          Open your Google Account
+        </button>
+      </p>
+      <PersistNote persisted={persisted} />
+      <Field label="Gmail address" error={addrProblem ?? undefined}>
+        <input type="text" autoComplete="off" spellCheck={false} value={address} onChange={(e) => { setAddress(e.target.value); setSaved(false); }} aria-invalid={addrProblem !== null} />
+      </Field>
+      <SecretField
+        env={env}
+        label="App password"
+        secretKey="email.imapPassword"
+        kind="email"
+        saved={vault.keys.has("email.imapPassword")}
+        onSaved={vault.refresh}
+        onTest={async (typed, signal) => {
+          const r = await testEmail(env.core, cfg, typed, signal);
+          return `Connected to ${r.mailbox || "the mailbox"}: ${r.total.toLocaleString()} messages. The value was not saved.`;
+        }}
+      />
+      <div className="lib-editor-bar">
+        <button
+          type="button"
+          className="lib-btn lib-btn-primary"
+          disabled={address === "" || addrProblem !== null || saved}
+          onClick={() => {
+            update({ email: cfg });
+            setSaved(true);
+            setInfo("Saved. Press Fetch new mail, or Start from now to import only mail that arrives from now on.");
+          }}
+        >
+          Save address
+        </button>
         <button
           type="button"
           className="lib-btn"
-          disabled={disabled || !ok}
-          onClick={() => {
-            onStart({ clientId: id.trim(), clientSecret: secret });
-            setSecret("");
-          }}
+          disabled={!saved || task.busy}
+          onClick={() =>
+            void task.run(async (signal) => {
+              setProgress({ ...IDLE_FETCH, phase: "fetching" });
+              setProgress(await fetchEmail(cfg, { core: env.core, write: env.write, signal, onProgress: setProgress, now: env.now }));
+            })
+          }
         >
-          Sign in with my client
+          Fetch new mail
+        </button>
+        <button type="button" className="lib-btn" disabled={!saved || task.busy} onClick={() => void task.run(async (signal) => { await startEmailFromNow(env.core, signal, (env.now ?? Date.now)()); setInfo("From now on, new mail will be imported when you fetch."); })}>
+          Start from now
         </button>
       </div>
-    </details>
+      <FetchStatus p={progress} onStop={task.stop} busy={task.busy} />
+      {progress.phase === "error" && progress.error && <StatusBanner severity="error" message={`${sourceErrorText(progress.error, "the mailbox")}${progress.serverCode ? ` (${progress.serverCode})` : ""}`} />}
+      {info && <StatusBanner severity="info" message={info} onDismiss={() => setInfo(null)} />}
+      <ErrorLine task={task} what="Gmail" />
+    </section>
   );
 }
 
@@ -1057,6 +1084,7 @@ export function ConnectorsPane({ env }: { env: PaneEnv }): ReactNode {
 export function sourceConnections(env: PaneEnv): LibraryExtension[] {
   return [
     { id: "src-email", label: "Email", render: () => <EmailPane env={env} /> },
+    { id: "src-google", label: "Google", render: () => <GooglePane env={env} gmailCard={<GmailEasyCard env={env} />} /> },
     { id: "src-slack", label: "Slack", render: () => <SlackPane env={env} /> },
     { id: "src-box", label: "Box", render: () => <BoxPane env={env} /> },
     { id: "src-repos", label: "Repositories", render: () => <ReposPane env={env} /> },

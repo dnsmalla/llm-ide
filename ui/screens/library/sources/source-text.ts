@@ -8,8 +8,10 @@ export const EMAIL_INTRO =
   "Connects one mailbox over IMAP. It is forward-only: only mail that arrives after you connect is imported, and each message is saved once as a note under source/emails.";
 export const EMAIL_APP_PASSWORD =
   "App password: create one in your mail provider's security settings (it needs 2-step verification on Gmail, iCloud and Microsoft accounts) and paste it here. Your normal account password does not work and should never be used. It is stored encrypted in the core's vault and is never shown again.";
-export const EMAIL_GOOGLE =
-  "Google sign-in: opens Google in your browser. LLM-IDE's own Google client is in testing mode, so only accounts added as test users can use it. To use your own Google Cloud OAuth client instead, enter its client ID and secret below; Google requires you to register the redirect address shown in the core's documentation.";
+export const EMAIL_GOOGLE_MOVED =
+  "This mailbox used the old Google sign-in, which is no longer offered here (it asked for access to your whole mailbox). Use the Google connection instead, or switch to an app password below. Saved settings were switched to the app password route; save them again to keep them.";
+export const EMAIL_GOOGLE_POINTER =
+  "For Gmail, the Google connection in this list is the safer route: it is read-only and needs no app password. This IMAP form stays as the manual fallback.";
 export const EMAIL_MARK_READ = "Marking messages as read changes your mailbox. It is off by default.";
 
 export const SLACK_INTRO =
@@ -31,7 +33,7 @@ export const MCP_UNVERIFIED = "Unverified tools: this connector's tool names and
 export const NOT_READY = "No import pipeline yet. Nothing is fetched for this connector.";
 
 export const DISCONNECT_TEXT = {
-  email: "The mailbox settings are removed and the saved app password is deleted from the vault. A Google sign-in stays until you revoke it in your Google account. Notes already imported are kept.",
+  email: "The mailbox settings are removed and the saved app password is deleted from the vault. Notes already imported are kept.",
   slack: "The channel settings are removed and the saved Slack tokens are deleted from the vault. Notes already imported are kept.",
   box: "The folder settings are removed and the saved client secret is deleted from the vault. Content already indexed stays in the search index. Notes are not affected.",
 } as const;
