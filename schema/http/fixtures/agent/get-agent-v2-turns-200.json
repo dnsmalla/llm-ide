@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /agent/v2/turns",
+  "status": 200,
+  "description": "One running turn of the caller. Another user's turns are never listed; an idle caller gets an empty array.",
+  "response": {
+    "turns": [
+      {
+        "sessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+        "startedAt": "2026-10-31T03:00:00.000Z",
+        "mode": "ask"
+      }
+    ]
+  }
+}

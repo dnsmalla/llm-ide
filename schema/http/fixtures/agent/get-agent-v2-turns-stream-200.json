@@ -1,0 +1,12 @@
+{
+  "endpoint": "GET /agent/v2/turns/stream",
+  "status": 200,
+  "description": "Re-attach to a running turn from the start (after=0): buffered events replay with their sequence ids, then live ones follow until the turn ends.",
+  "request": {
+    "query": {
+      "sessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+      "after": "0"
+    }
+  },
+  "response": "id: 1\ndata: {\"type\":\"init\",\"sessionId\":\"sdk-example\",\"claudeCodeVersion\":\"example\",\"tools\":[],\"capabilities\":[]}\n\nid: 2\ndata: {\"type\":\"mode_set\",\"mode\":\"ask\"}\n\nid: 3\ndata: {\"type\":\"delta\",\"text\":\"hello\"}\n\n"
+}

@@ -1964,6 +1964,40 @@ export type PostAgentV2CancelResponse200 = {
 
 export type PostAgentV2CancelResponse400 = CommonError;
 
+/** Request parts for `GET /agent/v2/turns` (schema/http/agent.schema.json). */
+export type GetAgentV2TurnsRequest = Record<string, never>;
+
+export type GetAgentV2TurnsResponse200 = {
+  /** The caller's running turns, oldest first. Another user's turns are never listed. */
+  turns: ({
+    /** The chatSessionId the turn runs on */
+    sessionId: string;
+    /** ISO 8601 */
+    startedAt: string;
+    /** The turn's resolved mode */
+    mode: string | null;
+  })[];
+};
+
+/** Request parts for `GET /agent/v2/turns/stream` (schema/http/agent.schema.json). */
+export type GetAgentV2TurnsStreamRequest = {
+  query: {
+    /** The chat session of the running turn (max 200 characters) */
+    sessionId: string;
+    /** Count of events already received (integer >= 0, default 0). Replay resumes after the after-th event. */
+    after?: string;
+  };
+};
+
+/** text/event-stream. One frame per event: `id: <seq>` then `data: <json>`; the data are the same events as POST /agent/v2/stream (schema/agent-v2), plus `replay_info` {gap, dropped, ended} first when the bounded ring dropped events the reader asked for, and `replay_truncated` {originalType} in place of an event larger than 256 KB. The stream ends when the turn ends. A turn that ended less than 60 seconds ago replays and closes. Memory only: nothing is stored on disk. */
+export type GetAgentV2TurnsStreamResponse200 = string;
+
+export type GetAgentV2TurnsStreamResponse400 = CommonError;
+
+export type GetAgentV2TurnsStreamResponse404 = CommonError;
+
+export type GetAgentV2TurnsStreamResponse429 = CommonError;
+
 /** Request parts for `POST /kb/agent/dispatch` (schema/http/agent.schema.json). */
 export type PostKbAgentDispatchRequest = {
   body: {
@@ -7024,6 +7058,21 @@ export interface ApiEndpoints {
     responses: {
       200: PostAgentV2CancelResponse200;
       400: PostAgentV2CancelResponse400;
+    };
+  };
+  "GET /agent/v2/turns": {
+    request: GetAgentV2TurnsRequest;
+    responses: {
+      200: GetAgentV2TurnsResponse200;
+    };
+  };
+  "GET /agent/v2/turns/stream": {
+    request: GetAgentV2TurnsStreamRequest;
+    responses: {
+      200: GetAgentV2TurnsStreamResponse200;
+      400: GetAgentV2TurnsStreamResponse400;
+      404: GetAgentV2TurnsStreamResponse404;
+      429: GetAgentV2TurnsStreamResponse429;
     };
   };
   "POST /kb/agent/dispatch": {

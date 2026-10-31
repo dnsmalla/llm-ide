@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /agent/v2/turns/stream",
+  "status": 429,
+  "description": "Four readers are already attached to this turn.",
+  "request": {
+    "query": {
+      "sessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TOO_MANY_READERS",
+      "message": "Too many readers are attached to this turn"
+    }
+  }
+}

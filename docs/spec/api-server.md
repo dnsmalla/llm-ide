@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 95` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 96` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -238,7 +238,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/code-assist` (removed, 410), `/kb/agent/ask`, `/kb/complete`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models`, `/kb/providers/catalog/test`, `/kb/providers/catalog/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/auth/me/extensions/install`, `/auth/me/extensions/catalog/refresh`, `/auth/me/extensions/updates/check`, `/auth/me/extensions/update/preview`, `/auth/me/extensions/update`, `/auth/me/extensions/repair` (each reaches GitHub or the MCP registry), `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
-| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack` |
+| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `GET /agent/v2/turns`, `GET /agent/v2/turns/stream`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack` |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
@@ -285,6 +285,20 @@ Security headers always set: `X-Content-Type-Options: nosniff`, `Referrer-Policy
 Default: `127.0.0.1:3456` (`config.mjs:113–114`). Binding a non-loopback address requires **both** a non-loopback `LLMIDE_HOST` value **and** `LLMIDE_ALLOW_REMOTE=1`. If `LLMIDE_HOST` is non-loopback and `LLMIDE_ALLOW_REMOTE` is not set, the server calls `process.exit(1)` before listening (`server.mjs:726–736`). When remote binding is active, a startup `warn` log `server_network_exposed` is emitted (`server.mjs:741–749`).
 
 ---
+
+## 7b. Chat turn re-attach (API 96)
+
+A webview reload drops the `POST /agent/v2/stream` connection. Two additive routes let a client find its running turns and re-attach (`extension/routes/agent-v2.mjs`, buffer in `extension/routes/turn-replay.mjs`):
+
+| Route | Answers |
+|---|---|
+| `GET /agent/v2/turns` | `{ turns: [{ sessionId, startedAt, mode }] }`: the caller's running turns, oldest first. Another user's turns are never listed (the owner is compared, not parsed from a key). |
+| `GET /agent/v2/turns/stream?sessionId=&after=` | SSE: every buffered event after the `after`-th (a count of events the client already holds, default 0), then live events, `id: <seq>` on each frame; ends when the turn ends. A first `replay_info` event `{ gap, dropped, ended }` appears when the ring dropped events the client asked for; an event over 256 KB is replaced by `replay_truncated`. 400 `VALIDATION_FAILED` (empty or over-200-character `sessionId`, `after` not an integer 0..1e9); 404 `NO_TURN` (no such turn, or another user's); 429 `TOO_MANY_READERS`. |
+
+- **Memory only.** Each turn's events live in a per-turn ring: at most 2000 events and 4 MB, at most 64 turns, at most 4 attached readers per turn, dropped 60 s after the turn ends (a late reader replays and closes). Nothing is written to disk, so a core restart loses the buffer by design.
+- **`detach: true`** on `POST /agent/v2/stream` (default false) keeps the turn running when its own stream drops; only `POST /agent/v2/cancel` (or the turn ending) stops it. Without the flag a dropped stream aborts the turn exactly as before, so the Mac app is unchanged.
+- Both GETs use the `kbWrite` rate bucket; routes require the signed-in user like every `/agent/v2/*` route.
+- Tests: `extension/tests/turn-replay-routes.test.mjs`. Contract: `schema/http/agent.schema.json`.
 
 ## 8. See also
 

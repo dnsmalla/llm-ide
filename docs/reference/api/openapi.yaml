@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 95
+  x-api-version: 96
 servers:
   - url: "https://{host}"
     variables:
@@ -617,6 +617,83 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "503":
           description: "Service Unavailable"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /agent/v2/turns:
+    get:
+      tags:
+        - "agent"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "turns"
+                properties:
+                  turns:
+                    type: "array"
+                    description: "The caller's running turns, oldest first. Another user's turns are never listed."
+                    items:
+                      type: "object"
+                      required:
+                        - "sessionId"
+                        - "startedAt"
+                        - "mode"
+                      properties:
+                        sessionId:
+                          type: "string"
+                          description: "The chatSessionId the turn runs on"
+                        startedAt:
+                          type: "string"
+                          description: "ISO 8601"
+                        mode:
+                          type:
+                            - "string"
+                            - "null"
+                          description: "The turn's resolved mode"
+  /agent/v2/turns/stream:
+    get:
+      tags:
+        - "agent"
+      parameters:
+        - name: "sessionId"
+          in: "query"
+          required: true
+          description: "The chat session of the running turn (max 200 characters)"
+          schema:
+            type: "string"
+        - name: "after"
+          in: "query"
+          required: false
+          description: "Count of events already received (integer >= 0, default 0). Replay resumes after the after-th event."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            text/plain:
+              schema:
+                type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "429":
+          description: "Too Many Requests"
           content:
             application/json:
               schema:

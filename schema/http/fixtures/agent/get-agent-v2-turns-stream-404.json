@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /agent/v2/turns/stream",
+  "status": 404,
+  "description": "No running turn for this session, or the session belongs to another user.",
+  "request": {
+    "query": {
+      "sessionId": "no-such-chat"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NO_TURN",
+      "message": "No running turn for this session"
+    }
+  }
+}

@@ -160,6 +160,8 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /kb/plan/delete", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("DELETE /kb/review/delete", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /", "no Mac caller (see schema/http/INVENTORY.md)"),
+    ("GET /agent/v2/turns", "no Mac caller; the Tauri desktop lists running turns after a webview reload (API 96)"),
+    ("GET /agent/v2/turns/stream", "server-sent event replay; no Mac caller (the Tauri desktop re-attaches after a webview reload)"),
     ("GET /auth/google/callback", "OAuth browser callback page, not a JSON API body"),
     ("GET /auth/mcp-connector/callback", "OAuth browser callback page, not a JSON API body"),
     ("GET /auth/mcp-connector/status", "no Mac caller (see schema/http/INVENTORY.md)"),

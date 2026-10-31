@@ -43,6 +43,7 @@ import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect 
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
+import { openTurnReplay, listRunningTurns, attachTurnReplay } from './turn-replay.mjs';
 import { extensionChatWorkspace } from '../core/extension-chat-workspace.mjs';
 import {
   beginRouteTurn, createRouteTurn, routeSwitchNotice, runAdapterTurn, isAdapterProvider, sendRouteRefusal,
@@ -312,6 +313,13 @@ export async function handleAgentV2Routes(
   }
   // Session router (K1 P6b): the per-chat provider/model pick and token cap.
   const routePath = url.split('?')[0];
+  if (req.method === 'GET' && routePath === '/agent/v2/turns') {
+    sendJSON(res, 200, { turns: listRunningTurns(userId) });
+    return true;
+  }
+  if (req.method === 'GET' && routePath === '/agent/v2/turns/stream') {
+    return handleV2TurnAttach(req, res, userId);
+  }
   if (req.method === 'GET' && routePath === '/agent/v2/session/route') {
     return handleRouteGet(req, res, userId, getDb());
   }
@@ -510,7 +518,7 @@ async function handleV2Stream(req, res, userId, deps) {
     return true;
   }
   inFlightChatSessions.add(lockKey);
-  inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt });
+  inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt, mode });
   emitOsEvent(userId, 'turn-start');
   try {
     return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
@@ -586,10 +594,21 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     ac.abort();
     if (currentSdkSessionId) abortDecisionsForSession(currentSdkSessionId);
   };
-  onClientDisconnect(req, res, abortTurn);
+  // Replay buffer (memory only, bounded): lets GET /agent/v2/turns/stream re-attach to this turn.
+  const replay = openTurnReplay({ userId, chatSessionId, mode, startedAt: turnStartedAt });
+  // `detach: true` (a client that can re-attach, e.g. a webview that may reload) keeps the turn running when
+  // its own stream drops; without it a dropped stream stops the turn, exactly as before.
+  const detachable = body.detach === true;
+  let primaryGone = false;
+  onClientDisconnect(req, res, () => {
+    if (detachable) { primaryGone = true; return; }
+    abortTurn();
+  });
   inFlightAborts.set(chatSessionLockKey(userId, chatSessionId), abortTurn);
   const send = (obj) => {
-    if (!res.writableEnded && !ac.signal.aborted) {
+    if (ac.signal.aborted) return;
+    replay.push(obj);
+    if (!primaryGone && !res.writableEnded) {
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
     }
   };
@@ -801,6 +820,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     if (!res.writableEnded) res.end();
     return true;
   } finally {
+    replay.end();
     // Closed on every exit, a throw included: a run never stays 'running' because
     // bookkeeping failed. Status: cancelled (Stop / disconnect), error (the engine
     // failed), else ok.
@@ -842,6 +862,53 @@ async function handleV2Cancel(req, res, userId) {
   const cancelled = typeof abort === 'function';
   if (cancelled) abort();
   sendJSON(res, 200, { cancelled });
+  return true;
+}
+
+/**
+ * GET /agent/v2/turns/stream?sessionId=&after= — re-attach to the caller's running (or just ended, 60 s) turn.
+ * SSE: every buffered event after `after` (a count of events already received; default 0), then live events,
+ * `id: <seq>` on each frame; ends when the turn ends. A `replay_info` event { gap, dropped, ended } comes first
+ * when the ring dropped events the reader asked for. 404 NO_TURN when the user has no such turn (another
+ * user's session is the same 404), 429 TOO_MANY_READERS. Memory-only, bounded buffer (turn-replay.mjs).
+ */
+function handleV2TurnAttach(req, res, userId) {
+  const q = new URL(req.url, 'http://x').searchParams;
+  const sessionId = q.get('sessionId') || '';
+  const afterRaw = q.get('after');
+  const after = afterRaw === null || afterRaw === '' ? 0 : Number(afterRaw);
+  if (!sessionId || sessionId.length > 200 || !Number.isInteger(after) || after < 0 || after > 1e9) {
+    sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'sessionId (string) and after (integer >= 0) are required' } });
+    return true;
+  }
+  let headed = false;
+  const head = () => {
+    if (headed) return;
+    headed = true;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+  };
+  let finished = false;
+  const onEvent = (seq, line) => {
+    if (finished || res.writableEnded) return;
+    head();
+    if (seq === null) { finished = true; res.end(); return; }
+    res.write(`id: ${seq}\ndata: ${line}\n\n`);
+  };
+  const onInfo = (info) => {
+    head();
+    res.write(`data: ${JSON.stringify({ type: 'replay_info', gap: info.gap, dropped: info.dropped, ended: info.ended })}\n\n`);
+  };
+  const handle = attachTurnReplay(userId, sessionId, after, onEvent, onInfo);
+  if (!handle) {
+    sendJSON(res, 404, { error: { code: 'NO_TURN', message: 'No running turn for this session' } });
+    return true;
+  }
+  if (handle.full) {
+    sendJSON(res, 429, { error: { code: 'TOO_MANY_READERS', message: 'Too many readers are attached to this turn' } });
+    return true;
+  }
+  head();
+  res.on('close', () => handle.detach?.());
   return true;
 }
 

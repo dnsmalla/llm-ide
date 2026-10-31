@@ -891,6 +891,84 @@
         }
       }
     },
+    "GET /agent/v2/turns": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "turns"
+          ],
+          "properties": {
+            "turns": {
+              "type": "array",
+              "description": "The caller's running turns, oldest first. Another user's turns are never listed.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sessionId",
+                  "startedAt",
+                  "mode"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The chatSessionId the turn runs on"
+                  },
+                  "startedAt": {
+                    "type": "string",
+                    "description": "ISO 8601"
+                  },
+                  "mode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The turn's resolved mode"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /agent/v2/turns/stream": {
+      "request": {
+        "query": {
+          "type": "object",
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "The chat session of the running turn (max 200 characters)"
+            },
+            "after": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Count of events already received (integer >= 0, default 0). Replay resumes after the after-th event."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string",
+          "description": "text/event-stream. One frame per event: `id: <seq>` then `data: <json>`; the data are the same events as POST /agent/v2/stream (schema/agent-v2), plus `replay_info` {gap, dropped, ended} first when the bounded ring dropped events the reader asked for, and `replay_truncated` {originalType} in place of an event larger than 256 KB. The stream ends when the turn ends. A turn that ended less than 60 seconds ago replays and closes. Memory only: nothing is stored on disk."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
     "POST /kb/agent/dispatch": {
       "request": {
         "body": {
