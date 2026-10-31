@@ -12,6 +12,8 @@ export interface HostPrefs {
   learn: boolean;
   terminal: boolean;
   theme: "dark" | "light" | "midnight";
+  /** The feature profile: an explicit subset of the server's feature keys; empty = every feature. */
+  features: string[];
 }
 
 export interface HostPrefsView {
@@ -32,7 +34,11 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   if (ltaMode !== "off" && ltaMode !== "shadow" && ltaMode !== "on") return null;
   if (theme !== "dark" && theme !== "light" && theme !== "midnight") return null;
   for (const b of [router, cap, compress, learn, terminal]) if (typeof b !== "boolean") return null;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme };
+  // Older prefs files have no features field; that reads as "every feature", the historical behaviour.
+  const features = Array.isArray(raw.features)
+    ? raw.features.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 40).slice(0, 32)
+    : [];
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {

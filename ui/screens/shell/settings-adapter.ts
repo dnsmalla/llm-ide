@@ -81,6 +81,22 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           return path;
         },
         confirmTrust: async (path) => (await d.invoke<unknown>("trust_confirm", { path })) === true,
+        async getFeatureProfile() {
+          const v = await readPrefs();
+          return { stored: v.stored.features, launch: v.launch.features };
+        },
+        async setFeatureProfile(features) {
+          const v = await writePrefs({ features });
+          return { stored: v.stored.features, launch: v.launch.features };
+        },
+        async rebuildFeatures(features) {
+          const raw = await d.invoke<unknown>("feature_rebuild", { features });
+          const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+          return {
+            started: o.started === true,
+            message: typeof o.message === "string" ? o.message.slice(0, 300) : "The rebuild did not start.",
+          };
+        },
         async mermaidStatus() {
           const s = decodeComponentStatus(await d.invoke<unknown>("mermaid_runtime_status"));
           if (!s) throw new Error("the desktop host returned a component status this app cannot read");

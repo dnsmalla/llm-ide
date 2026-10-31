@@ -1,6 +1,7 @@
 // The top toolbar's pure model (Mac `AppShell.shellToolbar` + `ToolbarToolButton`): which sections it lists and in
 // what order, the roving-focus rules, and the overflow partition for narrow windows. No React, no DOM: tested with node.
 import { SECTIONS, devToolsEnabled, type SectionDef, type SectionId } from "./sections";
+import { ALL_FEATURES, isSectionEnabled, type AppFeature } from "./features";
 
 /**
  * The toolbar sections in the Mac's `ShellSection.toolbarOrder` (Live is only shown while a session records and
@@ -27,11 +28,15 @@ export const MAC_CASE_TO_ID: Readonly<Record<string, SectionId | null>> = {
 const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
 
 /** The sections the toolbar lists now: the Mac list, plus the developer-only Spike item when developer tools are on. */
-export function toolbarSections(devTools: boolean = devToolsEnabled()): SectionDef[] {
+export function toolbarSections(
+  devTools: boolean = devToolsEnabled(),
+  usable: ReadonlySet<AppFeature> = new Set(ALL_FEATURES),
+): SectionDef[] {
   const out: SectionDef[] = [];
   for (const id of TOOLBAR_IDS) {
     const d = BY_ID.get(id);
-    if (d) out.push(d);
+    // A feature that is off (or not compiled into this build) hides its toolbar item, as on the Mac.
+    if (d && isSectionEnabled(d.id, usable)) out.push(d);
   }
   const spike = BY_ID.get("spike");
   if (devTools && spike) out.push(spike);

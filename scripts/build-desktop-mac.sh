@@ -73,10 +73,21 @@ if [ "$CHECKS" = 1 ]; then
 fi
 
 step "Build the app (frontend + release Rust binary; the first cargo build takes several minutes)"
-(cd "$DESKTOP" && npx tauri build --bundles app)
+# A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
+TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
+echo "features: ${LLMIDE_BUILD_FEATURES:-all}"
+(cd "$DESKTOP" && CARGO_TARGET_DIR="$TARGET_DIR" npx tauri build --bundles app)
 
-APP="$DESKTOP/src-tauri/target/release/bundle/macos/LLM-IDE.app"
+APP="$TARGET_DIR/release/bundle/macos/LLM-IDE.app"
 [ -d "$APP" ] || { echo "build finished but $APP is missing" >&2; exit 1; }
+
+# A local build records its source checkout so Settings > Build can rebuild itself; a distributed release omits it
+# (LLMIDE_OMIT_SOURCE_ROOT=1), and the in-app rebuild then refuses. Written BEFORE signing so the seal covers it.
+if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
+  mkdir -p "$APP/Contents/Resources"
+  printf '%s\n' "$ROOT" > "$APP/Contents/Resources/source-root.txt"
+  chmod 600 "$APP/Contents/Resources/source-root.txt"
+fi
 
 step "Ad-hoc sign"
 # Re-sign the whole bundle in one pass so the seal covers the bundled core. No hardened runtime (see header).
@@ -100,6 +111,13 @@ if [ "$SMOKE" = 1 ]; then
   LLMIDE_CORE_DIR="$APP/Contents/Resources/core" node "$DESKTOP/scripts/smoke-core.mjs"
   step "Run the shell end-to-end suite against the core inside the app (fake engine, no model call)"
   (cd "$DESKTOP" && LLMIDE_E2E_BUNDLE="$APP/Contents/Resources/core" node --test --experimental-strip-types ../ui/screens/shell/tests/e2e/e2e.test.mjs)
+fi
+
+if [ -n "${LLMIDE_BUILD_OUT:-}" ]; then
+  step "Copy the finished app to $LLMIDE_BUILD_OUT (the rebuild script swaps it in)"
+  mkdir -p "$LLMIDE_BUILD_OUT"
+  rm -rf "$LLMIDE_BUILD_OUT/LLM-IDE.app"
+  ditto "$APP" "$LLMIDE_BUILD_OUT/LLM-IDE.app"
 fi
 
 if [ "$DMG" = 1 ]; then

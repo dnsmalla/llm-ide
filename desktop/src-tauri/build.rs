@@ -7,6 +7,7 @@
 const COMMANDS: &[&str] = &[
     "ping",
     "core_status",
+    "feature_rebuild",
     "core_log_read",
     "core_log_clear",
     "secrets_status",

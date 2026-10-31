@@ -15,7 +15,9 @@ import { core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { safeText } from "./safe-text";
-import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
+import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
+import { featureStore } from "./feature-store";
+import { isSectionEnabled } from "./features";
 
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
@@ -53,6 +55,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
   const session = useCoreSession();
+  const features = useFeatures();
   const { project, loaded: projectLoaded, notice, dismissNotice } = useActiveProject();
   const everUsable = useRef(false);
   const main = useRef<HTMLElement>(null);
@@ -65,6 +68,10 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => {
     coreStatusStore.start();
     return () => coreStatusStore.stop();
+  }, []);
+  // The feature profile decides which sections exist in this run; read it once (the host prefs are cheap).
+  useEffect(() => {
+    void featureStore.load();
   }, []);
   useEffect(() => showTheme(theme), [theme]);
   // The host says which OS it is (the traffic-light inset is macOS-only); the navigator guess above covers the first paint.
@@ -81,12 +88,31 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const prevRoot = useRef<string | null | undefined>(undefined);
   const projectRoot = project?.root ?? null;
   const overridden = useRef(initialSection != null);
+  // A home section whose feature is off (or was not compiled in) falls back to Explorer, then Chat, then Welcome.
+  const usableHome = (): SectionId => {
+    const stored = readHome();
+    if (isSectionEnabled(stored, features.usable)) return stored;
+    for (const id of ["explorer", "chat"] as const) if (isSectionEnabled(id, features.usable)) return id;
+    return "welcome";
+  };
   useEffect(() => {
     if (!projectLoaded) return;
-    const to = landingFor({ prev: prevRoot.current, now: projectRoot, home: readHome(), overridden: overridden.current });
+    const home = usableHome();
+    const to = landingFor({ prev: prevRoot.current, now: projectRoot, home, overridden: overridden.current });
     prevRoot.current = projectRoot;
     if (to) dispatch({ type: "select", id: to });
-  }, [projectLoaded, projectRoot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectLoaded, projectRoot, features.ready, features.usable]);
+
+  // Features can only change at the next start, but a stored/compiled section can disappear after it loads (e.g. a
+  // direct deep link into a feature that is off): land somewhere that exists instead of showing an empty shell.
+  useEffect(() => {
+    if (!features.ready) return;
+    if (nav.active !== "welcome" && !isSectionEnabled(nav.active, features.usable)) {
+      dispatch({ type: "select", id: usableHome() });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [features.ready, features.usable, nav.active]);
 
   // A restarted core invalidates nothing server-side; but a fatal one cannot refresh tokens: drop them.
   useEffect(() => {

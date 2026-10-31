@@ -3,8 +3,22 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
 import { baseName, needsPatch, patchMonacoSource } from "./scripts/monaco-freeze-patch.ts";
+import { ALL_FEATURES, compiledFeatures } from "../ui/screens/shell/features.ts";
 
 const appVersion = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "dev";
+
+// The feature profile for this build: `LLMIDE_BUILD_FEATURES=agent_chat,file_explorer,...` (unset/empty = all).
+// Dependencies are closed here too, so a build cannot contain Graph without Explorer. The booleans are injected as
+// `__FEATURE_*__` defines; screens.tsx uses them in dead branches, which Rollup removes together with the chunk.
+const requested = (process.env.LLMIDE_BUILD_FEATURES ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => (ALL_FEATURES as readonly string[]).includes(s));
+const compiled = compiledFeatures(Object.fromEntries(ALL_FEATURES.map((f) => [f, requested.length === 0 || requested.includes(f)])));
+const featureDefines: Record<string, string> = {};
+for (const f of ALL_FEATURES) {
+  featureDefines[`__FEATURE_${f.toUpperCase()}__`] = JSON.stringify(compiled.has(f));
+}
 
 // Monaco 0.57 ships its own copy of DOMPurify (3.4.15, with known advisories) at
 // esm/vs/base/browser/dompurify/dompurify.js, imported by relative path, so an npm
@@ -34,7 +48,7 @@ const freezeSafeMonaco = (): Plugin => ({
 });
 
 // Tauri expects a fixed dev port (see src-tauri/tauri.conf.json devUrl).
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [useNpmDompurify(), freezeSafeMonaco(), react()],
   resolve: {
     // @llmide/ui-kit is consumed from source (../ui/kit): one React for kit and app.
@@ -75,8 +89,13 @@ export default defineConfig({
     },
   },
   // Shown in Settings > About (the webview cannot read package.json or ask the host for it).
-  define: { __APP_VERSION__: JSON.stringify(appVersion) },
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    ...featureDefines,
+    // The Phase 0 spike views ship only in dev or when asked for (they pull monaco/sigma/xterm copies).
+    __INCLUDE_SPIKE__: JSON.stringify(process.env.LLMIDE_INCLUDE_SPIKE === "1" || mode !== "production"),
+  },
   clearScreen: false,
   server: { port: 5173, strictPort: true, host: "127.0.0.1", fs: { allow: [".."] } },
   build: { target: "es2022" },
-});
+}));

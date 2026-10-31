@@ -30,7 +30,22 @@ export async function load(entryRel) {
     logLevel: "silent",
     // Vite-only: no screens exist in node tests.
     define: { "import.meta.glob": "Object" },
-    alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
+    // Screen modules and the dock chunk are stubbed: these tests exercise the shell, and bundling every screen
+    // would pull Monaco/wasm/xterm (Vite handles those queries; esbuild does not).
+    plugins: [{
+      name: "test-screen-stubs",
+      setup(b) {
+        b.onResolve({ filter: /^\.\.\/(welcome|chat|library|settings|explorer|graph|docgen)\/(index|visual)\.tsx$/ }, (args) => ({ path: args.path, namespace: "screen-stub" }));
+        b.onResolve({ filter: /^\.\.\/chat\/dock\.tsx$/ }, (args) => ({ path: args.path, namespace: "screen-stub" }));
+        b.onLoad({ filter: /.*/, namespace: "screen-stub" }, () => ({ contents: "export default function Stub(){ return null; }", loader: "jsx" }));
+      },
+    }],
+    // The dock chunk imports the kit stylesheet; bundle it as text (side-effect only) instead of failing.
+    loader: { ".css": "text" },
+    alias: {
+      "@llmide/ui-kit/styles.css": join(REPO, "ui/kit/src/styles/kit.css"),
+      "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts"),
+    },
   });
   return import(`${outfile}?t=${Date.now()}`);
 }

@@ -1,11 +1,17 @@
 import { useEffect } from "react";
 import { activityStore, core, coreStatusStore } from "./runtime";
+import { featureStore, type FeatureSnapshot } from "./feature-store";
 import type { ProjectInfo, RecentEntry, RecentList } from "./host";
 import { projectStore, type AfterCreate } from "./project-store";
 import { useStoreSelector } from "./hooks";
 import { deriveStatusView, statusViewEqual, type StatusView } from "./status-view";
 import type { SessionSnapshot } from "./core";
 import type { ActivityState } from "./activity-store";
+
+/** The feature profile (compiled, stored, running, usable). Re-renders when it loads or changes. */
+export function useFeatures(): FeatureSnapshot {
+  return useStoreSelector(featureStore, (s) => s);
+}
 
 /** Login state of the core client (token-free). Re-renders only when it changes. */
 export function useCoreSession(): SessionSnapshot {

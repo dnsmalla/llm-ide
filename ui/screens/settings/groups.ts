@@ -27,7 +27,7 @@ export interface GroupDef {
 
 export const APP_GROUPS: readonly GroupDef[] = [
   { id: "workspace", title: "Workspace", sf: "slider.horizontal.3", icon: "sliders-horizontal", status: "partial", band: "app" },
-  { id: "build", title: "Build", sf: "hammer", icon: "hammer", status: "mac-only", band: "app" },
+  { id: "build", title: "Build", sf: "hammer", icon: "hammer", status: "partial", band: "app" },
   { id: "server", title: "Server & Backend", sf: "server.rack", icon: "server", status: "partial", band: "app" },
   { id: "connections", title: "Connections", sf: "tray.and.arrow.down", icon: "plug", status: "partial", band: "app" },
   { id: "updates", title: "Updates & About", sf: "arrow.down.circle", icon: "circle-arrow-down", status: "partial", band: "app" },

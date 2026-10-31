@@ -6,6 +6,7 @@ import { Icon, type IconName } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { estimateWidth, partitionToolbar, rovingStop, samePartition, toolbarKeyTarget, toolbarSections, type Partition } from "./toolbar-model";
 import type { SectionDef, SectionId } from "./sections";
+import { useFeatures } from "./use-shell";
 
 const ICONS: Partial<Record<SectionId, IconName>> = {
   explorer: "folder",
@@ -55,7 +56,8 @@ const ToolButton = memo(function ToolButton({ def, active, stop, onSelect, onFoc
 });
 
 export const SectionToolbar = memo(function SectionToolbar({ active, onSelect, devTools }: ToolbarProps) {
-  const defs = useMemo(() => toolbarSections(devTools), [devTools]);
+  const features = useFeatures();
+  const defs = useMemo(() => toolbarSections(devTools, features.usable), [devTools, features.usable]);
   const bar = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>());
   const widths = useRef(new Map<string, number>());

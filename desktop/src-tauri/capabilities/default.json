@@ -8,6 +8,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
     "allow-core-status",
+    "allow-feature-rebuild",
     "allow-core-log-read",
     "allow-core-log-clear",
     "allow-secrets-status",

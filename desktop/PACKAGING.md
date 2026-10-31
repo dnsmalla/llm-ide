@@ -388,3 +388,23 @@ Meaning: the web view has no core it is allowed to use. Check, in order:
 
 Behaviour: a foreign :3456 server is ignored and the own core starts on 3457-3459; adoption is a dev opt-in
 (`LLMIDE_ADOPT_CORE=1` or a debug build). Not verified: the behaviour in a real window with an old server on 3456.
+
+## Feature profile and reduced builds
+
+`LLMIDE_BUILD_FEATURES=agent_chat,file_explorer,…` (unset or empty = every feature) is read by
+`desktop/vite.config.ts`, which injects `__FEATURE_*__` booleans. `ui/screens/shell/screens.tsx` guards each screen's
+dynamic import with them and a disabled screen's branch is dead code, so its chunk is not in the bundle at all (a
+build without `code_graph_3d`/`doc_gen` contains neither screen; `terminal` off removes the xterm dock chunk;
+production also drops the Phase 0 Spike chunk via `__INCLUDE_SPIKE__`). The profile itself is `prefs.json.features`
+(`Prefs::features`, empty = all); the host passes it to the core as `LLMIDE_FEATURES` at the next start, and `/health`
+reports the running set. The UI uses `launch` (not `stored`) for availability, so a change only shows after a restart.
+
+Settings → Build → **Apply & Rebuild** runs `scripts/rebuild-desktop-features.sh <pid> <features> <source-root>`:
+it builds with a separate `CARGO_TARGET_DIR` (so the running bundle is untouched), copies the finished app out with
+`LLMIDE_BUILD_OUT`, waits for the app to exit, keeps one rollback slot as `<app>.bak`, swaps and reopens. A local
+build writes `Contents/Resources/source-root.txt` so the in-app command knows where to rebuild from; a distributed
+release sets `LLMIDE_OMIT_SOURCE_ROOT=1` and the command refuses. Log: `~/Library/Logs/LLM-IDE/rebuild.log`.
+
+Honest scope: the frontend chunks and the core's route groups are reduced. The Rust host commands are shared
+infrastructure and are not cargo-excluded yet, and the staged core still contains the route modules (they are never
+loaded when disabled).

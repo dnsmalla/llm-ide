@@ -79,6 +79,12 @@ export interface SettingsHost {
   setTheme?(theme: ThemeChoice): void;
   /** Native folder dialog (S-A/S-E host command). Resolves null when cancelled. */
   pickFolder?(title: string): Promise<string | null>;
+  /** The feature profile: what is stored for the next start and what this launch actually runs. */
+  getFeatureProfile?(): Promise<{ stored: string[]; launch: string[] }>;
+  /** Writes the profile (empty = every feature). The core picks it up at the next start. */
+  setFeatureProfile?(features: string[]): Promise<{ stored: string[]; launch: string[] }>;
+  /** Starts a reduced build from the source checkout with `features` compiled in; the app restarts when it is ready. */
+  rebuildFeatures?(features: string[]): Promise<{ started: boolean; message: string }>;
   /** Active project folder, if the shell has one. */
   activeProjectPath?(): string | null;
   notesFolderPath?(): Promise<string | null>;

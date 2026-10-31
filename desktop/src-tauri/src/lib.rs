@@ -9,6 +9,7 @@ mod confirm;
 mod core_env;
 mod core_host;
 mod core_log;
+mod feature_rebuild;
 mod foreign_core;
 mod fs_ops;
 mod fs_watch;
@@ -268,6 +269,7 @@ macro_rules! product_handlers {
     ($($spike:path),* $(,)?) => {
         tauri::generate_handler![
                 core_host::core_status,
+                feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
                 core_log::core_log_clear,
                 secrets::secrets_status,

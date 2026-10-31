@@ -18,4 +18,7 @@ export { getTheme, setTheme, subscribeTheme, seedThemeFromHost, hasStoredTheme, 
 export { projectStore } from "./project-store";
 export { devToolsEnabled, setDevTools, subscribeDevTools, SECTIONS, type SectionId } from "./sections";
 export { HOME_CHOICES, DEFAULT_HOME, readHome, storeHome } from "./landing";
+export * from "./features";
+export { featureStore, type FeatureSnapshot } from "./feature-store";
+export { useFeatures } from "./use-shell";
 export { ChatDockSlot, installChatDock, type ChatDockProps } from "./chat-dock";

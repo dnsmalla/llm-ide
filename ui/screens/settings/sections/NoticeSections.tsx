@@ -27,7 +27,6 @@ const make = (id: string): ComponentType => {
   };
 };
 
-export const BuildGroup = make("build");
 export const MobileGroup = make("mobile");
 export const LoopDefaultsGroup = make("loop-defaults");
 export const SelfHealGroup = make("self-heal");

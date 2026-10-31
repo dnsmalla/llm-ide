@@ -21,7 +21,7 @@ before(async () => {
   m = await import(`${outfile}?t=${Date.now()}`);
 });
 
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark" };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [] };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {

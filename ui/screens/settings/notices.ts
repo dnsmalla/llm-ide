@@ -19,12 +19,6 @@ export interface GroupNotice {
 }
 
 export const NOTICES: Readonly<Record<string, GroupNotice>> = {
-  build: {
-    mac: "Rebuilds the Mac app from source with only the features you enabled compiled in (Apply & Rebuild), and shows what this binary was built with.",
-    status: "Managed in the Mac app",
-    meanwhile: "The desktop app is built and packaged separately; nothing here changes its contents. Use the Mac app on a source checkout if you need a reduced build.",
-    blockedBy: "Swift-only: Apply & Rebuild drives the Swift package build and swaps the installed .app. No desktop equivalent is planned.",
-  },
   mobile: {
     mac: "Hosts the iPhone companion: enable it, start on launch, port, pairing QR and PIN, paired devices, phone permissions and the connection log.",
     status: "Managed in the Mac app",
@@ -60,7 +54,9 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   paths:
     "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:
-    "On the Mac this group also holds the workspace profile (feature presets) and per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
+    "On the Mac this group also holds per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the full feature profile (presets and switches); toolbar visibility is not offered.",
+  build:
+    "Apply & Rebuild needs a source checkout and the Rust/Node toolchains; a distributed build has no source tree, so the button is absent there. It rebuilds the app and restarts it when ready.",
   "doc-gen":
     "On the Mac a beta switch chooses between the server and the folder on disk. The desktop has only the server path (the core's docs routes over the project's templates/ and commands/ folders), so the switch has one state and is not shown.",
   server:

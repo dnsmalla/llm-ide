@@ -29,9 +29,14 @@ pub const MAX_BYTES: usize = 16 * 1024;
 
 /// The feature keys the server knows (`FEATURE_KEYS` in `extension/core/config.mjs`). Used only to turn
 /// "everything except terminal" into an explicit list; a test pins the order and content.
-const FEATURE_KEYS: [&str; 8] = [
+pub(crate) const FEATURE_KEYS: [&str; 8] = [
     "agent_chat", "file_explorer", "code_graph_3d", "gantt_issues", "terminal", "doc_gen", "mobile_sync", "auto_tasks",
 ];
+
+/// True for a key the server knows (`FEATURE_KEYS`).
+pub(crate) fn is_feature_key(k: &str) -> bool {
+    FEATURE_KEYS.contains(&k)
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -61,11 +66,13 @@ pub struct Prefs {
     pub learn: bool,
     pub terminal: bool,
     pub theme: Theme,
+    /// The feature profile (an explicit subset of `FEATURE_KEYS`; empty = every feature, the historical behaviour).
+    pub features: Vec<String>,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark }
+        Self { lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark, features: Vec::new() }
     }
 }
 
@@ -80,6 +87,20 @@ pub struct PrefsPatch {
     pub learn: Option<bool>,
     pub terminal: Option<bool>,
     pub theme: Option<Theme>,
+    pub features: Option<Vec<String>>,
+}
+
+/// An explicit feature list: only keys the server knows, in the canonical order, with `agent_chat` always on.
+fn normalize_features(list: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = FEATURE_KEYS
+        .iter()
+        .filter(|k| list.iter().any(|x| x == *k))
+        .map(|k| (*k).to_string())
+        .collect();
+    if !out.iter().any(|k| k == "agent_chat") {
+        out.insert(0, "agent_chat".to_string());
+    }
+    out
 }
 
 impl Prefs {
@@ -92,6 +113,22 @@ impl Prefs {
         if let Some(v) = p.learn { n.learn = v; }
         if let Some(v) = p.terminal { n.terminal = v; }
         if let Some(v) = p.theme { n.theme = v; }
+        if let Some(v) = &p.features {
+            if v.is_empty() {
+                // Empty stays "inherit every feature"; the Terminal flag is left as it was.
+                n.features = Vec::new();
+            } else {
+                n.features = normalize_features(v);
+                // An explicit profile owns the Terminal feature; keep the legacy flag in step so both views agree.
+                n.terminal = n.features.iter().any(|k| k == "terminal");
+            }
+        } else if p.terminal.is_some() && !n.features.is_empty() {
+            // The legacy Terminal switch (Settings > Workspace > Features) edits the same profile.
+            n.features.retain(|k| k != "terminal");
+            if n.terminal {
+                n.features = normalize_features(&[n.features.clone(), vec!["terminal".to_string()]].concat());
+            }
+        }
         // Cap and compress only act while the router is on; never store a state that cannot mean what it says.
         if !n.router {
             n.cap = false;
@@ -109,6 +146,8 @@ pub fn parse(text: &str) -> Prefs {
     serde_json::from_str::<Prefs>(text).map(|p| Prefs::default().patched(&PrefsPatch {
         lta_mode: Some(p.lta_mode), router: Some(p.router), cap: Some(p.cap), compress: Some(p.compress),
         learn: Some(p.learn), terminal: Some(p.terminal), theme: Some(p.theme),
+        // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
+        features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
     })).unwrap_or_default()
 }
 
@@ -130,12 +169,29 @@ pub fn save_to(dir: &Path, prefs: &Prefs) -> Result<(), String> {
 /// `LLMIDE_FEATURES` for the core and the Terminal gate: the host's own value, minus `terminal` when
 /// the pref turns it off. `None` = leave it unset (every feature on). Unset or empty means all.
 pub fn effective_features(host_env: Option<&str>, terminal: bool) -> Option<String> {
+    effective_features_with(host_env, terminal, &[])
+}
+
+/// `LLMIDE_FEATURES` for the core: an explicit profile wins over the host's own value. Dependencies are enforced
+/// in the UI (the same rule as the Mac's `AppFeature.validated`); here the list is filtered to known keys, chat is
+/// kept, and `terminal` follows the Terminal switch. Never an empty value (that would read as "all").
+pub fn effective_features_with(host_env: Option<&str>, terminal: bool, features: &[String]) -> Option<String> {
+    if !features.is_empty() {
+        let mut list: Vec<&str> = FEATURE_KEYS
+            .iter()
+            .copied()
+            .filter(|k| features.iter().any(|x| x == k) && (terminal || *k != "terminal"))
+            .collect();
+        if !list.contains(&"agent_chat") {
+            list.insert(0, "agent_chat");
+        }
+        return Some(list.join(","));
+    }
     let base: Option<Vec<&str>> = host_env.map(str::trim).filter(|v| !v.is_empty()).map(|v| v.split(',').map(str::trim).filter(|k| !k.is_empty()).collect());
     if terminal {
         return host_env.map(str::trim).filter(|v| !v.is_empty()).map(String::from);
     }
     let list: Vec<&str> = base.unwrap_or_else(|| FEATURE_KEYS.to_vec()).into_iter().filter(|k| *k != "terminal").collect();
-    // Never an empty value (that would read as "all"); chat is always on.
     Some(if list.is_empty() { "agent_chat".to_string() } else { list.join(",") })
 }
 
@@ -148,8 +204,8 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
         if p.compress { v.push(("LLMIDE_ROUTER_COMPRESS", "on".to_string())); }
     }
     if p.learn { v.push(("LLMIDE_ROUTER_LEARN", "on".to_string())); }
-    if !p.terminal {
-        if let Some(f) = effective_features(host_features, false) { v.push(("LLMIDE_FEATURES", f)); }
+    if !p.terminal || !p.features.is_empty() {
+        if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
     }
     v
 }
@@ -243,7 +299,8 @@ pub fn archive_policy() -> crate::chat_archive::ArchivePolicy {
 
 /// The Terminal feature for this launch: the host's own `LLMIDE_FEATURES` AND the pref.
 pub fn terminal_enabled(host_features: Option<&str>) -> bool {
-    let eff = effective_features(host_features, launch().terminal);
+    let launch = launch();
+    let eff = effective_features_with(host_features, launch.terminal, &launch.features);
     crate::pty::feature_enabled(eff.as_deref(), "terminal")
 }
 
@@ -287,6 +344,59 @@ mod tests {
         assert!(!off.router && !off.cap && !off.compress);
         let stray = Prefs::default().patched(&PrefsPatch { cap: Some(true), ..Default::default() });
         assert!(!stray.cap, "cap alone cannot be stored while the router is off");
+    }
+
+    #[test]
+    fn an_explicit_profile_is_normalized_ordered_and_always_keeps_chat() {
+        let p = Prefs::default().patched(&PrefsPatch {
+            features: Some(vec!["doc_gen".into(), "nope".into(), "agent_chat".into(), "file_explorer".into(), "doc_gen".into()]),
+            ..Default::default()
+        });
+        assert_eq!(p.features, ["agent_chat", "file_explorer", "doc_gen"], "known keys only, canonical order, chat forced");
+        assert!(!p.terminal, "an explicit profile without the terminal key turns the legacy flag off");
+        let all = Prefs::default().patched(&PrefsPatch { features: Some(vec!["file_explorer".into()]), ..Default::default() });
+        assert_eq!(all.features, ["agent_chat", "file_explorer"]);
+        let empty = Prefs::default().patched(&PrefsPatch { features: Some(vec![]), ..Default::default() });
+        assert!(empty.features.is_empty(), "an empty list stays 'inherit every feature'");
+    }
+
+    #[test]
+    fn the_terminal_switch_and_the_profile_stay_in_step() {
+        let with_terminal = Prefs::default().patched(&PrefsPatch {
+            features: Some(vec!["agent_chat".into(), "file_explorer".into(), "terminal".into()]),
+            ..Default::default()
+        });
+        assert!(with_terminal.terminal);
+        let off = with_terminal.patched(&PrefsPatch { terminal: Some(false), ..Default::default() });
+        assert!(!off.terminal);
+        assert!(!off.features.iter().any(|k| k == "terminal"), "turning Terminal off removes it from the profile");
+        let back = off.patched(&PrefsPatch { terminal: Some(true), ..Default::default() });
+        assert!(back.features.iter().any(|k| k == "terminal"));
+    }
+
+    #[test]
+    fn an_explicit_profile_sets_llmide_features_for_the_core() {
+        let p = Prefs::default().patched(&PrefsPatch {
+            features: Some(vec!["agent_chat".into(), "file_explorer".into(), "terminal".into()]),
+            ..Default::default()
+        });
+        let v = core_env_pairs(&p, Some("agent_chat,doc_gen"));
+        assert_eq!(v, vec![("LLMIDE_FEATURES", "agent_chat,file_explorer,terminal".to_string())]);
+        // Terminal off removes it from the explicit profile too.
+        let off = p.patched(&PrefsPatch { terminal: Some(false), ..Default::default() });
+        assert_eq!(core_env_pairs(&off, None), vec![("LLMIDE_FEATURES", "agent_chat,file_explorer".to_string())]);
+        // The profile wins over the host's own value.
+        let two = effective_features_with(None, true, &["agent_chat".into(), "auto_tasks".into()]).unwrap();
+        assert_eq!(two, "agent_chat,auto_tasks");
+    }
+
+    #[test]
+    fn a_legacy_file_without_features_keeps_its_terminal_setting() {
+        let text = r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":false,"theme":"dark"}"#;
+        let p = parse(text);
+        assert!(!p.terminal);
+        assert!(p.features.is_empty());
+        assert_eq!(effective_features_with(None, p.terminal, &p.features).unwrap(), "agent_chat,file_explorer,code_graph_3d,gantt_issues,doc_gen,mobile_sync,auto_tasks");
     }
 
     #[test]

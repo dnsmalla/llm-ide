@@ -4,9 +4,10 @@ import { ActivityBell } from "./ActivityBell";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
-import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
+import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
 import { HOME_CHOICES, readHome, storeHome } from "./landing";
 import { SECTIONS, type SectionId } from "./sections";
+import { isSectionEnabled } from "./features";
 import { safeText } from "./safe-text";
 
 const ProjectSwitcher = memo(function ProjectSwitcher() {
@@ -49,14 +50,16 @@ const ProjectSwitcher = memo(function ProjectSwitcher() {
 
 /** Which section a project lands on (stored per viewer; default Explorer). */
 const HomePicker = memo(function HomePicker() {
+  const features = useFeatures();
   const [home, setHome] = useState<SectionId>(() => readHome());
+  const choices = HOME_CHOICES.filter((id) => isSectionEnabled(id, features.usable));
   const label = SECTIONS.find((s) => s.id === home)?.label ?? "Explorer";
   return (
     <MenuButton
       ariaLabel={`Home page: ${label}. Choose the section a project opens on`}
       className="sh-statusbar-item"
       up
-      items={HOME_CHOICES.map((id) => ({
+      items={choices.map((id) => ({
         id,
         label: SECTIONS.find((s) => s.id === id)?.label ?? id,
         checked: id === home,

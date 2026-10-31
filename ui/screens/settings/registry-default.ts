@@ -16,7 +16,7 @@ const trust = () => import("./sections/ExtensionsTrustSection.tsx");
 
 const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   workspace: dflt(() => import("./sections/WorkspaceGroup.tsx")),
-  build: named(notices, "BuildGroup"),
+  build: dflt(() => import("./sections/BuildSection.tsx")),
   server: dflt(() => import("./sections/ServerSection.tsx")),
   connections: dflt(() => import("./sections/ConnectionsSection.tsx")),
   updates: dflt(() => import("./sections/UpdatesSection.tsx")),
