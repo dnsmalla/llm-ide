@@ -223,7 +223,7 @@ What the iPhone does meanwhile: **the Mac Swift app keeps hosting `:3006`** (fea
 | A3 | **Move Auto Tasks to the SDK engine** (confined, metered, `/kb/loop/agent-run` style); keep the CLI path only for `codex` and `gemini` and only as an explicit opt-in per task | The CLI path runs a user-login binary with broad tools; the SDK path is confined and metered. Fewer unconfined processes is the secure answer |
 | A4 | Nothing is scheduled on the relay; the relay may **queue a request** for the desktop to drain when on | ADR 0018: desktop is the worker; no unattended cloud execution |
 | A5 | Repair approvals for edits outside scope stay **desktop-only**; phone may approve only read-only snapshot approvals already opted in | Relay permission re-check is unproven |
-| A6 | Keep all 13 tasks for the move; mark `generateDoc`, `reviewConflicts`, `generateKnowledge` as thin triggers of their kit's route | Do not decide product scope inside a port; ask the user about daily use before K4 |
+| A6 | Keep all 13 tasks for the move until the usage evidence is in (audit 2026-10-31 proposes 5 KEEP, 5 MERGE, 3 REMOVE, none removed yet); mark `generateDoc`, `reviewConflicts`, `generateKnowledge` as thin triggers of their kit's route | Do not decide product scope inside a port; ask the user about daily use before K4 |
 | A7 | FIFO per git root by default; worktree parallelism stays opt-in | Matches `LoopRunQueue`; fewer race surfaces |
 | A8 | **One shared job runner** for Loop, Auto Tasks and later ingest | The plan says job runner is core |
 
@@ -295,8 +295,8 @@ Fake model and recorded fixtures only in CI; hostile-input fixtures for every pa
 
 1. **3D graph in the macOS exit gate?** Recommend no: 2D in the gate, WebGL 3D right after (option B); Swift 3D stays meanwhile.
 2. **Live helper (Swift binary in the bundle) vs pure Rust capture?** Recommend the helper now, Rust later; approve the one allowed Swift addition (parity work under the freeze).
-3. **Move Auto Tasks from the `claude` CLI to the SDK engine (A3)?** Recommend yes; keep `codex` and `gemini` as opt-in CLI tasks only if you still use them (do you?).
+3. **Move Auto Tasks from the `claude` CLI to the SDK engine (A3)?** Answered 2026-10-31: **yes for Claude (SDK becomes the default engine); multi-engine is kept**: codex, gemini and the others stay first-class (CLI-login and API-key paths both), not opt-in extras. The engine interface and the Node gaps (write mode for codex/gemini, metering parity, key vs login) are in [the Auto Tasks audit](2026-10-31-auto-tasks-audit.md) section 4.
 4. **Issues provider tokens into the core vault (W2)?** Recommend yes with the one-way Keychain migration; Swift keeps its own copy.
-5. **Which of the 13 Auto Tasks do you use daily (A6)?** Recommend deciding before A7 so unused ones are not ported.
-6. **Is it acceptable that the phone works only through the Swift app until the relay?** Recommend yes.
+5. **Which of the 13 Auto Tasks do you use daily (A6)?** Answered in part 2026-10-31: the phone-command surface is kept (what Auto Tasks are for) and removals wait for evidence. The audit proposes 5 KEEP, 5 MERGE, 3 REMOVE (generateKnowledge, generateDoc, updatePlanStatus) and gives you `node scripts/auto-task-usage.mjs` to print your own per-task run counts; decide per task before A7 ([audit](2026-10-31-auto-tasks-audit.md) sections 2, 5, 7, 8).
+6. **Is it acceptable that the phone works only through the Swift app until the relay?** Recommend yes. The target phone surface is a job API (enqueue named tasks with typed args, list, cancel, status, result) with tiers: read-only `review` from the native app with no approval, everything that writes or posts approved on the desktop ([audit](2026-10-31-auto-tasks-audit.md) section 3).
 7. **When will you record real meetings** so the live archive ack can be switched on?
