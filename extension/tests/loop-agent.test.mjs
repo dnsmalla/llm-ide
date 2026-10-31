@@ -248,6 +248,27 @@ test('runLoopAgent: offers file tools + find-code only — no shell, no network,
   assert.equal(o.env.LLMIDE_JWT_SECRET, undefined, 'the server\'s own secrets never reach the subprocess');
 }));
 
+test('runLoopAgent readOnly (the command bus review kind): no Edit/Write offered, a write is refused and nothing lands', () => withKey(async () => {
+  const capture = {};
+  const target = path.join(REPO, 'src', 'a.txt');
+  const out = await runLoopAgent({
+    message: 'review', root: REPO, userId: user.id, readOnly: true,
+    queryFactory: toolPlayingQuery(capture, [
+      { tool: 'Write', input: { file_path: target, content: 'pwn\n' }, run: () => { throw new Error('a read-only run must never write'); } },
+      { tool: 'Edit', input: { file_path: target, old_string: 'old', new_string: 'pwn' }, run: () => { throw new Error('a read-only run must never edit'); } },
+    ]),
+  }, noSkill);
+  const o = capture.options;
+  assert.ok(!o.tools.includes('Edit') && !o.tools.includes('Write'), 'write tools are not offered');
+  assert.ok(o.tools.includes('Read') && o.tools.includes('Grep'));
+  assert.ok(o.disallowedTools.includes('Write') && o.disallowedTools.includes('Edit'));
+  assert.deepEqual(out.changedPaths, []);
+  assert.ok(out.denied.length >= 2, 'both writes were refused');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'old\n');
+  assert.ok(loopToolRefusal('Edit', { file_path: target }, REPO, { readOnly: true }));
+  assert.equal(loopToolRefusal('Read', { file_path: target }, REPO, { readOnly: true }), null);
+}));
+
 test('runLoopAgent: an edit inside repoRoot lands and is reported repo-relative; outside edits are refused and do not land', () => withKey(async () => {
   const capture = {};
   const outsideTarget = path.join(OUTSIDE, 'written.txt');

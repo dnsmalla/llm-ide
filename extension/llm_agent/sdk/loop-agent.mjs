@@ -276,7 +276,7 @@ export function withSecretExclusions(input) {
  * or null when it may. The single confinement rule both the PreToolUse hook
  * and canUseTool apply.
  */
-export function loopToolRefusal(toolName, input, roots) {
+export function loopToolRefusal(toolName, input, roots, { readOnly = false } = {}) {
   const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
   const where = allowed.join(', ');
   if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
@@ -285,6 +285,8 @@ export function loopToolRefusal(toolName, input, roots) {
   // Read-only and path-free: it returns names and repo-relative paths, and
   // every follow-up Read is judged by the rules below.
   if (toolName === LOOP_FIND_CODE_TOOL) return null;
+  // A read-only run (the command bus's review kind) never writes: Edit and Write are refused outright.
+  if (readOnly && WRITE_TOOLS.has(toolName)) return `${toolName} is not available in a read-only run.`;
   const inside = (p) => writePathGate(p, allowed) !== 'blocked';
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
     if (!inside(input?.file_path)) {
@@ -496,7 +498,7 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
 export async function runLoopAgent(
   {
     message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
-    allowAmbientAuth = false, queryFactory = sdkQueryFactory,
+    allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
@@ -573,7 +575,7 @@ export async function runLoopAgent(
   };
 
   const preToolUse = async (input) => {
-    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots);
+    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots, { readOnly });
     // Refused calls never count as repeats (only on the error streak).
     const verdict = reason ? { action: 'ok' } : progress.onCall(input?.tool_name, input?.tool_input);
     if (verdict.action !== 'ok') {
@@ -624,7 +626,7 @@ export async function runLoopAgent(
   };
   // Decides instead of asking: never parks, never prompts.
   const canUseTool = async (toolName, input) => {
-    const reason = loopToolRefusal(toolName, input, roots);
+    const reason = loopToolRefusal(toolName, input, roots, { readOnly });
     if (reason) {
       refuse(toolName, reason);
       return { behavior: 'deny', message: reason };
@@ -644,11 +646,11 @@ export async function runLoopAgent(
     // user-scope / plugin servers, and `mcp__*` can no longer be denied
     // wholesale (it would hide find-code too).
     strictMcpConfig: true,
-    tools: [...LOOP_AGENT_TOOLS],
+    tools: readOnly ? LOOP_AGENT_TOOLS.filter((t) => !WRITE_TOOLS.has(t)) : [...LOOP_AGENT_TOOLS],
     // Nothing is pre-approved: every call the SDK would ask about reaches
     // canUseTool, which applies the confinement rule.
     allowedTools: [],
-    disallowedTools: [...LOOP_AGENT_DISALLOWED],
+    disallowedTools: readOnly ? [...LOOP_AGENT_DISALLOWED, ...WRITE_TOOLS] : [...LOOP_AGENT_DISALLOWED],
     permissionMode: 'default',
     canUseTool,
     // + the native-tool output cap (tool-output-cap.mjs) — a no-op for this
