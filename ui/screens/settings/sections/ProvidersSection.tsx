@@ -7,6 +7,7 @@ import { describeError } from "../errors.ts";
 import { filterBy } from "../virtual.ts";
 import type { ModelList } from "../decoders.ts";
 import { Button, ErrorText, Field, SecretInput, Switch, VirtualList } from "../ui.tsx";
+import { BuiltinProviders } from "./BuiltinProviders.tsx";
 
 export default function ProvidersSection() {
   const { client } = useEnv();
@@ -22,6 +23,7 @@ export default function ProvidersSection() {
 
   return (
     <div className="st-stack">
+      <BuiltinProviders />
       <div className="st-row">
         <input className="st-input st-grow" type="search" aria-label="Filter connections" placeholder="Filter connections" value={query} onChange={(e) => setQuery(e.target.value)} />
         <Button label="Reload connections" onClick={() => void model.load()} disabled={s.phase === "loading"}><RefreshIcon /> Reload</Button>

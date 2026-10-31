@@ -28,6 +28,7 @@ before(async () => {
     entryPoints: {
       screen: join(SETTINGS, "SettingsScreen.tsx"),
       providers: join(SETTINGS, "sections/ProvidersSection.tsx"),
+      builtin: join(SETTINGS, "sections/BuiltinProviders.tsx"),
       history: join(SETTINGS, "sections/AgentHistorySection.tsx"),
       ui: join(SETTINGS, "ui.tsx"),
       context: join(SETTINGS, "context.tsx"),
@@ -66,7 +67,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -291,6 +292,21 @@ test("VirtualList: 5,000 items render a small window with list semantics", () =>
   const rendered = (out.match(/role="listitem"/g) ?? []).length;
   assert.ok(rendered > 0 && rendered < 60, `rendered ${rendered}`);
   assert.match(out, /aria-setsize="5000"/);
+});
+
+test("Built-in providers: Claude subscription and the CLI rows, with no key fields", () => {
+  const out = html(h(m.context.SettingsEnvProvider, { env: env({}) }, h(m.builtin.BuiltinProviders)));
+  assert.match(out, /Built-in providers/);
+  assert.match(out, /Claude \(subscription \/ CLI login\)/);
+  assert.match(out, /OpenAI \(Codex CLI\)/);
+  assert.match(out, /Google Gemini \(Gemini CLI\)/);
+  assert.match(out, /DeepSeek/);
+  assert.match(out, /claude login/);
+  assert.match(out, /aria-label="Check the claude CLI"/);
+  assert.match(out, /aria-label="Check the codex CLI"/);
+  assert.match(out, /aria-label="Check the gemini CLI"/);
+  assert.match(out, /Checking\.\.\./);
+  assert.ok(!/<input|<textarea|<select/.test(out), "no key or command fields in the built-in rows");
 });
 
 test("ProvidersSection with a loaded catalog: connections listed with names, key status from hasKey only, no key text", async () => {
