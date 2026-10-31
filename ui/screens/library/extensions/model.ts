@@ -358,7 +358,26 @@ export class ExtensionsModel {
         this.info(`${item.name} changed while you were deciding. Switch it on again to review it.`);
         return;
       }
-      await this.toggle(item, true, consents);
+      // The core binds consents per commit but the toggle request carries no commit field, so re-read the installed
+      // list right before enabling: the local copy may be stale, and consent given for commit A must not enable B.
+      let latest: InstalledItem | undefined;
+      try {
+        latest = (await this.api.installed(this.signal)).items.find((i) => i.id === request.itemId);
+      } catch (e) {
+        this.fail(e);
+        return;
+      }
+      if (!latest) {
+        await this.loadInstalled();
+        this.info(`${request.itemName} is no longer installed, so nothing was changed.`);
+        return;
+      }
+      if (latest.pinnedCommit !== request.commit) {
+        await this.loadInstalled();
+        this.info(`${item.name} changed while you were deciding. Switch it on again to review it.`);
+        return;
+      }
+      await this.toggle(latest, true, consents);
       return;
     }
     if (item.pinnedCommit !== request.from) {

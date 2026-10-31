@@ -492,3 +492,19 @@ test("dispose aborts in-flight work and later answers change nothing", async () 
   await p;
   assert.equal(model.getSnapshot().items.length, 0);
 });
+
+test("M8: the installed list is re-read right before enabling; a commit that moved server-side refuses (stale local list)", async () => {
+  const { core, model, setItems } = setup({ [`POST ${P}/toggle`]: () => ok({ ok: true, item: runnerBody() }) });
+  await model.init();
+  await model.requestEnable(runner(model));
+  model.tick("hook", true);
+  // The server-side pin moves after the list was read and the sheet opened; the local list is NOT refreshed.
+  setItems([runnerBody({ pinnedCommit: F })]);
+  assert.notEqual(runner(model).pinnedCommit, F);
+  const reads = () => core.calls.filter((c) => c.method === "GET" && c.path === `${P}/installed`).length;
+  const r0 = reads();
+  await model.confirmConsent();
+  assert.ok(reads() > r0, "re-fetched installed before enabling");
+  assert.equal(posts(core, "toggle").length, 0);
+  assert.match(model.getSnapshot().notice!.text, /changed while you were deciding/);
+});
