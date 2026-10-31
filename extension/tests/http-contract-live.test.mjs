@@ -268,6 +268,10 @@ function childEnv(port, secrets) {
     LLMIDE_HOST: '127.0.0.1',
     LLMIDE_PORT: String(port),
     LLMIDE_DB_PATH: join(tmpDir, 'kb.db'),
+    // Connector/plugin/MCP selection state otherwise writes the developer's real
+    // ~/Library/.../plugins directory (and a restricted session cannot write it, turning
+    // /auth/me/connectors into a 500). Keep every piece of state in the temp dir.
+    LLMIDE_PLUGIN_DIR: join(tmpDir, 'plugins'),
     LLMIDE_ENGINE_PREWARM: '0',
     LLMIDE_BACKUP_INTERVAL_HOURS: '0',
     LLMIDE_JWT_SECRET: secrets.jwt,

@@ -10,6 +10,10 @@
   `agent_chat,mobile_sync` (mobile-only) all compile with `--disable-sandbox`.
 - Contract gates: `make contract-gates` passes (HTTP inventory regenerated after the issues-token change; os-view
   bundle current).
+- Feature matrix: **all 10 server rows pass** (each disabled set boots, `/health` and route gating correct, and the
+  live contract in assert mode is 570–602/0 per row). Fix: the live contract now points `LLMIDE_PLUGIN_DIR` at its
+  temp dir, so connector/plugin/MCP selection state no longer writes the developer's real home (a restricted
+  session made that a 500 and failed five fixtures).
 
 ### Fixed in the Mac app
 
