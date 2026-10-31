@@ -84,7 +84,7 @@ final class ExtensionsCatalogPresentationTests: XCTestCase {
 
     func testErrorHints() {
         let allowed = ExtensionsCatalogPresentation.message(forCode: "SOURCE_NOT_ALLOWED", serverMessage: "x")
-        XCTAssertTrue(allowed.contains("LLMIDE_EXT_ALLOWED_SOURCES"))
+        XCTAssertTrue(allowed.contains("Extension sources"))
         XCTAssertTrue(ExtensionsCatalogPresentation.message(forCode: "CATALOG_DISABLED", serverMessage: "").contains("turned off"))
         XCTAssertEqual(ExtensionsCatalogPresentation.message(forCode: "WHATEVER", serverMessage: "boom"), "boom")
     }
@@ -224,7 +224,7 @@ final class ExtensionsCatalogModelTests: XCTestCase {
         model.installURL = "https://github.com/acme/runner"
         await model.install()
         XCTAssertTrue(model.noticeIsError)
-        XCTAssertTrue(model.notice?.contains("LLMIDE_EXT_ALLOWED_SOURCES") == true)
+        XCTAssertTrue(model.notice?.contains("Extension sources") == true)
         XCTAssertNil(model.lastInstall)
     }
 

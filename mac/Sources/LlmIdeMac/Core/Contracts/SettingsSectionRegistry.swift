@@ -27,6 +27,8 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case docGen
     /// App group, after Doc Gen: agent history storage, retention, clear and compact.
     case agentHistory
+    /// App group, after Agent history: Extensions' folder trust and install-source allowlist cards.
+    case extensions
 }
 
 /// Scroll anchors a deep link can post with `.scrollSettingsToCard`.

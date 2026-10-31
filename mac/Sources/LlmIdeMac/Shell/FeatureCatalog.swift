@@ -147,6 +147,13 @@ enum FeatureCatalog {
         registry.register(slot: .agentHistory, id: "chat-archive", order: 10) {
             AnyView(ChatArchiveSettingsCard())
         }
+        // Extensions' folder trust list and install-source allowlist. Extensions is never build-excluded.
+        registry.register(slot: .extensions, id: "workspace-trust") {
+            AnyView(WorkspaceTrustSettingsCard(api: api))
+        }
+        registry.register(slot: .extensions, id: "extension-allowlist", order: 10) {
+            AnyView(ExtensionAllowlistSettingsCard(api: api))
+        }
         #if FEATURE_AUTOTASK
         registry.register(slot: .loopDefaults, id: "loop-defaults") {
             AnyView(LoopNewProjectDefaultsPanel())

@@ -87,13 +87,13 @@ enum ExtensionsCatalogPresentation {
     // MARK: Errors
 
     /// A short sentence for an API error, with the operator hint where the
-    /// fix is outside the app (the Settings screen for the allowlist is pending).
+    /// fix is outside the app (the allowlist lives in Settings under Extension sources).
     static func message(forCode code: String, serverMessage: String) -> String {
         switch code {
         case "CATALOG_DISABLED":
             return "The extension catalog is turned off on this server (LLMIDE_EXT_CATALOG=off). Installing, updating and refreshing are unavailable until it is turned on."
         case "SOURCE_NOT_ALLOWED":
-            return "This source is not on the allowed list. To allow it, add owner/repo (a glob such as owner/* works; */* allows any GitHub repository) to the LLMIDE_EXT_ALLOWED_SOURCES environment variable of the server and restart the backend. A Settings screen for this is not available yet."
+            return "This source is not on the allowed list. Add owner/repo (or owner/*) in Settings under Extension sources, then try again. If the setting refuses it, the operator's limit does not cover it and the operator has to allow it on the server."
         case "SOURCE_BLOCKED":
             return "This source is blocked and cannot be installed."
         case "ALREADY_INSTALLED":
@@ -146,7 +146,7 @@ enum ExtensionsCatalogPresentation {
         case "package_launcher": return "Browse only: it would need a package launcher (npx/uvx) that is never run."
         case "registry_install_not_supported": return "Browse only: MCP registry entries cannot be installed from here. Open the repository link to set it up yourself."
         case "unsupported_source": return "Browse only: its source is not a GitHub repository path this screen can install."
-        case "source_not_allowed": return "Not allowed: add the repository to LLMIDE_EXT_ALLOWED_SOURCES on the server to install it."
+        case "source_not_allowed": return "Not allowed: add the repository in Settings under Extension sources to install it."
         case .some(let r) where !r.isEmpty: return "Browse only (\(r))."
         default: return "Browse only."
         }
