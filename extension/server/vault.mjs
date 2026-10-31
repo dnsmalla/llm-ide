@@ -182,6 +182,12 @@ const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
 // registry's own SLUG_RE shape.
 const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 
+// Google connector credentials, one set per connected Google account:
+// `google.acct.<accountId>.{refreshToken,clientId,clientSecret}` where accountId is 12 hex characters derived
+// from the Google subject id (connectors/google/google-auth.mjs). Written only by the OAuth flow's completion and
+// by the disconnect flow; NOT settable through the generic POST /auth/me/secrets (isUserSettableVaultKey).
+const GOOGLE_ACCOUNT_KEY_RE = /^google\.acct\.[a-f0-9]{12}\.(refreshToken|clientId|clientSecret)$/;
+
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
@@ -207,6 +213,7 @@ function ensureAllowed(key) {
   if (ALLOWED_KEYS.has(key)) return;
   if (typeof key === 'string' && CUSTOM_PROVIDER_KEY_RE.test(key)) return;
   if (typeof key === 'string' && MCP_CREDENTIAL_KEY_RE.test(key)) return;
+  if (typeof key === 'string' && GOOGLE_ACCOUNT_KEY_RE.test(key)) return;
   throw new Error(`Unknown vault key: ${key}`);
 }
 

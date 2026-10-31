@@ -1043,6 +1043,8 @@ export function deleteUserCascade(userId) {
       'workspace_trust', 'ext_source_allowlist',
       // migration 0058 — command bus (commands, per-command event log, per-kind enable flags)
       'bus_commands', 'job_events', 'bus_kind_flags',
+      // migration 0059 — Google connector accounts and sync cursors (tokens live in the vault, deleted with user_secrets)
+      'google_accounts', 'connector_sync_state',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
