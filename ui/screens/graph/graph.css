@@ -64,3 +64,13 @@
 .gr-open { display: flex; flex-direction: column; gap: var(--tok-space-xs); align-items: flex-start; width: 100%; margin-top: var(--tok-space-sm); }
 .gr-open .gr-field { width: 100%; }
 @media (prefers-reduced-motion: reduce) { .gr-canvas-wrap * { transition: none !important; } }
+/* Left-panel file tree (Mac FileTreePanel position). */
+.gr-tree { display: flex; flex-direction: column; gap: var(--tok-space-xs); border-bottom: 1px solid var(--tok-color-border); padding-bottom: var(--tok-space-sm); }
+.gr-tree-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); }
+.gr-tree-title { font-size: var(--tok-type-caption-size); font-weight: var(--tok-type-caption-weight); text-transform: uppercase; letter-spacing: 0.06em; color: var(--tok-color-text-muted); }
+.gr-tree-body { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+.gr-dir-summary { cursor: pointer; font-size: var(--tok-type-mono-size); color: var(--tok-color-text-muted); padding: 1px 0; }
+.gr-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); text-align: left; padding: 1px 0 1px 14px; cursor: pointer; border-radius: var(--tok-radius-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gr-file:hover { background: var(--tok-color-surface-2); }
+.gr-file[data-on] { background: var(--tok-color-accent); color: var(--tok-color-body); }
+.gr-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }

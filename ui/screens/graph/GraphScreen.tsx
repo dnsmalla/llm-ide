@@ -5,6 +5,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { Controls } from "./Controls.tsx";
 import { NodeDetails } from "./Details.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
+import { GraphFileTree } from "./FileTree.tsx";
 import { NodeList } from "./NodeList.tsx";
 import { EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
 import { buildAdjacency, communitySummary } from "./filters.ts";
@@ -82,6 +83,12 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView }
       {fatal && <StatusBanner severity="error" message={`${fatal} The Nodes tab still works.`} />}
       <div className="gr-body">
         <div className="gr-side">
+          <GraphFileTree
+            paths={model.paths}
+            selected={s.query}
+            onSelect={(path) => store.setQuery(path)}
+            onClear={() => store.setQuery("")}
+          />
           <label className="gr-field">
             <span>Search nodes</span>
             <input type="search" value={s.query} spellCheck={false} placeholder="Name or path" onChange={(e) => store.setQuery(e.target.value)} />
