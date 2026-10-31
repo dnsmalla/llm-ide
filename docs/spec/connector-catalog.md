@@ -31,8 +31,8 @@ Not covered: Box, Slack, Email and Git ingestion internals (see [knowledge-base]
 
 | id | authKind | pipelineReady | Ingestion path |
 |---|---|---|---|
-| `gdrive` | `google-oauth` | false | none yet |
-| `gcal` | `google-oauth` | false | none yet |
+| `gdrive` | `google-oauth` | false | REST connector built, see [google-connectors](google-connectors.md); the catalog flag and the Mac screen are not wired (slice G5/G6) |
+| `gcal` | `google-oauth` | false | REST connector built, see [google-connectors](google-connectors.md); the catalog flag and the Mac screen are not wired (slice G5/G6) |
 | `miro` | `miro-oauth` | true | MCP-backed (section 4) |
 | `box` | `box-ccg` | true | Pattern A, `extension/connectors/box.mjs` |
 | `slack` | `slack-oauth` | true | `extension/connectors/slack-source.mjs` |
@@ -121,12 +121,13 @@ Server: `extension/tests/connector-catalog.test.mjs`, `connector-state.test.mjs`
 | Catalog, per-user selection, routes, Library add sheet, selection-gated Settings | Shipped, with tests |
 | Miro OAuth and fetch plumbing | Shipped, with tests against fixtures |
 | Miro tool names `list_boards`, `get_board_items`, argument `board_id`, `itemsPath`, `textFields` | **Unverified guesses** (`extension/connectors/mcp-connector-defs.mjs`). Never run against the real server. Confirm with a connected `POST /kb/mcp-connector/test` and edit the string literals |
+| gdrive, gcal ingestion over REST | **Built as libraries and `/kb/google/*` routes** (API 103, [google-connectors](google-connectors.md)); not wired into the catalog or any screen. The MCP route below stays unbuilt |
 | gdrive, gcal MCP ingestion | **Not built.** No server descriptor (only the commented example in `mcp-connector-defs.mjs`); catalog `pipelineReady: false`; Mac placeholder card. The Mac already ships `gdrive.json` and `gcal.json` manifests, so a `/kb/mcp-connector/*` call for those ids answers 400 "Unknown MCP connector id" until descriptors exist. Whether the Mac loads those manifests when the pipeline is not ready was not checked |
-| Google OAuth bring-your-own client | Planned: Google registers redirect URIs per client and has no dynamic registration, hence `byoClient: true`; the vault keys are defined, no UI collects them |
+| Google OAuth bring-your-own client | **Built for the REST connectors** (`/kb/google/start`, vault keys `google.acct.<id>.*`, [google-connectors](google-connectors.md)); no UI collects the client id and secret yet |
 | Google MCP endpoint and tool names in the commented example | Unverified, copied from a comment |
 | Server-side enforcement that a deselected connector cannot fetch | Not built (selection is visibility only) |
 | Pinned fetch for the MCP client and Box | Shipped (section 6) |
-| Activity feed entry for connector fetches | Not built (`connector_fetched` is not in the activity kinds, comment in `extension/routes/router.mjs`) |
+| Activity feed entry for connector fetches | Not built as a kind (`connector_fetched` is not in the activity kinds); the Google routes reuse `email_fetched` and `knowledge_updated` |
 
 ## Regeneration checklist
 
