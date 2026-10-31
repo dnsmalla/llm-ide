@@ -12,6 +12,7 @@ on:
     paths:
       - 'desktop/**'
       - 'ui/**'
+      - 'extension/**'
       - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
       - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
       - 'schema/design/**'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'desktop/**'
       - 'ui/**'
+      - 'extension/**'
       - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
       - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
       - 'schema/design/**'
@@ -85,6 +87,10 @@ jobs:
 
       - name: Install npm dependencies
         working-directory: desktop
+        run: npm ci
+
+      - name: Install extension dependencies (the end-to-end tests start the real core)
+        working-directory: extension
         run: npm ci
 
       - name: Install ui-kit dependencies
