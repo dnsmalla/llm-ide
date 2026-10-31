@@ -12,7 +12,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 13 | 19 | 14 | 46 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
-| Mobile (iPhone native, PWA) | 8 | 5 | 12 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
+| Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 14 | 4 | 1 | 19 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 92 | 39 | 74 | 205 |  |
+| Total | 93 | 40 | 72 | 205 |  |
 
 ## How the surfaces connect
 
@@ -165,12 +165,12 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Phone works with the Mac off (needs relay, S4) (wait)
 - [ ] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait)
 - [x] Command bus spec written: one command/result contract for desktop, extension, iPhone (WS now, relay later) and PWA, tiers, catalogue, mobile audit (`plans/2026-10-31-command-bus-spec.md`) (me)
-- [ ] Command bus S1: contract schemas + conformance fixtures in `schema/` (additive) (me)
+- [x] Command bus S1: `schema/bus/` (envelope, event, registry with the tier table as data, 33 command, 35 tier, 36 event fixtures, sequences) + `scripts/conformance-bus.mjs` in `make contract-gates`; Swift `Envelope.swift` and the Swift decode of the fixtures are left to S2/S4 (me)
 - [~] Command bus S2: the Swift security fixes are done and tested (one tier table and gate for every wire type; Auto Task run honours the enable flag; template/config/toggle desktop-only; implement, review-merge and Self-Heal apply/discard need a desktop confirmation; phone explore never inherits Bypass; queued Loop starts re-validated at execution; dead `history`/`images` fields removed); the envelope mapper behind `mobile.commandBus` is not started (me)
 - [x] Mobile docs corrected against the code (port fallback, tabs, chatHost, cleartext warning, capability table) and verification rows F1-F18 added; the 14 untested protocol files now have round-trip tests (me)
 - [ ] Run the new `docs/mobile/verification.md` F-rows on a real iPhone and record the result (you)
 - [~] Mobile TLS with SPKI pinning: design written (`plans/2026-10-31-mobile-tls-pinning-design.md`), not implemented; needs Q1-Q4 and an on-device Tailscale test (me)
-- [ ] Command bus S3: core job API (`/bus/*`, six job kinds, execution-time re-check, engine interface) (me)
+- [~] Command bus S3: API 100 job API is built and tested (nine `/bus/*` routes, desktop approvals with a nonce, execution-time re-check, idempotency, gap-free SSE replay, cancel, quotas, `LLMIDE_BUS=off`, crash recovery, engine interface with claude/adapter/codex/gemini read-only); only `review` is available, the other five kinds answer `KIND_NOT_AVAILABLE` until Node owns their data (source registry, note extractor, Loop definitions, custom tasks, write engines) (`docs/spec/command-bus.md`) (me)
 - [ ] Command bus S4: iOS client rewritten as renderer over the envelope, old path kept one release (me)
 - [ ] Command bus S5: extension moves to the envelope (me)
 - [ ] Command bus S6: relay transport + TLS pin on the direct path (wait)
