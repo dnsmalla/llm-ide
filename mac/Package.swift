@@ -132,7 +132,6 @@ if autoTasksIncluded {
         "AutoCodeUpdateServiceMeteringTests.swift",
         "AutoCodeUpdateServiceReviewSkipTests.swift",
         "CustomAutoTaskProjectScopeTests.swift",
-        "MobileAutoTaskBridgeScopeTests.swift",
         "PhoneBridgeSpyHost.swift",
         "PhoneQueuedLoopRevalidationTests.swift",
         "PhoneAutoTaskRunGateTests.swift",

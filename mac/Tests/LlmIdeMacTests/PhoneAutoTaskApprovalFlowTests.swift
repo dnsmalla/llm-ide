@@ -32,8 +32,8 @@ final class PhoneAutoTaskApprovalFlowTests: XCTestCase {
     }
 
     func testWhichTasksNeedApproval() {
-        func tier(_ id: String, custom: [CustomAutoTask] = []) -> PhoneApprovalTier {
-            MobileAutoTaskBridge.approvalTarget(taskId: id, customTasks: custom).tier
+        func tier(_ id: String) -> PhoneApprovalTier {
+            MobileAutoTaskBridge.approvalTarget(taskId: id).tier
         }
         XCTAssertEqual(tier("implementIssues"), .t2)
         XCTAssertEqual(tier("reviewMerge"), .t2)
@@ -42,10 +42,20 @@ final class PhoneAutoTaskApprovalFlowTests: XCTestCase {
         }
         XCTAssertEqual(tier("reviewCode"), .t0)
         XCTAssertEqual(tier("no-such"), .t0, "unknown id needs no dialog; startPhoneRun reports it")
-        let reader = CustomAutoTask(id: "r", name: "r", template: "p", mode: .review)
-        let writer = CustomAutoTask(id: "w", name: "w", template: "p", mode: .implement)
-        XCTAssertEqual(tier("r", custom: [reader, writer]), .t1)
-        XCTAssertEqual(tier("w", custom: [reader, writer]), .t2)
+    }
+
+    /// User decision 2026-10-31: custom tasks are desktop-only. The phone is refused (typed tier_refused), with no
+    /// dialog and nothing started, for any id that is not a built-in (a custom id is a UUID or custom:*).
+    func testCustomTasksAreRefusedFromThePhoneWithoutADialog() {
+        for id in [UUID().uuidString, "custom:cat-1", "custom:anything", "no-such"] {
+            let (bridge, host, service, _) = make()
+            host.autoTaskRequest = .run(.init(task: id))
+            XCTAssertTrue(bridge.handle(type: "auto_task_run", data: nil))
+            XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.tierRefused, id)
+            XCTAssertEqual(host.lastAck?.ok, false, id)
+            XCTAssertTrue(host.approvalRequests.isEmpty, "\(id): refused, never escalated to a dialog")
+            XCTAssertFalse(service.hasScheduledRun, id)
+        }
     }
 
     func testEveryAutoTaskHasAPolicyRow() {

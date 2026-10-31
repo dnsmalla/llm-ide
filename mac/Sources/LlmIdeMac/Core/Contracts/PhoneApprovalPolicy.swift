@@ -15,7 +15,7 @@ enum PhoneApprovalTier: Int, Comparable {
 
 /// Which tier each phone-startable task needs. Foundation-only so Auto Tasks, Loop and Mobile Control
 /// share it without naming each other. Keys are `AutoTask` raw values or the `loop.*` / `generation.run`
-/// / `custom.*` pseudo-keys below. `PhoneApprovalPolicyTests` parses registry.json and fails on any
+/// pseudo-keys below. Custom tasks have no row: they are refused from the phone. `PhoneApprovalPolicyTests` parses registry.json and fails on any
 /// mismatch, so this Swift table cannot drift from the registry.
 enum PhoneApprovalPolicy {
     struct Entry {
@@ -27,8 +27,11 @@ enum PhoneApprovalPolicy {
     static let loopStart = "loop.start"
     static let loopStartStage = "loop.startStage"
     static let generationRun = "generation.run"
-    static let customRead = "custom.read"
-    static let customWrite = "custom.write"
+
+    /// Custom tasks are desktop-only (user decision 2026-10-31; registry `custom.run` `clients: ["desktop-ui"]`).
+    /// The phone can neither start nor edit them and is not shown them: any task id that is not a built-in is refused.
+    static let phoneMayRunCustomTasks = false
+    static let customTaskRefusalMessage = "Custom tasks can only be run from your Mac."
 
     static let table: [String: Entry] = [
         // Built-in Auto Tasks (keys are AutoTask raw values)
@@ -50,15 +53,8 @@ enum PhoneApprovalPolicy {
         loopStartStage:      Entry(registryKind: "loop.run", tier: .t1),
         // Doc Gen
         generationRun:       Entry(registryKind: nil, tier: .t1),
-        // Custom tasks: classified by capability. Read-only is the registry's custom.run (T1); anything
-        // that can write (or is unknown) is escalated to T2.
-        customRead:          Entry(registryKind: "custom.run", tier: .t1),
-        customWrite:         Entry(registryKind: "custom.run", tier: .t2),
     ]
 
     /// Fails closed: an unknown key needs the strictest tier.
     static func tier(forKey key: String) -> PhoneApprovalTier { table[key]?.tier ?? .t2 }
-
-    /// `writes == nil` (unknown capability) is treated as able to write.
-    static func customKey(writes: Bool?) -> String { writes == false ? customRead : customWrite }
 }

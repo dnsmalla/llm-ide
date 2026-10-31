@@ -32,19 +32,6 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         self.logStore = logStore
     }
 
-    /// Custom tasks of the ACTIVE project only (same scoping as
-    /// `AutoCodeUpdateService.dueCustomTasks`); no active project → none.
-    func scopedCustomTasks() -> [CustomAutoTask] {
-        Self.customTasks(activeProjectId: autoCode?.projectStore?.activeProject?.bundle.id,
-                         defaults: autoCode?.config.userDefaults ?? .standard)
-    }
-
-    static func customTasks(activeProjectId: String?, defaults: UserDefaults) -> [CustomAutoTask] {
-        guard let activeProjectId else { return [] }
-        CustomAutoTask.adoptLegacyTasks(into: activeProjectId, in: defaults)
-        return CustomAutoTask.loadAll(forProject: activeProjectId, from: defaults)
-    }
-
     // MARK: - MobileFeatureBridge
 
     /// Handle `auto_task_*` messages: list / toggle / run / stop / history for
@@ -101,9 +88,12 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                     refuseDisabled(label: t.label, id: t.rawValue)
                     return true
                 }
-                if let raw = m.task, AutoTask(rawValue: raw) == nil,
-                   let custom = scopedCustomTasks().first(where: { $0.id == raw }), !custom.isEnabled {
-                    refuseDisabled(label: custom.name, id: custom.id)
+                // Custom tasks are desktop-only: the phone is not shown them and cannot start one. Any id that
+                // is not a built-in is refused (a custom id is a UUID, so it cannot be told from a stale one).
+                if let raw = m.task, AutoTask(rawValue: raw) == nil {
+                    host?.logInfo("auto_task_run refused: non-built-in task id from a phone")
+                    host?.sendAutoTaskReply(.ack(ok: false, message: PhoneApprovalPolicy.customTaskRefusalMessage,
+                                                 code: MobileRefusalCode.tierRefused))
                     return true
                 }
                 // Run-all is refused from the phone: `runNow` runs EVERY enabled task, which no dialog could
@@ -116,9 +106,9 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                         code: MobileRefusalCode.tierRefused))
                     return true
                 }
-                // Every task the registry marks T1/T2 (and every custom task that can write) is only
+                // Every task the registry marks T1/T2 is only
                 // REQUESTED by the phone: the person at the Mac confirms the exact task, project and ids.
-                let target = Self.approvalTarget(taskId: raw, customTasks: scopedCustomTasks())
+                let target = Self.approvalTarget(taskId: raw)
                 if target.tier.needsDesktopApproval {
                     guard !ac.hasScheduledRun else {
                         host?.sendAutoTaskReply(.ack(ok: false,
@@ -283,23 +273,17 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     }
 
     /// What a phone-requested task is, for the approval policy: its tier (from `PhoneApprovalPolicy`, which a
-    /// test pins to schema/bus/registry.json), the built-in it names, or the custom task.
+    /// test pins to schema/bus/registry.json) and the built-in it names. Custom tasks never get here.
     struct ApprovalTarget: Equatable {
         let tier: PhoneApprovalTier
         let builtin: AutoTask?
-        let custom: CustomAutoTask?
     }
 
-    static func approvalTarget(taskId: String, customTasks: [CustomAutoTask]) -> ApprovalTarget {
+    static func approvalTarget(taskId: String) -> ApprovalTarget {
         if let t = AutoTask(rawValue: taskId) {
-            return ApprovalTarget(tier: PhoneApprovalPolicy.tier(forKey: t.rawValue), builtin: t, custom: nil)
+            return ApprovalTarget(tier: PhoneApprovalPolicy.tier(forKey: t.rawValue), builtin: t)
         }
-        if let c = customTasks.first(where: { $0.id == taskId }) {
-            // A custom task that commits (implement) can write; unknown capability would default to T2.
-            let key = PhoneApprovalPolicy.customKey(writes: c.mode == .implement)
-            return ApprovalTarget(tier: PhoneApprovalPolicy.tier(forKey: key), builtin: nil, custom: c)
-        }
-        return ApprovalTarget(tier: .t0, builtin: nil, custom: nil)   // unknown id: startPhoneRun reports it
+        return ApprovalTarget(tier: .t0, builtin: nil)   // unknown id: startPhoneRun reports it
     }
 
     /// Ask on the Mac, then start the run only if it was approved AND the world is still what was shown.
@@ -308,8 +292,8 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// the run would act on.
     private func runAfterDesktopApproval(task: String, target: ApprovalTarget, projectId: String?) async {
         guard let ac = autoCode, let host else { return }
-        let shown = await ac.phoneApprovalSnapshot(builtin: target.builtin, custom: target.custom, tier: target.tier)
-        let name = target.builtin?.label ?? target.custom?.name ?? task
+        let shown = await ac.phoneApprovalSnapshot(builtin: target.builtin, tier: target.tier)
+        let name = target.builtin?.label ?? task
         let outcome = await host.requestDesktopApproval(
             PhoneDesktopApprovalRequest(title: "Run \(name) from your iPhone?", lines: shown.lines))
         switch outcome {
@@ -333,9 +317,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             host.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
             return
         }
-        let stillEnabled = target.builtin.map { ac.isTaskEnabled($0) } ?? target.custom.map { c in
-            scopedCustomTasks().first(where: { $0.id == c.id })?.isEnabled == true
-        } ?? false
+        let stillEnabled = target.builtin.map { ac.isTaskEnabled($0) } ?? false
         guard stillEnabled else {
             host.sendAutoTaskReply(.ack(ok: false, message: "A task was turned off on your Mac meanwhile.",
                                         code: MobileRefusalCode.taskDisabled))
@@ -346,7 +328,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             return
         }
         // The exact ids / branches the person approved must still be what the run would act on.
-        let now = await ac.phoneApprovalSnapshot(builtin: target.builtin, custom: target.custom, tier: target.tier)
+        let now = await ac.phoneApprovalSnapshot(builtin: target.builtin, tier: target.tier)
         guard now.fingerprint == shown.fingerprint else {
             host.sendAutoTaskReply(.ack(ok: false,
                                         message: "What this would run changed on your Mac while you were deciding, so nothing ran. Ask again.",
@@ -358,17 +340,13 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
 
     /// Start the run the phone asked for (all checks are done) and report the outcome.
     private func startPhoneRun(task: String?, ac: AutoCodeUpdateService) {
-        // Four-way branch: built-in task / custom task / no task = global run / an unrecognized non-nil id
-        // (e.g. the phone still shows a since-deleted custom task) — the last case must NOT fall through to
-        // a global run-all, which would be a surprising response to "run this one specific task".
+        // Three-way branch: built-in task / no task = global run / an unrecognized non-nil id (custom tasks are
+        // refused earlier) — the last case must NOT fall through to a global run-all, which would be a surprising response to "run this one specific task".
         var started = false
         var unrecognized = false
         if let raw = task, let t = AutoTask(rawValue: raw) {
             started = ac.runSingle(t, trigger: .phone)
             if started { host?.logInfo("Auto-task run single: \(t.rawValue)") }
-        } else if let raw = task, let custom = scopedCustomTasks().first(where: { $0.id == raw }) {
-            started = ac.runSingleCustom(custom, trigger: .phone)
-            if started { host?.logInfo("Custom auto-task run: \(custom.name)") }
         } else if task == nil {
             started = ac.runNow(trigger: .phone)
             if started { host?.logInfo("Auto-task run now") }
@@ -462,18 +440,14 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                          enabled: s.isEnabled(task: t),
                          lastError: ac.taskErrors[t.rawValue] ?? ac.visibleTemplateWarning(for: t.rawValue))
         }
-        let customInfos = scopedCustomTasks().map { t in
-            MobileAutoTaskReply.TaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
-                         lastError: ac.taskErrors[t.id] ?? ac.visibleTemplateWarning(for: t.id))
-        }
         // Mirror the Mac "Show only enabled" filter: when on, the phone sees
         // only the active task set (re-enabling a hidden task is done on Mac).
-        // Custom tasks participate identically to built-ins.
-        let combined = allInfos + customInfos
+        // Custom tasks are never sent: they are desktop-only (PhoneApprovalPolicy.phoneMayRunCustomTasks).
+        let combined = allInfos
         let infos = s.showOnlyEnabledTasks ? combined.filter { $0.enabled } : combined
         return MobileAutoTaskReply.State(masterEnabled: s.enabled,
                              isRunning: ac.isRunning || ac.hasScheduledRun,
-                             currentTask: ac.currentTask?.rawValue ?? ac.currentCustomTaskId,
+                             currentTask: ac.currentTask?.rawValue,
                              currentStep: ac.currentStep,
                              statusMessage: ac.statusMessage,
                              lastRunDate: ac.lastRunDate?.timeIntervalSince1970,
@@ -499,7 +473,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         guard let logStore else { return nil }
         // No host means no phone to send to; never fall back to raw text.
         let redact = host?.phoneTextRedactor ?? { _ in "" }
-        let current = autoCode?.currentTask?.rawValue ?? autoCode?.currentCustomTaskId
+        let current = autoCode?.currentTask?.rawValue
         let builtIn = AutoTask.allCases.map { task in
             let lines = logStore.lines(for: task).map { line in
                 MobileAutoTaskReply.LogLine(id: line.id.uuidString,
@@ -509,16 +483,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             }
             return MobileAutoTaskReply.TaskLogs(id: task.rawValue, label: task.label, lines: lines)
         }
-        let custom = scopedCustomTasks().map { task in
-            let lines = logStore.lines(for: task.id).map { line in
-                MobileAutoTaskReply.LogLine(id: line.id.uuidString,
-                                            timestamp: line.timestamp.timeIntervalSince1970,
-                                            level: line.level.rawValue,
-                                            text: redact(line.text))
-            }
-            return MobileAutoTaskReply.TaskLogs(id: task.id, label: task.name, lines: lines)
-        }
-        return MobileAutoTaskReply.Logs(currentTask: current, tasks: builtIn + custom)
+        return MobileAutoTaskReply.Logs(currentTask: current, tasks: builtIn)
     }
 
     private func pushAutoTaskStateIfPaired() {

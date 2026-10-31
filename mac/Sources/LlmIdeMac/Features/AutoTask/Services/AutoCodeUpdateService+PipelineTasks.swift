@@ -707,19 +707,12 @@ extension AutoCodeUpdateService {
         return items.count > approvalDisplayLimit ? "\(shown) and \(items.count - approvalDisplayLimit) more (\(items.count) total)" : shown
     }
 
-    func phoneApprovalSnapshot(builtin: AutoTask?, custom: CustomAutoTask?, tier: PhoneApprovalTier) async -> PhoneApprovalSnapshot {
+    func phoneApprovalSnapshot(builtin: AutoTask?, tier: PhoneApprovalTier) async -> PhoneApprovalSnapshot {
         let projectName = projectStore?.activeProject?.bundle.displayName ?? "none open"
         let projectId = projectStore?.activeProject?.bundle.id ?? ""
         var lines = ["Project: \(projectName)",
                      "Approval level: \(tier == .t2 ? "writes code or leaves this Mac" : "changes data on this Mac or acts as you")"]
         var fingerprint = ["project:\(projectId)"]
-        if let custom {
-            lines.append("Custom task: \(custom.name) (\(custom.mode.label): \(custom.mode.detail))")
-            let excerpt = custom.template.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300)
-            lines.append("Prompt: \(excerpt)")
-            fingerprint.append("custom:\(custom.id):\(custom.mode.rawValue):\(custom.template)")
-            return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint)
-        }
         guard let task = builtin else { return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint) }
         fingerprint.append("task:\(task.rawValue)")
         switch task {
