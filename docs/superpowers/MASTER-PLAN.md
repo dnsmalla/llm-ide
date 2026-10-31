@@ -11,16 +11,16 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 14 | 20 | 14 | 48 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 14 | 22 | 14 | 50 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 6 | 1 | 8 | 15 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 6 | 2 | 7 | 15 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 14 | 4 | 2 | 20 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 94 | 41 | 74 | 209 |  |
+| Total | 94 | 44 | 73 | 211 |  |
 
 ## How the surfaces connect
 
@@ -44,7 +44,8 @@ Parents: [kit-by-kit migration](plans/2026-10-27-kit-by-kit-migration.md), [Taur
 4. **Web app decided (Q-WEB-1 = A, relay-served phone web view, last, in sync-kit).** The relay, PWA, push and phone-without-Mac stay behind sync-kit; only relay hosting (Q-WEB-2) is still open.
 5. **Kit order** (kit-by-kit plan): ui-kit, os-kit, docs-kit, graph-kit, knowledge-kit, agent-kit, work/workspace/capture, core job runner, automation-kit, sync-kit. Tauri K3 screens follow each kit's K1/K2; **sync-kit (relay + PWA) comes last** because it mirrors every other kit.
 6. **Knowledge-kit K1 needs Q1-Q14, Q16, Q19 answered (you)**; meeting work (live-then-archive Phase 5 Mac side, 3, 6) waits for you to record meetings (wait).
-7. **Swift retirement (K4 / Phase 6)** only after one release with both desktop apps and a parity checklist.
+7. **Decided 2026-10-31 (user, delegated to the secure recommendation: revisit if wrong):** Mermaid is installed on demand when needed; DOCX export is optional (Markdown Save is enough, build a markdown-to-DOCX route only if easy); custom tasks are NOT available from the phone for now (the phone and extension refuse `custom.run`); macOS first and finished, then Windows and Linux; Codex and Gemini stay supported engines; Google is for Gmail, Calendar and Drive connectors only (never LLM sign-in).
+8. **Swift retirement (K4 / Phase 6)** only after one release with both desktop apps and a parity checklist.
 
 ## Web app: the user's answers (2026-10-30)
 
@@ -145,6 +146,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Parity checklist all rows verified against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 5 (macOS first and finished, then Windows and Linux): Code Graph, Issues + Gantt, Doc Gen + Visual, Live capture helper, Loop + Auto Tasks on the core job runner, quick chat, System page; the Tauri app does not host `:3006` (the Swift app keeps the phone until the relay); exit gate = daily use on macOS except the named deferrals (`plans/2026-10-31-tauri-phase5-macos-plan.md`, parity sections 7 to 12); Auto Tasks scope is pending the usage evidence (`plans/2026-10-31-auto-tasks-audit.md`: multi-engine and the phone-command surface kept, 3 tasks proposed for removal) (me)
 - [~] Phase 5 P5-G Code Graph section on the desktop (`ui/screens/graph/`, vendored graph-kit WASM layout in a worker, sigma/WebGL, LOD for 50k nodes; parity section 7 rows `~`, not verified in a real window; blocked-by: host CSP for WASM, kernel speed at 50k, 32 MB read cap, Swift-only graph generation; numbers in the phase 5 plan section 5) (me)
+- [~] Phase 5 Doc Gen + Visual on the desktop, built and unit-tested, not GUI-verified (`ui/screens/docgen/`, commits `9b2fa3f6` to `885e6fe6`): template and source pickers (project files, Library notes, pasted text, 5,000-source cap, 4 parallel reads, 50k characters each), generate with cancel, revise, save to `llm-doc/generated/` without overwrite (hash compare-and-swap), history list, 30 core error codes mapped, 37 hostile-output fixtures render inert; blocked-by or deferred: DOCX export (Markdown Save is the export for now: user decision 2026-10-31, only build a markdown-to-DOCX route if easy), secret-scan result before save (needs a core field), image sources (needs a host command), language field, per-call progress; Mermaid runtime is the next item (me)
+- [~] Phase 5 Mermaid diagrams on demand (user decision 2026-10-31: install at need time is ok): user-initiated download of one pinned, hash-verified runtime into app data, rendered in a sandboxed iframe with strict CSP and a sanitised SVG; in progress (me)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 
@@ -198,7 +201,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Extension read/queue through the relay when the desktop is off (me)
 - [ ] Relay contract added to `schema/http` with conformance tests (kit plan: contract group "relay (new)") (me)
 - [~] Connector catalog: phase 1 verified shipped (catalog, per-user selection, `/auth/me/connectors*` routes, Library and selection-gated Settings, Miro MCP ingest, tests exist); open: gdrive/gcal MCP descriptors (`pipelineReady: false`), Miro tool names are unverified guesses; spec written (`docs/spec/connector-catalog.md`, `de7d1f38`); audit in `plans/2026-10-31-status-audit.md` (b) (me)
-- [ ] Google connectors: Gmail, Calendar and Drive as read-only Library connectors through our own OAuth client (bring your own, PKCE loopback in the core, tokens in the vault, pinned Google hosts), replacing the broad `mail.google.com` Gmail scope; Google's official Workspace MCP servers are Developer Preview and need write scopes, so not v1; 3 open questions Q-G1 to Q-G3 (`plans/2026-10-31-google-connectors-plan.md`) (you)
+- [~] Google connectors G0 to G3 built and fixture-tested, not run against real Google: OAuth core (PKCE loopback in the core, bring-your-own client, granted-scope subset check, vault-only refresh tokens, revoke), Gmail forward-only over REST with a historyId cursor, Calendar and Drive on the sources hub, `/kb/google/*` routes (API 103), legacy `mail.google.com` token revoked at first new connect; remaining: G4 to G8 slices, Tauri/Mac screens, and a real-account test with your own Google Cloud OAuth client (`plans/2026-10-31-google-connectors-plan.md`). Original scope: Gmail, Calendar and Drive as read-only Library connectors through our own OAuth client (bring your own, PKCE loopback in the core, tokens in the vault, pinned Google hosts), replacing the broad `mail.google.com` Gmail scope; Google's official Workspace MCP servers are Developer Preview and need write scopes, so not v1; 3 open questions Q-G1 to Q-G3 (`plans/2026-10-31-google-connectors-plan.md`) (you)
 
 ## S5. Chrome extension
 
