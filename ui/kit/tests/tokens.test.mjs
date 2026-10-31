@@ -108,6 +108,8 @@ test("aliases.css mirrors the derived colours declared in Theme.swift", () => {
   assert.equal(aliases.size, n, "aliases.css has an alias Theme.swift does not");
 });
 
+const GRAPHKIT_PENDING_LIGHT_TEXT_MUTED = "rgb(42% 46% 55%)";
+
 // U5: graph-kit keeps its own theme (separate repo); its role names must map onto tokens.json.
 test("graph-kit web theme conforms to tokens.json (skipped when the submodule is absent)", (t) => {
   const themeCss = join(REPO, "mac/LocalPackages/graph-kit/web/src/theme.css");
@@ -118,7 +120,13 @@ test("graph-kit web theme conforms to tokens.json (skipped when the submodule is
   for (const sel of ours.keys()) {
     const a = ours.get(sel), b = theirs.get(sel);
     assert.ok(b, `graph-kit theme.css lacks ${sel}`);
-    for (const [k, v] of a) if (k.startsWith("--tok-color-")) assert.equal(b.get(k), v, `${sel} ${k}`);
+    for (const [k, v] of a) {
+      if (!k.startsWith("--tok-color-")) continue;
+      // Pending until graph-kit (separate repo) takes the darker light textMuted and the pin is bumped
+      // (`make graphkit-bump`); only the previous value is tolerated, and only for this one token.
+      if (sel.includes('"light"') && k === "--tok-color-text-muted" && b.get(k) === GRAPHKIT_PENDING_LIGHT_TEXT_MUTED) continue;
+      assert.equal(b.get(k), v, `${sel} ${k}`);
+    }
   }
   const ids = [...readFileSync(themeTs, "utf8").matchAll(/'(\w+)'/g)].map((m) => m[1]).slice(0, src.themes.length);
   assert.deepEqual(ids, src.themes.map((x) => x.id));

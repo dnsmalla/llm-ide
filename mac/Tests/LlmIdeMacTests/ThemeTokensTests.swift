@@ -77,7 +77,7 @@ final class ThemeTokensTests: XCTestCase {
         assertColor(t.surface2, (0.95, 0.96, 0.98, 1), "light.surface2")
         assertColor(t.border, (0, 0, 0, 0.10), "light.border")
         assertColor(t.text, (0.12, 0.14, 0.18, 1), "light.text")
-        assertColor(t.textMuted, (0.42, 0.46, 0.55, 1), "light.textMuted")
+        assertColor(t.textMuted, (0.39, 0.43, 0.52, 1), "light.textMuted")
         assertColor(t.accent, (0.18, 0.49, 0.56, 1), "light.accent")
         assertColor(t.accent2, (0.20, 0.40, 0.85, 1), "light.accent2")
         assertColor(t.accent3, (0.18, 0.65, 0.40, 1), "light.accent3")

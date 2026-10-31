@@ -67,10 +67,8 @@ Labelled controls (every icon button has an `aria-label`), roles (`toolbar`, `ta
 state, visible keyboard focus ring (`:focus-visible`, accent colour, >= 3:1 on every
 theme), `prefers-reduced-motion` removes transitions and animations, `ResizableDivider`
 is keyboard operable (arrows, Home, End). Colour contrast of the token pairs is tested
-for all three themes (`tests/contrast.test.mjs`). Known gaps:
+for all three themes (`tests/contrast.test.mjs`; light `textMuted` was darkened from 4.31:1 to 4.8:1 on body, user-approved, which slightly changes the Mac light look). Known gaps:
 
-- Light theme `textMuted` on `body` is 4.31:1 (AA needs 4.5). It is a `tokens.json`
-  value, so fixing it changes the Mac look too; it needs a design decision.
 - `EditorTabBar`: `role="tab"` wraps two buttons (select and close), which a screen
   reader announces awkwardly. Restructure at the first K3 screen that uses it.
 - `LibrarySidebar` and `SelectItemEmpty` carry the spike's demo content (hard-coded

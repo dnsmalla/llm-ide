@@ -19,11 +19,6 @@ const ratio = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-// Known gap, recorded not hidden: light textMuted on body is below AA. Changing it
-// changes the Mac look too (tokens.json), so it is a design decision, tracked in
-// docs/kits/ui-kit.md. The floor stops it getting worse.
-const KNOWN_BELOW_AA = { "light textMuted on body": 4.0 };
-
 // WCAG AA: 4.5:1 for body text, 3:1 for large text / UI components (the focus ring).
 for (const t of src.themes) {
   test(`${t.id}: text, muted text and focus ring meet WCAG AA on body and surface`, () => {
@@ -31,11 +26,24 @@ for (const t of src.themes) {
     const surface = toRgb(t.colors.surface, body);
     for (const [name, bg] of [["body", body], ["surface", surface]]) {
       assert.ok(ratio(toRgb(t.colors.text, bg), bg) >= 4.5, `${t.id} text on ${name}`);
-      const key = `${t.id} textMuted on ${name}`;
       const r = ratio(toRgb(t.colors.textMuted, bg), bg);
-      assert.ok(r >= (KNOWN_BELOW_AA[key] ?? 4.5), `${key} = ${r.toFixed(2)}`);
-      if (key in KNOWN_BELOW_AA) console.log(`# known gap: ${key} = ${r.toFixed(2)}:1 (AA needs 4.5)`);
+      assert.ok(r >= 4.5, `${t.id} textMuted on ${name} = ${r.toFixed(2)}`);
       assert.ok(ratio(toRgb(t.colors.accent, bg), bg) >= 3, `${t.id} accent (focus ring) on ${name}`);
+    }
+  });
+}
+
+// Muted text also sits on the second surface (cards, sidebar) and on alternating table rows
+// (a translucent overlay over body or surface). AA floor there too.
+for (const t of src.themes) {
+  test(`${t.id}: muted text meets WCAG AA on surface2 and on alternating rows`, () => {
+    const body = toRgb(t.colors.body, [1, 1, 1]);
+    const surface = toRgb(t.colors.surface, body);
+    const surface2 = toRgb(t.colors.surface2, body);
+    const beds = { surface2, "rowAlt over body": toRgb(t.colors.rowAlt, body), "rowAlt over surface": toRgb(t.colors.rowAlt, surface) };
+    for (const [name, bg] of Object.entries(beds)) {
+      const r = ratio(toRgb(t.colors.textMuted, bg), bg);
+      assert.ok(r >= 4.5, `${t.id} textMuted on ${name} = ${r.toFixed(2)}`);
     }
   });
 }

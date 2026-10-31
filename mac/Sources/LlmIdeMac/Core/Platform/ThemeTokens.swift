@@ -70,7 +70,7 @@ enum ThemeTokens {
         surface2: .rgb(0.95, 0.96, 0.98),
         border: .black(0.1),
         text: .rgb(0.12, 0.14, 0.18),
-        textMuted: .rgb(0.42, 0.46, 0.55),
+        textMuted: .rgb(0.39, 0.43, 0.52),
         accent: .rgb(0.18, 0.49, 0.56),
         accent2: .rgb(0.2, 0.4, 0.85),
         accent3: .rgb(0.18, 0.65, 0.4),
