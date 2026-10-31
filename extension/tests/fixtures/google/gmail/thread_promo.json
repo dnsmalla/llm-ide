@@ -1,0 +1,51 @@
+{
+ "id": "t-promo",
+ "historyId": "1220",
+ "messages": [
+  {
+   "id": "m4",
+   "threadId": "t-promo",
+   "labelIds": [
+    "INBOX",
+    "CATEGORY_PROMOTIONS"
+   ],
+   "internalDate": "1761911000000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "Sale"
+     },
+     {
+      "name": "From",
+      "value": "shop@example.com"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/plain",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 7,
+       "data": "NTAlIG9mZg"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

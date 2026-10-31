@@ -1,0 +1,54 @@
+{
+ "id": "t-html",
+ "historyId": "1210",
+ "messages": [
+  {
+   "id": "m3",
+   "threadId": "t-html",
+   "labelIds": [
+    "INBOX"
+   ],
+   "internalDate": "1761910000000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "Newsletter"
+     },
+     {
+      "name": "From",
+      "value": "News <news@example.com>"
+     },
+     {
+      "name": "Date",
+      "value": "Fri, 31 Oct 2025 12:00:00 +0000"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/html",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/html; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 868,
+       "data": "PGh0bWw-PGhlYWQ-PHRpdGxlPng8L3RpdGxlPjxzdHlsZT5ib2R5e2JhY2tncm91bmQ6dXJsKGh0dHA6Ly90LmV4YW1wbGUvcy5wbmcpfTwvc3R5bGU-PC9oZWFkPjxib2R5IG9ubG9hZD0ic3RlYWwoKSI-CjxwPkhlbGxvIDxiPnRlYW08L2I-LDwvcD4KPGltZyBzcmM9Imh0dHBzOi8vdHJhY2tlci5leGFtcGxlLmNvbS9vcGVuLmdpZj91PTEiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPgo8aW1nIHNyYz0iaHR0cHM6Ly9jZG4uZXhhbXBsZS5jb20vbG9nby5wbmciIGFsdD0iQ29tcGFueSBsb2dvIj4KPHA-Q2xpY2sgPGEgaHJlZj0iamF2YXNjcmlwdDphbGVydChkb2N1bWVudC5jb29raWUpIj5oZXJlPC9hPiBvciA8YSBocmVmPSJodHRwczovL2V4YW1wbGUuY29tL3Jlc2V0P3Rva2VuPWFiYyI-cmVzZXQ8L2E-IG9yIDxhIGhyZWY9ImRhdGE6dGV4dC9odG1sO2Jhc2U2NCxQSE5qY21sd2REND0iPmRhdGE8L2E-LjwvcD4KPHNjcmlwdD5mZXRjaCgnaHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tL3gnKTwvc2NyaXB0Pgo8aWZyYW1lIHNyYz0iaHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tL2ZyYW1lIj48L2lmcmFtZT4KPGZvcm0gYWN0aW9uPSJodHRwczovL2V2aWwuZXhhbXBsZS5jb20vcG9zdCI-PGlucHV0IG5hbWU9cHc-PC9mb3JtPgo8cD5EZXBsb3kga2V5OiBnaHBfYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5IGFuZCBoZWFkZXIgQXV0aG9yaXphdGlvbjogQmVhcmVyIGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1PC9wPgo8cD4hW3BpeGVsXShodHRwczovL3RyYWNrZXIuZXhhbXBsZS5jb20vbWQucG5nKSAmbHQ7aW1nIHNyYz14IG9uZXJyb3I9YWxlcnQoMSkmZ3Q7PC9wPgo8L2JvZHk-PC9odG1sPg"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

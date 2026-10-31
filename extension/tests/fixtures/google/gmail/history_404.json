@@ -1,0 +1,12 @@
+{
+ "error": {
+  "code": 404,
+  "message": "Requested entity was not found.",
+  "errors": [
+   {
+    "reason": "notFound"
+   }
+  ],
+  "status": "NOT_FOUND"
+ }
+}

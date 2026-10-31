@@ -1,0 +1,94 @@
+{
+ "id": "t-mixed",
+ "historyId": "1230",
+ "messages": [
+  {
+   "id": "m5",
+   "threadId": "t-mixed",
+   "labelIds": [
+    "INBOX"
+   ],
+   "internalDate": "1761912000000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "Mixed"
+     },
+     {
+      "name": "From",
+      "value": "a@example.com"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/plain",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 12,
+       "data": "a2VwdCBtZXNzYWdl"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "m6",
+   "threadId": "t-mixed",
+   "labelIds": [
+    "TRASH"
+   ],
+   "internalDate": "1761913000000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "Mixed"
+     },
+     {
+      "name": "From",
+      "value": "b@example.com"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/plain",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 15,
+       "data": "dHJhc2hlZCBtZXNzYWdl"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,35 @@
+{
+ "history": [
+  {
+   "id": "1101",
+   "messagesAdded": [
+    {
+     "message": {
+      "threadId": "t-simple"
+     }
+    }
+   ]
+  },
+  {
+   "id": "1102",
+   "labelsAdded": [
+    {
+     "message": {
+      "threadId": "t-html"
+     }
+    }
+   ]
+  },
+  {
+   "id": "1103",
+   "messagesDeleted": [
+    {
+     "message": {
+      "threadId": "t-gone"
+     }
+    }
+   ]
+  }
+ ],
+ "historyId": "1500"
+}

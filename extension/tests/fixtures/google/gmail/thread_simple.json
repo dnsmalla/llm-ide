@@ -1,0 +1,126 @@
+{
+ "id": "t-simple",
+ "historyId": "1200",
+ "messages": [
+  {
+   "id": "m1",
+   "threadId": "t-simple",
+   "labelIds": [
+    "INBOX",
+    "UNREAD"
+   ],
+   "internalDate": "1761900000000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "=?UTF-8?B?6YCx5qyh44Of44O844OG44Kj44Oz44Kw44Gu6K2w6aGM?="
+     },
+     {
+      "name": "From",
+      "value": "Alice Example <alice@example.com>"
+     },
+     {
+      "name": "To",
+      "value": "me@example.com, \"Bob, Jr.\" <bob@example.com>"
+     },
+     {
+      "name": "Date",
+      "value": "Fri, 31 Oct 2025 09:00:00 +0000"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/plain",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 49,
+       "data": "SGksCgpBZ2VuZGE6IGJ1ZGdldCwgaGlyaW5nLgoKLS0gCkFsaWNlCkFjbWUgQ29ycA"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "m2",
+   "threadId": "t-simple",
+   "labelIds": [
+    "INBOX"
+   ],
+   "internalDate": "1761903600000",
+   "sizeEstimate": 2048,
+   "payload": {
+    "partId": "",
+    "mimeType": "multipart/mixed",
+    "filename": "",
+    "headers": [
+     {
+      "name": "Subject",
+      "value": "Re: =?UTF-8?B?6YCx5qyh44Of44O844OG44Kj44Oz44Kw44Gu6K2w6aGM?="
+     },
+     {
+      "name": "From",
+      "value": "me@example.com"
+     },
+     {
+      "name": "To",
+      "value": "alice@example.com"
+     },
+     {
+      "name": "Date",
+      "value": "Fri, 31 Oct 2025 10:00:00 +0000"
+     }
+    ],
+    "body": {
+     "size": 0
+    },
+    "parts": [
+     {
+      "partId": "0",
+      "mimeType": "text/plain",
+      "filename": "",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+       }
+      ],
+      "body": {
+       "size": 140,
+       "data": "VGhhbmtzLCBhZGRpbmcgYSBzZWN1cml0eSByZXZpZXcuCgpPbiBGcmksIE9jdCAzMSwgMjAyNSBhdCA5OjAwIEFNIEFsaWNlIEV4YW1wbGUgPGFsaWNlQGV4YW1wbGUuY29tPiB3cm90ZToKPiBIaSwKPiBBZ2VuZGE6IGJ1ZGdldCwgaGlyaW5nLgo"
+      }
+     },
+     {
+      "partId": "1",
+      "mimeType": "application/pdf",
+      "filename": "agenda.pdf",
+      "headers": [
+       {
+        "name": "Content-Disposition",
+        "value": "attachment; filename=\"agenda.pdf\""
+       }
+      ],
+      "body": {
+       "attachmentId": "ANGjdJ_attachment_id_that_changes",
+       "size": 48211
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
