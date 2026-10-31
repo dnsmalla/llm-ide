@@ -1,0 +1,10 @@
+{
+  "file": "graph-layout.wasm",
+  "graphKitCommit": "51ff3721a7ac6621f23d0216064c0d04eaf35e9a",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "buildCommand": "cd mac/LocalPackages/graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>  (cargo build --release -p graph-layout --lib --target wasm32-unknown-unknown)",
+  "sha256": "0f30028fe33b39c84a41a7c975d118b7402e6c50033bbe7d38358bc600d179a0",
+  "bytes": 106429,
+  "gzipBytes": 40053,
+  "abi": "gl_alloc, gl_free, gl_layout, gl_out_ptr, gl_out_len, memory (no imports)"
+}
