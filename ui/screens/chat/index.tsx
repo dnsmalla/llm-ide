@@ -106,8 +106,16 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   const approvals = useCallback((s: ChatState) => (
     <ApprovalsPanel state={s} projectRoot={root.current} decide={(req) => controller.decide(s.sessionId, req)} />
   ), [controller]);
+  // Trusting a folder starts its MCP servers: a native, default-Cancel dialog with fixed text naming the folder (host
+  // command `trust_confirm`). Without the host there is no native dialog and the in-page confirmation stands alone.
+  const nativeTrustConfirm = useMemo(
+    () => (shellHost.isAvailable()
+      ? (_title: string, _body: string, path: string) => invokeHost<boolean>("trust_confirm", { path }).then((ok) => ok === true, () => false)
+      : undefined),
+    [],
+  );
   const banner = useCallback((s: ChatState) => (
-    <TrustBanner trust={s.workspaceTrust} core={transport} onTrusted={(path) => controller.trustGranted(s.sessionId, path)} />
-  ), [controller, transport]);
+    <TrustBanner trust={s.workspaceTrust} core={transport} onTrusted={(path) => controller.trustGranted(s.sessionId, path)} nativeConfirm={nativeTrustConfirm} />
+  ), [controller, transport, nativeTrustConfirm]);
   return <ChatScreen controller={controller} store={store} core={transport} host={host} approvals={approvals} banner={banner} noProject={projectRoot === null} />;
 }

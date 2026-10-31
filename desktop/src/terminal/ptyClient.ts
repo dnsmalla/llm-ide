@@ -14,11 +14,16 @@ export interface PtyHandle {
   kill(): Promise<void>;
 }
 
-/** Spawns the login shell; `onBytes` receives each output batch in order. */
-export async function spawnShell(cols: number, rows: number, onBytes: (bytes: Uint8Array) => void): Promise<PtyHandle> {
+/**
+ * Spawns the login shell; `onBytes` receives each output batch in order, and `onExit` fires once the shell has
+ * exited and its last output was delivered (so a tab can say "(exited)" at once).
+ */
+export async function spawnShell(cols: number, rows: number, onBytes: (bytes: Uint8Array) => void, onExit: () => void = () => undefined): Promise<PtyHandle> {
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (message) => onBytes(new Uint8Array(message));
-  const { id, shell } = await invoke<{ id: number; shell: string }>("pty_spawn", { cols, rows, onData: channel });
+  const exit = new Channel<unknown>();
+  exit.onmessage = () => onExit();
+  const { id, shell } = await invoke<{ id: number; shell: string }>("pty_spawn", { cols, rows, onData: channel, onExit: exit });
   return {
     id,
     shell,

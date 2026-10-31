@@ -17,7 +17,7 @@ export interface PtyStatus {
 export interface TermHost {
   status(): Promise<PtyStatus>;
   retryConsent(): Promise<PtyStatus>;
-  spawn(cols: number, rows: number, onBytes: (b: Uint8Array) => void): Promise<PtyHandle>;
+  spawn(cols: number, rows: number, onBytes: (b: Uint8Array) => void, onExit?: () => void): Promise<PtyHandle>;
 }
 
 export type TabState = "starting" | "running" | "exited" | "error";
@@ -112,14 +112,23 @@ export class TerminalManager {
   async start(id: number, cols: number, rows: number, onBytes: (b: Uint8Array) => void): Promise<PtyHandle | null> {
     const tab = this.snap.tabs.find((t) => t.id === id);
     if (!tab || tab.state !== "starting") return null;
+    // A shell that exits before `spawn` resolves reports it here; applied once the tab is running.
+    let exitedEarly = false;
+    let running = false;
+    const onExit = () => {
+      if (running) this.markExited(id);
+      else exitedEarly = true;
+    };
     try {
-      const h = await this.host.spawn(cols, rows, onBytes);
+      const h = await this.host.spawn(cols, rows, onBytes, onExit);
       if (this.disposed || !this.snap.tabs.some((t) => t.id === id)) {
         await h.kill();
         return null;
       }
       this.handles.set(id, h);
       this.patchTab(id, { state: "running", title: `${h.shell} ${id}` });
+      running = true;
+      if (exitedEarly) this.markExited(id);
       if (this.snap.phase !== "ready") this.set({ phase: "ready", status: this.snap.status ? { ...this.snap.status, consent: "granted" } : this.snap.status });
       return h;
     } catch (e) {

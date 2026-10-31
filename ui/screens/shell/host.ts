@@ -28,6 +28,8 @@ export interface CoreStatus {
   claude: ClaudeState;
   claude_source: string | null;
   claude_notice: string | null;
+  /** Absolute path of the redacted core failure log (path only; the file exists after a failure). */
+  core_log_path: string | null;
 }
 
 /** Mirrors `ProjectInfo` in src-tauri/src/project.rs. */
@@ -100,6 +102,7 @@ export function normalizeCoreStatus(raw: unknown): CoreStatus {
     claude,
     claude_source: asStr(r.claude_source),
     claude_notice: asStr(r.claude_notice),
+    core_log_path: asStr(r.core_log_path),
   };
 }
 

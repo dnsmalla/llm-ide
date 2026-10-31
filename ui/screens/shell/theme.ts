@@ -40,6 +40,15 @@ export function storeTheme(id: ThemeId, storage: StorageLike | null = defaultSto
   }
 }
 
+/** True when the webview's own storage already holds a theme choice. */
+export function hasStoredTheme(storage: StorageLike | null = defaultStorage()): boolean {
+  try {
+    return [KEY, LEGACY_KEY].some((k) => isThemeId(storage?.getItem(k) ?? null));
+  } catch {
+    return false;
+  }
+}
+
 /** Apply a theme to the document (data-theme + color-scheme). */
 export function showTheme(id: ThemeId): void {
   applyTheme(id);
@@ -63,6 +72,16 @@ export function setTheme(id: ThemeId, opts: { persist?: boolean } = {}): void {
   if (opts.persist !== false) storeTheme(id);
   showTheme(id);
   for (const l of [...themeListeners]) l();
+}
+
+/**
+ * Boot-time fallback: when the webview's storage lost the choice (cleared site data), use the one the host
+ * kept in `prefs.json`. Never overrides a stored choice; an invalid value is ignored.
+ */
+export function seedThemeFromHost(id: unknown, storage: StorageLike | null = defaultStorage()): boolean {
+  if (!isThemeId(id) || hasStoredTheme(storage)) return false;
+  setTheme(id, { persist: false });
+  return true;
 }
 
 export function subscribeTheme(l: ThemeListener): () => void {

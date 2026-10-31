@@ -18,6 +18,15 @@ function TrustedFolders() {
   const m = useModel(() => new TrustListModel(client));
   const s = useStore(m);
   useRefreshOnFocus(() => void m.load());
+  // With a desktop host the final yes is a native dialog (fixed text naming the folder, default Cancel); a refusal keeps the folder untrusted.
+  const confirmTrust = async (path: string) => {
+    if (host.confirmTrust) {
+      let ok = false;
+      try { ok = await host.confirmTrust(path); } catch { ok = false; }
+      if (!ok) { m.cancelPending(); return; }
+    }
+    await m.confirmPendingTrust();
+  };
   return (
     <div className="st-stack">
       <p className="st-hint">Chats in a trusted folder start the MCP servers its .mcp.json defines. Each change is a click here; nothing is trusted automatically.</p>
@@ -31,7 +40,7 @@ function TrustedFolders() {
         <div className="st-dialog" role="alertdialog" aria-label={`Trust ${s.pendingTrust.path}`}>
           <p className="st-pre">{TRUST_CONSENT(s.pendingTrust.path)}</p>
           <div className="st-row">
-            <Button tone="danger" onClick={() => void m.confirmPendingTrust()}>Trust this folder</Button>
+            <Button tone="danger" onClick={() => void confirmTrust(s.pendingTrust!.path)}>Trust this folder</Button>
             <Button onClick={() => m.cancelPending()}>Cancel</Button>
           </div>
         </div>

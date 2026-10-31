@@ -39,6 +39,11 @@ export interface SettingsHost {
   /** Per-chat router and token-cap switches: host prefs read when the backend next starts. */
   getRoutePrefs?(): Promise<{ router: boolean; cap: boolean }>;
   setRoutePrefs?(prefs: { router: boolean; cap: boolean }): Promise<void>;
+  /** Further host prefs read when the app/backend next starts: prompt compression, learned limits, the Terminal feature. */
+  getExtraPrefs?(): Promise<{ compress: boolean; learn: boolean; terminal: boolean }>;
+  setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean }>): Promise<void>;
+  /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
+  confirmTrust?(path: string): Promise<boolean>;
   /** Sign-in/out through the shell's core client, which owns the tokens. */
   signIn?(email: string, password: string): Promise<void>;
   signOut?(): Promise<void>;

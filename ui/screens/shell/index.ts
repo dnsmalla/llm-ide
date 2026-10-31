@@ -12,5 +12,5 @@ export { useCoreSession, useCoreStatusView, useActiveProject } from "./use-shell
 export { useStoreSelector } from "./hooks";
 export type { SectionProps } from "./sections";
 export { shellBus, createShellBus, safeRelativePath, relativeToProject, type ShellBus, type ShellEvent } from "./bus";
-export { getTheme, setTheme, subscribeTheme, THEMES } from "./theme";
+export { getTheme, setTheme, subscribeTheme, seedThemeFromHost, hasStoredTheme, THEMES } from "./theme";
 export { projectStore } from "./project-store";

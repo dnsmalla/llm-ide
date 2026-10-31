@@ -26,6 +26,8 @@ export const SWITCH_TEXT = {
   fallback: "Off by default: when a provider is rate-limited, try the next one in your list before a turn starts, and say so in the chat.",
   router: `Off by default: adds a per-chat control to pin a provider and model and set a token limit. ${NEXT_START_NOTE}`,
   cap: `Counts input, output and cache-write tokens and stops a chat at its limit with a one-click raise. ${NEXT_START_NOTE}`,
+  compress: `Off by default: shortens long prompts before a provider turn to save tokens; needs the per-chat model and token limit. ${NEXT_START_NOTE}`,
+  learn: `Off by default: remembers the limits a provider reports and avoids it before it is rate-limited again. ${NEXT_START_NOTE}`,
   noConnections: "Connect a provider in Providers to use these switches.",
 } as const;
 

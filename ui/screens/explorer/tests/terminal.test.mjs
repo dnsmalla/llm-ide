@@ -21,14 +21,14 @@ function fakeHost(opts = {}) {
     host.refuse = false; host.consent = "unasked";
     return st();
   };
-  host.spawn = async (cols, rows, onBytes) => {
+  host.spawn = async (cols, rows, onBytes, onExit) => {
     host.spawns++;
     if (!host.enabled) throw "the Terminal feature is disabled";
     if (host.refuse) { host.consent = "denied"; throw "terminal access was not approved"; }
     if (opts.limit) throw "too many terminals (max 8)";
     host.consent = "granted";
     const id = host.spawns;
-    const hd = { id, shell: "zsh", onBytes, cols, rows,
+    const hd = { id, shell: "zsh", onBytes, onExit, cols, rows,
       write: async (d) => { if (host.dead?.has(id)) throw "no such terminal"; host.writes.push([id, d]); },
       resize: async () => {}, ack: async (n) => { host.acks.push([id, n]); }, kill: async () => { host.kills.push(id); } };
     host.handles.push(hd);
@@ -261,4 +261,26 @@ test("controller: openAt opens a regular tab and reveals line/col in the editor"
   assert.equal(c.getSnapshot().tabs.activeId, "src/a.ts");
   assert.deepEqual(editor.reveals, [["src/a.ts", 2, 5]]);
   assert.equal(c.getSnapshot().tabs.tabs[0].preview, false);
+});
+
+test("manager: the host's shell-exit event marks the tab exited at once, even if it fires before spawn resolves", async () => {
+  const host = fakeHost({ consent: "granted" });
+  const m = new mgr.TerminalManager(host);
+  await m.refresh();
+  const id = m.openTab();
+  await m.start(id, 80, 24, () => {});
+  assert.equal(m.getSnapshot().tabs[0].state, "running");
+  host.handles[0].onExit();
+  assert.equal(m.getSnapshot().tabs[0].state, "exited", "no write was needed to notice");
+  host.handles[0].onExit();
+  assert.equal(m.getSnapshot().tabs[0].state, "exited", "a second event is harmless");
+  // early exit: the event arrives while spawn is still in flight
+  const early = fakeHost({ consent: "granted" });
+  const spawn = early.spawn;
+  early.spawn = async (c, r, b, onExit) => { onExit(); return spawn(c, r, b, onExit); };
+  const m2 = new mgr.TerminalManager(early);
+  await m2.refresh();
+  const id2 = m2.openTab();
+  await m2.start(id2, 80, 24, () => {});
+  assert.equal(m2.getSnapshot().tabs[0].state, "exited");
 });

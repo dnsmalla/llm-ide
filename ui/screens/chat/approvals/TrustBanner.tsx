@@ -14,7 +14,7 @@ export interface TrustBannerProps {
   /** Called after the core accepted the trust, with the path that was trusted. */
   onTrusted: (path: string) => void;
   /** Optional host-run native confirmation (the plan's preferred form). Resolve true to proceed; absent = the in-page dialog only. */
-  nativeConfirm?: (title: string, body: string) => Promise<boolean>;
+  nativeConfirm?: (title: string, body: string, path: string) => Promise<boolean>;
 }
 
 export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBannerProps) {
@@ -36,7 +36,7 @@ export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBann
     if (dialogPath === null || dialogPath !== trust.path || busy) return;
     setBusy(true); setError(null);
     try {
-      if (nativeConfirm && !(await nativeConfirm(conf.title, conf.body.join("\n\n")))) { setBusy(false); return; }
+      if (nativeConfirm && !(await nativeConfirm(conf.title, conf.body.join("\n\n"), dialogPath))) { setBusy(false); return; }
       await core.json("PUT", "/auth/me/workspace-trust", { path: dialogPath, trusted: true });
       onTrusted(dialogPath);
       setDialogPath(null);

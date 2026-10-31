@@ -6,8 +6,8 @@ import { decodeHealth, type Health } from "../decoders.ts";
 import { describeError } from "../errors.ts";
 import { featureRows, THEME_CHOICES } from "../misc-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
-import type { ThemeChoice } from "../host.ts";
-import { Button, ErrorText, NeedsHost } from "../ui.tsx";
+import type { SettingsHost, ThemeChoice } from "../host.ts";
+import { Button, ErrorText, NeedsHost, Switch } from "../ui.tsx";
 
 export function AppearanceSection() {
   const { host } = useEnv();
@@ -52,7 +52,7 @@ export function WorkspaceSection() {
 }
 
 export function FeaturesSection() {
-  const { client } = useEnv();
+  const { client, host } = useEnv();
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -66,8 +66,22 @@ export function FeaturesSection() {
       <ErrorText text={error} />
       {loaded ? <p>{rows.note}</p> : <p className="st-hint" role="status">Loading...</p>}
       {rows.enabled.length > 0 ? <ul aria-label="Enabled features">{rows.enabled.map((f) => <li key={f}>{f}</li>)}</ul> : null}
-      <p className="st-hint">This list is read-only. Features are chosen when the backend starts.</p>
+      <p className="st-hint">Features are chosen when the backend starts.</p>
       <Button label="Reload features" onClick={load}>Reload</Button>
+      <TerminalToggle host={host} />
     </div>
   );
+}
+
+function TerminalToggle({ host }: { host: SettingsHost }) {
+  const { getExtraPrefs, setExtraPrefs } = host;
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void getExtraPrefs?.().then((p) => { if (live) setOn(p.terminal); });
+    return () => { live = false; };
+  }, [getExtraPrefs]);
+  if (!getExtraPrefs || !setExtraPrefs) return <NeedsHost what="The Terminal switch" />;
+  if (on === null) return null;
+  return <Switch label="Terminal" checked={on} hint="Lets you open a shell inside the app, after a native confirmation. Applies the next time you open the app." onChange={(v) => { setOn(v); void setExtraPrefs({ terminal: v }); }} />;
 }

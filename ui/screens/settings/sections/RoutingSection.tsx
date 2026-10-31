@@ -3,6 +3,7 @@ import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
 import { RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { ProviderSettings } from "../decoders.ts";
+import type { SettingsHost } from "../host.ts";
 import { Button, ErrorText, NeedsHost, Switch } from "../ui.tsx";
 import { StatusBanner } from "@llmide/ui-kit";
 
@@ -90,6 +91,7 @@ export default function RoutingSection() {
         </>
       )}
       <RoutePrefs getPrefs={host.getRoutePrefs?.bind(host)} setPrefs={host.setRoutePrefs?.bind(host)} />
+      <ExtraPrefs host={host} />
     </div>
   );
 }
@@ -140,6 +142,27 @@ function RoutePrefs({ getPrefs, setPrefs }: { getPrefs: (() => Promise<{ router:
     <>
       <Switch label="Per-chat model and token limit (beta)" checked={prefs.router} hint={SWITCH_TEXT.router} onChange={(v) => save({ router: v, cap: v ? prefs.cap : false })} />
       {prefs.router ? <Switch label="Enforce the token limit" checked={prefs.cap} hint={SWITCH_TEXT.cap} onChange={(v) => save({ ...prefs, cap: v })} /> : null}
+    </>
+  );
+}
+
+function ExtraPrefs({ host }: { host: SettingsHost }) {
+  const { getExtraPrefs, setExtraPrefs, getRoutePrefs } = host;
+  const [prefs, setLocal] = useState<{ compress: boolean; learn: boolean; terminal: boolean } | null>(null);
+  const [router, setRouter] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void getExtraPrefs?.().then((p) => { if (live) setLocal(p); });
+    void getRoutePrefs?.().then((p) => { if (live) setRouter(p.router); });
+    return () => { live = false; };
+  }, [getExtraPrefs, getRoutePrefs]);
+  if (!getExtraPrefs || !setExtraPrefs) return null; // the router block above already shows the host placeholder
+  if (!prefs) return null;
+  const save = (patch: Partial<typeof prefs>) => { setLocal({ ...prefs, ...patch }); void setExtraPrefs(patch); };
+  return (
+    <>
+      {router ? <Switch label="Shorten long prompts (beta)" checked={prefs.compress} hint={SWITCH_TEXT.compress} onChange={(v) => save({ compress: v })} /> : null}
+      <Switch label="Learn provider limits (beta)" checked={prefs.learn} hint={SWITCH_TEXT.learn} onChange={(v) => save({ learn: v })} />
     </>
   );
 }

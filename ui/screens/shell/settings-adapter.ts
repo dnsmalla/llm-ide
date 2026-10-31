@@ -1,14 +1,16 @@
 // Adapts the shell (core client, host commands, theme and project stores) to the narrow `SettingsEnv` the Settings
 // screen codes against (ui/screens/settings/host.ts, core-api.ts). Everything is injected so it is tested with fakes.
 //
-// Deliberately NOT provided (Settings then shows its "needs the desktop host" placeholder instead of pretending):
-//  - getLtaMode / setLtaMode / launchLtaMode and getRoutePrefs / setRoutePrefs: no host command or core route stores
-//    these switches yet (blocked on the host owner; they are env flags read when the core is spawned).
-//  - pickFolder: the only native folder dialogs are `project_open` and `notes_root_choose`, and both CHANGE state
-//    (the open project, the notes folder). Reusing one as a neutral picker would be a side effect the user did not ask for.
+// Host-backed items (only offered when a desktop host is present; in a plain browser Settings shows its
+// "needs the desktop host" placeholder instead of pretending):
+//  - archiving mode, router/cap, compress/learn, Terminal feature: host prefs (`get_prefs` / `set_prefs`, prefs.rs),
+//    applied by the host at the NEXT app start.
+//  - pickFolder: `pick_folder` (no side effect) then a single-use `pick_folder_redeem`; confirmTrust: `trust_confirm`.
+// Still not provided: nothing blocks a macOS build; Windows/Linux hosts share the same commands.
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { CoreError, type CoreClient } from "./core";
+import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
 import type { CoreStatus } from "./host";
 
 export interface SettingsAdapterDeps {
@@ -44,12 +46,49 @@ export function trustOf(status: CoreStatus | null): CoreTrust {
 }
 
 export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
+  let launch: HostPrefsView["launch"] | null = null;
+  const readPrefs = async (): Promise<HostPrefsView> => {
+    const v = decodePrefsView(await d.invoke<unknown>("get_prefs"));
+    if (!v) throw new Error("the desktop host returned preferences this app cannot read");
+    launch = v.launch;
+    return v;
+  };
+  const writePrefs = async (patch: HostPrefsPatch): Promise<HostPrefsView> => {
+    const v = decodePrefsView(await d.invoke<unknown>("set_prefs", { patch }));
+    if (!v) throw new Error("the desktop host returned preferences this app cannot read");
+    launch = v.launch;
+    return v;
+  };
+  const hostPart: Partial<SettingsHost> = d.hostAvailable()
+    ? {
+        getLtaMode: async () => (await readPrefs()).stored.ltaMode,
+        setLtaMode: async (mode) => { await writePrefs({ ltaMode: mode }); },
+        launchLtaMode: () => launch?.ltaMode ?? "off",
+        getRoutePrefs: async () => { const p = (await readPrefs()).stored; return { router: p.router, cap: p.cap }; },
+        setRoutePrefs: async (p) => { await writePrefs({ router: p.router, cap: p.router ? p.cap : false }); },
+        getExtraPrefs: async () => { const p = (await readPrefs()).stored; return { compress: p.compress, learn: p.learn, terminal: p.terminal }; },
+        setExtraPrefs: async (p) => { await writePrefs(p); },
+        async pickFolder(title) {
+          const choice = decodePickedChoice(await d.invoke<unknown>("pick_folder", { title }));
+          if (!choice) return null;
+          const path = decodePickedFolder(await d.invoke<unknown>("pick_folder_redeem", { token: choice.token }));
+          if (!path) throw new Error("the desktop host returned a folder this app cannot use");
+          return path;
+        },
+        confirmTrust: async (path) => (await d.invoke<unknown>("trust_confirm", { path })) === true,
+      }
+    : {};
   const host: SettingsHost = {
     async diagnostics(): Promise<DiagnosticsInfo> {
-      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: null, platform: d.platform() };
+      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: d.coreStatus()?.core_log_path ?? null, platform: d.platform() };
     },
     getTheme: () => d.theme.get(),
-    setTheme: (t) => d.theme.set(t),
+    setTheme: (t) => {
+      d.theme.set(t);
+      // Mirrored into the host's prefs.json so the choice survives a cleared webview store. Best effort.
+      if (d.hostAvailable()) void writePrefs({ theme: t }).catch(() => undefined);
+    },
+    ...hostPart,
     activeProjectPath: () => d.activeProjectRoot(),
     async notesFolderPath() {
       if (!d.hostAvailable()) return null;
