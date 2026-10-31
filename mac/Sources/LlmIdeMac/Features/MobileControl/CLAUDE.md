@@ -53,6 +53,18 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
 - **Device Discovery** — Bonjour/mDNS (`_llmide._tcp`) or Direct IP + PIN
 - **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`). Pairing trades the PIN for a **per-device token** (`MobilePairedDeviceStore`, hashed on disk; the phone keeps it in its Keychain) and the PIN **rotates** right after; the phone reconnects with the token. Settings → Mobile Control lists paired devices with **Revoke**. The PIN is one-time (rotates on every successful pairing); older phones (no `deviceId`) still pair but get no token and must re-pair with the new PIN
 
+## Tier gate and desktop confirmations
+
+- **One table, one gate.** `PhoneTierTable` (Services/) classifies EVERY wire message type (R, C, T0, T1, T2, D, plus
+  link and Mac-to-phone). `handleInbound` consults it before any bridge sees a frame; unknown, Mac-to-phone and
+  desktop-only types are refused with a typed code (`MobileRefusalCode`). A new tag in `MobileProtocol.Tag` without a
+  row fails `PhoneTierTableTests`. Bridges keep their own switch and payload checks (defence in depth).
+- **Desktop confirmation.** Phone-started actions that write code or leave the machine (Auto Task implement and
+  review-merge, Self-Heal apply/discard) go through `PhoneDesktopApprovalGate`: native modal, default Cancel, 120 s
+  timeout denies, one at a time, 3 per 5 minutes. Features reach it only through `MobileBridgeHosting.requestDesktopApproval`.
+  Re-check switch, setting and project AFTER the approval, before acting.
+- **Queued phone work is re-validated when it executes** (switch and active project), not only at receipt.
+
 ## Adding a phone capability (the bridge registry + Phone access)
 
 - New bridges go through `MobileControlManager.register(bridge:messageTypes:capabilities:)` (see
@@ -61,7 +73,7 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
   handler must re-check the switch on every request** (a phone may hold an old capability list).
 - Anything that edits files, posts as the user or approves a tool defaults **OFF**. Replies must be shaped
   for the phone's pending request (never a bare `CommandError(commandId: <type>)`), so a screen can't spin.
-- Switches that gate control from the phone, all default **OFF**: `autoTaskControl` (Auto Task run/toggle/config/templates),
+- Switches that gate control from the phone, all default **OFF**: `autoTaskControl` (Auto Task **run** only: toggles, config and templates are desktop-only, and implement/review-merge also need a desktop confirmation),
   `loopControl` (`loop_start*`), `generationRun`, plus `fileBrowse` for Explore search and `@file` refs. They are
   enforced in the handlers, not through advertised capabilities, so an old phone sees the screens and gets a typed refusal.
 - Never take a path from the phone as a filesystem path: resolve ids on the Mac (recents, incidents) or

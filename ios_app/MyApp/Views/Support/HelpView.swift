@@ -20,7 +20,7 @@ struct HelpView: View {
                         1. On your Mac: LLM-IDE → Settings → Mobile Control → Start.
                         2. Note the IP, port (:3006), and PIN (or scan the pairing QR).
                         3. On iPhone: pick your Mac from the list, or enter IP + PIN manually.
-                        4. When status shows Live, tap Chat, Explore, or Auto in the toolbar — the iPhone is a companion, not a screen mirror.
+                        4. When status shows Live, use the Chat tab, or the Project tab and its Explorer / Auto Tasks / Loop control — the iPhone is a remote control, not a screen mirror.
                         """
                     )
                     HelpSection(
