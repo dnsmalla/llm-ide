@@ -152,17 +152,24 @@ export function getCommandArgs(userId, id) {
   return r ? jparse(r.args_json, {}) : null;
 }
 
+// The state a caller sees is the command's own state, or for an enqueued command the job's (queued when the job row is
+// missing). The filter below mirrors `shapeRow` in SQL so the state is applied BEFORE the LIMIT.
+const OWN_STATES = new Set(['awaiting_approval', 'denied', 'expired']);
+const JOB_STATES_VISIBLE = new Set(['queued', 'running', 'succeeded', 'failed', 'interrupted']);
+
 export function listCommands(userId, { state, limit = 50 } = {}) {
   const n = Math.max(1, Math.min(200, Math.floor(limit) || 50));
-  const rows = getDb().prepare('SELECT * FROM bus_commands WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 500').all(userId);
-  const out = [];
-  for (const r of rows) {
-    const c = shapeRow(r, r.state === 'enqueued' ? getJob(userId, r.id) : null);
-    if (state && c.state !== state) continue;
-    out.push(c);
-    if (out.length >= n) break;
+  let where = 'c.user_id = ?';
+  if (state) {
+    if (OWN_STATES.has(state)) where += ` AND c.state = '${state}'`;
+    else if (state === 'cancelled') where += " AND (c.state = 'cancelled' OR (c.state = 'enqueued' AND j.state = 'cancelled'))";
+    else if (state === 'queued') where += " AND c.state = 'enqueued' AND (j.id IS NULL OR j.state = 'queued')";
+    else if (JOB_STATES_VISIBLE.has(state)) where += ` AND c.state = 'enqueued' AND j.state = '${state}'`;
+    else return [];
   }
-  return out;
+  const rows = getDb().prepare(`SELECT c.* FROM bus_commands c LEFT JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
+    WHERE ${where} ORDER BY c.created_at DESC, c.rowid DESC LIMIT ?`).all(userId, n);
+  return rows.map((r) => shapeRow(r, r.state === 'enqueued' ? getJob(userId, r.id) : null));
 }
 
 export function listPendingApprovals(userId) {
@@ -315,7 +322,7 @@ export function purgeOldCommandsSystem(now = Date.now(), days = BUS_LIMITS.reten
   const db = getDb();
   const cutoff = new Date(now - days * 86400_000).toISOString();
   const rows = db.prepare(`SELECT c.id FROM bus_commands c LEFT JOIN jobs j ON j.id = c.id
-    WHERE c.created_at < ? AND (c.state IN ('denied','expired') OR (c.state = 'enqueued' AND (j.id IS NULL OR j.state IN ('succeeded','failed','cancelled','interrupted'))))`).all(cutoff);
+    WHERE c.created_at < ? AND (c.state IN ('denied','expired','cancelled') OR (c.state = 'enqueued' AND (j.id IS NULL OR j.state IN ('succeeded','failed','cancelled','interrupted'))))`).all(cutoff);
   db.transaction(() => {
     for (const r of rows) {
       db.prepare('DELETE FROM job_events WHERE job_id = ?').run(r.id);

@@ -887,3 +887,57 @@ test('L1: chunk events carry the whole text in valid UTF-8 pieces', async () => 
     for (const e of ev.events.filter((x) => x.type === 'chunk')) assert.ok(Buffer.byteLength(JSON.stringify(e.payload), 'utf8') <= 16 * 1024);
   } finally { control.text = 'Finding: none\nNo findings.'; }
 });
+
+// ---- L2, L3: store queries ----
+
+const insertCmd = (userId, i, { state, createdAt, kind = 'review' }) => main.getDb().prepare(
+  `INSERT INTO bus_commands (id, user_id, kind, tier, idem, args_hash, args_json, origin_client, state, ttl_at, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+).run(`seed-${i}-${state}-${createdAt.slice(0, 4)}`.padEnd(12, 'x'), userId, kind, 'T0', `seed-idem-${i}-${state}`, 'h', '{}', 'desktop-ui', state, '2099-01-01T00:00:00.000Z', createdAt);
+
+test('L3: listCommands filters by state BEFORE the limit (an old match is found behind newer rows of other states)', async () => {
+  await reset();
+  insertCmd(A, 0, { state: 'expired', createdAt: '2020-01-01T00:00:00.000Z' });
+  for (let i = 1; i <= 650; i++) insertCmd(A, i, { state: 'denied', createdAt: new Date(Date.UTC(2024, 0, 1) + i * 1000).toISOString() });
+  const exp = store.listCommands(A, { state: 'expired', limit: 5 });
+  assert.equal(exp.length, 1, 'the old expired row is found');
+  assert.equal(exp[0].state, 'expired');
+  const denied = store.listCommands(A, { state: 'denied', limit: 200 });
+  assert.equal(denied.length, 200);
+  assert.ok(denied[0].createdAt > denied[199].createdAt, 'newest first');
+  assert.equal(store.listCommands(A, { limit: 7 }).length, 7);
+  assert.equal(store.listCommands(B, { state: 'expired' }).length, 0, 'per user');
+});
+
+test('L3: job-derived states filter in SQL too (queued, running, succeeded, cancelled)', async () => {
+  await reset();
+  const b = newBus({});
+  const c1 = b.receive(A, cmd(), { client: 'desktop-ui' }); // queued
+  const c2 = b.receive(A, cmd({ args: { focus: 'doc', projectId: 'proj-2' } }), { client: 'desktop-ui' });
+  q.claimNextJobSystem(); // c1 -> running
+  q.finishJobSystem(c1.command.id, 'succeeded', { result: {} });
+  q.claimNextJobSystem(); // c2 -> running
+  q.requestCancel(A, c2.command.id);
+  q.finishJobSystem(c2.command.id, 'cancelled', { error: 'cancelled' });
+  b.receive(A, cmd({ args: { focus: 'conflicts', projectId: 'proj-1' } }), { client: 'desktop-ui' }); // queued
+  assert.deepEqual(store.listCommands(A, { state: 'succeeded' }).map((c) => c.id), [c1.command.id]);
+  assert.deepEqual(store.listCommands(A, { state: 'cancelled' }).map((c) => c.id), [c2.command.id]);
+  assert.equal(store.listCommands(A, { state: 'queued' }).length, 1);
+  assert.equal(store.listCommands(A, { state: 'running' }).length, 0);
+  assert.equal(store.listCommands(A, {}).length, 3);
+});
+
+test('L2: cancelled-while-waiting commands are purged after the retention window like every other finished command', async () => {
+  await reset();
+  const old = new Date(Date.now() - 9 * 86400_000).toISOString();
+  insertCmd(A, 1, { state: 'cancelled', createdAt: old });
+  insertCmd(A, 2, { state: 'cancelled', createdAt: new Date().toISOString() });
+  insertCmd(A, 3, { state: 'awaiting_approval', createdAt: old });
+  const db = main.getDb();
+  const oldId = db.prepare("SELECT id FROM bus_commands WHERE idem = 'seed-idem-1-cancelled'").get().id;
+  db.prepare("INSERT INTO job_events (job_id, seq, user_id, type, payload_json, terminal, bytes, at) VALUES (?,?,?,?,?,?,?,?)").run(oldId, 1, A, 'ended', '{}', 1, 2, 1);
+  assert.equal(store.purgeOldCommandsSystem(), 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM bus_commands WHERE idem = 'seed-idem-1-cancelled'").get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM job_events WHERE job_id = ?').get(oldId).n, 0, 'its events go too');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM bus_commands WHERE idem IN ('seed-idem-2-cancelled','seed-idem-3-awaiting_approval')").get().n, 2, 'recent and still-pending rows stay');
+});
