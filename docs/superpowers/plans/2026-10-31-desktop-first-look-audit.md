@@ -63,3 +63,5 @@ ProjectSkillsInstaller}.swift`, `Features/Settings/Views/HelpGuideView.swift`. F
 Spike gating, (e)(f) shared "no project" card, (g) clean-data-dir end-to-end test. Security: project names and recents
 are untrusted text (rendered as text, bidi/control stripped, length-capped); nothing here deletes user data; "forget"
 edits only the recent list.
+
+Settings now mirrors the Mac's single App page (collapsible groups, same order): see [2026-10-31-settings-mirror-map.md](2026-10-31-settings-mirror-map.md).
