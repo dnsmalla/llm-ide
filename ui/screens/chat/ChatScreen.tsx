@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Composer, type ComposerProps } from "./Composer";
+import { ComposerWithExtras } from "./slash/ComposerWithExtras";
+import type { ComposeServices } from "./slash/extras";
+import { PlanController } from "./plan/controller";
+import { PlanArea, refineSeed } from "./plan/PlanArea";
+import { HeaderBadges } from "./badges/HeaderBadges";
+import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { CapChip, ModePicker, ModelPicker, PermissionChip } from "./Pickers";
 import { SessionList } from "./SessionList";
@@ -26,6 +32,8 @@ export interface ChatHost {
   files?: FileRefs;
   /** Host file dialog; absent = the Attach button is hidden (checklist row stays open). */
   attachFiles?: () => void;
+  /** Slash menu, @ mentions, attachments and plan saving (slash/extras.tsx); absent = the plain composer. */
+  compose?: ComposeServices;
   /** Native confirmation for Bypass (once per app run). Resolve true to proceed. */
   confirmBypass?: () => Promise<boolean>;
 }
@@ -61,6 +69,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [route, setRoute] = useState<RouteView | null>(null);
   const loadingMore = useRef(false);
+  const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
+  const [refineNonce, setRefineNonce] = useState(0);
   useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.
@@ -159,6 +169,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               <h2 className="chat-title">{sessions.find((s) => s.id === activeId)?.title || "Untitled chat"}</h2>
               {state.context && <span className="chat-muted" aria-label={`Context ${state.context.percentage} percent used`}>Context {state.context.percentage}%</span>}
               {state.model && <span className="chat-muted">{state.model}</span>}
+              <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />
               <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />
             </header>
@@ -177,6 +188,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 {state.tasks.map((t) => <li key={t.id} data-status={t.status}>{t.title} <span className="chat-muted">{t.status}</span></li>)}
               </ul>
             )}
+            <PlanArea
+              chatId={activeId} state={state} mode={current.mode} plans={plans} onOpenLink={host.openLink} onCopy={host.copy}
+              onRefine={(title) => { controller.setView(activeId, { draft: refineSeed(title) }); setRefineNonce((n) => n + 1); }}
+              onExecute={(turn) => {
+                setCurrent({ mode: "execute" });
+                controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission });
+                touchSession(activeId);
+              }}
+            />
             {approvals?.(state)}
             <div className="chat-controls">
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
@@ -185,10 +205,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
             <DraftComposer
-              key={activeId} controller={controller} id={activeId}
+              key={`${activeId}:${refineNonce}`} controller={controller} id={activeId}
+              compose={host.compose} models={groups} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
+              setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              onSend={(text) => { controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission }); touchSession(activeId); }}
-              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={noProject ? "Open a project to send messages." : null}
+              onSend={(text, extra) => { controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments }); touchSession(activeId); }}
+              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null}
             />
           </>
         )}
@@ -202,7 +224,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 }
 
 /** Owns the draft text locally (typing never re-renders the conversation) and saves it per chat on every change. */
-function DraftComposer({ controller, id, ...rest }: { controller: ChatController; id: string } & Omit<ComposerProps, "draft" | "onDraft">) {
+function DraftComposer({ controller, id, compose, models, setMode, setModel, clearChat, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void } & Omit<ComposerProps, "draft" | "onDraft" | "extras">) {
   const [draft, setDraft] = useState(() => controller.getView(id).draft);
-  return <Composer {...rest} draft={draft} onDraft={(t) => { setDraft(t); controller.setView(id, { draft: t }); }} />;
+  const onDraft = (t: string) => { setDraft(t); controller.setView(id, { draft: t }); };
+  if (!compose) return <Composer {...rest} draft={draft} onDraft={onDraft} />;
+  return <ComposerWithExtras {...rest} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} />;
 }

@@ -3,6 +3,7 @@
 import "@llmide/ui-kit/styles.css";
 import "./chat.css";
 import "./approvals/approvals.css";
+import "./slash/compose.css";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { chatBinding, core as shellCore, host as shellHost, invokeHost, relativeToProject, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
@@ -14,6 +15,11 @@ import { TauriChatStore } from "./tauri-store";
 import { safeHref } from "./markdown";
 import { ApprovalsPanel, TrustBanner } from "./approvals";
 import type { ChatState } from "./state";
+import { createCatalogLoader } from "./slash/loader";
+import { createHostAttach } from "./attach/host";
+import { createHostProjectFs } from "./mentions/project-fs";
+import { createMentionSearch } from "./mentions";
+import type { ComposeServices } from "./slash/extras";
 
 export { ChatScreen, type ChatHost, type ChatScreenProps } from "./ChatScreen";
 export { ChatController, type ControllerDeps, type SendOptions, type ChatView } from "./controller";
@@ -65,9 +71,26 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
   useEffect(() => () => controller.dispose(), [controller]);
   // "Open in Explorer": paths named by tool calls, only when they are inside the open project.
+  // Slash menu, @ mentions, attachments, plan saving: host-backed only inside the desktop app, and the project fs
+  // only while a project is open (the host confines every path to its root; the webview never sends an absolute one).
+  const hasProject = projectRoot !== null;
+  const compose = useMemo<ComposeServices>(() => {
+    const desktop = shellHost.isAvailable();
+    const project = desktop && hasProject ? createHostProjectFs(invokeHost) : null;
+    const sections: Record<string, "settings" | "library"> = { settings: "settings", library: "library" };
+    return {
+      catalog: createCatalogLoader(transport),
+      project,
+      mentions: createMentionSearch({ fs: project, core: transport }),
+      attachHost: desktop ? createHostAttach(invokeHost) : null,
+      openSection: (section) => { const target = sections[section]; if (!target) return false; shellBus.publish({ type: "goto-section", section: target }); return true; },
+      openLibraryTarget: () => shellBus.publish({ type: "goto-section", section: "library" }),
+    };
+  }, [transport, hasProject]);
   const host = useMemo<ChatHost>(
     () => ({
       ...BASE_HOST,
+      compose,
       // Bypass needs a native, default-Cancel confirmation (host command `bypass_confirm`); without the host it fails closed.
       ...(shellHost.isAvailable()
         ? { confirmBypass: () => invokeHost<boolean>("bypass_confirm", { summary: "Bypass lets the assistant run tools without asking first." }).then((ok) => ok === true, () => false) }
@@ -77,7 +100,7 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
         open: (rel) => shellBus.publish({ type: "open-file", path: rel }),
       },
     }),
-    [],
+    [compose],
   );
   // S-G: approval/question cards and the trust banner read the running chat's state; decisions go through the controller.
   const approvals = useCallback((s: ChatState) => (

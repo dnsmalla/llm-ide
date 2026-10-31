@@ -1,5 +1,6 @@
 // One message: user bubble or assistant parts (streamed text, tool cards, notices). Memoised so a stream
 // only re-renders the last message; inside it only the open tail of the text re-parses.
+import { editPreviewFor } from "./plan/EditPreview";
 import { memo, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
@@ -80,6 +81,7 @@ export function ToolCard({ tool, files }: { tool: ToolPart; files?: FileRefs }) 
           {fileRel !== null && files && (
             <button type="button" className="chat-link-btn" onClick={() => files.open(fileRel)}>Open in Explorer</button>
           )}
+          {editPreviewFor(tool, files?.resolve)}
           {tool.args && <pre className="chat-tool-args" aria-label="Arguments">{args.text}{args.rest > 0 ? "\n…" : ""}</pre>}
           {res && <pre className="chat-tool-out" aria-label="Output">{res.text}{res.rest > 0 ? "\n…" : ""}</pre>}
           {res && res.rest > 0 && (
