@@ -49,6 +49,22 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// answered is dropped rather than overwriting the newer answer.
     private(set) var requestGate = MobileLoopRequestGate()
 
+    /// Why a start the phone queued must NOT run now, or nil. Pure so a test can pin every case.
+    nonisolated static func executionRefusal(switchAllowed: Bool, deniedMessage: String,
+                                             projectAtReceipt: String?, projectNow: String?) -> String? {
+        guard switchAllowed else { return deniedMessage }
+        guard projectAtReceipt == projectNow else {
+            return "The active project changed on your Mac while this was waiting, so nothing started. Ask again."
+        }
+        return nil
+    }
+
+    private func executionRefusal(projectAtReceipt: String?) -> String? {
+        Self.executionRefusal(switchAllowed: loopControlAllowed, deniedMessage: loopControlDeniedMessage,
+                              projectAtReceipt: projectAtReceipt,
+                              projectNow: host?.projectStore?.activeProject?.bundle.id)
+    }
+
     init(host: any MobileBridgeHosting, loopLane: any LoopLaneControlling) {
         self.host = host
         self.loopLane = loopLane
@@ -92,6 +108,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
             }
             let seq = requestGate.issue()
             let stopGeneration = requestGate.stopGeneration
+            let projectAtReceipt = host?.projectStore?.activeProject?.bundle.id
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
@@ -100,6 +117,14 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 guard self.requestGate.stopGeneration == stopGeneration else {
                     self.host?.logInfo("loop_start cancelled by a Stop sent meanwhile")
                     self.host?.sendLoopReply(.ack(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    return
+                }
+                // Re-validate at EXECUTION time: the switch may have been turned off, or the project changed,
+                // while the snapshot loaded. Checking only at receipt let a queued request run against a
+                // project the phone never asked about.
+                if let why = self.executionRefusal(projectAtReceipt: projectAtReceipt) {
+                    self.host?.logInfo("loop_start refused at execution: \(why)")
+                    self.host?.sendLoopReply(.ack(accepted: false, message: why))
                     return
                 }
                 // Refuse for a concrete reason rather than firing a run that the
@@ -157,6 +182,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
             }
             let seq = requestGate.issue()
             let stopGeneration = requestGate.stopGeneration
+            let projectAtReceipt = host?.projectStore?.activeProject?.bundle.id
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
@@ -164,6 +190,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 guard self.requestGate.stopGeneration == stopGeneration else {
                     self.host?.logInfo("loop_start_stage cancelled by a Stop sent meanwhile")
                     self.host?.sendLoopReply(.ack(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    return
+                }
+                if let why = self.executionRefusal(projectAtReceipt: projectAtReceipt) {
+                    self.host?.logInfo("loop_start_stage refused at execution: \(why)")
+                    self.host?.sendLoopReply(.ack(accepted: false, message: why))
                     return
                 }
                 guard state.configured else {

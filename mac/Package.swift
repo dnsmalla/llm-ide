@@ -134,6 +134,7 @@ if autoTasksIncluded {
         "CustomAutoTaskProjectScopeTests.swift",
         "MobileAutoTaskBridgeScopeTests.swift",
         "PhoneBridgeSpyHost.swift",
+        "PhoneQueuedLoopRevalidationTests.swift",
         "PhoneAutoTaskRunGateTests.swift",
         "PhoneAutoTaskApprovalFlowTests.swift",
         "AutoCodeUpdateServiceCLITests.swift",

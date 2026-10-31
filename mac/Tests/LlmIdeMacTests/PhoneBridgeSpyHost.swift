@@ -10,6 +10,8 @@ final class PhoneBridgeSpyHost: MobileBridgeHosting {
     var mobileClientPaired = true
     var allowed: Set<String> = []
     var autoTaskRequest: MobileAutoTaskRequest?
+    var loopRequest: MobileLoopRequest?
+    var loopReplies: [MobileLoopReply] = []
     var autoTaskReplies: [MobileAutoTaskReply] = []
     var commandErrors: [(commandId: String, message: String, code: String?)] = []
     var infoLines: [String] = []
@@ -34,8 +36,8 @@ final class PhoneBridgeSpyHost: MobileBridgeHosting {
     }
     func decodeAutoTaskRequest(type: String, data: Data?) -> MobileAutoTaskRequest? { autoTaskRequest }
     func sendAutoTaskReply(_ reply: MobileAutoTaskReply) { autoTaskReplies.append(reply) }
-    func decodeLoopRequest(type: String, data: Data?) -> MobileLoopRequest? { nil }
-    func sendLoopReply(_ reply: MobileLoopReply) {}
+    func decodeLoopRequest(type: String, data: Data?) -> MobileLoopRequest? { loopRequest }
+    func sendLoopReply(_ reply: MobileLoopReply) { loopReplies.append(reply) }
     func requestDesktopApproval(_ request: PhoneDesktopApprovalRequest) async -> PhoneDesktopApprovalOutcome {
         approvalRequests.append(request)
         return approvalOutcomes.isEmpty ? .approved : approvalOutcomes.removeFirst()
