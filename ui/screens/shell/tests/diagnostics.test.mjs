@@ -71,3 +71,13 @@ test("the core client reports one outcome per request: status or code, never bod
   for (const o of seen) log.record(o);
   assert.equal(log.entries()[1].path, "/kb/chats/:id");
 });
+
+test("the panel renders the report with Copy and Clear", async () => {
+  const { React, renderToStaticMarkup } = await import("./helpers.mjs");
+  const { DiagnosticsPanel } = await load("DiagnosticsPanel.tsx");
+  const html = renderToStaticMarkup(React.createElement(DiagnosticsPanel));
+  assert.match(html, /Core diagnostics/);
+  assert.match(html, /Copy diagnostics/);
+  assert.match(html, />Clear</);
+  assert.match(html, /Signed in: no/);
+});

@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { useActiveProject, useCoreStatusView } from "./use-shell";
 import { HOME_CHOICES, readHome, storeHome } from "./landing";
 import { SECTIONS, type SectionId } from "./sections";
@@ -75,12 +76,18 @@ const HomePicker = memo(function HomePicker() {
 /** Core state chip: re-renders only when the derived status view changes. */
 const CoreChip = memo(function CoreChip() {
   const view = useCoreStatusView();
+  const [diag, setDiag] = useState(false);
   return (
     <>
-      <span className="sh-statusbar-core" role="status" aria-live="polite" data-level={view.level} title={view.detail ?? undefined}>
+      <button type="button" className="sh-statusbar-core sh-statusbar-item" aria-live="polite" aria-haspopup="dialog" aria-expanded={diag} data-level={view.level} title={view.detail ?? "Show core diagnostics"} onClick={() => setDiag((v) => !v)}>
         <span className="sh-dot" aria-hidden="true" />
         {view.label}
-      </span>
+      </button>
+      {diag && (
+        <div style={{ position: "fixed", left: 8, bottom: 32, zIndex: 50 }} onKeyDown={(e) => e.key === "Escape" && setDiag(false)}>
+          <DiagnosticsPanel onClose={() => setDiag(false)} />
+        </div>
+      )}
       {view.hints.map((h) => (
         <button
           key={h.id}

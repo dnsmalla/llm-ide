@@ -74,14 +74,14 @@ const failing = (code: string, status = 0) => ({
 
 test("a shell CoreError keeps its own code instead of becoming UNREACHABLE", async () => {
   for (const [code, status] of [["UNTRUSTED_CORE", 0], ["NO_SESSION", 401], ["SESSION_EXPIRED", 401], ["UNSAFE_URL", 0], ["TIMEOUT", 0], ["BAD_RESPONSE", 502], ["BAD_REQUEST", 0]] as const) {
-    const e = await call(failing(code, status), "GET", "/x").catch((x) => x);
+    const e = (await call(failing(code, status), "GET", "/x").catch((x: unknown) => x)) as ApiError;
     assert.ok(e instanceof ApiError, code);
     assert.equal(e.code, code);
     assert.ok(!describeError(e).includes("sk-"));
   }
-  const net = await call(failing("NETWORK"), "GET", "/x").catch((x) => x);
+  const net = (await call(failing("NETWORK"), "GET", "/x").catch((x: unknown) => x)) as ApiError;
   assert.equal(net.code, "UNREACHABLE");
-  const unknown = await call({ request: async () => { throw new Error("boom"); } }, "GET", "/x").catch((x) => x);
+  const unknown = (await call({ request: async () => { throw new Error("boom"); } }, "GET", "/x").catch((x: unknown) => x)) as ApiError;
   assert.equal(unknown.code, "UNREACHABLE");
 });
 
@@ -99,8 +99,8 @@ test("the shell codes have their own plain sentences", () => {
 test("an abort is ABORTED even when the shell reports another code", async () => {
   const ctl = new AbortController();
   ctl.abort();
-  const e = await call(failing("NETWORK"), "GET", "/x", undefined, ctl.signal).catch((x) => x);
+  const e = (await call(failing("NETWORK"), "GET", "/x", undefined, ctl.signal).catch((x: unknown) => x)) as ApiError;
   assert.equal(e.code, "ABORTED");
-  const e2 = await call(failing("ABORTED"), "GET", "/x").catch((x) => x);
+  const e2 = (await call(failing("ABORTED"), "GET", "/x").catch((x: unknown) => x)) as ApiError;
   assert.equal(e2.code, "ABORTED");
 });

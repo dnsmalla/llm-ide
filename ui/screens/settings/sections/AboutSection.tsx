@@ -7,6 +7,7 @@ import { describeError } from "../errors.ts";
 import { buildDiagnostics, coreTrustLabel, coreTrustTone } from "../misc-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
+import { DiagnosticsPanel } from "../../shell/DiagnosticsPanel";
 
 export default function AboutSection() {
   const { client, host } = useEnv();
@@ -50,6 +51,10 @@ export default function AboutSection() {
           </div>
         </>
       ) : <p className="st-hint" role="status">Loading...</p>}
+      <details>
+        <summary>Core request log</summary>
+        <DiagnosticsPanel />
+      </details>
     </div>
   );
 }
