@@ -310,7 +310,8 @@ const HOST = config.host;
 //   v101 — host-approved Bypass (additive; only when the core was started by the Tauri host, i.e. env LLMIDE_HOST_APPROVAL_KEY is set; with it unset nothing changes): POST /agent/v2/stream with permissionMode "bypass" must carry a valid single-use 60 s x-llmide-host-approval token (core/host-approval.mjs, desktop/PACKAGING.md) or answers 403 { error: { code: 'HOST_APPROVAL_REQUIRED' } } before any turn; phone, extension and remote origins are capped at Ask regardless of token; an approved turn is audited approvedBy: host. No new route.
 //   v102 — security review fixes, additive on the wire. (1) Command bus host proof is a separate secret derived from LLMIDE_HOST_APPROVAL_KEY (header x-llmide-host-nonce; the /health nonce no longer proves anything). (2) Bypass: format v2 approval token bound to the chat (x-llmide-host-approval: v2.<expiry>.<nonce>.<mac>, purpose bypass:<chatId>) plus x-llmide-client: desktop-ui and the host proof; v1 only with LLMIDE_HOST_APPROVAL_COMPAT=1. (3) GET /bus/kinds: kinds[].engines lists only selectable engines, new engineStatus [{ id, available, reason? }]; a codex or gemini review is refused 501 ENGINE_NOT_SANDBOXED. (4) bus result reads are scoped by client class (docs/spec/command-bus.md). Spec: docs/spec/command-bus.md, docs/spec/api-server.md section 7g.
 //   v103 — Google connectors, additive (docs/spec/google-connectors.md, contract schema/http/google.schema.json): ten routes under /kb/google/* (start, status, accounts, disconnect, options, calendars, drive/folders, gmail/fetch, gmail/seen, sync). Google sign-in is a connector credential only: bring-your-own OAuth client, PKCE with a loopback listener owned by the core, read-only scopes, refresh tokens only in the vault (key pattern google.acct.<id>.*), every Google request through the pinned fetch with a host allowlist. Migration 0059 (google_accounts, connector_sync_state). Starting a connect revokes the legacy mail.google.com token of /auth/google/* if one exists. No existing route or field changed.
-const SERVER_API_VERSION = 103;
+//   v104 — iCal feed connector, additive (docs/spec/calendar-ical.md, contract schema/http/calendar-ical.schema.json): five routes under /kb/calendar-ical/* (POST+GET sources, DELETE sources/:id, POST sync, POST options). Read-only Google Calendar via the "Secret address in iCal format" (no OAuth, no Google Cloud project): the URL is a bearer secret, stored only in the vault (key ical.src.<id>.url, not settable through /auth/me/secrets), never returned, logged or audited. Fetch through the pinned fetch, https:443, host allowlist calendar.google.com (+ operator LLMIDE_ICAL_HOSTS), same-host redirects only (2 hops), 5 MiB streamed cap, 20 s deadline, conditional GET. Safe in-repo ICS parser with bounded RRULE expansion. Migration 0060 (ical_sources; connector_sync_state accepts connector 'ical'). No existing route or field changed.
+const SERVER_API_VERSION = 104;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -380,6 +381,10 @@ const ALL_ENDPOINTS = [
   '/kb/google/gmail/fetch',
   '/kb/google/gmail/seen',
   '/kb/google/sync',
+  '/kb/calendar-ical/sources',
+  '/kb/calendar-ical/sources/:id',
+  '/kb/calendar-ical/sync',
+  '/kb/calendar-ical/options',
   '/kb/activity',
   '/kb/activity/seen',
   '/kb/usage/limits',
@@ -509,6 +514,7 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/slack/conversations') return 'dispatch';
     // The Google pickers each make an outbound Google API call.
     if (path === '/kb/google/calendars' || path === '/kb/google/drive/folders') return 'dispatch';
+    if (path === '/kb/calendar-ical/sources') return 'kbWrite';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
     return null;
@@ -525,6 +531,7 @@ function rateLimitProfile(url, method) {
     if (path.startsWith('/bus/'))              return 'kbWrite';
     if (path.startsWith('/kb/issue-schedule')) return 'kbWrite';
     if (path.startsWith('/kb/docs/')) return 'kbWrite';
+    if (path.startsWith('/kb/calendar-ical/')) return 'kbWrite';
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';
     return null;
   }
@@ -601,6 +608,9 @@ function rateLimitProfile(url, method) {
   // options, disconnect and the seen commit are local writes (kbWrite). status and accounts are cheap local reads, unthrottled.
   if (url === '/kb/google/gmail/fetch' || url === '/kb/google/sync') return 'dispatch';
   if (url === '/kb/google/start' || url === '/kb/google/options' || url === '/kb/google/disconnect' || url === '/kb/google/gmail/seen') return 'kbWrite';
+  // iCal feeds: sync reaches the feed host (dispatch); add, options are local writes (kbWrite).
+  if (url === '/kb/calendar-ical/sync') return 'dispatch';
+  if (url === '/kb/calendar-ical/sources' || url === '/kb/calendar-ical/options') return 'kbWrite';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   if (url === '/kb/agent-history/clear' || url === '/kb/agent-history/compact') return 'kbWrite';
   // Local filesystem symlink install of the skills kit into a project path.

@@ -33,6 +33,7 @@ const CLIENT_REFUSAL_CODES = new Set([
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
 import { handleGoogleRoutes } from './google-connectors.mjs';
+import { handleCalendarIcalRoutes } from './calendar-ical.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';
 import { handleCompleteRoutes } from './complete.mjs';
 // Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
@@ -1306,6 +1307,10 @@ export async function handleKB(req, res) {
     // ── Google connectors: Gmail, Calendar, Drive (/kb/google/*) ──
     // Always on (Library connectors, no LLMIDE_FEATURES key). See routes/google-connectors.mjs.
     if (await handleGoogleRoutes(req, res, { userId, url })) return true;
+
+    // ── iCal feed connector: Google Calendar secret address, read-only (/kb/calendar-ical/*) ──
+    // Always on. The feed URL is a bearer secret: write-only, vault only. See routes/calendar-ical.mjs.
+    if (await handleCalendarIcalRoutes(req, res, { userId, url })) return true;
 
     // ── System view aggregate (GET /kb/os/state) ─────────────────
     // Read-only, no model call. See routes/os.mjs.
