@@ -3,6 +3,7 @@ mod core_env;
 mod core_host;
 mod fs_ops;
 mod fs_watch;
+mod git;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
@@ -274,6 +275,10 @@ pub fn run() {
             fs_watch::fs_watch_start,
             fs_watch::fs_watch_set,
             fs_watch::fs_watch_stop,
+            git::git_status,
+            git::git_diff,
+            git::git_show,
+            git::git_stage,
             tray::notify,
             tray::tray_status,
             tray::tray_set_close_to_tray,
