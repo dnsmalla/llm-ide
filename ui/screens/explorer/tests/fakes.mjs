@@ -110,16 +110,22 @@ export function makeEditor() {
     has: (p) => models.has(p),
     showNone() { ed.current = null; },
     getText: (p) => models.get(p)?.text ?? null,
-    replace(p, t) { const m = models.get(p); m.text = t; m.saved = t; },
+    snapshot(p) { const m = models.get(p); if (!m) return null; m.ver ??= 0; m.hist ??= new Map(); m.hist.set(m.ver, m.text); return { text: m.text, versionId: m.ver }; },
+    replace(p, t) { const m = models.get(p); m.text = t; m.saved = t; m.ver = (m.ver ?? 0) + 1; },
     append(p, t) { models.get(p).text += t; },
-    markSaved(p) { const m = models.get(p); m.saved = m.text; },
+    markSaved(p, v) {
+      const m = models.get(p);
+      if (v === undefined || v === m.ver) m.saved = m.text; else m.saved = m.hist?.get(v) ?? m.saved;
+      return m.text === m.saved;
+    },
+    versionOf(p) { return models.get(p)?.ver ?? 0; },
     close(p) { models.delete(p); if (ed.current === p) ed.current = null; },
     rename(a, b) { const m = models.get(a); models.delete(a); models.set(b, m); if (ed.current === a) ed.current = b; },
     showDiff(p, o) { ed.diff = [p, o]; },
     hideDiff() { ed.diff = null; },
     find() {}, reveal(path, line, col) { reveals.push([path, line, col]); }, reveals, focus() {}, layout() {}, retheme() {}, modelCount: () => models.size, dispose() {},
     // test helper: simulate typing
-    type(p, text) { const m = models.get(p); m.text = text; cb.onDirty(p, m.text !== m.saved); },
+    type(p, text) { const m = models.get(p); m.ver = (m.ver ?? 0) + 1; m.text = text; cb.onDirty(p, m.text !== m.saved); },
     evict(p) { models.delete(p); cb.onEvict(p); },
   };
   return ed;

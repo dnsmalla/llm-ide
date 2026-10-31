@@ -168,6 +168,10 @@ export function createMonacoEditorHost(): EditorHost {
       editor?.setModel(null);
     },
     getText: (path) => models.get(path)?.model.getValue() ?? null,
+    snapshot(path) {
+      const e = models.get(path);
+      return e ? { text: e.model.getValue(), versionId: e.model.getAlternativeVersionId() } : null;
+    },
     replace(path, text) {
       const e = models.get(path);
       if (!e) return;
@@ -186,12 +190,15 @@ export function createMonacoEditorHost(): EditorHost {
       e.baseline = e.model.getAlternativeVersionId();
       setDirty(path, e);
     },
-    markSaved(path) {
+    markSaved(path, versionId) {
       const e = models.get(path);
-      if (!e) return;
-      e.baseline = e.model.getAlternativeVersionId();
+      if (!e) return true;
+      const cur = e.model.getAlternativeVersionId();
+      // Typing during the write moved the version: the saved text is the OLD version, so keep dirty.
+      e.baseline = versionId ?? cur;
       e.forcedDirty = false;
       setDirty(path, e);
+      return e.baseline === cur;
     },
     close(path) {
       const e = models.get(path);

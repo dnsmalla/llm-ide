@@ -333,3 +333,29 @@ test("diff toggles on and off through the editor host", async () => {
   await c.toggleDiff("a.txt");
   assert.equal(editor.diff, null);
 });
+
+test("typing during a save keeps the buffer dirty (H5)", async () => {
+  const { c, editor, fs } = await setup({ "a.txt": "one" });
+  await c.openFile("a.txt", false);
+  editor.type("a.txt", "two");
+  const realWrite = fs.write;
+  fs.write = async (...a) => { const r = await realWrite(...a); editor.type("a.txt", "two+more"); return r; };
+  assert.equal(await c.save("a.txt"), true);
+  assert.equal(fs.files.get("a.txt"), "two");
+  assert.equal(c.getSnapshot().tabs.tabs[0].dirty, true);
+  assert.equal(c.getSnapshot().docs.get("a.txt").state.dirty, true);
+  assert.equal(editor.models.get("a.txt").text, "two+more");
+  assert.equal(editor.models.get("a.txt").saved, "two");
+});
+
+test("reloadFromDisk never overwrites keystrokes typed during the read (M5)", async () => {
+  const { c, editor, fs } = await setup({ "a.txt": "one" });
+  await c.openFile("a.txt", false);
+  editor.type("a.txt", "mine");
+  fs.files.set("a.txt", "theirs");
+  const realRead = fs.read;
+  fs.read = async (p) => { const r = await realRead(p); editor.type("a.txt", "mine!!"); return r; };
+  await c.reloadFromDisk("a.txt");
+  assert.equal(editor.models.get("a.txt").text, "mine!!");
+  assert.equal(c.getSnapshot().docs.get("a.txt").state.external, "changed");
+});

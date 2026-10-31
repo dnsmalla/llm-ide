@@ -460,16 +460,17 @@ export class ExplorerController {
     const ed = this.getEditor();
     const d = this.snap.docs.get(path);
     if (!ed || !d || d.status !== "ready" || d.readOnly || d.state.saving) return false;
-    const text = ed.getText(path);
-    if (text === null) return false;
+    const snap = ed.snapshot(path);
+    if (snap === null) return false;
+    const text = snap.text;
     this.patchDoc(path, (x) => ({ ...x, state: beginSave(x.state) }));
     const gen = this.gen;
     try {
       const w = await this.fs.write(path, text, { encoding: d.encoding === "unknown" ? "utf-8" : d.encoding, bom: d.bom, expected_hash: d.state.diskHash, force: opts.force });
       if (gen !== this.gen) return false;
-      ed.markSaved(path);
-      this.patchDoc(path, (x) => ({ ...x, size: w.size, state: saveSucceeded(x.state, w.hash) }));
-      this.dispatchTabs({ type: "edit", id: path, dirty: false });
+      const clean = ed.markSaved(path, snap.versionId);
+      this.patchDoc(path, (x) => ({ ...x, size: w.size, state: { ...saveSucceeded(x.state, w.hash), dirty: !clean } }));
+      this.dispatchTabs({ type: "edit", id: path, dirty: !clean });
       this.queueGit();
       return true;
     } catch (e) {
@@ -483,10 +484,18 @@ export class ExplorerController {
   /** Banner action "Reload from disk": discards the buffer. */
   async reloadFromDisk(path: string): Promise<void> {
     const gen = this.gen;
+    const v0 = this.getEditor()?.snapshot(path)?.versionId;
     try {
       const r = await this.fs.read(path);
       if (gen !== this.gen || r.status !== "ok" || r.text === null) return;
-      this.getEditor()?.replace(path, r.text);
+      const ed = this.getEditor();
+      if (ed && ed.snapshot(path)?.versionId !== v0) {
+        // Typed while the read was in flight: never overwrite those keystrokes; surface the conflict instead.
+        this.patchDoc(path, (x) => ({ ...x, state: { ...x.state, external: "changed" } }));
+        this.notify("error", "The file changed while you were editing; reload was cancelled.");
+        return;
+      }
+      ed?.replace(path, r.text);
       this.patchDoc(path, (x) => ({ ...x, size: r.size, encoding: r.encoding, bom: r.bom, eol: r.eol, readOnly: r.read_only, state: reloaded(x.state, r.hash) }));
       this.dispatchTabs({ type: "edit", id: path, dirty: false });
     } catch (e) {

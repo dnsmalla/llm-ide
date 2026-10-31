@@ -30,12 +30,14 @@ export interface EditorHost {
   /** Shows the empty state (no tab). */
   showNone(): void;
   getText(path: string): string | null;
+  /** The buffer text plus the editor's version id at that instant (a save records it so typing during the write is not marked saved). */
+  snapshot(path: string): { text: string; versionId: number } | null;
   /** Replaces the buffer with disk content and resets the saved baseline (reload). */
   replace(path: string, text: string): void;
   /** Appends text to a read-only range view ("load more"). */
   append(path: string, text: string): void;
-  /** The buffer now equals disk: dirty is cleared. */
-  markSaved(path: string): void;
+  /** The disk now holds the buffer as of `versionId` (default: the current one). Returns true when the buffer is clean; false when it moved on since (it stays dirty). */
+  markSaved(path: string, versionId?: number): boolean;
   /** Disposes the model (tab closed). */
   close(path: string): void;
   /** A tab's file moved: keep the buffer under the new path, unsaved state included. */
