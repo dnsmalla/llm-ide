@@ -6,7 +6,7 @@ import { EditorSession, detectEol, toFileEol } from "../write/editor-session.ts"
 import { WriteQueue } from "../write/write-queue.ts";
 import { WriteError, type SavedNote } from "../write/write-host.ts";
 import { baseOf, conflictCopyRel, dateStamp, initialNoteText, nameProblem, newNoteRel, renamedRel, slugify, uniqueRel, withExtension } from "../write/note-ops.ts";
-import { applySummary, buildRequest, decodeSummary, extractTranscript, renderSummarySection, resummarize, SummarizeError, summarizeErrorText } from "../write/resummarize.ts";
+import { applySummary, applySummaryDetailed, buildRequest, decodeSummary, extractTranscript, renderSummarySection, resummarize, SummarizeError, summarizeErrorText } from "../write/resummarize.ts";
 import { readKey } from "../write/frontmatter-edit.ts";
 import { parseNote } from "../frontmatter.ts";
 
@@ -197,8 +197,11 @@ test("summary: transcript extraction, request body, section and header rewrite l
   assert.deepEqual(readKey(out, "tldr"), ["a", "b: c"]);
   assert.equal(readKey(out, "summary_model"), "m-1");
   assert.equal(readKey(out, "summary_generated_at"), "2026-10-31T00:00:00.000Z");
-  assert.ok(out.includes("\nNew summary.\n\n## Actions\n- [ ] **Alice** — Ship (due 2026-11-01)\n- [ ] Plan\n\n## Decisions\n- Go\n\n## Transcript"));
-  assert.ok(!out.includes("Old summary text"));
+  assert.ok(out.includes("\nNew summary.\n\n## Actions\n- [ ] **Alice** — Ship (due 2026-11-01)\n- [ ] Plan\n\n## Decisions\n- Go\n\n"));
+  assert.ok(out.includes("<!-- llmide:summary:end -->\n\n## Transcript"));
+  // M11: no markers yet (a Mac-written note): hand-written/old text is KEPT, the section is inserted, the caller is told.
+  assert.ok(out.includes("Old summary text"));
+  assert.equal(applySummaryDetailed(MEETING, s)!.keptExisting, true);
   // Idempotent: applying again changes nothing about the body.
   assert.equal(parseNote(applySummary(out, s)!).body, parseNote(out).body);
   assert.equal(applySummary("---\na: b\n---\nnothing\n", s), null);
@@ -208,6 +211,21 @@ test("summary: transcript extraction, request body, section and header rewrite l
   assert.ok(!/[^\r]\n/.test(crlf), "no bare LF in a CRLF note");
   // A transcript over the cap is clipped and flagged.
   assert.equal(buildRequest(MEETING, "x".repeat(400_001)).truncated, true);
+});
+
+test("M11: re-summarise replaces only the marked section; text around it survives byte for byte", () => {
+  const s = decodeSummary(REPLY)!;
+  const first = applySummary(MEETING, s)!;
+  const withNotes = first.replace("<!-- llmide:summary:start -->", "My own notes\n\n<!-- llmide:summary:start -->").replace("## Transcript", "Closing remarks\n\n## Transcript");
+  const again = decodeSummary({ ...REPLY, full: "Second summary.", actions: [], decisions: [] })!;
+  const out = applySummaryDetailed(withNotes, again)!;
+  assert.equal(out.keptExisting, false);
+  assert.ok(out.text.includes("My own notes\n\n<!-- llmide:summary:start -->"));
+  assert.ok(out.text.includes("Second summary."));
+  assert.ok(!out.text.includes("New summary."));
+  assert.ok(out.text.includes("Old summary text"), "pre-marker text from the Mac stays");
+  assert.ok(out.text.includes("Closing remarks\n\n## Transcript"));
+  assert.equal(out.text.split("llmide:summary:start").length, 2, "one section, no duplication");
 });
 
 test("summary decoding rejects junk and bounds lists", () => {

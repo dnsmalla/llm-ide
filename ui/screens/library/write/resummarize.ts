@@ -1,7 +1,7 @@
 // "Re-summarise" for a meeting note: send its transcript to the core (`POST /kb/summarize`, the route the
 // Mac uses), then rewrite ONLY what the Mac rewrites (MeetingFileStore.writeSummary): the frontmatter keys
-// `gist`, `tldr`, `summary_generated_at`, `summary_model`, and the summary section between the header and
-// `## Transcript`. The transcript and every other header line stay byte-identical. The save is a
+// `gist`, `tldr`, `summary_generated_at`, `summary_model`, and the marked summary section above
+// `## Transcript` (hand-written text around it is never removed). The transcript and every other header line stay byte-identical. The save is a
 // compare-and-swap, so a note edited meanwhile is never overwritten.
 //
 // Cancel: the request is aborted; nothing is written. The route has a 3-minute server ceiling.
@@ -121,20 +121,56 @@ export function renderSummarySection(s: SummarizeReply): string {
   return `${out}\n`;
 }
 
-/** Writes the summary into `text` (header keys + the section above the transcript). Null when there is no transcript heading. */
-export function applySummary(text: string, s: SummarizeReply): string | null {
+/** Delimit the generated section so a re-summarise replaces ONLY it, never hand-written notes around it. */
+export const SUMMARY_START = "<!-- llmide:summary:start -->";
+export const SUMMARY_END = "<!-- llmide:summary:end -->";
+
+export interface AppliedSummary {
+  text: string;
+  /** True when the note had no markers: the section was inserted and any older summary text was left in place. */
+  keptExisting: boolean;
+}
+
+/**
+ * Writes the summary into `text` (header keys + the marked section above the transcript). Null when there is no
+ * transcript heading. Unlike the Mac's `writeSummary`, which drops EVERYTHING between the header and
+ * `## Transcript` (hand-written notes included: a Mac quirk, see the parity checklist), only the span between
+ * the markers is replaced. A note without markers (every note the Mac wrote) gets the section inserted just
+ * above the transcript and keeps all existing text, so the caller can warn that an older summary may remain.
+ */
+export function applySummaryDetailed(text: string, s: SummarizeReply): AppliedSummary | null {
   const start = bodyStart(text);
   const body = text.slice(start);
   const m = TRANSCRIPT_LINE.exec(body);
   if (!m) return null;
   const crlf = text.includes("\r\n");
-  const section = crlf ? renderSummarySection(s).replaceAll("\n", "\r\n") : renderSummarySection(s);
-  let out = text.slice(0, start) + section + body.slice(m.index);
+  const eol = crlf ? "\r\n" : "\n";
+  const section = (crlf ? renderSummarySection(s).replaceAll("\n", "\r\n") : renderSummarySection(s));
+  const block = `${SUMMARY_START}${section}${SUMMARY_END}${eol}${eol}`;
+  const before = body.slice(0, m.index);
+  const si = before.indexOf(SUMMARY_START);
+  const ei = si < 0 ? -1 : before.indexOf(SUMMARY_END, si + SUMMARY_START.length);
+  let newBody: string;
+  let keptExisting = false;
+  if (si >= 0 && ei >= 0) {
+    // Replace the marked span only (plus the line break pair that followed it, which the block re-adds).
+    let tail = ei + SUMMARY_END.length;
+    for (const brk of [eol, eol]) if (before.startsWith(brk, tail)) tail += brk.length;
+    newBody = before.slice(0, si) + block + before.slice(tail) + body.slice(m.index);
+  } else {
+    keptExisting = before.trim() !== "";
+    newBody = before + block + body.slice(m.index);
+  }
+  let out = text.slice(0, start) + newBody;
   out = setKey(out, "gist", s.gist);
   out = setKey(out, "tldr", s.tldr);
   out = setKey(out, "summary_generated_at", new Date(s.generatedAtMs || 0).toISOString());
   out = setKey(out, "summary_model", s.model);
-  return out;
+  return { text: out, keptExisting };
+}
+
+export function applySummary(text: string, s: SummarizeReply): string | null {
+  return applySummaryDetailed(text, s)?.text ?? null;
 }
 
 /** The request body the Mac sends (LlmIdeAPIClient.summarize). */
@@ -169,6 +205,8 @@ export interface ResummarizeResult {
   saved: SavedNote;
   text: string;
   truncated: boolean;
+  /** The note had no summary markers, so older summary text was left above the new section. */
+  keptExisting: boolean;
 }
 
 function statusError(status: number): SummarizeError {
@@ -207,11 +245,12 @@ export async function resummarize(rel: string, deps: ResummarizeDeps): Promise<R
   if (!reply) throw new SummarizeError("bad_reply");
   deps.onPhase("saving");
   // The note may have been edited while the model worked: write against the hash we read, so a change is a conflict.
-  const next = applySummary(opened.text, reply);
-  if (next === null) throw new SummarizeError("no_transcript");
+  const applied = applySummaryDetailed(opened.text, reply);
+  if (applied === null) throw new SummarizeError("no_transcript");
+  const next = applied.text;
   try {
     const saved = await deps.host.save(rel, next, opened.bom, opened.hash);
-    return { saved, text: next, truncated: req.truncated };
+    return { saved, text: next, truncated: req.truncated, keptExisting: applied.keptExisting };
   } catch (e) {
     const err = e instanceof WriteError ? e : toWriteError(e);
     throw new SummarizeError(err.code === "conflict" ? "conflict" : "write_failed");

@@ -94,7 +94,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
       const r = await resummarize(rel, { host: write, core: p.summarize, signal: ac.signal, onPhase: (phase) => setSum({ phase, message: null, ok: false }) });
       store.noteWritten(r.saved, r.text);
       p.onChanged();
-      setSum({ phase: null, ok: true, message: r.truncated ? "Summary updated from the first part of a very long transcript." : "Summary updated." });
+      setSum({ phase: null, ok: true, message: (r.truncated ? "Summary updated from the first part of a very long transcript." : "Summary updated.") + (r.keptExisting ? " Text that was already above the transcript was kept, so an older summary may still be there; delete it by hand if you do not need it." : "") });
     } catch (e) {
       setSum({ phase: null, ok: false, message: summarizeErrorText(e instanceof SummarizeError ? e.code : "failed") });
     } finally {
