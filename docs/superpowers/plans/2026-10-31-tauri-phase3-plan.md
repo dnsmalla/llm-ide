@@ -131,6 +131,28 @@ Today the "Mac app" in that rule is the Swift app writing `~/Library/Application
 
 Flag: the quit hook on Windows (no `willTerminate` equivalent beyond window close/exit events and OS shutdown) is weaker than on macOS; the recovery sweep carries it, which is why the sweep is a Phase 3 acceptance item, not a polish item.
 
+### 4.1 The rule as built (S-D, 2026-10-31; supersedes the proposal above where they differ)
+
+User decision: **one copy of a chat, the Mac app's file format, live then archive.** Implemented in
+`desktop/src-tauri/src/chat_store.rs` / `chat_archive.rs` / `chat_cmds.rs`; full detail in
+[desktop-chat-store](../../how-to/desktop-chat-store.md).
+
+1. The chat file is the live and final transcript (the Mac's option B). The Tauri app reads and writes the
+   Mac app's `sessions/` folder in place on macOS, `<data dir>/chats/<userId>/sessions/` on Windows and Linux,
+   same JSON schema (Swift `ChatSession`), so `chat_archive_write/read/list/delete` became
+   `chat_save/load/list/delete`. The server holds working state only; the live-in-server-DB rows of item 2
+   above are not used by the desktop chat.
+2. Quit: verify the file, record a receipt (SHA-256 identical to `archiveHash`), then purge the working state;
+   6 s cap; a journal before the first call; the start-up sweep (after the webview binds its session) repeats it.
+   Never purge before a receipt; a failed step leaves the working state.
+3. Delete: tombstone in `pending-deletes.json` (the Mac's format) before the file goes, then
+   `POST /kb/session-purges`; both apps honour and replay each other's entries.
+4. Overlap on macOS: against the Mac app the protection is a revision compare-and-swap (the Mac does not take
+   the advisory lock file). A small Mac change to take `chat-store.lock` around `saveOrThrow` would close the
+   remaining microsecond window; it is not made here (Swift is out of this slice).
+5. Windows and Linux: no reliable quit hook for OS shutdown or a kill; the sweep is the guarantee. The
+   extension's server-side chat rows are not archived by the desktop app yet.
+
 ## 5. Permissions UI
 
 Reference: Mac Chat `EditAcceptanceMode`, `ToolApprovalCard`, `ApprovalQuestionCard`, `AgentV2ApprovalState`, `ToolApprovalsSettingsSection`, and the Extensions consent flows (`McpConsentPrompt`, `PluginTrustPresentation`, `ExtensionTrustSettingsCards`, `PluginUpdateConfirmSheet`). Source of truth is the server (`approval_request`/`decision`, tool-approvals store, workspace-trust, mcp consent, hook-trust): the page renders and returns decisions only.

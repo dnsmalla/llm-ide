@@ -1,4 +1,8 @@
 mod ax_probe;
+mod chat_archive;
+mod chat_cmds;
+mod chat_hash;
+mod chat_store;
 mod core_env;
 mod core_host;
 mod fs_ops;
@@ -200,6 +204,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(host)
+        .manage(chat_cmds::ChatService::new())
         .plugin(navigation_guard())
         .plugin(tauri_plugin_notification::init())
         // A reload drops the webview's terminal state; its shells must not outlive it.
@@ -246,7 +251,9 @@ pub fn run() {
             tray::setup(app.handle());
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();
+            let signal_chat = app.state::<chat_cmds::ChatService>().inner().clone();
             if let Err(e) = ctrlc::set_handler(move || {
+                let _ = signal_chat.quit_archive(std::time::Duration::from_secs(3));
                 signal_host.shutdown();
                 pty::kill_all();
                 std::process::exit(0);
@@ -297,6 +304,13 @@ pub fn run() {
             sse_replay::sse_replay_stop,
             sse_replay::sse_channel_stream,
             ax_probe::ax_probe,
+            chat_cmds::chat_bind_session,
+            chat_cmds::chat_unbind_session,
+            chat_cmds::chat_list,
+            chat_cmds::chat_load,
+            chat_cmds::chat_save,
+            chat_cmds::chat_delete,
+            chat_cmds::chat_archive_status,
             notes_fs::notes_root_get,
             notes_fs::notes_root_choose,
             notes_fs::notes_root_clear,
@@ -313,6 +327,8 @@ pub fn run() {
         // activation takes effect; the bench needs no external activation step.
         RunEvent::Ready if autobench_mode().is_some() => bring_to_front(app_handle),
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            // Live-then-archive first (the core must still be up), capped at 6 s, once per process.
+            let _ = app_handle.state::<chat_cmds::ChatService>().quit_archive_default();
             app_handle.state::<CoreHost>().shutdown();
             pty::kill_all();
             sse_replay::stop();

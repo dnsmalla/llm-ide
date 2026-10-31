@@ -41,6 +41,13 @@
     "allow-notes-root-clear",
     "allow-notes-list",
     "allow-notes-read",
-    "allow-notes-heads"
+    "allow-notes-heads",
+    "allow-chat-bind-session",
+    "allow-chat-unbind-session",
+    "allow-chat-list",
+    "allow-chat-load",
+    "allow-chat-save",
+    "allow-chat-delete",
+    "allow-chat-archive-status"
   ]
 }
