@@ -1,44 +1,76 @@
 // Stage the Node core for bundling (Phase 0 T6 fallback packaging).
 //
 // Produces desktop/resources/core/ which tauri.conf.json copies into the app:
-//   core/node/node            self-contained Node binary (LLMIDE_NODE_BIN)
+//   core/node/node[.exe]      pinned official Node LTS (node-runtime.mjs; npm/corepack not shipped)
 //   core/root/extension/...   pruned copy of extension/ with production deps
 //   core/root/schema/...      schema/models (read via ../../schema from providers/)
 //
 // The source tree is only read. Dev-only paths (tests, src, dist, docs, live
 // DB files) are never copied. Usage:
-//   LLMIDE_NODE_BIN=/path/to/official/node node scripts/stage-core.mjs
+//   node scripts/stage-core.mjs [--target darwin-arm64|darwin-x64|win32-x64|linux-x64]
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
+import { PIN, fetchNodeRuntime, hostTarget, installNode, pinFor } from './node-runtime.mjs';
 import { removeSdkBinaryPackages, sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
 import { isSecretName, makeCopyFilter, verifyStagedCore } from './stage-filter.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const REPO = resolve(DESKTOP, '..');
 const OUT = join(DESKTOP, 'resources', 'core');
-const TARGET = `${process.platform}-${process.arch}`;
 
-const nodeBin = process.env.LLMIDE_NODE_BIN;
-if (!nodeBin || !existsSync(nodeBin)) {
-  console.error('LLMIDE_NODE_BIN must point at a self-contained node binary (not a Homebrew shim)');
-  process.exit(2);
-}
+// --target <platform>-<arch> (Node process names: darwin-arm64, darwin-x64, win32-x64, linux-x64);
+// default is the machine running this script.
+const targetArg = process.argv.indexOf('--target');
+const TARGET = targetArg > 0 ? process.argv[targetArg + 1] : hostTarget();
+const CROSS = TARGET !== hostTarget();
+try { pinFor(TARGET); } catch (e) { console.error(e.message); process.exit(2); }
 
-// The bundled node must be an official self-contained build. Homebrew node
-// links libnode.dylib from its prefix, which does not exist inside the .app.
-// Checked before anything under resources/core is removed.
-let linked;
-try {
-  linked = execFileSync('otool', ['-L', nodeBin], { encoding: 'utf8' });
-} catch (e) {
-  console.error(`cannot run otool -L on ${nodeBin}: ${e.message.split('\n')[0]}`);
-  process.exit(2);
-}
-if (linked.includes('libnode')) {
-  console.error(`LLMIDE_NODE_BIN (${nodeBin}) links libnode (Homebrew node build), which is not self-contained.`);
-  console.error('Use the official node.org macOS binary, e.g. LLMIDE_NODE_BIN=/path/to/official/node.');
-  process.exit(2);
+// The node that ships: by default the pinned, SHA-256-verified official Node LTS for TARGET
+// (node-runtime.mjs). LLMIDE_NODE_BIN is an offline/dev escape hatch for the host target only
+// (never for a release: LLMIDE_STAGE_RELEASE=1 refuses it). Checked before anything under
+// resources/core is removed.
+let nodeBin = process.env.LLMIDE_NODE_BIN;
+let nodeInfo = { version: 'local', sha256: null };
+if (nodeBin) {
+  if (process.env.LLMIDE_STAGE_RELEASE === '1') {
+    console.error('LLMIDE_NODE_BIN is not allowed with LLMIDE_STAGE_RELEASE=1: releases use the pinned official Node');
+    process.exit(2);
+  }
+  if (CROSS) {
+    console.error(`LLMIDE_NODE_BIN cannot be used to stage a different target (${TARGET} on ${hostTarget()})`);
+    process.exit(2);
+  }
+  if (!existsSync(nodeBin)) {
+    console.error(`LLMIDE_NODE_BIN does not exist: ${nodeBin}`);
+    process.exit(2);
+  }
+  console.warn(`warning: using LLMIDE_NODE_BIN (${nodeBin}), not the pinned Node ${PIN.version}; not for release`);
+  // Homebrew node links libnode.dylib from its prefix, which does not exist inside the .app.
+  if (process.platform === 'darwin') {
+    let linked;
+    try {
+      linked = execFileSync('otool', ['-L', nodeBin], { encoding: 'utf8' });
+    } catch (e) {
+      console.error(`cannot run otool -L on ${nodeBin}: ${e.message.split('\n')[0]}`);
+      process.exit(2);
+    }
+    if (linked.includes('libnode')) {
+      console.error(`LLMIDE_NODE_BIN (${nodeBin}) links libnode (Homebrew node build), which is not self-contained.`);
+      console.error('Unset it to use the pinned official Node, or point it at the official node.org binary.');
+      process.exit(2);
+    }
+  }
+  nodeBin = { node: nodeBin, license: null };
+} else {
+  try {
+    nodeBin = await fetchNodeRuntime(TARGET);
+    nodeInfo = { version: nodeBin.version, sha256: nodeBin.sha256 };
+    console.log(`node ${nodeBin.version} (${TARGET}) verified sha256 ${nodeBin.sha256}`);
+  } catch (e) {
+    console.error(`staging failed: ${e.message}`);
+    process.exit(2);
+  }
 }
 
 // Top-level extension entries that the server never loads at runtime.
@@ -77,15 +109,16 @@ const extOut = join(OUT, 'root', 'extension');
 mkdirSync(extOut, { recursive: true });
 mkdirSync(join(OUT, 'node'), { recursive: true });
 
-// 1. Node binary (ad-hoc signed; stripped to keep the bundle small).
-const nodeOut = join(OUT, 'node', 'node');
-copyFileSync(nodeBin, nodeOut);
-chmodSync(nodeOut, 0o755);
-try {
-  execFileSync('strip', ['-x', nodeOut], { stdio: 'ignore' });
-  execFileSync('codesign', ['-s', '-', '-f', nodeOut], { stdio: 'ignore' });
-} catch (e) {
-  console.warn(`warning: strip/codesign skipped: ${e.message.split('\n')[0]}`);
+// 1. Node binary. macOS: stripped and ad-hoc re-signed (the official signature is invalid
+// after strip); done only for a darwin target staged on a darwin host (needs strip/codesign).
+const nodeOut = installNode(nodeBin, OUT, TARGET);
+if (TARGET.startsWith('darwin-') && process.platform === 'darwin') {
+  try {
+    execFileSync('strip', ['-x', nodeOut], { stdio: 'ignore' });
+    execFileSync('codesign', ['-s', '-', '-f', nodeOut], { stdio: 'ignore' });
+  } catch (e) {
+    console.warn(`warning: strip/codesign skipped: ${e.message.split('\n')[0]}`);
+  }
 }
 
 // 2. Extension source (runtime files only), then production deps.
@@ -100,7 +133,8 @@ for (const name of readdirSync(join(REPO, 'extension'))) {
 for (const f of ['package.json', 'package-lock.json']) {
   if (!existsSync(join(extOut, f))) copyFileSync(join(REPO, 'extension', f), join(extOut, f));
 }
-execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: extOut, stdio: 'inherit' });
+// npm is npm.cmd on Windows, which only runs through a shell.
+execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: extOut, stdio: 'inherit', shell: process.platform === 'win32' });
 const nmBefore = dirBytes(join(extOut, 'node_modules'));
 
 // 3. Prune node_modules: other-platform prebuilds, sources, docs, sourcemaps.
@@ -109,7 +143,13 @@ rmSync(join(nm, '.bin'), { recursive: true, force: true });
 rmSync(join(nm, '@rollup'), { recursive: true, force: true }); // vite-only optional dep
 const bsPre = join(nm, 'better-sqlite3', 'prebuilds');
 if (existsSync(bsPre)) {
+  // better-sqlite3 13 ships N-API prebuilds for every target inside the package (named
+  // <platform>-<arch>.node, same as TARGET), so no ABI match with the bundled node is needed.
   for (const f of readdirSync(bsPre)) if (f !== `${TARGET}.node`) rmSync(join(bsPre, f));
+}
+if (!existsSync(join(bsPre, `${TARGET}.node`))) {
+  console.error(`staging failed: better-sqlite3 has no prebuild for ${TARGET} (${bsPre})`);
+  process.exit(1);
 }
 for (const d of ['deps', 'src', 'build']) rmSync(join(nm, 'better-sqlite3', d), { recursive: true, force: true });
 // `.claude` too: published packages can carry a maintainer's local agent
@@ -157,15 +197,16 @@ const schemaOut = join(OUT, 'root', 'schema', 'models');
 mkdirSync(schemaOut, { recursive: true });
 copyFileSync(join(REPO, 'schema', 'models', 'anthropic-models.json'), join(schemaOut, 'anthropic-models.json'));
 
+const nmFinal = dirBytes(nm); // after the SDK binary package was removed
 const sizes = {
   node_binary: statSync(nodeOut).size,
-  extension_src: dirBytes(extOut) - nmAfter,
+  extension_src: dirBytes(extOut) - nmFinal,
   node_modules_before_prune: nmBefore,
-  node_modules_after_prune: nmAfter,
+  node_modules_after_prune: nmFinal,
   schema: dirBytes(join(OUT, 'root', 'schema')),
   core_total: dirBytes(OUT),
 };
-writeFileSync(join(OUT, 'STAGE.json'), JSON.stringify({ target: TARGET, sizes, generatedBy: 'scripts/stage-core.mjs' }, null, 2));
+writeFileSync(join(OUT, 'STAGE.json'), JSON.stringify({ target: TARGET, node: nodeInfo, sizes, generatedBy: 'scripts/stage-core.mjs' }, null, 2));
 for (const [k, v] of Object.entries(sizes)) console.log(`${k.padEnd(28)} ${v}`);
 console.log(`BENCH ${JSON.stringify({ name: 'bundle_bytes', value: sizes.core_total, unit: 'bytes', part: 'core_stage' })}`);
 console.log(`staged ${relative(REPO, OUT)} (dropped ${dropped.length} doc/test/sourcemap entries)`);

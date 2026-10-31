@@ -9,13 +9,13 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const CORE = join(DESKTOP, 'resources', 'core');
-const NODE = join(CORE, 'node', 'node');
+const NODE = join(CORE, 'node', process.platform === 'win32' ? 'node.exe' : 'node');
 const EXT = join(CORE, 'root', 'extension');
 
 /** Each entry: the specifier to import and an expression over the module namespace `m`. */
@@ -74,7 +74,7 @@ const CORE_REAL = realpathSync(CORE);
 /** A resolved URL passes only when it lands inside the staged core, never a repo or system copy. */
 function insideCore(resolvedUrl) {
   const file = fileURLToPath(resolvedUrl);
-  return file === CORE_REAL || file.startsWith(CORE_REAL + '/');
+  return file === CORE_REAL || file.startsWith(CORE_REAL + sep);
 }
 
 if (!existsSync(NODE)) {

@@ -1425,4 +1425,43 @@ process.on('SIGTERM', () => process.exit(0));
         }
         assert_eq!(cmd.get_current_dir(), Some(Path::new("/App/core/root/extension")));
     }
+
+    /// Run by hand against a real staging (`node scripts/stage-core.mjs` first):
+    /// `LLMIDE_KEYCHAIN_BACKEND=memory cargo test --lib real_staged_core -- --ignored --nocapture`.
+    /// Exercises the production launcher (cleared env, secrets, data layout), the nonce
+    /// handshake, the claude probe and the tree stop against the real server.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn real_staged_core_starts_reports_claude_and_stops_clean() {
+        let res = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("resources");
+        assert!(res.join("core").join("node").join(NODE_FILE).is_file(), "stage the core first");
+        set_resource_dir(res.canonicalize().unwrap());
+        std::env::set_var("LLMIDE_POC_BUNDLED", "1");
+        std::env::set_var("LLMIDE_KEYCHAIN_BACKEND", "memory");
+        let dir = std::env::temp_dir().join(format!("llmide-real-core-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir = fsutil::private_dir(&dir).unwrap();
+        let t = Tuning { ports: free_ports(2), adopt: false, ..Tuning::default() };
+        let host = CoreHost::with(t, Arc::new(real_launch), Arc::new(real_claude_probe));
+        host.start_in_background(Some(dir.clone()));
+        let end = Instant::now() + Duration::from_secs(40);
+        let s = loop {
+            let s = host.status();
+            if (s.state == Phase::Ready && s.claude != "unknown") || s.state == Phase::Failed || Instant::now() > end {
+                break s;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        println!("status: {s:?}");
+        assert_eq!(s.state, Phase::Ready, "{s:?}");
+        assert_eq!(s.trust, "spawned");
+        assert!(dir.join("core").join("data.db").is_file(), "DB must live in the data dir");
+        assert_ne!(s.claude, "unknown");
+        let pid = s.pid.unwrap() as i32;
+        host.shutdown();
+        // SAFETY: existence check only.
+        assert!(all_dead(&[pid]), "core survived shutdown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
