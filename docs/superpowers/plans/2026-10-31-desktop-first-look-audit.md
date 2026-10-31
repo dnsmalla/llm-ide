@@ -50,9 +50,9 @@ ProjectSkillsInstaller}.swift`, `Features/Settings/Views/HelpGuideView.swift`. F
 
 | Topic | Mac | Desktop | Decision |
 |---|---|---|---|
-| Chat | Embedded Code Assistant panel docked in Explorer/Library; no standalone Chat section | Chat is its own section | Keep Chat as a section (it is the only full-width, multi-session surface and the mobile/web parity target). **Follow-up, not built now:** an optional docked chat panel inside Explorer (`ChatPanelView` equivalent) reusing the same controller, so the Mac muscle memory works too. Recommendation: build it after the Explorer editor tabs settle; the dock must share the Chat section's session store, not fork it |
+| Chat | Embedded Code Assistant panel docked in Explorer/Library; no standalone Chat section | Chat is its own section AND a docked panel in Explorer (done 2026-10-31, shared runtime) | Keep Chat as a section (it is the only full-width, multi-session surface and the mobile/web parity target). **Follow-up, not built now:** an optional docked chat panel inside Explorer (`ChatPanelView` equivalent) reusing the same controller, so the Mac muscle memory works too. Recommendation: build it after the Explorer editor tabs settle; the dock must share the Chat section's session store, not fork it |
 | Default home | Code Graph (System fallback) | Explorer | Explorer: it is the first section with real content on a fresh project; Code Graph needs a scan first. Users can change it (stored in shell prefs, localStorage `llmide.home`). **Decision needed:** match the Mac default (Code Graph) or keep Explorer |
-| Settings placement | Account menu (gear) | Last nav item | There is no account menu on the desktop shell yet; Settings stays last. An account menu is a follow-up |
+| Settings placement | Account menu (gear) | Account menu (gear), Cmd/Ctrl+, | Done 2026-10-31: the toolbar's account menu mirrors the Mac's (Settings, Help & Guide, Permissions, Sign out) |
 | Project folder rule | Empty or `system/project.json` folders only for "New" | Open accepts any folder (as before); New always creates a fresh folder | New creates `<parent>/<name>` and refuses an existing one (no overwrite) |
 | Registration | The Mac client registers with the server | The webview registers with the core after the host creates the files | Failures are warnings; the project works without skills and Doc Gen registers again on open |
 | Last project at launch | Restored | Not restored | **Decision needed.** Recommendation: restore (Welcome stays reachable via Home), after the Welcome work is verified in a real window |
@@ -65,3 +65,17 @@ are untrusted text (rendered as text, bidi/control stripped, length-capped); not
 edits only the recent list.
 
 Settings now mirrors the Mac's single App page (collapsible groups, same order): see [2026-10-31-settings-mirror-map.md](2026-10-31-settings-mirror-map.md).
+
+## 5. Status 2026-10-31 (mirror-the-Mac pass: toolbar, chrome, Explorer dock)
+
+Built, unit-tested, not GUI-verified (user decision: the desktop mirrors the Mac's look and functions):
+
+- Left nav replaced by the Mac's top toolbar (Home, section buttons in `ShellSection.toolbarOrder` order with icon and label, Soon for
+  sections without a desktop screen, roving focus, More menu on narrow windows) and the account menu; the Mac order and labels are drift-checked.
+- Native window chrome on macOS: overlay title bar, traffic lights in the toolbar row, drag regions, platform reported by the host.
+- Status bar: project switcher and core chip (before), activity bell over `/kb/activity`, Chat item. Developer-tools switch in Settings > General.
+- Explorer-first layout: panel switcher, editor tabs and the right-hand docked Code Assistant sharing the Chat section's runtime.
+
+Gap 8 items now closed: Account menu with Permissions and Help, Settings in the account menu. Still open: auto-restore of the last project,
+per-section hide list, Live in the toolbar, project export, ProjectMigrator. What only a real window verifies: traffic-light spacing and
+drag, overflow at real widths, dock drag-resize, full-screen behaviour on macOS, focus order across toolbar, editor and dock.
