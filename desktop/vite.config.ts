@@ -1,6 +1,9 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
+
+const appVersion = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "dev";
 
 // Monaco 0.57 ships its own copy of DOMPurify (3.4.15, with known advisories) at
 // esm/vs/base/browser/dompurify/dompurify.js, imported by relative path, so an npm
@@ -45,6 +48,8 @@ export default defineConfig({
       ],
     },
   },
+  // Shown in Settings > About (the webview cannot read package.json or ask the host for it).
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   clearScreen: false,
   server: { port: 5173, strictPort: true, host: "127.0.0.1", fs: { allow: [".."] } },
   build: { target: "es2022" },

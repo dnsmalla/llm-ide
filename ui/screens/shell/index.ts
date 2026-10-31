@@ -6,7 +6,11 @@
 export * from "./host";
 export * from "./core";
 export * from "./status-view";
-export { coreStatusStore, core } from "./runtime";
+export { coreStatusStore, core, chatBinding } from "./runtime";
+export type { ChatBinding, BindSnapshot, BindState } from "./chat-binding";
 export { useCoreSession, useCoreStatusView, useActiveProject } from "./use-shell";
 export { useStoreSelector } from "./hooks";
 export type { SectionProps } from "./sections";
+export { shellBus, createShellBus, safeRelativePath, relativeToProject, type ShellBus, type ShellEvent } from "./bus";
+export { getTheme, setTheme, subscribeTheme, THEMES } from "./theme";
+export { projectStore } from "./project-store";

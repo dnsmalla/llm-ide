@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
+import { shellBus } from "./bus";
 import { useActiveProject, useCoreStatusView } from "./use-shell";
 
 const ProjectSwitcher = memo(function ProjectSwitcher() {
@@ -49,9 +50,9 @@ const CoreChip = memo(function CoreChip() {
         {view.label}
       </span>
       {view.claudeNotice && (
-        <span className="sh-statusbar-text sh-warning" title={view.claudeNotice}>
+        <button type="button" className="sh-statusbar-item sh-warning" title={`${view.claudeNotice} Open Settings.`} onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" })}>
           Claude Code not found
-        </span>
+        </button>
       )}
     </>
   );

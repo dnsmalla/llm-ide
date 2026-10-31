@@ -7,7 +7,8 @@ import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, SELECTABLE, initialNav, navKeyTarget, navReducer, readStoredSection, sectionForShortcut, storeSection, type SectionDef, type SectionId } from "./sections";
 import { core, coreStatusStore } from "./runtime";
-import { readStoredTheme, showTheme, storeTheme } from "./theme";
+import { shellBus } from "./bus";
+import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
 
 const ICONS: Record<SectionId, ReactNode> = {
@@ -69,7 +70,7 @@ const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert,
 
 export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [nav, dispatch] = useReducer(navReducer, undefined, () => initialNav(initialSection ?? readStoredSection()));
-  const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? readStoredTheme());
+  const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const [navOpen, setNavOpen] = useState(true);
   const view = useCoreStatusView();
   const session = useCoreSession();
@@ -106,6 +107,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Cross-screen requests: "open this file" lands in Explorer, "go to <section>" switches (the target screen
+  // reads the sticky event itself once it is mounted, see bus.ts).
+  useEffect(() => {
+    const offOpen = shellBus.subscribe("open-file", () => dispatch({ type: "select", id: "explorer" }));
+    const offGoto = shellBus.subscribe("goto-section", (ev) => dispatch({ type: "select", id: ev.section }));
+    return () => {
+      offOpen();
+      offGoto();
+    };
+  }, []);
+
   const onSelect = useCallback((id: SectionId) => dispatch({ type: "select", id }), []);
   const onNavKey = useCallback((e: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const target = navKeyTarget(e.key, index, SELECTABLE.length);
@@ -118,10 +130,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-nav-index="${target}"]`)?.focus());
     }
   }, []);
-  const onTheme = useCallback((id: ThemeId) => {
-    storeTheme(id);
-    setTheme(id);
-  }, []);
+  const onTheme = useCallback((id: ThemeId) => applyThemeChoice(id), []);
+  // Settings > Appearance changes the theme through the same store (a launch override stays unpersisted until the user picks).
+  useEffect(() => subscribeTheme(() => setTheme(getTheme())), []);
 
   const inert = isInert(gate);
   let selectableIndex = -1;

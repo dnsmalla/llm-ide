@@ -168,8 +168,28 @@ function parseSession(body: unknown): { tokens: Omit<Tokens, "expiresAt"> & { tt
   return { tokens: { access, refresh, ttlSec: ttl }, user };
 }
 
+/** Status and decoded body of an answer, success or not (for callers that map error envelopes themselves). */
+export interface RawResponse {
+  status: number;
+  /** Parsed JSON, or `undefined` for an empty body, or `null` when the body is not JSON. */
+  body: unknown;
+}
+
+/** Receives the access token each time it is issued (login, refresh) and `null` on sign-out. */
+export type AccessTokenListener = (token: string | null) => void;
+
 export interface CoreClient {
   request<T = unknown>(path: string, opts?: RequestOptions): Promise<T>;
+  /** Like `request` but never throws on a non-2xx answer: returns the status and body. Transport errors still throw `CoreError`. */
+  requestRaw(path: string, opts?: RequestOptions): Promise<RawResponse>;
+  /**
+   * Hand-off of the current access token to the desktop host (the chat store binding needs it in host memory).
+   * The only door a token leaves this closure through; the listener is called at once with the current token
+   * (if signed in), then on every refresh and with `null` on sign-out. Never pass it to anything but the host.
+   */
+  subscribeAccessToken(listener: AccessTokenListener): () => void;
+  /** Re-sends the current access token to the listeners (after a core restart the host must bind again). No-op when signed out. */
+  republishAccessToken(): void;
   /** Async iterable of SSE events; ends when the server closes, throws `CoreError` on failure/abort. */
   stream(path: string, opts?: StreamOptions): AsyncGenerator<SseEvent, void, void>;
   login(email: string, password: string, signal?: AbortSignal): Promise<SessionSnapshot>;
@@ -194,6 +214,16 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
   let snapshot: SessionSnapshot = SIGNED_OUT;
   let refreshing: Promise<void> | null = null;
   const listeners = new Set<Listener>();
+  const tokenListeners = new Set<AccessTokenListener>();
+  const emitToken = (t: string | null) => {
+    for (const l of [...tokenListeners]) {
+      try {
+        l(t);
+      } catch {
+        // a listener must not break the session
+      }
+    }
+  };
 
   const emit = (next: SessionSnapshot) => {
     if (next.signedIn === snapshot.signedIn && next.user?.id === snapshot.user?.id) return;
@@ -218,11 +248,14 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     tokens = { access: t.access, refresh: t.refresh, expiresAt: now() + t.ttlSec * 1000 };
     // Older servers omit `user` on refresh: keep the one we have.
     emit({ signedIn: true, user: user ?? snapshot.user });
+    emitToken(t.access);
   };
 
   const drop = () => {
+    const had = tokens !== null;
     tokens = null;
     emit(SIGNED_OUT);
+    if (had) emitToken(null);
   };
 
   const rawFetch = async (path: string, init: RequestInit, timeoutMs: number, parent: AbortSignal | undefined): Promise<Response> => {
@@ -310,6 +343,35 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
       } catch {
         throw new CoreError(502, "BAD_RESPONSE", "The core returned a body that is not JSON.");
       }
+    },
+
+    async requestRaw(path: string, opts: RequestOptions = {}): Promise<RawResponse> {
+      const res = await send(path, opts, false);
+      if (res.status === 204) return { status: 204, body: undefined };
+      let body: unknown = null;
+      try {
+        const text = await res.text();
+        body = text === "" ? undefined : JSON.parse(text);
+      } catch {
+        body = null;
+      }
+      return { status: res.status, body };
+    },
+
+    republishAccessToken() {
+      if (tokens) emitToken(tokens.access);
+    },
+
+    subscribeAccessToken(listener) {
+      tokenListeners.add(listener);
+      if (tokens) {
+        try {
+          listener(tokens.access);
+        } catch {
+          // see emitToken
+        }
+      }
+      return () => tokenListeners.delete(listener);
     },
 
     async *stream(path: string, opts: StreamOptions = {}): AsyncGenerator<SseEvent, void, void> {

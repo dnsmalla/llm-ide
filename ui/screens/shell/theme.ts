@@ -44,3 +44,28 @@ export function storeTheme(id: ThemeId, storage: StorageLike | null = defaultSto
 export function showTheme(id: ThemeId): void {
   applyTheme(id);
 }
+
+// ---- shared theme state --------------------------------------------------------------------------
+// The status bar menu and Settings > Appearance both change the theme; the Shell renders from this one store.
+type ThemeListener = () => void;
+const themeListeners = new Set<ThemeListener>();
+let current: ThemeId | null = null;
+
+/** Current theme (stored choice on first read). */
+export function getTheme(): ThemeId {
+  return (current ??= readStoredTheme());
+}
+
+/** Sets, persists and applies the theme, and tells subscribers. */
+export function setTheme(id: ThemeId, opts: { persist?: boolean } = {}): void {
+  if (!isThemeId(id)) return;
+  current = id;
+  if (opts.persist !== false) storeTheme(id);
+  showTheme(id);
+  for (const l of [...themeListeners]) l();
+}
+
+export function subscribeTheme(l: ThemeListener): () => void {
+  themeListeners.add(l);
+  return () => themeListeners.delete(l);
+}
