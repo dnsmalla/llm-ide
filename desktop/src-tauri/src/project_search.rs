@@ -242,6 +242,7 @@ const PROBE_WINDOW: usize = 64 * 1024;
 const PREFILTER_MAX: usize = 1024 * 1024;
 
 /// Scans decoded text; pure, so it is unit-tested directly.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn scan_text(text: &str, re: &Regex, rel: &str) -> Option<FileHits> {
     scan_text_ctl(text, re, rel, None)
 }

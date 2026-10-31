@@ -30,8 +30,10 @@ pub trait Trasher {
 
 /// `GetDriveTypeW` value for a fixed local disk. Anything else (removable 2, remote 4, CD-ROM 5, RAM disk 6,
 /// unknown 0/1) may have no Recycle Bin, where "move to the bin" becomes a permanent delete.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const DRIVE_FIXED: u32 = 3;
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn windows_drive_has_recycle_bin(drive_type: u32) -> bool {
     drive_type == DRIVE_FIXED
 }
