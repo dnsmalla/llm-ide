@@ -588,8 +588,9 @@ pub fn checkout(root: &Path, name: &str, confirm: &dyn Fn(&str) -> bool) -> R<()
     if !confirm(&prompt) {
         return gerr("cancelled", "checkout cancelled");
     }
-    // `--` ends the revision list so a branch can never be read as a path.
-    run_git(root, &["checkout", name, "--"], 64 * 1024).map(|_| ()).map_err(map_checkout_error)
+    // `switch` only ever resolves a BRANCH: a tag or path with the same name cannot be picked instead
+    // (`checkout <name>` is ambiguous), and `--no-guess` never creates a branch from a remote one.
+    run_git(root, &["switch", "--no-guess", name], 64 * 1024).map(|_| ()).map_err(map_checkout_error)
 }
 
 pub fn create_branch(root: &Path, name: &str) -> R<()> {
@@ -597,7 +598,7 @@ pub fn create_branch(root: &Path, name: &str) -> R<()> {
     if branch_exists(root, name) {
         return gerr("exists", format!("a branch named {} already exists", line(name, 80)));
     }
-    run_git(root, &["checkout", "-b", name], 64 * 1024).map(|_| ()).map_err(map_checkout_error)
+    run_git(root, &["switch", "-c", name], 64 * 1024).map(|_| ()).map_err(map_checkout_error)
 }
 
 // ---- log -------------------------------------------------------------------------------
@@ -929,6 +930,48 @@ mod tests {
             assert_eq!(code(valid_branch_name(bad)), "invalid_ref", "{bad:?}");
         }
         assert_eq!(code(valid_branch_name(&"a".repeat(201))), "invalid_ref");
+    }
+
+    /// Whatever `valid_branch_name` accepts, git itself must accept (ours may be stricter, never looser).
+    #[test]
+    fn branch_name_validation_is_never_looser_than_git() {
+        if !have_git() {
+            return;
+        }
+        let mut corpus: Vec<String> = ["main", "a/b/c", "a.b", "a-b", "a_b", "ünï", "fix/é", "x@y", "@x", "a@", "a.lock", "a/.b", "a/b.lock/c", "a//b", "a/", "/a", "a.", ".a", "a..b", "a b", "a~", "a^", "a:", "a?", "a*", "a[", "a\\b", "a@{b", "@", "HEAD", "-a", "a\u{7f}b", "a\u{200b}b", "a\u{feff}", "💥", "a\u{85}b", "a.lock/", "refs/heads/x", "heads/x"].iter().map(|s| s.to_string()).collect();
+        for i in 0..200u32 {
+            let c = char::from_u32(i + 1).unwrap();
+            corpus.push(format!("a{c}b"));
+            corpus.push(format!("{c}ab"));
+            corpus.push(format!("ab{c}"));
+        }
+        for name in corpus {
+            if valid_branch_name(&name).is_ok() {
+                let ok = Command::new("git").args(["check-ref-format", "--branch", &name]).env("GIT_CONFIG_GLOBAL", "/dev/null").output().map(|o| o.status.success()).unwrap_or(false);
+                assert!(ok, "we accept {name:?} but git refuses it");
+            }
+        }
+    }
+
+    #[test]
+    fn checkout_picks_the_branch_even_when_a_tag_has_the_same_name() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tagbranch");
+        fs::write(r.join("a.txt"), "1\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "one"]);
+        g(&r, &["branch", "feat"]);
+        g(&r, &["switch", "-q", "feat"]);
+        fs::write(r.join("a.txt"), "2\n").unwrap();
+        g(&r, &["commit", "-qam", "two"]);
+        g(&r, &["switch", "-q", "main"]);
+        // a tag named like the branch, pointing at main's commit
+        g(&r, &["tag", "feat"]);
+        checkout(&r, "feat", &yes).unwrap();
+        assert_eq!(status(&r).unwrap().branch.as_deref(), Some("feat"), "on the branch, not detached at the tag");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "2\n");
     }
 
     #[test]
