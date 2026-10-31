@@ -50,7 +50,11 @@ function CodeBlock({ lang, text, onCopy }: { lang: string; text: string; onCopy?
 function BlockView({ b, onOpenLink, onCopy }: { b: Block } & Omit<MarkdownProps, "text">) {
   switch (b.kind) {
     case "p": return <p><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></p>;
-    case "h": { const Tag = b.level <= 2 ? "h3" : "h4"; return <Tag><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></Tag>; }
+    case "h": {
+      // Keep the markdown heading hierarchy (h1–h6), as the Mac does; the chat stylesheet supplies its scale.
+      const Tag = (`h${Math.min(Math.max(b.level, 1), 6)}`) as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+      return <Tag><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></Tag>;
+    }
     case "ul": return <ul>{b.items.map((it, j) => <li key={j}><Inlines nodes={it} onOpenLink={onOpenLink} /></li>)}</ul>;
     case "ol": return <ol>{b.items.map((it, j) => <li key={j}><Inlines nodes={it} onOpenLink={onOpenLink} /></li>)}</ol>;
     case "quote": return <blockquote><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></blockquote>;

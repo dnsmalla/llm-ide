@@ -135,19 +135,30 @@ function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
   const lastIdx = m.parts.length - 1;
   return (
     <article className="chat-msg chat-assistant" aria-label="Assistant message" aria-busy={live}>
-      {m.parts.map((p, i) => p.kind === "text"
-        ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
-        : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
-      {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
-      {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
-      {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
+      <span className="chat-role">llm-agent</span>
+      <div className="chat-assistant-body">
+        {m.parts.map((p, i) => p.kind === "text"
+          ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
+          : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
+        {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
+        {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
+        {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
+      </div>
     </article>
   );
 }
 
 export const MessageView = memo(function MessageView({ m, host }: { m: Message; host: MessageHost }) {
   if (m.role === "user") {
-    return <article className="chat-msg chat-user" aria-label="Your message"><p>{m.text}</p></article>;
+    // The Mac labels each turn and right-aligns the user's message in a narrow accent bubble.
+    return (
+      <article className="chat-msg chat-user-row" aria-label="Your message">
+        <div className="chat-turn">
+          <span className="chat-role">You</span>
+          <div className="chat-user-bubble"><p>{m.text}</p></div>
+        </div>
+      </article>
+    );
   }
   return <Assistant m={m} host={host} />;
 });

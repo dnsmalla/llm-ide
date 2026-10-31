@@ -56,7 +56,7 @@ test("an unclosed fence (a stream mid-code) runs to the end", () => {
 
 test("tables, lists, headings, quotes, rules, emphasis", () => {
   const out = render("# T\n\n| a | b |\n|---|---|\n| 1 | **2** |\n\n- x\n- y\n\n1. one\n\n> q\n\n---\n\n*em* and `code`");
-  for (const re of [/<h3>T<\/h3>/, /<th scope="col">a<\/th>/, /<td><strong>2<\/strong><\/td>/, /<ul><li>x<\/li><li>y<\/li><\/ul>/, /<ol><li>one<\/li><\/ol>/, /<blockquote>q<\/blockquote>/, /<hr\/>/, /<em>em<\/em>/, /<code>code<\/code>/]) assert.match(out, re);
+  for (const re of [/<h1>T<\/h1>/, /<th scope="col">a<\/th>/, /<td><strong>2<\/strong><\/td>/, /<ul><li>x<\/li><li>y<\/li><\/ul>/, /<ol><li>one<\/li><\/ol>/, /<blockquote>q<\/blockquote>/, /<hr\/>/, /<em>em<\/em>/, /<code>code<\/code>/]) assert.match(out, re);
 });
 
 test("pathological input stays bounded", () => {

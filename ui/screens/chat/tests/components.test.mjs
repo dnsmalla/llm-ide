@@ -42,8 +42,12 @@ test("MessageView: user text is escaped; assistant is an article with busy state
   const u = html(h(c.MessageView, { m: { role: "user", id: "u", text: "<script>alert(1)</script>" }, host }));
   assert.ok(!u.includes("<script"));
   assert.match(u, /aria-label="Your message"/);
+  assert.match(u, /class="chat-role">You</);           // the Mac labels each turn
+  assert.match(u, /class="chat-user-bubble"/);          // and right-aligns the user in a narrow bubble
   const a = html(h(c.MessageView, { m: asst({ status: "streaming", parts: [c.appendText(c.emptyText(), "Hi\n\nthere")] }), host }));
   assert.match(a, /<article[^>]*aria-label="Assistant message"[^>]*aria-busy="true"/);
+  assert.match(a, /class="chat-role">llm-agent</);
+  assert.match(a, /class="chat-assistant-body"/);
   assert.match(a, /chat-caret/);
   assert.ok(!html(h(c.MessageView, { m: asst(), host })).includes("chat-caret"));
 });
