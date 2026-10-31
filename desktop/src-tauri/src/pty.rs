@@ -72,11 +72,26 @@ enum Consent {
     Denied,
 }
 
-/// Per-page-load consent. Default deny: nothing runs until `check` has seen a yes, a
-/// no is remembered until the page reloads (a page cannot nag with repeat prompts),
-/// and `reset` (page load / window close) forgets everything.
+/// How long one approval lasts. After that the next spawn asks again and typing into already
+/// open terminals is refused until the user approves a new one.
+pub const GRANT_TTL_MS: u64 = 30 * 60 * 1000;
+
+struct Inner {
+    consent: Consent,
+    /// When `consent` became `Granted` (ms since the epoch).
+    granted_ms: u64,
+    /// Bumped by `reset` (page load / window close): an answer to a dialog that was opened for an
+    /// older page load is discarded, so a grant can never leak into the next page.
+    epoch: u64,
+}
+
+/// Per-page-load consent with an expiry. Default deny: nothing runs until `check` has seen a
+/// yes, a no is remembered until the page reloads (a page cannot nag with repeat prompts), a
+/// yes lasts `GRANT_TTL_MS`, and `reset` (page load / window close) forgets everything.
 pub struct Gate {
-    state: Mutex<Consent>,
+    state: Mutex<Inner>,
+    /// Serialises the native dialog (one at a time) without holding `state` while it is open.
+    asking: Mutex<()>,
     /// Re-asks after a refusal: (count, last time). Cleared by `reset`.
     retries: Mutex<(u32, Option<Instant>)>,
 }
@@ -88,17 +103,33 @@ const RETRY_MAX: u32 = 5;
 
 impl Gate {
     pub const fn new() -> Self {
-        Gate { state: Mutex::new(Consent::Unasked), retries: Mutex::new((0, None)) }
+        Gate { state: Mutex::new(Inner { consent: Consent::Unasked, granted_ms: 0, epoch: 0 }), asking: Mutex::new(()), retries: Mutex::new((0, None)) }
     }
 
     pub fn reset(&self) {
-        *lock(&self.state) = Consent::Unasked;
+        let mut st = lock(&self.state);
+        st.consent = Consent::Unasked;
+        st.epoch += 1;
+        drop(st);
         *lock(&self.retries) = (0, None);
+    }
+
+    /// Expires a grant that is older than the TTL (back to `Unasked`: the next spawn asks).
+    fn expire(st: &mut Inner, now: u64) {
+        if st.consent == Consent::Granted && now.saturating_sub(st.granted_ms) >= GRANT_TTL_MS {
+            st.consent = Consent::Unasked;
+        }
     }
 
     /// `unasked` / `granted` / `denied`, for the UI's pre-explanation and denied state.
     pub fn label(&self) -> &'static str {
-        match *lock(&self.state) {
+        self.label_at(crate::confirm::now_ms())
+    }
+
+    pub fn label_at(&self, now: u64) -> &'static str {
+        let mut st = lock(&self.state);
+        Self::expire(&mut st, now);
+        match st.consent {
             Consent::Unasked => "unasked",
             Consent::Granted => "granted",
             Consent::Denied => "denied",
@@ -109,7 +140,7 @@ impl Gate {
     /// Rate limited; only valid while denied.
     pub fn retry(&self) -> Result<(), &'static str> {
         let mut st = lock(&self.state);
-        if *st != Consent::Denied {
+        if st.consent != Consent::Denied {
             return Err("nothing to retry");
         }
         let mut r = lock(&self.retries);
@@ -120,29 +151,55 @@ impl Gate {
             return Err("please wait a few seconds before trying again");
         }
         *r = (r.0 + 1, Some(Instant::now()));
-        *st = Consent::Unasked;
+        st.consent = Consent::Unasked;
         Ok(())
     }
 
     pub fn granted(&self) -> bool {
-        *lock(&self.state) == Consent::Granted
+        self.granted_at(crate::confirm::now_ms())
+    }
+
+    pub fn granted_at(&self, now: u64) -> bool {
+        let mut st = lock(&self.state);
+        Self::expire(&mut st, now);
+        st.consent == Consent::Granted
     }
 
     /// True when terminals are allowed; `ask` (the native dialog) runs only while the
     /// state is `Unasked`, and its answer is recorded.
     pub fn check(&self, ask: impl FnOnce() -> bool) -> bool {
-        let mut st = lock(&self.state);
-        match *st {
-            Consent::Granted => true,
-            Consent::Denied => false,
-            Consent::Unasked => {
-                let yes = ask();
-                *st = if yes { Consent::Granted } else { Consent::Denied };
-                yes
+        self.check_at(crate::confirm::now_ms(), ask)
+    }
+
+    pub fn check_at(&self, now: u64, ask: impl FnOnce() -> bool) -> bool {
+        let _one_dialog = lock(&self.asking);
+        let epoch = {
+            let mut st = lock(&self.state);
+            Self::expire(&mut st, now);
+            match st.consent {
+                Consent::Granted => return true,
+                Consent::Denied => return false,
+                Consent::Unasked => st.epoch,
             }
+        };
+        let yes = ask();
+        let mut st = lock(&self.state);
+        if st.epoch != epoch {
+            // The page that was asked about is gone: the answer does not carry over.
+            return false;
         }
+        if yes {
+            st.consent = Consent::Granted;
+            st.granted_ms = now;
+        } else {
+            st.consent = Consent::Denied;
+        }
+        yes
     }
 }
+
+/// Label of the one button that grants terminal access.
+pub const TERMINAL_ACCEPT: &str = "Allow terminal";
 
 static GATE: Gate = Gate::new();
 
@@ -157,17 +214,15 @@ pub fn authorize() -> Result<(), String> {
     if !terminal_enabled() {
         return Err("the Terminal feature is disabled".into());
     }
+    // Cancel-first (the default button, Return key): only an explicit click on "Allow terminal" counts.
     let allowed = GATE.check(|| {
-        rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_title("Allow terminal access?")
-            .set_description(
-                "LLM-IDE wants to open a terminal: a real shell that runs with all of your \
-                 user permissions. Only allow this if you just asked for a terminal.",
-            )
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show()
-            == rfd::MessageDialogResult::Yes
+        crate::confirm::ask(
+            "Allow terminal access?",
+            "LLM-IDE wants to open a terminal: a real shell that runs with all of your user permissions. \
+             The approval lasts 30 minutes. Only allow this if you just asked for a terminal.",
+            TERMINAL_ACCEPT,
+            true,
+        )
     });
     if allowed {
         Ok(())
@@ -703,6 +758,37 @@ mod tests {
         assert!(g.check(|| { asked += 1; true }));
         assert_eq!(asked, 1);
         assert!(g.granted());
+    }
+
+    #[test]
+    fn a_grant_expires_after_the_ttl_and_asks_again() {
+        let g = Gate::new();
+        assert!(g.check_at(1_000, || true));
+        assert!(g.granted_at(1_000 + GRANT_TTL_MS - 1));
+        assert!(!g.granted_at(1_000 + GRANT_TTL_MS), "expired");
+        assert_eq!(g.label_at(1_000 + GRANT_TTL_MS), "unasked");
+        let mut asked = 0;
+        assert!(g.check_at(1_000 + GRANT_TTL_MS, || { asked += 1; true }), "re-asked after expiry");
+        assert_eq!(asked, 1);
+    }
+
+    #[test]
+    fn an_answer_for_an_older_page_load_is_discarded() {
+        let g = Gate::new();
+        let yes = g.check_at(1, || {
+            g.reset(); // the page reloaded while the dialog was open
+            true
+        });
+        assert!(!yes);
+        assert!(!g.granted_at(2), "the grant must not leak into the new page");
+        assert_eq!(g.label_at(2), "unasked");
+    }
+
+    #[test]
+    fn the_terminal_dialog_defaults_to_cancel() {
+        let (first, second) = crate::confirm::button_labels(TERMINAL_ACCEPT);
+        assert_eq!(first, "Cancel", "the default (first) button must not grant");
+        assert_eq!(second, TERMINAL_ACCEPT);
     }
 
     #[test]

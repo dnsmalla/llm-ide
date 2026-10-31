@@ -93,9 +93,17 @@ pub(crate) fn ask(title: &str, description: &str, accept: &str, warn: bool) -> b
         .set_level(if warn { rfd::MessageLevel::Warning } else { rfd::MessageLevel::Info })
         .set_title(title)
         .set_description(description)
-        .set_buttons(rfd::MessageButtons::OkCancelCustom("Cancel".to_string(), accept.to_string()))
+        .set_buttons({
+            let (first, second) = button_labels(accept);
+            rfd::MessageButtons::OkCancelCustom(first, second)
+        })
         .show();
     accepted(&result, accept)
+}
+
+/// The two button labels in dialog order: Cancel FIRST (the default / Return button), accept second.
+pub(crate) fn button_labels(accept: &str) -> (String, String) {
+    ("Cancel".to_string(), accept.to_string())
 }
 
 pub(crate) fn accepted(result: &rfd::MessageDialogResult, accept: &str) -> bool {
