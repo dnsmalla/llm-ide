@@ -25,7 +25,8 @@ import { mkdirSync, renameSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { makePinnedFetch } from '../../server/pinned-fetch.mjs';
-import { parseRepoUrl, resolveCommit, downloadArchive, sourceAllowed, isCommitSha, validRef } from './sources/github.mjs';
+import { parseRepoUrl, resolveCommit, downloadArchive, isCommitSha, validRef } from './sources/github.mjs';
+import { sourceAllowedFor } from './allowlist.mjs';
 import { extractTarGz } from './sources/tar.mjs';
 import { inspectTree } from './inspect.mjs';
 import { scanTree, summarizeFindings } from './scan.mjs';
@@ -66,10 +67,10 @@ function lockFor(userId, id) {
 }
 
 /** Download `commit` of the item's repository and read it like an install does. Nothing is written. */
-async function loadCandidate(rec, commit, { fetch: f, signal }) {
+async function loadCandidate(userId, rec, commit, { fetch: f, signal }) {
   const repo = sourceOf(rec);
   if (!repo) throw new InstallError('invalid_url', 'this item has no GitHub source');
-  if (!sourceAllowed(repo.owner, repo.repo)) throw new InstallError('source_not_allowed', 'this source is not on the allowed list');
+  if (!sourceAllowedFor(userId, repo.owner, repo.repo)) throw new InstallError('source_not_allowed', 'this source is not on the allowed list');
   const subpath = validSubpath(rec.subpath);
   let archive; let tree;
   try {
@@ -171,7 +172,7 @@ export async function previewUpdate(userId, id, { commit, fetch: fetchImpl, sign
   const to = await targetCommit(rec, commit, { fetch: fetchImpl, signal }, { resolveIfMissing: true });
   if (to === rec.pinnedCommit) throw new InstallError('already_current', 'already at this commit', { commit: to });
   const f = pinnedFetch({ fetch: fetchImpl });
-  const cand = await loadCandidate(rec, to, { fetch: f, signal });
+  const cand = await loadCandidate(userId, rec, to, { fetch: f, signal });
   const cur = readTreeFromDisk(join(itemStoreDir(userId, id), rec.pinnedCommit));
   if (cur.error) throw new InstallError('bytes_missing', 'the installed files are missing or damaged; repair first', { status: cur.error, use: '/auth/me/extensions/repair' });
 
@@ -247,7 +248,7 @@ export async function applyUpdate(userId, id, { commit, consents = [], fetch: fe
   if (to === rec.pinnedCommit) throw new InstallError('already_current', 'already at this commit', { commit: to });
   const unlock = lockFor(userId, id);
   try {
-    const cand = await loadCandidate(rec, to, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
+    const cand = await loadCandidate(userId, rec, to, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
     const findings = scanEnabled() ? scanTree(cand.files, { skipped: cand.skipped }) : [];
     const src = validateSource({ kind: 'git', url: cand.repo.url, commit: to, ...(rec.source.ref ? { ref: rec.source.ref } : {}) });
     if (!src.ok) throw new InstallError('invalid_url', `source: ${src.error}`);
@@ -316,7 +317,7 @@ export async function repair(userId, id, { fetch: fetchImpl, signal } = {}) {
   if (before.status === 'ok') return { ok: true, repaired: false, status: 'ok', item: view(userId, id) };
   const unlock = lockFor(userId, id);
   try {
-    const cand = await loadCandidate(rec, rec.pinnedCommit, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
+    const cand = await loadCandidate(userId, rec, rec.pinnedCommit, { fetch: pinnedFetch({ fetch: fetchImpl }), signal });
     const hash = treeHash(cand.files);
     if (rec.integrity && hash !== rec.integrity) throw new InstallError('integrity_mismatch', 'the downloaded files differ from what was installed; not restoring them', { commit: rec.pinnedCommit });
     let repaired = false;

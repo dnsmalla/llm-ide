@@ -18,7 +18,8 @@ import { mkdirSync, writeFileSync, renameSync, rmSync, existsSync, realpathSync 
 import { randomBytes } from 'node:crypto';
 import { dirname, join, resolve, sep, relative } from 'node:path';
 import { makePinnedFetch } from '../../server/pinned-fetch.mjs';
-import { parseRepoUrl, resolveCommit, downloadArchive, sourceAllowed, SourceError, validRef, isCommitSha } from './sources/github.mjs';
+import { sourceAllowedFor } from './allowlist.mjs';
+import { parseRepoUrl, resolveCommit, downloadArchive, SourceError, validRef, isCommitSha } from './sources/github.mjs';
 import { extractTarGz, ArchiveError } from './sources/tar.mjs';
 import { inspectTree } from './inspect.mjs';
 import { scanTree, summarizeFindings } from './scan.mjs';
@@ -74,7 +75,7 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
   if (typeof userId !== 'string' || !userId) throw new InstallError('invalid_user', 'no user');
   const repo = parseRepoUrl(url);
   if (!repo) throw new InstallError('invalid_url', 'use a https://github.com/<owner>/<repo> address');
-  if (!sourceAllowed(repo.owner, repo.repo)) throw new InstallError('source_not_allowed', 'this source is not on the allowed list');
+  if (!sourceAllowedFor(userId, repo.owner, repo.repo)) throw new InstallError('source_not_allowed', 'this source is not on the allowed list');
   if (ref !== undefined && ref !== null && ref !== '' && !validRef(ref)) throw new InstallError('invalid_ref', 'invalid ref');
   if (commit !== undefined && commit !== null && commit !== '' && !isCommitSha(commit)) throw new InstallError('invalid_commit', 'commit must be 40 hex characters');
   const subpath = validSubpath(subpathIn);

@@ -23,7 +23,8 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makePinnedFetch } from '../../server/pinned-fetch.mjs';
-import { resolveCommit, downloadArchive, sourceAllowed, readCapped, parseRepoUrl } from './sources/github.mjs';
+import { resolveCommit, downloadArchive, readCapped, parseRepoUrl } from './sources/github.mjs';
+import { sourceAllowedFor } from './allowlist.mjs';
 import { extractTarGz } from './sources/tar.mjs';
 import { frontmatter } from './inspect.mjs';
 import { itemId } from './model.mjs';
@@ -261,7 +262,7 @@ export function searchCatalog(userId, { q = '', kind, limit = 25, offset = 0 } =
       let id = null;
       try { id = itemId(e.kind, e.publisher, e.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')); } catch { /* not addressable as an item */ }
       const repo = e.source?.url ? parseRepoUrl(e.source.url) : null;
-      const allowed = e.installable === true && !!repo && sourceAllowed(repo.owner, repo.repo);
+      const allowed = e.installable === true && !!repo && sourceAllowedFor(userId, repo.owner, repo.repo);
       hits.push({ s, entry: {
         indexId: e.indexId, kind: e.kind, name: e.name, description: e.description ?? '', publisher: e.publisher,
         ...(e.version ? { version: e.version } : {}), source: e.source ?? {}, ...(e.remote ? { remote: true } : {}),

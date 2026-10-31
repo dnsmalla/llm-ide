@@ -109,13 +109,21 @@ export async function downloadArchive({ owner, repo, commit }, { fetch: fetchImp
 /** What an install may come from when the operator has not set `LLMIDE_EXT_ALLOWED_SOURCES`. a `star/star` pattern in the variable opens it to any repository. */
 export const DEFAULT_ALLOWED_SOURCES = 'anthropics/*,modelcontextprotocol/*';
 
+/** True when the `owner/repo` glob (`*` matches within one segment) matches `name`. Case-insensitive. */
+export function globMatches(pattern, name) {
+  const re = new RegExp(`^${String(pattern).toLowerCase().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`);
+  return re.test(String(name).toLowerCase());
+}
+
+/** The cleaned patterns of an allowlist spec (comma list, optional `github.com/` prefix). */
+export function parsePatterns(spec) {
+  return String(spec ?? '').split(',').map((s) => s.trim().replace(/^github\.com\//, '')).filter(Boolean);
+}
+
 /** Operator allowlist (`LLMIDE_EXT_ALLOWED_SOURCES`, comma list of `owner/repo` globs). Unset or blank: {@link DEFAULT_ALLOWED_SOURCES}. */
 export function sourceAllowed(owner, repo, spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES) {
-  let list = String(spec ?? '').split(',').map((s) => s.trim().replace(/^github\.com\//, '')).filter(Boolean);
+  let list = parsePatterns(spec);
   if (!list.length) list = DEFAULT_ALLOWED_SOURCES.split(',');
-  const name = `${owner}/${repo}`.toLowerCase();
-  return list.some((pat) => {
-    const re = new RegExp(`^${pat.toLowerCase().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`);
-    return re.test(name);
-  });
+  const name = `${owner}/${repo}`;
+  return list.some((pat) => globMatches(pat, name));
 }
