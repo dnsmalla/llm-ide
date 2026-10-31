@@ -86,3 +86,6 @@
 .ex-chat { flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--tok-color-body); border-left: 1px solid var(--tok-color-border); overflow: hidden; }
 .ex-chat > * { flex: 1 1 auto; min-height: 0; }
 .ex-chat-toggle:disabled { opacity: 0.5; cursor: default; }
+.ex-folders { margin: 0 0 var(--tok-space-sm); padding: 0; list-style: none; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.ex-folder-row { display: flex; align-items: center; gap: var(--tok-space-sm); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
+.ex-danger { color: var(--tok-color-danger); }

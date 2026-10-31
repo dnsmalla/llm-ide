@@ -183,3 +183,50 @@ export function UnsavedDialog({ name, onSave, onDiscard, onCancel }: UnsavedProp
     </Modal>
   );
 }
+
+export interface ProjectFolderRow {
+  /** The project-relative path (the host's own layout list). */
+  name: string;
+  exists: boolean;
+}
+
+export interface ProjectFoldersProps {
+  root: string;
+  folders: readonly ProjectFolderRow[];
+  error: string | null;
+  busy: boolean;
+  onReveal: (relPath: string) => void;
+  onRefresh: () => void;
+  onCancel: () => void;
+}
+
+/** The Mac's Project folders sheet (ExplorerView's folder.badge.gearshape): the layout's folders, missing ones marked. */
+export function ProjectFoldersDialog({ root, folders, error, busy, onReveal, onRefresh, onCancel }: ProjectFoldersProps) {
+  return (
+    <Modal title="Project folders" onCancel={onCancel} labelId="ex-folders-title">
+      <p className="ex-modal-text">The folders this project uses. A missing folder is shown, never created here.</p>
+      <p className="ex-modal-text ex-muted" title={root}>{root}</p>
+      {error ? <p className="ex-modal-text ex-danger" role="alert">{error}</p> : null}
+      {busy && !folders.length ? (
+        <p className="ex-modal-text ex-muted" role="status">Reading the project folders…</p>
+      ) : folders.length === 0 ? (
+        <p className="ex-modal-text ex-muted">The host returned no folders.</p>
+      ) : (
+        <ul className="ex-folders" aria-label="Project folders">
+          {folders.map((f) => (
+            <li key={f.name} className="ex-folder-row">
+              <button type="button" className="ex-link" disabled={!f.exists} onClick={() => onReveal(f.name)} title={f.exists ? "Show in Finder" : "This folder does not exist yet"}>
+                {f.name}
+              </button>
+              {!f.exists ? <span className="ex-muted">missing</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="ex-modal-actions">
+        <button type="button" className="ex-btn" disabled={busy} onClick={onRefresh}>Refresh</button>
+        <button type="button" className="ex-btn ex-btn-primary" onClick={onCancel}>Close</button>
+      </div>
+    </Modal>
+  );
+}

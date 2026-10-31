@@ -238,6 +238,15 @@ export class ExplorerController {
     this.queueSession();
   }
 
+  /** The Mac's Collapse All: close every folder except the tree's base, dropping their cached pages. */
+  collapseAll(): void {
+    let tree = this.snap.tree;
+    for (const p of [...tree.expanded]) if (p !== this.treeBase) tree = withExpanded(tree, p, false);
+    this.set({ tree: pruneCollapsed(tree) });
+    this.syncWatch();
+    this.queueSession();
+  }
+
   setFocus(path: string | null): void {
     if (path !== this.snap.focusPath) this.set({ focusPath: path });
   }

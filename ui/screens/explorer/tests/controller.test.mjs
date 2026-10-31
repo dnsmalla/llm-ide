@@ -38,6 +38,15 @@ test("the tree can be rooted at the project's code/ folder (the Mac's Explorer r
   assert.deepEqual(fs.state.watched.sort(), ["", ".git", "code"]);
 });
 
+test("collapse all closes every folder except the tree base", async () => {
+  const { c } = await setup({ "code/src/main.rs": "m", "code/src/lib.rs": "l", "code/a.txt": "a" }, { treeBase: "code" });
+  await c.toggleDir("code/src", true);
+  assert.ok(c.getSnapshot().tree.expanded.has("code/src"));
+  c.collapseAll();
+  assert.deepEqual([...c.getSnapshot().tree.expanded].sort(), ["code"]);
+  assert.deepEqual(rows(c), ["code/src", "code/a.txt"], "children are no longer laid out");
+});
+
 test("a missing code/ folder falls back to the project root", async () => {
   const { c } = await setup({ "app/main.swift": "m", "README.md": "r" }, { treeBase: "code" });
   assert.equal(c.getSnapshot().treeBase, "");

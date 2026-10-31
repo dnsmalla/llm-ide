@@ -7,7 +7,7 @@ and each feature's `Views/`.
 
 | Menu | Mac layout (panes / tree / actions) | Desktop now | Next |
 |---|---|---|---|
-| **Explorer** | Left: panel tabs (Explorer / Source Control / Search), file tree rooted at the project's `code/`, git decorations; center: editor tabs; right: Code Assistant panel. | Real. Tree rooted at `code/` (falls back to the project root when absent); panel tabs; Monaco editor; Terminal dock; Code Assistant. | Memory viewer / paths sheet parity, tree root row label. |
+| **Explorer** | Left: panel tabs (Explorer / Source Control / Search), file tree rooted at the project's `code/`, git decorations, Project folders sheet, Collapse All; center: editor tabs; right: Code Assistant panel. | Real. Tree rooted at `code/` (falls back to the project root when absent); panel tabs; Project folders sheet (host layout, missing marked, Reveal); Collapse All; Monaco editor; Terminal dock; Code Assistant. | Root row label; Project Memory entry point. |
 | **Graph** | Three panes: left Library tree (Code / Data / All categories) + repo quick-pick + run footer; center 3D graph; right node details; System page lives inside Graph. | Graph canvas + node search/filters/details; no Library tree, no run controls, no System page. | Add the Library tree + quick-pick/run footer, then the System view. |
 | **Auto Tasks** | Task lanes, schedules, source updates, loop engineering/regression sweeps. | “Soon”. | Port the task cards and run controls. |
 | **Review Conflicts** | Left conflicts file tree (`FileTreePanel`), center diff/hunk staging, review actions. | “Soon”. | Port the conflict tree + diff (Explorer has the diff machinery). |
@@ -23,6 +23,7 @@ and each feature's `Views/`.
 
 - Explorer tree roots at `code/` (Mac `ExplorerView.root` → `activeProjectCodeDir`).
 - Doc Gen/Visual Files pane limited to the Mac's categories; no climbing to the project root.
+- Explorer: Project folders sheet + Collapse All (the Mac's folder.badge.gearshape and rectangle.compress.vertical actions).
 - Repositories settings rebuilt as the Mac's GitLab/GitHub card (see below).
 
 ## Repositories (Settings → Project)

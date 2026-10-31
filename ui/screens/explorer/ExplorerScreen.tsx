@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useS
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ExplorerController } from "./controller";
-import { ConfirmDialog, PromptDialog, UnsavedDialog } from "./Dialogs";
+import { ConfirmDialog, ProjectFoldersDialog, PromptDialog, UnsavedDialog, type ProjectFolderRow } from "./Dialogs";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
@@ -12,6 +12,7 @@ import { FileTree } from "./FileTree";
 import { createHostFs, baseName, parentOf, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
+import { host as shellHost, invokeHost } from "../shell/host";
 import { DOCK_MAX, DOCK_MIN, clampDockWidth, dockFits, readDockPrefs, writeDockPrefs, type DockPrefs } from "./dock-model";
 import { ExplorerTabBar } from "./TabBar";
 import { topLevel } from "./tree-model";
@@ -125,6 +126,10 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const [dockEver, setDockEver] = useState(false);
   const [dockHeight, setDockHeight] = useState(DOCK_DEFAULT);
   const [runtime, setRuntime] = useState<TerminalRuntime | null>(deps?.terminal?.runtime ?? null);
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  const [folders, setFolders] = useState<{ root: string; rows: ProjectFolderRow[] } | null>(null);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  const [foldersBusy, setFoldersBusy] = useState(false);
   const search = useMemo(
     () =>
       new SearchController({
@@ -309,6 +314,38 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const chatVisible = chatDock.open && chatFits;
   const chatWidth = clampDockWidth(chatDock.width, viewportW, width);
 
+  const loadFolders = useCallback(async () => {
+    setFoldersBusy(true);
+    setFoldersError(null);
+    try {
+      const raw = await invokeHost<unknown>("project_paths");
+      const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      const root = typeof o.root === "string" ? o.root : projectRoot;
+      const list = Array.isArray(o.folders) ? o.folders : [];
+      const rows: ProjectFolderRow[] = [];
+      for (const row of list) {
+        if (!row || typeof row !== "object") continue;
+        const r = row as Record<string, unknown>;
+        if (typeof r.name !== "string" || r.name.length === 0) continue;
+        rows.push({ name: r.name.slice(0, 200), exists: r.exists === true });
+        if (rows.length >= 64) break;
+      }
+      setFolders({ root, rows });
+    } catch (e) {
+      setFoldersError(e instanceof Error ? e.message : "The project folders could not be read.");
+    } finally {
+      setFoldersBusy(false);
+    }
+  }, [projectRoot]);
+
+  const openFolders = () => {
+    setFoldersOpen(true);
+    void loadFolders();
+  };
+  const revealFolder = (relPath: string) => {
+    void invokeHost("reveal_in_os", { relPath }).catch(() => undefined);
+  };
+
   return (
     <div className="ex-root" data-active={active} onKeyDown={onKeyDown}>
       <aside className="ex-side" style={{ width }} aria-label="Side panel">
@@ -318,6 +355,14 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           <span className="ex-project" title={projectRoot}>{name}</span>
           {snap.git?.branch && <Chip label={snap.git.branch + (snap.git.ahead ? ` ↑${snap.git.ahead}` : "") + (snap.git.behind ? ` ↓${snap.git.behind}` : "")} compact />}
           <span className="ex-spacer" />
+          {shellHost.isAvailable() ? (
+            <button type="button" className="ui-icon-button" aria-label="Project folders" title="Project folders" onClick={openFolders}>
+              <Icon name="folder-cog" size={14} />
+            </button>
+          ) : null}
+          <button type="button" className="ui-icon-button" aria-label="Collapse all" title="Collapse all" onClick={() => controller.collapseAll()}>
+            <Icon name="chevrons-right" size={14} />
+          </button>
           <button type="button" className="ui-icon-button" aria-label="New file" title="New file" onClick={() => setDialog({ type: "prompt", kind: "new-file", dir: targetDir(snap.focusPath) })}>+</button>
           <button type="button" className="ui-icon-button" aria-label="New folder" title="New folder" onClick={() => setDialog({ type: "prompt", kind: "new-dir", dir: targetDir(snap.focusPath) })}>▣</button>
           <button type="button" className="ui-icon-button" aria-label="Refresh" title="Refresh" onClick={() => void refreshAll()}>↻</button>
@@ -432,6 +477,18 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           items={menu.target.kind === "tab" ? tabMenu(menu.target.id) : treeMenu(menu.target.path)}
           onPick={pickMenu}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {foldersOpen && (
+        <ProjectFoldersDialog
+          root={folders?.root ?? projectRoot}
+          folders={folders?.rows ?? []}
+          error={foldersError}
+          busy={foldersBusy}
+          onReveal={revealFolder}
+          onRefresh={() => void loadFolders()}
+          onCancel={() => setFoldersOpen(false)}
         />
       )}
 
