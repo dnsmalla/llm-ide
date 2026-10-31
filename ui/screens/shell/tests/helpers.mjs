@@ -28,7 +28,13 @@ export async function load(entryRel) {
     packages: "external",
     jsx: "automatic",
     logLevel: "silent",
+    // Vite-only: no screens exist in node tests.
+    define: { "import.meta.glob": "Object" },
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
   });
   return import(`${outfile}?t=${Date.now()}`);
 }
+
+/** Desktop's single React copy: tests must render with the same instance the bundles import. */
+export const React = requireFromDesktop("react");
+export const { renderToStaticMarkup } = requireFromDesktop("react-dom/server");

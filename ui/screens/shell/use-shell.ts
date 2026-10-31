@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { core, coreStatusStore } from "./runtime";
-import { host, type ProjectInfo } from "./host";
+import type { ProjectInfo } from "./host";
+import { projectStore } from "./project-store";
 import { useStoreSelector } from "./hooks";
 import { deriveStatusView, statusViewEqual, type StatusView } from "./status-view";
 import type { SessionSnapshot } from "./core";
@@ -17,56 +18,26 @@ export function useCoreStatusView(): StatusView {
 
 export interface ActiveProject {
   project: ProjectInfo | null;
-  recent: ProjectInfo[];
-  /** Native dialog; null when cancelled. */
+  recent: readonly ProjectInfo[];
+  loaded: boolean;
+  error: string | null;
+  /** Native folder dialog (host-owned); a cancel changes nothing. */
   openFolder(): Promise<void>;
   openRecent(index: number): Promise<void>;
-  error: string | null;
   refresh(): Promise<void>;
 }
 
-/** Project state via host commands only (never webview-supplied paths). */
+const PROJECT_ACTIONS = {
+  openFolder: () => projectStore.openFolder(),
+  openRecent: (i: number) => projectStore.openRecent(i),
+  refresh: () => projectStore.refresh(),
+};
+
+/** Project state via host commands only (never webview-supplied paths); shared across the shell. */
 export function useActiveProject(): ActiveProject {
-  const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [recent, setRecent] = useState<ProjectInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const [p, r] = await Promise.all([host.projectActive(), host.projectRecent()]);
-      setProject(p);
-      setRecent(r);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
+  const s = useStoreSelector(projectStore, (x) => x);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const openFolder = useCallback(async () => {
-    try {
-      const p = await host.projectOpen();
-      if (p) setProject(p);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [refresh]);
-
-  const openRecent = useCallback(
-    async (index: number) => {
-      try {
-        setProject(await host.projectOpenRecent(index));
-        await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [refresh],
-  );
-
-  return { project, recent, openFolder, openRecent, error, refresh };
+    if (!projectStore.getSnapshot().loaded) void projectStore.refresh();
+  }, []);
+  return { ...s, ...PROJECT_ACTIONS };
 }
