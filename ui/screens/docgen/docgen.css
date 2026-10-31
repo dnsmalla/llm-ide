@@ -1,0 +1,49 @@
+/* Doc Gen and Visual. Tokens only. */
+.dg-root { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: auto; background: var(--tok-color-body); color: var(--tok-color-text); font-size: var(--tok-type-body-size); }
+.dg-root[data-active="false"] { pointer-events: none; }
+.dg-top { display: flex; align-items: baseline; gap: var(--tok-space-md); padding: 8px var(--tok-space-md); border-bottom: 1px solid var(--tok-color-border); }
+.dg-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
+.dg-h2 { margin: 0 0 4px; font-size: var(--tok-type-heading-size, 1.1em); }
+.dg-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: var(--tok-space-md); padding: var(--tok-space-md); }
+@media (max-width: 860px) { .dg-grid { grid-template-columns: minmax(0, 1fr); } }
+.dg-left, .dg-right { display: flex; flex-direction: column; gap: var(--tok-space-md); min-width: 0; min-height: 0; }
+.dg-setup, .dg-sources, .dg-result { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; }
+.dg-group { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); margin: 0; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dg-group legend { padding: 0 4px; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.dg-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.dg-field input[type="text"], .dg-field input[type="search"], .dg-field select, .dg-field textarea { font: inherit; color: var(--tok-color-text); background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 4px 8px; min-width: 0; }
+.dg-field textarea { resize: vertical; }
+.dg-field :focus-visible, .dg-btn:focus-visible, .dg-link:focus-visible, .dg-tab:focus-visible, .dg-rowbtn:focus-visible, .dg-vlist:focus-visible, .dg-check input:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.dg-grow { flex: 1; min-width: 0; }
+.dg-bar { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.dg-actions { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.dg-btn { font: inherit; font-size: var(--tok-type-button-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 3px 10px; cursor: pointer; }
+.dg-btn:hover:not(:disabled) { border-color: var(--tok-color-accent); }
+.dg-btn:disabled { opacity: 0.55; cursor: default; }
+.dg-primary { background: color-mix(in srgb, var(--tok-color-accent) 28%, transparent); }
+.dg-link { background: none; border: 0; padding: 0; color: var(--tok-color-accent); cursor: pointer; font: inherit; text-decoration: underline; }
+.dg-danger { color: var(--tok-color-danger); }
+.dg-muted { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.dg-note { padding: 4px 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); font-size: var(--tok-type-caption-size); }
+.dg-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--tok-color-border); }
+.dg-tab { font: inherit; color: var(--tok-color-text-muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 12px; cursor: pointer; }
+.dg-tab[aria-selected="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
+.dg-pane { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; padding-top: var(--tok-space-sm); }
+.dg-vlist { overflow: auto; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); outline: none; }
+.dg-vrow { display: flex; align-items: center; box-sizing: border-box; padding: 0 8px; border-bottom: 1px solid color-mix(in srgb, var(--tok-color-border) 50%, transparent); overflow: hidden; }
+.dg-check { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+.dg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-rowbtn { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; }
+.dg-crumbs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tok-color-text-muted); }
+.dg-result { min-height: 240px; }
+.dg-empty, .dg-progress, .dg-error { padding: var(--tok-space-md); border: 1px dashed var(--tok-color-border); border-radius: var(--tok-radius-sm); display: flex; flex-direction: column; gap: 6px; }
+.dg-error { border-style: solid; border-color: var(--tok-color-danger); }
+.dg-done { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; }
+.dg-doc { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-md); overflow: auto; max-height: 60vh; min-width: 0; }
+.dg-dialog-wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, #000 45%, transparent); z-index: 20; }
+.dg-dialog { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md, 8px); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.dg-tlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dg-trow { display: flex; align-items: center; gap: 8px; }
+.dg-tform { display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+@media (prefers-reduced-motion: reduce) { .dg-root * { transition: none !important; animation: none !important; } }
