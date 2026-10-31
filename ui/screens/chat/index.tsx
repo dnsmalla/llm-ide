@@ -15,6 +15,7 @@ import { TauriChatStore } from "./tauri-store";
 import { safeHref } from "./markdown";
 import { ApprovalsPanel, TrustBanner } from "./approvals";
 import type { ChatState } from "./state";
+import { createBypassGate } from "./bypass";
 import { createCatalogLoader } from "./slash/loader";
 import { createHostAttach } from "./attach/host";
 import { createHostProjectFs } from "./mentions/project-fs";
@@ -59,7 +60,26 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
     () => (shellHost.isAvailable() ? new TauriChatStore({ invoke: invokeHost, ready: () => chatBinding.whenBound() }) : new HttpChatStore(transport)),
     [transport],
   );
-  const controller = useMemo(() => new ChatController({ core: transport, store, workspaceRoot: () => root.current ?? "" }), [transport, store]);
+  // Bypass approval gate: only in the desktop app (the host signs the approval); a plain browser has none, so Bypass
+  // is refused there. The token lives inside this gate's memory only.
+  const bypass = useMemo(
+    () => (shellHost.isAvailable()
+      ? createBypassGate({ confirmSigned: (summary) => invokeHost<string | null>("bypass_confirm_signed", { summary }).then((t) => (typeof t === "string" ? t : null), () => null) })
+      : null),
+    [],
+  );
+  const controller = useMemo(() => new ChatController({ core: transport, store, workspaceRoot: () => root.current ?? "", ...(bypass ? { bypass } : {}) }), [transport, store, bypass]);
+  // A project change or sign-out ends every Bypass grant (the core's grant is per user and chat; the UI stops relying on it).
+  useEffect(() => { bypass?.endAll(); }, [bypass, projectRoot]);
+  useEffect(() => {
+    if (!bypass) return undefined;
+    let was = shellCore.getSnapshot().signedIn;
+    return shellCore.subscribe(() => {
+      const now = shellCore.getSnapshot().signedIn;
+      if (was && !now) bypass.endAll();
+      was = now;
+    });
+  }, [bypass]);
   useEffect(() => { if (active) void controller.refreshRemoteBusy(); }, [active, controller]);
   // Webview load/reload and every return to the section: pick up turns still running on the core (replay re-attach).
   useEffect(() => {
@@ -92,16 +112,15 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
     () => ({
       ...BASE_HOST,
       compose,
-      // Bypass needs a native, default-Cancel confirmation (host command `bypass_confirm`); without the host it fails closed.
-      ...(shellHost.isAvailable()
-        ? { confirmBypass: () => invokeHost<boolean>("bypass_confirm", { summary: "Bypass lets the assistant run tools without asking first." }).then((ok) => ok === true, () => false) }
-        : {}),
+      // Bypass needs the host's signed, default-Cancel approval (`bypass_confirm_signed`); without the host it fails closed.
+      ...(bypass ? { bypass } : {}),
+      projectRoot: () => root.current,
       files: {
         resolve: (raw) => relativeToProject(raw, root.current),
         open: (rel) => shellBus.publish({ type: "open-file", path: rel }),
       },
     }),
-    [compose],
+    [compose, bypass],
   );
   // S-G: approval/question cards and the trust banner read the running chat's state; decisions go through the controller.
   const approvals = useCallback((s: ChatState) => (

@@ -17,6 +17,7 @@ function make(core, extra = {}) {
   const ctl = new c.ChatController({ core, store, workspaceRoot: () => "/proj", newId: () => `t${++n}`, sleep: () => tick(1), abortGraceMs: 30, onPersistError: (id, e) => persistErrors.push([id, e]), ...extra });
   return { ctl, store, persistErrors };
 }
+const liveGate = () => ({ prepare: (_id, m) => ({ permissionMode: m }), live: () => true, rejected() {}, end() {}, endAll() {}, msLeft: () => null, subscribe: () => () => {}, request: async () => "approved" });
 const msgs = async (store, id) => (await store.loadMessages(id, { limit: 100 })).messages;
 
 test("a turn streams to completion, sends the right body, and persists both sides", async () => {
@@ -236,7 +237,7 @@ test("a 10k-delta reply is micro-batched: far fewer state commits than events, t
 
 test("queued messages keep their OWN options: nothing is sent with the next message's attachments or permission mode", async () => {
   const core = fakeCore({ streams: [turn(), turn(), turn()] });
-  const { ctl } = make(core);
+  const { ctl } = make(core, { bypass: liveGate() });
   const a1 = [{ path: "one.txt", content: "1" }], a2 = [{ path: "two.txt", content: "2" }];
   ctl.send("a", "first", { mode: "ask" });
   ctl.send("a", "second", { mode: "ask", attachments: a1, permissionMode: "ask" });

@@ -7,6 +7,7 @@ export * from "../route";
 export * from "../store";
 export * from "../transport";
 export * from "../controller";
+export * from "../bypass";
 export * from "../MarkdownView";
 export * from "../MessageView";
 export * from "../MessageList";

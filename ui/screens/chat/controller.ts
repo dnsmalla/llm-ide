@@ -12,6 +12,7 @@ import { initialState, reduce, assistantText, type Action, type AssistantMessage
 import { toMessages, type ChatStore } from "./store";
 import { describeError, httpLike, type CoreTransport, type ReplayFrame } from "./transport";
 import { cancelTurn } from "./route";
+import { BYPASS_NEEDS_APPROVAL_NOTICE, type BypassGate } from "./bypass";
 import { HISTORY_PAGE } from "./virtual";
 
 export interface SendOptions {
@@ -39,6 +40,11 @@ export interface ControllerDeps {
   /** Test seam: wait `ms`. */
   sleep?: (ms: number) => Promise<void>;
   onPersistError?: (sessionId: string, err: unknown) => void;
+  /**
+   * Bypass approval (bypass.ts). Without it a requested Bypass is sent as Ask: the approval token only exists in the
+   * desktop app, and nothing else may turn a chat's tools loose.
+   */
+  bypass?: BypassGate;
   /** How long after Stop the UI waits for the stream to unwind before forcing idle. */
   abortGraceMs?: number;
 }
@@ -92,6 +98,8 @@ export class ChatController {
   private remoteBusy: ReadonlySet<string> = new Set();
   private version = 0;
   private disposed = false;
+  /** Set by the screen: the core refused a Bypass turn of this chat (the picker drops back to Ask). */
+  onBypassRejected: ((id: string) => void) | null = null;
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -369,27 +377,43 @@ export class ChatController {
     }
   }
 
-  private async runTurn(id: string, text: string, opts: SendOptions, workspaceRoot: string, persistUser = true): Promise<void> {
+  private async runTurn(id: string, text: string, opts: SendOptions, workspaceRoot: string, persistUser = true, fromQueue = false): Promise<void> {
     const r = this.rt(id);
     const ac = new AbortController();
     r.ac = ac; r.userAborted = false; r.lastSend = { text, opts, workspaceRoot }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
     if (persistUser) this.persist(id, { role: "user", content: text, meta: { mode: opts.mode } });
-    const body = {
-      message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
-      ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
-      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
-      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
-      agentContext: { chatSessionId: id, workspaceRoot, surface: "desktop" },
+    // Built per attempt: the single-use Bypass token goes out with the first attempt only (a later attempt rides the
+    // grant the core opened, or is sent as Ask), and a queued message never takes a waiting token.
+    const attemptBody = (): { body: Record<string, unknown>; headers?: Record<string, string> } => {
+      const requested = opts.permissionMode ?? null;
+      const gate = this.deps.bypass;
+      const p = gate ? gate.prepare(id, requested, { allowToken: !fromQueue }) : { permissionMode: requested === "bypass" ? "ask" : requested };
+      return {
+        headers: "headers" in p ? p.headers : undefined,
+        body: {
+          message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
+          ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(p.permissionMode ? { permissionMode: p.permissionMode } : {}),
+          ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
+          agentContext: { chatSessionId: id, workspaceRoot, surface: "desktop" },
+        },
+      };
     };
     let dropped = false;
     try {
       for (let attempt = 0; ; attempt++) {
         try {
-          dropped = await this.readStream(id, body, ac) === "dropped";
+          dropped = await this.readStream(id, attemptBody(), ac) === "dropped";
           break;
         } catch (e) {
           // The previous turn of this chat may still be unwinding on the server (it answers 409 until it has).
           const h = httpLike(e);
+          if (h?.status === 403 && h.code === "HOST_APPROVAL_REQUIRED") {
+            // The core does not hold an approval for this chat: back to Ask, no retry here. The user re-enables Bypass.
+            this.deps.bypass?.rejected(id);
+            this.onBypassRejected?.(id);
+            throw Object.assign(new Error(BYPASS_NEEDS_APPROVAL_NOTICE), { status: 403, code: "HOST_APPROVAL_REQUIRED" });
+          }
           const busy = h?.status === 409 && h.code === "TURN_IN_PROGRESS";
           if (busy && attempt < RETRY_409_DELAYS.length && !ac.signal.aborted && r.state.applied === 0) {
             await (this.deps.sleep ?? defaultSleep)(RETRY_409_DELAYS[attempt]);
@@ -419,8 +443,8 @@ export class ChatController {
    * Reads the stream. Events are micro-batched (one reducer pass per BATCH_MS or BATCH_MAX events, at once on a
    * terminal event) so a 10k-delta reply costs a few hundred passes, not 10k, and the UI renders per frame anyway.
    */
-  private async readStream(id: string, body: unknown, ac: AbortController): Promise<"done" | "dropped"> {
-    const outcome = await this.readFrames(id, this.deps.core.stream("/agent/v2/stream", body, ac.signal), ac, false);
+  private async readStream(id: string, req: { body: unknown; headers?: Record<string, string> }, ac: AbortController): Promise<"done" | "dropped"> {
+    const outcome = await this.readFrames(id, this.deps.core.stream("/agent/v2/stream", req.body, ac.signal, req.headers), ac, false);
     if (outcome === "terminal") return "done";
     if (ac.signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
     // Closed without a result/error: a detached turn is still running on the core, so follow it instead of failing.
@@ -507,7 +531,7 @@ export class ChatController {
       if (!entry || entry.text !== text) { this.restoreDraft(id, text); continue; }
       if (entry.workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); continue; }
       this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text, workspaceRoot: entry.workspaceRoot });
-      void this.runTurn(id, text, entry.opts, entry.workspaceRoot);
+      void this.runTurn(id, text, entry.opts, entry.workspaceRoot, true, true);
       return;
     }
   }

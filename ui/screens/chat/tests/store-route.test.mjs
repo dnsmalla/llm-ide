@@ -33,12 +33,6 @@ test("mode picker rules: only Auto follows the server, a new chat starts on Auto
   assert.deepEqual(c.MODES.map((m) => m.id), ["auto", "ask", "plan", "assist_plan", "review", "document", "execute"]);
 });
 
-test("Bypass needs one confirmation per app run", () => {
-  assert.equal(c.needsBypassConfirm("bypass", false), true);
-  assert.equal(c.needsBypassConfirm("bypass", true), false);
-  assert.equal(c.needsBypassConfirm("ask", false), false);
-});
-
 test("plain-chat note: catalog model in a tool mode with tools off or unlisted; never for Claude", () => {
   const groups = [{ id: "g", label: "G", catalog: true, models: [{ provider: "custom:cat-groq", model: "tooly", label: "tooly", toolsSupported: true }, { provider: "custom:cat-groq", model: "plain", label: "plain", toolsSupported: false }] }];
   assert.equal(c.plainChatReason("custom:cat-groq", "tooly", "execute", groups, false), "toolsOff");

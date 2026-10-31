@@ -64,8 +64,8 @@ export function fakeCore({ json = {}, streams = [], attaches = null } = {}) {
       if (h === undefined) throw Object.assign(new Error(`no fake for ${method} ${path}`), { status: 404 });
       return h;
     },
-    stream(path, body, signal) {
-      calls.push({ method: "STREAM", path, body });
+    stream(path, body, signal, headers) {
+      calls.push({ method: "STREAM", path, body, headers });
       const script = queue.shift();
       return (async function* () {
         if (typeof script === "function") { yield* script(signal); return; }

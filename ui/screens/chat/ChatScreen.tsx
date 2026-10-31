@@ -13,10 +13,11 @@ import { MessageList } from "./MessageList";
 import { CapChip, ModePicker, ModelPicker, PermissionChip } from "./Pickers";
 import { SessionList } from "./SessionList";
 import { ModeBanner } from "./approvals/ModeBanner";
+import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
 import {
-  AUTO_MODE, getRoute, loadModelGroups, needsBypassConfirm, pickerMode, pickerModeAfterSessionChange, plainChatReason, putRoute,
+  AUTO_MODE, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, putRoute,
   type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import type { ChatState } from "./state";
@@ -35,8 +36,13 @@ export interface ChatHost {
   attachFiles?: () => void;
   /** Slash menu, @ mentions, attachments and plan saving (slash/extras.tsx); absent = the plain composer. */
   compose?: ComposeServices;
-  /** Native confirmation for Bypass (once per app run). Resolve true to proceed. */
-  confirmBypass?: () => Promise<boolean>;
+  /**
+   * Host-signed Bypass approval (bypass.ts). Absent (plain browser, no host bridge) = Bypass stays refused. The same gate
+   * is the controller's `bypass` dep, so the token the dialog returns reaches only that chat's next turn.
+   */
+  bypass?: BypassGate;
+  /** The open project folder (named in the dialog's summary). */
+  projectRoot?: () => string | null;
 }
 
 export interface ChatScreenProps {
@@ -74,7 +80,6 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [activeId, setActiveId] = useState<string | null>(initialSessionId);
   const [prefs, setPrefs] = useState<Record<string, ChatPrefs>>({});
   const [permission, setPermission] = useState<PermissionMode>("ask");
-  const bypassConfirmed = useRef(false);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [route, setRoute] = useState<RouteView | null>(null);
@@ -147,13 +152,37 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const onLoadOlder = useCallback(() => (activeId ? controller.loadOlder(activeId) : Promise.resolve(0)), [activeId, controller]);
   const onScrollState = useCallback((scrollTop: number, stick: boolean) => { if (activeId) controller.setView(activeId, { scrollTop, stickToBottom: stick }); }, [activeId, controller]);
 
+  // Bypass: a native host dialog per chat (a live grant is not asked again). A decline leaves the mode as it was,
+  // silently; the core refusing a turn drops the picker to Ask with a plain notice and never retries on its own.
+  const gate = host.bypass;
+  const [, bumpGate] = useState(0);
+  useEffect(() => gate?.subscribe(() => bumpGate((n) => n + 1)), [gate]);
+  useEffect(() => {
+    controller.onBypassRejected = (id) => { setPermission("ask"); if (id === activeIdRef.current) setNotice(BYPASS_NEEDS_APPROVAL_NOTICE); };
+    return () => { controller.onBypassRejected = null; };
+  }, [controller]);
+  const activeIdRef = useRef<string | null>(activeId);
+  activeIdRef.current = activeId;
+  // Re-render when the believed grant runs out so the banner turns to "needs approval" on time.
+  const msLeft = gate && activeId ? gate.msLeft(activeId) : null;
+  useEffect(() => {
+    if (msLeft === null) return;
+    const t = setTimeout(() => bumpGate((n) => n + 1), msLeft + 50);
+    return () => clearTimeout(t);
+  }, [msLeft, activeId]);
+  const bypassLive = !!(gate && activeId && gate.live(activeId));
+
   const changePermission = async (m: PermissionMode) => {
-    if (needsBypassConfirm(m, bypassConfirmed.current)) {
-      const ok = host.confirmBypass ? await host.confirmBypass() : false; // fail closed without a native confirm
-      if (!ok) return;
-      bypassConfirmed.current = true;
+    if (m !== "bypass") {
+      if (activeId) gate?.end(activeId);
+      setPermission(m);
+      return;
     }
-    setPermission(m);
+    if (!gate) { setNotice("Bypass is only available in the desktop app."); return; } // fail closed without the host
+    if (!activeId) return;
+    const title = sessions.find((s) => s.id === activeId)?.title;
+    const r = await gate.request(activeId, bypassSummary(title, host.projectRoot?.() ?? null));
+    if (r === "approved") setPermission("bypass"); // declined: previous mode, no banner
   };
 
   return (
@@ -171,7 +200,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       <section className="chat-main" aria-label="Chat">
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
-        <ModeBanner mode={permission} />
+        <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
         {typeof banner === "function" ? banner(state) : banner}
         {!activeId ? (
           <div className="chat-empty"><p>Select a chat or start a new one.</p><button type="button" className="chat-btn chat-primary" onClick={() => void newChat()}>New chat</button></div>

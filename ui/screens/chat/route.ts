@@ -33,8 +33,7 @@ export const PERMISSION_MODES: readonly PermissionOption[] = [
   { id: "accept-edits", label: "Accept Edits", hint: "Apply edits, confirm commands" },
   { id: "bypass", label: "Bypass", hint: "No confirmations" },
 ];
-/** Bypass needs one explicit confirmation per app run (plan section 5). */
-export const needsBypassConfirm = (target: PermissionMode, confirmedThisRun: boolean): boolean => target === "bypass" && !confirmedThisRun;
+// Bypass approval (host-signed token, per-chat grant): see ./bypass.ts.
 
 // --- models ---------------------------------------------------------------------------------
 

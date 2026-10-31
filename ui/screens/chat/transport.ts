@@ -15,9 +15,10 @@ export interface CoreTransport {
   /**
    * POST that answers with an SSE body: yields the `data:` payload of each complete event (the framing is the
    * transport's job: the shell client's SseDecoder). A non-2xx answer rejects BEFORE the first payload
-   * (validation, 409 TURN_IN_PROGRESS, 402 cap...).
+   * (validation, 409 TURN_IN_PROGRESS, 402 cap...). `headers` are per-call extras; the shell client accepts only its
+   * allowlist (today the Bypass host-approval token) and refuses the call to an unverified core.
    */
-  stream(path: string, body: unknown, signal: AbortSignal): AsyncIterable<string>;
+  stream(path: string, body: unknown, signal: AbortSignal, headers?: Record<string, string>): AsyncIterable<string>;
   /**
    * GET that answers with an SSE body, keeping each frame's `id:` (the replay sequence number). Optional: a transport
    * without it cannot re-attach, so the controller does not ask the core to keep a turn alive for it (no `detach`).
