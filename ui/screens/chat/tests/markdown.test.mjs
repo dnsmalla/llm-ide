@@ -65,3 +65,38 @@ test("pathological input stays bounded", () => {
   c.parseBlocks("a".repeat(500000));
   assert.ok(Date.now() - t < 2000);
 });
+
+// --- hostile input: parse cost is bounded ------------------------------------------------------------------
+
+const timed = (fn) => { const t0 = performance.now(); const r = fn(); return [performance.now() - t0, r]; };
+const BUDGET_MS = 1500; // generous for slow CI; the unbounded versions take tens of seconds to minutes
+
+test("hostile text parses within a time budget: bracket floods, unclosed links, backticks, stars, whitespace lines", () => {
+  const MB = 1024 * 1024;
+  const cases = {
+    "[ flood": "[".repeat(MB),
+    "![ flood": "![".repeat(MB / 2),
+    "unclosed links": "[a](".repeat(MB / 4),
+    "unclosed links with label text": "[abc](http://x".repeat(MB / 14),
+    "backticks": "`a ".repeat(MB / 3),
+    "stars": "*a ".repeat(MB / 3),
+    "bold openers": "**a ".repeat(MB / 4),
+    "underscores": "_a ".repeat(MB / 3),
+    "table sep + spaces": `| a |\n-${" ".repeat(MB)}x\n`,
+    "fence + spaces": "```" + " ".repeat(MB) + "x\n",
+    "rule + spaces": "---" + " ".repeat(MB) + "x",
+    "many paragraphs": "a\n\n".repeat(MB / 3),
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    const [ms] = timed(() => c.parseBlocks(text));
+    assert.ok(ms < BUDGET_MS, `${name}: ${Math.round(ms)} ms`);
+  }
+});
+
+test("hostile input stays correct: normal markdown after the budget is spent is still safe text, links stay allowlisted", () => {
+  const blocks = c.parseBlocks("[".repeat(100_000) + "\n\n[ok](https://example.com) and [bad](javascript:alert(1))");
+  const links = JSON.stringify(blocks).match(/"kind":"link","href":"[^"]*"/g) ?? [];
+  assert.ok(links.every((l) => /"href":"https?:/.test(l)), "no unsafe link element, whatever the budget did");
+  const small = c.parseBlocks("[ok](https://example.com) **b** *i* `c`");
+  assert.deepEqual(small[0].inlines.map((x) => x.kind), ["link", "text", "strong", "text", "em", "text", "code"]);
+});
