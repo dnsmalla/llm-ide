@@ -814,7 +814,15 @@ pub fn write_file(root: &Path, req: &WriteReq) -> R<WriteResult> {
     if orig_meta.is_none() && std::fs::symlink_metadata(&target).is_ok() {
         return Err(cleanup(FsError { code: "exists", message: "the file was created on disk meanwhile".into() }));
     }
-    std::fs::rename(&tmp, &target).map_err(|e| cleanup(io_err("cannot replace file", e)))?;
+    if orig_meta.is_none() {
+        // A NEW file must never replace one that appeared since the check above: no-replace rename.
+        rename_noreplace(&tmp, &target).map_err(|e| {
+            let c = if e.kind() == std::io::ErrorKind::AlreadyExists { FsError { code: "exists", message: "the file was created on disk meanwhile".into() } } else { io_err("cannot create file", e) };
+            cleanup(c)
+        })?;
+    } else {
+        std::fs::rename(&tmp, &target).map_err(|e| cleanup(io_err("cannot replace file", e)))?;
+    }
     sync_dir(&dir);
     let meta = std::fs::metadata(&target).map_err(|e| io_err("cannot stat file", e))?;
     Ok(WriteResult { path: rel_of(root, &target), size: meta.len(), mtime_ms: mtime_ms(&meta), hash: sha_hex(&bytes) })
@@ -876,14 +884,26 @@ fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     let e = std::io::Error::last_os_error();
-    // Filesystem without the flag: fall back to check-then-rename.
+    // Filesystem without the flag.
     if matches!(e.raw_os_error(), Some(libc::EINVAL) | Some(libc::ENOTSUP) | Some(libc::ENOSYS)) {
+        return link_unlink(from, to);
+    }
+    Err(e)
+}
+
+/// No-replace move without `RENAME_EXCL`: `link()` fails with `AlreadyExists` atomically when `to` exists, then
+/// the old name is removed. A directory cannot be hard-linked, so it still goes through check-then-rename
+/// (a narrow race on filesystems without the flag; directories are moved by user action only).
+#[cfg(unix)]
+fn link_unlink(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(from)?.is_dir() {
         if std::fs::symlink_metadata(to).is_ok() {
             return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
         }
         return std::fs::rename(from, to);
     }
-    Err(e)
+    std::fs::hard_link(from, to)?;
+    std::fs::remove_file(from)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -1274,6 +1294,44 @@ mod tests {
         assert_eq!(code(write_file(&root, &WriteReq { force: true, ..wr("alias", "x", None) })), "protected_path");
         assert_eq!(code(write_file(&root, &wr("d/hooks-new", "x", None))), "protected_path");
         assert_eq!(fs::read_to_string(root.join(".git/config")).unwrap(), "[core]\n");
+    }
+
+    #[test]
+    fn a_new_file_never_replaces_one_created_meanwhile() {
+        let root = scratch("noreplace");
+        fs::write(root.join("src.tmp"), "new").unwrap();
+        fs::write(root.join("dst.txt"), "theirs").unwrap();
+        let e = rename_noreplace(&root.join("src.tmp"), &root.join("dst.txt")).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(root.join("dst.txt")).unwrap(), "theirs");
+        assert_eq!(fs::read_to_string(root.join("src.tmp")).unwrap(), "new", "the source stays for cleanup");
+        rename_noreplace(&root.join("src.tmp"), &root.join("fresh.txt")).unwrap();
+        assert_eq!(fs::read_to_string(root.join("fresh.txt")).unwrap(), "new");
+        assert!(!root.join("src.tmp").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_no_rename_excl_fallback_uses_link_and_is_atomic_for_files() {
+        let root = scratch("linkfallback");
+        fs::write(root.join("a"), "A").unwrap();
+        fs::write(root.join("b"), "B").unwrap();
+        assert_eq!(link_unlink(&root.join("a"), &root.join("b")).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(root.join("b")).unwrap(), "B");
+        assert_eq!(fs::read_to_string(root.join("a")).unwrap(), "A");
+        link_unlink(&root.join("a"), &root.join("c")).unwrap();
+        assert_eq!(fs::read_to_string(root.join("c")).unwrap(), "A");
+        assert!(!root.join("a").exists());
+        // a dangling symlink at the target counts as taken
+        std::os::unix::fs::symlink("/nonexistent", root.join("dangling")).unwrap();
+        fs::write(root.join("d"), "D").unwrap();
+        assert_eq!(link_unlink(&root.join("d"), &root.join("dangling")).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        // folders: check-then-rename
+        fs::create_dir(root.join("dir1")).unwrap();
+        fs::create_dir(root.join("dir2")).unwrap();
+        assert_eq!(link_unlink(&root.join("dir1"), &root.join("dir2")).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        link_unlink(&root.join("dir1"), &root.join("dir3")).unwrap();
+        assert!(root.join("dir3").is_dir());
     }
 
     #[test]
