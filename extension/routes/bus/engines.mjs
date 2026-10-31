@@ -73,7 +73,7 @@ async function gitSignature(spawn, cwd) {
   } catch { return null; }
 }
 
-async function runCli({ userId, engine, prompt, cwd, spawn, deps, id }) {
+async function runCli({ engine, prompt, cwd, spawn, deps, id }) {
   const provider = engine.provider;
   if (engine.credential === 'api-key') throw fail('kind_not_available', `The ${id} CLI engine runs on its own login only: an API key is never put in a CLI child's environment`);
   const inv = (deps.cliInvocation ?? cliInvocation)(provider, prompt, { cwd, model: engine.model });

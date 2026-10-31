@@ -135,7 +135,6 @@ test('control characters and bidi marks in a task id are stripped before anythin
   fs.writeFileSync(history, JSON.stringify([{ taskId: '\u001b[31mred\u0007\nINJECTED\u202Etxt', status: 'success', trigger: 'manual', finishedAt: '2026-10-30T10:00:00Z' }]));
   const s = summarize({ historyPath: history, dbPath: path.join(dir, 'none.db') });
   const report = formatReport(s);
-  // eslint-disable-next-line no-control-regex
   assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(report), 'no control character in the report');
   assert.ok(!/[\u202a-\u202e\u2066-\u2069\u200b-\u200f]/.test(report), 'no bidi or zero-width mark');
   assert.ok(!report.includes('\u001b'));
@@ -181,3 +180,9 @@ test('default DB path: the app\'s system/data.db when it exists, else the repo k
   assert.ok(formatReport(s).includes(appDb), 'the report names the path it read');
   assert.equal(s.dbPath, appDb);
 }));
+
+test('a long path is printed whole (a truncated path would name nothing)', () => {
+  const long = `/${'d'.repeat(60)}/${'e'.repeat(60)}/data.db`;
+  const report = formatReport(summarize({ historyPath: long, dbPath: long }));
+  assert.ok(report.split(long).length >= 3, 'both lines carry the full path');
+});

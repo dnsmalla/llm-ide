@@ -92,11 +92,14 @@ export function resolveDbPath({ db, env = process.env, root = ROOT, home = os.ho
 const STATUSES = new Set(['success', 'failed', 'cancelled', 'skipped']);
 const TRIGGERS = new Set(['manual', 'cron', 'pipeline', 'phone']);
 
-/** An id as it may be PRINTED: control, bidi and zero-width characters become `?`, capped at 80 characters. */
-export function safeId(raw) {
+/** An id as it may be PRINTED: control, bidi and zero-width characters become `?`, capped at `max` characters (80 for an id). */
+export function safeId(raw, max = 80) {
   const t = String(raw ?? '').replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '?');
-  return t.length > 80 ? `${t.slice(0, 79)}~` : t;
+  return t.length > max ? `${t.slice(0, max - 1)}~` : t;
 }
+
+/** A file path as it may be printed: same cleaning, but long enough for any real path (a truncated path names nothing). */
+const safePath = (p) => safeId(p, 1024);
 
 /** Short, single-line reason for an error thrown by fs, JSON or SQLite. */
 function reasonOf(err, what) {
@@ -236,11 +239,11 @@ export function summarize({ historyPath, dbPath }) {
 export function formatReport(s) {
   const lines = [];
   lines.push(s.historyFound
-    ? `Mac run history: ${s.historyTotal} run(s) on file at ${safeId(s.historyPath)} (the app keeps only the newest 200 across all tasks).`
-    : `Mac run history: unavailable at ${safeId(s.historyPath)}: ${s.historyError} (pass --history <auto-task-runs.json>).`);
+    ? `Mac run history: ${s.historyTotal} run(s) on file at ${safePath(s.historyPath)} (the app keeps only the newest 200 across all tasks).`
+    : `Mac run history: unavailable at ${safePath(s.historyPath)}: ${s.historyError} (pass --history <auto-task-runs.json>).`);
   lines.push(s.ledgerFound
-    ? `Server usage ledger: read from ${safeId(s.dbPath)} (CLI-backed tasks only, no success flag).`
-    : `Server usage ledger: unavailable at ${safeId(s.dbPath)}: ${s.ledgerError} (pass --db <data.db>, or set LLMIDE_DB_PATH / LLMIDE_DATA_DIR).`);
+    ? `Server usage ledger: read from ${safePath(s.dbPath)} (CLI-backed tasks only, no success flag).`
+    : `Server usage ledger: unavailable at ${safePath(s.dbPath)}: ${s.ledgerError} (pass --db <data.db>, or set LLMIDE_DB_PATH / LLMIDE_DATA_DIR).`);
   lines.push('');
   const head = ['task', 'runs', 'last run', 'success%', 'cron', 'phone', 'ledger runs', 'ledger last'];
   const body = s.rows.map((r) => [
