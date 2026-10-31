@@ -8,7 +8,7 @@
     "build": "node ../scripts/gen-design-tokens.mjs --check && node scripts/check-capabilities.mjs --product && tsc --noEmit && vite build",
     "tauri": "tauri",
     "tokens": "node ../scripts/gen-design-tokens.mjs",
-    "test": "node --test --experimental-strip-types scripts/*.test.mjs ../ui/screens/shell/tests/*.test.mjs ../ui/screens/shell/tests/e2e/*.test.mjs ../ui/screens/settings/tests/*.test.* ../ui/screens/chat/tests/*.test.mjs ../ui/screens/library/tests/*.test.* ../ui/screens/library/extensions/tests/*.test.* ../ui/screens/explorer/tests/*.test.mjs ../ui/screens/explorer/scm/tests/*.test.mjs ../ui/screens/graph/tests/*.test.*",
+    "test": "node --test --experimental-strip-types scripts/*.test.mjs ../ui/screens/shell/tests/*.test.mjs ../ui/screens/shell/tests/e2e/*.test.mjs ../ui/screens/settings/tests/*.test.* ../ui/screens/chat/tests/*.test.mjs ../ui/screens/library/tests/*.test.* ../ui/screens/library/extensions/tests/*.test.* ../ui/screens/explorer/tests/*.test.mjs ../ui/screens/explorer/scm/tests/*.test.mjs ../ui/screens/graph/tests/*.test.* ../ui/screens/docgen/tests/*.test.*",
     "check:security": "node scripts/check-capabilities.mjs && node scripts/check-dompurify.mjs",
     "check:security:product": "node scripts/check-capabilities.mjs --product && node scripts/check-dompurify.mjs"
   },
