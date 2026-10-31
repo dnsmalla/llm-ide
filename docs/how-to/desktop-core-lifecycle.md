@@ -72,4 +72,4 @@ Code while the app runs is noticed within 30 s.
 
 ## Host commands that open things or take consent
 
-The webview never opens links, picks files or enables Bypass on its own authority. `open_external_url` validates and confirms every new host, refuses internal addresses and userinfo; `reveal_in_os` is confined to the active project root; `attach_*` return opaque handles instead of paths; `bypass_confirm` is a native default-Cancel dialog. Details, limits and unverified paths: `desktop/PACKAGING.md`, "Host commands for the screens".
+The webview never opens links, picks files or enables Bypass on its own authority. `open_external_url` validates and confirms every new host, refuses internal addresses and userinfo; `reveal_in_os` is confined to the active project root; `attach_*` return opaque handles instead of paths; `bypass_confirm_signed` is a native default-Cancel dialog whose single-use token the chat sends once as `x-llmide-host-approval`. Details, limits and unverified paths: `desktop/PACKAGING.md`, "Host commands for the screens".
