@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/bus/command.schema.json",
+  "title": "Command bus command envelope",
+  "description": "The frame a client sends to start one command (docs/spec/command-bus.md section 1.1). Same shape on every transport. `origin`, `userId` and `deviceId` are set by the host from the authenticated session; a value in the frame is ignored (and counted as a mismatch), never trusted. `args` is typed per kind by schema/bus/registry.json (kinds.<kind>.args): ids and enums, never a path, a shell command or a provider key.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "args", "idem"],
+  "properties": {
+    "v": { "type": "integer", "enum": [1], "description": "Contract version. An unknown value is refused unsupported_version." },
+    "kind": { "type": "string", "minLength": 1, "maxLength": 64, "description": "A key of registry.kinds; unknown is refused unknown_kind." },
+    "args": { "type": "object", "description": "Validated against registry.kinds[kind].args." },
+    "idem": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_.:-]+$", "description": "Idempotency key: the same (user, idem) with the same kind and args returns the original command, never a second execution." },
+    "createdAt": { "type": "integer", "minimum": 0, "description": "Client clock in ms, advisory only." },
+    "ttlMs": { "type": "integer", "minimum": 1000, "maximum": 86400000, "description": "How long the desktop may still start this command after receipt; the receiver enforces its own maximum." },
+    "origin": { "type": "object", "description": "Ignored: overwritten from the session." },
+    "userId": { "type": "string", "description": "Ignored: taken from the session." },
+    "deviceId": { "type": "string", "description": "Ignored: taken from the session." }
+  }
+}

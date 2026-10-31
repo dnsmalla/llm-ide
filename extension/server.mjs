@@ -18,6 +18,8 @@ import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireAdmin } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
+import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
+import { createBus, busEnabled } from './routes/bus/executor.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
 import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
@@ -304,7 +306,8 @@ const HOST = config.host;
 //   v97 — chat history paging (additive): GET /kb/chat/sessions/:id?beforeSeq=&limit= — with `beforeSeq` (integer >= 1, else 400 VALIDATION_FAILED) the page is the newest `limit` (default 200, max 2000) messages whose seq is below it, so older history pages without re-reading the newest; absent, the newest page exactly as before. Every session answer gains `hasMore` (true when older messages remain below the page).
 //   v98 — note index full-text search and more note kinds (additive; no migration: note_index.kind is free text). GET /kb/index/search?q=&limit=&projectId= → { results:[{ noteKey, title, snippet, date, kind, projectId }] } (kind 'note' FTS rows of the caller only, best match first; limit 1-50, default 20; q 1-200 characters, a query with no 2+ character word answers an empty list; snippet is plain text of about 200 characters around the first matched word, secrets redacted again, control, bidi and zero-width characters removed; projectId omitted = every project) | 400 VALIDATION_FAILED. POST /kb/index/notes now accepts `kind` in meeting|note|email|slack|document|repo|plan|other (default meeting; anything else 400). Rides the 'kbWrite' rate bucket.
 //   v99 — Claude-compatible (Anthropic Messages) endpoints, additive and without a new dependency. The built-in provider catalog gains the entry `anthropic-compatible` (kind 'anthropic-compatible', custom base URL, key required, private network only with the same opt-in and operator gate as the OpenAI-style custom endpoint); it is connected through the existing POST /kb/providers/catalog/connect { catalogId:'anthropic-compatible', baseURL, slug, name, apiKey, allowPrivate? } and removed through /disconnect, and is NOT part of the GET /kb/providers/catalog list (that shape is unchanged). Its connection id is `ac-<slug>`, provider `custom:ac-<slug>`: a chat on it runs on the Agent engine (the Claude Agent SDK pointed at the URL through ANTHROPIC_BASE_URL), never the OpenAI-form adapter, and the base URL is re-checked (https, no credentials, address class, operator gate) on every dispatch (`blocked` otherwise). /test and /models list `<base>/v1/models` with x-api-key through the pinned fetch. GET /kb/providers/custom → { providers:[{ id, provider, name, baseURL, kind:'anthropic-compatible', allowPrivate, enabled, hasKey, source:'connection'|'synced' }] } (the caller's own; 'synced' = the Mac's custom providers that have an Anthropic door, read-only; never a key). Rides the 'kbWrite' rate bucket.
-const SERVER_API_VERSION = 99;
+//   v100 — command bus job API (additive; LLMIDE_BUS=off answers every /bus route 503 BUS_DISABLED and never starts the runner; spec docs/spec/command-bus.md, contract schema/bus). POST /bus/commands { v?:1, kind, args, idem, ttlMs? } → 202 { command, deduped:false } | 200 { command, deduped:true } (same idem, same kind and args) | 400 VALIDATION_FAILED|UNSUPPORTED_VERSION|UNKNOWN_KIND|INVALID_ARGS (details.errors) | 403 TIER_DENIED | 404 NOT_FOUND (unregistered project) | 409 IDEM_CONFLICT | 413 PAYLOAD_TOO_LARGE | 429 QUOTA_EXCEEDED | 501 KIND_NOT_AVAILABLE | 503 BUS_DISABLED; GET /bus/commands?state=&limit= → { items }; GET /bus/commands/:id → { command } (with result when succeeded); GET /bus/commands/:id/events?after=N → SSE of BusEvent, `id: <seq>`, seq per command from 1 gap-free from the durable job_events log, ends after the one terminal event or after 10 min (re-attach with after) | 400 | 404 | 429 TOO_MANY_READERS; POST /bus/commands/:id/cancel → { command } | 409 ALREADY_FINISHED; POST /bus/commands/:id/approve { nonce, confirm? } and /deny → { command } (desktop class only: 403 TIER_DENIED | 403 APPROVAL_NONCE_INVALID | 400 CONFIRM_MISMATCH | 409 NOT_PENDING|EXPIRED); GET /bus/approvals → { items } (desktop class only; carries the per-command nonce); GET /bus/kinds → { v, client, registryVersion, limits, kinds } (the registry as the caller sees it); PUT /bus/kinds/:kind { enabled } → { kind, enabled } (desktop class only). Client class: advisory header x-llmide-client capped at `extension` unless x-llmide-host-nonce equals LLMIDE_CORE_NONCE. All routes ride the 'kbWrite' rate bucket. Migration 0058 (bus_commands, job_events, bus_kind_flags).
+const SERVER_API_VERSION = 100;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -458,8 +461,19 @@ const ALL_ENDPOINTS = [
   '/kb/index/status',
   '/kb/os/state',
   '/kb/os/stream',
+  '/bus/commands',
+  '/bus/commands/:id',
+  '/bus/commands/:id/events',
+  '/bus/commands/:id/cancel',
+  '/bus/commands/:id/approve',
+  '/bus/commands/:id/deny',
+  '/bus/approvals',
+  '/bus/kinds',
+  '/bus/kinds/:kind',
 ];
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
+// The command bus executor (routes/bus/executor.mjs), created and started after listen; null while LLMIDE_BUS=off.
+let bus = null;
 // Feature route-group handlers, filled at boot (see initFeatureRoutes below).
 let featureHandlers = {};
 
@@ -481,6 +495,7 @@ function rateLimitProfile(url, method) {
     // collateral SLACK_FETCH_FAILED errors on unrelated /kb/slack/fetch calls.
     if (path === '/kb/slack/conversations') return 'dispatch';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
+    if (path.startsWith('/bus/')) return 'kbWrite';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —
@@ -492,6 +507,7 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/agent-history/settings') return 'kbWrite';
     if (path === '/kb/providers/settings')     return 'kbWrite';
     if (path === '/agent/v2/session/route')    return 'kbWrite';
+    if (path.startsWith('/bus/'))              return 'kbWrite';
     if (path.startsWith('/kb/issue-schedule')) return 'kbWrite';
     if (path.startsWith('/kb/docs/')) return 'kbWrite';
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';
@@ -527,6 +543,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
+  if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).
   if (['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair'].some((p) => url === `/auth/me/extensions/${p}`)) return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
@@ -709,6 +726,12 @@ const server = http.createServer(async (req, res) => {
   }
 
 
+
+  // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
+  if (isBusRoute(req.url || '')) {
+    await handleBusRoute(req, res, { bus });
+    return;
+  }
 
   // Mount the Phase-2 KB router before the rest so /kb/* never falls
   // through to the legacy "no route" branch.  handleKB returns true once
@@ -1093,6 +1116,9 @@ function shutdown(signal) {
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
   stopBackgroundOutcomePoller();
+  // Command bus: end open event streams (server.close waits for them) and abort running jobs (their process groups).
+  closeBusStreams();
+  const busStopped = bus ? bus.stop().catch((err) => logger.warn('shutdown_bus_stop_failed', { error: err.message })) : Promise.resolve();
   // Stop per-meeting agent tick loops so they don't fire (or publish a
   // late question) while we drain in-flight requests.
   try { stopAllAgents(); } catch (err) { logger.warn('shutdown_stop_agents_failed', { error: err.message }); }
@@ -1101,7 +1127,8 @@ function shutdown(signal) {
     process.exit(1);
   }, 10_000);
   hardTimeout.unref();
-  server.close(() => {
+  server.close(async () => {
+    await busStopped;
     // Save rate-limit state before closing the DB so the next startup
     // inherits current bucket levels.
     try { saveBuckets(getDb({ logger })); } catch (err) { logger.warn('shutdown_save_buckets_failed', { error: err.message }); }
@@ -1314,6 +1341,15 @@ server.listen(PORT, HOST, () => {
     // schedule using vault-stored credentials. No client needs to be
     // connected for status updates to flow in.
     startBackgroundOutcomePoller();
+    // Command bus job runner: after the DB is open and migrated, behind the LLMIDE_BUS=off kill switch. The library is idle
+    // until a command is enqueued; boot sweeps jobs a dead process left running (interrupted) and backfills their terminal events.
+    if (busEnabled()) {
+      try {
+        bus = createBus({ logger });
+        const swept = bus.start();
+        if (swept.interrupted?.length || swept.requeued?.length) logger.info('bus_boot_sweep', { interrupted: swept.interrupted.length, requeued: swept.requeued.length });
+      } catch (err) { bus = null; logger.warn('bus_start_failed', { error: err.message }); }
+    }
 
     // Ensure the builtin (.skills) source is registered, and check it's
     // actually present. There is no fallback copy any more (see

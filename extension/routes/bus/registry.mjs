@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const REGISTRY = JSON.parse(readFileSync(fileURLToPath(new URL('./registry.json', import.meta.url)), 'utf8'));
+export const COMMAND_SCHEMA = JSON.parse(readFileSync(fileURLToPath(new URL('./command.schema.json', import.meta.url)), 'utf8'));
 export const LIMITS = REGISTRY.limits;
 export const CLIENT_CLASSES = Object.keys(REGISTRY.clientClasses);
 export const kindInfo = (kind) => (Object.hasOwn(REGISTRY.kinds, kind) ? REGISTRY.kinds[kind] : null);
