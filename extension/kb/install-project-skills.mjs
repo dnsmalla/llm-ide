@@ -14,6 +14,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
+import { scrubbedChildEnv } from '../core/child-env.mjs';
 
 const TOOLS = ['claude', 'cursor', 'codex', 'agents', 'gemini'];
 const DEFAULT_STACKS = 'typescript,swift';
@@ -165,7 +166,7 @@ export function installProjectSkills(opts = {}) {
   const result = spawnSync('bash', args, {
     encoding: 'utf8',
     timeout: INSTALL_TIMEOUT_MS,
-    env: { ...process.env, PATH: process.env.PATH },
+    env: scrubbedChildEnv(),
   });
 
   if (result.error) {

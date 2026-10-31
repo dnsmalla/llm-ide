@@ -18,6 +18,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scrubbedChildEnv } from '../../core/child-env.mjs';
 
 const PKG = '@anthropic-ai/claude-agent-sdk';
 // The dist-tags document only: the package's full registry document is
@@ -121,7 +122,7 @@ function npmBin() {
 
 function run(file, args, { cwd, timeout }) {
   return new Promise((resolve) => {
-    execFile(file, args, { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
+    execFile(file, args, { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env: scrubbedChildEnv() }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err?.code ?? 0, out: `${stdout || ''}${stderr || ''}`.slice(-4000) });
     });
   });

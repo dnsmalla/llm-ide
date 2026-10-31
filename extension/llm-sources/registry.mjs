@@ -32,6 +32,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
+import { scrubbedChildEnv } from '../core/child-env.mjs';
 import { listEnabled, pruneOrphans, migrateLegacyDefaultSources, listDisabledItems, itemKey, pruneMissingItems } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
@@ -582,7 +583,7 @@ async function cloneShallow(url, ref, dest) {
   args.push('--', url, dest);
   try {
     await _runGit('git', args, {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: scrubbedChildEnv({ GIT_TERMINAL_PROMPT: '0' }),
       timeout: 60_000,
     });
     return { ok: true };
@@ -644,7 +645,7 @@ export async function addSource({ url, path, ref, name } = {}) {
 const BUILTIN_REMOTE_REF = process.env.LLMIDE_SKILLS_REF || 'main';
 const UPDATE_CHECK_TTL_MS = 30 * 60 * 1000;
 const _updateChecks = new Map(); // sourceId -> { at, result }
-const GIT_ENV = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
+const GIT_ENV = () => scrubbedChildEnv({ GIT_TERMINAL_PROMPT: '0' });
 
 async function gitOut(cwd, args, timeout = 30_000) {
   const { stdout } = await _runGit('git', args, { cwd, env: GIT_ENV(), timeout });
@@ -744,7 +745,7 @@ async function syncCheckoutAfterKitUpdate(kitDir) {
   if (!existsSync(script)) return { corrected: [], warnings: ['.skills-lock not refreshed (scripts/sync-skills.sh missing)'] };
   try {
     await execFileAsync('bash', [script], {
-      cwd: root, env: { ...process.env, SKILLS_REPO: kitDir }, timeout: 120_000,
+      cwd: root, env: scrubbedChildEnv({ SKILLS_REPO: kitDir }), timeout: 120_000,
     });
     return { corrected: ['.skills-lock', 'agent-tool definitions', '.skills pointer (commit it in llm-ide)'], warnings: [] };
   } catch (err) {
@@ -861,7 +862,7 @@ export async function syncBuiltin() {
   try {
     await _runGit('git', ['submodule', 'update', '--init', '.skills'], {
       cwd: process.env.LLMIDE_REPO_ROOT || repoRootFallback(),
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: scrubbedChildEnv({ GIT_TERMINAL_PROMPT: '0' }),
       timeout: 120_000,
     });
     installed = true;
