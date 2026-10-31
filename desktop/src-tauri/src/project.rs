@@ -143,7 +143,7 @@ pub fn is_too_broad(real: &str, home: Option<&str>) -> bool {
     false
 }
 
-fn home_dir() -> Option<String> {
+pub(crate) fn home_dir() -> Option<String> {
     let h = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     let h = PathBuf::from(h);
     Some(std::fs::canonicalize(&h).unwrap_or(h).to_string_lossy().into_owned())
