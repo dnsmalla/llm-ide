@@ -161,7 +161,7 @@ test('M2: one user disconnecting never fails or throttles the shared refresh oth
   const now = Date.parse('2027-06-01T00:00:00Z');
   let release; const gate = new Promise((r) => { release = r; });
   let hits = 0;
-  const f = async (u) => { hits += 1; await gate; return new Response(JSON.stringify(REGISTRY), { status: 200 }); };
+  const f = async () => { hits += 1; await gate; return new Response(JSON.stringify(REGISTRY), { status: 200 }); };
   const acA = new AbortController();
   const a = idx.refreshIndexes({ userId: 'A', sourceId: 'mcp-registry', signal: acA.signal, fetch: f, now });
   const b = idx.refreshIndexes({ userId: 'B', sourceId: 'mcp-registry', fetch: f, now });

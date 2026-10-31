@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **81**
 - Auth: 215 token, 12 public
 - Handler found: 225; no handler found: 2
-- No Mac and no extension caller: 42 (tests only: 29, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 40 (tests only: 27, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -46,7 +46,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (42):
+Endpoints with no client caller (40):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -88,8 +88,6 @@ Endpoints with no client caller (42):
 - `/auth/me/audit` — tests only
 - `/auth/mcp-connector/start` — tests only
 - `/auth/mcp-connector/status` — tests only
-- `/auth/me/extensions/allowlist` — tests only
-- `/auth/me/workspace-trust` — tests only
 
 ## Endpoints
 
@@ -300,21 +298,21 @@ Endpoints with no client caller (42):
 | `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:947` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:963` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:989` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/extensions/allowlist` | public+auth | PUT | token | core | `extension/routes/extensions-catalog.mjs:117` | - | - | tests only |
+| `/auth/me/extensions/allowlist` | public+auth | PUT | token | core | `extension/routes/extensions-catalog.mjs:121` | `LlmIdeAPIClient+Extensions.swift` | - | - |
 | `/auth/me/extensions/installed` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | `LlmIdeAPIClient+Extensions.swift` | - | - |
 | `/auth/me/extensions/updates` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | `LlmIdeAPIClient+Extensions.swift` | - | - |
 | `/auth/me/extensions/catalog` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | `LlmIdeAPIClient+Extensions.swift` | - | - |
 | `/auth/me/extensions/active` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/install` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:156` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/catalog/refresh` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:164` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/updates/check` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:177` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/update/preview` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:185` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/update` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:185` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/rollback` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:197` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/repair` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:203` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:209` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:223` | `LlmIdeAPIClient+Extensions.swift` | - | - |
-| `/auth/me/workspace-trust` | public+auth | ANY | token | core | `extension/routes/workspace-trust.mjs:17` | - | - | tests only |
+| `/auth/me/extensions/install` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:160` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/catalog/refresh` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:168` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/updates/check` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:181` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/update/preview` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:189` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/update` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:189` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/rollback` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:201` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/repair` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:207` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:213` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:227` | `LlmIdeAPIClient+Extensions.swift` | - | - |
+| `/auth/me/workspace-trust` | public+auth | ANY | token | core | `extension/routes/workspace-trust.mjs:17` | `LlmIdeAPIClient+Extensions.swift` | - | - |
 | `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:857` | `LlmIdeAPIClient+Connectors.swift` | - | - |
 | `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:304` | `LlmIdeAPIClient+Auth.swift` | - | - |
 | `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:742` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
@@ -325,7 +323,7 @@ Endpoints with no client caller (42):
 
 ## Consistency
 
-Checked: 227 roster entries, 758 Swift files, 52 extension source files.
+Checked: 227 roster entries, 762 Swift files, 52 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

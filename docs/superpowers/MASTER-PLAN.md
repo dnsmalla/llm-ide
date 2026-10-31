@@ -18,9 +18,9 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 8 | 2 | 5 | 15 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
+| Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 82 | 19 | 71 | 172 |  |
+| Total | 83 | 19 | 71 | 173 |  |
 
 ## How the surfaces connect
 
@@ -278,6 +278,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Workspace Trust server: per-user trust records, untrusted folders' `.mcp.json` stdio servers are not loaded and project hooks/plugins/skill scripts are named in a notice, `LLMIDE_WORKSPACE_TRUST=off` kill switch, API 95 (Tauri plan §8) (me)
 - [x] Workspace Trust Mac UI: chat banner with confirmed Trust this folder, Settings folder list with enforced state (me)
 - [ ] Real-app check of the Workspace Trust banner and Settings cards (me)
+- [x] Independent security review fixes (server): workspace trust fails closed (strict MCP for every untrusted folder, parents, remote servers, stricter trust roots), raw commits verified on the repo (`COMMIT_NOT_IN_REPO`), apply bound to the preview (`UPDATE_CHANGED`), server-owned shared index refresh, uninstall/repair/apply locking, job runner and process-group hardening, lazy integrity check at load (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
 - [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log (me)

@@ -35,14 +35,20 @@ States: `queued`, `running`, `succeeded`, `failed`, `cancelled`, `interrupted`. 
 | Behaviour | Rule |
 |---|---|
 | Concurrency | at most `maxConcurrent` jobs run at once (default 2) |
-| Handler | `async ({ job, signal, spawn, log }) => result`, or `{ run, resumable: true }` |
+| Handler | `async ({ job, signal, spawn, log }) => result`, or `{ run, resumable: true, timeoutMs? }` |
+| Timeout | each job has a deadline (`timeoutMs`, else `jobTimeoutMs`, default 30 min): the job is aborted; a handler that ignores the abort is failed `timeout` after `graceMs` and its lane is freed, so a hung handler cannot hold it. A late result is ignored |
+| Settling | the DB write that ends a job is guarded; the slot is always freed (try/finally) and the next job pumped, even when that write throws |
 | Success / error | the result is stored as JSON; a thrown error becomes `failed` with its message |
 | Cancel (queued) | becomes `cancelled` at once |
 | Cancel (running) | `cancel_requested` is set and the job's `AbortSignal` fires; the final state is `cancelled` with `error = cancelled` |
 | Cancel (finished) | refused (`already_finished`) |
 | Quit (`stop()`) | every running job is aborted; it ends `cancelled` with `error = server_quit`; jobs still `queued` stay queued. After `2 x graceMs + 500 ms` any remaining child group gets SIGKILL |
-| Boot (`start()`) | rows left `running` by a dead process are swept: `resumable` kinds go back to `queued` (attempts is kept, so the next run counts as attempt 2), the rest become `interrupted` with `error = server_restarted` |
-| Process group | `ctx.spawn(cmd, args, opts)` starts the child detached in its own group; abort sends SIGTERM to the group and SIGKILL after `graceMs` (default 2000 ms); after the leader exits the group is swept with SIGKILL. Output is capped at 1,000,000 characters per stream |
+| Boot (`start()`) | rows left `running` by a dead process are swept: `resumable` kinds go back to `queued` (attempts is kept, so the next run counts as attempt 2), the rest become `interrupted` with `error = server_restarted`. A row with `cancel_requested` is `cancelled` (never requeued); a resumable row that already ran `maxAttempts` times (default 3) is `failed` with `error = too_many_attempts`, so a poison job cannot crash-loop the server |
+| Process group | `ctx.spawn(cmd, args, opts)` starts the child detached in its own group; abort sends SIGTERM to the group and SIGKILL after `graceMs` (default 2000 ms); after the leader exits the group is swept with SIGKILL only while it still has live members (an empty group's number may belong to a stranger), and the runner stops tracking the pid (`onExit`). With no `env` the child gets a sanitized default (`PATH`, `HOME`, `LANG`, `TMPDIR`, …, no `LLMIDE_*` or tokens); an explicit `env` is used as given, never merged with `process.env`. Output is capped at 1,000,000 characters per stream |
+
+## §3a Quotas
+
+`enqueueJob` refuses a payload over 64 KiB (`payload_too_large`) and a user with 100 jobs already queued or running (`quota_exceeded`); other users are unaffected.
 
 ## §4 Open decisions
 
