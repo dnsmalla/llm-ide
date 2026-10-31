@@ -32,15 +32,59 @@ final class PhoneAutoTaskApprovalFlowTests: XCTestCase {
     }
 
     func testWhichTasksNeedApproval() {
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: "implementIssues", isEnabled: { _ in true }),
-                       [.implementIssues])
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: "reviewMerge", isEnabled: { _ in false }),
-                       [.reviewMerge])
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: "reviewCode", isEnabled: { _ in true }), [])
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: "no-such", isEnabled: { _ in true }), [])
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: nil, isEnabled: { $0 == .reviewMerge }),
-                       [.reviewMerge], "run-all names the risky tasks that are enabled")
-        XCTAssertEqual(MobileAutoTaskBridge.tasksNeedingDesktopApproval(taskId: nil, isEnabled: { _ in false }), [])
+        func tier(_ id: String, custom: [CustomAutoTask] = []) -> PhoneApprovalTier {
+            MobileAutoTaskBridge.approvalTarget(taskId: id, customTasks: custom).tier
+        }
+        XCTAssertEqual(tier("implementIssues"), .t2)
+        XCTAssertEqual(tier("reviewMerge"), .t2)
+        for id in ["sourceUpdate", "sourcesToIssue", "updateIssues", "loopEngineering", "generateDoc"] {
+            XCTAssertEqual(tier(id), .t1, id)
+        }
+        XCTAssertEqual(tier("reviewCode"), .t0)
+        XCTAssertEqual(tier("no-such"), .t0, "unknown id needs no dialog; startPhoneRun reports it")
+        let reader = CustomAutoTask(id: "r", name: "r", template: "p", mode: .review)
+        let writer = CustomAutoTask(id: "w", name: "w", template: "p", mode: .implement)
+        XCTAssertEqual(tier("r", custom: [reader, writer]), .t1)
+        XCTAssertEqual(tier("w", custom: [reader, writer]), .t2)
+    }
+
+    func testEveryAutoTaskHasAPolicyRow() {
+        for t in AutoTask.allCases {
+            XCTAssertNotNil(PhoneApprovalPolicy.table[t.rawValue], "\(t.rawValue) has no phone approval row")
+        }
+    }
+
+    func testRunAllIsRefusedFromThePhone() {
+        let (bridge, host, service, _) = make()
+        host.autoTaskRequest = .run(.init(task: nil))
+        _ = bridge.handle(type: "auto_task_run", data: nil)
+        XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.tierRefused)
+        XCTAssertTrue(host.approvalRequests.isEmpty)
+        XCTAssertFalse(service.hasScheduledRun)
+    }
+
+    func testNewlyGatedBuiltinsAskTheMacBeforeRunning() async {
+        for id in ["sourceUpdate", "sourcesToIssue", "updateIssues", "loopEngineering", "generateDoc"] {
+            let (bridge, host, service, settings) = make()
+            settings.setEnabled(true, task: AutoTask(rawValue: id)!)
+            host.approvalOutcomes = [.denied]
+            host.autoTaskRequest = .run(.init(task: id))
+            _ = bridge.handle(type: "auto_task_run", data: nil)
+            XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.awaitingDesktopApproval, id)
+            XCTAssertFalse(service.hasScheduledRun, "\(id): nothing starts before the Mac answers")
+            await waitForAcks(host, 2)
+            XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.desktopDenied, id)
+            XCTAssertEqual(host.approvalRequests.count, 1, id)
+            XCTAssertFalse(service.hasScheduledRun, id)
+        }
+    }
+
+    func testListedTruncatesHonestlyButFingerprintKeepsEveryId() {
+        let ids = (1...25).map { "#\($0)" }
+        let text = AutoCodeUpdateService.listed(ids, empty: "none")
+        XCTAssertTrue(text.contains("and 5 more (25 total)"), text)
+        XCTAssertTrue(text.contains("#20") && !text.contains("#21,"))
+        XCTAssertEqual(AutoCodeUpdateService.listed([], empty: "none"), "none")
     }
 
     func testImplementWaitsThenIsDeniedAndNeverStarts() async {

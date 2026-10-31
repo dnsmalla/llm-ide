@@ -106,10 +106,20 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                     refuseDisabled(label: custom.name, id: custom.id)
                     return true
                 }
-                // Implement and review-merge write code / push: the phone only REQUESTS them; the person
-                // at the Mac confirms the exact task, project and issue/branch ids in a native modal.
-                let risky = Self.tasksNeedingDesktopApproval(taskId: m.task, isEnabled: ac.isTaskEnabled)
-                if !risky.isEmpty {
+                // Run-all is refused from the phone: `runNow` runs EVERY enabled task, which no dialog could
+                // honestly list. The phone runs one named task at a time.
+                guard let raw = m.task else {
+                    host?.logInfo("auto_task_run refused: run-all from a phone")
+                    host?.sendAutoTaskReply(.ack(
+                        ok: false,
+                        message: "Run one task at a time from your phone. Run all is only available on your Mac.",
+                        code: MobileRefusalCode.tierRefused))
+                    return true
+                }
+                // Every task the registry marks T1/T2 (and every custom task that can write) is only
+                // REQUESTED by the phone: the person at the Mac confirms the exact task, project and ids.
+                let target = Self.approvalTarget(taskId: raw, customTasks: scopedCustomTasks())
+                if target.tier.needsDesktopApproval {
                     guard !ac.hasScheduledRun else {
                         host?.sendAutoTaskReply(.ack(ok: false,
                                                      message: "Auto Tasks is already running on your Mac. Tap Stop first."))
@@ -120,7 +130,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                         code: MobileRefusalCode.awaitingDesktopApproval))
                     let projectId = host?.projectStore?.activeProject?.bundle.id
                     Task { [weak self] in
-                        await self?.runAfterDesktopApproval(task: m.task, risky: risky, projectId: projectId)
+                        await self?.runAfterDesktopApproval(task: raw, target: target, projectId: projectId)
                     }
                     return true
                 }
@@ -272,27 +282,36 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                                 code: MobileRefusalCode.desktopOnly)
     }
 
-    /// Built-ins that edit code or leave the machine when run: a phone may not start them without the
-    /// person at the Mac confirming. A single-task run names one; a run-all names every one that is enabled.
-    static let desktopApprovalTasks: [AutoTask] = [.implementIssues, .reviewMerge]
-
-    static func tasksNeedingDesktopApproval(taskId: String?, isEnabled: (AutoTask) -> Bool) -> [AutoTask] {
-        if let taskId {
-            guard let t = AutoTask(rawValue: taskId) else { return [] }
-            return desktopApprovalTasks.contains(t) ? [t] : []
-        }
-        return desktopApprovalTasks.filter(isEnabled)
+    /// What a phone-requested task is, for the approval policy: its tier (from `PhoneApprovalPolicy`, which a
+    /// test pins to schema/bus/registry.json), the built-in it names, or the custom task.
+    struct ApprovalTarget: Equatable {
+        let tier: PhoneApprovalTier
+        let builtin: AutoTask?
+        let custom: CustomAutoTask?
     }
 
-    /// Ask on the Mac, then start the run only if it was approved AND the world is still what was asked.
-    /// Re-checks at execution time: the Phone-access switch, the task's enable flag, the active project and
-    /// that nothing else started meanwhile.
-    private func runAfterDesktopApproval(task: String?, risky: [AutoTask], projectId: String?) async {
+    static func approvalTarget(taskId: String, customTasks: [CustomAutoTask]) -> ApprovalTarget {
+        if let t = AutoTask(rawValue: taskId) {
+            return ApprovalTarget(tier: PhoneApprovalPolicy.tier(forKey: t.rawValue), builtin: t, custom: nil)
+        }
+        if let c = customTasks.first(where: { $0.id == taskId }) {
+            // A custom task that commits (implement) can write; unknown capability would default to T2.
+            let key = PhoneApprovalPolicy.customKey(writes: c.mode == .implement)
+            return ApprovalTarget(tier: PhoneApprovalPolicy.tier(forKey: key), builtin: nil, custom: c)
+        }
+        return ApprovalTarget(tier: .t0, builtin: nil, custom: nil)   // unknown id: startPhoneRun reports it
+    }
+
+    /// Ask on the Mac, then start the run only if it was approved AND the world is still what was shown.
+    /// Re-checks at execution time: the Phone-access switch, the task's enable flag, the active project,
+    /// that nothing else started meanwhile, and that the exact ids/branches approved are still the ones
+    /// the run would act on.
+    private func runAfterDesktopApproval(task: String, target: ApprovalTarget, projectId: String?) async {
         guard let ac = autoCode, let host else { return }
-        let lines = await ac.phoneApprovalDetails(for: risky)
-        let names = risky.map(\.label).joined(separator: " and ")
+        let shown = await ac.phoneApprovalSnapshot(builtin: target.builtin, custom: target.custom, tier: target.tier)
+        let name = target.builtin?.label ?? target.custom?.name ?? task
         let outcome = await host.requestDesktopApproval(
-            PhoneDesktopApprovalRequest(title: "Run \(names) from your iPhone?", lines: lines))
+            PhoneDesktopApprovalRequest(title: "Run \(name) from your iPhone?", lines: shown.lines))
         switch outcome {
         case .approved:
             break
@@ -314,13 +333,24 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             host.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
             return
         }
-        guard risky.allSatisfy({ ac.isTaskEnabled($0) }) else {
+        let stillEnabled = target.builtin.map { ac.isTaskEnabled($0) } ?? target.custom.map { c in
+            scopedCustomTasks().first(where: { $0.id == c.id })?.isEnabled == true
+        } ?? false
+        guard stillEnabled else {
             host.sendAutoTaskReply(.ack(ok: false, message: "A task was turned off on your Mac meanwhile.",
                                         code: MobileRefusalCode.taskDisabled))
             return
         }
         guard host.projectStore?.activeProject?.bundle.id == projectId else {
             host.sendAutoTaskReply(.ack(ok: false, message: "The project changed on your Mac meanwhile, so nothing ran."))
+            return
+        }
+        // The exact ids / branches the person approved must still be what the run would act on.
+        let now = await ac.phoneApprovalSnapshot(builtin: target.builtin, custom: target.custom, tier: target.tier)
+        guard now.fingerprint == shown.fingerprint else {
+            host.sendAutoTaskReply(.ack(ok: false,
+                                        message: "What this would run changed on your Mac while you were deciding, so nothing ran. Ask again.",
+                                        code: MobileRefusalCode.desktopDenied))
             return
         }
         startPhoneRun(task: task, ac: ac)

@@ -115,6 +115,8 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         return WorkspaceRoot.context(config: config, projectStore: store)?.projectRoot
     }
 
+    private var activeProjectId: String? { manager?.projectStore?.activeProject?.bundle.id }
+
     private var notesDir: URL? { projectRoot.map { ProjectLayout(root: $0).notesDir } }
 
     private func buildOptions() -> GenerationOptions {
@@ -166,6 +168,32 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         let sources = run.sources.filter { !$0.text.isEmpty }.map { (name: $0.name, content: $0.text) }
         guard !sources.isEmpty else { return fail(run, "Attach at least one text file to generate from.") }
 
+        // Doc Gen writes files into the project and spends model quota: T1, the Mac confirms first.
+        if PhoneApprovalPolicy.tier(forKey: PhoneApprovalPolicy.generationRun).needsDesktopApproval {
+            let projectId = activeProjectId
+            let outcome = await manager.desktopApproval.request(PhoneDesktopApprovalRequest(
+                title: "Generate a document from your iPhone?",
+                lines: ["Project: \((manager.projectStore?.activeProject?.bundle.displayName ?? "none open"))",
+                        "Kind: \(surface.rawValue)",
+                        "Using: \(template?.name ?? command?.instruction.prefix(80).description ?? "?")",
+                        "From \(sources.count) attached file(s): \(sources.map(\.name).joined(separator: ", "))",
+                        "Saves the result under llm-doc/ and spends model quota."]))
+            guard outcome == .approved else {
+                let why: String
+                switch outcome {
+                case .denied:   why = "You cancelled this on your Mac."
+                case .timedOut: why = "Not approved on your Mac in time, so nothing was generated."
+                default:        why = "Your Mac is already asking for a confirmation, or was asked too often. Try again later."
+                }
+                return fail(run, why)
+            }
+            guard manager.phoneAccess.isAllowed(.generationRun) else {
+                return fail(run, PhoneAccess.generationRun.deniedMessage)
+            }
+            guard activeProjectId == projectId else {
+                return fail(run, "The project changed on your Mac meanwhile, so nothing was generated.")
+            }
+        }
         manager.append(.info, "generation_run \(surface.rawValue) (\(sources.count) source(s))")
         let prompt = run.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         do {

@@ -690,39 +690,77 @@ extension AutoCodeUpdateService {
         }
     }
 
-    /// True when the user's per-task enable checkbox is on for `task`. Drives
-    /// the `enabledOrder` loop in `run()` (per-task manual runs via `runSingle`
-    /// ignore this — they run the task regardless).
-    /// What the person at the Mac is shown before a PHONE-started implement / review-merge may run: the
-    /// project and the exact issue numbers or branches, read from the Mac's own state (never from the phone).
-    func phoneApprovalDetails(for tasks: [AutoTask]) async -> [String] {
-        var lines = ["Project: \(projectStore?.activeProject?.bundle.displayName ?? "none open")"]
-        guard let resolved = resolveBackendAndProject() else {
-            lines.append("Repository: not linked, so the run would stop immediately.")
-            return lines
+    /// What the person at the Mac is shown before a PHONE-started task may run, plus a fingerprint of the
+    /// FULL set it would act on (every pending issue id, every candidate branch) so the caller can refuse
+    /// at execution if that set differs from what was approved. Read from the Mac's own state, never the phone.
+    struct PhoneApprovalSnapshot: Equatable {
+        let lines: [String]
+        let fingerprint: [String]
+    }
+
+    private static let approvalDisplayLimit = 20
+
+    /// "a, b, c and N more" so the dialog is honest about a long list.
+    static func listed(_ items: [String], empty: String) -> String {
+        guard !items.isEmpty else { return empty }
+        let shown = items.prefix(approvalDisplayLimit).joined(separator: ", ")
+        return items.count > approvalDisplayLimit ? "\(shown) and \(items.count - approvalDisplayLimit) more (\(items.count) total)" : shown
+    }
+
+    func phoneApprovalSnapshot(builtin: AutoTask?, custom: CustomAutoTask?, tier: PhoneApprovalTier) async -> PhoneApprovalSnapshot {
+        let projectName = projectStore?.activeProject?.bundle.displayName ?? "none open"
+        let projectId = projectStore?.activeProject?.bundle.id ?? ""
+        var lines = ["Project: \(projectName)",
+                     "Approval level: \(tier == .t2 ? "writes code or leaves this Mac" : "changes data on this Mac or acts as you")"]
+        var fingerprint = ["project:\(projectId)"]
+        if let custom {
+            lines.append("Custom task: \(custom.name) (\(custom.mode.label): \(custom.mode.detail))")
+            let excerpt = custom.template.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300)
+            lines.append("Prompt: \(excerpt)")
+            fingerprint.append("custom:\(custom.id):\(custom.mode.rawValue):\(custom.template)")
+            return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint)
         }
-        let gitRoot = resolved.gitRoot
-        for task in tasks {
-            switch task {
-            case .implementIssues:
+        guard let task = builtin else { return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint) }
+        fingerprint.append("task:\(task.rawValue)")
+        switch task {
+        case .implementIssues, .reviewMerge:
+            guard let resolved = resolveBackendAndProject() else {
+                lines.append("Repository: not linked, so the run would stop immediately.")
+                return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint)
+            }
+            let gitRoot = resolved.gitRoot
+            if task == .implementIssues {
                 let ids = registry.pendingEntries(repoKey: Self.registryRepoKey(resolved))
-                    .compactMap(\.issueIid).prefix(20).map { "#\($0)" }
-                lines.append("Implement issues: " + (ids.isEmpty ? "none pending" : ids.joined(separator: ", ")))
+                    .compactMap(\.issueIid).map { "#\($0)" }
+                lines.append("Implement issues: " + Self.listed(ids, empty: "none pending"))
                 lines.append("Edits code and commits on local fix/* branches, only for issues labelled for approval.")
-            case .reviewMerge:
+                fingerprint.append(contentsOf: ids.map { "issue:\($0)" })
+            } else {
                 let defaultBranch = await Task.detached { Self.defaultBranch(at: gitRoot) }.value
                 let branches = await Task.detached {
                     Self.reviewMergeCandidates(defaultBranch: defaultBranch, at: gitRoot)
                 }.value
-                lines.append("Push, then open an MR/PR into \(defaultBranch): "
-                             + (branches.isEmpty ? "no branches waiting" : branches.prefix(20).joined(separator: ", ")))
-            default:
-                lines.append(task.label)
+                lines.append("Push, then open an MR/PR into \(defaultBranch): " + Self.listed(branches, empty: "no branches waiting"))
+                fingerprint.append("base:\(defaultBranch)")
+                fingerprint.append(contentsOf: branches.map { "branch:\($0)" })
             }
+        case .sourceUpdate:
+            lines.append("Fetches email, Slack and document sources into your Library and re-indexes.")
+        case .sourcesToIssue, .updateIssues:
+            lines.append("\(task.label): creates or updates issues in your upstream tracker as you.")
+        case .loopEngineering:
+            lines.append("Runs the project's Loops; they can edit files within each loop's declared scope.")
+        case .generateDoc:
+            lines.append("Generates documentation into the project and spends model quota.")
+        default:
+            lines.append(task.label)
         }
-        return lines
+        return PhoneApprovalSnapshot(lines: lines, fingerprint: fingerprint)
     }
 
+    /// True when the user's per-task enable checkbox is on for `task`. Drives
+    /// the `enabledOrder` loop in `run()` (per-task manual runs via `runSingle`
+    /// ignore this — they run the task regardless).
     func isTaskEnabled(_ task: AutoTask) -> Bool {
         switch task {
         case .sourceUpdate:      return autoTaskSettings.runSourceUpdate

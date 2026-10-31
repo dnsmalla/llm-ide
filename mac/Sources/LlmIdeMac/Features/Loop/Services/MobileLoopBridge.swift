@@ -72,6 +72,38 @@ final class MobileLoopBridge: MobileFeatureBridge {
 
     // MARK: - MobileFeatureBridge
 
+    /// Registry loop.run is T1: ask the person at the Mac, then re-check the Stop generation, the Phone
+    /// access switch and the project. Replies with the refusal and returns false unless all hold.
+    private func confirmOnMac(title: String, lines: [String], stopGeneration: Int,
+                              projectAtReceipt: String?, label: String) async -> Bool {
+        // Tier from PhoneApprovalPolicy (loopStart / loopStartStage are T1, pinned to the registry by a test).
+        assert(PhoneApprovalPolicy.tier(forKey: PhoneApprovalPolicy.loopStart).needsDesktopApproval)
+        guard let host else { return false }
+        let outcome = await host.requestDesktopApproval(PhoneDesktopApprovalRequest(title: title, lines: lines))
+        let refusal: String?
+        switch outcome {
+        case .approved:  refusal = nil
+        case .denied:    refusal = "You cancelled this on your Mac."
+        case .timedOut:  refusal = "Not approved on your Mac in time, so nothing started."
+        case .busy:      refusal = "Your Mac is already asking for a confirmation, or was asked too often. Try again later."
+        }
+        if let refusal {
+            host.logInfo("\(label) not approved on the Mac (\(outcome))")
+            host.sendLoopReply(.ack(accepted: false, message: refusal))
+            return false
+        }
+        guard requestGate.stopGeneration == stopGeneration else {
+            host.sendLoopReply(.ack(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+            return false
+        }
+        if let why = executionRefusal(projectAtReceipt: projectAtReceipt) {
+            host.logInfo("\(label) refused after approval: \(why)")
+            host.sendLoopReply(.ack(accepted: false, message: why))
+            return false
+        }
+        return true
+    }
+
     /// Handle `loop_*` messages: snapshot / start / stop / history for the
     /// active project's Loop. `data` is optional so a manager-triggered
     /// synthetic call can pass `nil` for message types that never decode a
@@ -153,6 +185,14 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                                   message: "No loop is set up for the active project. Create one on the Mac first."))
                     return
                 }
+                // Registry loop.run is T1: the person at the Mac confirms the loop and project first,
+                // then everything is re-checked (a Stop or project switch may have landed meanwhile).
+                guard await self.confirmOnMac(
+                    title: "Start the \"\(primary.name)\" loop from your iPhone?",
+                    lines: ["Project: \(self.host?.projectStore?.activeProject?.bundle.displayName ?? "none open")",
+                            "Loop: \(primary.name)",
+                            "The loop can edit files within its declared scope and run its verify commands."],
+                    stopGeneration: stopGeneration, projectAtReceipt: projectAtReceipt, label: "loop_start") else { return }
                 // Synchronous on the main actor and spins its own Task; false
                 // means the scheduler declined (already busy).
                 let started = loopLane.runSingleLoopFromPhone(loopId: primary.id)
@@ -209,6 +249,12 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                                   message: "That stage no longer exists — refresh and try again."))
                     return
                 }
+                guard await self.confirmOnMac(
+                    title: "Run the \"\(stage.name)\" loop stage from your iPhone?",
+                    lines: ["Project: \(self.host?.projectStore?.activeProject?.bundle.displayName ?? "none open")",
+                            "Stage: \(stage.name)",
+                            "The stage can edit files within the loop's declared scope and run its verify commands."],
+                    stopGeneration: stopGeneration, projectAtReceipt: projectAtReceipt, label: "loop_start_stage") else { return }
                 // Queue behind an in-flight run when needed — see `loop_start`.
                 let started = loopLane.runSingleLoopStageFromPhone(stageId: stageId)
                 self.startedHereTracker.noteStart(succeeded: started)
