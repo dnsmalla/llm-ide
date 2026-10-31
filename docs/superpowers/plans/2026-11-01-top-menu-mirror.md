@@ -16,7 +16,7 @@ and each feature's `Views/`.
 | **Loop** | Loop runs, verification/repair dashboards, regression sweep. | “Soon”. | Needs a core/API model for runs/verification; only `/kb/loop/agent-run` exists today. |
 | **Doc Gen** | Sources (Code / LLM Doc / Data), template, command/prompt, "Steps to generate" checklist, result + history; save to `llm-doc/`. | Real. Setup + Sources, the Mac's three-step checklist (template/command, sources, prompt), result/history, save, mermaid. | Refine/save-as-new affordance review. |
 | **Visual** | Same generation views, sources Data / Code, image viewer; save under `llm-doc/`. | Real. Same category restriction now. | Image viewer parity. |
-| **Library** | Sidebar categories (meetings, code, docs, data, input sources, plugins, LLM/MCP sources), item list, detail; write side. | Real. Sidebar, virtualised list, viewer/write side, extensions. | Audit sidebar grouping/order against `LibraryView.swift`. |
+| **Library** | Sidebar categories (Sources, Code, Data, LLM Doc, extensions), file trees with add-file/folder, list/detail, write side. | Real notes sidebar/list/viewer/write/extensions, plus **Project files** (Code/Data) lazy trees with a read-only viewer and Open in Explorer. Add-file/folder menus and the Mac's tree-integrated list remain. | Add-file/folder actions; tree/list integration. |
 | **Chat** | Code Assistant panel, role labels, markdown, approvals. | Real (Mac-like typography landed). | Turn actions parity. |
 
 ## Done in this pass
@@ -30,6 +30,7 @@ and each feature's `Views/`.
 - Gantt: timeline + scheduling overlay editor (start/due/estimate/dependencies).
 - Review Conflicts: code + LLM Doc tree, read-only viewer, Open in Explorer, Code Assistant.
 - Doc Gen/Visual: the Mac's three-step "Steps to generate" checklist with per-tab copy and done states.
+- Library: Code/Data project-file trees (read-only) beside the notes sections, with Open in Explorer.
 - Repositories settings rebuilt as the Mac's GitLab/GitHub card (see below).
 
 ## Repositories (Settings → Project)

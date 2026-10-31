@@ -9,6 +9,7 @@ import { IDLE_REBUILD, type RebuildProgress } from "./index-rebuild.ts";
 import type { NoteRecord } from "./notes-model.ts";
 import { EXTENSION_PLACEHOLDERS, LibraryNav, type LibraryExtension } from "./LibraryNav";
 import { NoteList, type BulkSelect } from "./NoteList";
+import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./ProjectFiles.tsx";
 import { NoteViewer } from "./NoteViewer";
 import { BulkBar } from "./write/BulkBar";
 import { DiscardDialog, NewNoteDialog } from "./write/WriteDialogs";
@@ -35,6 +36,8 @@ export interface LibraryScreenProps {
   write?: LibraryWriteProps | null;
   /** Source connection panes (Email, Slack, Box, ...), listed under "Connections". */
   connections?: readonly LibraryExtension[];
+  /** Project folders for the Mac's Code/Data categories; absent when the host cannot list them. */
+  files?: ProjectFilesDeps;
   /** Runs an index rebuild over the current records; absent when the core is not reachable from here. */
   runRebuild?: ((records: readonly NoteRecord[], report: (p: RebuildProgress) => void, signal: AbortSignal) => Promise<RebuildProgress>) | null;
   /** Opens an allowlisted URL through the host; reject when it cannot (a notice is shown). */
@@ -47,13 +50,14 @@ export interface LibraryScreenProps {
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
   const rebuildAbort = useRef<AbortController | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const [projectFile, setProjectFile] = useState<string | null>(null);
   // ---- write side
   const queue = useMemo(() => new WriteQueue(), []);
   const [selecting, setSelecting] = useState(false);
@@ -85,6 +89,10 @@ export function LibraryScreen({ store, host, write = null, connections, runRebui
       store.hasUnsaved = null;
     };
   }, [store, write]);
+
+  useEffect(() => {
+    setProjectFile(null);
+  }, [state.selectedRel]);
 
   useEffect(() => {
     void store.init();
@@ -191,7 +199,9 @@ export function LibraryScreen({ store, host, write = null, connections, runRebui
         extensionId={extensionId}
         extensions={extensions}
         connections={connections}
+        projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} /> : undefined}
         onSection={(id) => {
+          setProjectFile(null);
           setExtensionId(null);
           store.setSection(id);
         }}
@@ -247,8 +257,10 @@ export function LibraryScreen({ store, host, write = null, connections, runRebui
             )}
             <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} />
           </div>
-          <main className="lib-detail" aria-label="Note">
-            {selected && write ? (
+          <main className="lib-detail" aria-label={projectFile ? "Project file" : "Note"}>
+            {projectFile ? (
+              <ProjectFileView path={projectFile} deps={files!} />
+            ) : selected && write ? (
               <NoteWorkspace
                 key={selected}
                 host={host}

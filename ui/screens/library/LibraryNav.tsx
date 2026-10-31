@@ -30,6 +30,8 @@ export interface LibraryNavProps {
   extensions: readonly LibraryExtension[];
   /** Source connections (Email, Slack, Box, ...): a group of panes that open in the detail area. */
   connections?: readonly LibraryExtension[];
+  /** The project-file trees (Code/Data) rendered between Sources and LLM Doc, when the host can list them. */
+  projectNav?: ReactNode;
   onSection: (id: string | null) => void;
   onExtension: (id: string) => void;
   onRefresh: () => void;
@@ -83,6 +85,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
         ))}
       </ul>
+      {p.projectNav}
       {docs.length > 0 && (
         <>
           <h3 className="lib-nav-group">

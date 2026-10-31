@@ -83,5 +83,14 @@ export default function Library({ active }: SectionProps) {
         : undefined,
     [available, writeHost, store],
   );
-  return <LibraryScreen store={store} host={host} write={write} connections={connections} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={available} />;
+  const files = useMemo(
+    () => (available
+      ? {
+          list: (path: string) => invokeHost<unknown>("fs_list_dir", { req: { path, offset: 0, limit: 300, show_hidden: false, gitignore: true, hide_ignored: true } }),
+          read: (path: string) => invokeHost<unknown>("fs_read_file", { req: { path, max_bytes: 1_000_000 } }),
+        }
+      : undefined),
+    [available],
+  );
+  return <LibraryScreen store={store} host={host} write={write} connections={connections} files={files} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={available} />;
 }
