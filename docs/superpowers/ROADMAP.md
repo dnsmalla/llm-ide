@@ -2,7 +2,7 @@
 
 Updated 2026-10-31 (written at `e72654c9`; 348 commits since 2026-10-30). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
 
-Current numbers: `SERVER_API_VERSION` 102, migration head 0058 on pushed `main` and 0059 (`google_connectors`) in the local commits; the HTTP contract and generated types are in `schema/`.
+Current numbers: `SERVER_API_VERSION` 103, migration head 0058 on pushed `main` and 0059 (`google_connectors`) in the local commits; the HTTP contract and generated types are in `schema/`.
 
 ## Principles (kept at the top on purpose)
 
