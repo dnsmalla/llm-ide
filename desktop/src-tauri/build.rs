@@ -19,6 +19,8 @@ const COMMANDS: &[&str] = &[
     "project_forget_recent",
     "project_close",
     "project_create",
+    "project_paths",
+    "project_memory",
     "fs_list_dir",
     "fs_read_file",
     "fs_read_range",

@@ -55,30 +55,6 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Use the Mac app on a source checkout.",
     blockedBy: "Swift-only (incident store and worktree repair). No desktop equivalent is planned.",
   },
-  connections: {
-    mac: "Connects the sources that feed the Library: Meetings (capture platforms), Email, Slack, Box and the catalog connectors, with fetch-now actions and status.",
-    status: "Planned",
-    meanwhile: "Library sources and ingestion are in the Library screen; per-source credentials and the connector catalog are still set up in the Mac app.",
-    blockedBy: "Needs the connector catalog and per-source credential routes wired into a desktop card (the core routes exist; the desktop UI does not).",
-  },
-  paths: {
-    mac: "Shows and edits the project's folders (notes, plans, docs) and opens them in Explorer.",
-    status: "Planned",
-    meanwhile: "The Workspace group above shows the open project and the notes folder.",
-    blockedBy: "Needs host commands to read and change the project's folder layout with a native folder dialog.",
-  },
-  repositories: {
-    mac: "Connects GitHub and GitLab (tokens, hosts) and registers the local repositories the project works with.",
-    status: "Planned",
-    meanwhile: "Source control in Explorer works on the open project's own git repository; hosted-repo tokens are set up in the Mac app.",
-    blockedBy: "Needs the repo allow-list and provider token routes surfaced in a desktop card with write-only token fields.",
-  },
-  memory: {
-    mac: "Lists whether a knowledge graph exists for the project and its agent memory files.",
-    status: "Planned",
-    meanwhile: "Generate or view the graph from the Code Graph screen.",
-    blockedBy: "Needs a host command that lists the project's system/memory files (a webview must not read the disk).",
-  },
   "code-graph": {
     mac: "The Code Graph auto-update interval and the banner shown when an upload was truncated.",
     status: "Planned",
@@ -89,6 +65,12 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
 
 /** Groups that are only partly implemented keep a short note for the part that is not. */
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
+  connections:
+    "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
+  repositories:
+    "On the Mac this group also holds the GitHub and GitLab tokens and hosts. On the desktop those live in Library → Connections; this group mirrors the local allow-list.",
+  paths:
+    "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:
     "On the Mac this group also holds the workspace profile, menu-bar visibility and Home page choice. The desktop shows the open project, the notes folder and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
   server:

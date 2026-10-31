@@ -34,6 +34,35 @@ export interface CoreLogText {
   exists: boolean;
 }
 
+/** One canonical project folder and whether it exists (read-only, from the active project root). */
+export interface ProjectFolder {
+  name: string;
+  exists: boolean;
+}
+
+export interface ProjectPaths {
+  root: string;
+  folders: ProjectFolder[];
+}
+
+export interface ProjectMemoryFile {
+  name: string;
+  /** Project-relative, for `reveal_in_os`. */
+  path: string;
+  sizeBytes: number;
+}
+
+export interface ProjectGraph {
+  path: string;
+  sizeBytes: number;
+}
+
+export interface ProjectMemory {
+  root: string;
+  graph: ProjectGraph | null;
+  files: ProjectMemoryFile[];
+}
+
 export interface SettingsHost {
   /** Versions and core trust state (nonce verified = "spawned"). */
   diagnostics(): Promise<DiagnosticsInfo>;
@@ -67,6 +96,11 @@ export interface SettingsHost {
   /** The core's log tail for the Server & Backend group (fixed paths under the app data dir, bounded). */
   coreLog?(): Promise<CoreLogText>;
   clearCoreLog?(): Promise<void>;
+  /** The open project's layout and memory files (read-only, host-resolved; the page never supplies a path). */
+  projectPaths?(): Promise<ProjectPaths>;
+  projectMemory?(): Promise<ProjectMemory>;
+  /** Reveals a project-relative path in the OS file manager (the host re-checks it against the root). */
+  revealPath?(relPath: string): Promise<void>;
   /** The developer-tools switch (shows the Spike item in the toolbar): per viewer, applies at once. */
   getDevTools?(): boolean;
   setDevTools?(on: boolean): void;

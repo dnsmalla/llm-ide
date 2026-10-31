@@ -38,7 +38,13 @@ before(async () => {
       sdk: join(SETTINGS, "sections/AgentSdkSection.tsx"),
       optional: join(SETTINGS, "sections/OptionalComponentsSection.tsx"),
       server: join(SETTINGS, "sections/ServerSection.tsx"),
+      connections: join(SETTINGS, "sections/ConnectionsSection.tsx"),
+      repos: join(SETTINGS, "sections/RepositoriesSection.tsx"),
+      paths: join(SETTINGS, "sections/PathsSection.tsx"),
+      memory: join(SETTINGS, "sections/MemorySection.tsx"),
       componentsModel: join(SETTINGS, "components-model.ts"),
+      sourcesModel: join(SETTINGS, "sources-model.ts"),
+      projectModel: join(SETTINGS, "project-model.ts"),
       registryDefault: join(SETTINGS, "registry-default.ts"),
       historyModel: join(SETTINGS, "agent-history-model.ts"),
       secret: join(SETTINGS, "secret-field.ts"),
@@ -59,7 +65,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "componentsModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -177,6 +183,53 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /No log entries yet/);
   assert.match(out, /Refresh log/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Clear log<\/button>/, "nothing to clear before a log exists");
+});
+
+test("Connections: the catalog card explains selection vs credentials and has no credential inputs", () => {
+  const e = { client: { request: async () => ({ status: 200, body: { catalog: [] } }) }, host: { diagnostics: async () => ({}), copyText: async () => {} } };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.connections.default)));
+  assert.match(out, /only shows or hides/i);
+  assert.match(out, /Library → Connections/);
+  assert.match(out, /Loading the catalog/);
+  assert.match(out, /Refresh catalog/);
+  assert.ok(!/<input|<textarea|<select/.test(out), "no credential fields in this group");
+  assert.match(out, /On the Mac this group also holds/);
+});
+
+test("Repositories: the allow-list card adds with the host folder dialog and removes only after a confirm", () => {
+  const e = {
+    client: { request: async () => ({ status: 200, body: { repos: [] } }) },
+    host: { diagnostics: async () => ({}), copyText: async () => {}, pickFolder: async () => null, activeProjectPath: () => "/p" },
+  };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.repos.default)));
+  assert.match(out, /Add repository folder/);
+  assert.match(out, /Loading repositories/);
+  assert.match(out, /Provider tokens and indexing are managed in/);
+  const noPick = { client: e.client, host: { diagnostics: async () => ({}), copyText: async () => {} } };
+  const bare = html(h(m.context.SettingsEnvProvider, { env: noPick }, h(m.repos.default)));
+  assert.match(bare, /Adding a folder needs the desktop host/);
+});
+
+test("Paths and Memory: read-only project views, labelled, with no path the page supplied", () => {
+  const e = {
+    client: {},
+    host: {
+      diagnostics: async () => ({}),
+      copyText: async () => {},
+      projectPaths: async () => ({ root: "/p", folders: [{ name: "system", exists: true }] }),
+      projectMemory: async () => ({ root: "/p", graph: null, files: [] }),
+      revealPath: async () => {},
+    },
+  };
+  const wrap = (el) => h(m.context.SettingsEnvProvider, { env: e }, el);
+  const paths = html(wrap(h(m.paths.default)));
+  assert.match(paths, /Loading the project folders/);
+  assert.match(paths, /read-only/i);
+  assert.match(paths, /On the Mac this group can also change/);
+  const memory = html(wrap(h(m.memory.default)));
+  assert.match(memory, /Loading project memory/);
+  assert.match(memory, /knowledge graph/i);
+  assert.ok(!/<input|<select|<textarea/.test(paths + memory), "no editable path fields");
 });
 
 test("Tool permissions and Agent SDK render labelled controls before any data arrives (loading state)", () => {

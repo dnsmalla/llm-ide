@@ -48,9 +48,9 @@ export const APP_GROUPS: readonly GroupDef[] = [
 ];
 
 export const PROJECT_GROUPS: readonly GroupDef[] = [
-  { id: "paths", title: "Paths", sf: "folder.badge.gearshape", icon: "folder-cog", status: "host", band: "project" },
-  { id: "repositories", title: "Repositories", sf: "arrow.triangle.branch", icon: "git-branch", status: "core-route", band: "project" },
-  { id: "memory", title: "Memory", sf: "brain", icon: "brain", status: "host", band: "project" },
+  { id: "paths", title: "Paths", sf: "folder.badge.gearshape", icon: "folder-cog", status: "partial", band: "project" },
+  { id: "repositories", title: "Repositories", sf: "arrow.triangle.branch", icon: "git-branch", status: "partial", band: "project" },
+  { id: "memory", title: "Memory", sf: "brain", icon: "brain", status: "works", band: "project" },
   { id: "code-graph", title: "Code Graph", sf: "cube.transparent", icon: "network", status: "host", band: "project" },
 ];
 

@@ -9,6 +9,7 @@
 // Still not provided: nothing blocks a macOS build; Windows/Linux hosts share the same commands.
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import { decodeComponentStatus, decodeCoreLog } from "../settings/components-model";
+import { decodeMemory, decodePaths } from "../settings/project-model";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { CoreError, type CoreClient } from "./core";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
@@ -101,6 +102,19 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async clearCoreLog() {
           await d.invoke<unknown>("core_log_clear");
+        },
+        async projectPaths() {
+          const p = decodePaths(await d.invoke<unknown>("project_paths"));
+          if (!p) throw new Error("the desktop host returned a project layout this app cannot read");
+          return p;
+        },
+        async projectMemory() {
+          const m = decodeMemory(await d.invoke<unknown>("project_memory"));
+          if (!m) throw new Error("the desktop host returned project memory this app cannot read");
+          return m;
+        },
+        async revealPath(relPath) {
+          await d.invoke<unknown>("reveal_in_os", { relPath });
         },
       }
     : {};

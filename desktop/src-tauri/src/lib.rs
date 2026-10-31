@@ -24,6 +24,7 @@ mod notes_write;
 mod os_open;
 mod proc_tree;
 mod project;
+mod project_layout;
 mod project_scaffold;
 mod prefs;
 mod project_search;
@@ -278,6 +279,8 @@ macro_rules! product_handlers {
                 project::project_forget_recent,
                 project::project_close,
                 project::project_create,
+                project_layout::project_paths,
+                project_layout::project_memory,
                 fs_ops::fs_list_dir,
                 fs_ops::fs_read_file,
                 fs_ops::fs_read_range,

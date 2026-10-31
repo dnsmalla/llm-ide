@@ -18,7 +18,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   workspace: dflt(() => import("./sections/WorkspaceGroup.tsx")),
   build: named(notices, "BuildGroup"),
   server: dflt(() => import("./sections/ServerSection.tsx")),
-  connections: named(notices, "ConnectionsGroup"),
+  connections: dflt(() => import("./sections/ConnectionsSection.tsx")),
   updates: dflt(() => import("./sections/UpdatesSection.tsx")),
   mobile: named(notices, "MobileGroup"),
   general: dflt(() => import("./sections/GeneralSection.tsx")),
@@ -34,9 +34,9 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   "extension-sources": named(trust, "Allowlist"),
   "optional-components": dflt(() => import("./sections/OptionalComponentsSection.tsx")),
   "self-heal": named(notices, "SelfHealGroup"),
-  paths: named(notices, "PathsGroup"),
-  repositories: named(notices, "RepositoriesGroup"),
-  memory: named(notices, "MemoryGroup"),
+  paths: dflt(() => import("./sections/PathsSection.tsx")),
+  repositories: dflt(() => import("./sections/RepositoriesSection.tsx")),
+  memory: dflt(() => import("./sections/MemorySection.tsx")),
   "code-graph": named(notices, "CodeGraphGroup"),
 };
 
