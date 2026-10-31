@@ -1,9 +1,9 @@
 // One parked tool approval. Stateless about the decision (the panel owns I/O); local state is only the optional
 // deny note and the batch review toggle. Tool arguments are untrusted: everything shown comes from buildPreview.
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { PendingApproval } from "../state";
 import { ArgsPreview } from "./ArgsPreview";
-import { counterText, nextFocusIndex, shortcutFor, type CardUi } from "./machine";
+import { DWELL_MS, counterText, nextFocusIndex, routeCardKey, type CardUi, type KeyEventLike } from "./machine";
 import { buildPreview } from "./preview";
 import { classifyApproval, toolTitle } from "./risk";
 import { describeRule } from "./rules";
@@ -26,19 +26,28 @@ export interface ApprovalCardProps {
   onBatch: () => void;
   batchProgress: { done: number; total: number } | null;
   cardRef?: (el: HTMLElement | null) => void;
+  /** Dwell before decisions are accepted (default DWELL_MS; 0 = immediately, for tests). */
+  dwellMs?: number;
 }
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex='0']";
 
-export function ApprovalCard({ approval, ui, projectRoot, position, total, batch, turnClosed, onDecide, onConfirmRule, onBatch, batchProgress, cardRef }: ApprovalCardProps) {
+export function ApprovalCard({ approval, ui, projectRoot, position, total, batch, turnClosed, onDecide, onConfirmRule, onBatch, batchProgress, cardRef, dwellMs = DWELL_MS }: ApprovalCardProps) {
   const [note, setNote] = useState("");
   const [reviewBatch, setReviewBatch] = useState(false);
+  // The panel keys this card by request id, so every new head starts un-armed: see DWELL_MS.
+  const [armed, setArmed] = useState(dwellMs <= 0);
+  useEffect(() => {
+    if (armed) return;
+    const t = setTimeout(() => setArmed(true), dwellMs);
+    return () => clearTimeout(t);
+  }, [armed, dwellMs]);
   const el = useRef<HTMLElement | null>(null);
   const risk = useMemo(() => classifyApproval(approval, projectRoot), [approval, projectRoot]);
   const preview = useMemo(() => buildPreview(approval), [approval]);
   const rule = useMemo(() => describeRule(approval.suggestion, risk, projectRoot), [approval.suggestion, risk, projectRoot]);
   const phase = ui?.phase ?? "idle";
-  const locked = turnClosed || phase === "submitting" || phase === "expired" || batchProgress !== null;
+  const locked = !armed || turnClosed || phase === "submitting" || phase === "expired" || batchProgress !== null;
   const title = toolTitle(approval.toolName);
   const sessionRule = rule.ok && rule.view.scope === "session" ? rule.view : null;
   const projectRule = rule.ok && rule.view.scope === "project" ? rule.view : null;
@@ -50,13 +59,14 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
       if (i >= 0) { e.preventDefault(); items[i].focus(); }
       return;
     }
-    const k = shortcutFor(e);
-    if (!k || locked) return;
-    e.preventDefault();
-    if (k === "allow") onDecide("allow");
-    else if (k === "deny") onDecide("deny", note);
-    else if (k === "rule" && projectRule) onConfirmRule(true);
-    else if (k === "session" && sessionRule) onConfirmRule(true);
+    routeCardKey(e as unknown as KeyEventLike, { armed, locked }, {
+      allow: () => onDecide("allow"),
+      deny: () => onDecide("deny", note),
+      rule: () => { if (projectRule) onConfirmRule(true); },
+      session: () => { if (sessionRule) onConfirmRule(true); },
+      // Esc is the keyboard exit from the Tab cycle below; it must not decide (an accidental Esc is not a denial).
+      release: () => { (document.activeElement as HTMLElement | null)?.blur(); },
+    });
   };
 
   return (
@@ -98,7 +108,7 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
           </div>
           <input className="chat-input appr-note-input" aria-label="Optional note to the assistant, sent with Deny" placeholder="Or tell it what to do instead, then Deny (optional)"
             value={note} maxLength={2000} disabled={locked} onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && note.trim() && !locked) { e.preventDefault(); onDecide("deny", note); } }} />
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.repeat && note.trim() && !locked) { e.preventDefault(); onDecide("deny", note); } }} />
           {!rule.ok && approval.suggestion && <p className="chat-muted">{rule.reason}</p>}
         </>
       )}

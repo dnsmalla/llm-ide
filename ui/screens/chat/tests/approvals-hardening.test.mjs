@@ -79,3 +79,61 @@ test("M12: spoofing whitespace, tag characters, variation selectors and separato
   const out = html(h(A.ArgsPreview, { preview: A.buildPreview(bash("r", "ls -la　x")) }));
   assert.match(out, /\(2 found\)/);
 });
+
+// ---- H1 held key / double click ----
+const ev = (over = {}) => {
+  const e = { key: "y", altKey: true, ctrlKey: false, metaKey: false, repeat: false, target: { tagName: "SECTION" }, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...over };
+  return e;
+};
+const harness = () => {
+  const calls = [];
+  const act = { allow: () => calls.push("allow"), deny: () => calls.push("deny"), rule: () => calls.push("rule"), session: () => calls.push("session"), release: () => calls.push("release") };
+  return { calls, act };
+};
+test("H1: a held key (repeat) never decides, a single press does", () => {
+  const { calls, act } = harness();
+  const ctx = { armed: true, locked: false };
+  A.routeCardKey(ev(), ctx, act);
+  for (let i = 0; i < 20; i++) A.routeCardKey(ev({ repeat: true }), ctx, act);
+  assert.deepEqual(calls, ["allow"], "only the first press counts");
+});
+test("H1: nothing is accepted until the card has dwelt, then it is", () => {
+  const { calls, act } = harness();
+  const e = ev();
+  A.routeCardKey(e, { armed: false, locked: false }, act);
+  assert.deepEqual(calls, []);
+  assert.equal(e.defaultPrevented, true, "the key is still swallowed so it cannot reach another handler");
+  A.routeCardKey(ev({ key: "n" }), { armed: true, locked: false }, act);
+  assert.deepEqual(calls, ["deny"]);
+  assert.ok(A.DWELL_MS >= 400 && A.DWELL_MS <= 1000);
+});
+test("H1: shortcuts are dead while typing in an input, textarea, select or contenteditable", () => {
+  const { calls, act } = harness();
+  const ctx = { armed: true, locked: false };
+  for (const target of [{ tagName: "INPUT", getAttribute: () => null }, { tagName: "TEXTAREA" }, { tagName: "SELECT" }, { tagName: "DIV", isContentEditable: true }, { tagName: "DIV", getAttribute: (n) => (n === "contenteditable" ? "true" : null) }]) {
+    A.routeCardKey(ev({ target }), ctx, act);
+  }
+  assert.deepEqual(calls, []);
+  A.routeCardKey(ev({ target: { tagName: "INPUT", getAttribute: (n) => (n === "type" ? "checkbox" : null) } }), ctx, act);
+  assert.deepEqual(calls, ["allow"], "a checkbox is not text entry");
+});
+test("H1: locked cards and IME composition ignore shortcuts; Esc releases focus and never decides", () => {
+  const { calls, act } = harness();
+  A.routeCardKey(ev(), { armed: true, locked: true }, act);
+  A.routeCardKey(ev({ isComposing: true }), { armed: true, locked: false }, act);
+  assert.deepEqual(calls, []);
+  A.routeCardKey(ev({ key: "Escape", altKey: false }), { armed: true, locked: false }, act);
+  assert.deepEqual(calls, ["release"]);
+});
+test("H1: a freshly mounted card has its decision buttons disabled until the dwell ends", () => {
+  const props = { approval: bash("r1", "npm test"), ui: { phase: "idle", error: null, shown: "d", confirmingRule: false }, projectRoot: "/p", position: 1, total: 2, batch: [], turnClosed: false, batchProgress: null, onDecide() {}, onConfirmRule() {}, onBatch() {} };
+  const fresh = html(h(A.ApprovalCard, props));
+  assert.match(fresh, /<button[^>]*disabled=""[^>]*>Allow once</);
+  assert.match(fresh, /<button[^>]*disabled=""[^>]*>Deny</);
+  const armed = html(h(A.ApprovalCard, { ...props, dwellMs: 0 }));
+  assert.ok(!/<button[^>]*disabled=""[^>]*>Allow once</.test(armed));
+});
+test("H1: the head of the queue changing gives the next card its own dwell (cards are keyed by request id)", async () => {
+  const src = (await import("node:fs")).readFileSync(new URL("../approvals/ApprovalsPanel.tsx", import.meta.url), "utf8");
+  assert.match(src, /<ApprovalCard\s+key=\{head\.requestId\}/);
+});

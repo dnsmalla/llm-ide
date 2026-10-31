@@ -130,3 +130,50 @@ export function shortcutFor(e: { key: string; altKey: boolean; ctrlKey: boolean;
     default: return null;
   }
 }
+
+/**
+ * How long a freshly shown card ignores decisions (buttons disabled, shortcuts dead). The next queued card mounts at the
+ * same screen position and takes focus, so a held key or a fast double click aimed at the previous card would otherwise
+ * land on a request the user never saw.
+ */
+export const DWELL_MS = 500;
+
+export interface KeyEventLike {
+  key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean;
+  repeat?: boolean; isComposing?: boolean;
+  target?: { tagName?: string; isContentEditable?: boolean; getAttribute?: (n: string) => string | null } | null;
+  preventDefault: () => void;
+}
+
+/** True for text-entry elements: shortcuts must never fire while the user is typing in one. */
+export function isTypingTarget(t: KeyEventLike["target"]): boolean {
+  if (!t) return false;
+  const tag = (t.tagName ?? "").toUpperCase();
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") return !["button", "checkbox", "radio", "submit", "reset"].includes((t.getAttribute?.("type") ?? "text").toLowerCase());
+  if (t.isContentEditable) return true;
+  const ce = t.getAttribute?.("contenteditable");
+  return ce !== null && ce !== undefined && ce !== "false";
+}
+
+export interface CardKeyContext { armed: boolean; locked: boolean }
+export interface CardKeyActions {
+  allow: () => void; deny: () => void; rule: () => void; session: () => void;
+  /** Esc: leave the card (focus moves out). It NEVER decides anything. */
+  release: () => void;
+}
+
+/**
+ * The single place a keydown on an approval card becomes a decision. A shortcut acts only for a single, deliberate,
+ * un-repeated press on a card that has been on screen for DWELL_MS, outside any text field, while unlocked. Returns
+ * whether the event was handled (the caller then stops default handling).
+ */
+export function routeCardKey(e: KeyEventLike, ctx: CardKeyContext, act: CardKeyActions): boolean {
+  if (e.key === "Escape" && !e.altKey && !e.ctrlKey && !e.metaKey) { act.release(); return true; }
+  const k = shortcutFor(e);
+  if (!k) return false;
+  e.preventDefault();
+  if (e.repeat || e.isComposing || isTypingTarget(e.target) || !ctx.armed || ctx.locked) return true;
+  act[k]();
+  return true;
+}

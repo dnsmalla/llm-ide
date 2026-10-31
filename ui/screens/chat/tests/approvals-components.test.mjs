@@ -14,7 +14,7 @@ const bash = (id, command, extra) => tool(id, "Bash", { command }, extra);
 
 const cardProps = (approval, extra = {}) => ({
   approval, ui: { phase: "idle", error: null, shown: "d", confirmingRule: false }, projectRoot: "/p", position: 1, total: 1, batch: [], turnClosed: false,
-  batchProgress: null, onDecide: noop, onConfirmRule: noop, onBatch: noop, ...extra,
+  batchProgress: null, onDecide: noop, onConfirmRule: noop, onBatch: noop, dwellMs: 0, ...extra,
 });
 
 test("ApprovalCard: named group, the four choices with shortcuts, and a statement that nothing is automatic", () => {
@@ -168,6 +168,8 @@ test("approvals sources never use dangerouslySetInnerHTML or timers that could r
   for (const f of readdirSync(dir).filter((x) => /\.tsx?$/.test(x))) {
     const src = readFileSync(join(dir, f), "utf8");
     assert.ok(!/dangerouslySetInnerHTML|innerHTML/.test(src), `${f} uses raw HTML`);
-    assert.ok(!/setTimeout|setInterval/.test(src), `${f} has a timer`);
+    // The one allowed timer only ARMS a card after its dwell (H1); it never allows, denies or expires a request.
+    const stripped = f === "ApprovalCard.tsx" ? src.replace("setTimeout(() => setArmed(true), dwellMs)", "") : src;
+    assert.ok(!/setTimeout|setInterval/.test(stripped), `${f} has a timer`);
   }
 });
