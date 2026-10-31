@@ -15,6 +15,7 @@ import { redactValue } from '../../kb/bus-store.mjs';
 import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { validate } from './schema-validate.mjs';
 import { runReview } from './review.mjs';
+import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 
 export const busEnabled = () => String(process.env.LLMIDE_BUS || '').toLowerCase() !== 'off';
 
@@ -147,6 +148,12 @@ export function createBus({ logger, deps = {}, maxConcurrent = 2, graceMs = 2000
     if (gate.outcome === 'not_available') throw new BusError(501, 'KIND_NOT_AVAILABLE', 'this kind is not available on this server', { reason: info.unavailableReason });
     if (frame.args.projectId) {
       try { projectRootFor(userId, frame.args.projectId); } catch { throw new BusError(404, 'NOT_FOUND', 'project not found'); }
+    }
+    if (frame.kind === 'review') {
+      // An engine that cannot be confined is refused at receipt, so nothing is queued that could never run safely.
+      const eid = engineIdFor(frame.args.engine?.provider ?? 'anthropic');
+      const st = eid ? engineStatus(eid, deps.engineDeps) : null;
+      if (st && !st.available) throw new BusError(501, ENGINE_NOT_SANDBOXED, 'this engine cannot be confined to a read-only run yet', { engine: eid, reason: st.reason });
     }
     const needsApproval = gate.outcome === 'needs_approval';
     const ttlMs = Math.min(LIMITS.maxTtlMs, frame.ttlMs ?? (needsApproval ? LIMITS.approvalTtlMs : LIMITS.defaultTtlMs));

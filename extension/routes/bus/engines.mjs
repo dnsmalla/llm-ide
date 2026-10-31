@@ -14,6 +14,14 @@
 //   - a CLI child gets minimalCliEnv (+ the provider's own key on the api-key path), never the server's env.
 //   - gemini has no read-only flag, so a CLI run on a git checkout must leave `git status` unchanged: a changed tree fails
 //     the run `read_only_violated`.
+//   - codex and gemini are DISABLED for the bus (`available: false`, reason ENGINE_NOT_SANDBOXED) until an OS sandbox
+//     exists. Their "read-only" holds only inside the checkout: the child still sees HOME/XDG/PATH, the CLI's login
+//     files, and (codex -s read-only) can read ~/.ssh and any other file the user can; gemini has no sandbox flag at all.
+//     Claude (the confined agent) and the text-only adapter stay available. Kept for the day a sandbox lands:
+//     `deps.allowUnsandboxedCli` is a TEST-ONLY seam, no HTTP or env path sets it.
+//   - NEVER an API key in a CLI child's env: the credential `api-key` is refused for CLI engines (a key in the env of a
+//     process we cannot confine is a key the process can read and send anywhere). Documented gap: CLI engines run on the
+//     CLI's own login only, once they are enabled.
 //   - a missing login or key is a typed error (engine_not_logged_in, engine_no_key), never a silent fallback to another engine.
 import crypto from 'node:crypto';
 import { redactSecrets } from '../../core/redact-secrets.mjs';
@@ -36,7 +44,16 @@ export function engineIdFor(provider) {
   return null;
 }
 
-const KEY_ENV = { openai: 'OPENAI_API_KEY', google: 'GEMINI_API_KEY' };
+export const ENGINE_NOT_SANDBOXED = 'ENGINE_NOT_SANDBOXED';
+const CLI_ENGINES = new Set(['codex', 'gemini']);
+
+/** `{ id, available, reason? }` for one engine id. The CLI engines are unavailable: no OS sandbox confines them. */
+export function engineStatus(id, deps = {}) {
+  if (CLI_ENGINES.has(id) && !deps.allowUnsandboxedCli) return { id, available: false, reason: ENGINE_NOT_SANDBOXED };
+  return { id, available: true };
+}
+/** Status of each id in `ids`, in order. */
+export const engineStatusList = (ids, deps = {}) => ids.map((id) => engineStatus(id, deps));
 const BAD_FLAG = /^--(yolo|dangerously-)/;
 const AUTH_HINT = /(not logged in|log ?in|authenticat|unauthori[sz]ed|credential|api[ -_]?key|sign in|401|403)/i;
 
@@ -56,13 +73,11 @@ async function gitSignature(spawn, cwd) {
 
 async function runCli({ userId, engine, prompt, cwd, spawn, deps, id }) {
   const provider = engine.provider;
-  const useKey = engine.credential === 'api-key';
-  const key = (deps.providerApiKey ?? providerApiKey)(userId, provider);
-  if (useKey && !key) throw fail('engine_no_key', `No ${provider} API key is saved. Add one in Settings, Providers.`);
+  if (engine.credential === 'api-key') throw fail('kind_not_available', `The ${id} CLI engine runs on its own login only: an API key is never put in a CLI child's environment`);
   const inv = (deps.cliInvocation ?? cliInvocation)(provider, prompt, { cwd, model: engine.model });
   if (!inv) throw fail('engine_failed', 'unknown engine');
   if (inv.args.some((a) => BAD_FLAG.test(String(a)))) throw fail('engine_failed', 'refused: an unsafe CLI flag');
-  const env = minimalCliEnv(useKey && key ? { [KEY_ENV[provider]]: key } : {});
+  const env = minimalCliEnv({});
   const before = await gitSignature(spawn, cwd);
   let r;
   try {
@@ -76,7 +91,7 @@ async function runCli({ userId, engine, prompt, cwd, spawn, deps, id }) {
   if (before && after && before !== after) throw fail('read_only_violated', `the ${id} run changed the working tree during a read-only task`);
   if (r.code !== 0) {
     const err = `${r.stderr || ''}\n${r.stdout || ''}`;
-    if (AUTH_HINT.test(err)) throw fail(useKey ? 'engine_no_key' : 'engine_not_logged_in', `The ${id} CLI is not signed in. Run its login or add an API key in Settings.`);
+    if (AUTH_HINT.test(err)) throw fail('engine_not_logged_in', `The ${id} CLI is not signed in. Run its own login.`);
     throw fail('engine_failed', `the ${id} run failed`);
   }
   return { ...capText(r.stdout), stopReason: 'end', engine: id };
@@ -126,5 +141,6 @@ export async function runTask({ userId, engine, prompt, cwd, mode = 'read', sign
   if (!id) throw fail('invalid_args', 'unknown provider');
   if (id === 'claude') return runClaude({ userId, engine, prompt, cwd, signal, deps });
   if (id === 'adapter') return runAdapter({ userId, engine, prompt, signal, deps });
+  if (!engineStatus(id, deps).available) throw fail('kind_not_available', `The ${id} engine is unavailable (${ENGINE_NOT_SANDBOXED}): no OS sandbox confines it`);
   return runCli({ userId, engine, prompt, cwd, signal, spawn, deps, id });
 }

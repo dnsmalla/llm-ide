@@ -207,3 +207,47 @@ test('audit redact still redacts by key name', () => {
   assert.equal(out.refreshToken, '[redacted]');
   assert.equal(out.nested.apiKey, '[redacted]');
 });
+
+// ---- M1: private keys, ssh material, AWS secrets and key-adjacent blobs ----------------------------------------
+
+const B64 = (n, seed = 'Ab3') => seed.repeat(Math.ceil(n / seed.length)).slice(0, n);
+
+test('PEM private key blocks are redacted whole (RSA, EC, OPENSSH, PGP), a truncated block to the end of the text', () => {
+  for (const kind of ['RSA PRIVATE KEY', 'EC PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PRIVATE KEY', 'ENCRYPTED PRIVATE KEY', 'PGP PRIVATE KEY BLOCK']) {
+    const block = `-----BEGIN ${kind}-----\n${B64(64)}\n${B64(64, 'xY9')}\n-----END ${kind}-----`;
+    assert.equal(redactSecrets(`before\n${block}\nafter`), 'before\n[REDACTED]\nafter', kind);
+    assert.equal(redactSecretsForStorage(`before\n${block}\nafter`), 'before\n[REDACTED]\nafter', `${kind} (storage)`);
+    assert.equal(hasSecretShape(block), true, `${kind} (probe)`);
+  }
+  const cut = `log start\n-----BEGIN OPENSSH PRIVATE KEY-----\n${B64(70)}\n${B64(70, 'q7Z')}`;
+  const out = redactSecrets(cut);
+  assert.equal(out, 'log start\n[REDACTED]');
+  assert.ok(!out.includes(B64(70)));
+});
+
+test('ssh key material lines are redacted; plain prose about ssh is not', () => {
+  const blob = `AAAA${B64(60, 'x1Y2')}`;
+  for (const t of ['ssh-rsa', 'ssh-ed25519', 'ssh-dss', 'ecdsa-sha2-nistp256']) {
+    assert.equal(redactSecrets(`id: ${t} ${blob} me@host`), 'id: [REDACTED] me@host', t);
+  }
+  assert.equal(redactSecrets('use ssh-rsa or ssh-ed25519 keys for login'), 'use ssh-rsa or ssh-ed25519 keys for login');
+});
+
+test('AWS access key ids (long-lived and temporary) and secret access keys are redacted', () => {
+  for (const pre of ['AKIA', 'ASIA']) assert.equal(redactSecrets(`k ${pre}${'Q'.repeat(16)} e`), 'k [REDACTED] e', pre);
+  const secret = B64(40, 'aB3/+');
+  for (const form of [`aws_secret_access_key = ${secret}`, `AWS_SECRET_ACCESS_KEY="${secret}"`, `aws-secret-access-key: ${secret}`]) {
+    assert.ok(!redactSecrets(`cfg ${form} end`).includes(secret), form);
+  }
+  assert.ok(!redactSecrets(`aws_session_token=${B64(120, 'Zq9/')}`).includes(B64(40, 'Zq9/')));
+});
+
+test('a long base64-looking blob after a key-named field is redacted; short values and ordinary words are left alone', () => {
+  const blob = B64(48, 'kP8x');
+  for (const form of [`encryption_key: ${blob}`, `"signingKey": "${blob}"`, `private-key=${blob}`, `KEY = ${blob}==`]) {
+    assert.ok(!redactSecrets(`x ${form} y`).includes(blob), form);
+  }
+  for (const keep of ['key: short', 'monkeys: banana', `key: ${'a'.repeat(60)}`, 'the key point is simple and the second key idea follows']) {
+    assert.equal(redactSecrets(keep), keep, keep);
+  }
+});

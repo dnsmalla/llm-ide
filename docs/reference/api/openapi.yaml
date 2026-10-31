@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 101
+  x-api-version: 102
 servers:
   - url: "https://{host}"
     variables:
@@ -15082,6 +15082,21 @@ components:
           type: "array"
           items:
             type: "string"
+        engineStatus:
+          type: "array"
+          description: "Every engine the kind knows with its availability now. codex and gemini are available:false with reason ENGINE_NOT_SANDBOXED until an OS sandbox exists; `engines` lists only the available ids."
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+              available:
+                type: "boolean"
+              reason:
+                type: "string"
+            required:
+              - "id"
+              - "available"
         args:
           type: "object"
           additionalProperties: true

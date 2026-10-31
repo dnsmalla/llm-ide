@@ -21,6 +21,7 @@ import { getDb } from '../../kb/db.mjs';
 import { REGISTRY, LIMITS, kindInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { resolveClient } from './client.mjs';
 import { BusError, approvalNonce, busEnabled } from './executor.mjs';
+import { engineStatusList } from './engines.mjs';
 
 export function isBusRoute(url) {
   const path = String(url || '').split('?')[0];
@@ -96,9 +97,12 @@ function streamEvents(req, res, userId, id, after) {
 
 function describeKind(userId, client, flags, kind, info) {
   const gate = decideReceipt({ client, kind, flagEnabled: !!flags[kind] });
+  // `engines` lists what can be selected NOW; `engineStatus` lists every engine the kind knows with its availability
+  // (codex and gemini: available false, reason ENGINE_NOT_SANDBOXED, until an OS sandbox exists).
+  const engineStatus = engineStatusList(info.engines);
   const out = {
     kind, tier: info.tier, lane: info.lane, write: info.write, available: info.available, description: info.description,
-    engines: info.engines, args: info.args, enabled: !!flags[kind],
+    engines: engineStatus.filter((e) => e.available).map((e) => e.id), engineStatus, args: info.args, enabled: !!flags[kind],
     allowed: gate.outcome !== 'tier_denied' && gate.outcome !== 'unknown_kind',
     needsApproval: gate.outcome === 'needs_approval',
   };

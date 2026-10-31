@@ -594,13 +594,14 @@ process.env.LLMIDE_OPENAI_CLI = writeStub('codex-stub', stubBody);
 process.env.LLMIDE_GOOGLE_CLI = writeStub('gemini-stub', stubBody);
 const setMode = (m) => fs.writeFileSync(MODE, m);
 const seen = () => JSON.parse(fs.readFileSync(SEEN, 'utf8'));
+const seen_reset = () => fs.rmSync(SEEN, { force: true });
 const { runGrouped } = await import('../core/process-group.mjs');
 const spawnGrouped = (cmd, args, opts) => runGrouped(cmd, args, { ...opts, graceMs: 50 });
 
 test('codex CLI engine: read-only sandbox flags, never --yolo, scrubbed env, redacted output', async () => {
   setMode('ok');
   git(['checkout', '-q', '--', '.'], REPO);
-  const r = await engines.runTask({ userId: A, engine: { provider: 'openai', model: 'gpt-5-codex' }, prompt: 'review it', cwd: REPO, mode: 'read', spawn: spawnGrouped });
+  const r = await engines.runTask({ userId: A, engine: { provider: 'openai', model: 'gpt-5-codex' }, prompt: 'review it', cwd: REPO, mode: 'read', spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } });
   const s = seen();
   assert.deepEqual(s.args.slice(0, 1), ['exec']);
   assert.ok(s.args.includes('-s') && s.args[s.args.indexOf('-s') + 1] === 'read-only');
@@ -615,48 +616,50 @@ test('codex CLI engine: read-only sandbox flags, never --yolo, scrubbed env, red
 
 test('gemini CLI engine: no --yolo, prompt as one --prompt= token, model validated', async () => {
   setMode('ok');
-  const r = await engines.runTask({ userId: A, engine: { provider: 'google', model: '--yolo' }, prompt: 'review it', cwd: REPO, mode: 'read', spawn: spawnGrouped });
+  const r = await engines.runTask({ userId: A, engine: { provider: 'google', model: '--yolo' }, prompt: 'review it', cwd: REPO, mode: 'read', spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } });
   const s = seen();
   assert.ok(s.args.some((a) => a.startsWith('--prompt=')));
   assert.ok(!s.args.some((a) => /yolo|dangerously/.test(a)), 'a flag-shaped model id is dropped, never forwarded');
   assert.equal(r.engine, 'gemini');
 });
 
-test('API-key path: the provider key is passed to the CLI only when credential is api-key, from the vault lookup', async () => {
+test('API-key path: a CLI child NEVER gets a key in its env; the api-key credential is refused for CLI engines', async () => {
   setMode('ok');
-  const deps = { providerApiKey: (u, p) => (p === 'openai' ? 'sk-test-key-for-openai-1234567890' : null) };
-  await engines.runTask({ userId: A, engine: { provider: 'openai', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps });
-  assert.equal(seen().key, 'sk-test-key-for-openai-1234567890');
+  const deps = { allowUnsandboxedCli: true, providerApiKey: (u, p) => (p === 'openai' ? 'sk-test-key-for-openai-1234567890' : null) };
+  seen_reset();
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps }), { code: 'kind_not_available' });
+  assert.equal(fs.existsSync(SEEN), false, 'the CLI was never started');
   await engines.runTask({ userId: A, engine: { provider: 'openai', credential: 'cli-login' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps });
   assert.equal(seen().key, null);
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'google', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps }), { code: 'engine_no_key' });
+  assert.ok(!seen().env.includes('OPENAI_API_KEY') && !seen().env.includes('GEMINI_API_KEY'));
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'google', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps }), { code: 'kind_not_available' });
 });
 
 test('CLI engine: a logged-out CLI is engine_not_logged_in; a failing one is engine_failed; a missing binary is typed', async () => {
   setMode('login');
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped }), { code: 'engine_not_logged_in' });
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { providerApiKey: () => 'k' } }), { code: 'engine_no_key' });
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }), { code: 'engine_not_logged_in' });
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai', credential: 'api-key' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true,  providerApiKey: () => 'k' } }), { code: 'kind_not_available' });
   setMode('fail');
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped }), { code: 'engine_failed' });
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }), { code: 'engine_failed' });
   const keep = process.env.LLMIDE_OPENAI_CLI;
   process.env.LLMIDE_OPENAI_CLI = path.join(STUBS, 'does-not-exist');
-  try { await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped }), { code: 'engine_not_logged_in' }); }
+  try { await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }), { code: 'engine_not_logged_in' }); }
   finally { process.env.LLMIDE_OPENAI_CLI = keep; }
 });
 
 test('a CLI that changes the working tree fails the read-only task (read_only_violated)', async () => {
   setMode('write');
   try {
-    await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'google' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped }), { code: 'read_only_violated' });
+    await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'google' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }), { code: 'read_only_violated' });
   } finally { git(['checkout', '-q', '--', '.'], REPO); setMode('ok'); }
 });
 
 test('write mode is refused by every engine, and an unsafe flag from a builder is refused before spawn', async () => {
   for (const provider of ['anthropic', 'openai', 'google', 'custom:cat-x']) {
-    await assert.rejects(engines.runTask({ userId: A, engine: { provider }, prompt: 'p', cwd: REPO, mode: 'write', spawn: spawnGrouped }), { code: 'kind_not_available' }, provider);
+    await assert.rejects(engines.runTask({ userId: A, engine: { provider }, prompt: 'p', cwd: REPO, mode: 'write', spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }), { code: 'kind_not_available' }, provider);
   }
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { cliInvocation: () => ({ bin: 'x', args: ['exec', '--yolo', 'p'] }) } }), { code: 'engine_failed' });
-  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'nonsense' }, prompt: 'p', cwd: REPO }), { code: 'invalid_args' });
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true,  cliInvocation: () => ({ bin: 'x', args: ['exec', '--yolo', 'p'] }) } }), { code: 'engine_failed' });
+  await assert.rejects(engines.runTask({ userId: A, engine: { provider: 'nonsense' }, prompt: 'p', cwd: REPO, deps: { allowUnsandboxedCli: true } }), { code: 'invalid_args' });
   assert.equal(engines.engineIdFor('anthropic'), 'claude');
   assert.equal(engines.engineIdFor('custom:cat-1'), 'adapter');
 });
@@ -689,7 +692,7 @@ test('adapter engine: text only through the provider adapter; a refused connecti
 test('review end to end with a stub codex: whole path through the bus, process group, redaction, terminal event', async () => {
   await reset();
   setMode('ok');
-  const real = createBus({ graceMs: 50, deps: { resolveProjectRoot: () => REPO, projectAllowed: () => true } });
+  const real = createBus({ graceMs: 50, deps: { resolveProjectRoot: () => REPO, projectAllowed: () => true, engineDeps: { allowUnsandboxedCli: true } } });
   busRef = real; real.start();
   try {
     const r = await call('POST', '/bus/commands', cmd({ args: { focus: 'code', projectId: 'proj-1', engine: { provider: 'openai', model: 'gpt-5-codex', credential: 'cli-login' } } }));
@@ -735,4 +738,48 @@ test('review with the adapter engine gets bounded, redacted git evidence in its 
   assert.match(prompt, /<evidence>/);
   assert.match(prompt, /third/);
   assert.equal(prompt.includes('sk-ant-api03'), false, 'evidence is redacted');
+});
+
+// ---- M1: codex and gemini are not sandboxed, so they are unavailable for the bus ----
+
+test('M1: codex and gemini are refused by runTask (kind_not_available) without spawning anything', async () => {
+  setMode('ok');
+  seen_reset();
+  for (const provider of ['openai', 'google']) {
+    await assert.rejects(engines.runTask({ userId: A, engine: { provider }, prompt: 'p', cwd: REPO, spawn: spawnGrouped }), { code: 'kind_not_available' }, provider);
+  }
+  assert.equal(fs.existsSync(SEEN), false, 'no CLI was started');
+  assert.deepEqual(engines.engineStatus('codex'), { id: 'codex', available: false, reason: 'ENGINE_NOT_SANDBOXED' });
+  assert.deepEqual(engines.engineStatus('gemini'), { id: 'gemini', available: false, reason: 'ENGINE_NOT_SANDBOXED' });
+  assert.deepEqual(engines.engineStatus('claude'), { id: 'claude', available: true });
+  assert.deepEqual(engines.engineStatus('adapter'), { id: 'adapter', available: true });
+});
+
+test('M1: POST /bus/commands with a codex or gemini review is refused 501 ENGINE_NOT_SANDBOXED and queues nothing', async () => {
+  await reset();
+  seen_reset();
+  for (const provider of ['openai', 'google']) {
+    const r = await call('POST', '/bus/commands', cmd({ args: { focus: 'code', projectId: 'proj-1', engine: { provider } } }));
+    assert.equal(r.status, 501, r.text);
+    assert.equal(r.body.error.code, 'ENGINE_NOT_SANDBOXED');
+    assert.equal(r.body.error.details.reason, 'ENGINE_NOT_SANDBOXED');
+  }
+  assert.equal((await call('GET', '/bus/commands')).body.items.length, 0);
+  assert.equal(fs.existsSync(SEEN), false);
+  // claude and the adapter are accepted
+  for (const provider of ['anthropic', 'custom:cat-x']) {
+    const r = await call('POST', '/bus/commands', cmd({ args: { focus: 'code', projectId: 'proj-1', engine: { provider } } }));
+    assert.equal(r.status, 202, `${provider}: ${r.text}`);
+  }
+});
+
+test('M1: GET /bus/kinds lists only usable engines and reports the others as available:false with a reason', async () => {
+  const r = await call('GET', '/bus/kinds');
+  const review = r.body.kinds.find((k) => k.kind === 'review');
+  assert.deepEqual(review.engines, ['claude', 'adapter']);
+  assert.deepEqual(review.engineStatus, [
+    { id: 'claude', available: true }, { id: 'adapter', available: true },
+    { id: 'codex', available: false, reason: 'ENGINE_NOT_SANDBOXED' }, { id: 'gemini', available: false, reason: 'ENGINE_NOT_SANDBOXED' },
+  ]);
+  for (const k of r.body.kinds.filter((x) => !x.available)) assert.deepEqual(k.engineStatus, []);
 });

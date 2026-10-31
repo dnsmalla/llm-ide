@@ -444,6 +444,12 @@ export type BusKind = {
   available: boolean;
   description: string;
   engines: string[];
+  /** Every engine the kind knows with its availability now. codex and gemini are available:false with reason ENGINE_NOT_SANDBOXED until an OS sandbox exists; `engines` lists only the available ids. */
+  engineStatus?: {
+    id: string;
+    available: boolean;
+    reason?: string;
+  }[];
   /** The kind's args JSON Schema (schema/bus/registry.json), for client pickers. */
   args: Record<string, unknown>;
   /** The caller's enable flag for this kind (off by default; set from the desktop). */

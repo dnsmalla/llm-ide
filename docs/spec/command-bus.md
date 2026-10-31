@@ -93,16 +93,18 @@ Interface (`extension/routes/bus/engines.mjs`): `runTask({ userId, engine: { pro
 |---|---|---|---|
 | `claude` | `anthropic` | the Agent SDK confined agent (`runLoopAgent`) with the new `readOnly` option: Edit and Write are neither offered nor allowed; a reported changed path fails the run | the SDK ladder: vault key, then env key, then the operator's `claude login`; `credential: api-key` requires a stored key (`engine_no_key`) |
 | `adapter` | `custom:cat-...` | a provider-catalog connection through the multi-provider adapter: **text only, no file access**, so the prompt carries bounded, redacted read-only git evidence | the connection's own key |
-| `codex` | `openai` | `codex exec -C <cwd> -s read-only` via `cliInvocation`, in the job's process group | CLI login, or the vault `openai` key passed as `OPENAI_API_KEY` when `credential: api-key` |
-| `gemini` | `google` | `gemini --prompt=...` via `cliInvocation`, in the job's process group | CLI login, or the vault `google` key as `GEMINI_API_KEY` |
+| `codex` | `openai` | **DISABLED** (`available:false`, reason `ENGINE_NOT_SANDBOXED`). Code kept: `codex exec -C <cwd> -s read-only` via `cliInvocation` | its own CLI login only (never an API key in the child env) |
+| `gemini` | `google` | **DISABLED** (`available:false`, reason `ENGINE_NOT_SANDBOXED`). Code kept: `gemini --prompt=...` via `cliInvocation` | its own CLI login only |
+
+**codex and gemini are disabled for the bus until an OS sandbox exists** (security review M1). Their "read-only" holds only inside the checkout: the child still sees `HOME`, `XDG_*` and `PATH`, the CLI's login files are readable, `codex -s read-only` can still read `~/.ssh` and every other file the user can, and gemini has no sandbox flag at all. So `POST /bus/commands` with a codex or gemini review is refused `501 ENGINE_NOT_SANDBOXED` (nothing is queued), `runTask` refuses them `kind_not_available` without spawning, and `GET /bus/kinds` reports `engines` (only the selectable ids: `claude`, `adapter`) and the additive `engineStatus: [{ id, available, reason? }]` listing every engine. `claude` (the confined agent) and the text-only `adapter` stay available. The seam `deps.allowUnsandboxedCli` is test-only. **Documented gap:** an API key is never put in a CLI child's environment (a key in a process we cannot confine is readable by it), so `credential: api-key` is refused for CLI engines (`kind_not_available`) and, once they are enabled, they run on the CLI's own login only. Result and event text is redacted with `core/redact-secrets.mjs`, which now also covers PEM private key blocks (a truncated block to the end of the text), `ssh-rsa`/`ssh-ed25519`/`ecdsa` key lines, AWS access key ids (`AKIA`, `ASIA`), AWS secret access keys and session tokens, and a long base64 blob after a key-named field.
 
 Rules, each tested:
 
 - `mode` is `read` only; every engine refuses `write` (`kind_not_available`).
 - **Never `--yolo`.** The Swift runner passes `--yolo` to codex and `--yolo -p` to gemini, which turns their sandbox off. A CLI argv containing `--yolo` or `--dangerously-*` is refused before spawn, and a model id that reads as a flag is dropped (`cliModelId`). Write kinds on codex and gemini stay `available:false` until a design and a user decision exist (audit G2, T5).
-- A CLI child gets `minimalCliEnv` (plus the provider's own key on the api-key path), never the server's environment (`LLMIDE_*`, JWT and vault secrets).
+- A CLI child gets `minimalCliEnv`, never an API key and never the server's environment (`LLMIDE_*`, JWT and vault secrets).
 - gemini has no read-only flag, so a CLI run on a git checkout must leave `git status --porcelain` unchanged; a changed tree fails the run `read_only_violated`.
-- A missing login or key is typed (`engine_not_logged_in`, `engine_no_key`), never a silent fallback to another engine.
+- A missing login or key is typed (`engine_not_logged_in`, `engine_no_key`; `engine_no_key` is for `claude` and the adapter), never a silent fallback to another engine.
 - CLI children run through the runner's `ctx.spawn`: own process group, killed on cancel, timeout and server quit.
 - The project is read in place, not in a throwaway checkout: a worktree per run is a later step (the audit's T0 ceiling asks for it).
 

@@ -22,9 +22,27 @@
         "description": "Read-only review of a registered project (code, docs or merge conflicts) on a chosen engine.",
         "engines": [
           "claude",
-          "adapter",
-          "codex",
-          "gemini"
+          "adapter"
+        ],
+        "engineStatus": [
+          {
+            "id": "claude",
+            "available": true
+          },
+          {
+            "id": "adapter",
+            "available": true
+          },
+          {
+            "id": "codex",
+            "available": false,
+            "reason": "ENGINE_NOT_SANDBOXED"
+          },
+          {
+            "id": "gemini",
+            "available": false,
+            "reason": "ENGINE_NOT_SANDBOXED"
+          }
         ],
         "args": {
           "type": "object",
@@ -84,6 +102,7 @@
         "available": false,
         "description": "Fetch email, Slack and document sources into the Library and re-index.",
         "engines": [],
+        "engineStatus": [],
         "args": {
           "type": "object",
           "additionalProperties": false,
@@ -111,6 +130,7 @@
         "available": false,
         "description": "Extract action items from recent notes and create upstream issues.",
         "engines": [],
+        "engineStatus": [],
         "args": {
           "type": "object",
           "additionalProperties": false,
@@ -141,6 +161,7 @@
         "available": false,
         "description": "Run an engine on approved issues in a worktree on a fix branch; optional ship (push, open MR/PR).",
         "engines": [],
+        "engineStatus": [],
         "args": {
           "type": "object",
           "additionalProperties": false,
@@ -180,6 +201,7 @@
         "available": false,
         "description": "Run one of the project's Loops (or one stage) with edits inside its declared scope.",
         "engines": [],
+        "engineStatus": [],
         "args": {
           "type": "object",
           "additionalProperties": false,
@@ -215,6 +237,7 @@
         "available": false,
         "description": "Run a saved custom task by id (the prompt is part of the saved task, never of the command).",
         "engines": [],
+        "engineStatus": [],
         "args": {
           "type": "object",
           "additionalProperties": false,
