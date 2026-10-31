@@ -591,7 +591,7 @@ final class MobileControlManager {
     /// 2c Task 1 — see `MobileFeatureBridge.swift`). Tag strings come from the
     /// single source of truth in `MobileProtocol.Tag`. Unknown types log and
     /// drop.
-    private func handleInbound(_ data: Data) {
+    func handleInbound(_ data: Data) {
         struct Envelope: Decodable { let type: String }
         guard let env = try? decoder.decode(Envelope.self, from: data) else {
             // Never the frame itself: it is phone-controlled and up to 8 MiB.
@@ -601,6 +601,14 @@ final class MobileControlManager {
 
         // Type and size only — see MobileLogPolicy for why never content.
         append(.info, "📨 Received type='\(MobileLogPolicy.typeLabel(env.type))', \(data.count) bytes")
+
+        // THE tier gate: one table, one place, before any bridge sees the frame. Unknown types, Mac-to-phone
+        // types and desktop-only types are refused here with a typed code (never a crash, never silent).
+        if case .refuse(let code, let message) = PhoneTierTable.verdict(for: env.type) {
+            append(.stderr, "Tier gate refused '\(MobileLogPolicy.typeLabel(env.type))' (\(code))")
+            reply(CommandError(commandId: MobileLogPolicy.typeLabel(env.type), message: message, code: code))
+            return
+        }
 
         switch env.type {
         case MobileProtocol.Tag.llmIdeChat:

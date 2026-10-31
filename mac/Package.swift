@@ -242,6 +242,7 @@ if mobileIncluded {
     let mobileTestExcludes: Set<String> = [
         "MobilePairingFrameTests.swift",
         "PhoneDesktopApprovalGateTests.swift",
+        "PhoneTierTableTests.swift",
         "MobileWebSocketServerBindTests.swift",
         "MobileWebSocketServerRebindTests.swift",
         "MobileWebSocketServerRoutingTests.swift",
