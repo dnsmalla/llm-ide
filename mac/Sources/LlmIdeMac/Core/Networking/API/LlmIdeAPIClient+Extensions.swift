@@ -402,3 +402,66 @@ extension LlmIdeAPIClient: ExtensionsCatalogAPI {
         try await get("/auth/me/extensions/active", authenticated: true)
     }
 }
+
+// MARK: - Workspace trust + install allowlist (API 95)
+
+/// One folder the user has decided on (`/auth/me/workspace-trust`).
+public struct WorkspaceTrustItem: Codable, Equatable, Identifiable {
+    public let path: String
+    public let trusted: Bool
+    public let updatedAt: String
+    public var id: String { path }
+}
+
+/// `enforced` is false when the server's trust kill switch is off (every
+/// folder then behaves as trusted).
+public struct WorkspaceTrustList: Codable, Equatable {
+    public let enforced: Bool
+    public let items: [WorkspaceTrustItem]
+}
+
+public struct WorkspaceTrustSetResult: Codable, Equatable {
+    public let ok: Bool
+    public let item: WorkspaceTrustItem
+}
+
+/// The per-user install allowlist: `operator` (the operator's own list),
+/// `ceiling` (what a user may add, nil = none), `user` (saved additions),
+/// `ignored` (saved additions the ceiling no longer covers) and `effective`.
+public struct ExtAllowlist: Codable, Equatable {
+    public let `operator`: [String]
+    public let ceiling: [String]?
+    public let user: [String]
+    public let ignored: [String]
+    public let effective: [String]
+}
+
+/// What the workspace-trust and allowlist screens use, so view models are
+/// testable with a fake.
+protocol ExtensionsTrustAPI: AnyObject, Sendable {
+    func workspaceTrust() async throws -> WorkspaceTrustList
+    func setWorkspaceTrust(path: String, trusted: Bool) async throws -> WorkspaceTrustSetResult
+    func extAllowlist() async throws -> ExtAllowlist
+    func setExtAllowlist(sources: [String]) async throws -> ExtAllowlist
+}
+
+extension LlmIdeAPIClient: ExtensionsTrustAPI {
+    func workspaceTrust() async throws -> WorkspaceTrustList {
+        try await get("/auth/me/workspace-trust", authenticated: true)
+    }
+
+    /// An explicit user action only; the server refuses folders that are too broad.
+    func setWorkspaceTrust(path: String, trusted: Bool) async throws -> WorkspaceTrustSetResult {
+        struct Req: Encodable { let path: String; let trusted: Bool }
+        return try await put("/auth/me/workspace-trust", body: Req(path: path, trusted: trusted), authenticated: true)
+    }
+
+    func extAllowlist() async throws -> ExtAllowlist {
+        try await get("/auth/me/extensions/allowlist", authenticated: true)
+    }
+
+    func setExtAllowlist(sources: [String]) async throws -> ExtAllowlist {
+        struct Req: Encodable { let sources: [String] }
+        return try await put("/auth/me/extensions/allowlist", body: Req(sources: sources), authenticated: true)
+    }
+}

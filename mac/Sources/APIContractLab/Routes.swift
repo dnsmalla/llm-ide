@@ -111,6 +111,10 @@ let apiRoutes: [Route] = [
     route("POST /auth/me/extensions/update", "ExtUpdateResult", ExtUpdateResult.self),  // extApplyUpdate
     route("POST /auth/me/extensions/update/preview", "ExtUpdatePreview", ExtUpdatePreview.self),  // extPreviewUpdate
     route("POST /auth/me/extensions/updates/check", "ExtUpdateCheckResult", ExtUpdateCheckResult.self),  // extCheckUpdates
+    route("GET /auth/me/workspace-trust", "WorkspaceTrustList", WorkspaceTrustList.self),  // workspaceTrust
+    route("PUT /auth/me/workspace-trust", "WorkspaceTrustSetResult", WorkspaceTrustSetResult.self),  // setWorkspaceTrust
+    route("GET /auth/me/extensions/allowlist", "ExtAllowlist", ExtAllowlist.self),  // extAllowlist
+    route("PUT /auth/me/extensions/allowlist", "ExtAllowlist", ExtAllowlist.self),  // setExtAllowlist
     route("POST /kb/providers/catalog/disconnect", "CatalogAck", LlmIdeAPIClient.CatalogAck.self),  // disconnectCatalogProvider
     route("POST /kb/providers/catalog/test", "CatalogTestResult", LlmIdeAPIClient.CatalogTestResult.self),  // testCatalogProvider
     route("POST /kb/providers/catalog/models", "CatalogModelList", LlmIdeAPIClient.CatalogModelList.self),  // fetchCatalogModels
