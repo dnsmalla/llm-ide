@@ -38,9 +38,10 @@ test("redactValue: secret-named keys, nesting, depth and breadth bounds", () => 
   assert.equal(v.ok, "fine");
   assert.equal(v.list[0], "[REDACTED]");
   assert.equal(v.n, 3);
-  assert.equal(v.deep.a.b.c.d.e, "[nested value omitted]");
+  assert.equal(v.deep.a.b.c.d.e, "[nested value omitted: object with 1 keys]");
   const wide = A.redactValue(Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, i])));
-  assert.equal(Object.keys(wide).length, 100);
+  assert.equal(Object.keys(wide).length, 101, "100 kept + one visible [hidden] marker");
+  assert.equal(wide["[hidden]"], "400 keys hidden");
   assert.equal(A.looksSecret("ghp_" + "a".repeat(36)), true);
   assert.equal(A.looksSecret("hello"), false);
 });

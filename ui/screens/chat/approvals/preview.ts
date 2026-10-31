@@ -1,7 +1,7 @@
 // What a card shows of a tool call's arguments: redacted, hidden characters escaped, size capped. The structure
 // (diff / write / command / json) is decided here so the component only lays it out. Pure.
 import type { PendingApproval } from "../state";
-import { redactSecrets, redactValue } from "./redact";
+import { redactSecretsCounted, redactValueDetailed } from "./redact";
 import { sanitizeText, type Sanitized } from "./sanitize";
 
 /** Shown text per block before "Show all"; and the hard ceiling once expanded. */
@@ -10,7 +10,14 @@ export const PREVIEW_MAX_CHARS = 40_000;
 /** Lines shown before a block is collapsed behind "Show all". */
 export const PREVIEW_COLLAPSED_LINES = 12;
 
-export type Block = Sanitized & { caption: string; tone?: "removed" | "added" };
+export type Block = Sanitized & {
+  caption: string;
+  tone?: "removed" | "added";
+  /** Secret-shaped spans replaced by [REDACTED] in this block (shown as "N secrets redacted"). */
+  redactions: number;
+  /** Things cut by a bound, in plain words ("3 more items hidden"); never empty when something was hidden. */
+  hidden: string[];
+};
 
 export type Preview =
   | { kind: "diff"; file: Sanitized | null; blocks: Block[]; replaceAll: boolean }
@@ -21,10 +28,14 @@ export type Preview =
   | { kind: "none" };
 
 const clean = (v: unknown, cap: number): Sanitized => {
-  const s = sanitizeText(typeof v === "string" ? redactSecrets(v) : v, cap);
-  return s;
+  if (typeof v !== "string") return sanitizeText(v, cap);
+  // Redact the whole value first, then cut: a cut could otherwise split a secret and leave half of it showing.
+  return sanitizeText(redactSecretsCounted(v).text, cap);
 };
-const block = (caption: string, v: unknown, tone?: Block["tone"]): Block => ({ ...clean(v, PREVIEW_MAX_CHARS), caption, tone });
+const block = (caption: string, v: unknown, tone?: Block["tone"], extra: { redactions?: number; hidden?: string[] } = {}): Block => {
+  const red = typeof v === "string" ? redactSecretsCounted(v).count : 0;
+  return { ...clean(v, PREVIEW_MAX_CHARS), caption, tone, redactions: red + (extra.redactions ?? 0), hidden: extra.hidden ?? [] };
+};
 
 export function buildPreview(a: Pick<PendingApproval, "args" | "argsSummary" | "toolName">): Preview {
   const args = a.args;
@@ -42,8 +53,18 @@ export function buildPreview(a: Pick<PendingApproval, "args" | "argsSummary" | "
     }
     if (typeof o.command === "string") return { kind: "command", block: { ...block("Command", o.command), truncated: o.truncated === true || o.command.length > PREVIEW_MAX_CHARS } };
     let text = "";
-    try { text = JSON.stringify(redactValue(o), null, 2); } catch { text = "[arguments could not be shown]"; }
-    if (text && text !== "{}") return { kind: "json", block: block("Arguments", text) };
+    let extra: { redactions: number; hidden: string[] } = { redactions: 0, hidden: [] };
+    try {
+      const rv = redactValueDetailed(o);
+      text = JSON.stringify(rv.value, null, 2);
+      const hidden: string[] = [];
+      if (rv.hiddenItems) hidden.push(`${rv.hiddenItems} more items hidden`);
+      if (rv.hiddenKeys) hidden.push(`${rv.hiddenKeys} keys hidden`);
+      if (rv.omittedNested) hidden.push(`${rv.omittedNested} nested values omitted`);
+      extra = { redactions: rv.redactions, hidden };
+    } catch { text = "[arguments could not be shown]"; }
+    // `text` is already redacted: block() would count nothing new unless the JSON text still held a secret shape.
+    if (text && text !== "{}") return { kind: "json", block: block("Arguments", text, undefined, extra) };
   }
   if (a.argsSummary) return { kind: "summary", block: block("Summary", a.argsSummary) };
   return { kind: "none" };

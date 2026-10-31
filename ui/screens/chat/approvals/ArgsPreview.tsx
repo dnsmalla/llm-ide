@@ -12,14 +12,16 @@ function BlockView({ b }: { b: Block }) {
   return (
     <div className="appr-block" data-tone={b.tone}>
       <div className="appr-caption">{b.caption}</div>
+      {b.redactions > 0 && <p className="appr-warn" role="note">{b.redactions} {b.redactions === 1 ? "secret" : "secrets"} redacted: shown as [REDACTED], the real call still carries the original text.</p>}
+      {b.hidden.length > 0 && <p className="appr-warn" role="note">Not shown: {b.hidden.join(", ")}.</p>}
+      {(b.truncated || b.totalChars > PREVIEW_MAX_CHARS) && <p className="appr-warn" role="note">Only the first {PREVIEW_MAX_CHARS} of {b.totalChars} characters can be shown here; the call itself is longer.</p>}
       <pre className="appr-pre" tabIndex={0} aria-label={`${b.caption}, ${b.totalChars} characters`}>{shown}</pre>
       {tooLong && (
         <button type="button" className="chat-link-btn" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? "Show less" : `Show all (${lines.total} lines, ${b.totalChars} characters)`}
         </button>
       )}
-      {(b.truncated || b.totalChars > PREVIEW_MAX_CHARS) && open && <p className="chat-muted">Preview cut at {PREVIEW_MAX_CHARS} characters; the call itself is longer.</p>}
-      {b.hadHidden && <p className="appr-warn" role="note">This text contains hidden or control characters, shown as {"<U+XXXX>"}.</p>}
+      {b.hadHidden && <p className="appr-warn" role="note">This text contains hidden or control characters, shown as {"<U+XXXX>"} ({b.hiddenCount} found).</p>}
     </div>
   );
 }
