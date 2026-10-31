@@ -157,9 +157,11 @@ export function getCommandArgs(userId, id) {
 const OWN_STATES = new Set(['awaiting_approval', 'denied', 'expired']);
 const JOB_STATES_VISIBLE = new Set(['queued', 'running', 'succeeded', 'failed', 'interrupted']);
 
-export function listCommands(userId, { state, limit = 50 } = {}) {
+export function listCommands(userId, { state, limit = 50, originClient } = {}) {
   const n = Math.max(1, Math.min(200, Math.floor(limit) || 50));
   let where = 'c.user_id = ?';
+  const extra = [];
+  if (typeof originClient === 'string') { where += ' AND c.origin_client = ?'; extra.push(originClient); }
   if (state) {
     if (OWN_STATES.has(state)) where += ` AND c.state = '${state}'`;
     else if (state === 'cancelled') where += " AND (c.state = 'cancelled' OR (c.state = 'enqueued' AND j.state = 'cancelled'))";
@@ -168,7 +170,7 @@ export function listCommands(userId, { state, limit = 50 } = {}) {
     else return [];
   }
   const rows = getDb().prepare(`SELECT c.* FROM bus_commands c LEFT JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
-    WHERE ${where} ORDER BY c.created_at DESC, c.rowid DESC LIMIT ?`).all(userId, n);
+    WHERE ${where} ORDER BY c.created_at DESC, c.rowid DESC LIMIT ?`).all(userId, ...extra, n);
   return rows.map((r) => shapeRow(r, r.state === 'enqueued' ? getJob(userId, r.id) : null));
 }
 

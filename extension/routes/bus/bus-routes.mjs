@@ -18,10 +18,11 @@ import {
   setKindEnabled, listKindFlags,
 } from '../../kb/bus-store.mjs';
 import { getDb } from '../../kb/db.mjs';
-import { REGISTRY, LIMITS, kindInfo, decideReceipt, mayApprove } from './registry.mjs';
+import { REGISTRY, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { resolveClient } from './client.mjs';
 import { BusError, approvalNonce, busEnabled } from './executor.mjs';
 import { engineStatusList } from './engines.mjs';
+import { recordAudit } from '../../server/audit.mjs';
 
 export function isBusRoute(url) {
   const path = String(url || '').split('?')[0];
@@ -31,6 +32,24 @@ export function isBusRoute(url) {
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const fail = (res, status, code, message, details) => send(res, status, { error: { code, message, ...(details !== undefined ? { details } : {}) } });
 const iso = (s) => s;
+
+// Read scope by client class (docs/spec/command-bus.md section 3): the native phone and the desktop (rank 3 and up) read
+// every command of the user's; phone-pwa and extension (lower, less trusted classes) read only commands that were
+// started by their OWN class. An unreadable command answers 404 exactly like an unknown id, so its existence is not
+// confirmed. (Approve and deny are desktop-only anyway.)
+const readsAll = (client) => (classInfo(client)?.rank ?? 0) >= 3;
+const canRead = (client, c) => !!c && (readsAll(client) || c.originClient === client);
+
+/** One audit row for a state-changing bus call. Never a nonce, a token or a body: ids, kind, class and the error code only. */
+function auditBus(req, userId, action, resource, outcome, detail) {
+  try {
+    recordAudit(getDb(), {
+      userId, requestId: req.id, ip: req.socket?.remoteAddress || 'unknown', userAgent: req.headers?.['user-agent'] || '',
+      action, resource, outcome, detail,
+    });
+  } catch { /* an audit failure must never fail the call */ }
+}
+const outcomeOf = (e) => (e.status === 403 || e.status === 401 ? 'denied' : 'failure');
 
 function shapeCommand(userId, c, { withResult = false } = {}) {
   const term = c.state === 'queued' || c.state === 'running' || c.state === 'awaiting_approval' ? null : terminalEvent(userId, c.id);
@@ -135,7 +154,7 @@ export async function handleBusRoute(req, res, { bus } = {}) {
       const limit = limitRaw == null || limitRaw === '' ? 50 : Number(limitRaw);
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) { fail(res, 400, 'VALIDATION_FAILED', 'limit must be an integer from 1 to 200'); return; }
       if (state && !['awaiting_approval', 'queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted', 'denied', 'expired'].includes(state)) { fail(res, 400, 'VALIDATION_FAILED', 'unknown state'); return; }
-      send(res, 200, { items: listCommands(userId, { state, limit }).map((c) => shapeCommand(userId, c)) });
+      send(res, 200, { items: listCommands(userId, { state, limit, ...(readsAll(client) ? {} : { originClient: client }) }).map((c) => shapeCommand(userId, c)) });
       return;
     }
     if (path === '/bus/commands') { fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET or POST only'); return; }
@@ -157,7 +176,9 @@ export async function handleBusRoute(req, res, { bus } = {}) {
       let body;
       try { body = await readJson(req, 4096); } catch { fail(res, 400, 'VALIDATION_FAILED', 'Body must be valid JSON'); return; }
       if (!body || typeof body.enabled !== 'boolean') { fail(res, 400, 'VALIDATION_FAILED', 'enabled must be a boolean'); return; }
-      send(res, 200, { kind, enabled: setKindEnabled(userId, kind, body.enabled) });
+      const enabled = setKindEnabled(userId, kind, body.enabled);
+      auditBus(req, userId, 'bus.kind_set', kind, 'success', { kind, enabled, client });
+      send(res, 200, { kind, enabled });
       return;
     }
 
@@ -187,7 +208,7 @@ export async function handleBusRoute(req, res, { bus } = {}) {
         expireStale(userId);
         ensureTerminal(userId, id);
         const c = getCommand(userId, id);
-        if (!c) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        if (!canRead(client, c)) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
         send(res, 200, { command: shapeCommand(userId, c, { withResult: true }) });
         return;
       }
@@ -195,23 +216,48 @@ export async function handleBusRoute(req, res, { bus } = {}) {
         const afterRaw = url.searchParams.get('after');
         const after = afterRaw == null || afterRaw === '' ? 0 : Number(afterRaw);
         if (!Number.isInteger(after) || after < 0 || after > 1e9) { fail(res, 400, 'VALIDATION_FAILED', 'after must be an integer >= 0'); return; }
-        if (!getCommand(userId, id)) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        if (!canRead(client, getCommand(userId, id))) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
         streamEvents(req, res, userId, id, after);
         return;
       }
       if (tail === '/cancel' && req.method === 'POST') {
-        send(res, 200, { command: shapeCommand(userId, bus.cancel(userId, id)) });
+        const before = getCommand(userId, id);
+        if (!canRead(client, before)) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        try {
+          const cmd = bus.cancel(userId, id);
+          auditBus(req, userId, 'bus.cancel', id, 'success', { kind: before.kind, client });
+          send(res, 200, { command: shapeCommand(userId, cmd) });
+        } catch (e) {
+          if (e instanceof BusError) auditBus(req, userId, 'bus.cancel', id, outcomeOf(e), { kind: before.kind, client, reason: e.code });
+          throw e;
+        }
         return;
       }
       if (tail === '/approve' && req.method === 'POST') {
         let body;
         try { body = await readJson(req, 8192); } catch { fail(res, 400, 'VALIDATION_FAILED', 'Body must be valid JSON'); return; }
-        send(res, 200, { command: shapeCommand(userId, bus.approve(userId, id, { client, nonce: body.nonce, confirm: body.confirm })) });
+        const before = getCommand(userId, id);
+        try {
+          const cmd = bus.approve(userId, id, { client, nonce: body.nonce, confirm: body.confirm });
+          auditBus(req, userId, 'bus.approve', id, 'success', { kind: cmd.kind, tier: cmd.tier, client });
+          send(res, 200, { command: shapeCommand(userId, cmd) });
+        } catch (e) {
+          if (e instanceof BusError) auditBus(req, userId, 'bus.approve', id, outcomeOf(e), { kind: before?.kind, client, reason: e.code });
+          throw e;
+        }
         return;
       }
       if (tail === '/deny' && req.method === 'POST') {
         try { await readJson(req, 8192); } catch { fail(res, 400, 'VALIDATION_FAILED', 'Body must be valid JSON'); return; }
-        send(res, 200, { command: shapeCommand(userId, bus.deny(userId, id, { client })) });
+        const before = getCommand(userId, id);
+        try {
+          const cmd = bus.deny(userId, id, { client });
+          auditBus(req, userId, 'bus.deny', id, 'success', { kind: cmd.kind, tier: cmd.tier, client });
+          send(res, 200, { command: shapeCommand(userId, cmd) });
+        } catch (e) {
+          if (e instanceof BusError) auditBus(req, userId, 'bus.deny', id, outcomeOf(e), { kind: before?.kind, client, reason: e.code });
+          throw e;
+        }
         return;
       }
       fail(res, 405, 'METHOD_NOT_ALLOWED', 'method not allowed');

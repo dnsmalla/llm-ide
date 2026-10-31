@@ -941,3 +941,74 @@ test('L2: cancelled-while-waiting commands are purged after the retention window
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM job_events WHERE job_id = ?').get(oldId).n, 0, 'its events go too');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM bus_commands WHERE idem IN ('seed-idem-2-cancelled','seed-idem-3-awaiting_approval')").get().n, 2, 'recent and still-pending rows stay');
 });
+
+// ---- L4: audit rows for approve / deny / cancel / PUT kinds ----
+
+const busAudit = (action) => main.getDb().prepare('SELECT * FROM audit_log WHERE action = ? ORDER BY id').all(action);
+
+test('L4: approve, deny, cancel and PUT /bus/kinds write audit rows (who, what, outcome) and never a nonce', async () => {
+  await reset();
+  main.getDb().prepare('DELETE FROM audit_log').run();
+  await call('PUT', '/bus/kinds/review', { enabled: true });
+  const put = busAudit('bus.kind_set');
+  assert.equal(put.length, 1);
+  assert.equal(put[0].resource, 'review'); assert.equal(put[0].outcome, 'success');
+  assert.deepEqual(JSON.parse(put[0].detail), { kind: 'review', enabled: true, client: 'desktop-ui' });
+  await call('PUT', '/bus/kinds/review', { enabled: false });
+  const phone = async () => (await call('POST', '/bus/commands', cmd(), { client: 'ios-native' })).body.command.id;
+  const id1 = await phone();
+  const nonce = (await call('GET', '/bus/approvals')).body.items.find((i) => i.id === id1).nonce;
+  // a wrong nonce is audited as denied and the supplied value is not recorded
+  await call('POST', `/bus/commands/${id1}/approve`, { nonce: 'a'.repeat(64) });
+  assert.equal((await call('POST', `/bus/commands/${id1}/approve`, { nonce })).status, 200);
+  const ap = busAudit('bus.approve');
+  assert.deepEqual(ap.map((r) => r.outcome), ['denied', 'success']);
+  assert.equal(ap[1].resource, id1);
+  assert.equal(JSON.parse(ap[1].detail).kind, 'review');
+  assert.equal(JSON.parse(ap[1].detail).client, 'desktop-ui');
+  assert.equal(JSON.parse(ap[0].detail).reason, 'APPROVAL_NONCE_INVALID');
+  // an approve attempted by a phone is audited too
+  await call('POST', `/bus/commands/${id1}/approve`, { nonce }, { client: 'ios-native' });
+  assert.equal(busAudit('bus.approve').at(-1).outcome, 'denied');
+  const id2 = await phone();
+  assert.equal((await call('POST', `/bus/commands/${id2}/deny`, {})).status, 200);
+  assert.equal(busAudit('bus.deny').at(-1).resource, id2);
+  const id3 = await phone();
+  assert.equal((await call('POST', `/bus/commands/${id3}/cancel`, {})).status, 200);
+  const ca = busAudit('bus.cancel');
+  assert.equal(ca.at(-1).resource, id3); assert.equal(ca.at(-1).outcome, 'success');
+  const all = JSON.stringify(main.getDb().prepare("SELECT * FROM audit_log WHERE action LIKE 'bus.%'").all());
+  assert.ok(!all.includes(nonce), 'the approval nonce is never in an audit row');
+  assert.ok(!all.includes('a'.repeat(64)), 'neither is a submitted wrong nonce');
+});
+
+// ---- L5: who may read which command ----
+
+test('L5: phone-pwa and extension read only commands of their own class; ios-native and desktop-ui read all of the user\'s', async () => {
+  await reset();
+  const dId = (await call('POST', '/bus/commands', cmd(), { client: 'desktop-ui' })).body.command.id;
+  const iId = (await call('POST', '/bus/commands', cmd(), { client: 'ios-native' })).body.command.id;
+  insertCmd(A, 91, { state: 'denied', createdAt: new Date().toISOString() });
+  const row = (cls) => main.getDb().prepare("UPDATE bus_commands SET origin_client = ? WHERE idem = ?").run(cls, `seed-idem-91-denied`);
+  row('extension');
+  const eId = main.getDb().prepare("SELECT id FROM bus_commands WHERE idem = 'seed-idem-91-denied'").get().id;
+  await sleep(100);
+  const ids = (r) => r.body.items.map((c) => c.id).sort();
+  const all = [dId, iId, eId].sort();
+  assert.deepEqual(ids(await call('GET', '/bus/commands', undefined, { client: 'desktop-ui' })), all);
+  assert.deepEqual(ids(await call('GET', '/bus/commands', undefined, { client: 'ios-native' })), all);
+  assert.deepEqual(ids(await call('GET', '/bus/commands', undefined, { client: 'extension' })), [eId]);
+  assert.deepEqual(ids(await call('GET', '/bus/commands', undefined, { client: 'phone-pwa' })), []);
+  for (const client of ['extension', 'phone-pwa']) {
+    for (const id of [dId, iId]) {
+      assert.equal((await call('GET', `/bus/commands/${id}`, undefined, { client })).status, 404, `${client} cannot read ${id}`);
+      assert.equal((await sse(`/bus/commands/${id}/events`, { client })).status, 404, `${client} events`);
+      assert.equal((await call('POST', `/bus/commands/${id}/cancel`, {}, { client })).status, 404, `${client} cancel`);
+    }
+  }
+  assert.equal((await call('GET', `/bus/commands/${eId}`, undefined, { client: 'extension' })).status, 200, 'its own class');
+  assert.equal((await call('GET', `/bus/commands/${eId}`, undefined, { client: 'phone-pwa' })).status, 404, 'a different low class');
+  assert.equal((await call('GET', `/bus/commands/${dId}`, undefined, { client: 'ios-native' })).status, 200);
+  assert.equal((await call('GET', `/bus/commands/${dId}`, undefined, { client: 'desktop-ui' })).status, 200);
+  assert.equal((await call('GET', '/bus/commands?state=denied', undefined, { client: 'extension' })).body.items.length, 1);
+});
