@@ -1,0 +1,237 @@
+{
+ "_comment": "Append-only conformance fixtures for ui/screens/library/frontmatter.ts. Cases marked with a Mac source file are copied from the Swift tests; a Mac behaviour change adds a new case.",
+ "cases": [
+  {
+   "name": "mac fixture lta/meeting-with-platform.md (Yams output)",
+   "source": "mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-with-platform.md",
+   "input": "---\nid: m-fixture-1\ntitle: Budget review\nstarted_at: '2026-08-01T10:00:00Z'\nended_at: '2026-08-01T10:30:00Z'\nduration_seconds: 1800\nparticipants:\n- Alice\n- Bob\nplatform: chrome-extension\nlanguage: en\ntldr: []\n---\n\n## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n",
+   "hasFrontmatter": true,
+   "data": {
+    "id": "m-fixture-1",
+    "title": "Budget review",
+    "started_at": "2026-08-01T10:00:00Z",
+    "ended_at": "2026-08-01T10:30:00Z",
+    "duration_seconds": "1800",
+    "participants": [
+     "Alice",
+     "Bob"
+    ],
+    "language": "en",
+    "tldr": [],
+    "platform": "chrome-extension"
+   },
+   "body": "## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n"
+  },
+  {
+   "name": "mac fixture lta/meeting-without-platform.md (Q19: no platform key)",
+   "source": "mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-without-platform.md",
+   "input": "---\nid: m-fixture-1\ntitle: Budget review\nstarted_at: '2026-08-01T10:00:00Z'\nended_at: '2026-08-01T10:30:00Z'\nduration_seconds: 1800\nparticipants:\n- Alice\n- Bob\nlanguage: en\ntldr: []\n---\n\n## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n",
+   "hasFrontmatter": true,
+   "data": {
+    "id": "m-fixture-1",
+    "title": "Budget review",
+    "started_at": "2026-08-01T10:00:00Z",
+    "ended_at": "2026-08-01T10:30:00Z",
+    "duration_seconds": "1800",
+    "participants": [
+     "Alice",
+     "Bob"
+    ],
+    "language": "en",
+    "tldr": []
+   },
+   "body": "## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n"
+  },
+  {
+   "name": "LibraryItemStoreSourceScanTests: double-quoted platform",
+   "source": "mac/Tests/LlmIdeMacTests/LibraryItemStoreSourceScanTests.swift",
+   "input": "---\nplatform: \"meet\"\n---\nhi",
+   "hasFrontmatter": true,
+   "data": {
+    "platform": "meet"
+   },
+   "body": "hi"
+  },
+  {
+   "name": "no frontmatter: whole text is body",
+   "input": "# Title\n\ntext\n",
+   "hasFrontmatter": false,
+   "data": {},
+   "body": "# Title\n\ntext\n"
+  },
+  {
+   "name": "unclosed fence: whole text is body (Mac split returns nil)",
+   "input": "---\ntitle: x\nbody without a closing fence\n",
+   "hasFrontmatter": false,
+   "data": {},
+   "body": "---\ntitle: x\nbody without a closing fence\n"
+  },
+  {
+   "name": "empty header is not a fence (Mac quirk: the close must be preceded by a newline inside the text after the opener)",
+   "input": "---\n---\nbody",
+   "hasFrontmatter": false,
+   "data": {},
+   "body": "---\n---\nbody"
+  },
+  {
+   "name": "CRLF file parses; body is LF-normalised",
+   "input": "---\r\ntitle: Win\r\nplatform: teams\r\n---\r\n\r\nbody\r\n",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "Win",
+    "platform": "teams"
+   },
+   "body": "body\n"
+  },
+  {
+   "name": "blank lines after the closing fence are dropped",
+   "input": "---\ntitle: a\n---\n\n\n\ntext",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "a"
+   },
+   "body": "text"
+  },
+  {
+   "name": "a four-dash line closes the fence and its rest is dropped (Mac quirk)",
+   "input": "---\ntitle: a\n----\nbody",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "a"
+   },
+   "body": "body"
+  },
+  {
+   "name": "close fence at end of text: empty body",
+   "input": "---\ntitle: a\n---",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "a"
+   },
+   "body": ""
+  },
+  {
+   "name": "double-quoted value unescapes \\\" and \\\\",
+   "input": "---\ntitle: \"He said \\\"hi\\\" in C:\\\\tmp\"\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "He said \"hi\" in C:\\tmp"
+   },
+   "body": "x"
+  },
+  {
+   "name": "single-quoted value: doubled quote is a quote; colon and hash inside are text",
+   "input": "---\ntitle: 'it''s: a # test'\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "it's: a # test"
+   },
+   "body": "x"
+  },
+  {
+   "name": "plain value keeps colons after the first; trailing comment is stripped",
+   "input": "---\nurl: http://a.b/c:d # note\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "url": "http://a.b/c:d"
+   },
+   "body": "x"
+  },
+  {
+   "name": "first occurrence of a key wins (Mac value(forKey:) returns the first line)",
+   "input": "---\ntitle: first\ntitle: second\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "first"
+   },
+   "body": "x"
+  },
+  {
+   "name": "block list, flow list, empty list and null",
+   "input": "---\nparticipants:\n- Alice\n- 'Bob B'\ntldr: [a, \"b, c\", 'd']\nempty: []\nnone: null\ntilde: ~\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "participants": [
+     "Alice",
+     "Bob B"
+    ],
+    "tldr": [
+     "a",
+     "b, c",
+     "d"
+    ],
+    "empty": [],
+    "none": null,
+    "tilde": null
+   },
+   "body": "x"
+  },
+  {
+   "name": "indented block list",
+   "input": "---\nparticipants:\n  - A\n  - B\nlanguage: ja\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "participants": [
+     "A",
+     "B"
+    ],
+    "language": "ja"
+   },
+   "body": "x"
+  },
+  {
+   "name": "nested map is skipped (null), later keys still read",
+   "input": "---\nmeta:\n  a: 1\n  b: 2\nplatform: slack\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "meta": null,
+    "platform": "slack"
+   },
+   "body": "x"
+  },
+  {
+   "name": "literal and folded block scalars",
+   "input": "---\ngist: |\n  line one\n  line two\nsummary: >-\n  folded\n  text\nafter: ok\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "gist": "line one\nline two\n",
+    "summary": "folded text",
+    "after": "ok"
+   },
+   "body": "x"
+  },
+  {
+   "name": "unicode keys values and emoji",
+   "input": "---\ntitle: '週次レビュー 🚀'\nparticipants: [田中, \"Zoë\"]\n---\n本文",
+   "hasFrontmatter": true,
+   "data": {
+    "title": "週次レビュー 🚀",
+    "participants": [
+     "田中",
+     "Zoë"
+    ]
+   },
+   "body": "本文"
+  },
+  {
+   "name": "hostile keys are plain data, never prototype writes",
+   "input": "---\n__proto__: x\nconstructor: y\ntoString: z\n---\nb",
+   "hasFrontmatter": true,
+   "data": {
+    "__proto__": "x",
+    "constructor": "y",
+    "toString": "z"
+   },
+   "body": "b"
+  },
+  {
+   "name": "numeric started_at stays a string for the date helper",
+   "input": "---\nstarted_at: 1785578400\n---\nx",
+   "hasFrontmatter": true,
+   "data": {
+    "started_at": "1785578400"
+   },
+   "body": "x"
+  }
+ ]
+}
