@@ -97,7 +97,7 @@ export async function syncIcalSource({ userId, sourceId, sourceName, getUrl, cur
   const ex = expandEvents(parsed.events, { windowStartMs: now - options.daysBack * 86_400_000, windowEndMs: now + options.daysAhead * 86_400_000, limits });
   const truncated = parsed.truncated || ex.truncated;
   // Real clock: indexed_at is datetime('now'); the injected `now` only moves the window.
-  const startedAt = sqlTime(Date.now() - 1000);
+  const startedAt = sqlTime(Date.now());
   const rows = [];
   const refs = [];
   for (const inst of ex.instances) { refs.push(instanceRef(sourceId, inst.uid, inst.key)); rows.push(...instanceToRows(inst, { sourceId, sourceName })); }
