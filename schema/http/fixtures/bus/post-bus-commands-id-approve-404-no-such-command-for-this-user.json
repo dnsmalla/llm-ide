@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /bus/commands/:id/approve",
+  "status": 404,
+  "description": "no such command for this user",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000003"
+    },
+    "body": {
+      "nonce": "5f0c1a9e7b3d4c2a8e6f1b0d9c7a5e3f2d4b6a8c0e1f3a5b7c9d1e2f4a6b8c0d"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "command not found"
+    }
+  }
+}

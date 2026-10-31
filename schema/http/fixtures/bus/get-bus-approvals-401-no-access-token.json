@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /bus/approvals",
+  "status": 401,
+  "description": "no access token",
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

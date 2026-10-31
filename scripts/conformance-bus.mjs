@@ -15,16 +15,19 @@ import { fileURLToPath } from 'node:url';
 import { validate } from '../extension/routes/bus/schema-validate.mjs';
 import { REGISTRY, decideReceipt, mayApprove, classInfo } from '../extension/routes/bus/registry.mjs';
 import { checkSequence } from '../extension/routes/bus/sequence.mjs';
+import { ERROR_CODES } from '../extension/kb/bus-store.mjs';
 import { redactSecrets } from '../extension/core/redact-secrets.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUS = join(ROOT, 'schema/bus');
 const RUNTIME_COPY = join(ROOT, 'extension/routes/bus/registry.json');
+const RUNTIME_COMMAND_SCHEMA = join(ROOT, 'extension/routes/bus/command.schema.json');
 const read = (p) => readFileSync(p, 'utf8');
 const json = (p) => JSON.parse(read(p));
 
 if (process.argv.includes('--sync')) {
   writeFileSync(RUNTIME_COPY, read(join(BUS, 'registry.json')));
+  writeFileSync(RUNTIME_COMMAND_SCHEMA, read(join(BUS, 'command.schema.json')));
   console.log('conformance-bus: runtime registry copy synced');
   process.exit(0);
 }
@@ -35,6 +38,8 @@ const counts = { commands: 0, tiers: 0, events: 0, sequences: 0 };
 
 // 1. runtime copy
 if (read(join(BUS, 'registry.json')) !== read(RUNTIME_COPY)) bad('extension/routes/bus/registry.json differs from schema/bus/registry.json (run: node scripts/conformance-bus.mjs --sync)');
+
+if (read(join(BUS, 'command.schema.json')) !== read(RUNTIME_COMMAND_SCHEMA)) bad('extension/routes/bus/command.schema.json differs from schema/bus/command.schema.json (run: node scripts/conformance-bus.mjs --sync)');
 
 // 2. registry shape
 const reg = json(join(BUS, 'registry.json'));
@@ -58,6 +63,8 @@ for (const [c, cls] of Object.entries(reg.clientClasses)) {
 }
 const evCodes = eventSchema.oneOf.find((v) => v.title === 'error').properties.payload.properties.code.enum;
 if (JSON.stringify([...evCodes].sort()) !== JSON.stringify([...reg.errorCodes].sort())) bad('registry.errorCodes differs from the error enum in event.schema.json');
+
+if (JSON.stringify([...ERROR_CODES].sort()) !== JSON.stringify([...reg.errorCodes].sort())) bad('kb/bus-store.mjs ERROR_CODES differs from registry.errorCodes');
 
 // 3. command fixtures
 const dir = (d) => readdirSync(join(BUS, 'fixtures', d)).filter((f) => f.endsWith('.json')).sort();

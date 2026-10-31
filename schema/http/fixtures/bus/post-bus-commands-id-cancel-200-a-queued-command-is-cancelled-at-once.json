@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /bus/commands/:id/cancel",
+  "status": 200,
+  "description": "a queued command is cancelled at once",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000005"
+    }
+  },
+  "response": {
+    "command": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000005",
+      "kind": "review",
+      "tier": "T0",
+      "state": "cancelled",
+      "originClient": "desktop-ui",
+      "createdAt": "2026-10-31T09:00:00.000Z",
+      "expiresAt": "2026-10-31T09:00:00.000Z",
+      "lastSeq": 2,
+      "finishedAt": "2026-10-31T09:00:00.000Z"
+    }
+  }
+}

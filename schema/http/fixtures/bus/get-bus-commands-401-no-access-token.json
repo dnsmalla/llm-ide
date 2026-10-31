@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /bus/commands",
+  "status": 401,
+  "description": "no access token",
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

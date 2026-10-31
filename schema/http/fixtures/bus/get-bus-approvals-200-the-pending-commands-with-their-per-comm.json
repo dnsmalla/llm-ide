@@ -1,0 +1,23 @@
+{
+  "endpoint": "GET /bus/approvals",
+  "status": 200,
+  "description": "the pending commands with their per-command nonce, for a desktop-class client",
+  "response": {
+    "items": [
+      {
+        "id": "7c1d2e3f-0000-4000-8000-000000000002",
+        "kind": "review",
+        "tier": "T0",
+        "reason": "switch_off",
+        "originClient": "ios-native",
+        "args": {
+          "focus": "doc",
+          "projectId": "proj-1"
+        },
+        "createdAt": "2026-10-31T09:00:00.000Z",
+        "expiresAt": "2026-10-31T09:00:00.000Z",
+        "nonce": "5f0c1a9e7b3d4c2a8e6f1b0d9c7a5e3f2d4b6a8c0e1f3a5b7c9d1e2f4a6b8c0d"
+      }
+    ]
+  }
+}

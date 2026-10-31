@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 401,
+  "description": "no access token: the global auth middleware answers before routing",
+  "request": {
+    "body": {
+      "kind": "review",
+      "idem": "fx-401",
+      "args": {
+        "focus": "code",
+        "projectId": "proj-1"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -39,6 +39,7 @@ const EXT_SRC_REL = 'extension/src';
 // string comparisons such as rate-limit profile lookups in server.mjs).
 const HANDLER_FILES_REL = [
   ...listDir('extension/routes', (f) => f.endsWith('.mjs')),
+  ...listDir('extension/routes/bus', (f) => f === 'bus-routes.mjs'),
   ...listDir('extension/server', (f) => f.endsWith('-routes.mjs')),
   SERVER_REL,
 ];

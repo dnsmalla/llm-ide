@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /bus/commands/:id/cancel",
+  "status": 409,
+  "description": "cancelling a finished command",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000006"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ALREADY_FINISHED",
+      "message": "this command has already finished",
+      "details": {
+        "state": "succeeded"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /bus/commands/:id/events",
+  "status": 429,
+  "description": "a fifth concurrent event stream for one user (the cap is 4)",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000001"
+    },
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "TOO_MANY_READERS",
+      "message": "too many event streams are open"
+    }
+  }
+}

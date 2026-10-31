@@ -1,0 +1,30 @@
+{
+  "endpoint": "GET /bus/commands/:id",
+  "status": 200,
+  "description": "a succeeded command with its bounded, redacted result",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000006"
+    }
+  },
+  "response": {
+    "command": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000006",
+      "kind": "review",
+      "tier": "T0",
+      "state": "succeeded",
+      "originClient": "desktop-ui",
+      "createdAt": "2026-10-31T09:00:00.000Z",
+      "expiresAt": "2026-10-31T09:00:00.000Z",
+      "lastSeq": 6,
+      "startedAt": "2026-10-31T09:00:00.000Z",
+      "finishedAt": "2026-10-31T09:00:00.000Z",
+      "result": {
+        "focus": "code",
+        "engine": "fake",
+        "text": "Finding: none. No findings.",
+        "truncated": false
+      }
+    }
+  }
+}

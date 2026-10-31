@@ -1,0 +1,19 @@
+{
+  "endpoint": "PUT /bus/kinds/:kind",
+  "status": 401,
+  "description": "no access token",
+  "request": {
+    "params": {
+      "kind": "review"
+    },
+    "body": {
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

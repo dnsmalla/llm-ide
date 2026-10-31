@@ -1,0 +1,40 @@
+{
+  "endpoint": "GET /bus/commands",
+  "status": 200,
+  "description": "the caller's commands, newest first, filtered by state and limit",
+  "request": {
+    "query": {
+      "state": "succeeded",
+      "limit": 10
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": "7c1d2e3f-0000-4000-8000-000000000006",
+        "kind": "review",
+        "tier": "T0",
+        "state": "succeeded",
+        "originClient": "desktop-ui",
+        "createdAt": "2026-10-31T09:00:00.000Z",
+        "expiresAt": "2026-10-31T09:00:00.000Z",
+        "lastSeq": 6,
+        "startedAt": "2026-10-31T09:00:00.000Z",
+        "finishedAt": "2026-10-31T09:00:00.000Z"
+      },
+      {
+        "id": "7c1d2e3f-0000-4000-8000-000000000002",
+        "kind": "review",
+        "tier": "T0",
+        "state": "succeeded",
+        "originClient": "ios-native",
+        "createdAt": "2026-10-31T09:00:00.000Z",
+        "expiresAt": "2026-10-31T09:00:00.000Z",
+        "lastSeq": 8,
+        "approvalReason": "switch_off",
+        "startedAt": "2026-10-31T09:00:00.000Z",
+        "finishedAt": "2026-10-31T09:00:00.000Z"
+      }
+    ]
+  }
+}

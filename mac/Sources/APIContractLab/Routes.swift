@@ -265,6 +265,16 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("PUT /kb/agent/personas/:id", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("PUT /kb/agent/personas/active", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("PUT /kb/issue-schedule", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
+    ("GET /bus/approvals", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("GET /bus/commands", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("GET /bus/commands/:id", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("GET /bus/commands/:id/events", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("GET /bus/kinds", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("POST /bus/commands", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("POST /bus/commands/:id/approve", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("POST /bus/commands/:id/cancel", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("POST /bus/commands/:id/deny", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
+    ("PUT /bus/kinds/:kind", "no Mac caller yet: the command bus (docs/spec/command-bus.md) is adopted by the Mac host in S2 and its Codable models arrive with that; the contract is gated by schema/bus and schema/http/bus.schema.json meanwhile"),
 ]
 
 // Lab mirrors of the client's PRIVATE response wrappers (each names the

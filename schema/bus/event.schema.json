@@ -2,28 +2,81 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://llm-ide.local/schema/bus/event.schema.json",
   "title": "Command bus result event",
-  "description": "One event of a command (docs/spec/command-bus.md section 1.2), the data: payload of GET /bus/commands/:id/events (the SSE `id:` equals seq). seq is per command, starts at 1 and is gap-free; exactly one event has terminal:true (ended or error) and it is the last. Payloads are redacted by the core before they leave. Every variant sets additionalProperties:false.",
+  "description": "One event of a command (docs/spec/command-bus.md section 1.2), the data: payload of GET /bus/commands/:id/events (the SSE `id:` equals seq). seq is per command, starts at 1 and is gap-free; exactly one event has terminal:true (ended or error) and it is the last. Payloads are redacted by the core before they leave. Every variant sets additionalProperties:false. The spec's `needs_answer` type is reserved and absent here until a kind that asks questions exists (adding a variant is additive).",
   "type": "object",
-  "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+  "required": [
+    "v",
+    "cmd",
+    "seq",
+    "type",
+    "payload",
+    "terminal",
+    "at"
+  ],
   "oneOf": [
     {
       "title": "accepted",
       "description": "The command was received: queued, waiting for a desktop approval, or already running.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "accepted" },
-        "terminal": { "const": false },
-        "at": { "type": "integer", "description": "Desktop clock, ms, advisory." },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "accepted"
+        },
+        "terminal": {
+          "const": false
+        },
+        "at": {
+          "type": "integer",
+          "description": "Desktop clock, ms, advisory."
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["kind", "tier", "state"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "tier",
+            "state"
+          ],
           "properties": {
-            "kind": { "type": "string" },
-            "tier": { "type": "string", "enum": ["R", "C", "T0", "T1", "T2", "D"] },
-            "state": { "type": "string", "enum": ["awaiting_approval", "queued"] }
+            "kind": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "R",
+                "C",
+                "T0",
+                "T1",
+                "T2",
+                "D"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "awaiting_approval",
+                "queued"
+              ]
+            }
           }
         }
       }
@@ -32,19 +85,48 @@
       "title": "progress",
       "description": "A step label while the command runs.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "progress" },
-        "terminal": { "const": false },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "progress"
+        },
+        "terminal": {
+          "const": false
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["step"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "step"
+          ],
           "properties": {
-            "step": { "type": "string" },
-            "note": { "type": "string", "x-optional": true }
+            "step": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string",
+              "x-optional": true
+            }
           }
         }
       }
@@ -53,17 +135,45 @@
       "title": "chunk",
       "description": "A piece of streamed text output (engine reply).",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "chunk" },
-        "terminal": { "const": false },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "chunk"
+        },
+        "terminal": {
+          "const": false
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["text"],
-          "properties": { "text": { "type": "string" } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -71,19 +181,49 @@
       "title": "data",
       "description": "A named, bounded value produced by the command. The value's keys are open: they are typed per (kind, name) by the kind's own documentation, not by this envelope.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "data" },
-        "terminal": { "const": false },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "data"
+        },
+        "terminal": {
+          "const": false
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["name", "value"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "value": { "type": "object", "additionalProperties": true }
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": true
+            }
           }
         }
       }
@@ -92,38 +232,61 @@
       "title": "needs_approval",
       "description": "The command waits for a desktop approval. The approval nonce is never in an event: only a desktop-class client reads it from GET /bus/approvals.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "needs_approval" },
-        "terminal": { "const": false },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "needs_approval"
+        },
+        "terminal": {
+          "const": false
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["tier", "reason"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tier",
+            "reason"
+          ],
           "properties": {
-            "tier": { "type": "string", "enum": ["R", "C", "T0", "T1", "T2", "D"] },
-            "reason": { "type": "string", "enum": ["tier", "switch_off"] }
+            "tier": {
+              "type": "string",
+              "enum": [
+                "R",
+                "C",
+                "T0",
+                "T1",
+                "T2",
+                "D"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "tier",
+                "switch_off"
+              ]
+            }
           }
-        }
-      }
-    },
-    {
-      "title": "needs_answer",
-      "description": "The command asks the user a question (reserved: no S3 kind emits it yet).",
-      "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
-      "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "needs_answer" },
-        "terminal": { "const": false },
-        "at": { "type": "integer" },
-        "payload": {
-          "type": "object", "additionalProperties": false, "required": ["requestId", "question"],
-          "properties": { "requestId": { "type": "string" }, "question": { "type": "string" } }
         }
       }
     },
@@ -131,19 +294,54 @@
       "title": "ended",
       "description": "Terminal: the command finished (succeeded) or was cancelled. The result is bounded and redacted.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "ended" },
-        "terminal": { "const": true },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "ended"
+        },
+        "terminal": {
+          "const": true
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["state"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
           "properties": {
-            "state": { "type": "string", "enum": ["succeeded", "cancelled"] },
-            "result": { "type": "object", "additionalProperties": true, "x-optional": true, "description": "The kind's result; keys are typed per kind." }
+            "state": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "cancelled"
+              ]
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-optional": true,
+              "description": "The kind's result; keys are typed per kind."
+            }
           }
         }
       }
@@ -152,19 +350,76 @@
       "title": "error",
       "description": "Terminal: the command did not run or failed. code is one of registry.errorCodes; message is short human text with no stack, path or secret.",
       "additionalProperties": false,
-      "required": ["v", "cmd", "seq", "type", "payload", "terminal", "at"],
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
       "properties": {
-        "v": { "type": "integer" },
-        "cmd": { "type": "string" },
-        "seq": { "type": "integer" },
-        "type": { "const": "error" },
-        "terminal": { "const": true },
-        "at": { "type": "integer" },
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "error"
+        },
+        "terminal": {
+          "const": true
+        },
+        "at": {
+          "type": "integer"
+        },
         "payload": {
-          "type": "object", "additionalProperties": false, "required": ["code", "message"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
           "properties": {
-            "code": { "type": "string", "enum": ["invalid_args", "unknown_kind", "unsupported_version", "tier_denied", "switch_off", "needs_desktop_approval", "expired", "duplicate", "idem_conflict", "engine_not_logged_in", "engine_no_key", "rate_limited", "quota_exceeded", "payload_too_large", "desktop_busy", "not_found", "kind_not_available", "project_not_registered", "project_not_allowed", "engine_failed", "read_only_violated", "interrupted", "timeout", "cancelled", "server_restarted", "internal"] },
-            "message": { "type": "string" }
+            "code": {
+              "type": "string",
+              "enum": [
+                "invalid_args",
+                "unknown_kind",
+                "unsupported_version",
+                "tier_denied",
+                "switch_off",
+                "needs_desktop_approval",
+                "expired",
+                "duplicate",
+                "idem_conflict",
+                "engine_not_logged_in",
+                "engine_no_key",
+                "rate_limited",
+                "quota_exceeded",
+                "payload_too_large",
+                "desktop_busy",
+                "not_found",
+                "kind_not_available",
+                "project_not_registered",
+                "project_not_allowed",
+                "engine_failed",
+                "read_only_violated",
+                "interrupted",
+                "timeout",
+                "cancelled",
+                "server_restarted",
+                "internal"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
           }
         }
       }

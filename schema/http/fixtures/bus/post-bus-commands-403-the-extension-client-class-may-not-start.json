@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 403,
+  "description": "the extension client class may not start a review (tier T0 is native or desktop only)",
+  "request": {
+    "body": {
+      "kind": "review",
+      "idem": "fx-ext-1",
+      "args": {
+        "focus": "code",
+        "projectId": "proj-1"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "this client may not start that kind of command",
+      "details": {
+        "tier": "T0",
+        "client": "extension"
+      }
+    }
+  }
+}

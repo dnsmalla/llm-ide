@@ -1,0 +1,96 @@
+{
+  "endpoint": "GET /bus/commands/:id/events",
+  "status": 200,
+  "description": "a successful review: accepted, progress, data, chunk, then the terminal ended with a result summary",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000006"
+    },
+    "query": {
+      "after": 0
+    }
+  },
+  "response": [
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 1,
+      "type": "accepted",
+      "payload": {
+        "kind": "review",
+        "tier": "T0",
+        "state": "queued"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 2,
+      "type": "progress",
+      "payload": {
+        "step": "checks passed"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 3,
+      "type": "progress",
+      "payload": {
+        "step": "running review on fake",
+        "note": "fixture engine"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 4,
+      "type": "data",
+      "payload": {
+        "name": "engine",
+        "value": {
+          "engine": "fake",
+          "focus": "code",
+          "textBytes": 24,
+          "truncated": false
+        }
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 5,
+      "type": "chunk",
+      "payload": {
+        "text": "Finding: none. No findings."
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000006",
+      "seq": 6,
+      "type": "ended",
+      "payload": {
+        "state": "succeeded",
+        "result": {
+          "focus": "code",
+          "engine": "fake",
+          "textBytes": 27,
+          "truncated": false
+        }
+      },
+      "terminal": true,
+      "at": 1761901200000
+    }
+  ]
+}

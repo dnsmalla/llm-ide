@@ -1,0 +1,710 @@
+{
+  "description": "The command bus job API (docs/spec/command-bus.md, contract schema/bus). Roster: the nine paths below are in ALL_ENDPOINTS (extension/server.mjs) and served by extension/routes/bus/bus-routes.mjs, dispatched from extension/server.mjs after authentication and the 'kbWrite' rate limit. Always on unless LLMIDE_BUS=off (every route then answers 503 BUS_DISABLED; not declared per route because the contract replays with the bus on). Every route is per user; an id that is not the caller's answers 404 NOT_FOUND like an unknown id. The client class (phone-pwa, extension, ios-native, desktop-ui) is resolved from the advisory x-llmide-client header, capped at `extension` unless x-llmide-host-nonce equals LLMIDE_CORE_NONCE; only desktop-ui approves, denies, lists approvals or sets a kind's enable flag. Statuses not declared per route: 400 VALIDATION_FAILED for a body that is not JSON, 413 PAYLOAD_TOO_LARGE for a command over 64 KiB and 429 QUOTA_EXCEEDED when the per-user queued or approval cap is reached (a fixture cannot carry an oversize body or a cap of 20 pending rows), a 400 VALIDATION_FAILED on PUT /bus/kinds/:kind when enabled is not a boolean (a fixture request must match its schema), and 400 CONFIRM_MISMATCH on approve of a T2 kind (no T2 kind is available yet). Fixtures were recorded by running the real handlers in-process against a temp DB with a fake engine (no model call), then given fixed example ids and times.",
+  "$defs": {
+    "BusCommand": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The command id (also the job id)."
+        },
+        "kind": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "R",
+            "C",
+            "T0",
+            "T1",
+            "T2",
+            "D"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted",
+            "denied",
+            "expired"
+          ],
+          "description": "awaiting_approval, denied, expired and the waiting-time cancelled come from bus_commands; queued onward from the job row (docs/spec/job-runner.md)."
+        },
+        "originClient": {
+          "type": "string",
+          "enum": [
+            "phone-pwa",
+            "extension",
+            "ios-native",
+            "desktop-ui"
+          ],
+          "description": "The client class that sent it, decided by the host, never by the frame."
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "After this the command is not started (ttl) or an unapproved one is expired."
+        },
+        "lastSeq": {
+          "type": "integer",
+          "description": "The newest event seq of this command (0 when none)."
+        },
+        "approvalReason": {
+          "type": "string",
+          "enum": [
+            "tier",
+            "switch_off"
+          ],
+          "description": "Why a desktop approval was required: the kind's tier, or the kind is switched off for a remote origin.",
+          "x-optional": true
+        },
+        "startedAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "finishedAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "errorCode": {
+          "type": "string",
+          "description": "The fixed registry error code of a command that ended in error (schema/bus/registry.json errorCodes).",
+          "x-optional": true
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Present only on GET /bus/commands/:id of a succeeded command. Bounded (256 KiB) and redacted. Keys are typed per kind: review gives { focus, engine, text, truncated, usage? }.",
+          "x-optional": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "tier",
+        "state",
+        "originClient",
+        "createdAt",
+        "expiresAt",
+        "lastSeq"
+      ]
+    },
+    "BusCommandEnvelope": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/BusCommand"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "BusKind": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "R",
+            "C",
+            "T0",
+            "T1",
+            "T2",
+            "D"
+          ]
+        },
+        "lane": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "write": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The kind's args JSON Schema (schema/bus/registry.json), for client pickers."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "The caller's enable flag for this kind (off by default; set from the desktop)."
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "false when the caller's client class may not start this tier at all (a start would be 403 TIER_DENIED)."
+        },
+        "needsApproval": {
+          "type": "boolean",
+          "description": "true when a start by the caller would wait for a desktop approval right now."
+        },
+        "unavailableReason": {
+          "type": "string",
+          "description": "Why the kind is not available on this server (only when available is false).",
+          "x-optional": true
+        }
+      },
+      "required": [
+        "kind",
+        "tier",
+        "lane",
+        "write",
+        "available",
+        "description",
+        "engines",
+        "args",
+        "enabled",
+        "allowed",
+        "needsApproval"
+      ]
+    },
+    "BusApproval": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "R",
+            "C",
+            "T0",
+            "T1",
+            "T2",
+            "D"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "tier",
+            "switch_off"
+          ]
+        },
+        "originClient": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The command's typed args exactly as stored: the desktop shows these, never a client-written summary."
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string",
+          "description": "The per-command approval nonce (HMAC, recomputed per process). Shown only to a desktop-class client; POST approve must repeat it."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "tier",
+        "reason",
+        "originClient",
+        "args",
+        "createdAt",
+        "expiresAt",
+        "nonce"
+      ]
+    }
+  },
+  "endpoints": {
+    "POST /bus/commands": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "integer",
+              "description": "Contract version; only 1 exists. Any other value is 400 UNSUPPORTED_VERSION.",
+              "x-optional": true
+            },
+            "kind": {
+              "type": "string",
+              "description": "A key of the registry (GET /bus/kinds)."
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Typed per kind by the registry (kinds.<kind>.args): ids and enums, never a path, a shell command or a provider key. Validated server-side; extra fields are INVALID_ARGS."
+            },
+            "idem": {
+              "type": "string",
+              "description": "Idempotency key, 1-64 characters of [A-Za-z0-9_.:-]. The same (user, idem) with the same kind and args returns the original command."
+            },
+            "ttlMs": {
+              "type": "integer",
+              "description": "How long the command may still be started after receipt (1000 to 86400000 ms).",
+              "x-optional": true
+            },
+            "createdAt": {
+              "type": "integer",
+              "description": "Client clock in ms, advisory only.",
+              "x-optional": true
+            }
+          },
+          "required": [
+            "kind",
+            "args",
+            "idem"
+          ]
+        }
+      },
+      "responses": {
+        "202": {
+          "type": "object",
+          "required": [
+            "command",
+            "deduped"
+          ],
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/BusCommand"
+            },
+            "deduped": {
+              "type": "boolean",
+              "description": "false: a new command was accepted."
+            }
+          }
+        },
+        "200": {
+          "type": "object",
+          "required": [
+            "command",
+            "deduped"
+          ],
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/BusCommand"
+            },
+            "deduped": {
+              "type": "boolean",
+              "description": "true: the same idempotency key, kind and args; this is the original command."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "501": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/commands": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "description": "Filter by state.",
+              "x-optional": true
+            },
+            "limit": {
+              "type": "integer",
+              "description": "1 to 200, default 50.",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BusCommand"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/commands/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusCommandEnvelope"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/commands/:id/events": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "after": {
+              "type": "integer",
+              "description": "Resume after this seq (default 0): events with a larger seq are sent.",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "sse",
+          "x-events": "schema/bus/event.schema.json"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/cancel": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusCommandEnvelope"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/approve": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "nonce": {
+              "type": "string",
+              "description": "The approval nonce from GET /bus/approvals."
+            },
+            "confirm": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Required for T2 kinds: repeats the exact projectId, issueIds and ship the command will act on (400 CONFIRM_MISMATCH otherwise). Typed per kind.",
+              "x-optional": true
+            }
+          },
+          "required": [
+            "nonce"
+          ]
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusCommandEnvelope"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/deny": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusCommandEnvelope"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/approvals": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BusApproval"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/kinds": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "integer"
+            },
+            "client": {
+              "type": "string",
+              "enum": [
+                "phone-pwa",
+                "extension",
+                "ios-native",
+                "desktop-ui"
+              ],
+              "description": "The client class the host resolved for this request."
+            },
+            "registryVersion": {
+              "type": "integer"
+            },
+            "limits": {
+              "type": "object",
+              "properties": {
+                "maxCommandBytes": {
+                  "type": "integer"
+                },
+                "maxResultBytes": {
+                  "type": "integer"
+                },
+                "maxActiveCommands": {
+                  "type": "integer"
+                },
+                "maxPendingApprovals": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxCommandBytes",
+                "maxResultBytes",
+                "maxActiveCommands",
+                "maxPendingApprovals"
+              ]
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BusKind"
+              }
+            }
+          },
+          "required": [
+            "v",
+            "client",
+            "registryVersion",
+            "limits",
+            "kinds"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /bus/kinds/:kind": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "A registry kind."
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "enabled"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "endpoint": "PUT /bus/kinds/:kind",
+  "status": 404,
+  "description": "unknown kind",
+  "request": {
+    "params": {
+      "kind": "files.write"
+    },
+    "body": {
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "unknown kind"
+    }
+  }
+}

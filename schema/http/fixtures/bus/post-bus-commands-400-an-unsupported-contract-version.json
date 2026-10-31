@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 400,
+  "description": "an unsupported contract version",
+  "request": {
+    "body": {
+      "v": 2,
+      "kind": "review",
+      "idem": "fx-bad-3",
+      "args": {
+        "focus": "code",
+        "projectId": "proj-1"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "UNSUPPORTED_VERSION",
+      "message": "unsupported contract version",
+      "details": {
+        "supported": [
+          1
+        ]
+      }
+    }
+  }
+}

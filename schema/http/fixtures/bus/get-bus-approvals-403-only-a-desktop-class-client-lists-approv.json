@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /bus/approvals",
+  "status": 403,
+  "description": "only a desktop-class client lists approvals",
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can list approvals",
+      "details": {
+        "client": "ios-native"
+      }
+    }
+  }
+}

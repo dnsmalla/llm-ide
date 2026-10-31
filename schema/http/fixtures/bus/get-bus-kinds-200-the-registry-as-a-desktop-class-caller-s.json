@@ -1,0 +1,238 @@
+{
+  "endpoint": "GET /bus/kinds",
+  "status": 200,
+  "description": "the registry as a desktop-class caller sees it",
+  "response": {
+    "v": 1,
+    "client": "desktop-ui",
+    "registryVersion": 1,
+    "limits": {
+      "maxCommandBytes": 65536,
+      "maxResultBytes": 262144,
+      "maxActiveCommands": 20,
+      "maxPendingApprovals": 20
+    },
+    "kinds": [
+      {
+        "kind": "review",
+        "tier": "T0",
+        "lane": "read",
+        "write": false,
+        "available": true,
+        "description": "Read-only review of a registered project (code, docs or merge conflicts) on a chosen engine.",
+        "engines": [
+          "claude",
+          "adapter",
+          "codex",
+          "gemini"
+        ],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "focus",
+            "projectId"
+          ],
+          "properties": {
+            "focus": {
+              "type": "string",
+              "enum": [
+                "code",
+                "doc",
+                "conflicts"
+              ]
+            },
+            "projectId": {
+              "type": "string",
+              "x-format": "id"
+            },
+            "engine": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "provider"
+              ],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "x-format": "provider"
+                },
+                "model": {
+                  "type": "string",
+                  "x-format": "model"
+                },
+                "credential": {
+                  "type": "string",
+                  "enum": [
+                    "cli-login",
+                    "api-key"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false
+      },
+      {
+        "kind": "sources.update",
+        "tier": "T1",
+        "lane": "write",
+        "write": true,
+        "available": false,
+        "description": "Fetch email, Slack and document sources into the Library and re-index.",
+        "engines": [],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceIds": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "string",
+                "x-format": "id"
+              }
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false,
+        "unavailableReason": "Node has no source registry: connector credentials and source lists live in the Mac app (email, Slack) or are sent per request (Box); no server-side refresh exists to adapt."
+      },
+      {
+        "kind": "issues.from_notes",
+        "tier": "T1",
+        "lane": "write",
+        "write": true,
+        "available": false,
+        "description": "Extract action items from recent notes and create upstream issues.",
+        "engines": [],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "x-format": "id"
+            },
+            "since": {
+              "type": "string",
+              "x-format": "date"
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false,
+        "unavailableReason": "The deterministic note action extractor and the tracker allow-list live in the Mac app; Node has only the meeting planner, a different function."
+      },
+      {
+        "kind": "issues.implement",
+        "tier": "T2",
+        "lane": "write",
+        "write": true,
+        "available": false,
+        "description": "Run an engine on approved issues in a worktree on a fix branch; optional ship (push, open MR/PR).",
+        "engines": [],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "issueIds"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "x-format": "id"
+            },
+            "issueIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "x-format": "id"
+              }
+            },
+            "ship": {
+              "type": "boolean"
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false,
+        "unavailableReason": "No Node worktree runner or write-mode engine yet. codex and gemini write mode needs an explicit design and user decision (Swift runs them with --yolo, which disables their sandbox); never copied here."
+      },
+      {
+        "kind": "loop.run",
+        "tier": "T1",
+        "lane": "write",
+        "write": true,
+        "available": false,
+        "description": "Run one of the project's Loops (or one stage) with edits inside its declared scope.",
+        "engines": [],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "loopId"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "x-format": "id"
+            },
+            "loopId": {
+              "type": "string",
+              "x-format": "id"
+            },
+            "stageId": {
+              "type": "string",
+              "x-format": "id"
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false,
+        "unavailableReason": "Loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step (POST /kb/loop/agent-run), which needs the composed stage prompt."
+      },
+      {
+        "kind": "custom.run",
+        "tier": "T1",
+        "lane": "write",
+        "write": true,
+        "available": false,
+        "description": "Run a saved custom task by id (the prompt is part of the saved task, never of the command).",
+        "engines": [],
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "customTaskId"
+          ],
+          "properties": {
+            "customTaskId": {
+              "type": "string",
+              "x-format": "id"
+            }
+          }
+        },
+        "enabled": false,
+        "allowed": true,
+        "needsApproval": false,
+        "unavailableReason": "Saved custom tasks (named prompt, cron, project) live in the Mac app; Node has no store to resolve a customTaskId."
+      }
+    ]
+  }
+}

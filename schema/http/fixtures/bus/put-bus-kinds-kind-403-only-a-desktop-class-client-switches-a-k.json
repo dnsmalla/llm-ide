@@ -1,0 +1,22 @@
+{
+  "endpoint": "PUT /bus/kinds/:kind",
+  "status": 403,
+  "description": "only a desktop-class client switches a kind",
+  "request": {
+    "params": {
+      "kind": "review"
+    },
+    "body": {
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can switch a kind on or off",
+      "details": {
+        "client": "ios-native"
+      }
+    }
+  }
+}

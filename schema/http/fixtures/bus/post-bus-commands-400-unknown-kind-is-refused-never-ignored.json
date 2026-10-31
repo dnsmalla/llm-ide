@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 400,
+  "description": "unknown kind is refused, never ignored",
+  "request": {
+    "body": {
+      "kind": "files.write",
+      "idem": "fx-bad-2",
+      "args": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "UNKNOWN_KIND",
+      "message": "unknown command kind"
+    }
+  }
+}

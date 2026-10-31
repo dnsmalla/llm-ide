@@ -408,6 +408,68 @@ export type AgentV2Event = {
   retryable: boolean;
 };
 
+export type BusCommand = {
+  /** The command id (also the job id). */
+  id: string;
+  kind: string;
+  tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+  /** awaiting_approval, denied, expired and the waiting-time cancelled come from bus_commands; queued onward from the job row (docs/spec/job-runner.md). */
+  state: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "denied" | "expired";
+  /** The client class that sent it, decided by the host, never by the frame. */
+  originClient: "phone-pwa" | "extension" | "ios-native" | "desktop-ui";
+  createdAt: string;
+  /** After this the command is not started (ttl) or an unapproved one is expired. */
+  expiresAt: string;
+  /** The newest event seq of this command (0 when none). */
+  lastSeq: number;
+  /** Why a desktop approval was required: the kind's tier, or the kind is switched off for a remote origin. */
+  approvalReason?: "tier" | "switch_off";
+  startedAt?: string;
+  finishedAt?: string;
+  /** The fixed registry error code of a command that ended in error (schema/bus/registry.json errorCodes). */
+  errorCode?: string;
+  /** Present only on GET /bus/commands/:id of a succeeded command. Bounded (256 KiB) and redacted. Keys are typed per kind: review gives { focus, engine, text, truncated, usage? }. */
+  result?: Record<string, unknown>;
+};
+
+export type BusCommandEnvelope = {
+  command: BusCommand;
+};
+
+export type BusKind = {
+  kind: string;
+  tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+  lane: "read" | "write";
+  write: boolean;
+  available: boolean;
+  description: string;
+  engines: string[];
+  /** The kind's args JSON Schema (schema/bus/registry.json), for client pickers. */
+  args: Record<string, unknown>;
+  /** The caller's enable flag for this kind (off by default; set from the desktop). */
+  enabled: boolean;
+  /** false when the caller's client class may not start this tier at all (a start would be 403 TIER_DENIED). */
+  allowed: boolean;
+  /** true when a start by the caller would wait for a desktop approval right now. */
+  needsApproval: boolean;
+  /** Why the kind is not available on this server (only when available is false). */
+  unavailableReason?: string;
+};
+
+export type BusApproval = {
+  id: string;
+  kind: string;
+  tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+  reason: "tier" | "switch_off";
+  originClient: string;
+  /** The command's typed args exactly as stored: the desktop shows these, never a client-written summary. */
+  args: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+  /** The per-command approval nonce (HMAC, recomputed per process). Shown only to a desktop-class client; POST approve must repeat it. */
+  nonce: string;
+};
+
 export type Template = {
   /** Stable UUID for the folder (SHA-256 of llmide.doc-template.<folder>, uppercase). */
   id: string;
@@ -491,6 +553,88 @@ export type RegisterResult = {
   id: string;
   /** The validated realpath the server stored. */
   root: string;
+};
+
+/** One event of a command (docs/spec/command-bus.md section 1.2), the data: payload of GET /bus/commands/:id/events (the SSE `id:` equals seq). seq is per command, starts at 1 and is gap-free; exactly one event has terminal:true (ended or error) and it is the last. Payloads are redacted by the core before they leave. Every variant sets additionalProperties:false. The spec's `needs_answer` type is reserved and absent here until a kind that asks questions exists (adding a variant is additive). */
+export type EventEvent = {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "accepted";
+  terminal: false;
+  /** Desktop clock, ms, advisory. */
+  at: number;
+  payload: {
+    kind: string;
+    tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+    state: "awaiting_approval" | "queued";
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "progress";
+  terminal: false;
+  at: number;
+  payload: {
+    step: string;
+    note?: string;
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "chunk";
+  terminal: false;
+  at: number;
+  payload: {
+    text: string;
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "data";
+  terminal: false;
+  at: number;
+  payload: {
+    name: string;
+    value: Record<string, unknown>;
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "needs_approval";
+  terminal: false;
+  at: number;
+  payload: {
+    tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+    reason: "tier" | "switch_off";
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "ended";
+  terminal: true;
+  at: number;
+  payload: {
+    state: "succeeded" | "cancelled";
+    /** The kind's result; keys are typed per kind. */
+    result?: Record<string, unknown>;
+  };
+} | {
+  v: number;
+  cmd: string;
+  seq: number;
+  type: "error";
+  terminal: true;
+  at: number;
+  payload: {
+    code: "invalid_args" | "unknown_kind" | "unsupported_version" | "tier_denied" | "switch_off" | "needs_desktop_approval" | "expired" | "duplicate" | "idem_conflict" | "engine_not_logged_in" | "engine_no_key" | "rate_limited" | "quota_exceeded" | "payload_too_large" | "desktop_busy" | "not_found" | "kind_not_available" | "project_not_registered" | "project_not_allowed" | "engine_failed" | "read_only_violated" | "interrupted" | "timeout" | "cancelled" | "server_restarted" | "internal";
+    message: string;
+  };
 };
 
 export type ExtensionsFinding = {
@@ -2596,6 +2740,212 @@ export type GetAgentV2SessionRouteHistoryResponse200 = {
 };
 
 export type GetAgentV2SessionRouteHistoryResponse400 = CommonError;
+
+/** Request parts for `POST /bus/commands` (schema/http/bus.schema.json). */
+export type PostBusCommandsRequest = {
+  body: {
+    /** Contract version; only 1 exists. Any other value is 400 UNSUPPORTED_VERSION. */
+    v?: number;
+    /** A key of the registry (GET /bus/kinds). */
+    kind: string;
+    /** Typed per kind by the registry (kinds.<kind>.args): ids and enums, never a path, a shell command or a provider key. Validated server-side; extra fields are INVALID_ARGS. */
+    args: Record<string, unknown>;
+    /** Idempotency key, 1-64 characters of [A-Za-z0-9_.:-]. The same (user, idem) with the same kind and args returns the original command. */
+    idem: string;
+    /** How long the command may still be started after receipt (1000 to 86400000 ms). */
+    ttlMs?: number;
+    /** Client clock in ms, advisory only. */
+    createdAt?: number;
+  };
+};
+
+export type PostBusCommandsResponse200 = {
+  command: BusCommand;
+  /** true: the same idempotency key, kind and args; this is the original command. */
+  deduped: boolean;
+};
+
+export type PostBusCommandsResponse202 = {
+  command: BusCommand;
+  /** false: a new command was accepted. */
+  deduped: boolean;
+};
+
+export type PostBusCommandsResponse400 = CommonError;
+
+export type PostBusCommandsResponse401 = CommonError;
+
+export type PostBusCommandsResponse403 = CommonError;
+
+export type PostBusCommandsResponse404 = CommonError;
+
+export type PostBusCommandsResponse409 = CommonError;
+
+export type PostBusCommandsResponse501 = CommonError;
+
+/** Request parts for `GET /bus/commands` (schema/http/bus.schema.json). */
+export type GetBusCommandsRequest = {
+  query: {
+    /** Filter by state. */
+    state?: string;
+    /** 1 to 200, default 50. */
+    limit?: number;
+  };
+};
+
+export type GetBusCommandsResponse200 = {
+  items: BusCommand[];
+};
+
+export type GetBusCommandsResponse400 = CommonError;
+
+export type GetBusCommandsResponse401 = CommonError;
+
+/** Request parts for `GET /bus/commands/:id` (schema/http/bus.schema.json). */
+export type GetBusCommandsIdRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+};
+
+export type GetBusCommandsIdResponse200 = BusCommandEnvelope;
+
+export type GetBusCommandsIdResponse401 = CommonError;
+
+export type GetBusCommandsIdResponse404 = CommonError;
+
+/** Request parts for `GET /bus/commands/:id/events` (schema/http/bus.schema.json). */
+export type GetBusCommandsIdEventsRequest = {
+  query: {
+    /** Resume after this seq (default 0): events with a larger seq are sent. */
+    after?: number;
+  };
+  params: {
+    /** The command id. */
+    id: string;
+  };
+};
+
+export type GetBusCommandsIdEventsResponse200 = ReadonlyArray<EventEvent>;
+
+export type GetBusCommandsIdEventsResponse400 = CommonError;
+
+export type GetBusCommandsIdEventsResponse401 = CommonError;
+
+export type GetBusCommandsIdEventsResponse404 = CommonError;
+
+export type GetBusCommandsIdEventsResponse429 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/cancel` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdCancelRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+};
+
+export type PostBusCommandsIdCancelResponse200 = BusCommandEnvelope;
+
+export type PostBusCommandsIdCancelResponse401 = CommonError;
+
+export type PostBusCommandsIdCancelResponse404 = CommonError;
+
+export type PostBusCommandsIdCancelResponse409 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/approve` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdApproveRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+  body: {
+    /** The approval nonce from GET /bus/approvals. */
+    nonce: string;
+    /** Required for T2 kinds: repeats the exact projectId, issueIds and ship the command will act on (400 CONFIRM_MISMATCH otherwise). Typed per kind. */
+    confirm?: Record<string, unknown>;
+  };
+};
+
+export type PostBusCommandsIdApproveResponse200 = BusCommandEnvelope;
+
+export type PostBusCommandsIdApproveResponse401 = CommonError;
+
+export type PostBusCommandsIdApproveResponse403 = CommonError;
+
+export type PostBusCommandsIdApproveResponse404 = CommonError;
+
+export type PostBusCommandsIdApproveResponse409 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/deny` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdDenyRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+};
+
+export type PostBusCommandsIdDenyResponse200 = BusCommandEnvelope;
+
+export type PostBusCommandsIdDenyResponse401 = CommonError;
+
+export type PostBusCommandsIdDenyResponse403 = CommonError;
+
+export type PostBusCommandsIdDenyResponse404 = CommonError;
+
+export type PostBusCommandsIdDenyResponse409 = CommonError;
+
+/** Request parts for `GET /bus/approvals` (schema/http/bus.schema.json). */
+export type GetBusApprovalsRequest = Record<string, never>;
+
+export type GetBusApprovalsResponse200 = {
+  items: BusApproval[];
+};
+
+export type GetBusApprovalsResponse401 = CommonError;
+
+export type GetBusApprovalsResponse403 = CommonError;
+
+/** Request parts for `GET /bus/kinds` (schema/http/bus.schema.json). */
+export type GetBusKindsRequest = Record<string, never>;
+
+export type GetBusKindsResponse200 = {
+  v: number;
+  /** The client class the host resolved for this request. */
+  client: "phone-pwa" | "extension" | "ios-native" | "desktop-ui";
+  registryVersion: number;
+  limits: {
+    maxCommandBytes: number;
+    maxResultBytes: number;
+    maxActiveCommands: number;
+    maxPendingApprovals: number;
+  };
+  kinds: BusKind[];
+};
+
+export type GetBusKindsResponse401 = CommonError;
+
+/** Request parts for `PUT /bus/kinds/:kind` (schema/http/bus.schema.json). */
+export type PutBusKindsKindRequest = {
+  params: {
+    /** A registry kind. */
+    kind: string;
+  };
+  body: {
+    enabled: boolean;
+  };
+};
+
+export type PutBusKindsKindResponse200 = {
+  kind: string;
+  enabled: boolean;
+};
+
+export type PutBusKindsKindResponse401 = CommonError;
+
+export type PutBusKindsKindResponse403 = CommonError;
+
+export type PutBusKindsKindResponse404 = CommonError;
 
 /** Request parts for `GET /kb/docs/templates` (schema/http/docs.schema.json). */
 export type GetKbDocsTemplatesRequest = {
@@ -7371,6 +7721,98 @@ export interface ApiEndpoints {
     responses: {
       200: GetAgentV2SessionRouteHistoryResponse200;
       400: GetAgentV2SessionRouteHistoryResponse400;
+    };
+  };
+  "POST /bus/commands": {
+    request: PostBusCommandsRequest;
+    responses: {
+      200: PostBusCommandsResponse200;
+      202: PostBusCommandsResponse202;
+      400: PostBusCommandsResponse400;
+      401: PostBusCommandsResponse401;
+      403: PostBusCommandsResponse403;
+      404: PostBusCommandsResponse404;
+      409: PostBusCommandsResponse409;
+      501: PostBusCommandsResponse501;
+    };
+  };
+  "GET /bus/commands": {
+    request: GetBusCommandsRequest;
+    responses: {
+      200: GetBusCommandsResponse200;
+      400: GetBusCommandsResponse400;
+      401: GetBusCommandsResponse401;
+    };
+  };
+  "GET /bus/commands/:id": {
+    request: GetBusCommandsIdRequest;
+    responses: {
+      200: GetBusCommandsIdResponse200;
+      401: GetBusCommandsIdResponse401;
+      404: GetBusCommandsIdResponse404;
+    };
+  };
+  "GET /bus/commands/:id/events": {
+    request: GetBusCommandsIdEventsRequest;
+    responses: {
+      200: GetBusCommandsIdEventsResponse200;
+      400: GetBusCommandsIdEventsResponse400;
+      401: GetBusCommandsIdEventsResponse401;
+      404: GetBusCommandsIdEventsResponse404;
+      429: GetBusCommandsIdEventsResponse429;
+    };
+  };
+  "POST /bus/commands/:id/cancel": {
+    request: PostBusCommandsIdCancelRequest;
+    responses: {
+      200: PostBusCommandsIdCancelResponse200;
+      401: PostBusCommandsIdCancelResponse401;
+      404: PostBusCommandsIdCancelResponse404;
+      409: PostBusCommandsIdCancelResponse409;
+    };
+  };
+  "POST /bus/commands/:id/approve": {
+    request: PostBusCommandsIdApproveRequest;
+    responses: {
+      200: PostBusCommandsIdApproveResponse200;
+      401: PostBusCommandsIdApproveResponse401;
+      403: PostBusCommandsIdApproveResponse403;
+      404: PostBusCommandsIdApproveResponse404;
+      409: PostBusCommandsIdApproveResponse409;
+    };
+  };
+  "POST /bus/commands/:id/deny": {
+    request: PostBusCommandsIdDenyRequest;
+    responses: {
+      200: PostBusCommandsIdDenyResponse200;
+      401: PostBusCommandsIdDenyResponse401;
+      403: PostBusCommandsIdDenyResponse403;
+      404: PostBusCommandsIdDenyResponse404;
+      409: PostBusCommandsIdDenyResponse409;
+    };
+  };
+  "GET /bus/approvals": {
+    request: GetBusApprovalsRequest;
+    responses: {
+      200: GetBusApprovalsResponse200;
+      401: GetBusApprovalsResponse401;
+      403: GetBusApprovalsResponse403;
+    };
+  };
+  "GET /bus/kinds": {
+    request: GetBusKindsRequest;
+    responses: {
+      200: GetBusKindsResponse200;
+      401: GetBusKindsResponse401;
+    };
+  };
+  "PUT /bus/kinds/:kind": {
+    request: PutBusKindsKindRequest;
+    responses: {
+      200: PutBusKindsKindResponse200;
+      401: PutBusKindsKindResponse401;
+      403: PutBusKindsKindResponse403;
+      404: PutBusKindsKindResponse404;
     };
   };
   "GET /kb/docs/templates": {

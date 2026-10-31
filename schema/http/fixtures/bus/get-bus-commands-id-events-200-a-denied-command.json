@@ -1,0 +1,50 @@
+{
+  "endpoint": "GET /bus/commands/:id/events",
+  "status": 200,
+  "description": "a denied command: accepted (awaiting approval), needs_approval, then the one terminal error",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000004"
+    },
+    "query": {}
+  },
+  "response": [
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000004",
+      "seq": 1,
+      "type": "accepted",
+      "payload": {
+        "kind": "review",
+        "tier": "T0",
+        "state": "awaiting_approval"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000004",
+      "seq": 2,
+      "type": "needs_approval",
+      "payload": {
+        "tier": "T0",
+        "reason": "switch_off"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000004",
+      "seq": 3,
+      "type": "error",
+      "payload": {
+        "code": "tier_denied",
+        "message": "denied on the desktop"
+      },
+      "terminal": true,
+      "at": 1761901200000
+    }
+  ]
+}

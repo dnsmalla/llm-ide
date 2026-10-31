@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 409,
+  "description": "the idempotency key was used for a different command",
+  "request": {
+    "body": {
+      "v": 1,
+      "kind": "review",
+      "idem": "fx-review-1",
+      "ttlMs": 600000,
+      "createdAt": 1761901200000,
+      "args": {
+        "focus": "doc",
+        "projectId": "proj-1"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "IDEM_CONFLICT",
+      "message": "that idempotency key was used for a different command"
+    }
+  }
+}

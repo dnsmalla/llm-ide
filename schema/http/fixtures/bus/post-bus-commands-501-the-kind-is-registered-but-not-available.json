@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 501,
+  "description": "the kind is registered but not available on this server (no stubbed success)",
+  "request": {
+    "body": {
+      "kind": "loop.run",
+      "idem": "fx-na-1",
+      "args": {
+        "projectId": "proj-1",
+        "loopId": "regression"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "KIND_NOT_AVAILABLE",
+      "message": "this kind is not available on this server",
+      "details": {
+        "reason": "Loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step (POST /kb/loop/agent-run), which needs the composed stage prompt."
+      }
+    }
+  }
+}

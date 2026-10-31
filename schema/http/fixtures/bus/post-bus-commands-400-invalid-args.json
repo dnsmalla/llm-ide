@@ -1,0 +1,29 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 400,
+  "description": "invalid args: a path is never an id",
+  "request": {
+    "body": {
+      "kind": "review",
+      "idem": "fx-bad-1",
+      "args": {
+        "focus": "code",
+        "projectId": "../../etc/passwd"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_ARGS",
+      "message": "the command is not valid",
+      "details": {
+        "errors": [
+          {
+            "path": ".args.projectId",
+            "message": "not a valid id"
+          }
+        ]
+      }
+    }
+  }
+}

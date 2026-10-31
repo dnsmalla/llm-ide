@@ -1,0 +1,17 @@
+{
+  "endpoint": "PUT /bus/kinds/:kind",
+  "status": 200,
+  "description": "the desktop switches a kind on",
+  "request": {
+    "params": {
+      "kind": "review"
+    },
+    "body": {
+      "enabled": true
+    }
+  },
+  "response": {
+    "kind": "review",
+    "enabled": true
+  }
+}

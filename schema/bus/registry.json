@@ -4,7 +4,7 @@
   "limits": {
     "maxCommandBytes": 65536,
     "maxIdemLength": 64,
-    "defaultTtlMs": 60000,
+    "defaultTtlMs": 3600000,
     "maxTtlMs": 86400000,
     "approvalTtlMs": 86400000,
     "maxEventPayloadBytes": 16384,

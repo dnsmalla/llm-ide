@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /bus/commands/:id/deny",
+  "status": 403,
+  "description": "a phone cannot deny or approve",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000004"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can deny a command",
+      "details": {
+        "client": "ios-native"
+      }
+    }
+  }
+}

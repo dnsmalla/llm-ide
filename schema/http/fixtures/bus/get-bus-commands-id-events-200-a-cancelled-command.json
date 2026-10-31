@@ -1,0 +1,39 @@
+{
+  "endpoint": "GET /bus/commands/:id/events",
+  "status": 200,
+  "description": "a cancelled command: accepted, then the terminal ended with state cancelled",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000005"
+    },
+    "query": {
+      "after": 0
+    }
+  },
+  "response": [
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000005",
+      "seq": 1,
+      "type": "accepted",
+      "payload": {
+        "kind": "review",
+        "tier": "T0",
+        "state": "queued"
+      },
+      "terminal": false,
+      "at": 1761901200000
+    },
+    {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000005",
+      "seq": 2,
+      "type": "ended",
+      "payload": {
+        "state": "cancelled"
+      },
+      "terminal": true,
+      "at": 1761901200000
+    }
+  ]
+}

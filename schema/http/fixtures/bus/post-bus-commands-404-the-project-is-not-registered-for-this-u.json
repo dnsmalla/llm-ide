@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /bus/commands",
+  "status": 404,
+  "description": "the project is not registered for this user",
+  "request": {
+    "body": {
+      "kind": "review",
+      "idem": "fx-np-1",
+      "args": {
+        "focus": "code",
+        "projectId": "unknown-project"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "project not found"
+    }
+  }
+}

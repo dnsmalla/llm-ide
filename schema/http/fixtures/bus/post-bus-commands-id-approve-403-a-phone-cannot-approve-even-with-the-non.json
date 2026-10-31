@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /bus/commands/:id/approve",
+  "status": 403,
+  "description": "a phone cannot approve, even with the nonce: the client class decides first",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000002"
+    },
+    "body": {
+      "nonce": "5f0c1a9e7b3d4c2a8e6f1b0d9c7a5e3f2d4b6a8c0e1f3a5b7c9d1e2f4a6b8c0d"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can approve a command",
+      "details": {
+        "client": "ios-native"
+      }
+    }
+  }
+}
