@@ -178,21 +178,60 @@ pub struct Out {
     pub truncated: bool,
 }
 
+/// Per-call extras for the hardened runner. The defaults are the read-only, no-input case.
+#[derive(Default)]
+pub(crate) struct Opts<'a> {
+    /// Bytes written to the child's stdin (a commit message, a patch); `None` = closed stdin.
+    pub stdin: Option<&'a [u8]>,
+    /// Let git read the USER'S global config (only for `config --get user.*`); never set for
+    /// anything that can run a program.
+    pub user_config: bool,
+    /// Home directory override for `user_config` (tests); default is the process's own.
+    pub home: Option<PathBuf>,
+    /// Extra environment (author/committer identity).
+    pub env: Vec<(&'static str, String)>,
+    /// Wall-clock limit; default 30 s. Bulk index writes on huge trees use more.
+    pub timeout: Option<Duration>,
+}
+
 /// Runs `git <base> args` in `root`. `Err` on spawn failure, timeout or non-zero exit (stderr in the message).
-fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
+pub(crate) fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
+    run_git_opts(root, args, cap, &Opts::default())
+}
+
+pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) -> R<Out> {
     check_repo(root)?;
     let git = find_git().ok_or(FsError { code: "git_unavailable", message: "git was not found on PATH".into() })?;
     let mut cmd = Command::new(git);
     cmd.args(base_args()).args(args).current_dir(root).env_clear();
     cmd.env("PATH", fallback_path())
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
         .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_PAGER", "cat")
         .env("LC_ALL", "C");
+    if opts.user_config {
+        // Read-only lookup of the user's own identity: point git at their real global config.
+        match &opts.home {
+            Some(h) => {
+                cmd.env("HOME", h).env("USERPROFILE", h).env("XDG_CONFIG_HOME", h.join(".config"));
+            }
+            None => {
+                for k in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"] {
+                    if let Some(v) = std::env::var_os(k) {
+                        cmd.env(k, v);
+                    }
+                }
+            }
+        }
+    } else {
+        cmd.env("GIT_CONFIG_GLOBAL", NULL_DEVICE);
+    }
+    for (k, v) in &opts.env {
+        cmd.env(k, v);
+    }
     if let Some(parent) = root.parent() {
         cmd.env("GIT_CEILING_DIRECTORIES", parent);
     }
@@ -201,8 +240,16 @@ fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
             cmd.env(k, v);
         }
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(if opts.stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| FsError { code: "git_unavailable", message: format!("cannot run git: {e}") })?;
+    if let (Some(data), Some(mut si)) = (opts.stdin, child.stdin.take()) {
+        // Written on its own thread so a child that stops reading cannot block us; dropping `si` closes stdin.
+        let data = data.to_vec();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = si.write_all(&data);
+        });
+    }
     let mut so = child.stdout.take().expect("piped");
     let mut se = child.stderr.take().expect("piped");
     let err_thread = std::thread::spawn(move || {
@@ -223,7 +270,7 @@ fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
-            Ok(None) if start.elapsed() > TIMEOUT => break None,
+            Ok(None) if start.elapsed() > opts.timeout.unwrap_or(TIMEOUT) => break None,
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(e) => return gerr("io", format!("git wait failed: {e}")),
         }
@@ -262,6 +309,8 @@ pub struct StatusEntry {
     pub worktree: char,
     /// `changed`, `renamed`, `unmerged`, `untracked`.
     pub kind: &'static str,
+    /// The path is a submodule (gitlink): staged as a commit pointer, never discarded here.
+    pub submodule: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq, Default)]
@@ -318,7 +367,7 @@ pub fn parse_status(raw: &[u8]) -> GitStatus {
                 let f: Vec<&str> = rec.splitn(9, ' ').collect();
                 if f.len() == 9 {
                     let (i, w) = xy(f[1]);
-                    st.entries.push(StatusEntry { path: f[8].into(), orig_path: None, index: i, worktree: w, kind: "changed" });
+                    st.entries.push(StatusEntry { path: f[8].into(), orig_path: None, index: i, worktree: w, kind: "changed", submodule: f[2].starts_with('S') });
                 }
             }
             b'2' => {
@@ -327,7 +376,7 @@ pub fn parse_status(raw: &[u8]) -> GitStatus {
                 if f.len() == 10 {
                     let (i, w) = xy(f[1]);
                     let orig = it.next().map(str::to_string);
-                    st.entries.push(StatusEntry { path: f[9].into(), orig_path: orig, index: i, worktree: w, kind: "renamed" });
+                    st.entries.push(StatusEntry { path: f[9].into(), orig_path: orig, index: i, worktree: w, kind: "renamed", submodule: f[2].starts_with('S') });
                 }
             }
             b'u' => {
@@ -335,10 +384,10 @@ pub fn parse_status(raw: &[u8]) -> GitStatus {
                 let f: Vec<&str> = rec.splitn(11, ' ').collect();
                 if f.len() == 11 {
                     let (i, w) = xy(f[1]);
-                    st.entries.push(StatusEntry { path: f[10].into(), orig_path: None, index: i, worktree: w, kind: "unmerged" });
+                    st.entries.push(StatusEntry { path: f[10].into(), orig_path: None, index: i, worktree: w, kind: "unmerged", submodule: f[2].starts_with('S') });
                 }
             }
-            b'?' => st.entries.push(StatusEntry { path: rec[2..].into(), orig_path: None, index: '.', worktree: '?', kind: "untracked" }),
+            b'?' => st.entries.push(StatusEntry { path: rec[2..].into(), orig_path: None, index: '.', worktree: '?', kind: "untracked", submodule: false }),
             _ => {}
         }
     }
@@ -354,12 +403,12 @@ pub fn status(root: &Path) -> R<GitStatus> {
 
 // ---- diff / show / stage -----------------------------------------------------------------
 
-fn rel_arg(rel: &str) -> R<String> {
+pub(crate) fn rel_arg(rel: &str) -> R<String> {
     let parts = split_rel(rel)?;
     if parts.is_empty() {
         return gerr("invalid_path", "a file path is required");
     }
-    if parts.first() == Some(&".git") {
+    if parts.iter().any(|p| p.eq_ignore_ascii_case(".git")) {
         return gerr("invalid_path", "the .git folder is not addressable");
     }
     Ok(rel.to_string())
@@ -426,7 +475,7 @@ pub fn stage(root: &Path, paths: &[String], stage: bool) -> R<()> {
 
 // ---- Tauri commands ------------------------------------------------------------------------
 
-async fn blocking<T, F>(f: F) -> R<T>
+pub(crate) async fn blocking<T, F>(f: F) -> R<T>
 where
     T: Send + 'static,
     F: FnOnce(PathBuf) -> R<T> + Send + 'static,

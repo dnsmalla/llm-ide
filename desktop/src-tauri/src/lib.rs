@@ -10,6 +10,7 @@ mod core_host;
 mod fs_ops;
 mod fs_watch;
 mod git;
+mod git_scm;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
@@ -295,6 +296,18 @@ pub fn run() {
             git::git_diff,
             git::git_show,
             git::git_stage,
+            git_scm::git_diff_hunks,
+            git_scm::git_stage_hunks,
+            git_scm::git_stage_all,
+            git_scm::git_discard,
+            git_scm::git_identity,
+            git_scm::git_commit,
+            git_scm::git_branches,
+            git_scm::git_checkout,
+            git_scm::git_create_branch,
+            git_scm::git_log,
+            git_scm::git_commit_files,
+            git_scm::git_commit_diff,
             tray::notify,
             tray::tray_status,
             tray::tray_set_close_to_tray,
