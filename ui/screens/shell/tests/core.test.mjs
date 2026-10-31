@@ -201,3 +201,56 @@ test("stream: HTTP error throws before yielding; abort mid-stream throws ABORTED
   await assert.rejects(it.next(), (e) => isAbortError(e));
   assert.ok(cancelled);
 });
+
+test("M4: logout during an in-flight refresh does not resurrect the session or republish a token", async () => {
+  let release;
+  const gateP = new Promise((r) => (release = r));
+  const { client, advance } = setup(async (url) => {
+    if (url.endsWith("/auth/login")) return json(200, session(1, 60));
+    if (url.endsWith("/auth/refresh")) { await gateP; return json(200, session(2)); }
+    return json(200, {});
+  });
+  await client.login("a@b.c", "pw");
+  const seen = [];
+  client.subscribeAccessToken((t) => seen.push(t));
+  advance(40_000);
+  const p = client.request("/kb/x").catch((e) => e);
+  await new Promise((r) => setTimeout(r, 0));
+  await client.logout();
+  release();
+  const err = await p;
+  assert.ok(err instanceof CoreError);
+  assert.equal(client.getSnapshot().signedIn, false);
+  assert.deepEqual(seen, ["acc1", null]);
+});
+
+test("M4: logout during an in-flight login does not sign in", async () => {
+  let release;
+  const gateP = new Promise((r) => (release = r));
+  const { client } = setup(async () => { await gateP; return json(200, session(1)); });
+  const p = client.login("a@b.c", "pw").catch((e) => e);
+  await new Promise((r) => setTimeout(r, 0));
+  await client.logout();
+  release();
+  assert.ok((await p) instanceof CoreError);
+  assert.equal(client.getSnapshot().signedIn, false);
+});
+
+test("H7: an untrusted core never receives credentials or a token publish", async () => {
+  let allowed = false;
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : json(200, {})), { credentialsAllowed: () => allowed });
+  await assert.rejects(client.login("a@b.c", "pw"), (e) => e.code === "UNTRUSTED_CORE");
+  await assert.rejects(client.register("a@b.c", "pw"), (e) => e.code === "UNTRUSTED_CORE");
+  assert.equal(calls.length, 0);
+  allowed = true;
+  await client.login("a@b.c", "pw");
+  const seen = [];
+  allowed = false;
+  client.subscribeAccessToken((t) => seen.push(t));
+  client.republishAccessToken();
+  assert.deepEqual(seen, []);
+  await assert.rejects(client.request("/kb/x"), (e) => e.code === "UNTRUSTED_CORE");
+  const before = calls.length;
+  await client.logout(); // local drop only, refresh token not sent
+  assert.equal(calls.length, before);
+});

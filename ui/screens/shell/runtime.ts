@@ -2,9 +2,17 @@
 import { createCoreClient } from "./core";
 import { createChatBinding } from "./chat-binding";
 import { host, invokeHost, isHostAvailable } from "./host";
+import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
+
+/** Credentials only go to a core the host spawned, or one the user confirmed in the login modal (memory only). */
+export const trustGate = createTrustGate({
+  getStatus: () => coreStatusStore.getSnapshot().status,
+  isHost: isHostAvailable,
+  subscribeStatus: (l) => coreStatusStore.subscribe(l),
+});
 
 /** The one core client. Its base URL follows the supervised core (it changes across restarts). */
 export const core = createCoreClient({
@@ -12,7 +20,11 @@ export const core = createCoreClient({
     const s = coreStatusStore.getSnapshot().status;
     return s && s.state === "ready" && s.url ? s.url : null;
   },
+  credentialsAllowed: () => trustGate.allowed(),
 });
+
+// Confirming (or losing) trust changes whether the host may hold the token: re-publish only when now allowed.
+trustGate.subscribe(() => core.republishAccessToken());
 
 /** Binds the signed-in session to the host's chat store (desktop only; a no-op in a plain browser). */
 export const chatBinding = createChatBinding(core, invokeHost, isHostAvailable);

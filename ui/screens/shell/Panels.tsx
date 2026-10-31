@@ -1,7 +1,24 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { CoreError, isAbortError, type CoreClient } from "./core";
 import type { StatusView } from "./status-view";
+import type { TrustGate } from "./trust-gate";
+
+/** Names the unverified core and the risk; credentials are held back until the user agrees. */
+export function UntrustedCoreNotice({ url, onConfirm }: { url: string | null; onConfirm: () => void }) {
+  return (
+    <div role="alertdialog" aria-labelledby="sh-untrusted-title" className="sh-form-error" data-testid="untrusted-core">
+      <strong id="sh-untrusted-title">Unverified core at {url ?? "an unknown address"}</strong>
+      <p>
+        LLM-IDE did not start this core. Another program on this computer may be answering on that address, and it would receive your password and
+        session tokens. Only continue if you started this core yourself.
+      </p>
+      <button type="button" className="sh-button" onClick={onConfirm}>
+        I started it, trust this core for this session
+      </button>
+    </div>
+  );
+}
 
 /** Full-area panel while the core is down. Never blank: always says what is happening. */
 export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: () => void }) {
@@ -37,7 +54,13 @@ export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: ()
 }
 
 /** Sign-in / create-account panel. Credentials go to the core only; nothing is stored here. */
-export function LoginPanel({ client }: { client: CoreClient }) {
+export function LoginPanel({ client, gate }: { client: CoreClient; gate?: TrustGate }) {
+  const trust = useSyncExternalStore(
+    (l) => (gate ? gate.subscribe(l) : () => undefined),
+    () => (gate ? gate.view() : null),
+    () => null,
+  );
+  const blocked = trust !== null && !trust.allowed;
   const [mode, setMode] = useState<"signin" | "create">("signin");
   const [canRegister, setCanRegister] = useState(false);
   const [pending, setPending] = useState(false);
@@ -58,6 +81,7 @@ export function LoginPanel({ client }: { client: CoreClient }) {
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (blocked) return;
     const form = e.currentTarget;
     const data = new FormData(form);
     const email = String(data.get("email") ?? "").trim();
@@ -94,6 +118,7 @@ export function LoginPanel({ client }: { client: CoreClient }) {
     <div className="sh-panel">
       <h2 className="sh-panel-title">{create ? "Create your account" : "Sign in to LLM-IDE"}</h2>
       <p className="sh-panel-text sh-muted">The account lives only on this computer. You sign in again each time the app starts.</p>
+      {trust?.needsConfirm && gate && <UntrustedCoreNotice url={trust.url} onConfirm={() => gate.confirm()} />}
       <form className="sh-form" onSubmit={submit} aria-busy={pending}>
         <label className="sh-field">
           <span>Email</span>
@@ -116,7 +141,7 @@ export function LoginPanel({ client }: { client: CoreClient }) {
         )}
         {notice && <div role="status">{notice}</div>}
         <div className="sh-form-actions">
-          <button type="submit" className="sh-button sh-button-primary" disabled={pending}>
+          <button type="submit" className="sh-button sh-button-primary" disabled={pending || blocked}>
             {pending ? "Please wait…" : create ? "Create account" : "Sign in"}
           </button>
           {(canRegister || create) && (

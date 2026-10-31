@@ -6,7 +6,7 @@ import { StatusBar } from "./StatusBar";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, SELECTABLE, initialNav, navKeyTarget, navReducer, readStoredSection, sectionForShortcut, storeSection, type SectionDef, type SectionId } from "./sections";
-import { core, coreStatusStore } from "./runtime";
+import { core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
@@ -175,7 +175,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {gate === "login" && (
             <div className="sh-overlay">
-              <LoginPanel client={core} />
+              <LoginPanel client={core} gate={trustGate} />
             </div>
           )}
         </main>

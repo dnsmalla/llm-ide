@@ -72,6 +72,12 @@ export interface CoreClientOptions {
   refreshSkewMs?: number;
   /** Default request timeout. Default 30 s. */
   timeoutMs?: number;
+  /**
+   * May credentials (password, refresh/bearer token, the token published to the host) go to the current core?
+   * Default: yes (browser dev mode and tests). The desktop runtime wires the trust gate here: only a spawned core,
+   * or one the user confirmed, receives them.
+   */
+  credentialsAllowed?: () => boolean;
 }
 
 export interface RequestOptions {
@@ -213,9 +219,17 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
   let tokens: Tokens | null = null;
   let snapshot: SessionSnapshot = SIGNED_OUT;
   let refreshing: Promise<void> | null = null;
+  // Bumped by every sign-out/drop and every login start: an in-flight login or refresh whose epoch moved on is stale
+  // and must not resurrect the session or republish a token.
+  let epoch = 0;
+  const trusted = () => (options.credentialsAllowed ? options.credentialsAllowed() : true);
+  const requireTrusted = () => {
+    if (!trusted()) throw new CoreError(0, "UNTRUSTED_CORE", "This core was not started by LLM-IDE and has not been confirmed. Credentials were not sent.");
+  };
   const listeners = new Set<Listener>();
   const tokenListeners = new Set<AccessTokenListener>();
   const emitToken = (t: string | null) => {
+    if (t !== null && !trusted()) return; // never hand a token to the host for an unverified core
     for (const l of [...tokenListeners]) {
       try {
         l(t);
@@ -252,6 +266,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
   };
 
   const drop = () => {
+    epoch++;
     const had = tokens !== null;
     tokens = null;
     emit(SIGNED_OUT);
@@ -276,6 +291,8 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     refreshing ??= (async () => {
       const current = tokens;
       if (!current) throw new CoreError(401, "NO_SESSION", "Not signed in.");
+      requireTrusted();
+      const startEpoch = epoch;
       const res = await rawFetch(
         "/auth/refresh",
         { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ refreshToken: current.refresh }) },
@@ -294,6 +311,8 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
         if (e instanceof CoreError) throw e;
         throw new CoreError(502, "BAD_RESPONSE", "The core returned an invalid session.");
       }
+      // Signed out (or re-logged in) while this refresh was in flight: drop the result.
+      if (epoch !== startEpoch) throw new CoreError(0, "ABORTED", "The session changed during refresh.");
       setTokens(parsed.tokens, parsed.user);
     })().finally(() => {
       refreshing = null;
@@ -303,6 +322,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
 
   const authHeader = async (): Promise<Record<string, string>> => {
     if (!tokens) throw new CoreError(401, "NO_SESSION", "Not signed in.");
+    requireTrusted();
     if (tokens.expiresAt - now() <= skew) await doRefresh();
     // `tokens` may have been cleared by a failed refresh, which already threw.
     return tokens ? { Authorization: `Bearer ${tokens.access}` } : {};
@@ -359,12 +379,12 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     },
 
     republishAccessToken() {
-      if (tokens) emitToken(tokens.access);
+      if (tokens && trusted()) emitToken(tokens.access);
     },
 
     subscribeAccessToken(listener) {
       tokenListeners.add(listener);
-      if (tokens) {
+      if (tokens && trusted()) {
         try {
           listener(tokens.access);
         } catch {
@@ -421,6 +441,8 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     },
 
     async login(email, password, signal) {
+      requireTrusted();
+      const startEpoch = ++epoch;
       const res = await rawFetch(
         "/auth/login",
         { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ email, password }) },
@@ -435,11 +457,13 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
         if (e instanceof CoreError) throw e;
         throw new CoreError(502, "BAD_RESPONSE", "The core returned an invalid session.");
       }
+      if (epoch !== startEpoch) throw new CoreError(0, "ABORTED", "Sign-in was cancelled.");
       setTokens(parsed.tokens, parsed.user);
       return snapshot;
     },
 
     async register(email, password, displayName, signal) {
+      requireTrusted();
       const res = await rawFetch(
         "/auth/register",
         { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ email, password, displayName }) },
@@ -464,7 +488,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     async logout() {
       const t = tokens;
       drop(); // local sign-out never waits on the network
-      if (!t) return;
+      if (!t || !trusted()) return; // the refresh token never goes to an unconfirmed core
       try {
         await rawFetch(
           "/auth/logout",
