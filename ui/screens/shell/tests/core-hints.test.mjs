@@ -108,3 +108,16 @@ test("statusEqual treats an unchanged foreign_core as equal (no re-render each p
   assert.equal(statusEqual(st({ foreign_core: FOREIGN }), st({ foreign_core: FOREIGN })), true);
   assert.equal(statusEqual(st({ foreign_core: FOREIGN }), st({ foreign_core: { ...FOREIGN, pid: 9 } })), false);
 });
+
+test("explainCoreErrorFor gives each shell transport code its own sentence; aborts are silent", async () => {
+  const { explainCoreErrorFor } = await load("core-explain.ts");
+  const mk = (code) => Object.assign(new Error("server text sk-secret"), { code });
+  const all = ["TIMEOUT", "UNTRUSTED_CORE", "NO_SESSION", "SESSION_EXPIRED", "UNSAFE_URL", "BAD_RESPONSE", "NETWORK"].map((c) => explainCoreErrorFor(mk(c), st()));
+  assert.equal(new Set(all).size, all.length);
+  for (const t of all) assert.ok(!t.includes("sk-secret"));
+  assert.match(explainCoreErrorFor(mk("UNTRUSTED_CORE"), st()), /not verified/);
+  assert.match(explainCoreErrorFor(mk("NETWORK"), st({ state: "failed" })), /not ready \(status: failed\)/);
+  assert.equal(explainCoreErrorFor(mk("ABORTED"), st()), null);
+  assert.equal(explainCoreErrorFor(mk("SOMETHING"), st()), "server text sk-secret");
+  assert.equal(explainCoreErrorFor("x", st(), "fb"), "fb");
+});

@@ -5,7 +5,7 @@ import { host, invokeHost, isHostAvailable } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
-import { describeCoreErrorFor } from "./core-explain";
+import { describeCoreErrorFor, explainCoreErrorFor } from "./core-explain";
 import { diagnosticsLog } from "./diagnostics";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
@@ -57,4 +57,9 @@ coreStatusStore.subscribe(() => {
 /** Error text for a failed core call, explained by the last known core status (see core-explain.ts). */
 export function describeCoreError(e: unknown, fallback?: string): string {
   return describeCoreErrorFor(e, coreStatusStore.getSnapshot().status, fallback);
+}
+
+/** Like `describeCoreError`, but every shell transport code gets its own sentence and an abort returns `null` (stay silent). */
+export function explainCoreError(e: unknown, fallback?: string): string | null {
+  return explainCoreErrorFor(e, coreStatusStore.getSnapshot().status, fallback);
 }
