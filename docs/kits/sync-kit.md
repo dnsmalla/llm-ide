@@ -106,16 +106,16 @@ The Mac WebSocket path stays **unchanged and working** until step 6 (kit plan in
 
 ## 7. Decisions needed from the user
 
-The relay questions are in the relay design (numbered R1 to R12). Map-level questions:
+The relay questions are in the relay design (decisions D1 to D9 resolved 2026-10-31 by the user's delegation to the secure option, "revisit if wrong"; D6 hosting still open until R2; external review G-EXT before any public exposure). The design was revised to the independent security review. Map-level questions:
 
 | # | Question | Options | Recommended |
 |---|---|---|---|
-| S1 | Keep the native iOS app after the PWA reaches parity? | keep; retire | keep until the PWA covers chat, approvals and push; then optional (ADR 0018) |
-| S2 | While the relay is not built, should phone features keep growing through the Mac (new bridges for new kits), or freeze? | grow; freeze | freeze new phone surfaces: every new bridge is a surface to re-implement on the relay; fix bugs only |
-| S3 | Is "the phone through the Mac is enough for now" (Q-WEB-3) still true for the **extension** when the Mac is off? | yes; no | yes: the extension keeps its local-core mode; remote mode is a later phase |
-| S4 | Should the relay carry **all** wire tags or only a read and request subset first (chat read, approvals, activity, usage, auto-task and loop status)? | all; subset | subset first, writes queued only for what the Mac already allows from the phone today |
-| S5 | Delete the PIN pairing once QR enrollment exists, or keep the PIN as a fallback on the LAN? | delete; keep | delete with `:3006` (cleartext and PIN go away, ADR 0018 consequence) |
-| S6 | Who may enroll a device: the admin only, or any signed-in user for their own devices? | admin; user | each user enrolls their own devices; a team key is per team (see relay R5) |
+| S1 | Keep the native iOS app after the PWA reaches parity? | keep; retire | **Decided 2026-10-31 (user delegated to the secure option; revisit if wrong): keep, permanently.** The PWA is read-only plus low-risk queueing on a separate origin; writes and approvals stay on the native app and desktop (relay design D1) |
+| S2 | While the relay is not built, should phone features keep growing through the Mac (new bridges for new kits), or freeze? | grow; freeze | freeze new phone surfaces: every new bridge is a surface to re-implement on the relay; fix bugs only (still open for the user, unchanged by the review) |
+| S3 | Is "the phone through the Mac is enough for now" (Q-WEB-3) still true for the **extension** when the Mac is off? | yes; no | yes: the extension keeps its local-core mode; remote mode is a later phase and is **meeting upload only, no snapshot keys** (D7, delegated 2026-10-31) |
+| S4 | Should the relay carry **all** wire tags or only a read and request subset first (chat read, approvals, activity, usage, auto-task and loop status)? | all; subset | **Decided 2026-10-31 (delegated; revisit if wrong): subset.** Reads per capability set; queued while the desktop is off: chat prompts, activity-seen, phone-session project switch, all under a fixed read-only ceiling (D2); approvals live-only on native; writes native or desktop only |
+| S5 | Delete the PIN pairing once QR enrollment exists, or keep the PIN as a fallback on the LAN? | delete; keep | **Decided 2026-10-31 (delegated; revisit if wrong): delete** with `:3006` at R9 (cleartext and PIN go away, ADR 0018 consequence); the Mac path stays until parity |
+| S6 | Who may enroll a device: the admin only, or any signed-in user for their own devices? | admin; user | **Decided 2026-10-31 (delegated; revisit if wrong): each user enrolls their own devices; per-user keys with individual login, no key shared between people (D8).** A team is a later, separate cryptographic design. Enrollment needs the QR secret, SAS on both screens and desktop confirmation |
 
 ## 8. Risks
 
@@ -125,7 +125,7 @@ The relay questions are in the relay design (numbered R1 to R12). Map-level ques
 | R2 | Cleartext `ws://` on the LAN today: a sniffed token works until the 30-day idle expiry | Already mitigated (idle expiry, rotation, per-device tokens); retire at relay parity |
 | R3 | A phone holding an old capability list calls a removed bridge | Handlers re-check on every request and return typed refusals (existing rule) |
 | R4 | Port `:3006` conflicts with a foreign process answer "Wrong PIN" (memory note) | Bind-with-fallback exists; relay removes the port |
-| R5 | Security: first public service in the product | Relay design threat model; E2E; no plaintext at the relay |
+| R5 | Security: first public service in the product | Relay design threat model (T1 to T23); E2E with per-kind subkeys; tiered clients; external review gate before public exposure |
 | R6 | Two phone paths during the overlap double maintenance | Time-box; the Mac path is frozen |
 
 ## 9. Drift, gaps and corrections to the plan's premises
