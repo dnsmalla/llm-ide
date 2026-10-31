@@ -219,6 +219,8 @@ struct Status {
     state: Phase,
     error: Option<String>,
     trust: &'static str,
+    /// The launch nonce of the child this app spawned (only while `trust == "spawned"`).
+    nonce: Option<String>,
     notice: Option<String>,
     restarts: u32,
     restart_at: Option<Instant>,
@@ -265,6 +267,7 @@ impl CoreHost {
                     state: Phase::Starting,
                     error: None,
                     trust: "pending",
+                    nonce: None,
                     notice: None,
                     restarts: 0,
                     restart_at: None,
@@ -281,6 +284,25 @@ impl CoreHost {
                 claude_probe,
                 claude_in_flight: AtomicBool::new(false),
             }),
+        }
+    }
+
+    /// The URL of the core this app SPAWNED and verified, right now: `Some` only while the phase is
+    /// `Ready`, the trust is `spawned` (never an adopted or still-pending core), and `/health` still
+    /// echoes this launch's nonce. Callers that hand a credential to the core re-ask at every use, so a
+    /// restart on another port (or a squatter) is never sent a stale URL's token.
+    pub fn verified_url(&self) -> Option<String> {
+        let (url, nonce) = {
+            let s = lock(&self.inner.status);
+            if s.state != Phase::Ready || s.trust != "spawned" {
+                return None;
+            }
+            (s.url.clone(), s.nonce.clone()?)
+        };
+        let port: u16 = url.strip_prefix("http://127.0.0.1:")?.parse().ok()?;
+        match probe(port, Duration::from_millis(800)) {
+            Probe::Healthy { nonce: Some(got) } if ct_eq(&got, &nonce) => Some(url),
+            _ => None,
         }
     }
 
@@ -527,6 +549,7 @@ impl CoreHost {
                 }
                 let ms = started.elapsed().as_millis() as u64;
                 self.set_ready(url, false, ms, "spawned", None);
+                lock(&self.inner.status).nonce = Some(nonce.to_string());
                 if is_restart {
                     lock(&self.inner.status).restarts += 1;
                 }
@@ -657,6 +680,7 @@ impl CoreHost {
             s.restart_at = None;
             s.fatal = false;
             s.trust = trust;
+            s.nonce = None;
             s.notice = notice;
         }
         println!(
@@ -1122,6 +1146,29 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(dir.join("core.log")).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn only_a_spawned_verified_core_is_handed_credentials() {
+        let (port, _) = fake(|| ok_with("x-llmide-nonce: good\r\n"));
+        let url = format!("http://127.0.0.1:{port}");
+        // pending: nothing yet
+        let host = CoreHost::new();
+        assert!(host.verified_url().is_none());
+        // adopted (identity unverifiable): never, even though it answers /health
+        host.set_ready(url.clone(), true, 1, "adopted_unverified", Some("n".into()));
+        assert!(host.verified_url().is_none(), "an adopted core is never verified");
+        // spawned with the matching nonce: yes
+        host.set_ready(url.clone(), false, 1, "spawned", None);
+        lock(&host.inner.status).nonce = Some("good".into());
+        assert_eq!(host.verified_url().as_deref(), Some(url.as_str()));
+        // the process on the port stopped echoing our nonce (replaced / squatted): no
+        lock(&host.inner.status).nonce = Some("other".into());
+        assert!(host.verified_url().is_none());
+        // not Ready: no
+        lock(&host.inner.status).nonce = Some("good".into());
+        lock(&host.inner.status).state = Phase::Restarting;
+        assert!(host.verified_url().is_none());
     }
 
     #[test]

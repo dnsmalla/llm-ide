@@ -26,10 +26,14 @@ fn err(code: &'static str, message: &str) -> StoreError {
     StoreError::new(code, message)
 }
 
+/// Resolves, at each use, the URL of the core this app spawned and verified (see `CoreHost::verified_url`);
+/// `None` for a pending, failed, restarting, adopted or nonce-mismatching core.
+pub type CoreProvider = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 struct Bound {
     user_id: String,
     token: String,
-    core_url: String,
+    core: CoreProvider,
     store: ChatStore,
     journal_path: PathBuf,
     shared_with_mac: bool,
@@ -90,19 +94,21 @@ impl ChatService {
         Self::default()
     }
 
-    fn snapshot(&self) -> Result<(ChatStore, String, String), StoreError> {
+    fn snapshot(&self) -> Result<(ChatStore, CoreProvider, String), StoreError> {
         let b = lock(&self.0.bound);
         let b = b.as_ref().ok_or_else(|| err("not_bound", "sign in first: no session is bound"))?;
-        Ok((b.store.clone(), b.core_url.clone(), b.token.clone()))
+        Ok((b.store.clone(), b.core.clone(), b.token.clone()))
     }
 
     fn store(&self) -> Result<ChatStore, StoreError> {
         self.snapshot().map(|s| s.0)
     }
 
-    /// Binds (or re-binds, refreshing the token) the signed-in session. `core_url` must be loopback.
-    pub fn bind(&self, core_url: &str, token: &str, layout_for: &dyn Fn(&str) -> Result<StoreLayout, String>, data_dir: Option<PathBuf>) -> Result<BindInfo, StoreError> {
-        let remote = HttpRemote::new(core_url, token).map_err(|_| err("invalid", "core url or token is not acceptable"))?;
+    /// Binds (or re-binds, refreshing the token) the signed-in session. The token is only ever sent to the
+    /// core `core` resolves to (spawned and nonce-verified, loopback); otherwise `core_unverified`.
+    pub fn bind(&self, core: CoreProvider, token: &str, layout_for: &dyn Fn(&str) -> Result<StoreLayout, String>, data_dir: Option<PathBuf>) -> Result<BindInfo, StoreError> {
+        let core_url = core().ok_or_else(|| err("core_unverified", "the core is not the one this app started (or is not ready); no credentials were sent"))?;
+        let remote = HttpRemote::new(&core_url, token).map_err(|_| err("invalid", "core url or token is not acceptable"))?;
         let user_id = match remote.me(Duration::from_secs(3)) {
             Ok(u) => u,
             Err(RemoteError::Unauthorized) => return Err(err("unauthorized", "the core rejected this session")),
@@ -119,15 +125,16 @@ impl ChatService {
         let store = ChatStore::open(layout, &user_id, index)?;
         {
             let mut b = lock(&self.0.bound);
-            *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core_url: core_url.to_string(), store: store.clone(), journal_path: journal_path.clone(), shared_with_mac: shared });
+            *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone(), shared_with_mac: shared });
         }
         let first = lock(&self.0.swept).insert(user_id.clone());
         if first {
             let svc = self.clone();
             std::thread::spawn(move || {
                 // The sweep reads the token at start; a later re-bind only refreshes it for the quit run.
-                if let Ok((store, url, tok)) = svc.snapshot() {
-                    if let Ok(remote) = HttpRemote::new(&url, &tok) {
+                if let Ok((store, core, tok)) = svc.snapshot() {
+                    // Re-resolved now (not captured at bind): a restarted core may be on another port.
+                    if let Some(remote) = core().and_then(|url| HttpRemote::new(&url, &tok).ok()) {
                         let jp = lock(&svc.0.bound).as_ref().map(|b| b.journal_path.clone());
                         let report = Archiver::new(store, remote, jp).with_policy(crate::prefs::archive_policy()).sweep(SWEEP_CAP);
                         *lock(&svc.0.last_sweep) = Some(report);
@@ -153,12 +160,12 @@ impl ChatService {
         if self.0.quit_started.swap(true, Ordering::SeqCst) {
             return None;
         }
-        let (store, url, tok, jp) = {
+        let (store, core, tok, jp) = {
             let b = lock(&self.0.bound);
             let b = b.as_ref()?;
-            (b.store.clone(), b.core_url.clone(), b.token.clone(), b.journal_path.clone())
+            (b.store.clone(), b.core.clone(), b.token.clone(), b.journal_path.clone())
         };
-        let remote = HttpRemote::new(&url, &tok).ok()?;
+        let remote = HttpRemote::new(&core()?, &tok).ok()?;
         let report = Archiver::new(store, remote, Some(jp)).with_policy(crate::prefs::archive_policy()).quit(cap);
         *lock(&self.0.last_quit) = Some(report.clone());
         Some(report)
@@ -250,9 +257,11 @@ pub async fn chat_bind_session(svc: State<'_, ChatService>, host: State<'_, Core
     if status.state != Phase::Ready {
         return Err(err("core_unavailable", "the core is not ready"));
     }
-    let url = status.url;
+    // Only the core THIS app spawned (nonce verified), never an adopted one on :3456.
+    let host = host.inner().clone();
+    let provider: CoreProvider = Arc::new(move || host.verified_url());
     let data_dir = crate::fsutil::desktop_data_dir().ok();
-    blocking(move || svc.bind(&url, &token, &|u| layout_here(u), data_dir)).await
+    blocking(move || svc.bind(provider, &token, &|u| layout_here(u), data_dir)).await
 }
 
 /// Forgets the bound session (sign-out).
@@ -372,7 +381,7 @@ impl ChatService {
     /// Deletes one chat after `confirm` (a native Cancel-first dialog in the app) said yes. Rate limited
     /// (a loop over the chat list cannot wipe the store), one dialog at a time, and the file is MOVED to
     /// the recoverable folder, never removed.
-    pub(crate) fn delete_confirmed(&self, raw_id: &str, confirm: &dyn Fn(&str) -> bool, url: &str, token: &str) -> Result<DeleteResult, StoreError> {
+    pub(crate) fn delete_confirmed(&self, raw_id: &str, confirm: &dyn Fn(&str) -> bool, url: Option<&str>, token: &str) -> Result<DeleteResult, StoreError> {
         let store = self.store()?;
         let id = crate::chat_store::canonical_chat_id(raw_id).ok_or_else(|| err("invalid_id", "chat id is not a UUID"))?;
         if !self.0.delete_limit.allow() {
@@ -394,8 +403,8 @@ impl ChatService {
         }
         let existed = store.delete(&id)?;
         // Best effort, bounded: the tombstone is already durable, so a miss is retried by the sweep.
-        let tombstone = match HttpRemote::new(url, token) {
-            Ok(remote) => {
+        let tombstone = match url.and_then(|u| HttpRemote::new(u, token).ok()) {
+            Some(remote) => {
                 let iso = crate::chat_archive::iso_utc(crate::chat_store::now_unix());
                 match remote.session_purge(&id, &iso, Duration::from_secs(2)) {
                     Ok(s) if s == "done" => {
@@ -406,7 +415,7 @@ impl ChatService {
                     Err(_) => "unreachable",
                 }
             }
-            Err(_) => "none",
+            None => "none",
         };
         Ok(DeleteResult { existed, tombstone })
     }
@@ -414,11 +423,13 @@ impl ChatService {
 
 #[tauri::command]
 pub async fn chat_delete(svc: State<'_, ChatService>, args: DeleteArgs) -> Result<DeleteResult, StoreError> {
-    let (_, url, token) = svc.snapshot()?;
+    let (_, core, token) = svc.snapshot()?;
     let svc = svc.inner().clone();
     blocking(move || {
         let ask = |text: &str| crate::confirm::ask("Delete this chat?", text, "Delete chat", true);
-        svc.delete_confirmed(&args.id, &ask, &url, &token)
+        // Resolved now; an unverified core simply means the tombstone is sent later by the sweep.
+        let url = core();
+        svc.delete_confirmed(&args.id, &ask, url.as_deref(), &token)
     })
     .await
 }
@@ -453,8 +464,38 @@ mod tests {
     use crate::chat_store::tests::Tmp;
     use crate::chat_store::{SaveMode, StoreLayout};
 
+    fn fixed(url: &str) -> CoreProvider {
+        let u = url.to_string();
+        Arc::new(move || Some(u.clone()))
+    }
+
     fn layout(t: &Tmp) -> impl Fn(&str) -> Result<StoreLayout, String> + '_ {
         move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions"), shared_with_mac: false })
+    }
+
+    #[test]
+    fn an_unverified_core_never_receives_the_token_and_nothing_binds() {
+        let t = Tmp::new("svc-unverified");
+        let core = FakeCore::default();
+        let url = serve(core, "tok", "user-42");
+        let svc = ChatService::new();
+        // an adopted / pending / restarting / nonce-mismatching core: the provider says no
+        let none: CoreProvider = Arc::new(|| None);
+        assert_eq!(svc.bind(none, "tok", &layout(&t), None).unwrap_err().code, "core_unverified");
+        assert_eq!(svc.store().err().unwrap().code, "not_bound");
+        // a provider that later stops verifying: the sweep and the quit run send nothing
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let verified = Arc::new(AtomicBool::new(true));
+        let (u, c2, v2) = (url.clone(), calls.clone(), verified.clone());
+        let flaky: CoreProvider = Arc::new(move || {
+            c2.fetch_add(1, Ordering::SeqCst);
+            v2.load(Ordering::SeqCst).then(|| u.clone())
+        });
+        svc.bind(flaky, "tok", &layout(&t), Some(t.0.join("data"))).unwrap();
+        verified.store(false, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300)); // let the bind-time sweep thread resolve its url
+        assert!(svc.quit_archive(Duration::from_secs(1)).is_none() || crate::prefs::archive_policy() == crate::chat_archive::ArchivePolicy::Off);
+        assert!(calls.load(Ordering::SeqCst) >= 1, "the provider is asked at each use, not captured once");
     }
 
     #[test]
@@ -476,7 +517,7 @@ mod tests {
         let t = Tmp::new("svc-del");
         let svc = ChatService::new();
         let url = serve(FakeCore::default(), "tok", "user-42");
-        svc.bind(&url, "tok", &layout(&t), None).unwrap();
+        svc.bind(fixed(&url), "tok", &layout(&t), None).unwrap();
         let store = svc.store().unwrap();
         let id = "AAAAAAAA-0000-4000-8000-000000000001";
         store.save(crate::chat_store::tests::session(id, 3), SaveMode::Replace, None, true).unwrap();
@@ -485,7 +526,7 @@ mod tests {
             asked.set(asked.get() + 1);
             false
         };
-        let r = svc.delete_confirmed(id, &no, &url, "tok");
+        let r = svc.delete_confirmed(id, &no, Some(&url), "tok");
         assert_eq!(r.unwrap_err().code, "declined");
         assert!(t.0.join("chats/user-42/sessions").join(format!("{id}.json")).exists());
         assert_eq!(store.pending_delete_count(), 0, "no tombstone for a declined delete");
@@ -494,7 +535,7 @@ mod tests {
             true
         };
         std::thread::sleep(Duration::from_millis(1_600)); // past the rate limit's minimum gap
-        let ok = svc.delete_confirmed(id, &yes, &url, "tok").unwrap();
+        let ok = svc.delete_confirmed(id, &yes, Some(&url), "tok").unwrap();
         assert!(ok.existed);
         assert_eq!(store.trashed().len(), 1);
     }
@@ -504,7 +545,7 @@ mod tests {
         let t = Tmp::new("svc-rl");
         let svc = ChatService::new();
         let url = serve(FakeCore::default(), "tok", "user-42");
-        svc.bind(&url, "tok", &layout(&t), None).unwrap();
+        svc.bind(fixed(&url), "tok", &layout(&t), None).unwrap();
         let yes = |_: &str| true;
         let mut limited = 0;
         for i in 0..12u32 {
@@ -512,7 +553,7 @@ mod tests {
             let mut body = crate::chat_store::tests::session(&id, 1);
             body["ownerUserId"] = serde_json::json!("user-42");
             std::fs::write(t.0.join("chats/user-42/sessions").join(format!("{id}.json")), serde_json::to_vec(&body).unwrap()).unwrap();
-            if svc.delete_confirmed(&id, &yes, &url, "tok").is_err_and(|e| e.code == "rate_limited") {
+            if svc.delete_confirmed(&id, &yes, Some(&url), "tok").is_err_and(|e| e.code == "rate_limited") {
                 limited += 1;
             }
         }
@@ -527,11 +568,11 @@ mod tests {
         assert!(svc.quit_archive(Duration::from_secs(1)).is_none());
         let url = serve(FakeCore::default(), "tok", "user-42");
         // wrong token, non-loopback url, junk token
-        assert_eq!(svc.bind(&url, "bad", &layout(&t), None).unwrap_err().code, "unauthorized");
-        assert_eq!(svc.bind("http://example.com", "tok", &layout(&t), None).unwrap_err().code, "invalid");
-        assert_eq!(svc.bind(&url, "a\nb", &layout(&t), None).unwrap_err().code, "invalid");
+        assert_eq!(svc.bind(fixed(&url), "bad", &layout(&t), None).unwrap_err().code, "unauthorized");
+        assert_eq!(svc.bind(fixed("http://example.com"), "tok", &layout(&t), None).unwrap_err().code, "invalid");
+        assert_eq!(svc.bind(fixed(&url), "a\nb", &layout(&t), None).unwrap_err().code, "invalid");
         assert_eq!(svc.store().err().unwrap().code, "not_bound");
-        let info = svc.bind(&url, "tok", &layout(&t), Some(t.0.join("data"))).unwrap();
+        let info = svc.bind(fixed(&url), "tok", &layout(&t), Some(t.0.join("data"))).unwrap();
         assert_eq!((info.user_id.as_str(), info.sweep_started), ("user-42", true));
         // the directory is the core's user id, never anything the caller named
         let store = svc.store().unwrap();
@@ -539,11 +580,11 @@ mod tests {
         store.save(sess, SaveMode::Replace, None, true).unwrap();
         assert!(t.0.join("chats/user-42/sessions/AAAAAAAA-0000-4000-8000-000000000001.json").exists());
         // re-bind (token refresh) does not start a second sweep; unbind forgets the session
-        assert!(!svc.bind(&url, "tok", &layout(&t), Some(t.0.join("data"))).unwrap().sweep_started);
+        assert!(!svc.bind(fixed(&url), "tok", &layout(&t), Some(t.0.join("data"))).unwrap().sweep_started);
         svc.unbind();
         assert_eq!(svc.store().err().unwrap().code, "not_bound");
         // a user id that cannot be one path segment is refused
         let evil = serve(FakeCore::default(), "tok", "../../etc");
-        assert_eq!(ChatService::new().bind(&evil, "tok", &layout(&t), None).unwrap_err().code, "invalid_user");
+        assert_eq!(ChatService::new().bind(fixed(&evil), "tok", &layout(&t), None).unwrap_err().code, "invalid_user");
     }
 }
