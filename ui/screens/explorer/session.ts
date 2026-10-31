@@ -25,6 +25,18 @@ export function projectKey(root: string): string {
 }
 
 const MAX_EXPANDED = 500;
+const MAX_SESSION_PATH = 1024;
+
+/**
+ * A project-relative path from localStorage (attacker-influenced: any script in the origin can write it): no drive
+ * letters / alternate streams (':'), no backslashes, no control characters, not absolute, no `.`/`..` segments.
+ */
+export function isSafeSessionPath(p: unknown): p is string {
+  if (typeof p !== "string" || p === "" || p.length > MAX_SESSION_PATH) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f:\\]/.test(p) || p.startsWith("/")) return false;
+  return !p.split("/").some((seg) => seg === ".." || seg === "." || seg === "");
+}
 
 export function loadSession(kv: KV | null, root: string): ExplorerSession {
   const empty: ExplorerSession = { tabs: null, expanded: [], treeWidth: null };
@@ -33,7 +45,7 @@ export function loadSession(kv: KV | null, root: string): ExplorerSession {
     const raw = kv.getItem(projectKey(root));
     if (!raw || raw.length > 512 * 1024) return empty;
     const o = JSON.parse(raw) as Partial<ExplorerSession>;
-    const expanded = Array.isArray(o.expanded) ? o.expanded.filter((p): p is string => typeof p === "string" && p.length < 4096 && !p.includes("\0") && !p.startsWith("/") && !p.split("/").includes("..")).slice(0, MAX_EXPANDED) : [];
+    const expanded = Array.isArray(o.expanded) ? o.expanded.slice(0, MAX_EXPANDED * 2).filter(isSafeSessionPath).slice(0, MAX_EXPANDED) : [];
     const w = typeof o.treeWidth === "number" && Number.isFinite(o.treeWidth) ? Math.min(800, Math.max(140, o.treeWidth)) : null;
     return { tabs: o.tabs && typeof o.tabs === "object" ? (o.tabs as SessionTabs) : null, expanded, treeWidth: w };
   } catch {

@@ -7,6 +7,8 @@
 //  - A dirty tab is never closed or replaced silently: `requestClose` answers `prompt`.
 //  - Closing the active tab activates the most recently used remaining tab.
 
+import { isSafeSessionPath } from "./session";
+
 export interface Tab {
   /** Project-relative path; also the tab id. */
   id: string;
@@ -168,7 +170,7 @@ export function restoreTabs(raw: unknown): TabsState {
   for (const t of o.tabs.slice(0, MAX_TABS)) {
     if (typeof t !== "object" || t === null) continue;
     const path = (t as { path?: unknown }).path;
-    if (typeof path !== "string" || path === "" || path.length > 4096 || path.includes("\0") || path.startsWith("/") || path.split("/").some((p) => p === ".." || p === ".")) continue;
+    if (!isSafeSessionPath(path)) continue;
     if (seen.has(path)) continue;
     seen.add(path);
     tabs.push({ id: path, pinned: (t as { pinned?: unknown }).pinned === true, preview: (t as { preview?: unknown }).preview === true, dirty: false });

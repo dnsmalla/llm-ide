@@ -41,3 +41,17 @@ test("storage failures never throw", () => {
   assert.deepEqual(S.loadSession(null, "/p").expanded, []);
   assert.deepEqual(S.loadSession(memKv({ [S.projectKey("/p")]: "{not json" }), "/p").expanded, []);
 });
+
+test("session restore rejects drive letters, ADS, backslashes, control chars and oversized input from localStorage", async () => {
+  const T = await load("tabs-model.ts");
+  const bad = ["C:/x", "C:\\x", "a:stream", "a\\b", "a\nb", "a\u001bb", "/abs", "../x", "a/../b", "a//b", "x".repeat(1025)];
+  for (const p of bad) assert.equal(S.isSafeSessionPath(p), false, JSON.stringify(p).slice(0, 40));
+  assert.equal(S.isSafeSessionPath("src/main.rs"), true);
+  const t = T.restoreTabs({ v: 1, active: "C:/x", tabs: [...bad, "ok.ts"].map((path) => ({ path })) });
+  assert.deepEqual(t.tabs.map((x) => x.id), ["ok.ts"]);
+  assert.equal(t.activeId, "ok.ts");
+  const kv = { getItem: () => JSON.stringify({ expanded: [...bad, "src"], tabs: null, treeWidth: 300 }), setItem() {} };
+  assert.deepEqual(S.loadSession(kv, "/p").expanded, ["src"]);
+  const huge = { getItem: () => "x".repeat(600 * 1024), setItem() {} };
+  assert.deepEqual(S.loadSession(huge, "/p").expanded, []);
+});
