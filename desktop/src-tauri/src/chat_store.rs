@@ -846,7 +846,8 @@ impl ChatStore {
                 user_id: user_id.to_string(),
                 index_path,
                 cache: Mutex::new(IndexCache::default()),
-                lock_timeout: Duration::from_secs(3),
+                // Tests share the process-wide lock across parallel threads; a loaded CI box must not turn that into flakes.
+                lock_timeout: if cfg!(test) { Duration::from_secs(30) } else { Duration::from_secs(3) },
             }),
         })
     }

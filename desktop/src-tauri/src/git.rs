@@ -177,6 +177,24 @@ pub fn base_args() -> Vec<String> {
     .collect()
 }
 
+/// Wall-clock limit for a call that touches `n` paths or entries: 30 s plus 25 ms each, at most 5 minutes.
+pub fn scaled_timeout(n: usize) -> Duration {
+    (TIMEOUT + Duration::from_millis(25) * n.min(1_000_000) as u32).min(Duration::from_secs(300))
+}
+
+/// Kills the child AND everything it started (git spawns helpers: a filter, `gc`, a credential helper). On
+/// unix the child leads its own process group (`process_group(0)` at spawn), so the whole group gets SIGKILL.
+pub(crate) fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: killpg with a pid we spawned as a group leader; an already-dead group is just ESRCH.
+        unsafe {
+            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+}
+
 pub struct Out {
     pub stdout: Vec<u8>,
     pub truncated: bool,
@@ -245,6 +263,11 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
         }
     }
     cmd.stdin(if opts.stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = cmd.spawn().map_err(|e| FsError { code: "git_unavailable", message: format!("cannot run git: {e}") })?;
     if let (Some(data), Some(mut si)) = (opts.stdin, child.stdin.take()) {
         // Written on its own thread so a child that stops reading cannot block us; dropping `si` closes stdin.
@@ -280,18 +303,20 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
         }
         // Output cap reached: stop the child instead of waiting for it to fill the disk.
         if out_thread.is_finished() {
-            let _ = child.kill();
+            kill_tree(&mut child);
             break child.wait().ok();
         }
     };
     if status.is_none() {
-        let _ = child.kill();
+        kill_tree(&mut child);
         let _ = child.wait();
     }
     let (stdout, truncated) = out_thread.join().unwrap_or_default();
     let stderr = err_thread.join().unwrap_or_default();
     match status {
-        None => gerr("git_timeout", "git took too long"),
+        // Nothing is cleaned up here: an `index.lock` left by the killed process may remain. Removing it blindly could
+        // break a git running elsewhere, so the user decides.
+        None => gerr("git_timeout", "git took too long and was stopped. A stale .git/index.lock may remain; close other git tools, delete it if no git is running, and try again"),
         Some(s) if s.success() || truncated => Ok(Out { stdout, truncated }),
         Some(_) => {
             let msg = String::from_utf8_lossy(&stderr).trim().to_string();
@@ -474,7 +499,7 @@ pub fn stage(root: &Path, paths: &[String], stage: bool) -> R<()> {
     };
     args.extend(rels.iter().map(String::as_str));
     // `add`/`restore` write the index, so they must not use optional-lock avoidance of reads only; they take their own lock.
-    run_git(root, &args, 64 * 1024).map(|_| ())
+    run_git_opts(root, &args, 64 * 1024, &Opts { timeout: Some(scaled_timeout(rels.len() * 20)), ..Opts::default() }).map(|_| ())
 }
 
 // ---- Tauri commands ------------------------------------------------------------------------
@@ -553,6 +578,43 @@ mod tests {
             .output()
             .unwrap();
         assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn timeouts_scale_with_the_work_and_are_capped() {
+        assert_eq!(scaled_timeout(0), Duration::from_secs(30));
+        assert!(scaled_timeout(10_000) > scaled_timeout(100));
+        assert_eq!(scaled_timeout(usize::MAX), Duration::from_secs(300));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timeout_kills_the_whole_process_group_not_just_git() {
+        use std::os::unix::process::CommandExt;
+        // sh stands in for git; its background `sleep` stands in for a helper git started.
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 60 & echo $!; wait"])
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut line).unwrap();
+        let helper: libc::pid_t = line.trim().parse().unwrap();
+        // SAFETY: signal 0 only probes.
+        assert_eq!(unsafe { libc::kill(helper, 0) }, 0, "the helper is running");
+        kill_tree(&mut child);
+        let _ = child.wait();
+        let mut alive = true;
+        for _ in 0..100 {
+            // SAFETY: signal 0 only probes. A zombie child of init is gone for kill(2) once reaped.
+            alive = unsafe { libc::kill(helper, 0) } == 0;
+            if !alive {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive, "the helper survived the kill");
     }
 
     #[test]
