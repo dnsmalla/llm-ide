@@ -104,9 +104,9 @@ One table, `mcp_connector_seen(user_id, connector_id, item_id, seen_at)`, primar
 - **Per-user isolation.** Selection is keyed by `userId`; vault rows and the seen table are per user; the status route refuses another user's flow state.
 - **OAuth.** Authorization code with PKCE; redirect URI fixed to the loopback server; `state` random, single use, 10-minute TTL, in memory (a server restart invalidates a flow). The callback is the only unauthenticated connector route and releases nothing but an escaped message.
 - **Audit.** `connector.select`, `connector.deselect`, `auth.secret_set` for the token write.
-- **Outbound fetch gaps** (from the status audit, section e; not fixed by this spec):
-  - `extension/connectors/mcp-client.mjs` uses the SDK default fetch for the MCP transport and for every URL OAuth discovery returns (authorization server metadata, token and registration endpoints). A malicious or compromised MCP server could point discovery at an internal address. The user-added MCP adapter in `extension/providers/adapter/mcp-client.mjs` already uses the pinned fetch; this module does not. Severity medium.
-  - `extension/connectors/box.mjs` fetches content URLs returned by the Box API with the default redirect policy and a bearer token and no private-address check. Severity medium. Fix direction: `extension/server/pinned-fetch.mjs` with a same-host redirect rule, as the tracker wrapper does.
+- **Outbound fetch pinning** (closed 2026-10-31; tests `extension/tests/mcp-client-ssrf.test.mjs`, `box-fetch-pinning.test.mjs`):
+  - `extension/connectors/mcp-client.mjs` passes `pinnedFetchFor(def)` (from `server/pinned-fetch.mjs`) as the `fetch` option of every `StreamableHTTPClientTransport`, so the MCP request AND the SDK's OAuth discovery, registration and token calls are pinned: DNS resolved once, every address classified, the checked address dialled. Metadata URLs aimed at `169.254.169.254`, loopback, private ranges or a rebinding hostname fail with `SSRF_BLOCKED`. Private targets are allowed only when the descriptor's own `serverUrl` is the loopback `LLMIDE_MCP_<ID>_URL` test override (and the operator gate is on); link-local and metadata ranges are refused in every posture. The SDK follows redirects same-origin only, one hop at a time through this fetch.
+  - `extension/connectors/box.mjs` sends every request (token exchange included) through the pinned fetch. API-returned content and info URLs are untrusted: https, no userinfo, port 443, host `box.com` / `boxcloud.com` or a subdomain only. Redirects are followed by hand (3 hops max), each hop re-validated and re-pinned; the bearer token is dropped as soon as a hop changes origin. Bodies are capped (8 MiB JSON, 10 MiB extracted text) by `content-length` and while streaming.
   - Google and Slack OAuth helpers call fixed literal hosts (low).
 - **Prompt injection.** Fetched board text becomes a note body and goes to the classifier. Notes are data, but a board author controls that text; the classify call must not be given tools (recommendation; not verified in code here).
 
@@ -125,7 +125,7 @@ Server: `extension/tests/connector-catalog.test.mjs`, `connector-state.test.mjs`
 | Google OAuth bring-your-own client | Planned: Google registers redirect URIs per client and has no dynamic registration, hence `byoClient: true`; the vault keys are defined, no UI collects them |
 | Google MCP endpoint and tool names in the commented example | Unverified, copied from a comment |
 | Server-side enforcement that a deselected connector cannot fetch | Not built (selection is visibility only) |
-| Pinned fetch for the MCP client and Box | Not built (section 6) |
+| Pinned fetch for the MCP client and Box | Shipped (section 6) |
 | Activity feed entry for connector fetches | Not built (`connector_fetched` is not in the activity kinds, comment in `extension/routes/router.mjs`) |
 
 ## Regeneration checklist

@@ -277,7 +277,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Guardrail scanners for secrets, PII, destructive ops (`extension/guardrails/`) (me)
 - [x] Claude-style permissions: Ask / Accept Edits / Bypass with prefix rules (project notes, PR #65; unverified in this audit) (me)
 - [x] Phase 0 staging script excludes secrets, keys, DBs (report "Packaging") (me)
-- [~] Provider and connector fetch pinning: pinned for providers, adapter MCP, extension install and tracker hosts; **not** pinned: Box content URLs, MCP connector OAuth discovery, Jev connection check, 7 literal-host calls, subprocess egress (`plans/2026-10-31-status-audit.md` (e)); independent review welcome (ROADMAP X7) (me)
+- [~] Provider and connector fetch pinning: pinned for providers, adapter MCP, extension install, tracker hosts, Box content downloads (host allowlist, manual redirects, token dropped cross-origin, size caps) and MCP connector OAuth discovery/token calls; **not** pinned: Jev connection check, 7 literal-host calls, subprocess egress (`plans/2026-10-31-status-audit.md` (e)); independent review welcome (ROADMAP X7) (me)
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
 - [~] Relay: E2E design revised to the independent review (threats T1 to T23, negative-test list, gate G-EXT before public exposure; `plans/2026-10-31-relay-design.md`); build items open: spec R0, crypto vectors R1, key rotation, emergency revoke and no-plaintext tests in R2 to R4 (me)
