@@ -106,9 +106,10 @@ export function decodeEvent(raw: unknown): DecodeResult {
   const good = (event: AgentEvent): DecodeResult => ({ ok: true, event });
   switch (type as AgentEventType) {
     case "init":
-      if (!strOrNull(raw.sessionId) || !strOrNull(raw.model)) return bad();
+      // An absent sessionId/model (the replay fixture omits model) is null, like the schema's nullable fields; a wrong type is malformed.
+      if (!strOrNull(raw.sessionId ?? null) || !strOrNull(raw.model ?? null)) return bad();
       return good({
-        type: "init", sessionId: raw.sessionId, model: raw.model,
+        type: "init", sessionId: (raw.sessionId ?? null) as string | null, model: (raw.model ?? null) as string | null,
         claudeCodeVersion: strOrNull(raw.claudeCodeVersion) ? raw.claudeCodeVersion : null,
         tools: strArray(raw.tools) ? raw.tools : [], capabilities: strArray(raw.capabilities) ? raw.capabilities : [],
       });

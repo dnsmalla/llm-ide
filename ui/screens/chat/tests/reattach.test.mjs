@@ -190,3 +190,29 @@ test("reducer and decoder: markers are plain notices; sequence parser is strict"
   assert.equal(c.decodeReplayMarker('{"type":"delta","text":"replay_info"}'), null);
   assert.equal(c.decodeReplayMarker("not json replay_"), null);
 });
+
+test("the schema fixtures of the new routes decode: running turns, the replay stream frames, and the typed errors", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { REPO } = await import("./helpers.mjs");
+  const fx = (n) => JSON.parse(readFileSync(join(REPO, "schema/http/fixtures/agent", n), "utf8"));
+  const turns = c.decodeRunningTurns(fx("get-agent-v2-turns-200.json").response);
+  assert.ok(turns.length >= 1 && turns.every((t) => t.sessionId.length > 0 && t.startedAt.length > 0));
+  assert.deepEqual(c.decodeRunningTurns(fx("get-agent-v2-turns-200-empty.json").response), []);
+  // The stream fixture is the raw SSE text: every frame's id parses, every data decodes as an agent/v2 event.
+  const text = fx("get-agent-v2-turns-stream-200.json").response;
+  const frames = text.split("\n\n").filter(Boolean).map((blk) => ({ id: /^id: (.*)$/m.exec(blk)?.[1] ?? null, data: /^data: (.*)$/m.exec(blk)[1] }));
+  assert.ok(frames.length >= 3);
+  let last = 0;
+  for (const f of frames) {
+    const n = c.parseReplaySeq(f.id);
+    assert.ok(n !== null && n > last, "ids are monotonic");
+    last = n;
+    assert.equal(c.decodeReplayMarker(f.data), null);
+    assert.equal(c.decodePayload(f.data).ok, true, f.data);
+  }
+  // Errors: the codes the controller branches on.
+  assert.equal(fx("get-agent-v2-turns-stream-404.json").response.error.code, "NO_TURN");
+  assert.equal(fx("get-agent-v2-turns-stream-429.json").response.error.code, "TOO_MANY_READERS");
+  assert.equal(fx("get-agent-v2-turns-stream-400.json").response.error.code, "VALIDATION_FAILED");
+});
