@@ -1,7 +1,7 @@
 // The `review` kind: a read-only review of a registered project (code, docs or merge conflicts) on a chosen engine.
 // A thin adapter over bus/engines.mjs. Nothing here writes: the engines run in read mode, CLI engines are checked for an
 // unchanged working tree, and `conflicts` is answered by git itself when git finds nothing (no model call).
-import { minimalCliEnv } from '../../providers/providers.mjs';
+import { runGit } from './git-safe.mjs';
 import { redactSecrets } from '../../core/redact-secrets.mjs';
 import { runTask, engineIdFor } from './engines.mjs';
 
@@ -22,7 +22,7 @@ export function reviewPrompt(focus, evidence = '') {
 
 async function git(spawn, cwd, args, maxChars = 40_000) {
   try {
-    const r = await spawn('git', ['--no-optional-locks', ...args], { cwd, env: minimalCliEnv({ GIT_OPTIONAL_LOCKS: '0' }) });
+    const r = await runGit(spawn, cwd, args);
     return { code: r.code, out: String(r.stdout || '').slice(0, maxChars) };
   } catch { return { code: -1, out: '' }; }
 }

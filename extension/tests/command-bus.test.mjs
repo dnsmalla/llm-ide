@@ -1012,3 +1012,51 @@ test('L5: phone-pwa and extension read only commands of their own class; ios-nat
   assert.equal((await call('GET', `/bus/commands/${dId}`, undefined, { client: 'desktop-ui' })).status, 200);
   assert.equal((await call('GET', '/bus/commands?state=denied', undefined, { client: 'extension' })).body.items.length, 1);
 });
+
+// ---- L6: git runs in a registered repo whose own config may be hostile ----
+
+test('L6: git run for a review ignores the repo\'s fsmonitor, textconv and external diff (no code from the repo config runs)', async () => {
+  const marker = (n) => path.join(SANDBOX, `PWNED-${n}`);
+  const script = (n) => { const f = path.join(SANDBOX, `evil-${n}.sh`); fs.writeFileSync(f, `#!/bin/sh\ntouch ${marker(n)}\nprintf '\\0'\n`, { mode: 0o755 }); return f; };
+  const cfg = (...a) => git(['config', ...a], REPO);
+  const attrs = path.join(REPO, '.gitattributes');
+  try {
+    cfg('core.fsmonitor', script('fsmonitor'));
+    cfg('diff.evil.textconv', script('textconv'));
+    cfg('diff.external', script('extdiff'));
+    fs.writeFileSync(attrs, '*.txt diff=evil\n');
+    fs.writeFileSync(path.join(REPO, 'a.txt'), 'changed\n'); // an uncommitted change so diff has something to convert
+    // focus conflicts: `git ls-files -u` and `git diff --check`; clean tree answers from git alone (no model call)
+    await runReview({ userId: A, args: { focus: 'conflicts', projectId: 'p' }, cwd: REPO, signal: new AbortController().signal, spawn: spawnGrouped, emit: () => {}, deps: { completeViaAdapter: async () => 'No findings.' } });
+    // the adapter path collects git evidence ('code' focus on a custom provider) and the CLI path takes a git signature
+    await runReview({ userId: A, args: { focus: 'code', projectId: 'p', engine: { provider: 'custom:cat-x' } }, cwd: REPO, signal: new AbortController().signal, spawn: spawnGrouped, emit: () => {}, deps: { completeViaAdapter: async () => 'No findings.' } });
+    await engines.runTask({ userId: A, engine: { provider: 'openai' }, prompt: 'p', cwd: REPO, spawn: spawnGrouped, deps: { allowUnsandboxedCli: true } }).catch(() => null);
+    for (const n of ['fsmonitor', 'textconv', 'extdiff']) assert.equal(fs.existsSync(marker(n)), false, `${n} from the repo config must not run`);
+  } finally {
+    for (const k of ['core.fsmonitor', 'diff.evil.textconv', 'diff.external']) { try { cfg('--unset', k); } catch { /* absent */ } }
+    fs.rmSync(attrs, { force: true });
+    git(['checkout', '-q', '--', '.'], REPO);
+  }
+});
+
+test('L6: the review checks AND runs in the realpath (a symlink swapped in after the check is not followed)', async () => {
+  await reset();
+  const link = path.join(SANDBOX, 'link-to-repo');
+  fs.rmSync(link, { force: true });
+  fs.symlinkSync(REPO, link);
+  const checked = [];
+  const seenCwd = [];
+  const b = createBus({ graceMs: 50, deps: {
+    resolveProjectRoot: () => link,
+    projectAllowed: (u, root) => { checked.push(root); return true; },
+    runReview: async ({ cwd }) => { seenCwd.push(cwd); return { focus: 'code', engine: 'fake', text: 'ok', truncated: false }; },
+  } });
+  busRef = b; b.start();
+  try {
+    const r = b.receive(A, cmd(), { client: 'desktop-ui' });
+    await until(() => ['succeeded', 'failed'].includes(store.getCommand(A, r.command.id).state), 5000);
+    assert.equal(store.getCommand(A, r.command.id).state, 'succeeded');
+    assert.deepEqual(checked, [REPO], 'the allow-check saw the resolved path');
+    assert.deepEqual(seenCwd, [REPO], 'the run used that same resolved path, not the symlink');
+  } finally { await b.stop(); busRef = bus; bus.start(); fs.rmSync(link, { force: true }); }
+});

@@ -11,7 +11,7 @@
 //   - mode is 'read' only. Every engine refuses 'write' (kind_not_available): codex and gemini write mode needs an explicit
 //     design and a user decision (the Swift runner passes --yolo, which turns their sandbox off; this never does).
 //   - a CLI argv containing --yolo or --dangerously-* is refused before spawn, whoever built it.
-//   - a CLI child gets minimalCliEnv (+ the provider's own key on the api-key path), never the server's env.
+//   - a CLI child gets minimalCliEnv, never an API key and never the server's env.
 //   - gemini has no read-only flag, so a CLI run on a git checkout must leave `git status` unchanged: a changed tree fails
 //     the run `read_only_violated`.
 //   - codex and gemini are DISABLED for the bus (`available: false`, reason ENGINE_NOT_SANDBOXED) until an OS sandbox
@@ -25,6 +25,7 @@
 //   - a missing login or key is a typed error (engine_not_logged_in, engine_no_key), never a silent fallback to another engine.
 import crypto from 'node:crypto';
 import { truncateUtf8 } from './bytes.mjs';
+import { runGit } from './git-safe.mjs';
 import { redactSecrets } from '../../core/redact-secrets.mjs';
 import {
   cliInvocation, providerApiKey, minimalCliEnv,
@@ -66,7 +67,7 @@ const capText = (t) => {
 /** `git status` signature of a checkout, or null when cwd is not one. Never writes (no optional locks). */
 async function gitSignature(spawn, cwd) {
   try {
-    const r = await spawn('git', ['--no-optional-locks', 'status', '--porcelain=v1', '-z'], { cwd, env: minimalCliEnv({ GIT_OPTIONAL_LOCKS: '0' }) });
+    const r = await runGit(spawn, cwd, ['status', '--porcelain=v1', '-z']);
     if (r.code !== 0) return null;
     return crypto.createHash('sha256').update(r.stdout).digest('hex');
   } catch { return null; }

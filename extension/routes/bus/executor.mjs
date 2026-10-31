@@ -114,6 +114,8 @@ export function createBus({
       if (args.projectId) {
         try { root = projectRootFor(userId, args.projectId); } catch { fail('project_not_registered'); }
         if (root && typeof root === 'object') root = root.root;
+        // Check and run in the SAME resolved path: a symlink swapped in after the check is never followed.
+        try { root = fs.realpathSync(root); } catch { fail('project_not_allowed'); }
         if (!projectAllowed(userId, root)) fail('project_not_allowed');
       }
       const emit = (type, payload) => appendEvent(userId, job.id, { type, payload });
