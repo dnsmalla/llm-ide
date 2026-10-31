@@ -13,14 +13,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 9 | 3 | 15 | 27 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 5 | 2 | 6 | 13 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 8 | 2 | 5 | 15 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 81 | 20 | 70 | 171 |  |
+| Total | 82 | 19 | 71 | 172 |  |
 
 ## How the surfaces connect
 
@@ -157,9 +157,10 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Connector adapters for Box, git, issues, QA, SCIP, email, Slack with OAuth (`extension/connectors/`, CLAUDE.md) (me)
 - [x] Reusable React web bundles run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, OS view `b31133e0`); not a hosted web app (me)
 - [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
-- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decided later with the relay work (Q-WEB-2) (you)
+- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decide at the start of R2 (Q-WEB-2 = D6, the only open relay decision); the PWA host is a separate account either way (you)
+- [ ] Independent external security review of the relay spec and R1, R3, R4 code: release gate G-EXT, required before any public exposure (D9) (you)
 - [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
-- [~] End-to-end crypto design: team key, QR enrollment, rotate on revoke written (`docs/superpowers/plans/2026-10-31-relay-design.md`, `93e8b083`); revise the design to the review's findings before R0 (me)
+- [x] End-to-end crypto design revised to every review finding (25 of 25 mapped in its traceability table): per-user keys with individual login, key hierarchy and capability sets, signed wrap, desktop-owned device registry, signed manifest, tiered clients (PWA read-only on a separate origin and account), fixed read-only ceiling, printed emergency-revoke code, no recovery in v1; user delegated D1 to D9 to the secure option, revisit if wrong (`docs/superpowers/plans/2026-10-31-relay-design.md`) (me)
 - [x] Independent security review of the relay design: done with findings, 3 critical (PWA code trust, unauthenticated key wrap, relay-supplied device list), 7 high, 10 medium, 5 low; 9 decisions for you (`docs/superpowers/plans/2026-10-31-relay-security-review.md`) (me)
 - [ ] Snapshot producer on the desktop and request consumer with permission re-check (me)
 - [ ] Phone PWA (installable, offline read, queue) (me)
@@ -273,7 +274,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Provider and connector fetch pinning: pinned for providers, adapter MCP, extension install and tracker hosts; **not** pinned: Box content URLs, MCP connector OAuth discovery, Jev connection check, 7 literal-host calls, subprocess egress (`plans/2026-10-31-status-audit.md` (e)); independent review welcome (ROADMAP X7) (me)
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
-- [~] Relay: E2E design written with threat model (`93e8b083`); independent review done with findings (`plans/2026-10-31-relay-security-review.md`, 3 critical to settle in the R0 spec); key rotation on revoke and no-plaintext tests are phases R1 to R4 of that design (me)
+- [~] Relay: E2E design revised to the independent review (threats T1 to T23, negative-test list, gate G-EXT before public exposure; `plans/2026-10-31-relay-design.md`); build items open: spec R0, crypto vectors R1, key rotation, emergency revoke and no-plaintext tests in R2 to R4 (me)
 - [x] Workspace Trust server: per-user trust records, untrusted folders' `.mcp.json` stdio servers are not loaded and project hooks/plugins/skill scripts are named in a notice, `LLMIDE_WORKSPACE_TRUST=off` kill switch, API 95 (Tauri plan §8) (me)
 - [x] Workspace Trust Mac UI: chat banner with confirmed Trust this folder, Settings folder list with enforced state (me)
 - [ ] Real-app check of the Workspace Trust banner and Settings cards (me)
