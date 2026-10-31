@@ -1,6 +1,6 @@
 // The Explorer section: file tree (left), editor tabs and Monaco (right). Wiring only; behaviour lives in
 // `controller.ts` and the pure models, which are tested without a DOM.
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ExplorerController } from "./controller";
@@ -13,6 +13,16 @@ import { createHostFs, baseName, parentOf, type FsApi, type WatchBatch } from ".
 import type { KV } from "./session";
 import { ExplorerTabBar } from "./TabBar";
 import { topLevel } from "./tree-model";
+import { DEFAULT_PANEL, isDockToggleKey, panelForKey, type PanelId } from "./panels";
+import { PanelTabs } from "./PanelTabs";
+import { SearchController } from "./search/controller";
+import { createHostSearch, type SearchApi } from "./search/host";
+import { SearchPanel } from "./search/SearchPanel";
+import { TerminalManager, type TermHost } from "./terminal/manager";
+import { TerminalDock, DOCK_DEFAULT, clampDock } from "./terminal/TerminalDock";
+import type { TerminalRuntime } from "./terminal/runtime-types";
+
+const ScmPanelLazy = lazy(() => import("./scm"));
 
 export interface ExplorerDeps {
   fs?: FsApi;
@@ -20,6 +30,10 @@ export interface ExplorerDeps {
   loadEditor?: () => Promise<EditorHost>;
   /** Hands the controller to the section entry (cross-screen "open file" requests); called with null on unmount. */
   onController?: (c: ExplorerController | null) => void;
+  /** Project search host (tests inject a fake). */
+  search?: SearchApi;
+  /** Terminal host and xterm runtime (tests inject fakes); the defaults load xterm lazily on first use. */
+  terminal?: { host: TermHost; runtime: TerminalRuntime };
 }
 
 type Dialog =
@@ -34,6 +48,21 @@ type MenuState = { x: number; y: number; target: { kind: "tree"; path: string | 
 // Desktop-side modules, resolved lazily so Monaco and the Tauri channel are not in the entry chunk.
 const defaultLoadEditor = (): Promise<EditorHost> => import("../../../desktop/src/editor/explorerHost").then((m) => m.createMonacoEditorHost());
 const defaultChannel = (cb: (b: WatchBatch) => void): Promise<unknown> => import("../../../desktop/src/editor/explorerBridge").then((m) => m.createWatchChannel(cb));
+
+// Terminal and search bridges live in desktop/ (xterm and Tauri channels are not resolvable from ui/screens).
+type DockModule = typeof import("../../../desktop/src/terminal/dockRuntime");
+let dockModule: Promise<DockModule> | null = null;
+const loadDock = (): Promise<DockModule> => (dockModule ??= import("../../../desktop/src/terminal/dockRuntime"));
+const lazyTermHost: TermHost = {
+  status: async () => (await loadDock()).hostTerminal.status(),
+  retryConsent: async () => (await loadDock()).hostTerminal.retryConsent(),
+  spawn: async (c, r, cb) => (await loadDock()).hostTerminal.spawn(c, r, cb),
+};
+const defaultSearchChannel = (cb: (e: never) => void): Promise<unknown> => import("../../../desktop/src/search/searchBridge").then((m) => m.createSearchChannel(cb));
+const loadDefaultRuntime = async (): Promise<TerminalRuntime> => {
+  const m = await loadDock();
+  return { create: (el, o) => m.createTermView(el, o), openUrl: (u) => m.hostTerminal.openUrl(u) };
+};
 
 const copy = (text: string) => {
   try {
@@ -56,6 +85,59 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [width, setWidth] = useState(280);
+  const [panel, setPanel] = useState<PanelId>(DEFAULT_PANEL);
+  const [scmSeen, setScmSeen] = useState(false);
+  useEffect(() => {
+    if (panel === "scm") setScmSeen(true);
+  }, [panel]);
+  const [focusSearch, setFocusSearch] = useState(0);
+  const [dockOpen, setDockOpen] = useState(false);
+  const [dockEver, setDockEver] = useState(false);
+  const [dockHeight, setDockHeight] = useState(DOCK_DEFAULT);
+  const [runtime, setRuntime] = useState<TerminalRuntime | null>(deps?.terminal?.runtime ?? null);
+  const search = useMemo(
+    () =>
+      new SearchController({
+        api: deps?.search ?? createHostSearch(defaultSearchChannel),
+        openPaths: () => controller.getSnapshot().tabs.tabs.map((t) => t.id),
+        onOpen: (path, line, col) => void controller.openAt(path, line, col),
+      }),
+    // Fixed for the life of the screen, like the controller.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [controller],
+  );
+  const terminal = useMemo(() => new TerminalManager(deps?.terminal?.host ?? lazyTermHost),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
+
+  const openDock = useCallback((open: boolean) => {
+    setDockOpen(open);
+    if (open) setDockEver(true);
+  }, []);
+
+  useEffect(() => {
+    if (!dockEver || runtime) return;
+    let live = true;
+    void loadDefaultRuntime().then((r) => live && setRuntime(r)).catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [dockEver, runtime]);
+
+  // No shell may outlive its project (the shell's cwd is the project root); search results are per project too.
+  useEffect(() => {
+    void terminal.closeAll();
+    search.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectRoot]);
+
+  useEffect(
+    () => () => {
+      search.dispose();
+      void terminal.dispose();
+    },
+    [search, terminal],
+  );
 
   useEffect(() => {
     deps?.onController?.(controller);
@@ -148,6 +230,11 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     else if (id === "refresh") void refreshAll();
   };
 
+  const openDiff = async (path: string) => {
+    await controller.openFile(path, false);
+    if (controller.getSnapshot().diffPath !== path) await controller.toggleDiff(path);
+  };
+
   const refreshAll = async () => {
     for (const d of snap.tree.dirs.keys()) await controller.refreshDir(d);
     void controller.refreshGit();
@@ -157,6 +244,18 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     if (!active) return;
     const mod = e.metaKey || e.ctrlKey;
     const id = snap.tabs.activeId;
+    const want = panelForKey(e, typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || ""));
+    if (want) {
+      e.preventDefault();
+      setPanel(want);
+      if (want === "search") setFocusSearch((n) => n + 1);
+      return;
+    }
+    if (isDockToggleKey(e)) {
+      e.preventDefault();
+      openDock(!dockOpen);
+      return;
+    }
     if (mod && e.key.toLowerCase() === "s" && id) {
       e.preventDefault();
       void controller.save(id);
@@ -181,7 +280,9 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
 
   return (
     <div className="ex-root" data-active={active} onKeyDown={onKeyDown}>
-      <aside className="ex-side" style={{ width }} aria-label="Explorer">
+      <aside className="ex-side" style={{ width }} aria-label="Side panel">
+        <PanelTabs active={panel} onChange={(id) => { setPanel(id); if (id === "search") setFocusSearch((n) => n + 1); }} />
+        <div className="ex-panel" role="tabpanel" id="ex-panel-explorer" aria-labelledby="ex-ptab-explorer" hidden={panel !== "explorer"}>
         <div className="ex-side-head">
           <span className="ex-project" title={projectRoot}>{name}</span>
           {snap.git?.branch && <Chip label={snap.git.branch + (snap.git.ahead ? ` ↑${snap.git.ahead}` : "") + (snap.git.behind ? ` ↓${snap.git.behind}` : "")} compact />}
@@ -206,6 +307,22 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
             else setDialog({ type: "delete", paths: snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : [path] });
           }}
         />
+        </div>
+        <div className="ex-panel" role="tabpanel" id="ex-panel-search" aria-labelledby="ex-ptab-search" hidden={panel !== "search"}>
+          <SearchPanel controller={search} focusSignal={focusSearch} />
+        </div>
+        {scmSeen && (
+          <div className="ex-panel" role="tabpanel" id="ex-panel-scm" aria-labelledby="ex-ptab-scm" hidden={panel !== "scm"}>
+            <Suspense fallback={<p className="ex-status" role="status">Loading source control…</p>}>
+              <ScmPanelLazy
+                projectRoot={projectRoot}
+                onOpenFile={(p) => void controller.openFile(p, false)}
+                onOpenDiff={(p) => void openDiff(p)}
+                onFilesChanged={() => void refreshAll()}
+              />
+            </Suspense>
+          </div>
+        )}
       </aside>
       <ResizableDivider
         width={width}
@@ -227,6 +344,24 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           onContextMenu={(id, x, y) => setMenu({ x, y, target: { kind: "tab", id } })}
         />
         <EditorPane controller={controller} snap={snap} loadEditor={loadEditor} editorRef={editorRef} onCloseTab={closeTab} />
+        {dockEver && runtime && (
+          <TerminalDock
+            manager={terminal}
+            runtime={runtime}
+            projectRoot={projectRoot}
+            projectName={name}
+            open={dockOpen}
+            height={dockHeight}
+            onHeightChange={(h) => setDockHeight(clampDock(h, typeof window === "undefined" ? 1000 : window.innerHeight))}
+            onClose={() => openDock(false)}
+          />
+        )}
+        {dockEver && !runtime && dockOpen && <p className="tm-empty" role="status">Loading terminal…</p>}
+        <div className="tm-strip">
+          <button type="button" className="ex-link tm-toggle" aria-expanded={dockOpen} aria-controls="tm-dock" title="Toggle terminal (Ctrl+`)" onClick={() => openDock(!dockOpen)}>
+            Terminal
+          </button>
+        </div>
       </div>
 
       {menu && (

@@ -368,6 +368,12 @@ export class ExplorerController {
     await this.loadDoc(path);
   }
 
+  /** Open a file as a regular tab and put the cursor at `line` / `col` (search results, cross-screen requests). */
+  async openAt(path: string, line: number, col = 1): Promise<void> {
+    await this.openFile(path, false);
+    this.getEditor()?.reveal?.(path, line, col);
+  }
+
   async activateTab(id: string): Promise<void> {
     this.dispatchTabs({ type: "activate", id });
     await this.loadDoc(id);

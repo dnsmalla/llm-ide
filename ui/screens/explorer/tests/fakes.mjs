@@ -99,6 +99,7 @@ export function makeFs(initial = {}) {
 
 export function makeEditor() {
   const models = new Map(); // path -> {text, saved, readOnly}
+  const reveals = [];
   const log = [];
   let cb = null;
   const ed = {
@@ -116,7 +117,7 @@ export function makeEditor() {
     rename(a, b) { const m = models.get(a); models.delete(a); models.set(b, m); if (ed.current === a) ed.current = b; },
     showDiff(p, o) { ed.diff = [p, o]; },
     hideDiff() { ed.diff = null; },
-    find() {}, focus() {}, layout() {}, retheme() {}, modelCount: () => models.size, dispose() {},
+    find() {}, reveal(path, line, col) { reveals.push([path, line, col]); }, reveals, focus() {}, layout() {}, retheme() {}, modelCount: () => models.size, dispose() {},
     // test helper: simulate typing
     type(p, text) { const m = models.get(p); m.text = text; cb.onDirty(p, m.text !== m.saved); },
     evict(p) { models.delete(p); cb.onEvict(p); },

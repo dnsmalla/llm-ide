@@ -8,7 +8,7 @@ export type FsErrorCode =
   | "no_project" | "root_too_broad" | "invalid_path" | "outside_root" | "not_found" | "exists" | "conflict"
   | "too_large" | "not_regular" | "hardlink" | "not_a_directory" | "permission_denied" | "unsupported_encoding"
   | "trash_unavailable" | "changed" | "no_watch" | "not_a_repo" | "untrusted_repo_config" | "git_unavailable"
-  | "git_failed" | "git_timeout" | "io" | "unavailable";
+  | "git_failed" | "git_timeout" | "invalid_query" | "io" | "unavailable";
 
 /** What the host rejects with: `{ code, message }`. Anything else is mapped to `io` / `unavailable`. */
 export class FsError extends Error {

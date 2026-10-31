@@ -234,6 +234,15 @@ export function createMonacoEditorHost(): EditorHost {
       diffEl.hidden = false;
     },
     hideDiff,
+    reveal(path, line, col) {
+      const e = models.get(path);
+      if (!e || !editor || diff) return;
+      const lineNumber = Math.min(Math.max(1, Math.floor(line) || 1), e.model.getLineCount());
+      const column = Math.min(Math.max(1, Math.floor(col) || 1), e.model.getLineMaxColumn(lineNumber));
+      editor.setPosition({ lineNumber, column });
+      editor.revealLineInCenter(lineNumber);
+      editor.focus();
+    },
     find() {
       const target = diff ? diff.getModifiedEditor() : editor;
       target?.focus();

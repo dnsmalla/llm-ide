@@ -43,6 +43,8 @@ export interface EditorHost {
   /** Side-by-side diff of `original` (git HEAD or index) against the buffer. */
   showDiff(path: string, original: string): void;
   hideDiff(): void;
+  /** Scrolls the open buffer to `line` (1-based) and places the cursor at `col` (1-based, UTF-16). Optional: search results use it. */
+  reveal?(path: string, line: number, col: number): void;
   find(): void;
   focus(): void;
   layout(): void;

@@ -179,7 +179,7 @@ test("screen: no project shows a message; with a project it has landmarks, label
   assert.match(none, /No project open/);
   const fs = makeFs({});
   const out = html(h(ExplorerScreen, { active: true, projectRoot: "/Users/me/proj", deps: { fs, kv: null, loadEditor: () => Promise.reject(new Error("x")) } }));
-  assert.match(out, /<aside[^>]*aria-label="Explorer"/);
+  assert.match(out, /<aside[^>]*aria-label="Side panel"/);
   assert.match(out, /class="ex-project"[^>]*title="\/Users\/me\/proj">proj</);
   for (const label of ["New file", "New folder", "Refresh", "Show hidden files", "Hide ignored files"]) assert.match(out, new RegExp(`aria-label="${label}"`));
   assert.match(out, /aria-pressed="false"/);
