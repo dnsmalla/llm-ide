@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
+
 export const LIBRARY = resolve(HERE, "..");
 const REPO = resolve(LIBRARY, "../../..");
 const DESKTOP = join(REPO, "desktop");
@@ -15,8 +16,7 @@ const requireFromDesktop = createRequire(join(DESKTOP, "package.json"));
  */
 export async function loadEntry() {
   const { build } = requireFromDesktop("esbuild");
-  const dir = join(DESKTOP, "node_modules/.cache/library-test");
-  mkdirSync(dir, { recursive: true });
+  const dir = bundleDir("library");
   const outfile = join(dir, "entry.mjs");
   await build({
     entryPoints: [join(HERE, "entry.ts")],

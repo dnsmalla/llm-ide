@@ -3,7 +3,7 @@
 // next to desktop/node_modules so `react` resolves to one copy (same approach as ui/kit/tests).
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SETTINGS = resolve(HERE, "..");
 const REPO = resolve(SETTINGS, "../../..");
 const DESKTOP = join(REPO, "desktop");
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 const req = createRequire(join(DESKTOP, "package.json"));
 const { build } = req("esbuild");
 const { createElement: h } = req("react");
@@ -22,8 +23,7 @@ const html = (el) => renderToStaticMarkup(el);
 
 let m;
 before(async () => {
-  const outdir = join(DESKTOP, "node_modules/.cache/settings-test");
-  mkdirSync(outdir, { recursive: true });
+  const outdir = bundleDir("settings");
   await build({
     entryPoints: {
       screen: join(SETTINGS, "SettingsScreen.tsx"),

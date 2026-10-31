@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
+
 export const EXPLORER = resolve(HERE, "..");
 const REPO = resolve(EXPLORER, "../../..");
 const DESKTOP = join(REPO, "desktop");
@@ -15,8 +16,7 @@ const requireFromDesktop = createRequire(join(DESKTOP, "package.json"));
  */
 export async function load(entryRel) {
   const { build } = requireFromDesktop("esbuild");
-  const dir = join(DESKTOP, "node_modules/.cache/explorer-test");
-  mkdirSync(dir, { recursive: true });
+  const dir = bundleDir("explorer");
   const name = entryRel.replace(/[^a-z0-9]+/gi, "_");
   const outfile = join(dir, `${name}.mjs`);
   await build({

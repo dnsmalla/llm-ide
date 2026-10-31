@@ -1,9 +1,10 @@
 // Bundles the chat screen sources once per test file (esbuild from desktop/node_modules, React externalised
 // so there is a single copy), and exposes fixtures and a fake core transport.
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const CHAT = resolve(HERE, "..");
@@ -16,9 +17,8 @@ export const renderToStaticMarkup = require("react-dom/server").renderToStaticMa
 
 export async function loadChat(name = "chat") {
   const { build } = require("esbuild");
-  const dir = join(DESKTOP, "node_modules/.cache/chat-test");
-  mkdirSync(dir, { recursive: true });
-  const outfile = join(dir, `${name}-${process.pid}.mjs`);
+  const dir = bundleDir("chat");
+  const outfile = join(dir, `${name}.mjs`);
   await build({
     entryPoints: [join(HERE, "entry.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent",
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
