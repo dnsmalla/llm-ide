@@ -22,5 +22,7 @@ a design: it changes no code, and it is revised as each later step lands.
 | capture-kit (live capture, live stream, summaries, notes, questions) | none (always on) | K0 map | [capture-kit.md](capture-kit.md) |
 | automation-kit (Loop, Auto Tasks, verify and repair) | `auto_tasks` | K0 map | [automation-kit.md](automation-kit.md) |
 | sync-kit (Mobile Control today; relay and phone web view later) | `mobile_sync` | K0 map | [sync-kit.md](sync-kit.md) |
+| ui-kit (design tokens, Core/DesignSystem, shared components) | none (always on) | K0 map | [ui-kit.md](ui-kit.md) |
+| os-kit (System page, `/kb/os/state` and stream, graph-kit OS view) | none (always on) | K0 map | [os-kit.md](os-kit.md) |
 
 Cross-kit principle (user decision 2026-10-29): [data-lifecycle.md](data-lifecycle.md) - one stored copy of each kind of data, live in the server DB while a session runs; a normal chat is archived into the Mac app at app quit and kept until the user deletes it, a meeting-attached chat is deleted at meeting end, and a rebuildable index with no unique data may stay on the server. The web and the extension are connectors with no data access of their own (the extension reads by calling the Mac app live). It applies to knowledge-kit and agent-kit (K1a) and is the reference for every kit's data plan.

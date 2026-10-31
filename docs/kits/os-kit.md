@@ -29,7 +29,7 @@ The key finding of this map: **os-kit is split across three owners today** (the 
 |---|---|---|---|
 | The page (source) | `mac/LocalPackages/graph-kit/web/src/` | 9 017 lines of TS, TSX, CSS (graph-kit map, `docs/kits/graph-kit.md` 2a) | `controller.ts` (1 056), `systemGraph.ts` (288), `host.ts` (113, the `OsHost` interface), `components/` (`Brain`, `CodeStructure`, `HubOverview`, `NodeSearch`, `Recent`, `Selection`), `orbit/` (three.js), `wasm/` (the Rust core as embedded bytes). Own `theme.css`, `os-tokens.css`, `theme.ts`. |
 | OS graph core | `mac/LocalPackages/graph-kit/rust/os-graph/` | 6 037 lines Rust | Community detection, orbit layout, viz graph; WASM. See the graph-kit map. |
-| Host package | `ui/os-view/` | `src/` 686 lines over 10 files (`api.ts` 123, `bridge.ts` 187, `hosts.ts` 285, `stream.ts` 118, `sse.ts` 58, `boot.ts` 73, `main.tsx` 32, `components/DevConnect.tsx` 88) | Supplies graph-kit's `OsHost` over the native bridge (Mac) and over HTTP (dev). Aliases `@dnsmalla/graph-kit-web` to the graph-kit source (`ui/os-view/vite.config.ts`). |
+| Host package | `ui/os-view/` | `src/` 984 lines over 11 files (`api.ts` 123, `bridge.ts` 187, `hosts.ts` 285, `stream.ts` 118, `sse.ts` 58, `boot.ts` 73, `main.tsx` 32, `components/DevConnect.tsx` 88) | Supplies graph-kit's `OsHost` over the native bridge (Mac) and over HTTP (dev). Aliases `@dnsmalla/graph-kit-web` to the graph-kit source (`ui/os-view/vite.config.ts`). |
 | Host tests | `ui/os-view/tests/os-view.test.mjs` | 919 lines, 64 `test(`/`it(` | |
 | Built bundle | `mac/Sources/LlmIdeMac/Resources/os-view/` | | Committed; `make os-view` writes it, `make os-view-check` fails when stale (`Makefile:245-262`). Runs from `file://` in a WKWebView, so one classic IIFE script (`vite.config.ts`). |
 | Tokens | `ui/os-view/src/tokens.generated.css` | | From `schema/design/tokens.json`; the page also carries graph-kit's own theme (see the ui-kit map). |
@@ -118,7 +118,7 @@ Options and the recommended answer; the recommendation is mine.
 
 1. The plan says the page is "React + ui-kit". The page is graph-kit's, with its own theme files; ui-kit tokens reach it only through `ui/os-view`'s generated CSS (ui-kit map, UI4).
 2. The plan's os-kit row says "mac web panel". It lives in the Graph section as the default page (revision 2), not on Home.
-3. `KIT_TABLE` has 10 kits; the plan's table has 12 rows (ui-kit and desktop-shell missing) and the file's comment says it mirrors the plan's table.
+3. `KIT_TABLE` has 10 kits; the plan's table also lists ui-kit, desktop-shell and Settings, and the file's comment says it mirrors the plan's table.
 4. The plan's "kits as rings: delegated vs owned" is not in the state response: `kits` carries `id`, `requires`, `enabled` only.
 5. `macOnly` placeholders still stand for Loop and Auto Tasks (known, plan "Gaps").
 6. `/kb/os/*` has no feature gate and no `LLMIDE_FEATURES` key, so a `mobile_sync`-only or lite build still serves it; not a defect, but the plan's "always" column should say so.
