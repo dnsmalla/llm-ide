@@ -79,6 +79,51 @@ final class ExtensionTrustDecodingTests: XCTestCase {
         XCTAssertEqual(WorkspaceTrustPresentation.withheld(n).map(\.name), ["db"])
     }
 
+    private func notice(_ skipped: [ChatWorkspaceTrustNotice.Skipped]) -> ChatWorkspaceTrustNotice {
+        ChatWorkspaceTrustNotice(path: "/Users/dev/app", text: "t", skipped: skipped)
+    }
+
+    func testRemoteMcpIsWithheldAndNotCalledAProgram() {
+        let n = notice([.init(kind: "mcp-remote", name: "hosted", file: ".mcp.json", withheld: true)])
+        XCTAssertEqual(WorkspaceTrustPresentation.withheld(n).map(\.name), ["hosted"])
+        for t in [WorkspaceTrustPresentation.bannerText(n), WorkspaceTrustPresentation.confirmationText(n)] {
+            XCTAssertTrue(t.contains("connects to a remote endpoint") && t.contains("hosted"), t)
+            XCTAssertFalse(t.contains("runs a program"), t)
+        }
+        XCTAssertEqual(WorkspaceTrustPresentation.kindText("mcp-remote"), "remote MCP server")
+    }
+
+    func testUninspectedMcpSaysSoAndNamesNothing() {
+        let n = notice([.init(kind: "mcp-uninspected", name: "could not be inspected", file: ".mcp.json", withheld: true)])
+        XCTAssertEqual(WorkspaceTrustPresentation.withheld(n).count, 1)
+        for t in [WorkspaceTrustPresentation.bannerText(n), WorkspaceTrustPresentation.confirmationText(n)] {
+            XCTAssertTrue(t.contains(".mcp.json could not be read, so what it starts is unknown"), t)
+            XCTAssertFalse(t.contains("runs a program on this Mac:"), t)
+            XCTAssertFalse(t.contains("connects to a remote endpoint"), t)
+        }
+        XCTAssertEqual(WorkspaceTrustPresentation.kindText("mcp-uninspected"), "MCP file that could not be read")
+    }
+
+    func testMixedKindsGetOneSentenceEach() {
+        let n = notice([
+            .init(kind: "mcp-stdio", name: "db", file: ".mcp.json", withheld: true),
+            .init(kind: "mcp-remote", name: "hosted", file: ".mcp.json", withheld: true),
+            .init(kind: "mcp-uninspected", name: "could not be inspected", file: "sub/.mcp.json", withheld: true),
+            .init(kind: "hooks", name: "Stop", file: ".claude/settings.json", withheld: false)])
+        XCTAssertEqual(WorkspaceTrustPresentation.withheld(n).count, 3)
+        for t in [WorkspaceTrustPresentation.bannerText(n), WorkspaceTrustPresentation.confirmationText(n)] {
+            XCTAssertTrue(t.contains("runs a program on this Mac: db."), t)
+            XCTAssertTrue(t.contains("connects to a remote endpoint: hosted."), t)
+            XCTAssertTrue(t.contains("could not be read"), t)
+        }
+    }
+
+    func testValidationFailedPrefersServerMessage() {
+        XCTAssertEqual(WorkspaceTrustPresentation.message(forCode: "VALIDATION_FAILED", serverMessage: "too many trust records"),
+                       "too many trust records")
+        XCTAssertTrue(WorkspaceTrustPresentation.message(forCode: "VALIDATION_FAILED", serverMessage: "").contains("not accepted"))
+    }
+
     func testAllowlistNormalizeAndText() {
         XCTAssertEqual(ExtensionAllowlistText.normalize(" Acme/Tools "), "acme/tools")
         XCTAssertEqual(ExtensionAllowlistText.normalize("foo/*"), "foo/*")
