@@ -915,6 +915,8 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     cmd.arg(rt.root.join("extension").join("server.mjs"))
         .env("LLMIDE_PORT", ctx.port.to_string())
         .env("LLMIDE_CORE_NONCE", ctx.nonce)
+        // Spawned core only (this is the spawn path): lets the packaged webview call it. Exact origins.
+        .env("LLMIDE_CORS_ORIGINS", crate::core_env::spawned_core_cors_origins())
         .env("LLMIDE_JWT_SECRET", &secrets.jwt_secret)
         .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
         .env("LLMIDE_ENGINE_PREWARM", "0")

@@ -35,6 +35,24 @@ minutes is a fatal state that is shown and not retried; on quit stop the whole p
 (SIGTERM to the process group, then SIGKILL; a Job Object on Windows) so no Node or `claude`
 child is left. An external server already on `:3456` is adopted and never touched.
 
+## The packaged webview can call the core (CORS and CSP)
+
+The release webview runs at `tauri://localhost` (macOS, Linux) or `http(s)://tauri.localhost` (Windows)
+and calls the core with `fetch` on loopback, bearer token in memory, `credentials: omit`. Three pieces
+make that work, all exact and none wider than needed:
+
+- **Core CORS:** only the core this app SPAWNS is started with `LLMIDE_CORS_ORIGINS` set to exactly
+  `tauri://localhost,http://tauri.localhost,https://tauri.localhost` (`core_env::spawned_core_cors_origins`,
+  applied in `core_host::real_launch`). The server still echoes `Origin` only for listed origins and
+  never sends `*`. An adopted `:3456` server, the Mac app's server and the extension are untouched, and
+  the variable is never copied from the host's own environment.
+- **CSP:** the release `connect-src` is `'self' ipc: http://ipc.localhost` plus `http://127.0.0.1:3457`,
+  `:3458`, `:3459`, the ports the host may spawn on (`SPAWN_PORTS`); a test fails if the two drift.
+  The Vite dev origin (5173) exists only in `devCsp`. The adoptable `:3456` is deliberately not allowed.
+- **Binding:** the core stays on `127.0.0.1`; the webview never gets a filesystem or http plugin.
+
+Tests: `desktop/scripts/check-csp.test.mjs`, `core_env::tests`, `extension/tests/server-cors-webview-origins.test.mjs`.
+
 ## `claude` not found
 
 The webview reads `core_status.claude` (`found` / `missing` / `unknown`) and shows

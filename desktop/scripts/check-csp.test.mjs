@@ -15,7 +15,11 @@ test('release CSP locks base/form/object/frame-ancestors and carries no dev orig
   for (const name of ['base-uri', 'form-action', 'object-src', 'frame-ancestors']) assert.deepEqual(d[name], ["'none'"], name);
   assert.deepEqual(d['default-src'], ["'self'"]);
   assert.ok(!/5173/.test(csp), 'dev server origin in the release CSP');
-  assert.ok(!/127\.0\.0\.1|localhost:\d/.test(csp), 'the webview never talks to the core directly');
+  // The webview talks to the core only on the ports the host may spawn it on (SPAWN_PORTS), exact origins, no wildcard.
+  const rust = readFileSync(join(import.meta.dirname, '..', 'src-tauri', 'src', 'core_host.rs'), 'utf8');
+  const ports = rust.match(/const SPAWN_PORTS: \[u16; \d+\] = \[([\d,\s]+)\]/)[1].split(',').map((p) => p.trim()).filter(Boolean);
+  assert.deepEqual(d['connect-src'], ["'self'", 'ipc:', 'http://ipc.localhost', ...ports.map((p) => `http://127.0.0.1:${p}`)]);
+  assert.ok(!/\*|localhost:\d|3456/.test(csp), 'no wildcard, no named-host port, not the adoptable 3456');
   assert.ok(!csp.includes("'unsafe-eval'") && !/script-src[^;]*unsafe-inline/.test(csp));
 });
 

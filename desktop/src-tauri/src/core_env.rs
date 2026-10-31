@@ -111,6 +111,17 @@ pub fn build_path(
     std::env::join_paths(kept).unwrap_or_default()
 }
 
+/// Origins of the packaged webview: macOS/Linux `tauri://localhost`, Windows `http(s)://tauri.localhost`.
+/// Exactly these, never `*`, never a dev server (5173 stays out of the release build).
+pub const WEBVIEW_ORIGINS: [&str; 3] = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
+
+/// `LLMIDE_CORS_ORIGINS` for the core THIS APP SPAWNED. Set only in `core_host::real_launch` (the spawn
+/// path), after the nonce handshake design: an adopted server is never launched by us and keeps its own
+/// env, and `scrub` never copies the variable from the host's environment, so nothing else can widen it.
+pub fn spawned_core_cors_origins() -> String {
+    WEBVIEW_ORIGINS.join(",")
+}
+
 /// The full environment for a core child, secrets excluded (the caller adds them).
 pub fn core_env(
     os: Os,
@@ -184,6 +195,20 @@ mod tests {
         });
         assert_eq!(win.len(), 4);
         assert!(win[0].ends_with("npm") && win[1].ends_with("claude"));
+    }
+
+    #[test]
+    fn cors_origins_are_exactly_the_webview_origins_and_never_inherited() {
+        let v = spawned_core_cors_origins();
+        assert_eq!(v, "tauri://localhost,http://tauri.localhost,https://tauri.localhost");
+        assert!(!v.contains('*') && !v.contains("5173") && !v.contains("127.0.0.1"));
+        // the host's own environment cannot inject or widen it
+        let parent = kv(&[("LLMIDE_CORS_ORIGINS", "*"), ("HOME", "/h")]);
+        for os in [Os::Mac, Os::Linux, Os::Windows] {
+            assert!(scrub(&parent, os).iter().all(|(k, _)| k != "LLMIDE_CORS_ORIGINS"));
+        }
+        let (env, _) = core_env(Os::Mac, &parent, None);
+        assert!(env.iter().all(|(k, _)| k != "LLMIDE_CORS_ORIGINS"));
     }
 
     #[cfg(unix)]
