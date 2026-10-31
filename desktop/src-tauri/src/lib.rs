@@ -16,6 +16,7 @@ mod git_scm;
 mod host_approval;
 mod fsutil;
 mod graph_file;
+mod mermaid_runtime;
 mod notes_fs;
 mod notes_write;
 mod os_open;
@@ -323,6 +324,9 @@ macro_rules! product_handlers {
                 confirm::bypass_confirm_signed,
                 confirm::trust_confirm,
                 host_approval::host_bus_proof,
+                mermaid_runtime::mermaid_runtime_status,
+                mermaid_runtime::mermaid_runtime_install,
+                mermaid_runtime::mermaid_runtime_read,
             $($spike),*
         ]
     };

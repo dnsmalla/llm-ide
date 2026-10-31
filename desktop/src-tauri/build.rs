@@ -94,6 +94,9 @@ const COMMANDS: &[&str] = &[
     "bypass_confirm_signed",
     "trust_confirm",
     "host_bus_proof",
+    "mermaid_runtime_status",
+    "mermaid_runtime_install",
+    "mermaid_runtime_read",
 ];
 
 fn main() {

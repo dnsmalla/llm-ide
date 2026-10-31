@@ -84,6 +84,9 @@
     "allow-bypass-confirm",
     "allow-bypass-confirm-signed",
     "allow-trust-confirm",
-    "allow-host-bus-proof"
+    "allow-host-bus-proof",
+    "allow-mermaid-runtime-status",
+    "allow-mermaid-runtime-install",
+    "allow-mermaid-runtime-read"
   ]
 }

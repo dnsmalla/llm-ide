@@ -1,0 +1,11 @@
+{
+  "name": "mermaid",
+  "version": "11.17.2",
+  "url": "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
+  "sha256": "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8",
+  "sha256_base64": "WB7X10vZBI0OOpE2OSfXLvIpQtdyJUayf3zCnjU5Drg=",
+  "bytes": 3572661,
+  "license": "MIT",
+  "verified": "2026-10-31",
+  "note": "Same release and hash as the Mac app pin (mac Core/Editor/Mermaid.swift). Hash computed from a one-time download of the exact URL (jsDelivr immutable version path, HTTP 200, no redirect). Bumping the version means updating url, sha256, sha256_base64, bytes and the sha256 source in tauri.conf.json csp together; check-csp.test.mjs fails otherwise."
+}
