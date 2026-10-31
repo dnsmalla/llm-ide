@@ -89,7 +89,11 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Install extension dependencies (the end-to-end tests start the real core)
+      # The end-to-end tests start the real core (needs better-sqlite3). Windows runners have no
+      # Visual Studio toolchain for the native build, and macOS is the first target: the suite is
+      # skipped there (LLMIDE_E2E=0 below) until the Windows pass.
+      - name: Install extension dependencies (end-to-end core tests)
+        if: runner.os != 'Windows'
         working-directory: extension
         run: npm ci
 
@@ -105,6 +109,8 @@ jobs:
 
       - name: Node tests
         working-directory: desktop
+        env:
+          LLMIDE_E2E: ${{ runner.os == 'Windows' && '0' || '1' }}
         run: npm test
 
       - name: Capability and DOMPurify security gates
@@ -112,8 +118,7 @@ jobs:
         run: npm run check:security
 
       - name: Generated tokens are up to date
-        working-directory: desktop
-        run: node scripts/gen-tokens.mjs --check
+        run: node scripts/gen-design-tokens.mjs --check
 
       - name: Build the frontend (tauri-build embeds desktop/dist)
         working-directory: desktop
