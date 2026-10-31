@@ -153,6 +153,10 @@ const known = new Set(schema.oneOf.map((v) => v.properties?.type?.const).filter(
 const NON_WIRE_TYPE_LITERALS = new Set([
   // SDK/provider input shapes — these are built to be sent TO a model, never
   // written to our SSE stream.
+  // The re-attach stream (GET /agent/v2/turns/stream) only: its markers never ride POST /agent/v2/stream, and the
+  // route is specified as text in schema/http/agent.schema.json.
+  'replay_info',              // routes/agent-v2.mjs — first frame of a re-attach with a gap
+  'replay_truncated',         // routes/turn-replay.mjs — stands in for an event over 256 KB
   'local',                    // sdk/engine.mjs — plugin mount descriptor
   'preset',                   // sdk/engine.mjs — systemPrompt: { type: 'preset' }
   'custom',                   // sdk/engine.mjs — systemPrompt: { type: 'custom' } (LLMIDE_V2_COMPACT_PROMPT)
