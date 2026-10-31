@@ -15,9 +15,13 @@ pub const GRAPH_FILE_MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// spike's default project (the frontend's default graph path lives under it).
 const DEFAULT_PROJECT_REL: &str = "Desktop/LLM/code/affiliate";
 
-/// The active project root: `LLMIDE_POC_PROJECT_ROOT`, else the parent directory of
+/// The active project root: the folder opened through `project_open*` (host dialog),
+/// else `LLMIDE_POC_PROJECT_ROOT`, else the parent directory of
 /// the `LLMIDE_POC_GRAPH` file, else the spike's default project under `$HOME`.
 pub fn project_root() -> Option<PathBuf> {
+    if let Some(active) = crate::project::active_root() {
+        return Some(active);
+    }
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     env("LLMIDE_POC_PROJECT_ROOT")
         .or_else(|| env("LLMIDE_POC_GRAPH").and_then(|g| g.parent().map(Path::to_path_buf)))

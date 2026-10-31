@@ -1,9 +1,11 @@
 mod ax_probe;
 mod core_host;
 mod graph_file;
+mod project;
 mod pty;
 mod secrets;
 mod sse_replay;
+mod tray;
 
 use std::sync::OnceLock;
 
@@ -159,18 +161,27 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(host)
+        .plugin(tauri_plugin_notification::init())
         // A reload drops the webview's terminal state; its shells must not outlive it.
         .on_page_load(|_webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 pty::kill_all();
             }
         })
-        .on_window_event(|_window, event| {
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Opt-in close-to-tray (default off); only when a tray icon exists.
+                if window.label() == "main" && tray::should_hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 pty::kill_all();
             }
         })
-        .setup(move |_app| {
+        .setup(move |app| {
+            tray::setup(app.handle());
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();
             if let Err(e) = ctrlc::set_handler(move || {
@@ -188,6 +199,13 @@ pub fn run() {
             core_host::core_status,
             secrets::secrets_status,
             read_graph_file,
+            project::project_open,
+            project::project_open_recent,
+            project::project_active,
+            project::project_recent,
+            tray::notify,
+            tray::tray_status,
+            tray::tray_set_close_to_tray,
             bench,
             bench_done,
             autobench_mode,

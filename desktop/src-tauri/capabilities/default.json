@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), terminal. No fs/shell/opener/http plugin, no wildcard permissions.",
+  "description": "Product surface of the main window: core status, secrets status (booleans only), graph read (project-root scoped), project open (host-run folder dialog, no dialog/fs plugin permission), tray + fixed-template notifications (no notification plugin permission), terminal. No fs/shell/opener/http plugin, no wildcard permissions.",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-start-dragging",
@@ -10,6 +10,13 @@
     "allow-core-status",
     "allow-secrets-status",
     "allow-read-graph-file",
+    "allow-project-open",
+    "allow-project-open-recent",
+    "allow-project-active",
+    "allow-project-recent",
+    "allow-notify",
+    "allow-tray-status",
+    "allow-tray-set-close-to-tray",
     "allow-pty-spawn",
     "allow-pty-write",
     "allow-pty-resize",

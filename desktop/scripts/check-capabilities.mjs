@@ -2,12 +2,12 @@
 //   - every command in generate_handler! (src-tauri/src/lib.rs) is declared in the
 //     AppManifest COMMANDS list (src-tauri/build.rs) and granted in a capability
 //   - no wildcard permission, no `core:default`, no fs/shell/opener/http/dialog/
-//     process plugin permission, no `remote` URL scope, only the "main" window
+//     notification/autostart/process plugin permission, no `remote` URL scope, only the "main" window
 // Usage: node scripts/check-capabilities.mjs   (exit 1 on any problem)
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const FORBIDDEN_PREFIX = /^(fs|shell|opener|http|dialog|process|os|updater|global-shortcut|clipboard-manager):/;
+const FORBIDDEN_PREFIX = /^(fs|shell|opener|http|dialog|process|os|updater|global-shortcut|clipboard-manager|notification|autostart):/;
 const toKebab = (s) => s.replaceAll('_', '-');
 
 export function check({ libRs, buildRs, capabilities }) {
