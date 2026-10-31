@@ -856,3 +856,59 @@ fn unowned_chats_belong_to_the_first_user_to_open_the_store_only() {
     let carol = store(&t, "carol");
     assert!(carol.list(&q(10)).unwrap().items.iter().all(|c| c.id != ID1));
 }
+
+
+// ---- special files and stale locks -------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_or_link_in_place_of_a_chat_file_never_blocks_or_is_followed() {
+    let t = Tmp::new("fifo");
+    let s = store(&t, "u1");
+    let p = t.0.join("sessions").join(format!("{ID1}.json"));
+    let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+    // SAFETY: valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let s2 = s.clone();
+    std::thread::spawn(move || {
+        let r = (s2.load(ID1, None, 5).map(|_| ()).map_err(|e| e.code), s2.archive_facts(ID1).map(|f| f.decoded).unwrap_or(true), s2.list(&q(10)).map(|l| l.total).unwrap_or(99));
+        let _ = tx.send(r);
+    });
+    let (load, decoded, total) = rx.recv_timeout(Duration::from_secs(10)).expect("reading a FIFO hung");
+    assert!(load.is_err() && !decoded && total == 0, "{load:?} {decoded} {total}");
+    // a symlink is not followed either
+    std::fs::remove_file(&p).unwrap();
+    std::fs::write(t.0.join("outside.json"), serde_json::to_vec(&session(ID1, 1)).unwrap()).unwrap();
+    std::os::unix::fs::symlink(t.0.join("outside.json"), &p).unwrap();
+    assert!(s.load(ID1, None, 5).is_err());
+}
+
+#[test]
+fn an_owner_with_no_start_time_is_trusted_only_for_a_while() {
+    let old = Some(UNKNOWN_OWNER_MAX_AGE + Duration::from_secs(1));
+    let fresh = Some(Duration::from_secs(5));
+    assert!(!owner_is_stale(ProcInfo::Unknown, 0, fresh));
+    assert!(owner_is_stale(ProcInfo::Unknown, 0, old));
+    assert!(!owner_is_stale(ProcInfo::Unknown, 0, None), "age unknown: keep the lock");
+    assert!(owner_is_stale(ProcInfo::Gone, 5, fresh));
+    assert!(owner_is_stale(ProcInfo::Started(9), 5, fresh), "a recycled pid");
+    assert!(!owner_is_stale(ProcInfo::Started(5), 5, fresh));
+}
+
+#[test]
+fn tombstone_attempts_saturate() {
+    let t = Tmp::new("attempts");
+    let s = store(&t, "u1");
+    s.add_tombstone(ID1).unwrap();
+    for _ in 0..3 {
+        s.bump_tombstone_attempt(ID1).unwrap();
+    }
+    assert_eq!(s.my_pending_deletes()[0].attempts, 3);
+    let p = t.0.join(PENDING_FILE);
+    let mut d: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    d["deletes"][0]["attempts"] = json!(MAX_TOMBSTONE_ATTEMPTS);
+    std::fs::write(&p, serde_json::to_vec(&d).unwrap()).unwrap();
+    s.bump_tombstone_attempt(ID1).unwrap();
+    assert_eq!(s.my_pending_deletes()[0].attempts, MAX_TOMBSTONE_ATTEMPTS);
+}

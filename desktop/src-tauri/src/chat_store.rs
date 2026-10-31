@@ -71,6 +71,8 @@ pub const TRASH_RETENTION_SECS: u64 = 30 * 24 * 3600;
 pub const TRASH_MAX_ENTRIES: usize = 500;
 /// Most `*.corrupt-*` files this app keeps in its own folder.
 pub const MAX_QUARANTINED: usize = 200;
+/// A tombstone's retry counter stops here (it is a counter, not a log).
+pub const MAX_TOMBSTONE_ATTEMPTS: i64 = 1_000;
 
 // ---- errors ---------------------------------------------------------------------------------
 
@@ -360,15 +362,41 @@ fn lock_is_stale(path: &Path, me: &LockOwner) -> bool {
     if owner.pid == me.pid && owner.start == me.start {
         return true;
     }
-    match proc_start_time(owner.pid) {
+    owner_is_stale(proc_start_time(owner.pid), owner.start, file_age(path))
+}
+
+/// A lock whose owner is alive but whose start time the platform cannot tell (`Unknown`) could be a recycled
+/// pid; such a lock is honoured only for this long, then treated as stale (a real writer holds it for
+/// milliseconds).
+pub const UNKNOWN_OWNER_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+
+fn owner_is_stale(info: ProcInfo, recorded_start: u64, age: Option<Duration>) -> bool {
+    match info {
         ProcInfo::Gone => true,
-        ProcInfo::Started(t) => owner.start != 0 && t != owner.start,
-        ProcInfo::Unknown => false,
+        ProcInfo::Started(t) => recorded_start != 0 && t != recorded_start,
+        ProcInfo::Unknown => age.is_some_and(|a| a > UNKNOWN_OWNER_MAX_AGE),
     }
 }
 
+/// Opens a chat-store file for reading only if it is a REGULAR file: `O_NONBLOCK | O_NOFOLLOW`, so a FIFO or a
+/// device planted in the shared folder cannot hang the reader, and a link is not followed.
+pub(crate) fn open_regular(path: &Path) -> std::io::Result<File> {
+    let mut o = OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let f = o.open(path)?;
+    if !f.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
+    }
+    Ok(f)
+}
+
 fn read_small(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
-    let f = File::open(path)?;
+    let f = open_regular(path)?;
     let mut v = Vec::new();
     f.take(max).read_to_end(&mut v)?;
     Ok(v)
@@ -1026,7 +1054,7 @@ impl ChatStore {
         let _lock = self.lock()?;
         self.update_pending(|d| {
             for e in d.deletes.iter_mut().filter(|e| e.id.eq_ignore_ascii_case(id)) {
-                e.attempts += 1;
+                e.attempts = (e.attempts + 1).min(MAX_TOMBSTONE_ATTEMPTS);
             }
         })
     }
@@ -1177,7 +1205,7 @@ impl ChatStore {
             return Err(StoreError::new("deleted", "this chat was deleted"));
         }
         let path = self.file_path(&id);
-        let file = File::open(&path).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { StoreError::new("not_found", "no such chat") } else { io_err("open chat", &e) })?;
+        let file = open_regular(&path).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { StoreError::new("not_found", "no such chat") } else if e.kind() == std::io::ErrorKind::InvalidInput { StoreError::new("invalid", "chat path is not a regular file") } else { io_err("open chat", &e) })?;
         let meta = file.metadata().map_err(|e| io_err("stat chat", &e))?;
         if meta.len() > MAX_READ_BYTES {
             return Err(StoreError::new("too_large", "chat file exceeds the read limit"));
@@ -1359,7 +1387,7 @@ impl ChatStore {
 
     /// Number of messages in the stored file (for a confirmation dialog); `None` when unreadable.
     pub fn message_count_of(&self, id: &str) -> Option<usize> {
-        let f = File::open(self.file_path(id)).ok()?;
+        let f = open_regular(&self.file_path(id)).ok()?;
         let size = f.metadata().ok()?.len();
         match parse_header(&f, size, id) {
             Parsed::Ok { summary, .. } => Some(summary.message_count),
@@ -1369,7 +1397,7 @@ impl ChatStore {
 
     /// The chat's title as stored (for a confirmation dialog); `None` when unreadable. Not logged.
     pub fn title_of(&self, id: &str) -> Option<String> {
-        let f = File::open(self.file_path(id)).ok()?;
+        let f = open_regular(&self.file_path(id)).ok()?;
         let size = f.metadata().ok()?.len();
         match parse_header(&f, size, id) {
             Parsed::Ok { summary, owner } if self.may_access(owner.as_deref()) => Some(summary.title),
@@ -1487,7 +1515,7 @@ impl ChatStore {
         if meta.len() > MAX_READ_BYTES {
             return Ok(exists_only);
         }
-        let Ok(file) = File::open(&path) else { return Ok(exists_only) };
+        let Ok(file) = open_regular(&path) else { return Ok(exists_only) };
         let reader = BufReader::with_capacity(64 * 1024, file.take(MAX_READ_BYTES));
         let mut de = serde_json::Deserializer::from_reader(reader);
         let Ok(doc) = (HashSeed).deserialize(&mut de) else { return Ok(exists_only) };
@@ -1716,7 +1744,7 @@ fn validate_session(obj: &Map<String, Value>) -> Result<()> {
 /// Parses the changed files, in up to four threads. `None` = could not open (vanished).
 fn parse_many(dir: &Path, todo: &[(String, u128, u64)]) -> Vec<Option<Parsed>> {
     let one = |(id, _m, size): &(String, u128, u64)| -> Option<Parsed> {
-        let f = File::open(dir.join(format!("{id}.json"))).ok()?;
+        let f = open_regular(&dir.join(format!("{id}.json"))).ok()?;
         Some(parse_header(&f, *size, id))
     };
     if todo.len() < 64 {
