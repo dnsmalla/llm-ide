@@ -67,10 +67,21 @@ enum MobileExploreBridge {
     ///
     /// Note what it does NOT lift: the server's hard rails stand either way —
     /// a blocklisted command and a write outside the workspace are refused on
-    /// bypass exactly as on manual.
+    /// bypass exactly as on manual. Bypass itself is never inherited (see
+    /// `permissionMode(macChip:)`).
     static func permissionMode() -> String {
         let raw = UserDefaults.standard.string(forKey: EditAcceptanceMode.defaultsKey) ?? ""
-        return (EditAcceptanceMode(rawValue: raw) ?? .review).agentPermissionMode
+        return permissionMode(macChip: EditAcceptanceMode(rawValue: raw) ?? .review)
+    }
+
+    /// A phone-originated turn NEVER runs with the Mac's Auto/Bypass chip: a remote origin does not inherit
+    /// "no prompts", whoever holds the paired token. Bypass is clamped to Ask; Ask and Accept Edits are kept
+    /// (the stricter of what the phone could ask for, which is nothing, and the Mac's setting).
+    static func permissionMode(macChip: EditAcceptanceMode) -> String {
+        switch macChip {
+        case .review, .auto:  return EditAcceptanceMode.review.agentPermissionMode        // "ask"
+        case .acceptEdits:    return EditAcceptanceMode.acceptEdits.agentPermissionMode   // "accept-edits"
+        }
     }
 
     /// Same workspace / project / git snapshot the Mac Explorer panel sends.

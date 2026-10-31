@@ -55,7 +55,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .autoTaskControl:   return "Starts a task that is already enabled on the Mac. Implementing issues and pushing branches also need your confirmation on the Mac. Turning tasks on or off and editing their settings and templates stay on the Mac. Viewing state, history and logs, and Stop, need no switch."
         case .loopControl:       return "A Loop run edits files and runs commands in the project. Viewing and Stop need no switch."
         case .generationRun:     return "Writes generated documents into the project's llm-doc/generated folder and uses your LLM quota."
-        case .exploreEdit:       return "Off: phone Explorer chat is read-only. On: it runs with the Mac's Code Assistant permission chip, which can be Auto (no prompts)."
+        case .exploreEdit:       return "Off: phone Explorer chat is read-only. On: it uses the Mac's Ask or Accept Edits setting; a Mac set to Bypass is treated as Ask for the phone, so shell commands and edits still prompt."
         }
     }
 

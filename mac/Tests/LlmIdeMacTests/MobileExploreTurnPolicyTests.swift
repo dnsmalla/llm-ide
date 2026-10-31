@@ -32,4 +32,25 @@ struct MobileExploreTurnPolicyTests {
     @Test func exploreEditDefaultsOff() {
         #expect(PhoneAccess.exploreEdit.defaultsOn == false)
     }
+
+    /// A remote origin never inherits Bypass, even with `exploreEdit` on.
+    @Test func macBypassIsClampedToAskForAPhoneTurn() {
+        withChip(.auto) {
+            let policy = MobileExploreBridge.turnPolicy(editAllowed: true)
+            #expect(policy.mode == "auto")
+            #expect(policy.permissionMode == "ask")
+        }
+    }
+
+    @Test func macAskStaysAsk() {
+        withChip(.review) {
+            #expect(MobileExploreBridge.turnPolicy(editAllowed: true).permissionMode == "ask")
+        }
+    }
+
+    @Test func noChipValueEverYieldsBypassForAPhone() {
+        for chip in EditAcceptanceMode.allCases {
+            #expect(MobileExploreBridge.permissionMode(macChip: chip) != "bypass", "\(chip)")
+        }
+    }
 }
