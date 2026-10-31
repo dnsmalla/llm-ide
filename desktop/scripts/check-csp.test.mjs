@@ -21,6 +21,20 @@ test('release CSP locks base/form/object/frame-ancestors and carries no dev orig
   assert.deepEqual(d['connect-src'], ["'self'", 'ipc:', 'http://ipc.localhost', ...ports.map((p) => `http://127.0.0.1:${p}`)]);
   assert.ok(!/\*|localhost:\d|3456/.test(csp), 'no wildcard, no named-host port, not the adoptable 3456');
   assert.ok(!csp.includes("'unsafe-eval'") && !/script-src[^;]*unsafe-inline/.test(csp));
+  // WebAssembly (the Code Graph layout kernel) compiles under 'wasm-unsafe-eval' ONLY.
+  assert.deepEqual(d['script-src'], ["'self'", "'wasm-unsafe-eval'"]);
+  // Workers are same-origin files (vite emits graph.worker-*.js); blob: stays only for Monaco's workers.
+  assert.deepEqual(d['worker-src'], ["'self'", 'blob:']);
+});
+
+test('script-src carries no eval, inline or wildcard source in either CSP', () => {
+  for (const csp of [conf.app.security.csp, conf.app.security.devCsp]) {
+    const script = directives(csp)['script-src'];
+    assert.ok(script, 'script-src is pinned explicitly');
+    assert.ok(!script.includes("'unsafe-eval'") && !script.includes("'unsafe-inline'") && !script.includes('data:'), script.join(' '));
+    assert.ok(!script.some((v) => v === '*' || v.includes('*') || /^https?:/.test(v)), `no wildcard or remote script origin: ${script.join(' ')}`);
+    assert.ok(script.includes("'wasm-unsafe-eval'"));
+  }
 });
 
 test('dev origins live only in devCsp, which keeps the same lockdown', () => {
@@ -28,6 +42,7 @@ test('dev origins live only in devCsp, which keeps the same lockdown', () => {
   assert.ok(dev.includes('127.0.0.1:5173'));
   const d = directives(dev);
   for (const name of ['base-uri', 'form-action', 'object-src', 'frame-ancestors']) assert.deepEqual(d[name], ["'none'"], name);
+  assert.deepEqual(d['script-src'], ["'self'", "'wasm-unsafe-eval'"]);
 });
 
 test('the JS prototypes are frozen before page scripts run', () => {
