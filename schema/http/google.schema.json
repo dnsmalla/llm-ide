@@ -1,0 +1,747 @@
+{
+  "description": "The Google connectors: Gmail, Google Calendar and Google Drive into the Library (docs/spec/google-connectors.md, plan docs/superpowers/plans/2026-10-31-google-connectors-plan.md). Rows: POST /kb/google/start, GET /kb/google/status, GET /kb/google/accounts, POST /kb/google/disconnect, POST /kb/google/options, GET /kb/google/calendars, GET /kb/google/drive/folders, POST /kb/google/gmail/fetch, POST /kb/google/gmail/seen, POST /kb/google/sync. Served by extension/routes/google-connectors.mjs, dispatched from extension/routes/router.mjs; always on (no LLMIDE_FEATURES key). Token-protected and user-scoped. Google sign-in here is a connector credential only: never an app login, never a model provider. No response carries a token, a client secret or a raw Google body: the OAuth client and the refresh token live in the per-user vault (google.acct.<id>.*), the access token in memory. Fixtures are the real handler's responses (in-process, tests/google-routes.test.mjs with GOOGLE_DUMP_FIXTURES) with Google answered by recorded fixtures under extension/tests/fixtures/google; no fixture reached a Google host. The ids, port, state, batch id and timestamps are normalised to example values. Not captured: the 502 upstream failures (they need Google), listed as x-unspecified. Open objects: ConnectorStatus.options and the options request and response are per-product bags whose keys differ by product (additionalProperties true, described in place). The 400 for a malformed JSON body is not declared per route, as SCHEMA.md says.",
+  "$defs": {
+    "Scope": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "basic",
+            "restricted",
+            "sensitive",
+            "unknown"
+          ],
+          "description": "Google's tier label shown in the Connect dialog (unverified against Google's own tables, see the plan)"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        }
+      }
+    },
+    "ConnectorStatus": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "pending",
+            "syncing",
+            "error",
+            "reconnect_needed"
+          ]
+        },
+        "lastRunAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "a stable code or fixed text, never a response body"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "the connector's normalised options; the keys differ by product (gmail: labels, windowDays, includePromotions, includeSocial; gcal: calendarIds, daysBack, daysAhead; gdrive: folderIds, includeSharedDrives), so the object is open"
+        }
+      }
+    },
+    "Account": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "reconnect_needed"
+          ]
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "driveContent": {
+          "type": "boolean"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "connectors": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ConnectorStatus"
+          },
+          "description": "keyed by product id (gmail, gcal, gdrive), only the granted products"
+        }
+      }
+    },
+    "GmailNote": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "noteFile": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "string",
+          "description": "the whole note: JSON-valued frontmatter then the Markdown body, untrusted text escaped, secret shapes redacted"
+        },
+        "messageCount": {
+          "type": "integer"
+        },
+        "lastAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Tombstone": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "noteFile": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string",
+          "description": "the line to append to the note: deleted upstream <date>"
+        }
+      }
+    },
+    "GmailStats": {
+      "type": "object",
+      "properties": {
+        "threads": {
+          "type": "integer"
+        },
+        "messages": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        },
+        "oversize": {
+          "type": "integer"
+        },
+        "rebootstrapped": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CalendarRun": {
+      "type": "object",
+      "properties": {
+        "calendarId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "full",
+            "incremental"
+          ]
+        },
+        "events": {
+          "type": "integer"
+        },
+        "cancelled": {
+          "type": "integer"
+        },
+        "resynced": {
+          "type": "boolean"
+        },
+        "pending": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DriveStats": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "integer"
+        },
+        "removed": {
+          "type": "integer"
+        },
+        "withContent": {
+          "type": "integer"
+        },
+        "metadataOnly": {
+          "type": "integer"
+        },
+        "skippedShared": {
+          "type": "integer"
+        },
+        "contentSkipped": {
+          "type": "integer"
+        },
+        "restarted": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/google/start": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "x-optional": true
+            },
+            "clientSecret": {
+              "type": "string",
+              "x-optional": true
+            },
+            "products": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "driveContent": {
+              "type": "boolean",
+              "x-optional": true
+            },
+            "accountId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "authUrl": {
+              "type": "string",
+              "description": "the Google authorization URL; the client opens it in the system browser"
+            },
+            "state": {
+              "type": "string"
+            },
+            "redirectPort": {
+              "type": "integer"
+            },
+            "expiresInSec": {
+              "type": "integer"
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Scope"
+              }
+            },
+            "legacyMailTokenRevoked": {
+              "type": "boolean"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/google/status": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "error"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "complete"
+                  ]
+                },
+                "accountId": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "products": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "grantedScopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missingScopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "driveContent": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/google/accounts": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Account"
+              }
+            },
+            "legacyMailToken": {
+              "type": "boolean",
+              "description": "true while the vault still holds the legacy mail.google.com token of /auth/google/*"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/google/disconnect": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "revoked": {
+              "type": "boolean",
+              "description": "false when the revoke call failed (offline); the local credentials are deleted either way"
+            },
+            "purgedSources": {
+              "type": "integer"
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/google/options": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "product": {
+              "type": "string"
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "per-product options, validated and clamped by the server; keys as in ConnectorStatus.options"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "the normalised options as stored"
+            },
+            "contentGranted": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/google/calendars": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "calendars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "primary": {
+                    "type": "boolean"
+                  },
+                  "accessRole": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from Google (HTTP error, rate limit after retries, malformed response): { error: { code: GOOGLE_*, message } }; producing it needs Google, and the offline tests cover it without capturing a fixture"
+        }
+      }
+    },
+    "GET /kb/google/drive/folders": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "parent": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "folders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "502": {
+          "x-unspecified": "upstream failure from Google (HTTP error, rate limit after retries, malformed response): { error: { code: GOOGLE_*, message } }; producing it needs Google, and the offline tests cover it without capturing a fixture"
+        }
+      }
+    },
+    "POST /kb/google/gmail/fetch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "batchId": {
+              "type": "string",
+              "description": "confirm with POST /kb/google/gmail/seen after the notes are written"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "bootstrap",
+                "history"
+              ]
+            },
+            "pending": {
+              "type": "boolean"
+            },
+            "stats": {
+              "$ref": "#/$defs/GmailStats"
+            },
+            "tombstones": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Tombstone"
+              }
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GmailNote"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from Google (HTTP error, rate limit after retries, malformed response): { error: { code: GOOGLE_*, message } }; producing it needs Google, and the offline tests cover it without capturing a fixture"
+        }
+      }
+    },
+    "POST /kb/google/gmail/seen": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "batchId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "pending": {
+              "type": "boolean"
+            }
+          }
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/google/sync": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "product": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string"
+                },
+                "product": {
+                  "type": "string",
+                  "enum": [
+                    "gcal"
+                  ]
+                },
+                "pending": {
+                  "type": "boolean"
+                },
+                "events": {
+                  "type": "integer"
+                },
+                "cancelled": {
+                  "type": "integer"
+                },
+                "calendars": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/CalendarRun"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string"
+                },
+                "product": {
+                  "type": "string",
+                  "enum": [
+                    "gdrive"
+                  ]
+                },
+                "pending": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "bootstrap",
+                    "changes"
+                  ]
+                },
+                "stats": {
+                  "$ref": "#/$defs/DriveStats"
+                }
+              }
+            }
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from Google (HTTP error, rate limit after retries, malformed response): { error: { code: GOOGLE_*, message } }; producing it needs Google, and the offline tests cover it without capturing a fixture"
+        }
+      }
+    }
+  }
+}

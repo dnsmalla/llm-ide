@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /kb/google/calendars",
+  "status": 200,
+  "request": {
+    "query": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "calendars": [
+      {
+        "id": "primary-id@example.com",
+        "summary": "Me",
+        "primary": true,
+        "accessRole": "owner"
+      },
+      {
+        "id": "team@group.calendar.google.com",
+        "summary": "Team",
+        "primary": false,
+        "accessRole": "reader"
+      }
+    ]
+  }
+}

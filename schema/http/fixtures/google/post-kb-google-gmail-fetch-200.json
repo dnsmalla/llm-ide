@@ -1,0 +1,42 @@
+{
+  "endpoint": "POST /kb/google/gmail/fetch",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "accountId": "0123456789ab",
+    "batchId": "0123456789abcdef01234567",
+    "mode": "bootstrap",
+    "pending": false,
+    "stats": {
+      "threads": 2,
+      "messages": 3,
+      "skipped": 1,
+      "oversize": 0,
+      "rebootstrapped": false,
+      "truncated": false
+    },
+    "tombstones": [],
+    "notes": [
+      {
+        "threadId": "t-simple",
+        "noteFile": "gmail-d3978525a50c-t-simple.md",
+        "title": "週次ミーティングの議題",
+        "markdown": "---\nsource: \"gmail\"\naccount: \"me@example.com\"\naccountId: \"d3978525a50c\"\nthreadId: \"t-simple\"\nsubject: \"週次ミーティングの議題\"\nlabels: [\"INBOX\",\"UNREAD\"]\nparticipants: [\"Alice Example <alice@example.com>\",\"me@example.com\",\"\\\"Bob, Jr.\\\" <bob@example.com>\",\"alice@example.com\"]\nfirst_at: \"2025-10-31T08:40:00.000Z\"\nlast_at: \"2025-10-31T09:40:00.000Z\"\nmessage_count: 2\nuntrusted: true\n---\n\n# 週次ミーティングの議題\n\n## Alice Example \\<alice@example.com\\>, 2025-10-31T08:40:00.000Z\n\nHi,\n\nAgenda: budget, hiring.\n\n## me@example.com, 2025-10-31T09:40:00.000Z\n\nThanks, adding a security review.\n\nAttachments (metadata only, not downloaded):\n- agenda.pdf (application/pdf, 48211 bytes)",
+        "messageCount": 2,
+        "lastAt": "2025-10-31T09:40:00.000Z"
+      },
+      {
+        "threadId": "t-html",
+        "noteFile": "gmail-d3978525a50c-t-html.md",
+        "title": "Newsletter",
+        "markdown": "---\nsource: \"gmail\"\naccount: \"me@example.com\"\naccountId: \"d3978525a50c\"\nthreadId: \"t-html\"\nsubject: \"Newsletter\"\nlabels: [\"INBOX\"]\nparticipants: [\"News <news@example.com>\"]\nfirst_at: \"2025-10-31T11:26:40.000Z\"\nlast_at: \"2025-10-31T11:26:40.000Z\"\nmessage_count: 1\nuntrusted: true\n---\n\n# Newsletter\n\n## News \\<news@example.com\\>, 2025-10-31T11:26:40.000Z\n\nHello team,\n\n  [image omitted: Company logo]\n\nClick here or [reset](https://example.com/reset?token=abc) or data.\n\nDeploy \\[REDACTED\\] and header Authorization: \\[REDACTED\\]\n\n!\\[pixel\\](https://tracker.example.com/md.png) \\<img src=x onerror=alert(1)\\>",
+        "messageCount": 1,
+        "lastAt": "2025-10-31T11:26:40.000Z"
+      }
+    ]
+  }
+}

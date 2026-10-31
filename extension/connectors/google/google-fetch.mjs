@@ -27,6 +27,13 @@ export function _setGoogleFetchForTests(fn) {
   testTransport = fn;
 }
 
+let sleepFn = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+/** Test seam (NODE_ENV=test only): replace the backoff sleep. Pass null to restore. */
+export function _setGoogleSleepForTests(fn) {
+  if (process.env.NODE_ENV !== 'test') throw new Error('_setGoogleSleepForTests is test-only');
+  sleepFn = fn || ((ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()));
+}
+
 export class GoogleApiError extends Error {
   /** @param {string} code stable machine code  @param {string} message safe text  @param {{status?: number, reason?: string, retryAfterMs?: number|null}} [x] */
   constructor(code, message, x = {}) {
@@ -146,8 +153,6 @@ function errorInfo(text) {
   return { reason: null, message: '' };
 }
 
-const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
-
 /**
  * An authenticated API call with the retry rules: one token refresh on 401, 429 / 403 rate-limit / 5xx backoff with
  * jitter honouring Retry-After (MAX_RETRIES attempts), nothing retried on other 4xx. Resolves the parsed JSON, or
@@ -156,7 +161,7 @@ const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.
  * @param {string} url  @param {{ method?: string, headers?: object, json?: unknown, maxBytes?: number, raw?: boolean,
  *   sleepImpl?: (ms: number) => Promise<void>, allow404?: boolean }} [o]
  */
-export async function googleCall(session, url, { method = 'GET', headers, json, maxBytes, raw = false, sleepImpl = sleep, allow404 = false } = {}) {
+export async function googleCall(session, url, { method = 'GET', headers, json, maxBytes, raw = false, sleepImpl = (ms) => sleepFn(ms), allow404 = false } = {}) {
   let refreshed = false;
   for (let attempt = 0; ; attempt++) {
     const token = await session.ensure();

@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /kb/google/gmail/fetch",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "accountId": "0123456789ab",
+    "batchId": "0123456789abcdef01234567",
+    "mode": "history",
+    "pending": false,
+    "stats": {
+      "threads": 0,
+      "messages": 0,
+      "skipped": 0,
+      "oversize": 0,
+      "rebootstrapped": false,
+      "truncated": false
+    },
+    "tombstones": [
+      {
+        "threadId": "t-gone",
+        "noteFile": "gmail-d3978525a50c-t-gone.md",
+        "line": "deleted upstream 2026-10-31"
+      }
+    ],
+    "notes": []
+  }
+}

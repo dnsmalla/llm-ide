@@ -1356,6 +1356,93 @@
       "responses": {
         "200": "Saved; returns the merged chains"
       }
+    },
+    "POST /kb/google/start": {
+      "summary": "Start a Google connect (bring-your-own OAuth client, PKCE, loopback listener owned by the core)",
+      "description": "Binds a 127.0.0.1 listener on an ephemeral port for this one flow (state and nonce, 5 minute timeout, single use) and returns the Google authorization URL for the client to open in the system browser. Scopes are read-only and listed with their tier. The client id and secret are stored in the per-user vault only after the token exchange succeeds. If the legacy mail.google.com token of /auth/google/* exists it is revoked and deleted first.",
+      "responses": {
+        "200": "Authorization URL and flow state",
+        "400": "Validation error (products, client id and secret)",
+        "404": "Unknown account to upgrade"
+      }
+    },
+    "GET /kb/google/status": {
+      "summary": "Poll a Google connect flow",
+      "description": "A terminal result (complete or error) is returned once and removed. Only the user who started the flow may read it.",
+      "responses": {
+        "200": "pending, unknown, error, or complete (account id, email, products, granted and missing scopes)",
+        "403": "Not your sign-in"
+      }
+    },
+    "GET /kb/google/accounts": {
+      "summary": "List connected Google accounts",
+      "description": "Per account: email, products, granted scopes, status (connected or reconnect_needed) and per-connector status and options. No token or secret is ever returned.",
+      "responses": {
+        "200": "Accounts and the legacy-token flag"
+      }
+    },
+    "POST /kb/google/disconnect": {
+      "summary": "Disconnect a Google account",
+      "description": "Revokes the refresh token at Google, deletes the vault rows, the sync cursors and the cached index rows. If the revoke fails the local credentials are still deleted and `revoked` is false.",
+      "responses": {
+        "200": "Disconnected",
+        "404": "Unknown account"
+      }
+    },
+    "POST /kb/google/options": {
+      "summary": "Set a connector's options",
+      "description": "Options are validated and clamped server side. A changed Gmail selection restarts its cursor.",
+      "responses": {
+        "200": "Stored options",
+        "400": "Validation error",
+        "404": "Unknown account",
+        "409": "The product was not granted for this account"
+      }
+    },
+    "GET /kb/google/calendars": {
+      "summary": "List the account's calendars (picker)",
+      "description": "Needs the calendar.calendarlist.readonly scope.",
+      "responses": {
+        "200": "Calendars",
+        "404": "Unknown account",
+        "502": "Google call failed"
+      }
+    },
+    "GET /kb/google/drive/folders": {
+      "summary": "List folders under a parent (picker)",
+      "description": "Names only, no content.",
+      "responses": {
+        "200": "Folders",
+        "502": "Google call failed"
+      }
+    },
+    "POST /kb/google/gmail/fetch": {
+      "summary": "Fetch Gmail threads as notes (forward-only)",
+      "description": "Returns the notes to write into the Library folder and a batch id. The cursor moves only when the client confirms with /kb/google/gmail/seen.",
+      "responses": {
+        "200": "Notes, tombstones and a batch id",
+        "400": "Validation error",
+        "409": "Not granted, a fetch already running, or reconnect needed",
+        "502": "Google call failed"
+      }
+    },
+    "POST /kb/google/gmail/seen": {
+      "summary": "Confirm the notes were written and advance the Gmail cursor",
+      "description": "Only the latest batch id is accepted, once.",
+      "responses": {
+        "200": "Cursor advanced",
+        "409": "Unknown or already confirmed batch"
+      }
+    },
+    "POST /kb/google/sync": {
+      "summary": "Index Calendar or Drive into the Library (Pattern A)",
+      "description": "One capped run. An unfinished run answers pending and continues from its stored cursor on the next call.",
+      "responses": {
+        "200": "Run result",
+        "400": "Validation error",
+        "409": "Not granted, a sync already running, or reconnect needed",
+        "502": "Google call failed"
+      }
     }
   },
   "components": {

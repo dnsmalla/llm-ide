@@ -1,0 +1,27 @@
+{
+  "endpoint": "GET /kb/google/status",
+  "status": 200,
+  "request": {
+    "query": {
+      "state": "EXAMPLE_STATE"
+    }
+  },
+  "response": {
+    "status": "complete",
+    "accountId": "0123456789ab",
+    "email": "me@example.com",
+    "products": [
+      "gmail",
+      "gcal"
+    ],
+    "grantedScopes": [
+      "email",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "openid"
+    ],
+    "missingScopes": [],
+    "driveContent": false
+  }
+}

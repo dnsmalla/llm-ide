@@ -1,0 +1,30 @@
+{
+  "endpoint": "POST /kb/google/options",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gmail",
+      "options": {
+        "labels": [
+          "INBOX",
+          "Label_1",
+          "bad label!"
+        ],
+        "windowDays": 9999
+      }
+    }
+  },
+  "response": {
+    "ok": true,
+    "options": {
+      "labels": [
+        "INBOX",
+        "Label_1"
+      ],
+      "windowDays": 365,
+      "includePromotions": false,
+      "includeSocial": false
+    }
+  }
+}

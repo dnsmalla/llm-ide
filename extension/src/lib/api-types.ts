@@ -756,6 +756,79 @@ export type Allowlist = {
   effective: string[];
 };
 
+export type Scope = {
+  scope?: string;
+  /** Google's tier label shown in the Connect dialog (unverified against Google's own tables, see the plan) */
+  tier?: "basic" | "restricted" | "sensitive" | "unknown";
+  readOnly?: true;
+};
+
+export type ConnectorStatus = {
+  status?: "idle" | "pending" | "syncing" | "error" | "reconnect_needed";
+  lastRunAt?: string | null;
+  /** a stable code or fixed text, never a response body */
+  lastError?: string | null;
+  /** the connector's normalised options; the keys differ by product (gmail: labels, windowDays, includePromotions, includeSocial; gcal: calendarIds, daysBack, daysAhead; gdrive: folderIds, includeSharedDrives), so the object is open */
+  options?: Record<string, unknown>;
+};
+
+export type Account = {
+  accountId?: string;
+  email?: string;
+  status?: "connected" | "reconnect_needed";
+  products?: string[];
+  driveContent?: boolean;
+  scopes?: string[];
+  /** keyed by product id (gmail, gcal, gdrive), only the granted products */
+  connectors?: Record<string, ConnectorStatus>;
+};
+
+export type GmailNote = {
+  threadId?: string;
+  noteFile?: string;
+  title?: string;
+  /** the whole note: JSON-valued frontmatter then the Markdown body, untrusted text escaped, secret shapes redacted */
+  markdown?: string;
+  messageCount?: number;
+  lastAt?: string | null;
+};
+
+export type Tombstone = {
+  threadId?: string;
+  noteFile?: string;
+  /** the line to append to the note: deleted upstream <date> */
+  line?: string;
+};
+
+export type GmailStats = {
+  threads?: number;
+  messages?: number;
+  skipped?: number;
+  oversize?: number;
+  rebootstrapped?: boolean;
+  truncated?: boolean;
+};
+
+export type CalendarRun = {
+  calendarId?: string;
+  mode?: "full" | "incremental";
+  events?: number;
+  cancelled?: number;
+  resynced?: boolean;
+  pending?: boolean;
+};
+
+export type DriveStats = {
+  files?: number;
+  removed?: number;
+  withContent?: number;
+  metadataOnly?: number;
+  skippedShared?: number;
+  contentSkipped?: number;
+  restarted?: boolean;
+  truncated?: boolean;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -3500,6 +3573,210 @@ export type PutAuthMeExtensionsAllowlistResponse400 = CommonError;
 export type PutAuthMeExtensionsAllowlistResponse401 = CommonError;
 
 export type PutAuthMeExtensionsAllowlistResponse403 = CommonError;
+
+/** Request parts for `POST /kb/google/start` (schema/http/google.schema.json). */
+export type PostKbGoogleStartRequest = {
+  body: {
+    clientId?: string;
+    clientSecret?: string;
+    products?: string[];
+    driveContent?: boolean;
+    accountId?: string;
+  };
+};
+
+export type PostKbGoogleStartResponse200 = {
+  /** the Google authorization URL; the client opens it in the system browser */
+  authUrl?: string;
+  state?: string;
+  redirectPort?: number;
+  expiresInSec?: number;
+  scopes?: Scope[];
+  legacyMailTokenRevoked?: boolean;
+};
+
+export type PostKbGoogleStartResponse400 = CommonError;
+
+export type PostKbGoogleStartResponse404 = CommonError;
+
+/** Request parts for `GET /kb/google/status` (schema/http/google.schema.json). */
+export type GetKbGoogleStatusRequest = {
+  query: {
+    state?: string;
+  };
+};
+
+export type GetKbGoogleStatusResponse200 = {
+  status?: "pending";
+} | {
+  status?: "unknown";
+} | {
+  status?: "error";
+  message?: string;
+} | {
+  status?: "complete";
+  accountId?: string;
+  email?: string;
+  products?: string[];
+  grantedScopes?: string[];
+  missingScopes?: string[];
+  driveContent?: boolean;
+};
+
+export type GetKbGoogleStatusResponse403 = CommonError;
+
+/** Request parts for `GET /kb/google/accounts` (schema/http/google.schema.json). */
+export type GetKbGoogleAccountsRequest = Record<string, never>;
+
+export type GetKbGoogleAccountsResponse200 = {
+  accounts?: Account[];
+  /** true while the vault still holds the legacy mail.google.com token of /auth/google/* */
+  legacyMailToken?: boolean;
+};
+
+/** Request parts for `POST /kb/google/disconnect` (schema/http/google.schema.json). */
+export type PostKbGoogleDisconnectRequest = {
+  body: {
+    accountId?: string;
+  };
+};
+
+export type PostKbGoogleDisconnectResponse200 = {
+  ok?: boolean;
+  /** false when the revoke call failed (offline); the local credentials are deleted either way */
+  revoked?: boolean;
+  purgedSources?: number;
+};
+
+export type PostKbGoogleDisconnectResponse404 = CommonError;
+
+/** Request parts for `POST /kb/google/options` (schema/http/google.schema.json). */
+export type PostKbGoogleOptionsRequest = {
+  body: {
+    accountId?: string;
+    product?: string;
+    /** per-product options, validated and clamped by the server; keys as in ConnectorStatus.options */
+    options?: Record<string, unknown>;
+  };
+};
+
+export type PostKbGoogleOptionsResponse200 = {
+  ok?: boolean;
+  /** the normalised options as stored */
+  options?: Record<string, unknown>;
+  contentGranted?: boolean;
+};
+
+export type PostKbGoogleOptionsResponse400 = CommonError;
+
+export type PostKbGoogleOptionsResponse404 = CommonError;
+
+export type PostKbGoogleOptionsResponse409 = CommonError;
+
+/** Request parts for `GET /kb/google/calendars` (schema/http/google.schema.json). */
+export type GetKbGoogleCalendarsRequest = {
+  query: {
+    accountId?: string;
+  };
+};
+
+export type GetKbGoogleCalendarsResponse200 = {
+  calendars?: {
+    id?: string;
+    summary?: string;
+    primary?: boolean;
+    accessRole?: string;
+  }[];
+};
+
+export type GetKbGoogleCalendarsResponse404 = CommonError;
+
+export type GetKbGoogleCalendarsResponse502 = unknown;
+
+/** Request parts for `GET /kb/google/drive/folders` (schema/http/google.schema.json). */
+export type GetKbGoogleDriveFoldersRequest = {
+  query: {
+    accountId?: string;
+    parent?: string;
+  };
+};
+
+export type GetKbGoogleDriveFoldersResponse200 = {
+  folders?: {
+    id?: string;
+    name?: string;
+  }[];
+};
+
+export type GetKbGoogleDriveFoldersResponse502 = unknown;
+
+/** Request parts for `POST /kb/google/gmail/fetch` (schema/http/google.schema.json). */
+export type PostKbGoogleGmailFetchRequest = {
+  body: {
+    accountId?: string;
+  };
+};
+
+export type PostKbGoogleGmailFetchResponse200 = {
+  accountId?: string;
+  /** confirm with POST /kb/google/gmail/seen after the notes are written */
+  batchId?: string;
+  mode?: "bootstrap" | "history";
+  pending?: boolean;
+  stats?: GmailStats;
+  tombstones?: Tombstone[];
+  notes?: GmailNote[];
+};
+
+export type PostKbGoogleGmailFetchResponse400 = CommonError;
+
+export type PostKbGoogleGmailFetchResponse409 = CommonError;
+
+export type PostKbGoogleGmailFetchResponse502 = unknown;
+
+/** Request parts for `POST /kb/google/gmail/seen` (schema/http/google.schema.json). */
+export type PostKbGoogleGmailSeenRequest = {
+  body: {
+    accountId?: string;
+    batchId?: string;
+  };
+};
+
+export type PostKbGoogleGmailSeenResponse200 = {
+  ok?: boolean;
+  pending?: boolean;
+};
+
+export type PostKbGoogleGmailSeenResponse409 = CommonError;
+
+/** Request parts for `POST /kb/google/sync` (schema/http/google.schema.json). */
+export type PostKbGoogleSyncRequest = {
+  body: {
+    accountId?: string;
+    product?: string;
+  };
+};
+
+export type PostKbGoogleSyncResponse200 = {
+  accountId?: string;
+  product?: "gcal";
+  pending?: boolean;
+  events?: number;
+  cancelled?: number;
+  calendars?: CalendarRun[];
+} | {
+  accountId?: string;
+  product?: "gdrive";
+  pending?: boolean;
+  mode?: "bootstrap" | "changes";
+  stats?: DriveStats;
+};
+
+export type PostKbGoogleSyncResponse400 = CommonError;
+
+export type PostKbGoogleSyncResponse409 = CommonError;
+
+export type PostKbGoogleSyncResponse502 = unknown;
 
 /** Request parts for `GET /` (schema/http/health-auth.schema.json). */
 export type GetRequest = Record<string, never>;
@@ -8036,6 +8313,83 @@ export interface ApiEndpoints {
       400: PutAuthMeExtensionsAllowlistResponse400;
       401: PutAuthMeExtensionsAllowlistResponse401;
       403: PutAuthMeExtensionsAllowlistResponse403;
+    };
+  };
+  "POST /kb/google/start": {
+    request: PostKbGoogleStartRequest;
+    responses: {
+      200: PostKbGoogleStartResponse200;
+      400: PostKbGoogleStartResponse400;
+      404: PostKbGoogleStartResponse404;
+    };
+  };
+  "GET /kb/google/status": {
+    request: GetKbGoogleStatusRequest;
+    responses: {
+      200: GetKbGoogleStatusResponse200;
+      403: GetKbGoogleStatusResponse403;
+    };
+  };
+  "GET /kb/google/accounts": {
+    request: GetKbGoogleAccountsRequest;
+    responses: {
+      200: GetKbGoogleAccountsResponse200;
+    };
+  };
+  "POST /kb/google/disconnect": {
+    request: PostKbGoogleDisconnectRequest;
+    responses: {
+      200: PostKbGoogleDisconnectResponse200;
+      404: PostKbGoogleDisconnectResponse404;
+    };
+  };
+  "POST /kb/google/options": {
+    request: PostKbGoogleOptionsRequest;
+    responses: {
+      200: PostKbGoogleOptionsResponse200;
+      400: PostKbGoogleOptionsResponse400;
+      404: PostKbGoogleOptionsResponse404;
+      409: PostKbGoogleOptionsResponse409;
+    };
+  };
+  "GET /kb/google/calendars": {
+    request: GetKbGoogleCalendarsRequest;
+    responses: {
+      200: GetKbGoogleCalendarsResponse200;
+      404: GetKbGoogleCalendarsResponse404;
+      502: GetKbGoogleCalendarsResponse502;
+    };
+  };
+  "GET /kb/google/drive/folders": {
+    request: GetKbGoogleDriveFoldersRequest;
+    responses: {
+      200: GetKbGoogleDriveFoldersResponse200;
+      502: GetKbGoogleDriveFoldersResponse502;
+    };
+  };
+  "POST /kb/google/gmail/fetch": {
+    request: PostKbGoogleGmailFetchRequest;
+    responses: {
+      200: PostKbGoogleGmailFetchResponse200;
+      400: PostKbGoogleGmailFetchResponse400;
+      409: PostKbGoogleGmailFetchResponse409;
+      502: PostKbGoogleGmailFetchResponse502;
+    };
+  };
+  "POST /kb/google/gmail/seen": {
+    request: PostKbGoogleGmailSeenRequest;
+    responses: {
+      200: PostKbGoogleGmailSeenResponse200;
+      409: PostKbGoogleGmailSeenResponse409;
+    };
+  };
+  "POST /kb/google/sync": {
+    request: PostKbGoogleSyncRequest;
+    responses: {
+      200: PostKbGoogleSyncResponse200;
+      400: PostKbGoogleSyncResponse400;
+      409: PostKbGoogleSyncResponse409;
+      502: PostKbGoogleSyncResponse502;
     };
   };
   "GET /": {

@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/google/gmail/fetch",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "accountId is required"
+    }
+  }
+}

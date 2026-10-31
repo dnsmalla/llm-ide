@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/google/sync",
+  "status": 400,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gmail"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "product must be gcal or gdrive"
+    }
+  }
+}

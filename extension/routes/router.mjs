@@ -32,6 +32,7 @@ const CLIENT_REFUSAL_CODES = new Set([
 ]);
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
+import { handleGoogleRoutes } from './google-connectors.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';
 import { handleCompleteRoutes } from './complete.mjs';
 // Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
@@ -1301,6 +1302,10 @@ export async function handleKB(req, res) {
     // ── Plain one-shot completion (POST /kb/complete; agent-kit K1 P3) ──
     // Always on. No tools, no history. See routes/complete.mjs.
     if (await handleCompleteRoutes(req, res, { userId, url })) return true;
+
+    // ── Google connectors: Gmail, Calendar, Drive (/kb/google/*) ──
+    // Always on (Library connectors, no LLMIDE_FEATURES key). See routes/google-connectors.mjs.
+    if (await handleGoogleRoutes(req, res, { userId, url })) return true;
 
     // ── System view aggregate (GET /kb/os/state) ─────────────────
     // Read-only, no model call. See routes/os.mjs.

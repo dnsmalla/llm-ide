@@ -1,0 +1,26 @@
+{
+  "endpoint": "POST /kb/google/options",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gdrive",
+      "options": {
+        "folderIds": [
+          "folderTick1"
+        ],
+        "includeSharedDrives": true
+      }
+    }
+  },
+  "response": {
+    "ok": true,
+    "options": {
+      "folderIds": [
+        "folderTick1"
+      ],
+      "includeSharedDrives": true
+    },
+    "contentGranted": false
+  }
+}

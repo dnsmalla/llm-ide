@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /kb/google/sync",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gcal"
+    }
+  },
+  "response": {
+    "accountId": "0123456789ab",
+    "product": "gcal",
+    "pending": false,
+    "events": 3,
+    "cancelled": 1,
+    "calendars": [
+      {
+        "calendarId": "primary",
+        "mode": "full",
+        "events": 3,
+        "cancelled": 1,
+        "resynced": false,
+        "pending": false
+      }
+    ]
+  }
+}

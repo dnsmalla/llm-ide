@@ -1,0 +1,26 @@
+{
+  "endpoint": "POST /kb/google/sync",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gdrive"
+    }
+  },
+  "response": {
+    "accountId": "0123456789ab",
+    "product": "gdrive",
+    "pending": false,
+    "mode": "bootstrap",
+    "stats": {
+      "files": 4,
+      "removed": 0,
+      "withContent": 2,
+      "metadataOnly": 2,
+      "skippedShared": 1,
+      "contentSkipped": 1,
+      "restarted": false,
+      "truncated": false
+    }
+  }
+}

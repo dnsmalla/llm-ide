@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/google/sync",
+  "status": 409,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gcal"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_RECONNECT_NEEDED",
+      "message": "Reconnect this Google account."
+    }
+  }
+}

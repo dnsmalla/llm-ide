@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/google/gmail/seen",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "batchId": "0123456789abcdef01234567"
+    }
+  },
+  "response": {
+    "ok": true,
+    "pending": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/google/sync",
+  "status": 409,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gcal"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_SYNC_RUNNING",
+      "message": "A sync for this account is already running"
+    }
+  }
+}

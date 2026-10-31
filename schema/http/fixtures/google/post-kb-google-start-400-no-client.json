@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/google/start",
+  "status": 400,
+  "request": {
+    "body": {
+      "products": [
+        "gmail"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_BAD_REQUEST",
+      "message": "clientId and clientSecret are required"
+    }
+  }
+}

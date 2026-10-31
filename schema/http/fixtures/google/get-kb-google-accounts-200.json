@@ -1,0 +1,53 @@
+{
+  "endpoint": "GET /kb/google/accounts",
+  "status": 200,
+  "response": {
+    "accounts": [
+      {
+        "accountId": "0123456789ab",
+        "email": "me@example.com",
+        "status": "connected",
+        "products": [
+          "gcal",
+          "gmail"
+        ],
+        "driveContent": false,
+        "scopes": [
+          "email",
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+          "https://www.googleapis.com/auth/calendar.events.readonly",
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "openid"
+        ],
+        "connectors": {
+          "gmail": {
+            "status": "idle",
+            "lastRunAt": "2025-11-01T00:00:00.000Z",
+            "lastError": null,
+            "options": {
+              "labels": [
+                "INBOX"
+              ],
+              "windowDays": 30,
+              "includePromotions": false,
+              "includeSocial": false
+            }
+          },
+          "gcal": {
+            "status": "idle",
+            "lastRunAt": "2025-11-01T00:00:00.000Z",
+            "lastError": null,
+            "options": {
+              "calendarIds": [
+                "primary"
+              ],
+              "daysBack": 30,
+              "daysAhead": 90
+            }
+          }
+        }
+      }
+    ],
+    "legacyMailToken": false
+  }
+}

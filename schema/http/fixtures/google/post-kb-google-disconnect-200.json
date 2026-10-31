@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/google/disconnect",
+  "status": 200,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "ok": true,
+    "revoked": true,
+    "purgedSources": 0
+  }
+}

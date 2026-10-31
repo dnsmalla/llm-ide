@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/google/start",
+  "status": 404,
+  "request": {
+    "body": {
+      "clientId": "example-client-id.apps.googleusercontent.com",
+      "clientSecret": "example-client-secret",
+      "products": [
+        "gmail"
+      ],
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_NOT_FOUND",
+      "message": "Unknown Google account"
+    }
+  }
+}

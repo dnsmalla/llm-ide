@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/google/options",
+  "status": 400,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "mail",
+      "options": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "product must be gmail, gcal or gdrive"
+    }
+  }
+}

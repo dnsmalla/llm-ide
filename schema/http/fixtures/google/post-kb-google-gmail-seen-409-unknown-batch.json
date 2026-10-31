@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/google/gmail/seen",
+  "status": 409,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "batchId": "0123456789abcdef01234567"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_BATCH_UNKNOWN",
+      "message": "Unknown or already confirmed batch"
+    }
+  }
+}

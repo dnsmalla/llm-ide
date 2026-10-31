@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/google/options",
+  "status": 404,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab",
+      "product": "gmail",
+      "options": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_NOT_FOUND",
+      "message": "Unknown Google account"
+    }
+  }
+}

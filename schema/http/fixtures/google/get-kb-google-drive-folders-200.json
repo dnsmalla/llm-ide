@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/google/drive/folders",
+  "status": 200,
+  "request": {
+    "query": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "folders": [
+      {
+        "id": "folderTick1",
+        "name": "Project"
+      }
+    ]
+  }
+}

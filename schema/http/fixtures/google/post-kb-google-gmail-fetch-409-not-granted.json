@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/google/gmail/fetch",
+  "status": 409,
+  "request": {
+    "body": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_PRODUCT_NOT_GRANTED",
+      "message": "This product was not granted for the account. Connect it again with that product ticked."
+    }
+  }
+}

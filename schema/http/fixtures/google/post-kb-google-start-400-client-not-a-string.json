@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/google/start",
+  "status": 400,
+  "request": {
+    "body": {
+      "clientId": "example-client-id.apps.googleusercontent.com",
+      "products": [
+        "gmail"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "clientId must be a string"
+    }
+  }
+}

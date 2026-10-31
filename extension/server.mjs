@@ -309,7 +309,8 @@ const HOST = config.host;
 //   v100 — command bus job API (additive; LLMIDE_BUS=off answers every /bus route 503 BUS_DISABLED and never starts the runner; spec docs/spec/command-bus.md, contract schema/bus). POST /bus/commands { v?:1, kind, args, idem, ttlMs? } → 202 { command, deduped:false } | 200 { command, deduped:true } (same idem, same kind and args) | 400 VALIDATION_FAILED|UNSUPPORTED_VERSION|UNKNOWN_KIND|INVALID_ARGS (details.errors) | 403 TIER_DENIED | 404 NOT_FOUND (unregistered project) | 409 IDEM_CONFLICT | 413 PAYLOAD_TOO_LARGE | 429 QUOTA_EXCEEDED | 501 KIND_NOT_AVAILABLE | 503 BUS_DISABLED; GET /bus/commands?state=&limit= → { items }; GET /bus/commands/:id → { command } (with result when succeeded); GET /bus/commands/:id/events?after=N → SSE of BusEvent, `id: <seq>`, seq per command from 1 gap-free from the durable job_events log, ends after the one terminal event or after 10 min (re-attach with after) | 400 | 404 | 429 TOO_MANY_READERS; POST /bus/commands/:id/cancel → { command } | 409 ALREADY_FINISHED; POST /bus/commands/:id/approve { nonce, confirm? } and /deny → { command } (desktop class only: 403 TIER_DENIED | 403 APPROVAL_NONCE_INVALID | 400 CONFIRM_MISMATCH | 409 NOT_PENDING|EXPIRED); GET /bus/approvals → { items } (desktop class only; carries the per-command nonce); GET /bus/kinds → { v, client, registryVersion, limits, kinds } (the registry as the caller sees it); PUT /bus/kinds/:kind { enabled } → { kind, enabled } (desktop class only). Client class: advisory header x-llmide-client capped at `extension` unless x-llmide-host-nonce equals LLMIDE_CORE_NONCE. All routes ride the 'kbWrite' rate bucket. Migration 0058 (bus_commands, job_events, bus_kind_flags).
 //   v101 — host-approved Bypass (additive; only when the core was started by the Tauri host, i.e. env LLMIDE_HOST_APPROVAL_KEY is set; with it unset nothing changes): POST /agent/v2/stream with permissionMode "bypass" must carry a valid single-use 60 s x-llmide-host-approval token (core/host-approval.mjs, desktop/PACKAGING.md) or answers 403 { error: { code: 'HOST_APPROVAL_REQUIRED' } } before any turn; phone, extension and remote origins are capped at Ask regardless of token; an approved turn is audited approvedBy: host. No new route.
 //   v102 — security review fixes, additive on the wire. (1) Command bus host proof is a separate secret derived from LLMIDE_HOST_APPROVAL_KEY (header x-llmide-host-nonce; the /health nonce no longer proves anything). (2) Bypass: format v2 approval token bound to the chat (x-llmide-host-approval: v2.<expiry>.<nonce>.<mac>, purpose bypass:<chatId>) plus x-llmide-client: desktop-ui and the host proof; v1 only with LLMIDE_HOST_APPROVAL_COMPAT=1. (3) GET /bus/kinds: kinds[].engines lists only selectable engines, new engineStatus [{ id, available, reason? }]; a codex or gemini review is refused 501 ENGINE_NOT_SANDBOXED. (4) bus result reads are scoped by client class (docs/spec/command-bus.md). Spec: docs/spec/command-bus.md, docs/spec/api-server.md section 7g.
-const SERVER_API_VERSION = 102;
+//   v103 — Google connectors, additive (docs/spec/google-connectors.md, contract schema/http/google.schema.json): ten routes under /kb/google/* (start, status, accounts, disconnect, options, calendars, drive/folders, gmail/fetch, gmail/seen, sync). Google sign-in is a connector credential only: bring-your-own OAuth client, PKCE with a loopback listener owned by the core, read-only scopes, refresh tokens only in the vault (key pattern google.acct.<id>.*), every Google request through the pinned fetch with a host allowlist. Migration 0059 (google_accounts, connector_sync_state). Starting a connect revokes the legacy mail.google.com token of /auth/google/* if one exists. No existing route or field changed.
+const SERVER_API_VERSION = 103;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -369,6 +370,16 @@ const ALL_ENDPOINTS = [
   '/kb/mcp-connector/fetch',
   '/kb/mcp-connector/seen',
   '/kb/mcp-connector/classify',
+  '/kb/google/start',
+  '/kb/google/status',
+  '/kb/google/accounts',
+  '/kb/google/disconnect',
+  '/kb/google/options',
+  '/kb/google/calendars',
+  '/kb/google/drive/folders',
+  '/kb/google/gmail/fetch',
+  '/kb/google/gmail/seen',
+  '/kb/google/sync',
   '/kb/activity',
   '/kb/activity/seen',
   '/kb/usage/limits',
@@ -496,6 +507,8 @@ function rateLimitProfile(url, method) {
     // to avoid burning through Slack's per-method rate limit and causing
     // collateral SLACK_FETCH_FAILED errors on unrelated /kb/slack/fetch calls.
     if (path === '/kb/slack/conversations') return 'dispatch';
+    // The Google pickers each make an outbound Google API call.
+    if (path === '/kb/google/calendars' || path === '/kb/google/drive/folders') return 'dispatch';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
     return null;
@@ -584,6 +597,10 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/mcp-connector/test' || url === '/kb/mcp-connector/fetch') return 'dispatch';
   if (url === '/kb/mcp-connector/seen') return 'kbWrite';
   if (url === '/kb/mcp-connector/classify') return 'llm';
+  // Google connectors: fetch and sync reach Google (dispatch bucket; the GET pickers are in the GET block above); start,
+  // options, disconnect and the seen commit are local writes (kbWrite). status and accounts are cheap local reads, unthrottled.
+  if (url === '/kb/google/gmail/fetch' || url === '/kb/google/sync') return 'dispatch';
+  if (url === '/kb/google/start' || url === '/kb/google/options' || url === '/kb/google/disconnect' || url === '/kb/google/gmail/seen') return 'kbWrite';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   if (url === '/kb/agent-history/clear' || url === '/kb/agent-history/compact') return 'kbWrite';
   // Local filesystem symlink install of the skills kit into a project path.

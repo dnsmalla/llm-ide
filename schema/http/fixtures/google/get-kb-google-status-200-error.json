@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /kb/google/status",
+  "status": 200,
+  "request": {
+    "query": {
+      "state": "EXAMPLE_STATE"
+    }
+  },
+  "response": {
+    "status": "error",
+    "message": "Replaced by a newer connect attempt."
+  }
+}

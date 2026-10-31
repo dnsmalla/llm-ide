@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/google/start",
+  "status": 400,
+  "request": {
+    "body": {
+      "clientId": "example-client-id.apps.googleusercontent.com",
+      "clientSecret": "example-client-secret",
+      "products": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_BAD_REQUEST",
+      "message": "products must be a non-empty list of gmail, gcal, gdrive"
+    }
+  }
+}

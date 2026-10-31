@@ -1,0 +1,49 @@
+{
+  "endpoint": "POST /kb/google/start",
+  "status": 200,
+  "request": {
+    "body": {
+      "clientId": "example-client-id.apps.googleusercontent.com",
+      "clientSecret": "example-client-secret",
+      "products": [
+        "gmail",
+        "gcal"
+      ],
+      "driveContent": false
+    }
+  },
+  "response": {
+    "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=example-client-id.apps.googleusercontent.com&response_type=code&state=EXAMPLE_STATE",
+    "state": "EXAMPLE_STATE",
+    "redirectPort": 54321,
+    "expiresInSec": 300,
+    "scopes": [
+      {
+        "scope": "email",
+        "tier": "basic",
+        "readOnly": true
+      },
+      {
+        "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "tier": "sensitive",
+        "readOnly": true
+      },
+      {
+        "scope": "https://www.googleapis.com/auth/calendar.events.readonly",
+        "tier": "sensitive",
+        "readOnly": true
+      },
+      {
+        "scope": "https://www.googleapis.com/auth/gmail.readonly",
+        "tier": "restricted",
+        "readOnly": true
+      },
+      {
+        "scope": "openid",
+        "tier": "basic",
+        "readOnly": true
+      }
+    ],
+    "legacyMailTokenRevoked": false
+  }
+}

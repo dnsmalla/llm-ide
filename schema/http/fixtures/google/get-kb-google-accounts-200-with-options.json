@@ -1,0 +1,52 @@
+{
+  "endpoint": "GET /kb/google/accounts",
+  "status": 200,
+  "response": {
+    "accounts": [
+      {
+        "accountId": "0123456789ab",
+        "email": "me@example.com",
+        "status": "connected",
+        "products": [
+          "gmail",
+          "gdrive"
+        ],
+        "driveContent": false,
+        "scopes": [
+          "email",
+          "https://www.googleapis.com/auth/drive.metadata.readonly",
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "openid"
+        ],
+        "connectors": {
+          "gmail": {
+            "status": "idle",
+            "lastRunAt": "2025-11-01T00:00:00.000Z",
+            "lastError": null,
+            "options": {
+              "labels": [
+                "INBOX",
+                "Label_1"
+              ],
+              "windowDays": 365,
+              "includePromotions": false,
+              "includeSocial": false
+            }
+          },
+          "gdrive": {
+            "status": "idle",
+            "lastRunAt": "2025-11-01T00:00:00.000Z",
+            "lastError": null,
+            "options": {
+              "folderIds": [
+                "folderTick1"
+              ],
+              "includeSharedDrives": true
+            }
+          }
+        }
+      }
+    ],
+    "legacyMailToken": false
+  }
+}

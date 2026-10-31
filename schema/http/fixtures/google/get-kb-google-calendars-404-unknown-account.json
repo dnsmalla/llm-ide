@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/google/calendars",
+  "status": 404,
+  "request": {
+    "query": {
+      "accountId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GOOGLE_NOT_FOUND",
+      "message": "Unknown Google account"
+    }
+  }
+}

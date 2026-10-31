@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 102
+  x-api-version: 103
 servers:
   - url: "https://{host}"
     variables:
@@ -24,6 +24,7 @@ tags:
   - name: "bus"
   - name: "docs"
   - name: "extensions"
+  - name: "google"
   - name: "health-auth"
   - name: "index"
   - name: "kb-sources"
@@ -8692,6 +8693,507 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/google/accounts:
+    get:
+      summary: "List connected Google accounts"
+      description: "Per account: email, products, granted scopes, status (connected or reconnect_needed) and per-connector status and options. No token or secret is ever returned."
+      tags:
+        - "google"
+      responses:
+        "200":
+          description: "Accounts and the legacy-token flag"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  accounts:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Account"
+                  legacyMailToken:
+                    type: "boolean"
+                    description: "true while the vault still holds the legacy mail.google.com token of /auth/google/*"
+  /kb/google/calendars:
+    get:
+      summary: "List the account's calendars (picker)"
+      description: "Needs the calendar.calendarlist.readonly scope."
+      tags:
+        - "google"
+      parameters:
+        - name: "accountId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "Calendars"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  calendars:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        summary:
+                          type: "string"
+                        primary:
+                          type: "boolean"
+                        accessRole:
+                          type: "string"
+        "404":
+          description: "Unknown account"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Google call failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/disconnect:
+    post:
+      summary: "Disconnect a Google account"
+      description: "Revokes the refresh token at Google, deletes the vault rows, the sync cursors and the cached index rows. If the revoke fails the local credentials are still deleted and `revoked` is false."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                accountId:
+                  type: "string"
+      responses:
+        "200":
+          description: "Disconnected"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  revoked:
+                    type: "boolean"
+                    description: "false when the revoke call failed (offline); the local credentials are deleted either way"
+                  purgedSources:
+                    type: "integer"
+        "404":
+          description: "Unknown account"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/drive/folders:
+    get:
+      summary: "List folders under a parent (picker)"
+      description: "Names only, no content."
+      tags:
+        - "google"
+      parameters:
+        - name: "accountId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "parent"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "Folders"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  folders:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        name:
+                          type: "string"
+        "502":
+          description: "Google call failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/gmail/fetch:
+    post:
+      summary: "Fetch Gmail threads as notes (forward-only)"
+      description: "Returns the notes to write into the Library folder and a batch id. The cursor moves only when the client confirms with /kb/google/gmail/seen."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                accountId:
+                  type: "string"
+      responses:
+        "200":
+          description: "Notes, tombstones and a batch id"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  accountId:
+                    type: "string"
+                  batchId:
+                    type: "string"
+                    description: "confirm with POST /kb/google/gmail/seen after the notes are written"
+                  mode:
+                    type: "string"
+                    enum:
+                      - "bootstrap"
+                      - "history"
+                  pending:
+                    type: "boolean"
+                  stats:
+                    "$ref": "#/components/schemas/GmailStats"
+                  tombstones:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Tombstone"
+                  notes:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/GmailNote"
+        "400":
+          description: "Validation error"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Not granted, a fetch already running, or reconnect needed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Google call failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/gmail/seen:
+    post:
+      summary: "Confirm the notes were written and advance the Gmail cursor"
+      description: "Only the latest batch id is accepted, once."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                accountId:
+                  type: "string"
+                batchId:
+                  type: "string"
+      responses:
+        "200":
+          description: "Cursor advanced"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  pending:
+                    type: "boolean"
+        "409":
+          description: "Unknown or already confirmed batch"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/options:
+    post:
+      summary: "Set a connector's options"
+      description: "Options are validated and clamped server side. A changed Gmail selection restarts its cursor."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                accountId:
+                  type: "string"
+                product:
+                  type: "string"
+                options:
+                  type: "object"
+                  additionalProperties: true
+                  description: "per-product options, validated and clamped by the server; keys as in ConnectorStatus.options"
+      responses:
+        "200":
+          description: "Stored options"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  options:
+                    type: "object"
+                    additionalProperties: true
+                    description: "the normalised options as stored"
+                  contentGranted:
+                    type: "boolean"
+        "400":
+          description: "Validation error"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Unknown account"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "The product was not granted for this account"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/start:
+    post:
+      summary: "Start a Google connect (bring-your-own OAuth client, PKCE, loopback listener owned by the core)"
+      description: "Binds a 127.0.0.1 listener on an ephemeral port for this one flow (state and nonce, 5 minute timeout, single use) and returns the Google authorization URL for the client to open in the system browser. Scopes are read-only and listed with their tier. The client id and secret are stored in the per-user vault only after the token exchange succeeds. If the legacy mail.google.com token of /auth/google/* exists it is revoked and deleted first."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                clientId:
+                  type: "string"
+                clientSecret:
+                  type: "string"
+                products:
+                  type: "array"
+                  items:
+                    type: "string"
+                driveContent:
+                  type: "boolean"
+                accountId:
+                  type: "string"
+      responses:
+        "200":
+          description: "Authorization URL and flow state"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  authUrl:
+                    type: "string"
+                    description: "the Google authorization URL; the client opens it in the system browser"
+                  state:
+                    type: "string"
+                  redirectPort:
+                    type: "integer"
+                  expiresInSec:
+                    type: "integer"
+                  scopes:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Scope"
+                  legacyMailTokenRevoked:
+                    type: "boolean"
+        "400":
+          description: "Validation error (products, client id and secret)"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Unknown account to upgrade"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/status:
+    get:
+      summary: "Poll a Google connect flow"
+      description: "A terminal result (complete or error) is returned once and removed. Only the user who started the flow may read it."
+      tags:
+        - "google"
+      parameters:
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "pending, unknown, error, or complete (account id, email, products, granted and missing scopes)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: "object"
+                    properties:
+                      status:
+                        type: "string"
+                        enum:
+                          - "pending"
+                  - type: "object"
+                    properties:
+                      status:
+                        type: "string"
+                        enum:
+                          - "unknown"
+                  - type: "object"
+                    properties:
+                      status:
+                        type: "string"
+                        enum:
+                          - "error"
+                      message:
+                        type: "string"
+                  - type: "object"
+                    properties:
+                      status:
+                        type: "string"
+                        enum:
+                          - "complete"
+                      accountId:
+                        type: "string"
+                      email:
+                        type: "string"
+                      products:
+                        type: "array"
+                        items:
+                          type: "string"
+                      grantedScopes:
+                        type: "array"
+                        items:
+                          type: "string"
+                      missingScopes:
+                        type: "array"
+                        items:
+                          type: "string"
+                      driveContent:
+                        type: "boolean"
+        "403":
+          description: "Not your sign-in"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/google/sync:
+    post:
+      summary: "Index Calendar or Drive into the Library (Pattern A)"
+      description: "One capped run. An unfinished run answers pending and continues from its stored cursor on the next call."
+      tags:
+        - "google"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                accountId:
+                  type: "string"
+                product:
+                  type: "string"
+      responses:
+        "200":
+          description: "Run result"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: "object"
+                    properties:
+                      accountId:
+                        type: "string"
+                      product:
+                        type: "string"
+                        enum:
+                          - "gcal"
+                      pending:
+                        type: "boolean"
+                      events:
+                        type: "integer"
+                      cancelled:
+                        type: "integer"
+                      calendars:
+                        type: "array"
+                        items:
+                          "$ref": "#/components/schemas/CalendarRun"
+                  - type: "object"
+                    properties:
+                      accountId:
+                        type: "string"
+                      product:
+                        type: "string"
+                        enum:
+                          - "gdrive"
+                      pending:
+                        type: "boolean"
+                      mode:
+                        type: "string"
+                        enum:
+                          - "bootstrap"
+                          - "changes"
+                      stats:
+                        "$ref": "#/components/schemas/DriveStats"
+        "400":
+          description: "Validation error"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Not granted, a sync already running, or reconnect needed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Google call failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/index/notes:
     post:
       tags:
@@ -13975,6 +14477,33 @@ components:
       scheme: "bearer"
       bearerFormat: "JWT"
   schemas:
+    Account:
+      type: "object"
+      properties:
+        accountId:
+          type: "string"
+        email:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "connected"
+            - "reconnect_needed"
+        products:
+          type: "array"
+          items:
+            type: "string"
+        driveContent:
+          type: "boolean"
+        scopes:
+          type: "array"
+          items:
+            type: "string"
+        connectors:
+          type: "object"
+          additionalProperties:
+            "$ref": "#/components/schemas/ConnectorStatus"
+          description: "keyed by product id (gmail, gcal, gdrive), only the granted products"
     ActivityItem:
       type: "object"
       required:
@@ -15125,6 +15654,24 @@ components:
         - "enabled"
         - "allowed"
         - "needsApproval"
+    CalendarRun:
+      type: "object"
+      properties:
+        calendarId:
+          type: "string"
+        mode:
+          type: "string"
+          enum:
+            - "full"
+            - "incremental"
+        events:
+          type: "integer"
+        cancelled:
+          type: "integer"
+        resynced:
+          type: "boolean"
+        pending:
+          type: "boolean"
     Cancel:
       type:
         - "object"
@@ -15563,6 +16110,30 @@ components:
         selected:
           type: "boolean"
           description: "set only on the catalog endpoint"
+    ConnectorStatus:
+      type: "object"
+      properties:
+        status:
+          type: "string"
+          enum:
+            - "idle"
+            - "pending"
+            - "syncing"
+            - "error"
+            - "reconnect_needed"
+        lastRunAt:
+          type:
+            - "string"
+            - "null"
+        lastError:
+          type:
+            - "string"
+            - "null"
+          description: "a stable code or fixed text, never a response body"
+        options:
+          type: "object"
+          additionalProperties: true
+          description: "the connector's normalised options; the keys differ by product (gmail: labels, windowDays, includePromotions, includeSocial; gcal: calendarIds, daysBack, daysAhead; gdrive: folderIds, includeSharedDrives), so the object is open"
     DeleteResult:
       type: "object"
       required:
@@ -15643,6 +16214,25 @@ components:
         enabled:
           type: "boolean"
         isNew:
+          type: "boolean"
+    DriveStats:
+      type: "object"
+      properties:
+        files:
+          type: "integer"
+        removed:
+          type: "integer"
+        withContent:
+          type: "integer"
+        metadataOnly:
+          type: "integer"
+        skippedShared:
+          type: "integer"
+        contentSkipped:
+          type: "integer"
+        restarted:
+          type: "boolean"
+        truncated:
           type: "boolean"
     Entity:
       type: "object"
@@ -16225,6 +16815,39 @@ components:
           type: "integer"
         chunks:
           type: "integer"
+    GmailNote:
+      type: "object"
+      properties:
+        threadId:
+          type: "string"
+        noteFile:
+          type: "string"
+        title:
+          type: "string"
+        markdown:
+          type: "string"
+          description: "the whole note: JSON-valued frontmatter then the Markdown body, untrusted text escaped, secret shapes redacted"
+        messageCount:
+          type: "integer"
+        lastAt:
+          type:
+            - "string"
+            - "null"
+    GmailStats:
+      type: "object"
+      properties:
+        threads:
+          type: "integer"
+        messages:
+          type: "integer"
+        skipped:
+          type: "integer"
+        oversize:
+          type: "integer"
+        rebootstrapped:
+          type: "boolean"
+        truncated:
+          type: "boolean"
     GoogleStatus:
       type: "object"
       required:
@@ -18443,6 +19066,23 @@ components:
             type: "integer"
         updatedAt:
           type: "string"
+    Scope:
+      type: "object"
+      properties:
+        scope:
+          type: "string"
+        tier:
+          type: "string"
+          enum:
+            - "basic"
+            - "restricted"
+            - "sensitive"
+            - "unknown"
+          description: "Google's tier label shown in the Connect dialog (unverified against Google's own tables, see the plan)"
+        readOnly:
+          type: "boolean"
+          enum:
+            - true
     SearchHit:
       type: "object"
       required:
@@ -18864,6 +19504,16 @@ components:
             - "null"
         unknownRows:
           type: "integer"
+    Tombstone:
+      type: "object"
+      properties:
+        threadId:
+          type: "string"
+        noteFile:
+          type: "string"
+        line:
+          type: "string"
+          description: "the line to append to the note: deleted upstream <date>"
     ToolApprovalListing:
       type: "object"
       required:

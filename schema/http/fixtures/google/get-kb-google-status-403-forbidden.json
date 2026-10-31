@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/google/status",
+  "status": 403,
+  "request": {
+    "query": {
+      "state": "EXAMPLE_STATE"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "FORBIDDEN",
+      "message": "not your sign-in"
+    }
+  }
+}
