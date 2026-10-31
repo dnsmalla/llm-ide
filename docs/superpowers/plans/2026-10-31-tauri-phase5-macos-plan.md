@@ -92,6 +92,28 @@ Waves for parallel agents: Wave A = P5-G, P5-S, P5-H, and the core half of P5-I 
 | G4 | `ui/screens/graph/index.tsx`, `panels/*` | Section, detail panel, search, Explorer glue, Rescan job UI |
 | G5 | `extension/routes/graph-job.mjs` (new), tests | Rescan as a core job (after the job-runner route slice A0, section 10) |
 
+**Status 2026-10-31 (G1, G2, G4 built; not verified in a real window).** The Code Graph section is enabled in the shell (`ui/screens/graph/`, entry `index.tsx`). Layout runs in a Web Worker on the vendored WASM kernel (`ui/screens/graph/wasm/`, graph-kit `51ff3721`, 106,429 bytes, sha256 `0f30028fe33b39c84a41a7c975d118b7402e6c50033bbe7d38358bc600d179a0`, re-vendor and verify with `node scripts/vendor-graph-layout-wasm.mjs [--verify]`); rendering is sigma/WebGL created only while the section is visible. Parity rows are `~` (section 7 of the checklist). What exists: strict decoder for graph-kit 1.1 and the canonical GraphDocument with caps and hostile-input handling; edge weights mirrored from `EdgeWeight.swift` and tested against it; LOD (node reduction by community rank, edge floor by weight bucket, label budget); filters (mode Code/Docs/All, kinds, community, weight slider); ranked search; virtualised node list as the keyboard and screen-reader alternative; details panel with "Open in Explorer"; layout cache by sha256; cancel by worker terminate; fast approximate preview for graphs of 5,000+ nodes so the first frame does not wait for the kernel.
+
+Benchmark (`node --experimental-strip-types ui/screens/graph/bench/graph-bench.ts`, Node 22 on Apple Silicon, ms, synthetic code-like graph, V8 not a webview; the draw is not included):
+
+| nodes | edges | JSON MB | decode | kernel (WASM) | rank | view prep | graphology build | total | peak RSS MB |
+|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 3,803 | 0 | 7 | 192 | 1 | 1 | 5 | 210 | 91 |
+| 8,000 | 30,510 | 3 | 37 | 896 | 4 | 4 | 23 | 968 | 142 |
+| 30,000 | 114,523 | 11 | 159 | 4,055 | 14 | 13 | 102 | 4,352 | 222 |
+| 50,000 | 190,956 | 18 | 243 | 7,081 | 13 | 3 | 166 | 7,522 | 270 |
+
+Reading the numbers against the section 5 targets: the 3 s first-frame target at 50k nodes is **not met by the kernel** (7.1 s in Node; graph-kit's own bench says 6.2 s at 44.8k; the kernel runs 120 force iterations above 8,000 nodes and the C ABI has no option to lower them). The screen therefore draws the fallback preview first (O(n+m), about 0.45 s at 50k in Node) and swaps in the kernel layout when it arrives; a second open of the same file is instant (cache). Main thread: decode, layout and ranking are all in the worker; the graphology build runs in 6,000-item chunks that yield; structured-clone of the preview model is the one main-thread cost not measured. Peak memory in Node at 50k is 270 MB RSS including the synthetic JSON; the webview figure (target under 600 MB) is not measured.
+
+Blocked-by (recorded, nothing worked around):
+- **CSP and WASM in WKWebView**: `desktop/src-tauri/tauri.conf.json` has `default-src 'self'` and no `script-src`, so WebAssembly compilation may be refused (Safari/WebKit needs `'wasm-unsafe-eval'` or `'unsafe-eval'`). If it is, the worker catches the failure and the screen falls back to the simplified layout with a visible notice, so nothing breaks, but the kernel never runs. Fix is one directive in the host config (`script-src 'self' 'wasm-unsafe-eval'`), owned by the host slice; verify in a real window.
+- **Kernel speed at 50k**: needs an iteration/quality option on the graph-kit ABI (graph-kit repo), or a smaller default tier above 30k, to reach the 3 s target without the preview.
+- **File size**: `read_graph_file` caps at 32 MB; a 50k-node real graph with symbols may exceed it. The screen shows the limit and a way to open another graph.json; raising or paging it is a host change.
+- **Generating the graph**: the scanners are Swift (`CodeNoteService`, GraphKit). The screen explains how to run Generate in the macOS app and offers "Check again" and "Open another graph.json" (project-relative path, host re-checks). Rescan as a core job is slice G5.
+- **Multi-repo projects**: `files[].path` is repo-relative, while the shell bus `open-file` is project-relative; for a project with several code repos Explorer may not find the file.
+- **Persistent layout cache**: the cache is in memory (last 3 graphs, 256 MB bound). A disk cache under the app data dir needs the host commands `graph_layout_cache_read/write`.
+- Only a real window can verify: WebGL frame rate and memory at 50k nodes in WKWebView, the worker + wasm load under the CSP, keyboard and screen-reader behaviour, focus ring placement, the look in each theme, and the 30 s hidden-phase behaviour (context released on hide).
+
 ---
 
 ## 6. P5-I Issues + Gantt (work-kit)

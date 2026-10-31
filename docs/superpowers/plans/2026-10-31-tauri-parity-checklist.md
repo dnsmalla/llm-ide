@@ -140,17 +140,17 @@ Phase 5 rows close at `x` (macOS) for the macOS exit gate; `x+w` waits for the W
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Open the project graph from `system/graph.json` (strict decoder, caps, unknown kinds map to other) | yes (`KnowledgeGraphService`, `GraphSessionStore`) | - |  |
-| 2D graph view, sigma/WebGL, pan and zoom at 30+ fps with 50k nodes | yes (`UAGraphView`, `CodeGraphCanvas`) | - |  |
-| Layout in a worker with the Rust kernel (WASM), cancel mid-layout, main thread never blocked over 50 ms | yes (Swift `GraphLayoutEngine`) | - |  |
-| Edges weighted and filtered at render, never pruned | yes (`EdgeWeight`) | - |  |
-| Search, select, focus neighbours, community colouring, node detail, open in Explorer | yes (`UAGraphView`) | - |  |
-| Labels by level of detail (zoom, rank, hover) | yes (`GraphNodeDisplayPolicy`) | - |  |
-| Rescan as a core job with progress and cancel | yes (`GraphAutoUpdater`, `LoopGraphRescanner`) | - |  |
+| Open the project graph from `system/graph.json` (strict decoder, caps, unknown kinds map to other) | yes (`KnowledgeGraphService`, `GraphSessionStore`) | ~ | `ui/screens/graph/decode.ts` + `source.ts`: graph-kit 1.1 and canonical GraphDocument, caps (100k nodes, 600k edges), unknown node kinds to other, unknown edge kinds to relatedTo, control/bidi characters stripped, paths confined; reads only through `read_graph_file` (candidates `system/graph/graph.json`, `system/graph.json`); tests `decode.test.ts` (hostile: bad JSON, wrong roots, cycles, huge strings, proto keys, caps, 20k-entry file), `store.test.ts`; not run against a real project in the window; real files above 32 MB show the host limit (blocked-by: host cap) |
+| 2D graph view, sigma/WebGL, pan and zoom at 30+ fps with 50k nodes | yes (`UAGraphView`, `CodeGraphCanvas`) | ~ | `view.ts` (sigma, one graphology graph built in chunks, no per-node components, hideEdgesOnMove, WebGL context released on hide), `GraphCanvas.tsx`; build bundles worker + wasm; pure parts tested (`view-logic.test.ts`); WebGL fps/memory at 50k NOT measured: needs a real window |
+| Layout in a worker with the Rust kernel (WASM), cancel mid-layout, main thread never blocked over 50 ms | yes (Swift `GraphLayoutEngine`) | ~ | `wasm/graph-layout.wasm` vendored (graph-kit 51ff3721, sha256 0f30028f...), `worker/graph.worker.ts` + `layout-job.ts` + `engine.ts`: typed arrays in, transfer out, cancel = terminate, 3 min watchdog, cache by sha256, fast preview for 5k+ nodes; tests `kernel.test.ts` (exact degree/in-degree on the schema fixtures, determinism, rejects bad input), `engine.test.ts`, `job.test.ts`; Node timings in the phase 5 plan (50k nodes: kernel 7.1 s, preview well under 1 s); WKWebView timing and the CSP `wasm-unsafe-eval` question need a real window (blocked-by: host CSP) |
+| Edges weighted and filtered at render, never pruned | yes (`EdgeWeight`) | ~ | `weights.ts` equals `EdgeWeight.swift` (test reads the Swift file), slider default 0.30, `lod.ts` plan hides by weight bucket at far zoom, the selection's own edges always shown; `view-logic.test.ts` |
+| Search, select, focus neighbours, community colouring, node detail, open in Explorer | yes (`UAGraphView`) | ~ | `search.ts` (ranked, 50k scan under 10 ms in Node), `NodeList.tsx` (virtualised, listbox + aria-activedescendant), `Details.tsx` (neighbours with weights, Open in Explorer via the shell bus `open-file`), colour-blind-safe community colours; tests `components.test.mjs`, `view-logic.test.ts`; keyboard and screen-reader pass in a real window not done |
+| Labels by level of detail (zoom, rank, hover) | yes (`GraphNodeDisplayPolicy`) | ~ | `lod.ts` label fraction by global rank + sigma label density, selection/neighbours always labelled; `view-logic.test.ts` |
+| Rescan as a core job with progress and cancel | yes (`GraphAutoUpdater`, `LoopGraphRescanner`) | - | blocked-by: graph generation lives in the Swift scanners (`CodeNoteService`, graph-kit GraphKit); the screen shows how to generate it (macOS app) and re-checks; a core job is slice G5 after the job runner |
 | 3D graph view | yes (`Graph3DView`, `CGSimulation3D`) | defer | Option B (WebGL 3D, graph-kit K3) after the macOS gate; Swift keeps it meanwhile |
 | Plugin graph engines (`graph-engine.json`) | yes (`PluginGraphEngine`) | defer | built-in engine only in Phase 5 |
 | Code note generation batch | yes (`CodeNoteService`) | defer | moves with the job runner |
-| Graph settings section | yes (`GraphSettingsSection`) | - |  |
+| Graph settings section | yes (`GraphSettingsSection`) | - | not started (engine choice, auto-update) |
 
 ## 8. Issues and Gantt (P5-I; plan section 6)
 
