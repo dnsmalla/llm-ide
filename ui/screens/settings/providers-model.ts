@@ -1,10 +1,11 @@
 // Settings -> Providers: ONE list of model connections, with the pure rules behind it.
 // Keys are write-only: they go to POST /kb/providers/catalog/connect once (the core puts
 // them in the per-user vault) and the page keeps only `hasKey`.
-import { call, type CoreClient } from "./core-api.ts";
+import { ApiError, call, type CoreClient } from "./core-api.ts";
 import {
   decodeCatalog,
   decodeConnectResult,
+  decodeCustomEndpoints,
   decodeModelList,
   decodeProviderSettings,
   decodeRemoved,
@@ -12,6 +13,7 @@ import {
   type Catalog,
   type CatalogProvider,
   type Connection,
+  type CustomEndpoint,
   type ModelCapability,
   type ModelList,
   type ProviderSettings,
@@ -37,6 +39,25 @@ export interface ProviderRow {
   keyRequired: boolean;
   enabled: boolean;
   allowPrivate: boolean;
+  /** A Mac-synced endpoint: shown, never changed here. Absent on managed rows. */
+  readOnly?: boolean;
+}
+
+/** The managed Claude-compatible endpoints and the Mac-synced ones, as rows (the key is never part of a row). */
+export function rowsFromCustom(custom: readonly CustomEndpoint[]): ProviderRow[] {
+  return custom.map((c) => ({
+    id: c.id,
+    provider: c.provider,
+    catalogId: CLAUDE_COMPATIBLE_CATALOG_ID,
+    name: c.name,
+    baseURL: c.baseURL,
+    kindLabel: CLAUDE_KIND_LABEL,
+    hasKey: c.hasKey,
+    keyRequired: true,
+    enabled: c.enabled,
+    allowPrivate: c.allowPrivate,
+    ...(c.source === "synced" ? { readOnly: true } : {}),
+  }));
 }
 
 /** Flattens the catalog into rows (one per connection). Linear; safe for thousands. */
@@ -79,20 +100,50 @@ export interface AddChoice {
 }
 
 export const CLAUDE_COMPATIBLE_ID = "claude-compatible";
+/** The catalog id the connect route takes for a Claude-compatible endpoint (hidden from GET /kb/providers/catalog). */
+export const CLAUDE_COMPATIBLE_CATALOG_ID = "anthropic-compatible";
 
-/** Catalog entries plus the Claude-compatible choice. The latter needs a core route that
- *  does not exist yet (only the Mac's replace-all POST /kb/custom-providers does), so it is
- *  listed but disabled instead of being faked. */
-export function addChoices(catalog: Catalog): AddChoice[] {
+/** The entry the add form is built from: the core hides it from the catalog list, so it is described here. */
+export const CLAUDE_COMPATIBLE_PROVIDER: CatalogProvider = {
+  id: CLAUDE_COMPATIBLE_CATALOG_ID,
+  name: "Claude-compatible endpoint",
+  baseURL: "",
+  keyRequired: true,
+  local: false,
+  customBaseURL: true,
+  allowPrivate: true,
+  docsUrl: "",
+  notes: "",
+  connections: [],
+};
+
+/** What a Claude-compatible endpoint can and cannot do, in plain words. Shown wherever one is added or listed. */
+export const CLAUDE_COMPATIBLE_LIMITS: readonly string[] = [
+  "Chats on this endpoint run on the Claude engine, with its tools. Use it from the chat model picker.",
+  "It is not used for one-shot completions (summaries, notes) or for the model tier roles in Model routing: those send a different request format and would fail.",
+  "The Claude engine connects to the address itself, so the app cannot pin or re-check what a host name resolves to at that moment. Only add gateways you trust.",
+  "An http:// or private-network address needs the operator setting for private providers on the server, and your opt-in here.",
+];
+
+/** Catalog entries plus the Claude-compatible choice, which is available once the core answers GET /kb/providers/custom. */
+export function addChoices(catalog: Catalog, claudeSupported = false): AddChoice[] {
   const out: AddChoice[] = catalog.providers.map((p) => ({ id: p.id, name: p.name, available: true, kindLabel: OPENAI_KIND_LABEL }));
   out.push({
     id: CLAUDE_COMPATIBLE_ID,
     name: "Claude-compatible endpoint",
-    available: false,
-    unavailableReason: "Not available in this app yet: the core has no route to list and save Anthropic-style endpoints. Add it in the Mac app for now.",
+    available: claudeSupported,
+    ...(claudeSupported ? {} : { unavailableReason: "This core is too old to save Anthropic-style endpoints. Update the app's core (API 99), or add it in the Mac app." }),
     kindLabel: CLAUDE_KIND_LABEL,
   });
   return out;
+}
+
+/** A sentence for a refused Claude-compatible connect: the server's own text is never shown (it can echo the address). */
+export function describeClaudeConnectError(e: unknown): string {
+  if (e instanceof ApiError && (e.code === "VALIDATION_FAILED" || e.code === "PROVIDER_BLOCKED")) {
+    return "The core did not accept that endpoint. Check that the address starts with https:// and has no user name, query or #fragment, that the key has no spaces, and that the short name is 1 to 24 lowercase letters or digits. A private-network or http:// address also needs the operator setting for private providers on the server.";
+  }
+  return describeError(e);
 }
 
 /** Legacy provider ids whose already-stored key the core can copy into a new connection. */
@@ -152,6 +203,12 @@ export function validateConnect(p: CatalogProvider, f: ConnectForm): FormIssue[]
   }
   if (f.name.length > 80) issues.push({ field: "name", message: "Keep the name under 80 characters." });
   return issues;
+}
+
+/** The slug a connection's id was made from (`cat-<catalog>-<slug>`, `ac-<slug>`), or null when the id has none. */
+export function slugOfRow(row: ProviderRow): string | null {
+  if (row.catalogId === CLAUDE_COMPATIBLE_CATALOG_ID) return row.id.startsWith("ac-") ? row.id.slice(3) : null;
+  return row.id !== `cat-${row.catalogId}` ? row.id.slice(`cat-${row.catalogId}-`.length) : null;
 }
 
 export interface ConnectBody {
@@ -235,6 +292,10 @@ export class ProvidersApi {
   constructor(client: CoreClient) {
     this.#c = client;
   }
+  /** The Claude-compatible endpoints. Rejects with ApiError 404 on a core older than API 99. */
+  async custom(signal?: AbortSignal): Promise<CustomEndpoint[]> {
+    return decodeCustomEndpoints(await call(this.#c, "GET", "/kb/providers/custom", undefined, signal));
+  }
   async catalog(signal?: AbortSignal): Promise<Catalog> {
     return decodeCatalog(await call(this.#c, "GET", "/kb/providers/catalog", undefined, signal));
   }
@@ -259,6 +320,10 @@ export interface ProvidersState {
   phase: "idle" | "loading" | "ready" | "failed";
   catalog: Catalog | null;
   rows: ProviderRow[];
+  /** Claude-compatible endpoints (managed and Mac-synced). */
+  custom: CustomEndpoint[];
+  /** `ok`: GET /kb/providers/custom answered; `unsupported`: 404 (older core); `failed`: any other failure; `unknown`: not asked yet. */
+  customRoute: "unknown" | "ok" | "unsupported" | "failed";
   error: string | null;
   /** Connection ids with a request in flight. */
   busy: ReadonlySet<string>;
@@ -274,7 +339,7 @@ export class ProvidersModel extends Store<ProvidersState> {
   #abort: AbortController | null = null;
 
   constructor(api: ProvidersApi) {
-    super({ phase: "idle", catalog: null, rows: [], error: null, busy: new Set(), testResults: {}, pendingRemove: null, adding: false });
+    super({ phase: "idle", catalog: null, rows: [], custom: [], customRoute: "unknown", error: null, busy: new Set(), testResults: {}, pendingRemove: null, adding: false });
     this.#api = api;
   }
 
@@ -285,10 +350,17 @@ export class ProvidersModel extends Store<ProvidersState> {
     this.#abort = ac;
     const gen = ++this.#generation;
     this.set({ phase: this.getState().catalog ? "ready" : "loading", error: null });
+    // The Claude-compatible list is optional: a core without the route (404) or a failure there never blocks the catalog.
+    const customP = this.#api.custom(ac.signal).then(
+      (custom) => ({ custom, route: "ok" as const }),
+      (e: unknown) => ({ custom: null, route: e instanceof ApiError && e.status === 404 ? ("unsupported" as const) : ("failed" as const) }),
+    );
     try {
       const catalog = await this.#api.catalog(ac.signal);
+      const c = await customP;
       if (gen !== this.#generation) return;
-      this.set({ phase: "ready", catalog, rows: rowsFromCatalog(catalog) });
+      const keep = c.custom ?? (c.route === "failed" ? this.getState().custom : []);
+      this.set({ phase: "ready", catalog, custom: keep, customRoute: c.route, rows: [...rowsFromCatalog(catalog), ...rowsFromCustom(keep)] });
     } catch (e) {
       if (gen !== this.#generation) return;
       this.set({ phase: this.getState().catalog ? "ready" : "failed", error: describeError(e) });
@@ -315,6 +387,7 @@ export class ProvidersModel extends Store<ProvidersState> {
       this.set({ error: issues[0]!.message });
       return false;
     }
+    const claude = provider.id === CLAUDE_COMPATIBLE_CATALOG_ID;
     this.set({ adding: true, error: null });
     this.#generation++; // an older load must not overwrite the new connection
     try {
@@ -325,20 +398,21 @@ export class ProvidersModel extends Store<ProvidersState> {
       return true;
     } catch (e) {
       form.apiKey.clear();
-      this.set({ adding: false, error: describeError(e) });
+      this.set({ adding: false, error: claude ? describeClaudeConnectError(e) : describeError(e) });
       return false;
     }
   }
 
   async setEnabled(row: ProviderRow, enabled: boolean): Promise<void> {
-    if (this.getState().busy.has(row.id)) return;
+    if (this.getState().busy.has(row.id) || row.readOnly) return;
     this.#mark(row.id, true);
     this.#generation++;
     try {
       // The connect route re-sends the connection; no key is sent, so the stored key is kept.
       const body: ConnectBody & { enabled: boolean } = { catalogId: row.catalogId, name: row.name, enabled };
       if (row.baseURL) body.baseURL = row.baseURL;
-      if (row.id !== `cat-${row.catalogId}`) body.slug = row.id.slice(`cat-${row.catalogId}-`.length);
+      const slug = slugOfRow(row);
+      if (slug !== null) body.slug = slug;
       if (row.allowPrivate) body.allowPrivate = true;
       await this.#api.connect(body);
       this.set({ error: null });
@@ -351,7 +425,7 @@ export class ProvidersModel extends Store<ProvidersState> {
   }
 
   async test(row: ProviderRow): Promise<void> {
-    if (this.getState().busy.has(row.id)) return;
+    if (this.getState().busy.has(row.id) || row.readOnly) return;
     this.#mark(row.id, true);
     try {
       const r = describeTest(await this.#api.test(row.id));
@@ -364,6 +438,7 @@ export class ProvidersModel extends Store<ProvidersState> {
   }
 
   requestRemove(row: ProviderRow): void {
+    if (row.readOnly) return;
     this.set({ pendingRemove: { id: row.id, name: row.name } });
   }
   cancelRemove(): void {

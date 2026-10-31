@@ -29,6 +29,8 @@
 .st-error { color: var(--tok-color-danger); font-size: var(--tok-type-caption-size); }
 .st-ok { color: var(--tok-color-success); font-size: var(--tok-type-caption-size); }
 .st-dialog { border: 1px solid var(--tok-color-danger); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-lg); display: flex; flex-direction: column; gap: var(--tok-space-md); }
+.st-note { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.st-note ul { margin: 0; padding-left: var(--tok-space-lg); }
 .st-pre { margin: 0; white-space: pre-wrap; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
 .st-table { width: 100%; border-collapse: collapse; }
 .st-table th, .st-table td { text-align: left; padding: var(--tok-space-xs) var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }

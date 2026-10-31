@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { SettingsSectionCard, RefreshIcon, PlusIcon, StatusBanner } from "@llmide/ui-kit";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
-import { ProvidersApi, ProvidersModel, addChoices, contextText, newConnectForm, rowDetail, sortModels, toolsBadge, overrideKey, type ConnectForm, type ProviderRow } from "../providers-model.ts";
+import { CLAUDE_COMPATIBLE_ID, CLAUDE_COMPATIBLE_LIMITS, CLAUDE_COMPATIBLE_PROVIDER, ProvidersApi, ProvidersModel, addChoices, contextText, newConnectForm, rowDetail, sortModels, toolsBadge, overrideKey, type ConnectForm, type ProviderRow } from "../providers-model.ts";
 import { keyStatusLabel } from "../secret-field.ts";
 import { describeError } from "../errors.ts";
 import { filterBy } from "../virtual.ts";
@@ -42,6 +42,7 @@ export default function ProvidersSection() {
           </div>
         </div>
       ) : null}
+      {s.custom.length > 0 ? <ClaudeLimits /> : null}
       {s.phase === "loading" ? <p className="st-hint" role="status">Loading connections...</p> : null}
       {s.phase === "ready" && s.rows.length === 0 ? <p className="st-hint">No connections yet. Choose Add from catalog to connect a provider.</p> : null}
       {rows.length > 0 ? (
@@ -61,10 +62,16 @@ export default function ProvidersSection() {
                   {t ? <span className={t.ok ? "st-ok" : "st-error"} title={t.detail || undefined}>{t.summary}</span> : null}
                 </div>
                 <span className="st-status" data-tone={r.hasKey || !r.keyRequired ? "ok" : "warning"}>{keyStatusLabel(r.hasKey, r.keyRequired)}</span>
-                <Button label={`Test ${r.name}`} disabled={busy} onClick={() => void model.test(r)}>Test</Button>
-                <Button label={`Models of ${r.name}`} onClick={() => setModelsFor(r)}>Models</Button>
-                <input type="checkbox" role="switch" aria-label={`Enable ${r.name}`} aria-checked={r.enabled} checked={r.enabled} disabled={busy} onChange={(e) => void model.setEnabled(r, e.target.checked)} />
-                <Button tone="danger" label={`Remove ${r.name}`} disabled={busy} onClick={() => model.requestRemove(r)}>Remove</Button>
+                {r.readOnly ? (
+                  <span className="st-hint" title="This endpoint comes from your Mac app's custom providers. Change or remove it there.">Synced from the Mac app (read-only)</span>
+                ) : (
+                  <>
+                    <Button label={`Test ${r.name}`} disabled={busy} onClick={() => void model.test(r)}>Test</Button>
+                    <Button label={`Models of ${r.name}`} onClick={() => setModelsFor(r)}>Models</Button>
+                    <input type="checkbox" role="switch" aria-label={`Enable ${r.name}`} aria-checked={r.enabled} checked={r.enabled} disabled={busy} onChange={(e) => void model.setEnabled(r, e.target.checked)} />
+                    <Button tone="danger" label={`Remove ${r.name}`} disabled={busy} onClick={() => model.requestRemove(r)}>Remove</Button>
+                  </>
+                )}
               </>
             );
           }}
@@ -82,17 +89,17 @@ export default function ProvidersSection() {
 
 function AddPanel({ model, onDone }: { model: ProvidersModel; onDone: () => void }) {
   const s = useStore(model);
-  const choices = useMemo(() => (s.catalog ? addChoices(s.catalog) : []), [s.catalog]);
+  const choices = useMemo(() => (s.catalog ? addChoices(s.catalog, s.customRoute === "ok") : []), [s.catalog, s.customRoute]);
   const [choiceId, setChoiceId] = useState(choices[0]?.id ?? "");
   const [form, setForm] = useState<ConnectForm>(() => newConnectForm(choices[0]?.id ?? ""));
   const [resetKey, setResetKey] = useState(0);
   const [, force] = useState(0);
   const choice = choices.find((c) => c.id === choiceId);
-  const provider = s.catalog?.providers.find((p) => p.id === choiceId);
+  const provider = choiceId === CLAUDE_COMPATIBLE_ID ? (choice?.available ? CLAUDE_COMPATIBLE_PROVIDER : undefined) : s.catalog?.providers.find((p) => p.id === choiceId);
   const pick = (id: string) => {
     form.apiKey.clear();
     setChoiceId(id);
-    setForm(newConnectForm(id));
+    setForm(newConnectForm(id === CLAUDE_COMPATIBLE_ID ? CLAUDE_COMPATIBLE_PROVIDER.id : id));
     setResetKey((k) => k + 1);
   };
   const patch = (p: Partial<Omit<ConnectForm, "apiKey">>) => {
@@ -112,6 +119,7 @@ function AddPanel({ model, onDone }: { model: ProvidersModel; onDone: () => void
       {provider ? (
         <>
           {provider.notes ? <p className="st-hint">{provider.notes}</p> : null}
+          {provider.id === CLAUDE_COMPATIBLE_PROVIDER.id ? <ClaudeLimits /> : null}
           {provider.keyRequired ? <SecretInput label="API key" field={form.apiKey} resetKey={resetKey} hint="Stored in the secure vault on this computer. It is never shown again." /> : null}
           {provider.customBaseURL || provider.local ? (
             <Field label="Address" hint="The full address, for example https://gateway.example.com/v1">
@@ -149,6 +157,18 @@ function AddPanel({ model, onDone }: { model: ProvidersModel; onDone: () => void
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/** The limits of a Claude-compatible endpoint, in plain words (see CLAUDE_COMPATIBLE_LIMITS). */
+function ClaudeLimits() {
+  return (
+    <div className="st-note" role="note" aria-label="About Claude-compatible endpoints">
+      <strong>About Claude-compatible endpoints</strong>
+      <ul>
+        {CLAUDE_COMPATIBLE_LIMITS.map((l) => <li key={l} className="st-hint">{l}</li>)}
+      </ul>
     </div>
   );
 }

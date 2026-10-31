@@ -135,6 +135,40 @@ export function decodeConnectResult(v: unknown): Connection {
   return decodeConnection(r.connection, "connect.connection");
 }
 
+/** A Claude-compatible (Anthropic Messages) endpoint from GET /kb/providers/custom. No key field exists: only `hasKey`. */
+export interface CustomEndpoint {
+  id: string;
+  /** Dispatch id, custom:ac-... (connections) or custom:<id> (synced). */
+  provider: string;
+  name: string;
+  baseURL: string;
+  allowPrivate: boolean;
+  enabled: boolean;
+  hasKey: boolean;
+  /** `connection`: managed here. `synced`: the Mac app's custom provider with an Anthropic door, read-only. */
+  source: "connection" | "synced";
+}
+
+/** Strict: any malformed row fails the whole list (a half-typed endpoint is never shown). Only these fields are kept. */
+export function decodeCustomEndpoints(v: unknown): CustomEndpoint[] {
+  const r = rec(v, "custom");
+  return arr(r.providers, "custom.providers").map((p, i) => {
+    const x = rec(p, `custom.providers[${i}]`);
+    const source = str(x.source, `custom.providers[${i}].source`);
+    if (source !== "connection" && source !== "synced") throw new DecodeError(`custom.providers[${i}].source`, "connection or synced");
+    return {
+      id: str(x.id, `custom.providers[${i}].id`),
+      provider: str(x.provider, `custom.providers[${i}].provider`),
+      name: str(x.name, `custom.providers[${i}].name`),
+      baseURL: str(x.baseURL, `custom.providers[${i}].baseURL`),
+      allowPrivate: bool(x.allowPrivate, `custom.providers[${i}].allowPrivate`),
+      enabled: bool(x.enabled, `custom.providers[${i}].enabled`),
+      hasKey: bool(x.hasKey, `custom.providers[${i}].hasKey`),
+      source,
+    };
+  });
+}
+
 export interface TestResult {
   ok: boolean;
   /** The server's sentence about the check. Shown only through describeTestDetail (see providers-model). */

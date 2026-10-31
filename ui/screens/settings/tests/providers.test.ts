@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { inspect } from "node:util";
 import { SecretField, keyStatusLabel, scrubSecrets } from "../secret-field.ts";
 import {
-  CLAUDE_COMPATIBLE_ID, OPENAI_KIND_LABEL, ProvidersApi, ProvidersModel, addChoices, buildConnectBody, cleanFallback, describeTest,
+  CLAUDE_COMPATIBLE_ID, CLAUDE_COMPATIBLE_CATALOG_ID, CLAUDE_COMPATIBLE_LIMITS, CLAUDE_COMPATIBLE_PROVIDER, CLAUDE_KIND_LABEL, OPENAI_KIND_LABEL, describeClaudeConnectError, rowsFromCustom, slugOfRow, ProvidersApi, ProvidersModel, addChoices, buildConnectBody, cleanFallback, describeTest,
   newConnectForm, rowsFromCatalog, sortModels, toolsBadge, validateConnect,
 } from "../providers-model.ts";
-import { decodeCatalog, decodeModelList, decodeTestResult, type Catalog, type CatalogProvider } from "../decoders.ts";
+import { ApiError } from "../core-api.ts";
+import { decodeCatalog, decodeConnectResult, decodeCustomEndpoints, decodeModelList, decodeTestResult, type Catalog, type CatalogProvider } from "../decoders.ts";
 import { fakeClient, fixture, reply, deferred } from "./helpers.ts";
 import { filterBy, windowRange } from "../virtual.ts";
 
@@ -42,13 +43,14 @@ test("scrubSecrets redacts provider keys, bearer tokens, JWTs and key=value pair
   assert.match(s, /ok$/);
 });
 
-test("rows: one per connection, with the adapter label; claude-compatible is offered but disabled with a reason", () => {
+test("rows: one per connection, with the adapter label; claude-compatible is disabled with a reason on a core without the route", () => {
   const rows = rowsFromCatalog(catalog());
   assert.ok(rows.length >= 1);
   assert.ok(rows.every((r) => r.kindLabel === OPENAI_KIND_LABEL));
   const claude = addChoices(catalog()).find((c) => c.id === CLAUDE_COMPATIBLE_ID)!;
   assert.equal(claude.available, false);
-  assert.match(claude.unavailableReason!, /route/);
+  assert.match(claude.unavailableReason!, /too old/);
+  assert.equal(addChoices(catalog(), true).find((c) => c.id === CLAUDE_COMPATIBLE_ID)!.available, true);
   assert.match(claude.kindLabel, /Claude-compatible/);
 });
 
@@ -219,4 +221,147 @@ test("1,000+ connections: rows build and filter quickly", () => {
   assert.equal(rows.length, 5000);
   assert.equal(hit.length, 1);
   assert.ok(performance.now() - t0 < 500);
+});
+
+// ---- Claude-compatible endpoints (core API 99) ------------------------------------------------
+
+const customBody = (): unknown => fixture("provider-catalog/get-kb-providers-custom-200.json").response;
+const catalogRoutes = () => ({
+  "GET /kb/providers/catalog": () => ({ status: 200, body: catalogBody() }),
+  "GET /kb/providers/settings": () => reply("provider-catalog/get-kb-providers-settings-200.json"),
+});
+
+test("custom endpoint fixtures decode: managed and synced, never a key; strict on shape", () => {
+  const list = decodeCustomEndpoints(customBody());
+  assert.deepEqual(list.map((e) => [e.id, e.source, e.hasKey]), [["ac-glm", "connection", true], ["zai", "synced", true]]);
+  assert.deepEqual(decodeCustomEndpoints(fixture("provider-catalog/get-kb-providers-custom-200-empty.json").response), []);
+  // Only the listed fields survive: a key-shaped field a hostile core adds is dropped.
+  const withKey = decodeCustomEndpoints({ providers: [{ ...(customBody() as { providers: object[] }).providers[0], apiKey: "sk-leak-0000000000", token: "t" }] });
+  assert.ok(!JSON.stringify(withKey).includes("sk-leak"));
+  assert.throws(() => decodeCustomEndpoints({ providers: [{ ...(customBody() as { providers: object[] }).providers[0], source: "mac" }] }), /source/);
+  assert.throws(() => decodeCustomEndpoints({ providers: [{ id: "x" }] }));
+  assert.throws(() => decodeCustomEndpoints({ providers: "no" }));
+  const conn = decodeConnectResult(fixture("provider-catalog/post-kb-providers-catalog-connect-200-claude-compatible.json").response);
+  assert.deepEqual([conn.id, conn.provider, conn.catalogId], ["ac-glm", "custom:ac-glm", "anthropic-compatible"]);
+});
+
+test("rows from custom endpoints: Claude label, synced ones read-only, slug from the id", () => {
+  const rows = rowsFromCustom(decodeCustomEndpoints(customBody()));
+  assert.ok(rows.every((r) => r.kindLabel === CLAUDE_KIND_LABEL && r.catalogId === CLAUDE_COMPATIBLE_CATALOG_ID));
+  assert.equal(rows[0]!.readOnly, undefined);
+  assert.equal(rows[1]!.readOnly, true);
+  assert.equal(slugOfRow(rows[0]!), "glm");
+  assert.equal(slugOfRow({ ...rows[0]!, id: "ac-default" }), "default");
+  assert.equal(slugOfRow({ ...rows[0]!, catalogId: "groq", id: "cat-groq" }), null);
+  assert.equal(slugOfRow({ ...rows[0]!, catalogId: "openai-compatible", id: "cat-openai-compatible-home" }), "home");
+});
+
+test("load: catalog rows plus Claude-compatible rows; a core without the route (404) keeps the catalog and offers nothing", async () => {
+  const withRoute = fakeClient({ ...catalogRoutes(), "GET /kb/providers/custom": () => ({ status: 200, body: customBody() }) });
+  const m = new ProvidersModel(new ProvidersApi(withRoute));
+  await m.load();
+  const st = m.getState();
+  assert.equal(st.phase, "ready");
+  assert.equal(st.customRoute, "ok");
+  assert.ok(st.rows.some((r) => r.id === "ac-glm") && st.rows.some((r) => r.id === "zai" && r.readOnly));
+  assert.equal(addChoices(st.catalog!, st.customRoute === "ok").find((c) => c.id === CLAUDE_COMPATIBLE_ID)!.available, true);
+
+  const old = new ProvidersModel(new ProvidersApi(fakeClient(catalogRoutes())));
+  await old.load();
+  assert.equal(old.getState().phase, "ready");
+  assert.equal(old.getState().customRoute, "unsupported");
+  assert.equal(old.getState().custom.length, 0);
+  assert.equal(old.getState().error, null, "an older core is not an error");
+
+  const broken = new ProvidersModel(new ProvidersApi(fakeClient({ ...catalogRoutes(), "GET /kb/providers/custom": () => ({ status: 500, body: { error: { code: "X" } } }) })));
+  await broken.load();
+  assert.equal(broken.getState().phase, "ready");
+  assert.equal(broken.getState().customRoute, "failed");
+});
+
+test("connect a Claude-compatible endpoint: the request carries catalogId anthropic-compatible, the key once, then the field is empty", async () => {
+  let connected = false;
+  const client = fakeClient({
+    ...catalogRoutes(),
+    "GET /kb/providers/custom": () => ({ status: 200, body: connected ? customBody() : { providers: [] } }),
+    "POST /kb/providers/catalog/connect": () => { connected = true; return reply("provider-catalog/post-kb-providers-catalog-connect-200-claude-compatible.json"); },
+  });
+  const m = new ProvidersModel(new ProvidersApi(client));
+  await m.load();
+  const f = newConnectForm(CLAUDE_COMPATIBLE_PROVIDER.id);
+  f.apiKey.set("sk-fixture-not-a-real-key-000000");
+  f.baseURL = "https://gw.example.com/anthropic";
+  f.slug = "glm";
+  f.name = "GLM gateway";
+  assert.equal(await m.connect(CLAUDE_COMPATIBLE_PROVIDER, f), true);
+  const sent = client.calls.find((c) => c.method === "POST")!;
+  assert.deepEqual(sent.body, { catalogId: "anthropic-compatible", apiKey: "sk-fixture-not-a-real-key-000000", baseURL: "https://gw.example.com/anthropic", slug: "glm", name: "GLM gateway" });
+  assert.equal(f.apiKey.state.filled, false, "the key left the field");
+  assert.ok(m.getState().rows.some((r) => r.id === "ac-glm"));
+  assert.ok(!JSON.stringify(m.getState()).includes("sk-fixture"), "no key in the model state");
+});
+
+test("Claude-compatible form: key and an https address are required; http needs the private-network opt-in", () => {
+  const f = newConnectForm(CLAUDE_COMPATIBLE_PROVIDER.id);
+  assert.match(validateConnect(CLAUDE_COMPATIBLE_PROVIDER, f)[0]!.message, /needs an API key/);
+  f.apiKey.set("k");
+  assert.equal(validateConnect(CLAUDE_COMPATIBLE_PROVIDER, f)[0]!.field, "baseURL");
+  f.baseURL = "http://10.0.0.5:11434";
+  assert.match(validateConnect(CLAUDE_COMPATIBLE_PROVIDER, f)[0]!.message, /private-network/);
+  f.allowPrivate = true;
+  assert.deepEqual(validateConnect(CLAUDE_COMPATIBLE_PROVIDER, f), []);
+});
+
+test("a refused Claude-compatible connect is explained in plain words, without the server's text", async () => {
+  const client = fakeClient({
+    ...catalogRoutes(),
+    "GET /kb/providers/custom": () => ({ status: 200, body: { providers: [] } }),
+    "POST /kb/providers/catalog/connect": () => ({ status: 400, body: { error: { code: "VALIDATION_FAILED", message: "Base URL host is a link-local address 169.254.169.254 sk-secret" } } }),
+  });
+  const m = new ProvidersModel(new ProvidersApi(client));
+  await m.load();
+  const f = newConnectForm(CLAUDE_COMPATIBLE_PROVIDER.id);
+  f.apiKey.set("k");
+  f.baseURL = "https://gw.example.com/anthropic";
+  assert.equal(await m.connect(CLAUDE_COMPATIBLE_PROVIDER, f), false);
+  const err = m.getState().error!;
+  assert.match(err, /operator setting/);
+  assert.ok(!/169\.254|sk-secret/.test(err));
+  assert.equal(describeClaudeConnectError(new ApiError(409, "LIMIT")), "You have reached the most provider connections one account can have. Remove one first.");
+});
+
+test("a managed endpoint can be tested, switched off and removed through the catalog routes; a synced one is read-only", async () => {
+  const client = fakeClient({
+    ...catalogRoutes(),
+    "GET /kb/providers/custom": () => ({ status: 200, body: customBody() }),
+    "POST /kb/providers/catalog/test": (b) => ({ status: 200, body: { ok: true, detail: "ok sk-fixture-not-a-real-key-000000", modelCount: 3 } }),
+    "POST /kb/providers/catalog/connect": () => reply("provider-catalog/post-kb-providers-catalog-connect-200-claude-compatible.json"),
+    "POST /kb/providers/catalog/disconnect": () => ({ status: 200, body: { ok: true, removed: true } }),
+  });
+  const m = new ProvidersModel(new ProvidersApi(client));
+  await m.load();
+  const managed = m.getState().rows.find((r) => r.id === "ac-glm")!;
+  const synced = m.getState().rows.find((r) => r.id === "zai")!;
+  await m.test(managed);
+  assert.deepEqual(client.calls.find((c) => c.path.endsWith("/test"))!.body, { id: "ac-glm" });
+  assert.ok(!JSON.stringify(m.getState().testResults).includes("sk-fixture"), "the test detail is scrubbed");
+  await m.setEnabled(managed, false);
+  assert.deepEqual(client.calls.find((c) => c.path.endsWith("/connect"))!.body, { catalogId: "anthropic-compatible", name: "GLM gateway", enabled: false, baseURL: "https://gw.example.com/anthropic", slug: "glm" });
+  const before = client.calls.length;
+  await m.test(synced);
+  await m.setEnabled(synced, false);
+  m.requestRemove(synced);
+  assert.equal(client.calls.length, before, "no request for a synced endpoint");
+  assert.equal(m.getState().pendingRemove, null);
+  m.requestRemove(managed);
+  assert.equal(await m.confirmRemove("GLM gateway"), true);
+  assert.deepEqual(client.calls.find((c) => c.path.endsWith("/disconnect"))!.body, { id: "ac-glm" });
+});
+
+test("the plain-language limits name each real restriction", () => {
+  const text = CLAUDE_COMPATIBLE_LIMITS.join(" ");
+  assert.match(text, /one-shot completions/);
+  assert.match(text, /model tier roles/);
+  assert.match(text, /connects to the address itself/);
+  assert.match(text, /operator setting/);
 });
