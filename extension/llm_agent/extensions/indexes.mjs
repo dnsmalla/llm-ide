@@ -278,7 +278,7 @@ function score(e, tokens) {
  * Browse the cached indexes. No network. `installed` marks what this user has.
  * `installable` is the entry's own flag AND the operator's install allowlist.
  */
-export function searchCatalog(userId, { q = '', kind, limit = 25, offset = 0 } = {}) {
+export function searchCatalog(userId, { q = '', kind, limit = 25, offset = 0, now = Date.now() } = {}) {
   const cache = readCache();
   const installed = new Set(readInstalled(userId).items.keys());
   const tokens = String(q).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8).map((t) => t.slice(0, 60));
@@ -305,5 +305,5 @@ export function searchCatalog(userId, { q = '', kind, limit = 25, offset = 0 } =
     }
   }
   hits.sort((a, b) => b.s - a.s || (a.entry.name < b.entry.name ? -1 : a.entry.name > b.entry.name ? 1 : 0));
-  return { query: String(q).slice(0, 200), total: hits.length, offset: off, results: hits.slice(off, off + lim).map((h) => h.entry), sources: sourceStatuses() };
+  return { query: String(q).slice(0, 200), total: hits.length, offset: off, results: hits.slice(off, off + lim).map((h) => h.entry), sources: sourceStatuses(now) };
 }

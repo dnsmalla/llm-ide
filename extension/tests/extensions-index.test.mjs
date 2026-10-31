@@ -92,7 +92,7 @@ test('refresh fills the four indexes; search ranks, filters and flags installabl
   assert.equal(page.results.length, 2);
   assert.equal(page.total, 10);
   assert.equal(idx.searchCatalog('u1', { limit: 99999 }).results.length, 10);
-  assert.deepEqual(idx.searchCatalog('u1', {}).sources.map((s) => s.status), ['fresh', 'fresh', 'fresh', 'fresh']);
+  assert.deepEqual(idx.searchCatalog('u1', { now: t0 }).sources.map((s) => s.status), ['fresh', 'fresh', 'fresh', 'fresh']);
 });
 
 test('installed items are marked per user', async () => {
