@@ -13,14 +13,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 9 | 3 | 15 | 27 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 4 | 1 | 7 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 5 | 2 | 6 | 13 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 13 | 1 | 10 | 24 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 7 | 2 | 5 | 14 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 78 | 19 | 71 | 168 |  |
+| Total | 79 | 20 | 70 | 169 |  |
 
 ## How the surfaces connect
 
@@ -91,7 +91,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Loose ends: Q21 quit delay on macOS logout, Q11 `llmide://` from Chrome (ROADMAP Loose ends) (me)
 - [ ] Meeting flows Mac half: ack with `lines`/`hash`, dedupe by session id, meeting-attached chat (ROADMAP M1) (wait)
 - [ ] Library read-path switch to `note_index` (M3) and legacy duplicate-row deletion (L1) (wait)
-- [ ] Swift feature freeze from Phase 1 (plan decision 4); whether it is in force is unverified (you)
+- [ ] Swift feature freeze from Phase 1 (plan decision 4): **not in force, trigger undefined** (the plan's Phase 1 starts after ADR 0018 is Accepted; 50 `feat` commits touched `mac/Sources` since 2026-10-24, all kit work); you decide when and what it covers, see sync-kit S2 (`plans/2026-10-31-status-audit.md` (d)) (you)
 - [ ] K4 Retire: remove each kit's Swift UI one release after its Tauri screen (kit plan) (wait)
 
 ## S2. Desktop multi-OS (Tauri)
@@ -159,12 +159,13 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
 - [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decided later with the relay work (Q-WEB-2) (you)
 - [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
-- [~] End-to-end crypto design: team key, QR enrollment, rotate on revoke written (`docs/superpowers/plans/2026-10-31-relay-design.md`, `93e8b083`); independent security review not done (me)
+- [~] End-to-end crypto design: team key, QR enrollment, rotate on revoke written (`docs/superpowers/plans/2026-10-31-relay-design.md`, `93e8b083`); revise the design to the review's findings before R0 (me)
+- [x] Independent security review of the relay design: done with findings, 3 critical (PWA code trust, unauthenticated key wrap, relay-supplied device list), 7 high, 10 medium, 5 low; 9 decisions for you (`docs/superpowers/plans/2026-10-31-relay-security-review.md`) (me)
 - [ ] Snapshot producer on the desktop and request consumer with permission re-check (me)
 - [ ] Phone PWA (installable, offline read, queue) (me)
 - [ ] Extension read/queue through the relay when the desktop is off (me)
 - [ ] Relay contract added to `schema/http` with conformance tests (kit plan: contract group "relay (new)") (me)
-- [ ] Connector catalog: per-user selection, MCP-backed gdrive/gcal/miro, selection-gated Settings (shipped phase 1 per project notes; unverified in this audit) (me)
+- [~] Connector catalog: phase 1 verified shipped (catalog, per-user selection, `/auth/me/connectors*` routes, Library and selection-gated Settings, Miro MCP ingest, tests exist); open: gdrive/gcal MCP descriptors (`pipelineReady: false`), Miro tool names are unverified guesses, no spec file (`plans/2026-10-31-status-audit.md` (b)) (me)
 
 ## S5. Chrome extension
 
@@ -200,7 +201,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Test-hang protection: per-test timeout and suite watchdog; token-bench fake runs 120 s to 8 s (`83be5934`, `d51e4a61`, `4ece15b3`) (me)
 - [x] This master plan and its status script (`93ccd529`) (me)
 - [x] Contract gates cover catalog connect `enabled` and `copyKeyFrom` (fixtures, regenerated types, OpenAPI, inventory) (me)
-- [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, docs-kit K1 routes skipped until the Mac switches (`6aa1468d`) (me)
+- [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, 93 routed and 128 skipped of 221 fixture endpoints (70 no Mac caller, 51 Mac decodes through a private wrapper, 7 non-JSON); extensions routes now routed (`66bef1b9`); lab not run in the audit (`plans/2026-10-31-status-audit.md` (c)) (me)
 - [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
 - [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
@@ -268,10 +269,10 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Guardrail scanners for secrets, PII, destructive ops (`extension/guardrails/`) (me)
 - [x] Claude-style permissions: Ask / Accept Edits / Bypass with prefix rules (project notes, PR #65; unverified in this audit) (me)
 - [x] Phase 0 staging script excludes secrets, keys, DBs (report "Packaging") (me)
-- [~] Provider and connector fetch pinning: done for provider catalog and trackers; independent review welcome (ROADMAP X7) (me)
+- [~] Provider and connector fetch pinning: pinned for providers, adapter MCP, extension install and tracker hosts; **not** pinned: Box content URLs, MCP connector OAuth discovery, Jev connection check, 7 literal-host calls, subprocess egress (`plans/2026-10-31-status-audit.md` (e)); independent review welcome (ROADMAP X7) (me)
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
-- [~] Relay: E2E design written with threat model (`93e8b083`); independent review, key rotation on revoke and no-plaintext tests are phases R1 to R4 of that design (me)
+- [~] Relay: E2E design written with threat model (`93e8b083`); independent review done with findings (`plans/2026-10-31-relay-security-review.md`, 3 critical to settle in the R0 spec); key rotation on revoke and no-plaintext tests are phases R1 to R4 of that design (me)
 - [x] Workspace Trust server: per-user trust records, untrusted folders' `.mcp.json` stdio servers are not loaded and project hooks/plugins/skill scripts are named in a notice, `LLMIDE_WORKSPACE_TRUST=off` kill switch, API 95 (Tauri plan §8) (me)
 - [ ] Workspace Trust Mac UI (trust prompt, Settings list) and a real-app check (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
@@ -288,7 +289,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
 - [x] `make test-desktop` (node, security, token drift, cargo if present); node part is in `make regression` (`Makefile`) (me)
 - [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
-- [~] Mac Sparkle `CFBundleVersion` limitation (project notes 2026-10; fix state unverified) (me)
+- [~] Mac Sparkle `CFBundleVersion` limitation: fixed in code (`b244199f`, `c04da0b4`: build number from `LLMIDE_BUILD_NUMBER` or commit count, appcast reads it from the built app, CI uses `run_number`); open: local commit-count vs CI run-number ordering risk, no script test, no real update run (`plans/2026-10-31-status-audit.md` (a)) (me)
 - [x] Night-push job built (`746b94f9`) (me)
 - [ ] Install the nightly push job: commands in `scripts/nightly-push.sh --help` (you)
 - [ ] CI result checked after every push (`gh run list`) (you)
