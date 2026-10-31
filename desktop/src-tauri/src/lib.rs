@@ -167,6 +167,7 @@ pub fn run() {
         .on_page_load(|_webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 pty::kill_all();
+                pty::reset_consent();
             }
         })
         .on_window_event(|window, event| {
@@ -179,6 +180,7 @@ pub fn run() {
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 pty::kill_all();
+                pty::reset_consent();
             }
         })
         .setup(move |app| {

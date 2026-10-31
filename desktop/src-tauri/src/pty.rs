@@ -8,6 +8,12 @@
 //! reader blocks and the shell stalls on a full pty buffer, so a flood (`yes`) pauses
 //! instead of overrunning xterm's write buffer and dropping bytes.
 //!
+//! Security: a pty is an unrestricted shell, so everything here is behind a host-side
+//! gate (see `Gate`): the Terminal feature must be enabled in the host's own
+//! `LLMIDE_FEATURES`, and the user must approve a native confirm dialog (run by the
+//! host, default deny) once per page load. The spawned shell's environment is scrubbed
+//! of the server's secrets and provider keys, and starts in the active project root.
+//!
 //! Known limits:
 //! - Background `&` jobs run in their own process groups and may be orphaned when a
 //!   shell is killed; only the foreground job and the shell's own group are signalled.
@@ -43,6 +49,112 @@ const HIGH_WATER: u64 = 1024 * 1024;
 const ACK_STALL_LIMIT: Duration = Duration::from_secs(60);
 /// Concurrent shells allowed; spawning beyond this is an error.
 const MAX_SESSIONS: usize = 8;
+
+/// Whether `key` is enabled by an `LLMIDE_FEATURES` value (comma-separated enabled
+/// keys; unset or empty means all, same as the Mac app and the server).
+pub fn feature_enabled(raw: Option<&str>, key: &str) -> bool {
+    match raw.map(str::trim).filter(|v| !v.is_empty()) {
+        None => true,
+        Some(list) => list.split(',').any(|k| k.trim() == key),
+    }
+}
+
+/// The Terminal feature toggle, read from the host's environment (never the webview).
+pub fn terminal_enabled() -> bool {
+    feature_enabled(std::env::var("LLMIDE_FEATURES").ok().as_deref(), "terminal")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Consent {
+    Unasked,
+    Granted,
+    Denied,
+}
+
+/// Per-page-load consent. Default deny: nothing runs until `check` has seen a yes, a
+/// no is remembered until the page reloads (a page cannot nag with repeat prompts),
+/// and `reset` (page load / window close) forgets everything.
+pub struct Gate {
+    state: Mutex<Consent>,
+}
+
+impl Gate {
+    pub const fn new() -> Self {
+        Gate { state: Mutex::new(Consent::Unasked) }
+    }
+
+    pub fn reset(&self) {
+        *lock(&self.state) = Consent::Unasked;
+    }
+
+    pub fn granted(&self) -> bool {
+        *lock(&self.state) == Consent::Granted
+    }
+
+    /// True when terminals are allowed; `ask` (the native dialog) runs only while the
+    /// state is `Unasked`, and its answer is recorded.
+    pub fn check(&self, ask: impl FnOnce() -> bool) -> bool {
+        let mut st = lock(&self.state);
+        match *st {
+            Consent::Granted => true,
+            Consent::Denied => false,
+            Consent::Unasked => {
+                let yes = ask();
+                *st = if yes { Consent::Granted } else { Consent::Denied };
+                yes
+            }
+        }
+    }
+}
+
+static GATE: Gate = Gate::new();
+
+/// Forget consent (new page load, window gone).
+pub fn reset_consent() {
+    GATE.reset();
+}
+
+/// Terminal feature on AND user consent (native dialog on first use per page load).
+/// Runs on a blocking thread: the dialog blocks until answered.
+pub fn authorize() -> Result<(), String> {
+    if !terminal_enabled() {
+        return Err("the Terminal feature is disabled".into());
+    }
+    let allowed = GATE.check(|| {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Allow terminal access?")
+            .set_description(
+                "LLM-IDE wants to open a terminal: a real shell that runs with all of your \
+                 user permissions. Only allow this if you just asked for a terminal.",
+            )
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes
+    });
+    if allowed {
+        Ok(())
+    } else {
+        Err("terminal access was not approved".into())
+    }
+}
+
+/// True for variables the shell must not inherit: the server's own configuration,
+/// provider credentials, and anything named like a secret.
+pub fn is_secret_env(name: &str) -> bool {
+    let u = name.to_ascii_uppercase();
+    const PREFIXES: [&str; 9] = [
+        "LLMIDE_", "MEETNOTES_", "ANTHROPIC_", "CLAUDE_CODE_OAUTH", "OPENAI_", "GEMINI_", "GOOGLE_API",
+        "AWS_SECRET", "AWS_SESSION",
+    ];
+    const WORDS: [&str; 6] = ["SECRET", "TOKEN", "PASSWORD", "PASSWD", "API_KEY", "CREDENTIAL"];
+    PREFIXES.iter().any(|p| u.starts_with(p)) || WORDS.iter().any(|w| u.contains(w))
+}
+
+/// The environment handed to the shell: the host's, minus secrets.
+pub fn shell_env(source: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
+    source.filter(|(k, _)| !is_secret_env(k)).collect()
+}
 
 /// Result of `spawn`: the session id and the shell's name (basename of its path).
 #[derive(Serialize)]
@@ -139,12 +251,17 @@ fn login_shell() -> String {
         .unwrap_or_else(|| "/bin/zsh".to_string())
 }
 
-/// Repo root when known, else `$HOME`, else `/`.
+/// Active project root when one is open; else `$HOME`, else `/`. The repo root is a
+/// dev-build convenience only.
 fn start_dir() -> PathBuf {
-    core_host::repo_root()
-        .ok()
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("/"))
+    if let Some(root) = crate::project::active_root() {
+        return root;
+    }
+    #[cfg(debug_assertions)]
+    if let Ok(root) = core_host::repo_root() {
+        return root;
+    }
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Basename of the shell path, for the tab label.
@@ -163,6 +280,7 @@ fn get(id: u32) -> Result<Shared, String> {
 /// Starts `$SHELL -l` in a new pty and returns its id and name. Output is sent to
 /// `on_data` as raw bytes (see `Response`): one message per batch.
 pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned, String> {
+    authorize()?;
     if lock_table().len() >= MAX_SESSIONS {
         return Err(format!("too many terminals (max {MAX_SESSIONS})"));
     }
@@ -177,6 +295,10 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
 
     let shell = login_shell();
     let mut cmd = CommandBuilder::new(&shell);
+    cmd.env_clear();
+    for (k, v) in shell_env(std::env::vars()) {
+        cmd.env(k, v);
+    }
     cmd.arg("-l");
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -368,6 +490,9 @@ pub fn ack(id: u32, bytes: u64) {
 
 /// Writes input bytes to the shell. Runs off the main thread (async command).
 pub fn write(id: u32, data: &str) -> Result<(), String> {
+    if !terminal_enabled() || !GATE.granted() {
+        return Err("terminal access was not approved".into());
+    }
     let session = get(id)?;
     let mut writer = lock(&session.writer);
     writer
@@ -473,5 +598,50 @@ mod tests {
         f.add(5);
         f.ack(50);
         assert_eq!(lock(&f.state).outstanding, 0);
+    }
+
+    #[test]
+    fn terminal_toggle_follows_llmide_features() {
+        assert!(feature_enabled(None, "terminal"));
+        assert!(feature_enabled(Some(""), "terminal"));
+        assert!(feature_enabled(Some("agent_chat, terminal"), "terminal"));
+        assert!(!feature_enabled(Some("agent_chat,file_explorer"), "terminal"));
+        assert!(!feature_enabled(Some("terminal_extra"), "terminal"));
+    }
+
+    #[test]
+    fn gate_defaults_to_deny_and_asks_once() {
+        let g = Gate::new();
+        assert!(!g.granted(), "nothing runs before consent");
+        let mut asked = 0;
+        assert!(g.check(|| { asked += 1; true }));
+        assert!(g.check(|| { asked += 1; true }));
+        assert_eq!(asked, 1);
+        assert!(g.granted());
+    }
+
+    #[test]
+    fn a_refusal_is_sticky_until_reset() {
+        let g = Gate::new();
+        assert!(!g.check(|| false));
+        assert!(!g.check(|| panic!("must not prompt again after a refusal")));
+        assert!(!g.granted());
+        g.reset();
+        assert!(g.check(|| true), "a reload gives a fresh decision");
+        g.reset();
+        assert!(!g.granted(), "reset revokes");
+    }
+
+    #[test]
+    fn shell_env_drops_secrets_and_keeps_the_basics() {
+        let src = [
+            ("PATH", "/usr/bin"), ("HOME", "/h"), ("SHELL", "/bin/zsh"), ("LANG", "C"), ("SSH_AUTH_SOCK", "/s"),
+            ("LLMIDE_JWT_SECRET", "x"), ("LLMIDE_VAULT_KEY", "x"), ("ANTHROPIC_API_KEY", "x"),
+            ("OPENAI_API_KEY", "x"), ("GITHUB_TOKEN", "x"), ("DB_PASSWORD", "x"), ("AWS_SECRET_ACCESS_KEY", "x"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let kept: Vec<String> = shell_env(src).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kept, ["PATH", "HOME", "SHELL", "LANG", "SSH_AUTH_SOCK"]);
     }
 }
