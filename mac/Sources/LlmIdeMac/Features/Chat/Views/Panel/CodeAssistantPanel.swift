@@ -419,7 +419,10 @@ struct CodeAssistantPanel: View {
             )
             if let trustNotice = engine.workspaceTrustNotice {
                 Divider().background(theme.current.border)
-                WorkspaceTrustBanner(api: api, notice: trustNotice) { engine.workspaceTrustNotice = nil }
+                WorkspaceTrustBanner(api: api, notice: trustNotice) {
+                    // Only clear the notice that was confirmed: a newer turn may have set another folder's.
+                    if engine.workspaceTrustNotice?.path == trustNotice.path { engine.workspaceTrustNotice = nil }
+                }
                     .id(trustNotice.path)
             }
             Divider().background(theme.current.border)
