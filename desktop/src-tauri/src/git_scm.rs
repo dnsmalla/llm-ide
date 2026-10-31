@@ -1072,12 +1072,12 @@ mod tests {
             }
             assert!(!marker.exists(), "evil {i} ran a program");
         }
-        // An alias cannot shadow a built-in, and we never run an alias name anyway.
+        // Aliases are not on the allowlist at all: the repo is refused (and no alias ever runs).
         let r = repo("alias");
         let cfg = fs::read_to_string(r.join(".git/config")).unwrap();
         fs::write(r.join(".git/config"), format!("{cfg}[alias]\n\tstatus = !touch {m}\n\tlog = !touch {m}\n\tcommit = !touch {m}\n")).unwrap();
         fs::write(r.join("a.txt"), "x\n").unwrap();
-        status(&r).unwrap();
+        assert_eq!(code(status(&r)), "untrusted_repo_config");
         assert!(!marker.exists(), "alias ran");
     }
 

@@ -10,6 +10,7 @@ mod core_host;
 mod fs_ops;
 mod fs_watch;
 mod git;
+mod git_config;
 mod git_scm;
 mod fsutil;
 mod graph_file;

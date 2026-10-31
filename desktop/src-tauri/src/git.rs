@@ -10,9 +10,9 @@
 //!   (a file named `:(glob)*` is just a file), `GIT_PAGER=cat`, `LC_ALL=C`.
 //! - `core.fsmonitor`, `core.hooksPath`, `core.pager`, `core.sshCommand` and `diff.external`
 //!   are forced off on the command line, and diffs run with `--no-ext-diff --no-textconv`.
-//! - Config keys that run programs and cannot all be overridden (`filter.*`, `include*`,
-//!   `diff.*.command`, `*.textconv`, `credential.helper`, `core.*Command`, `url.*.insteadOf`)
-//!   make the repo `untrusted_repo_config`: nothing runs until the user reviews it outside the app.
+//! - The repo config (and `config.worktree`, and the linked worktree / submodule git dirs) must pass
+//!   the strict ALLOWLIST in `git_config.rs`; anything else makes the repo `untrusted_repo_config`:
+//!   nothing runs until the user reviews it outside the app. Submodules are never descended into.
 //! - `GIT_CEILING_DIRECTORIES` is the root's parent, so discovery never climbs out of the project.
 //! - Output is capped and every call has a wall-clock timeout; the child is killed on either.
 //! - Paths are the same relative, validated paths as the fs commands; `--` precedes them.
@@ -42,97 +42,99 @@ const NULL_DEVICE: &str = "NUL";
 #[cfg(not(windows))]
 const NULL_DEVICE: &str = "/dev/null";
 
-/// Why this config text must not be used (it can run a program), if so.
-pub fn dangerous_config(text: &str) -> Option<&'static str> {
-    let mut section = String::new();
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('#') || line.starts_with(';') || line.is_empty() {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix('[') {
-            let header = rest.split(']').next().unwrap_or("").trim().to_ascii_lowercase();
-            let name = header.split_whitespace().next().unwrap_or("").to_string();
-            if name == "filter" {
-                return Some("filter driver");
-            }
-            if name == "include" || name == "includeif" {
-                return Some("config include");
-            }
-            section = header;
-            // `[core] fsmonitor = x` may be on the same line as the header.
-            if let Some((_, after)) = line.split_once(']') {
-                if let Some(r) = dangerous_key(&section, after.trim()) {
-                    return Some(r);
+/// Reads one config file for the scan. `None` = absent; a symlink, a non-regular file or a read
+/// error is untrusted (git would follow/parse it, we cannot vouch for it).
+fn read_config(path: &Path) -> R<Option<Vec<u8>>> {
+    let untrusted = |why: &str| gerr("untrusted_repo_config", format!("{why}: {}", path.display()));
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return untrusted("cannot inspect git config"),
+        Ok(m) if m.file_type().is_symlink() || !m.is_file() => return untrusted("git config is not a regular file"),
+        Ok(_) => {}
+    }
+    let f = crate::fs_ops::open_nofollow(path, false).map_err(|_| FsError { code: "untrusted_repo_config", message: format!("cannot read git config: {}", path.display()) })?;
+    let mut b = Vec::new();
+    let _ = f.take(crate::git_config::MAX_CONFIG_BYTES as u64 + 1).read_to_end(&mut b);
+    Ok(Some(b))
+}
+
+/// Validates `<dir>/config` and `<dir>/config.worktree` (git reads the latter with
+/// `extensions.worktreeConfig`, which the allowlist forbids; it is scanned regardless).
+fn check_git_dir(dir: &Path, allow_worktree: bool) -> R<Option<String>> {
+    let mut wt = None;
+    for name in ["config", "config.worktree"] {
+        let f = dir.join(name);
+        if let Some(bytes) = read_config(&f)? {
+            match crate::git_config::check_config_ex(&bytes, allow_worktree && name == "config") {
+                Ok(w) => wt = wt.or(w),
+                Err(why) => {
+                    return gerr(
+                        "untrusted_repo_config",
+                        format!("the repository config contains a setting that is not on the safe list ({why}); review {} first", f.display()),
+                    )
                 }
             }
-            continue;
-        }
-        if let Some(r) = dangerous_key(&section, line) {
-            return Some(r);
         }
     }
-    None
+    Ok(wt)
 }
 
-fn dangerous_key(section: &str, line: &str) -> Option<&'static str> {
-    let key = line.split('=').next().unwrap_or("").trim().to_ascii_lowercase();
-    if key.is_empty() {
-        return None;
-    }
-    let sec = section.split_whitespace().next().unwrap_or("");
-    let sub = section.contains('"');
-    match (sec, key.as_str()) {
-        ("core", "fsmonitor" | "sshcommand" | "pager" | "editor" | "askpass" | "hookspath" | "gitproxy" | "attributesfile" | "excludesfile") => Some("core program setting"),
-        ("diff", "external" | "command" | "textconv") => Some("diff program"),
-        ("diff" | "merge", "driver" | "tool") => Some("diff/merge program"),
-        ("difftool" | "mergetool", _) => Some("tool program"),
-        ("credential", "helper") => Some("credential helper"),
-        ("url", "insteadof" | "pushinsteadof") => Some("url rewrite"),
-        ("sequence", "editor") => Some("editor program"),
-        ("gpg", "program") => Some("gpg program"),
-        (_, "textconv" | "cachetextconv") if sub => Some("textconv program"),
-        (_, "command") if sub && sec == "diff" => Some("diff program"),
-        (_, "clean" | "smudge" | "process") if sub => Some("filter program"),
-        _ => None,
-    }
+fn untrusted<T>(why: &str) -> R<T> {
+    gerr("untrusted_repo_config", why.to_string())
 }
 
-/// Config files git would read for `root` (own `.git/config`, or the linked worktree's common dir).
-fn config_files(root: &Path) -> Vec<PathBuf> {
-    let dotgit = root.join(".git");
-    if dotgit.is_dir() {
-        return vec![dotgit.join("config")];
-    }
-    let mut out = Vec::new();
-    if let Ok(text) = std::fs::read_to_string(&dotgit) {
-        if let Some(rest) = text.trim().strip_prefix("gitdir:") {
-            let gd = root.join(rest.trim());
-            out.push(gd.join("config"));
-            if let Ok(c) = std::fs::read_to_string(gd.join("commondir")) {
-                out.push(gd.join(c.trim()).join("config"));
-            }
-            out.push(gd.parent().and_then(Path::parent).map(|p| p.join("config")).unwrap_or_default());
-        }
-    }
-    out
+fn read_small(path: &Path) -> Option<String> {
+    let f = std::fs::File::open(path).ok()?;
+    let mut s = String::new();
+    f.take(4096).read_to_string(&mut s).ok()?;
+    Some(s)
 }
 
+/// Resolves and validates every git directory git would read for `root`.
 fn check_repo(root: &Path) -> R<()> {
-    let files = config_files(root);
-    if files.is_empty() {
-        return gerr("not_a_repo", "this folder is not a git repository");
+    let dotgit = root.join(".git");
+    let meta = match std::fs::symlink_metadata(&dotgit) {
+        Ok(m) => m,
+        Err(_) => return gerr("not_a_repo", "this folder is not a git repository"),
+    };
+    if meta.file_type().is_symlink() {
+        return untrusted(".git is a symbolic link");
     }
-    for f in files {
-        match std::fs::metadata(&f) {
-            Ok(m) if m.len() > 256 * 1024 => return gerr("untrusted_repo_config", "git config is unusually large"),
-            Ok(_) => {
-                let text = std::fs::read_to_string(&f).unwrap_or_default();
-                if let Some(why) = dangerous_config(&text) {
-                    return gerr("untrusted_repo_config", format!("the repository config contains a setting that runs programs ({why}); review {} first", f.display()));
-                }
+    if meta.is_dir() {
+        check_git_dir(&dotgit, false)?;
+        return Ok(());
+    }
+    // `.git` FILE: `gitdir: <path>` (linked worktree, or a submodule checkout).
+    let Some(text) = read_small(&dotgit) else { return untrusted("cannot read the .git file") };
+    let Some(target) = text.trim().strip_prefix("gitdir:") else { return gerr("not_a_repo", "this folder is not a git repository") };
+    let croot = std::fs::canonicalize(root).map_err(|e| FsError { code: "io", message: format!("cannot resolve the project root: {e}") })?;
+    let target = Path::new(target.trim());
+    let gd = std::fs::canonicalize(if target.is_absolute() { target.to_path_buf() } else { root.join(target) })
+        .map_err(|_| FsError { code: "untrusted_repo_config", message: "the .git file points at a missing folder".into() })?;
+    if !gd.is_dir() {
+        return untrusted("the .git file does not point at a folder");
+    }
+    let inside = gd.starts_with(&croot);
+    // Outside the project it must be a real linked worktree (its `gitdir` back-pointer names this
+    // checkout) or a submodule git dir whose `core.worktree` names exactly this folder.
+    let back_ok = read_small(&gd.join("gitdir"))
+        .and_then(|b| std::fs::canonicalize(Path::new(b.trim())).ok())
+        .is_some_and(|p| p == croot.join(".git") || p == dotgit);
+    let wt = check_git_dir(&gd, !inside && !back_ok)?;
+    if !inside && !back_ok {
+        let ok = wt.is_some_and(|w| std::fs::canonicalize(gd.join(w)).is_ok_and(|p| p == croot))
+            && gd.components().any(|c| c.as_os_str() == "modules");
+        if !ok {
+            return untrusted("the .git file points outside the project and is not a linked worktree or submodule of it");
+        }
+    }
+    if let Some(c) = read_small(&gd.join("commondir")) {
+        let common = std::fs::canonicalize(gd.join(c.trim())).map_err(|_| FsError { code: "untrusted_repo_config", message: "commondir is missing".into() })?;
+        if common != gd {
+            if !(inside && common.starts_with(&croot)) && !back_ok {
+                return untrusted("commondir points outside the project");
             }
-            Err(_) => {}
+            check_git_dir(&common, false)?;
         }
     }
     Ok(())
@@ -165,7 +167,9 @@ pub fn base_args() -> Vec<String> {
     [
         "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "core.quotepath=false",
         "-c", "core.sshCommand=false", "-c", "diff.external=", "-c", "credential.helper=", "-c", "gc.auto=0",
-        "-c", "core.untrackedCache=false",
+        "-c", "core.untrackedCache=false", "-c", "core.attributesFile=/dev/null", "-c", "submodule.recurse=false",
+        "-c", "protocol.allow=never", "-c", "status.submoduleSummary=false", "-c", "maintenance.auto=false",
+        "-c", "diff.ignoreSubmodules=dirty",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -395,7 +399,7 @@ pub fn parse_status(raw: &[u8]) -> GitStatus {
 }
 
 pub fn status(root: &Path) -> R<GitStatus> {
-    let out = run_git(root, &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal"], STATUS_CAP)?;
+    let out = run_git(root, &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignore-submodules=dirty"], STATUS_CAP)?;
     let mut s = parse_status(&out.stdout);
     s.truncated |= out.truncated;
     Ok(s)
@@ -552,20 +556,13 @@ mod tests {
     }
 
     #[test]
-    fn config_scanner() {
-        assert_eq!(dangerous_config("[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = https://x\n"), None);
-        for bad in [
-            "[filter \"lfs\"]\n\tclean = x\n",
-            "[core]\n\tfsmonitor = ./hook\n",
-            "[include]\n\tpath = ../evil\n",
-            "[includeIf \"gitdir:/\"]\n\tpath = x\n",
-            "[diff \"x\"]\n\ttextconv = sh -c evil\n",
-            "[core] sshCommand = evil\n",
-            "[credential]\n\thelper = !evil\n",
-            "[url \"x\"]\n\tinsteadOf = y\n",
-            "[core]\n\tPAGER = evil\n",
+    fn runner_forces_the_hardening_flags() {
+        let a = base_args().join(" ");
+        for f in [
+            "submodule.recurse=false", "protocol.allow=never", "status.submoduleSummary=false", "maintenance.auto=false",
+            "gc.auto=0", "core.attributesFile=", "core.hooksPath=", "core.fsmonitor=false", "diff.ignoreSubmodules=dirty",
         ] {
-            assert!(dangerous_config(bad).is_some(), "{bad}");
+            assert!(a.contains(f), "{f} missing from {a}");
         }
     }
 
@@ -637,6 +634,176 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         fs::write(root.join(".git/config"), format!("{cfg}[core]\n\tfsmonitor = touch {}\n", marker.display())).unwrap();
         assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config");
         assert!(!marker.exists());
+    }
+
+    fn cfg_append(root: &Path, bytes: &[u8]) {
+        let mut cur = fs::read(root.join(".git/config")).unwrap();
+        cur.extend_from_slice(bytes);
+        fs::write(root.join(".git/config"), cur).unwrap();
+    }
+
+    /// Each of these defeated the old line-based denylist; each must now be refused before git starts.
+    #[test]
+    fn denylist_bypasses_are_refused() {
+        if !have_git() {
+            return;
+        }
+        let marker_dir = scratch("bypass-marker");
+        let marker = marker_dir.join("pwned");
+        let m = marker.display().to_string();
+        let mut cases: Vec<(&str, Vec<u8>)> = vec![
+            ("dotted filter subsection", format!("[filter.x]\n\tclean = touch {m}\n").into_bytes()),
+            ("dotted diff subsection", format!("[diff.x]\n\ttextconv = touch {m}\n").into_bytes()),
+            ("dotted includeif", b"[includeif.gitdir:/]\n\tpath = x\n".to_vec()),
+            ("core.worktree", b"[core]\n\tworktree = /\n".to_vec()),
+            ("submodule.recurse", b"[submodule]\n\trecurse = true\n".to_vec()),
+            ("protocol.ext.allow", b"[protocol \"ext\"]\n\tallow = always\n".to_vec()),
+            ("extensions.worktreeconfig", b"[extensions]\n\tworktreeConfig = true\n".to_vec()),
+            ("alias", format!("[alias]\n\tx = !touch {m}\n").into_bytes()),
+            ("http", b"[http]\n\tproxy = http://evil\n".to_vec()),
+            ("merge driver", format!("[merge \"x\"]\n\tdriver = touch {m}\n").into_bytes()),
+            ("line continuation", b"[core]\n\tfilemode = true \\\n[filter \"x\"]\n\tclean = x\n".to_vec()),
+            ("unknown key", b"[core]\n\tsomethingnew = 1\n".to_vec()),
+        ];
+        // Invalid UTF-8 before the dangerous key (read_to_string used to give an empty scan).
+        let mut bad = vec![0xff, 0xfe, b'\n'];
+        bad.extend_from_slice(format!("[core]\n\tfsmonitor = touch {m}\n").as_bytes());
+        cases.push(("invalid utf-8", bad));
+        // A BOM makes the first line not start with '['.
+        let mut bom = vec![0xef, 0xbb, 0xbf];
+        bom.extend_from_slice(format!("[filter \"x\"]\n\tclean = touch {m}\n").as_bytes());
+        cases.push(("bom", bom));
+        for (name, bytes) in &cases {
+            let root = scratch("bypass");
+            g(&root, &["init", "-q"]);
+            fs::write(root.join("a.txt"), "x\n").unwrap();
+            if *name == "bom" || *name == "invalid utf-8" {
+                // The BOM / bad bytes replace the start of the file.
+                let mut cur = bytes.clone();
+                cur.extend_from_slice(&fs::read(root.join(".git/config")).unwrap());
+                fs::write(root.join(".git/config"), cur).unwrap();
+            } else {
+                cfg_append(&root, bytes);
+            }
+            assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config", "{name}");
+            assert_eq!(stage(&root, &["a.txt".into()], true).unwrap_err().code, "untrusted_repo_config", "{name}");
+            assert!(!marker.exists(), "{name} ran a program");
+        }
+    }
+
+    #[test]
+    fn writing_git_config_through_the_fs_commands_then_staging_runs_nothing() {
+        if !have_git() {
+            return;
+        }
+        let root = scratch("combined");
+        g(&root, &["init", "-q"]);
+        let marker = root.join("combined-pwned");
+        fs::write(root.join("a.txt"), "x\n").unwrap();
+        let evil = format!("[core]\n\trepositoryformatversion = 0\n\tfsmonitor = touch {}\n[filter \"x\"]\n\tclean = touch {}\n", marker.display(), marker.display());
+        for rel in [".git/config", ".GIT/config"] {
+            let req = crate::fs_ops::WriteReq { path: rel.into(), text: evil.clone(), encoding: "utf-8".into(), bom: false, expected_hash: None, force: true };
+            assert_eq!(crate::fs_ops::write_file(&root, &req).unwrap_err().code, "protected_path");
+        }
+        stage(&root, &["a.txt".into()], true).unwrap();
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn config_worktree_is_scanned() {
+        if !have_git() {
+            return;
+        }
+        let root = scratch("cfgwt");
+        g(&root, &["init", "-q"]);
+        fs::write(root.join(".git/config.worktree"), "[core]\n\tfsmonitor = touch x\n").unwrap();
+        assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config");
+    }
+
+    #[test]
+    fn ordinary_configs_are_accepted() {
+        if !have_git() {
+            return;
+        }
+        let root = scratch("ordinary");
+        g(&root, &["init", "-q"]);
+        cfg_append(&root, b"[remote \"origin\"]\n\turl = https://example.com/x.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n[user]\n\tname = A\n\temail = a@b\n");
+        status(&root).unwrap();
+    }
+
+    #[test]
+    fn malicious_gitattributes_alone_runs_nothing() {
+        if !have_git() || cfg!(windows) {
+            return;
+        }
+        let root = scratch("attrs");
+        g(&root, &["init", "-q"]);
+        let marker = root.join("attr-pwned");
+        fs::write(root.join(".gitattributes"), "* filter=evil diff=evil merge=evil\n").unwrap();
+        fs::write(root.join("a.txt"), "x\n").unwrap();
+        stage(&root, &["a.txt".into()], true).unwrap();
+        status(&root).unwrap();
+        diff(&root, "a.txt", true).unwrap();
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn gitdir_file_must_point_into_the_project_or_be_a_real_worktree() {
+        if !have_git() {
+            return;
+        }
+        let evil = scratch("gd-evil");
+        g(&evil, &["init", "-q"]);
+        let root = scratch("gd-root");
+        fs::write(root.join(".git"), format!("gitdir: {}\n", evil.join(".git").display())).unwrap();
+        assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config");
+        // A genuine linked worktree (back-pointer present) still works.
+        let main = scratch("gd-main");
+        g(&main, &["init", "-q"]);
+        fs::write(main.join("f"), "x").unwrap();
+        g(&main, &["add", "."]);
+        g(&main, &["commit", "-q", "-m", "i"]);
+        let wt = scratch("gd-wt");
+        let _ = fs::remove_dir_all(&wt);
+        g(&main, &["worktree", "add", "-q", "-b", "w", wt.to_str().unwrap()]);
+        status(&wt).unwrap();
+        // The backing config is scanned too.
+        let mut cur = fs::read(main.join(".git/config")).unwrap();
+        cur.extend_from_slice(b"[core]\n\tfsmonitor = x\n");
+        fs::write(main.join(".git/config"), cur).unwrap();
+        assert_eq!(status(&wt).unwrap_err().code, "untrusted_repo_config");
+    }
+
+    #[test]
+    fn submodule_config_cannot_run_a_program() {
+        if !have_git() || cfg!(windows) {
+            return;
+        }
+        let inner = scratch("sm-inner");
+        g(&inner, &["init", "-q"]);
+        fs::write(inner.join("i"), "i").unwrap();
+        g(&inner, &["add", "."]);
+        g(&inner, &["commit", "-q", "-m", "i"]);
+        let outer = scratch("sm-outer");
+        g(&outer, &["init", "-q"]);
+        fs::write(outer.join("o"), "o").unwrap();
+        g(&outer, &["add", "."]);
+        g(&outer, &["commit", "-q", "-m", "o"]);
+        let o = Command::new("git").args(["-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.to_str().unwrap(), "sub"]).current_dir(&outer).env("GIT_CONFIG_GLOBAL", NULL_DEVICE).output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        // The submodule's own config tries to run a program on any status/diff inside it.
+        let marker = scratch("sm-marker").join("pwned");
+        let gitfile = fs::read_to_string(outer.join("sub/.git")).unwrap();
+        let gd = outer.join("sub").join(gitfile.trim().strip_prefix("gitdir:").unwrap().trim());
+        let gd = fs::canonicalize(gd).unwrap();
+        let mut cur = fs::read(gd.join("config")).unwrap();
+        cur.extend_from_slice(format!("[core]\n\tfsmonitor = touch {}\n", marker.display()).as_bytes());
+        fs::write(gd.join("config"), cur).unwrap();
+        fs::write(outer.join("sub/new.txt"), "n").unwrap();
+        status(&outer).unwrap();
+        stage(&outer, &["sub".into()], true).unwrap();
+        diff(&outer, "sub", true).unwrap();
+        assert!(!marker.exists(), "git descended into the submodule and ran its fsmonitor");
     }
 
     #[test]
