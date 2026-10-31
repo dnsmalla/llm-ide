@@ -21,13 +21,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          # Each runner stages and tests its OWN target (native node, native smoke test);
+          # cross-staging is not used. macos-15-intel is the x64 runner.
+          - name: macOS-arm64
             os: macos-latest
             bundles: app,dmg
-          - name: Windows
+          - name: macOS-x64
+            os: macos-15-intel
+            bundles: app,dmg
+          - name: Windows-x64
             os: windows-latest
             bundles: nsis
-          - name: Linux
+          - name: Linux-x64
             os: ubuntu-latest
             bundles: deb,appimage
     defaults:
@@ -61,12 +66,23 @@ jobs:
           npm ci --prefix desktop
           npm ci --prefix extension
 
-      # The official node binary that ships inside the bundle. The Node
-      # version is pinned; the setup-node binary is a self-contained build.
-      - name: Stage the Node core
+      # The node that ships is the pinned official Node LTS for this runner's target
+      # (desktop/scripts/node-pin.json): downloaded from nodejs.org and SHA-256 verified
+      # against the repo pin AND nodejs.org's SHASUMS256.txt, fail closed. The runner's own
+      # node (setup-node above) only runs the scripts. LLMIDE_STAGE_RELEASE=1 refuses the
+      # LLMIDE_NODE_BIN dev override.
+      - name: Stage the Node core (pinned official node, verified)
+        env:
+          LLMIDE_STAGE_RELEASE: '1'
+        run: node desktop/scripts/stage-core.mjs
+
+      # Imports every runtime dependency (incl. an in-memory better-sqlite3 open) with the
+      # STAGED node, then starts the staged core the way the host does and checks /health,
+      # the nonce echo, the data-dir DB and that no process survives the stop. No model call.
+      - name: Smoke-test the staged core
         run: |
-          export LLMIDE_NODE_BIN="$(node -p 'process.execPath')"
-          node desktop/scripts/stage-core.mjs
+          node desktop/scripts/check-core-deps.mjs
+          node desktop/scripts/smoke-core.mjs
 
       - name: Build UNSIGNED bundles
         working-directory: desktop

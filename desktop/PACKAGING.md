@@ -1,4 +1,4 @@
-# Packaging the Node core (Phase 0, T6)
+# Packaging the Node core (Phase 0 measurements, T6 production sidecar)
 
 Measured 2026-10-26 on macOS arm64, Node 22.23.1, release build
 (`npm run tauri build -- --bundles app,dmg`).
@@ -66,8 +66,7 @@ ship, so SEA saves little. Not recommended for Phase 1.
   `better_sqlite3.node`, and the `claude` binary if bundled); hardened runtime
   entitlements for node (JIT).
 - Per-arch builds (arm64 / x64) and a universal build double the size.
-- Windows/Linux: same layout with `node.exe` / ELF node; better-sqlite3
-  prebuilds per platform; no measurements yet.
+- Windows/Linux: same layout with `node.exe` / ELF node (staging and the Job Object / process-group code exist, see below); no measurements and no real packaged run yet.
 - The `.skills` submodule is not staged; skill files the server reads at
   runtime must be added to `stage-core.mjs`.
 - Updating the core means shipping a new app (no separate core updater yet).
@@ -86,7 +85,91 @@ resolves it (`LLMIDE_CLAUDE_PATH`, the SDK's bundled binary if present, then PAT
 well-known per-OS install dirs, each validated with a `--version` probe) and the SDK engine
 passes it as `pathToClaudeCodeExecutable`. When nothing is found the turn fails with an
 `ENGINE_ERROR` telling the user to install Claude Code and run `claude login`. Still open:
-a real packaged-app run on all three OSes (Tauri plan T6).
+a real packaged-app run on Windows and Linux (see "Production sidecar" below).
+
+## Production sidecar (T6)
+
+What the host guarantees about the Node core. Code: `src-tauri/src/core_host.rs`
+(lifecycle), `proc_tree.rs` (tree stop), `core_env.rs` (environment), `fsutil.rs`
+(data dir); staging: `scripts/stage-core.mjs`, `node-runtime.mjs`, `node-pin.json`.
+
+**Lifecycle.** The core starts on launch (a healthy `:3456` is adopted, never supervised or
+killed). A supervisor thread watches the spawned core: child exit, and `/health` every 5 s
+that must echo the launch nonce (3 consecutive failures = hung: the tree is killed). A crash or
+hang restarts the core with exponential backoff (1 s doubling, cap 30 s, fresh nonce, first
+free port of 3457..3459). `RestartPolicy`: 5 crashes inside 5 minutes is a **fatal** state
+(`state: "failed"`, `fatal: true`); there is no restart loop and old crashes age out. A first
+start that fails is reported as is, with no retry. Quit (`ExitRequested`/`Exit`, Ctrl-C, panic
+hook, `Drop`) calls `shutdown()`: it cancels a pending restart, and a spawn racing the quit is
+killed as soon as it lands (`closing` flag). Double launch is refused by the data-dir lock
+(`flock` on unix, an exclusive open on Windows).
+
+**Whole-tree stop.** The core is spawned as the leader of its own process group (unix) and
+stopping sends SIGTERM to the group, waits 3 s for the leader, then SIGKILLs the group (also when
+the leader exited but a member survives, e.g. after a crash). On Windows the child is put in a
+Job Object with `KILL_ON_JOB_CLOSE`, so terminating it, or the host dying, kills Node and every
+`claude`/git/MCP child. Limits: a grandchild that calls `setsid` leaves the group; a Windows
+grandchild spawned in the milliseconds before the job assignment (std cannot spawn suspended) is
+not in the job. Both are out of reach of node's own startup in practice. Tested with a fake
+server that spawns grandchildren (`cargo test --lib`: quit, crash, hang, stubborn SIGTERM
+ignorer, leader-already-gone).
+
+**`core_status` (additive, no existing field changed).** New `state` value `restarting`; new
+fields `restarts` (count), `restart_in_ms` (while restarting), `fatal` (bool), `claude`
+(`unknown` | `found` | `missing`), `claude_source` (`env` | `bundled` | `installed`, never a
+path) and `claude_notice` (the server's own install message when `missing`). A consumer that
+switches on `state` must handle `restarting`.
+
+**Data dir.** `llm-ide-desktop` under `~/Library/Application Support` (macOS),
+`%LOCALAPPDATA%` (Windows) or `$XDG_DATA_HOME`/`~/.local/share` (Linux); override with an
+absolute `LLMIDE_DESKTOP_DATA_DIR`. It deliberately does not follow the bundle identifier
+(`app_data_dir()` would move when the PoC identifier changes) and does not collide with the Mac
+app's `llm-ide/system`. The core runs with `LLMIDE_DATA_DIR` and `LLMIDE_DB_PATH` both set to
+`<data>/core` / `<data>/core/data.db`; the explicit DB path makes the server's repo-kb to
+data-dir boot migration a no-op, so a run from a checkout can never MOVE the live `kb/data.db`.
+See [docs/how-to/desktop-core-lifecycle.md](../docs/how-to/desktop-core-lifecycle.md) for the
+import path from the Mac app.
+
+**Environment.** The child gets `env_clear()` plus an allowlist (`core_env.rs`: HOME/USER,
+locale, temp dirs, Windows profile vars, proxy and CA variables, `LLMIDE_CLAUDE_PATH`,
+`LLMIDE_FEATURES`), the two secrets, and the `LLMIDE_*` the host sets. `ANTHROPIC_*`, provider keys,
+`NODE_OPTIONS`, tokens never reach it. `PATH` is the host's own, plus the `claude` install dirs
+that `extension/providers/claude-path.mjs` searches (`~/.claude/local`, `~/.local/bin`,
+Homebrew, `~/.npm-global/bin`, nvm; Windows `%APPDATA%\npm`, `%LOCALAPPDATA%\Programs[\claude]`),
+the OS system dirs, and the bundled node's dir last (so an npm-installed `claude` with an
+`env node` shebang finds a node; the user's own wins). Keep `core_env::well_known_dirs` and
+`claude-path.mjs` in step.
+
+**Finding `claude`.** A GUI app has a minimal PATH, so after the core is ready the host runs the
+server's own `claude-path.mjs` (`resolveClaudeExecutable`) under the core's node and environment
+and reports the result in `core_status.claude*`; while missing it re-checks every 30 s, so
+installing Claude Code is noticed without a restart. A probe that cannot run reports `unknown`,
+never `missing`. `LLMIDE_CLAUDE_PATH` in the host's environment is passed through; there is no
+host settings file for it yet.
+
+**Packaged Node.** `stage-core.mjs` takes `--target darwin-arm64|darwin-x64|win32-x64|linux-x64`
+(default: this machine; the release workflow stages each target on a native runner). It
+downloads the version in `scripts/node-pin.json` (Node 22 LTS) from nodejs.org and requires the
+archive's SHA-256 to equal both the repo pin and the line in nodejs.org's `SHASUMS256.txt`
+(fail closed; the SHASUMS signature is not checked). Only the `node` executable and its LICENSE
+are copied: npm, npx, corepack, headers and docs never ship. Homebrew/distro node is never used;
+`LLMIDE_NODE_BIN` remains an offline dev override for the host target only and is refused when
+`LLMIDE_STAGE_RELEASE=1`. better-sqlite3 13 ships N-API prebuilds for every target inside the
+package (`prebuilds/<platform>-<arch>.node`), so nothing is built or `prebuild-install`ed and no
+ABI match with the pinned node is needed; staging keeps only the target's file and fails if it is
+missing. `scripts/check-core-deps.mjs` loads the staged `.node` under the STAGED node (in-memory
+open) along with the other runtime modules; `scripts/smoke-core.mjs` starts the staged core as the
+host does (cleared env, nonce, secrets, data dir), checks `/health`, the nonce echo, the DB
+location, the claude probe, then stops the group and asserts nothing survives.
+`desktop-release.yml` (manual, unsigned, no secrets) runs stage + check + smoke on macOS arm64,
+macOS x64, Windows x64 and Linux x64 before building.
+
+**Verified here (macOS arm64, 2026-10-31):** pinned node download and hash check, stage, 6/6
+dependency check, `smoke-core` (health 518 ms, nonce, DB, probe, clean stop), the real launcher
+end to end (`cargo test --lib real_staged_core -- --ignored`, 698 ms to healthy, claude found),
+79 cargo tests. **Not run:** any Windows or Linux execution (the Job Object code, `node.exe`
+staging, `taskkill` smoke path, the Windows exclusive-open lock and the workflow matrix were only
+type-checked or read), a signed or Finder-launched macOS run of the new supervisor, macOS x64.
 
 ## Secrets
 
