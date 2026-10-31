@@ -57,6 +57,12 @@ pub const SCOPES: [&str; 5] = ["explorer", "conflicts", "visual", "docGen", "qui
 const ROLES: [&str; 3] = ["user", "assistant", "toolResult"];
 const LOCK_FILE: &str = "chat-store.lock";
 const PENDING_FILE: &str = "pending-deletes.json";
+/// Where a deleted chat file is moved (inside the sessions folder; the Mac app ignores sub-folders).
+pub const DELETED_DIR: &str = ".deleted";
+/// How long a deleted chat stays recoverable.
+pub const TRASH_RETENTION_SECS: u64 = 30 * 24 * 3600;
+/// Most recoverable copies kept; the oldest go first.
+pub const TRASH_MAX_ENTRIES: usize = 500;
 
 // ---- errors ---------------------------------------------------------------------------------
 
@@ -1192,16 +1198,60 @@ impl ChatStore {
             }
         }
         self.add_tombstone(&id)?;
-        let existed = match std::fs::remove_file(&path) {
-            Ok(()) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(e) => return Err(io_err("remove chat", &e)),
-        };
+        let existed = self.trash_file(&id)?;
         let mut c = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
         if c.entries.remove(&id).is_some() {
             c.dirty = true;
         }
         Ok(existed)
+    }
+
+    /// The chat's title as stored (for a confirmation dialog); `None` when unreadable. Not logged.
+    pub fn title_of(&self, id: &str) -> Option<String> {
+        let f = File::open(self.file_path(id)).ok()?;
+        let size = f.metadata().ok()?.len();
+        match parse_header(&f, size, id) {
+            Parsed::Ok { summary, owner } if owner.as_deref().is_none_or(|o| o == self.user_id()) => Some(summary.title),
+            _ => None,
+        }
+    }
+
+    fn deleted_dir(&self) -> PathBuf {
+        self.inner.layout.sessions.join(DELETED_DIR)
+    }
+
+    /// Moves `<id>.json` to `<sessions>/.deleted/<id>.<unix ts>.json` (private folder), never removes it.
+    /// `Ok(false)` when there was no file. Prunes the recoverable folder afterwards. The caller holds the lock.
+    fn trash_file(&self, id: &str) -> Result<bool> {
+        let from = self.file_path(id);
+        match std::fs::symlink_metadata(&from) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(io_err("stat chat", &e)),
+        }
+        let dir = crate::fsutil::private_dir(&self.deleted_dir()).map_err(|e| StoreError::new("io", e))?;
+        let ts = now_unix() as u64;
+        let mut moved = false;
+        for n in 0..1000u32 {
+            let name = if n == 0 { format!("{id}.{ts}.json") } else { format!("{id}.{ts}-{n}.json") };
+            let to = dir.join(name);
+            if to.exists() {
+                continue;
+            }
+            std::fs::rename(&from, &to).map_err(|e| io_err("move chat to the recoverable folder", &e))?;
+            moved = true;
+            break;
+        }
+        if !moved {
+            return Err(StoreError::new("io", "cannot find a free name in the recoverable folder"));
+        }
+        prune_trash(&dir, ts);
+        Ok(true)
+    }
+
+    /// Recoverable copies: (chat id, deleted-at unix seconds, path), newest first.
+    pub fn trashed(&self) -> Vec<(String, u64, PathBuf)> {
+        list_trash(&self.deleted_dir())
     }
 
     /// Removes files whose delete is pending (a late write or the other app resurrected them).
@@ -1219,7 +1269,7 @@ impl ChatStore {
                 if m.is_file() {
                     // Only this user's (or unowned) files; another user's tombstone is theirs to send.
                     let owner = read_small(&path, SMALL_FILE_MAX).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("ownerUserId").and_then(Value::as_str).map(str::to_owned));
-                    if owner.as_deref().is_none_or(|o| o == self.user_id()) && std::fs::remove_file(&path).is_ok() {
+                    if owner.as_deref().is_none_or(|o| o == self.user_id()) && matches!(self.trash_file(&id), Ok(true)) {
                         n += 1;
                     }
                 }
@@ -1376,6 +1426,33 @@ fn ensure_dir(dir: &Path) -> Result<()> {
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => crate::fsutil::private_dir(dir).map(|_| ()).map_err(|e| StoreError::new("io", e)),
         Err(e) => Err(io_err("stat store dir", &e)),
+    }
+}
+
+/// (id, deleted-at, path) of every well-formed entry in the recoverable folder, newest first.
+fn list_trash(dir: &Path) -> Vec<(String, u64, PathBuf)> {
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(stem) = name.strip_suffix(".json") else { continue };
+            let Some((id, rest)) = stem.split_once('.') else { continue };
+            let Some(id) = canonical_chat_id(id) else { continue };
+            let Some(ts) = rest.split('-').next().and_then(|t| t.parse::<u64>().ok()) else { continue };
+            v.push((id, ts, e.path()));
+        }
+    }
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    v
+}
+
+/// Drops copies older than the retention and the oldest beyond the count bound.
+fn prune_trash(dir: &Path, now: u64) {
+    for (i, (_, ts, path)) in list_trash(dir).into_iter().enumerate() {
+        if i >= TRASH_MAX_ENTRIES || now.saturating_sub(ts) > TRASH_RETENTION_SECS {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

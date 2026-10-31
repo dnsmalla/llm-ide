@@ -19,6 +19,7 @@ use tauri::State;
 
 use crate::chat_archive::{ArchiveReport, Archiver, HttpRemote, JournalDoc, LifecycleRemote, RemoteError, QUIT_CAP, SWEEP_CAP};
 use crate::chat_store::{layout_here, valid_user_id, ChatStore, ListPage, ListQuery, LoadedChat, SaveMode, SaveOutcome, StoreError, StoreLayout, MAX_LIST_PAGE, MAX_PAGE};
+use crate::confirm::RateLimit;
 use crate::core_host::{CoreHost, Phase};
 
 fn err(code: &'static str, message: &str) -> StoreError {
@@ -34,13 +35,29 @@ struct Bound {
     shared_with_mac: bool,
 }
 
-#[derive(Default)]
 struct Svc {
     bound: Mutex<Option<Bound>>,
     swept: Mutex<HashSet<String>>,
     last_sweep: Mutex<Option<ArchiveReport>>,
     last_quit: Mutex<Option<ArchiveReport>>,
     quit_started: AtomicBool,
+    /// A page cannot wipe the store: one delete every 1.5 s, 10 a minute, one native dialog at a time.
+    delete_limit: RateLimit,
+    delete_open: AtomicBool,
+}
+
+impl Default for Svc {
+    fn default() -> Self {
+        Self {
+            bound: Mutex::new(None),
+            swept: Mutex::new(HashSet::new()),
+            last_sweep: Mutex::new(None),
+            last_quit: Mutex::new(None),
+            quit_started: AtomicBool::new(false),
+            delete_limit: RateLimit::new(1_500, 10),
+            delete_open: AtomicBool::new(false),
+        }
+    }
 }
 
 /// Cheap-to-clone state managed by Tauri.
@@ -258,14 +275,40 @@ pub async fn chat_save(svc: State<'_, ChatService>, args: SaveArgs) -> Result<Sa
     blocking(move || store.save(args.session, mode, args.expected_revision.as_deref(), args.touch.unwrap_or(true))).await
 }
 
-#[tauri::command]
-pub async fn chat_delete(svc: State<'_, ChatService>, args: DeleteArgs) -> Result<DeleteResult, StoreError> {
-    let (store, url, token) = svc.snapshot()?;
-    blocking(move || {
-        let existed = store.delete(&args.id)?;
+/// Text of the native delete dialog: fixed template, the chat's own title (read from the file, sanitised) quoted.
+pub(crate) fn delete_text(title: &str) -> String {
+    let t = crate::confirm::sanitize_line(title, 80);
+    let quoted = if t.is_empty() { "this chat".to_string() } else { format!("\u{201C}{t}\u{201D}") };
+    format!("Delete {quoted}?\n\nIt disappears from your chat list. A recoverable copy is kept for 30 days in the chat folder (.deleted).")
+}
+
+impl ChatService {
+    /// Deletes one chat after `confirm` (a native Cancel-first dialog in the app) said yes. Rate limited
+    /// (a loop over the chat list cannot wipe the store), one dialog at a time, and the file is MOVED to
+    /// the recoverable folder, never removed.
+    pub(crate) fn delete_confirmed(&self, raw_id: &str, confirm: &dyn Fn(&str) -> bool, url: &str, token: &str) -> Result<DeleteResult, StoreError> {
+        let store = self.store()?;
+        let id = crate::chat_store::canonical_chat_id(raw_id).ok_or_else(|| err("invalid_id", "chat id is not a UUID"))?;
+        if !self.0.delete_limit.allow() {
+            return Err(err("rate_limited", "too many deletes; wait a moment"));
+        }
+        if self.0.delete_open.swap(true, Ordering::SeqCst) {
+            return Err(err("busy", "a confirmation is already open"));
+        }
+        struct Open<'a>(&'a AtomicBool);
+        impl Drop for Open<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _open = Open(&self.0.delete_open);
+        let title = store.title_of(&id).unwrap_or_default();
+        if !confirm(&delete_text(&title)) {
+            return Err(err("declined", "the delete was not confirmed"));
+        }
+        let existed = store.delete(&id)?;
         // Best effort, bounded: the tombstone is already durable, so a miss is retried by the sweep.
-        let id = crate::chat_store::canonical_chat_id(&args.id).unwrap_or_default();
-        let tombstone = match HttpRemote::new(&url, &token) {
+        let tombstone = match HttpRemote::new(url, token) {
             Ok(remote) => {
                 let iso = crate::chat_archive::iso_utc(crate::chat_store::now_unix());
                 match remote.session_purge(&id, &iso, Duration::from_secs(2)) {
@@ -280,6 +323,16 @@ pub async fn chat_delete(svc: State<'_, ChatService>, args: DeleteArgs) -> Resul
             Err(_) => "none",
         };
         Ok(DeleteResult { existed, tombstone })
+    }
+}
+
+#[tauri::command]
+pub async fn chat_delete(svc: State<'_, ChatService>, args: DeleteArgs) -> Result<DeleteResult, StoreError> {
+    let (_, url, token) = svc.snapshot()?;
+    let svc = svc.inner().clone();
+    blocking(move || {
+        let ask = |text: &str| crate::confirm::ask("Delete this chat?", text, "Delete chat", true);
+        svc.delete_confirmed(&args.id, &ask, &url, &token)
     })
     .await
 }
@@ -316,6 +369,54 @@ mod tests {
 
     fn layout(t: &Tmp) -> impl Fn(&str) -> Result<StoreLayout, String> + '_ {
         move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions"), shared_with_mac: false })
+    }
+
+    #[test]
+    fn a_declined_native_confirm_deletes_nothing_and_asks_per_chat() {
+        let t = Tmp::new("svc-del");
+        let svc = ChatService::new();
+        let url = serve(FakeCore::default(), "tok", "user-42");
+        svc.bind(&url, "tok", &layout(&t), None).unwrap();
+        let store = svc.store().unwrap();
+        let id = "AAAAAAAA-0000-4000-8000-000000000001";
+        store.save(crate::chat_store::tests::session(id, 3), SaveMode::Replace, None, true).unwrap();
+        let asked = std::cell::Cell::new(0);
+        let no = |_: &str| {
+            asked.set(asked.get() + 1);
+            false
+        };
+        let r = svc.delete_confirmed(id, &no, &url, "tok");
+        assert_eq!(r.unwrap_err().code, "declined");
+        assert!(t.0.join("chats/user-42/sessions").join(format!("{id}.json")).exists());
+        assert_eq!(store.pending_delete_count(), 0, "no tombstone for a declined delete");
+        let yes = |text: &str| {
+            assert!(text.contains("30 days"), "the dialog says a copy is kept: {text}");
+            true
+        };
+        std::thread::sleep(Duration::from_millis(1_600)); // past the rate limit's minimum gap
+        let ok = svc.delete_confirmed(id, &yes, &url, "tok").unwrap();
+        assert!(ok.existed);
+        assert_eq!(store.trashed().len(), 1);
+    }
+
+    #[test]
+    fn bulk_deletes_are_rate_limited() {
+        let t = Tmp::new("svc-rl");
+        let svc = ChatService::new();
+        let url = serve(FakeCore::default(), "tok", "user-42");
+        svc.bind(&url, "tok", &layout(&t), None).unwrap();
+        let yes = |_: &str| true;
+        let mut limited = 0;
+        for i in 0..12u32 {
+            let id = format!("AAAAAAAA-0000-4000-8000-{i:012}");
+            let mut body = crate::chat_store::tests::session(&id, 1);
+            body["ownerUserId"] = serde_json::json!("user-42");
+            std::fs::write(t.0.join("chats/user-42/sessions").join(format!("{id}.json")), serde_json::to_vec(&body).unwrap()).unwrap();
+            if svc.delete_confirmed(&id, &yes, &url, "tok").is_err_and(|e| e.code == "rate_limited") {
+                limited += 1;
+            }
+        }
+        assert!(limited >= 10, "a loop over chat_list cannot wipe everything quickly: {limited} limited");
     }
 
     #[test]

@@ -636,3 +636,61 @@ fn atomic_write_replaces_whole_or_not_at_all() {
     let tmps = std::fs::read_dir(&t.0).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
     assert_eq!(tmps, 0);
 }
+
+
+// ---- delete keeps a recoverable copy ------------------------------------------------------------
+
+#[test]
+fn delete_moves_the_file_to_a_recoverable_folder_instead_of_removing_it() {
+    let t = Tmp::new("trash");
+    let s = store(&t, "alice");
+    s.save(session(ID1, 3), SaveMode::Replace, None, true).unwrap();
+    let original = std::fs::read(t.0.join("sessions").join(format!("{ID1}.json"))).unwrap();
+    assert!(s.delete(ID1).unwrap());
+    assert!(!t.0.join("sessions").join(format!("{ID1}.json")).exists());
+    let kept = s.trashed();
+    assert_eq!(kept.len(), 1, "one recoverable copy");
+    assert_eq!(kept[0].0, ID1);
+    assert_eq!(std::fs::read(&kept[0].2).unwrap(), original, "byte-identical copy");
+    assert!(kept[0].2.starts_with(t.0.join("sessions").join(".deleted")));
+    // The recoverable folder is not a chat and does not show up in the listing.
+    assert_eq!(s.list(&q(10)).unwrap().total, 0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let m = std::fs::metadata(t.0.join("sessions").join(".deleted")).unwrap().permissions().mode();
+        assert_eq!(m & 0o077, 0, "private folder");
+    }
+}
+
+#[test]
+fn a_resurrected_file_is_trashed_not_removed_by_the_sweep() {
+    let t = Tmp::new("trash-resurrect");
+    let s = store(&t, "alice");
+    s.save(session(ID1, 2), SaveMode::Replace, None, true).unwrap();
+    s.delete(ID1).unwrap();
+    put(&t, ID1, &serde_json::to_vec(&session(ID1, 2)).unwrap());
+    assert_eq!(s.enforce_tombstones().unwrap(), 1);
+    assert_eq!(s.trashed().len(), 2, "both copies are kept");
+}
+
+#[test]
+fn trash_retention_and_count_are_bounded() {
+    let t = Tmp::new("trash-bound");
+    let s = store(&t, "alice");
+    let dir = t.0.join("sessions").join(".deleted");
+    std::fs::create_dir_all(&dir).unwrap();
+    let now = now_unix() as u64;
+    let old = now - TRASH_RETENTION_SECS - 10;
+    const OLD_ID: &str = "BBBBBBBB-0000-4000-8000-000000000009";
+    std::fs::write(dir.join(format!("{OLD_ID}.{old}.json")), b"{}").unwrap();
+    for i in 0..(TRASH_MAX_ENTRIES + 5) {
+        std::fs::write(dir.join(format!("AAAAAAAA-0000-4000-8000-{i:012}.{}.json", now - 100 - i as u64)), b"{}").unwrap();
+    }
+    s.save(session(ID1, 1), SaveMode::Replace, None, true).unwrap();
+    s.delete(ID1).unwrap();
+    let kept = s.trashed();
+    assert!(kept.iter().all(|k| k.0 != OLD_ID), "older than the retention is pruned");
+    assert!(kept.len() <= TRASH_MAX_ENTRIES, "{}", kept.len());
+    assert!(kept.iter().any(|k| k.0 == ID1), "the newest copy always survives");
+}
