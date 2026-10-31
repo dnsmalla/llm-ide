@@ -1,0 +1,31 @@
+{
+ "nextPageToken": "FP2",
+ "files": [
+  {
+   "id": "folderTick1",
+   "name": "Project",
+   "mimeType": "application/vnd.google-apps.folder",
+   "parents": [
+    "rootFolder1"
+   ]
+  },
+  {
+   "id": "docInTicked1",
+   "name": "Design doc",
+   "mimeType": "application/vnd.google-apps.document",
+   "modifiedTime": "2025-10-01T00:00:00Z",
+   "parents": [
+    "folderTick1"
+   ],
+   "webViewLink": "https://docs.google.com/document/d/docInTicked1/edit"
+  },
+  {
+   "id": "sheetTicked1",
+   "name": "Budget",
+   "mimeType": "application/vnd.google-apps.spreadsheet",
+   "parents": [
+    "folderTick1"
+   ]
+  }
+ ]
+}

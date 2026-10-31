@@ -1,0 +1,7 @@
+{
+ "id": "otherFolder1",
+ "name": "Personal",
+ "parents": [
+  "rootFolder1"
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "items": [
+  {
+   "id": "primary-id@example.com",
+   "summary": "Me",
+   "primary": true,
+   "accessRole": "owner"
+  },
+  {
+   "id": "team@group.calendar.google.com",
+   "summary": "Team",
+   "accessRole": "reader"
+  }
+ ]
+}

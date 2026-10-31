@@ -1,0 +1,34 @@
+{
+ "newStartPageToken": "T200",
+ "changes": [
+  {
+   "fileId": "docInTicked1",
+   "removed": false,
+   "file": {
+    "id": "docInTicked1",
+    "name": "Design doc v2",
+    "mimeType": "application/vnd.google-apps.document",
+    "parents": [
+     "folderTick1"
+    ]
+   }
+  },
+  {
+   "fileId": "docOutside1",
+   "removed": true
+  },
+  {
+   "fileId": "sheetTicked1",
+   "removed": false,
+   "file": {
+    "id": "sheetTicked1",
+    "name": "Budget",
+    "mimeType": "application/vnd.google-apps.spreadsheet",
+    "parents": [
+     "folderTick1"
+    ],
+    "trashed": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "nextSyncToken": "SYNC2",
+ "items": [
+  {
+   "id": "solo",
+   "status": "confirmed",
+   "summary": "Dentist (moved)",
+   "start": {
+    "dateTime": "2025-11-03T10:00:00+09:00"
+   },
+   "end": {
+    "dateTime": "2025-11-03T11:00:00+09:00"
+   },
+   "updated": "2025-10-30T00:00:00.000Z",
+   "htmlLink": "https://www.google.com/calendar/event?eid=xsolo"
+  },
+  {
+   "id": "abc_20251110T010000Z",
+   "status": "cancelled"
+  }
+ ]
+}

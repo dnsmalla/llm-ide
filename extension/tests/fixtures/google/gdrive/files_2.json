@@ -1,0 +1,27 @@
+{
+ "files": [
+  {
+   "id": "docOutside1",
+   "name": "Private notes",
+   "mimeType": "application/vnd.google-apps.document",
+   "parents": [
+    "otherFolder1"
+   ]
+  },
+  {
+   "id": "pdfTicked01",
+   "name": "Spec.pdf",
+   "mimeType": "application/pdf",
+   "size": "1234",
+   "parents": [
+    "folderTick1"
+   ]
+  },
+  {
+   "id": "sharedFile1",
+   "name": "Shared",
+   "mimeType": "application/vnd.google-apps.document",
+   "driveId": "drive1"
+  }
+ ]
+}
