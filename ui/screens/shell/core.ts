@@ -63,6 +63,16 @@ export function isLoopbackUrl(url: string): boolean {
   }
 }
 
+/**
+ * Extra per-call headers a caller may add. Everything else (Authorization, Content-Type, Host...) is refused,
+ * so no screen can use `headers` to smuggle credentials or change routing. The Bypass approval token is the only entry:
+ * it must have the host's exact shape (`v1.<expiry_ms>.<nonce hex32>.<mac hex64>`) and only ever goes to a core the
+ * trust gate allows (a spawned or user-confirmed one).
+ */
+export const EXTRA_HEADER_ALLOWLIST: Readonly<Record<string, RegExp>> = Object.freeze({
+  "x-llmide-host-approval": /^v1\.\d{1,16}\.[0-9a-f]{32}\.[0-9a-f]{64}$/,
+});
+
 export interface CoreClientOptions {
   /** Current core base URL (no trailing path), or `null` while the core is not up. */
   baseUrl: () => string | null;
@@ -253,6 +263,20 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     return trimmed;
   };
 
+  /** Validates caller headers against the allowlist; returns them lower-cased. Throws before anything is sent. */
+  const checkExtraHeaders = (extra: Record<string, string> | undefined): Record<string, string> => {
+    const out: Record<string, string> = {};
+    if (!extra) return out;
+    for (const [k, v] of Object.entries(extra)) {
+      const name = k.toLowerCase();
+      const shape = Object.hasOwn(EXTRA_HEADER_ALLOWLIST, name) ? EXTRA_HEADER_ALLOWLIST[name] : null;
+      if (!shape || typeof v !== "string" || !shape.test(v)) throw new CoreError(0, "BAD_REQUEST", "That request header is not allowed.");
+      requireTrusted(); // an approval token never goes to an unverified core
+      out[name] = v;
+    }
+    return out;
+  };
+
   const urlFor = (path: string): string => {
     if (!/^\/(?![/\\])/.test(path) || /[\r\n]/.test(path)) throw new CoreError(0, "BAD_REQUEST", "Core paths must start with a single '/'.");
     return base() + path;
@@ -334,9 +358,10 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     return { body: JSON.stringify(body), type: "application/json" };
   };
 
-  async function send(path: string, opts: RequestOptions, retried: boolean, streamInit?: { accept: string }): Promise<Response> {
+  async function send(path: string, opts: RequestOptions, retried: boolean, streamInit?: { accept: string; lastEventId?: string }): Promise<Response> {
     const auth = opts.auth !== false;
-    const headers: Record<string, string> = { Accept: streamInit?.accept ?? "application/json", ...opts.headers };
+    const headers: Record<string, string> = { Accept: streamInit?.accept ?? "application/json", ...checkExtraHeaders(opts.headers) };
+    if (streamInit?.lastEventId) headers["Last-Event-ID"] = streamInit.lastEventId;
     const enc = encodeBody(opts.body);
     if (enc.type) headers["Content-Type"] = enc.type;
     if (auth) Object.assign(headers, await authHeader());
@@ -395,13 +420,11 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     },
 
     async *stream(path: string, opts: StreamOptions = {}): AsyncGenerator<SseEvent, void, void> {
-      const headers: Record<string, string> = { ...opts.headers };
-      if (opts.lastEventId) headers["Last-Event-ID"] = opts.lastEventId;
       const res = await send(
         path,
-        { method: opts.method ?? "GET", body: opts.body, signal: opts.signal, timeoutMs: opts.connectTimeoutMs ?? defaultTimeout, headers },
+        { method: opts.method ?? "GET", body: opts.body, signal: opts.signal, timeoutMs: opts.connectTimeoutMs ?? defaultTimeout, headers: opts.headers },
         false,
-        { accept: "text/event-stream" },
+        { accept: "text/event-stream", lastEventId: opts.lastEventId },
       );
       if (!res.ok) throw await errorFromResponse(res);
       if (!res.body) throw new CoreError(502, "BAD_RESPONSE", "The core sent no stream body.");

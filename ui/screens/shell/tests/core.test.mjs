@@ -254,3 +254,37 @@ test("H7: an untrusted core never receives credentials or a token publish", asyn
   await client.logout(); // local drop only, refresh token not sent
   assert.equal(calls.length, before);
 });
+
+const APPROVAL = `v1.1900000000001.${"a".repeat(32)}.${"b".repeat(64)}`;
+const sseOk = () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"t":1}\n\n')); c.close(); } }), { headers: { "content-type": "text/event-stream" } });
+
+test("extra headers: only the host-approval header with the host's token shape; everything else is refused unsent", async () => {
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : sseOk()));
+  await client.login("a@b.c", "pw");
+  const sent = calls.length;
+  const bad = [
+    { Authorization: "Bearer evil" }, { authorization: "x" }, { Cookie: "a=b" }, { Host: "evil" }, { "Content-Type": "text/html" },
+    { "x-llmide-host-approval": "v1.1.2.3" }, { "x-llmide-host-approval": `${APPROVAL}\r\nX: y` }, { "x-llmide-host-approval": 5 },
+    { "x-llmide-host-approval": APPROVAL, "x-other": "1" }, { __proto__: null, constructor: APPROVAL },
+  ];
+  for (const headers of bad) {
+    await assert.rejects(client.stream("/agent/v2/stream", { method: "POST", body: {}, headers }).next(), (e) => e.code === "BAD_REQUEST");
+    await assert.rejects(client.request("/x", { headers }), (e) => e.code === "BAD_REQUEST");
+  }
+  assert.equal(calls.length, sent, "nothing was sent");
+  for await (const _ev of client.stream("/agent/v2/stream", { method: "POST", body: {}, headers: { "X-LLMIDE-Host-Approval": APPROVAL } })) void _ev;
+  const h = calls.at(-1).init.headers;
+  assert.equal(h["x-llmide-host-approval"], APPROVAL);
+  assert.equal(h.Authorization, "Bearer acc1");
+});
+
+test("extra headers: an unverified (untrusted) core never receives the approval token", async () => {
+  let trusted = true;
+  const { client, calls } = setup((url) => (url.endsWith("/auth/login") ? json(200, session(1)) : sseOk()), { credentialsAllowed: () => trusted });
+  await client.login("a@b.c", "pw");
+  trusted = false;
+  const sent = calls.length;
+  await assert.rejects(client.stream("/agent/v2/stream", { method: "POST", body: {}, headers: { "x-llmide-host-approval": APPROVAL } }).next(), (e) => e.code === "UNTRUSTED_CORE");
+  await assert.rejects(client.request("/x", { auth: false, headers: { "x-llmide-host-approval": APPROVAL } }), (e) => e.code === "UNTRUSTED_CORE");
+  assert.equal(calls.length, sent);
+});
