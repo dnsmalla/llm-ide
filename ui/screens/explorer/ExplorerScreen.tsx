@@ -193,6 +193,10 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           active={active}
           onContextMenu={(path, x, y) => setMenu({ x, y, target: { kind: "tree", path } })}
           onDropMove={(paths, dest) => setDialog({ type: "move", paths, dest })}
+          onKeyCommand={(cmd, path) => {
+            if (cmd === "rename") setDialog({ type: "prompt", kind: "rename", path });
+            else setDialog({ type: "delete", paths: snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : [path] });
+          }}
         />
       </aside>
       <ResizableDivider

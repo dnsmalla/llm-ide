@@ -56,13 +56,13 @@ How to use: one row per behaviour. **Mac** is the reference (Swift source named 
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| File tree, virtualised, expand/collapse, icons, drag and drop, clipboard | yes (`ExplorerTreeList, ExplorerTreeStore`) | - |  |
-| Create, rename, delete (to trash), duplicate, reveal in OS | yes (`ExplorerFileOps`) | - |  |
-| Keyboard commands (rename, delete, copy/paste) | yes (`ExplorerKeyCommand`) | - |  |
-| Editor tabs: open, close, reorder, dirty marker, restore on start | yes (`EditorTabBar`) | - |  |
-| Monaco editor: highlight, find/replace, theme, large file guard, binary refusal | yes (`FileDetailView`) | - |  |
-| Save atomic, external-change detection and conflict prompt | yes (`(new rule)`) | - |  |
-| Hunk staging list and diff view | yes (`HunkStagingList`) | - |  |
+| File tree, virtualised, expand/collapse, icons, drag and drop, clipboard | yes (`ExplorerTreeList, ExplorerTreeStore`) | ~ | partial: paged host listing + windowed rows, keyboard nav, type-ahead, multi-select, context menu, drag within root with confirm, git decoration (`ui/screens/explorer/{tree-model,FileTree}.*`; tests `tree-model.test.mjs` incl. 100k layout 2.8 ms / window 0.05 ms, `components.test.mjs`; Rust `fs_ops` 100k listing: first page 128 ms, all 100 pages 313 ms release); clipboard copy/paste of files not built; GUI scroll fps and real drag not run on a device |
+| Create, rename, delete (to trash), duplicate, reveal in OS | yes (`ExplorerFileOps`) | ~ | partial: create/rename/delete-to-trash/move, never overwrite, symlink/FIFO/hardlink/TOCTOU refusals (`desktop/src-tauri/src/fs_ops.rs`, `cargo test --lib fs_ops`, controller tests); duplicate and reveal-in-OS not built; trash call not exercised in a unit test (it would touch the real trash) |
+| Keyboard commands (rename, delete, copy/paste) | yes (`ExplorerKeyCommand`) | ~ | partial: arrows, Home/End, Page keys, F2 rename, Delete / Cmd+Backspace trash, Space select, type-ahead, Shift range (`FileTree.tsx`, `tree-model.test.mjs`); copy/paste of files not built |
+| Editor tabs: open, close, reorder, dirty marker, restore on start | yes (`EditorTabBar`) | ~ | partial: preview/regular/pinned tabs, dirty marker, unsaved prompt, drag reorder, per-project session restore in localStorage (`tabs-model.ts`, `TabBar.tsx`, `session.ts`; tests `tabs-model.test.mjs`, `controller.test.mjs` "session"); session is webview localStorage, not an app-data file; unsaved-buffer crash recovery file not built |
+| Monaco editor: highlight, find/replace, theme, large file guard, binary refusal | yes (`FileDetailView`) | ~ | partial: lazy Monaco chunk, models disposed on close and LRU-capped (24 models / 64M chars, dirty never evicted), large-file mode above 1 MB, binary and too-large placeholders, ranged "open anyway", read-only for non-UTF-8, tokens-based theme (`desktop/src/editor/explorerHost.ts`, `colors.ts`, `scripts/monaco-color.test.mjs`); find/replace is Monaco's built-in; never run in the real webview here |
+| Save atomic, external-change detection and conflict prompt | yes (`(new rule)`) | ~ | partial: temp + fsync + rename + dir fsync, mode kept, hash-based optimistic concurrency, watcher (debounced, bounded, non-recursive, poll fallback) with reload / keep-mine banner (`fs_ops.rs`, `fs_watch.rs`, `conflict.ts`; Rust tests and `controller.test.mjs` "external edit"); watcher on Windows and network shares not run |
+| Hunk staging list and diff view | yes (`HunkStagingList`) | ~ | partial: side-by-side diff against HEAD for the open file (`git.rs` `git_show`, `explorerHost.showDiff`, test "diff toggles"); hunk-level staging not built (file-level `git_stage` exists) |
 | Project open, recent, broad-root refusal, project paths sheet | yes (`ProjectPathsSheet`) | - |  |
 | Project memory viewer | yes (`ProjectMemoryView`) | - |  |
 | Terminal dock: tabs, resize, consent dialog, flow control, per-OS shell (Windows run) | yes (`Terminal/*`) | - |  |

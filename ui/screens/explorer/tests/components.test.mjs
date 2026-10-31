@@ -30,7 +30,7 @@ test("tree: ARIA tree semantics, levels, expanded state, labelled rows, no raw H
   const { c } = await ctl({ "src/main.rs": "x", "src/<img src=x onerror=alert(1)>.ts": "x", "a.txt": "x" });
   await c.toggleDir("src", true);
   c.select("src", { shift: false, toggle: false });
-  const out = html(h(FileTree, { controller: c, snap: c.getSnapshot(), active: true, onContextMenu: noop, onDropMove: noop }));
+  const out = html(h(FileTree, { controller: c, snap: c.getSnapshot(), active: true, onContextMenu: noop, onDropMove: noop, onKeyCommand: noop }));
   assert.match(out, /role="tree"[^>]*aria-label="Project files"[^>]*aria-multiselectable="true"/);
   assert.match(out, /tabindex="0"/);
   assert.match(out, /role="treeitem"[^>]*aria-level="1"[^>]*aria-selected="true"[^>]*aria-expanded="true"[^>]*aria-label="src"/);
@@ -47,7 +47,7 @@ test("tree: only the window is rendered for a huge folder", async () => {
   await settle();
   const snap = c.getSnapshot();
   assert.equal(snap.layout.count, 3000);
-  const out = html(h(FileTree, { controller: c, snap, active: true, onContextMenu: noop, onDropMove: noop }));
+  const out = html(h(FileTree, { controller: c, snap, active: true, onContextMenu: noop, onDropMove: noop, onKeyCommand: noop }));
   const rendered = (out.match(/role="treeitem"/g) ?? []).length;
   assert.ok(rendered > 0 && rendered < 80, `rendered ${rendered}`);
   assert.match(out, /data-pad="bottom"/);
@@ -56,13 +56,13 @@ test("tree: only the window is rendered for a huge folder", async () => {
 test("tree: gap rows are not treeitems and are marked busy; loading/empty/error status rows are plain text", async () => {
   const files = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`f${String(i).padStart(3, "0")}.txt`, "x"]));
   const { c } = await ctl(files, 10);
-  const out = html(h(FileTree, { controller: c, snap: c.getSnapshot(), active: false, onContextMenu: noop, onDropMove: noop }));
+  const out = html(h(FileTree, { controller: c, snap: c.getSnapshot(), active: false, onContextMenu: noop, onDropMove: noop, onKeyCommand: noop }));
   assert.ok(out.includes('aria-busy="true"'), 'gap rows are marked busy');
   const empty = await ctl({ "d/x": "1" });
   await empty.fs.remove("d/x");
   await empty.c.toggleDir("d", true);
   await empty.c.refreshDir("d");
-  assert.match(html(h(FileTree, { controller: empty.c, snap: empty.c.getSnapshot(), active: false, onContextMenu: noop, onDropMove: noop })), /Empty folder/);
+  assert.match(html(h(FileTree, { controller: empty.c, snap: empty.c.getSnapshot(), active: false, onContextMenu: noop, onDropMove: noop, onKeyCommand: noop })), /Empty folder/);
 });
 
 test("tabs: tablist, selected state, dirty marker, preview and pinned flags, labelled close buttons", async () => {

@@ -12,6 +12,8 @@ export interface TreeCallbacks {
   onContextMenu(path: string | null, x: number, y: number): void;
   /** The user dropped these paths on `destDir`; the screen confirms and then moves. */
   onDropMove(paths: string[], destDir: string): void;
+  /** F2 (rename) and Delete / Cmd+Backspace (move to trash) on the focused row. */
+  onKeyCommand(cmd: "rename" | "delete", path: string): void;
 }
 
 interface Props extends TreeCallbacks {
@@ -24,7 +26,7 @@ const DND_TYPE = "application/x-llmide-paths";
 const NAV_KEYS = new Set<string>(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Enter"]);
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
-export function FileTree({ controller, snap, active, onContextMenu, onDropMove }: Props) {
+export function FileTree({ controller, snap, active, onContextMenu, onDropMove, onKeyCommand }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
@@ -104,6 +106,11 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove }
         const i = indexOfPath(layout, a.path);
         if (i >= 0) scrollToIndex(i);
       } else if (a.type === "open") void controller.openFile(a.path, false);
+      return;
+    }
+    if (snap.focusPath && (e.key === "F2" || e.key === "Delete" || (e.key === "Backspace" && e.metaKey))) {
+      e.preventDefault();
+      onKeyCommand(e.key === "F2" ? "rename" : "delete", snap.focusPath);
       return;
     }
     if (e.key === " " && snap.focusPath) {
