@@ -59,12 +59,20 @@ final class NotesFolderConfig {
         defaults.set(url.path, forKey: pathKey)
     }
 
+    /// Saves the folder and, when the app is entitled to app-scoped bookmarks, a bookmark so it is found again
+    /// after a move. Bookmark creation can fail (a build without the entitlement, or a volume that refuses it);
+    /// that must not make folder selection fail — the stored path still works for a non-sandboxed app, exactly as
+    /// `setFolderFromPath` already did. A stale bookmark is cleared so `currentFolder` cannot keep resolving to
+    /// the previous folder.
     func setFolder(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        let bm = try url.bookmarkData(options: [.withSecurityScope],
-                                      includingResourceValuesForKeys: nil,
-                                      relativeTo: nil)
-        defaults.set(bm, forKey: bookmarkKey)
+        if let bm = try? url.bookmarkData(options: [.withSecurityScope],
+                                          includingResourceValuesForKeys: nil,
+                                          relativeTo: nil) {
+            defaults.set(bm, forKey: bookmarkKey)
+        } else {
+            defaults.removeObject(forKey: bookmarkKey)
+        }
         defaults.set(url.path, forKey: pathKey)
     }
 
