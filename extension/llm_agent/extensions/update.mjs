@@ -231,19 +231,32 @@ export async function previewUpdate(userId, id, { commit, fetch: fetchImpl, sign
   };
 }
 
+/**
+ * Put `files` at <itemDir>/<sha>/. An existing directory of that name is renamed ASIDE, never deleted here: the
+ * caller calls `commit()` once the state write succeeded (the old bytes are then removed) or `rollback()` when it
+ * did not (they are put back). So a failed write never costs the previous version's bytes.
+ */
 function swapIn(userId, itemDir, files, sha) {
   const finalDir = join(itemDir, sha);
-  const staging = join(itemDir, `.staging-${randomBytes(6).toString('hex')}`);
+  const tag = randomBytes(6).toString('hex');
+  const staging = join(itemDir, `.staging-${tag}`);
+  const aside = join(itemDir, `.old-${tag}`);
+  let movedAside = false;
   try {
     mkdirSync(itemDir, { recursive: true, mode: 0o700 });
     writeTree(files, staging);
-    if (existsSync(finalDir)) rmSync(finalDir, { recursive: true, force: true });
+    if (existsSync(finalDir)) { renameSync(finalDir, aside); movedAside = true; }
     renameSync(staging, finalDir);
   } catch (err) {
     rmSync(staging, { recursive: true, force: true });
+    if (movedAside) { try { rmSync(finalDir, { recursive: true, force: true }); renameSync(aside, finalDir); } catch { /* best effort */ } }
     throw err instanceof InstallError ? err : new InstallError('write_failed', 'could not store the item');
   }
-  return finalDir;
+  return {
+    finalDir,
+    commit() { if (movedAside) rmSync(aside, { recursive: true, force: true }); },
+    rollback() { rmSync(finalDir, { recursive: true, force: true }); if (movedAside) { try { renameSync(aside, finalDir); } catch { /* best effort */ } } },
+  };
 }
 
 /** After the record moved to `next`: keep the prior on/off state only while every consent covers the new commit. */
@@ -289,7 +302,8 @@ export async function applyUpdate(userId, id, { commit, consents = [], fetch: fe
     const src = validateSource({ kind: 'git', url: cand.repo.url, commit: to, ...(rec.source.ref ? { ref: rec.source.ref } : {}) });
     if (!src.ok) throw new InstallError('invalid_url', `source: ${src.error}`);
     const itemDir = itemStoreDir(userId, id);
-    const finalDir = swapIn(userId, itemDir, cand.files, to);
+    const swap = swapIn(userId, itemDir, cand.files, to);
+    const finalDir = swap.finalDir;
     const wasEnabled = readOverlay(userId).items.get(id)?.enabled === true;
     const { previous: olderPrevious, update: _drop, ...base } = rec;
     const next = {
@@ -303,10 +317,13 @@ export async function applyUpdate(userId, id, { commit, consents = [], fetch: fe
       storeDir: relative(baseDir(), finalDir),
       previous: snapshot(rec),
     };
-    if (!putInstalled(userId, id, next)) {
-      rmSync(finalDir, { recursive: true, force: true });
+    let stored = false;
+    try { stored = putInstalled(userId, id, next); } catch { stored = false; }
+    if (!stored) {
+      swap.rollback();
       throw new InstallError('state_unreadable', 'the extensions state file cannot be written');
     }
+    swap.commit();
     // Exactly one older version is kept: drop the one before the one we just kept.
     const dropSha = olderPrevious?.pinnedCommit;
     if (isCommitSha(dropSha) && dropSha !== to && dropSha !== rec.pinnedCommit) removeStore(join(itemDir, dropSha), userId);
@@ -361,10 +378,14 @@ export async function repair(userId, id, { fetch: fetchImpl, signal } = {}) {
     const hash = treeHash(cand.files);
     if (rec.integrity && hash !== rec.integrity) throw new InstallError('integrity_mismatch', 'the downloaded files differ from what was installed; not restoring them', { commit: rec.pinnedCommit });
     let repaired = false;
+    let swap = null;
     if (before.status === 'unverified' && before.hash === hash) { /* the bytes on disk are the pinned commit's: only record the fingerprint */ }
-    else { swapIn(userId, itemStoreDir(userId, id), cand.files, rec.pinnedCommit); repaired = true; }
+    else { swap = swapIn(userId, itemStoreDir(userId, id), cand.files, rec.pinnedCommit); repaired = true; }
     const fresh = readInstalled(userId).items.get(id) ?? rec;
-    if (!putInstalled(userId, id, { ...fresh, integrity: hash })) throw new InstallError('state_unreadable', 'the extensions state file cannot be written');
+    let stored = false;
+    try { stored = putInstalled(userId, id, { ...fresh, integrity: hash }); } catch { stored = false; }
+    if (!stored) { swap?.rollback(); throw new InstallError('state_unreadable', 'the extensions state file cannot be written'); }
+    swap?.commit();
     clearInstalledRuntimeCache();
     return { ok: true, repaired, status: repaired ? 'restored' : 'verified', was: before.status, item: view(userId, id) };
   } finally { unlock(); }

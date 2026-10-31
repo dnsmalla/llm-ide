@@ -34,7 +34,7 @@ export function ceilingPatterns(spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES_CE
 /** `https://github.com/Owner/Repo.git/` and `Owner/Repo` are the same entry: lower-case `owner/repo`. */
 export function normalizeEntry(raw) {
   if (typeof raw !== 'string') return null;
-  const s = raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const s = raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^github\.com\//, '').replace(/\/+$/, '').replace(/\.git$/, '').replace(/\/+$/, '');
   return s || null;
 }
 

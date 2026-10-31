@@ -81,3 +81,47 @@ export function diffTrees(before, after, { limit = 200 } = {}) {
   const counts = { added: added.length, removed: removed.length, changed: changed.length };
   return { counts, added: added.slice(0, limit), removed: removed.slice(0, limit), changed: changed.slice(0, limit), truncated: Math.max(counts.added, counts.removed, counts.changed) > limit };
 }
+
+/**
+ * A cheap stamp of a tree: entry count, total size and newest mtime from lstat only (no file is read). A change
+ * to any file's size or mtime changes it. Null when the tree cannot be walked or holds a link or special file.
+ */
+export function stampDir(dir) {
+  let n = 0; let size = 0; let newest = 0;
+  const walk = (abs, depth) => {
+    if (depth > ARCHIVE_LIMITS.depth) throw new Error('too_deep');
+    for (const e of readdirSync(abs, { withFileTypes: true })) {
+      const p = join(abs, e.name);
+      const st = lstatSync(p);
+      if (st.isSymbolicLink()) throw new Error('link');
+      n += 1; if (n > ARCHIVE_LIMITS.files * 4) throw new Error('too_large');
+      newest = Math.max(newest, st.mtimeMs, st.ctimeMs);
+      if (st.isDirectory()) { walk(p, depth + 1); continue; }
+      if (!st.isFile()) throw new Error('special');
+      size += st.size;
+    }
+  };
+  try { walk(dir, 0); } catch { return null; }
+  return `${n}:${size}:${newest}`;
+}
+
+const verified = new Map();
+export function clearVerifiedCache() { verified.clear(); }
+
+/**
+ * Load-time check that the bytes still match the install-time fingerprint. The full hash runs once per process per
+ * (dir, fingerprint); afterwards only the cheap stamp is compared, and the full hash runs again only when the stamp
+ * moved. A record with no fingerprint (installed before they existed) is not checked.
+ * @returns {boolean} false when the bytes changed on disk
+ */
+export function verifiedOnLoad(dir, recorded) {
+  if (typeof recorded !== 'string' || !recorded) return true;
+  const key = `${dir}\0${recorded}`;
+  const stamp = stampDir(dir);
+  const hit = verified.get(key);
+  if (hit && stamp !== null && hit.stamp === stamp) return hit.ok;
+  const ok = stamp !== null && verifyDir(dir, recorded).status === 'ok';
+  if (verified.size > 2000) verified.clear();
+  verified.set(key, { stamp, ok });
+  return ok;
+}

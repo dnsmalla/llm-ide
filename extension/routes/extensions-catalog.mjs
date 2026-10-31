@@ -106,6 +106,8 @@ async function activeView(userId) {
   };
 }
 
+// Audit detail is bounded: a client can send any number of consent strings.
+const capConsents = (a) => (Array.isArray(a) ? a.slice(0, 20).map((c) => String(c).slice(0, 40)) : undefined);
 const str = (v) => (typeof v === 'string' ? v : undefined);
 
 export async function handleCatalogRoute(req, res, { db, requestId }) {
@@ -192,7 +194,7 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
         send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'consents must be an array of strings' } }); return;
       }
       const r = await applyUpdate(userId, body.id, { commit: body.commit, consents: body.consents ?? [], signal: ac.signal });
-      audit('extension.update', body.id, 'success', { from: r.update.from, to: r.update.to, enabled: r.update.enabled, ...(r.update.reason ? { reason: r.update.reason } : {}), ...(body.consents?.length ? { consents: body.consents } : {}) });
+      audit('extension.update', body.id, 'success', { from: r.update.from, to: r.update.to, enabled: r.update.enabled, ...(r.update.reason ? { reason: r.update.reason } : {}), ...(body.consents?.length ? { consents: capConsents(body.consents) } : {}) });
       send(res, 200, r);
       return;
     }
@@ -218,7 +220,7 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
         ? setInstalledMembers(userId, body.id, body.members, body.enabled)
         : setInstalledEnabled(userId, body.id, body.enabled, { consents: body.consents ?? [] });
       audit(body.members?.length ? 'extension.members' : (body.enabled ? 'extension.enable' : 'extension.disable'), body.id, 'success',
-        { commit: item.pinnedCommit, ...(body.consents?.length ? { consents: body.consents } : {}) });
+        { commit: item.pinnedCommit, ...(body.consents?.length ? { consents: capConsents(body.consents) } : {}) });
       send(res, 200, { ok: true, item });
       return;
     }

@@ -102,3 +102,8 @@ test('user delete cascades the allowlist row', () => {
   main.getDb().prepare('DELETE FROM users WHERE id = ?').run(U);
   assert.equal(main.getDb().prepare('SELECT COUNT(*) AS n FROM ext_source_allowlist WHERE user_id = ?').get(U).n, 0);
 });
+
+test('LOW: normalizeEntry strips the trailing slash before .git', async () => {
+  const { normalizeEntry } = await import('../llm_agent/extensions/allowlist.mjs');
+  for (const raw of ['x/y.git/', 'X/Y.git', 'https://github.com/x/y.git/', 'github.com/x/y//', ' x/y ']) assert.equal(normalizeEntry(raw), 'x/y', raw);
+});

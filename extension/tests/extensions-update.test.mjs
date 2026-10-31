@@ -281,3 +281,18 @@ test('M3: uninstall takes the item lock (busy while an update or repair is in fl
   await rejects(upd.repair('u-m3', it.id, { fetch: net({}) }), 'not_found');
   assert.equal(fs.existsSync(installedMod.itemStoreDir('u-m3', it.id)), false);
 });
+
+test('LOW: a failed state write rolls the swap back and never costs the previous version bytes', async () => {
+  upd._clearPreviewsForTests();
+  const it = await install('u-low', 'acme', 'tidy', { 'SKILL.md': SKILL1 }, S1);
+  await upd.applyUpdate('u-low', it.id, { commit: S2, fetch: net({ [url('acme', 'tidy', S2)]: repoArchive({ 'SKILL.md': SKILL2 }) }) });
+  const before = fs.readFileSync(path.join(dirOf('u-low', it.id, S1), 'SKILL.md'), 'utf8');
+  const tmp = `${installedMod.installedFilePath()}.tmp`;
+  fs.mkdirSync(tmp); // the atomic state write cannot create its tmp file
+  try {
+    await rejects(upd.applyUpdate('u-low', it.id, { commit: S1, fetch: net({ [url('acme', 'tidy', S1)]: repoArchive({ 'SKILL.md': SKILL1 }) }) }), 'state_unreadable');
+  } finally { fs.rmdirSync(tmp); }
+  assert.equal(fs.readFileSync(path.join(dirOf('u-low', it.id, S1), 'SKILL.md'), 'utf8'), before, 'the rollback target survived');
+  assert.equal(installedMod.readInstalled('u-low').items.get(it.id).pinnedCommit, S2, 'record unchanged');
+  assert.deepEqual(fs.readdirSync(installedMod.itemStoreDir('u-low', it.id)).filter((n) => n.startsWith('.')), [], 'no staging or aside leftovers');
+});

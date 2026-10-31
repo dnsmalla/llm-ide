@@ -41,6 +41,7 @@ import { readInstalled, itemStoreDir, userStoreDir } from './installed.mjs';
 import { parseItemId } from './model.mjs';
 import { frontmatter } from './inspect.mjs';
 import { loadPluginAt } from '../../plugins/loader.mjs';
+import { verifiedOnLoad, clearVerifiedCache } from './integrity.mjs';
 
 const MAX_SKILLS_PER_ITEM = 200;
 const MAX_SERVERS_PER_ITEM = 16;
@@ -54,9 +55,9 @@ const LOADER_TO_CONSENT = { hooks: 'hook', lsp: 'lsp', bin: 'bin' };
 const EMPTY = Object.freeze({ plugins: [], skills: [], mcp: [], items: [], warnings: [] });
 
 const pluginCache = new Map();
-export function _resetInstalledRuntimeForTests() { pluginCache.clear(); }
+export function _resetInstalledRuntimeForTests() { pluginCache.clear(); clearVerifiedCache(); }
 /** Drop parsed plugins: call after bytes under a store directory were replaced. */
-export function clearInstalledRuntimeCache() { pluginCache.clear(); }
+export function clearInstalledRuntimeCache() { pluginCache.clear(); clearVerifiedCache(); }
 
 const mcpId = (...parts) => {
   const raw = parts.join('-').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -197,6 +198,8 @@ export function activeInstalled(userId, gate, { legacyPluginNames = new Set() } 
     if (missingConsents(rec).length) { warnings.push(`${id}: consent for this commit is missing`); continue; }
     const dir = safeDir(userId, id, rec);
     if (!dir) { warnings.push(`${id}: stored files are missing or not a plain directory`); continue; }
+    // Bytes that changed on disk since install are never loaded (repair restores them).
+    if (!verifiedOnLoad(dir, rec.integrity)) { warnings.push(`${id}: stored files changed since install; repair it`); continue; }
     items.push({ id, kind: parsed.kind, publisher: { trust: rec.publisher?.trust ?? 'unknown' }, source: { commit: rec.pinnedCommit },
       state: { disabledMembers: [...(overlay.items.get(id)?.disabledMembers ?? [])].sort() } });
     const memberOn = (type, name) => gate.installedMemberActive(parsed.kind, parsed.name, type, name);
