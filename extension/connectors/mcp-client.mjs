@@ -49,6 +49,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { config } from '../core/config.mjs';
+import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { getSecret, setSecret } from '../server/vault.mjs';
 import { getMcpConnectorSeenIds, markMcpConnectorSeen } from '../kb/db.mjs';
 import { toItemArray, pickPath, defaultMcpItemMapper } from './mcp-connector-defs.mjs';
@@ -241,6 +242,24 @@ export function takeMcpStatus(state) {
   return out;
 }
 
+
+/**
+ * The fetch every MCP transport request goes through: the MCP request itself AND the SDK's OAuth discovery
+ * (protected-resource / authorization-server metadata), dynamic registration and token calls, whose URLs come
+ * from the remote server's own JSON and are therefore untrusted. The pin resolves DNS once, classifies every
+ * address and dials the checked one, so an issuer / token_endpoint aimed at 169.254.169.254, localhost or a
+ * rebinding hostname is refused (SSRF_BLOCKED). Private targets are allowed only when the descriptor's own
+ * serverUrl is a loopback http address (the operator-set test override) AND the operator gate is on; link-local
+ * and metadata ranges stay refused regardless. The SDK follows redirects itself, same-origin only, one hop at a
+ * time through this fetch.
+ */
+export function pinnedFetchFor(def, { resolver } = {}) {
+  let host = '';
+  try { host = new URL(def.serverUrl).hostname.replace(/^\[|\]$/g, ''); } catch { /* refused later by the transport */ }
+  const loopbackOverride = ['127.0.0.1', 'localhost', '::1'].includes(host);
+  return makePinnedFetch({ allowPrivate: loopbackOverride, ...(resolver ? { resolver } : {}) });
+}
+
 // ─── Sessions ───────────────────────────────────────────────────────────────
 
 /** True when this user holds tokens for this connector's current issuer. */
@@ -258,7 +277,7 @@ export async function withMcpSession(db, userId, def, fn) {
   const provider = new VaultOAuthProvider({ db, userId, def });
   if (!provider.tokens()) throw mcpUnauthorized(def);
 
-  const transport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider });
+  const transport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider, fetch: pinnedFetchFor(def) });
   const client = new Client(CLIENT_INFO);
   try {
     await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
@@ -504,7 +523,7 @@ export async function fetchMcpItems(db, userId, def, { limit = DEFAULT_ITEM_LIMI
  */
 export async function startMcpAuthorization({ db, userId, def, stateToken }) {
   const provider = new VaultOAuthProvider({ db, userId, def, stateToken });
-  const transport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider });
+  const transport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider, fetch: pinnedFetchFor(def) });
   const client = new Client(CLIENT_INFO);
   try {
     await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
@@ -533,7 +552,7 @@ export async function startMcpAuthorization({ db, userId, def, stateToken }) {
 export async function finishMcpAuthorization({ db, userId, def, code }) {
   if (!code) throw new Error('Authorization code missing from the callback.');
   const provider = new VaultOAuthProvider({ db, userId, def });
-  const authTransport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider });
+  const authTransport = new StreamableHTTPClientTransport(new URL(def.serverUrl), { authProvider: provider, fetch: pinnedFetchFor(def) });
   try {
     await authTransport.finishAuth(code);
   } finally {

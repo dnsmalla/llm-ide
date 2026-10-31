@@ -73,6 +73,7 @@ export function makePinnedFetch({ allowPrivate = false, resolver = systemResolve
       };
       const headers = {};
       for (const [k, v] of new Headers(init.headers || {})) headers[k] = v;
+      if (init.body instanceof URLSearchParams && !headers['content-type']) headers['content-type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
       const mod = url.protocol === 'https:' ? https : http;
       const req = mod.request({
         protocol: url.protocol, hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port || undefined,
@@ -95,7 +96,8 @@ export function makePinnedFetch({ allowPrivate = false, resolver = systemResolve
         resolve(new Response(noBody ? null : Readable.toWeb(res), { status: res.statusCode, statusText: res.statusMessage, headers: h }));
       });
       req.on('error', (err) => reject(blocked || err));
-      const body = init.body;
+      let body = init.body;
+      if (body instanceof URLSearchParams) body = body.toString(); // the MCP SDK's OAuth token/registration calls
       if (body != null) req.write(typeof body === 'string' || body instanceof Uint8Array ? body : Buffer.from(body));
       req.end();
     });
