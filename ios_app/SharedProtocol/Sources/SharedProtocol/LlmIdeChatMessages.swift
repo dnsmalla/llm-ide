@@ -20,21 +20,48 @@ public struct ChatFileText: Codable, Equatable {
     public init(name: String, text: String) { self.name = name; self.text = text }
 }
 
-/// Client → server: ask the llm-ide agent a question. Images are base64; files
-/// carry text extracted on-device (not binary) to stay under the WS frame cap.
+/// Client → server: ask the llm-ide agent a question. Files carry text extracted on-device (not binary) to
+/// stay under the WS frame cap.
+///
+/// `history` and `images` are **deprecated and ignored**: the Mac's session store is the transcript (it never
+/// read `history`), and the Mac refuses images in this chat. They stay decodable so an older phone that still
+/// sends them is understood. A current phone sends them empty (an older Mac still requires the keys). Decoding
+/// tolerates their absence.
 public struct LlmIdeChat: Codable, Equatable {
     public let type = MobileProtocol.Tag.llmIdeChat
     public let commandId: String
     public let text: String
+    /// Deprecated, ignored by the Mac.
     public let history: [ChatTurn]
+    /// Deprecated, refused by the Mac when non-empty.
     public let images: [ChatImage]
     public let files: [ChatFileText]
-    public init(commandId: String, text: String, history: [ChatTurn],
+    public init(commandId: String, text: String, history: [ChatTurn] = [],
                 images: [ChatImage] = [], files: [ChatFileText] = []) {
         self.commandId = commandId; self.text = text; self.history = history
         self.images = images; self.files = files
     }
     private enum CodingKeys: String, CodingKey { case type, commandId, text, history, images, files }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        commandId = try c.decode(String.self, forKey: .commandId)
+        text = try c.decode(String.self, forKey: .text)
+        history = try c.decodeIfPresent([ChatTurn].self, forKey: .history) ?? []
+        images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []
+        files = try c.decodeIfPresent([ChatFileText].self, forKey: .files) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(commandId, forKey: .commandId)
+        try c.encode(text, forKey: .text)
+        // Always written (usually empty): a not-yet-updated Mac decodes them as required keys.
+        try c.encode(history, forKey: .history)
+        try c.encode(images, forKey: .images)
+        try c.encode(files, forKey: .files)
+    }
 }
 
 public struct OutputPayload: Codable, Equatable {

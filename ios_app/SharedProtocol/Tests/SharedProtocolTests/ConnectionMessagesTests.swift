@@ -111,6 +111,32 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertTrue(decoded.files.isEmpty)
     }
 
+    /// Old phone -> new Mac: a frame that still carries `history` and `images` decodes (both ignored by the Mac).
+    func testLlmIdeChatFromAnOldPhoneStillDecodes() throws {
+        let old = #"{"type":"llmide_chat","commandId":"c","text":"hi","history":[{"role":"user","content":"x"}],"images":[{"mediaType":"image/png","data":"B"}],"files":[]}"#
+        let decoded = try JSONDecoder().decode(LlmIdeChat.self, from: Data(old.utf8))
+        XCTAssertEqual(decoded.text, "hi")
+        XCTAssertEqual(decoded.history.count, 1)
+        XCTAssertEqual(decoded.images.count, 1)
+    }
+
+    /// New phone -> old Mac: an older Mac decodes `history`/`images` as required keys, so a new phone still writes
+    /// them, empty. New Mac <- same frame decodes with nothing in them.
+    func testLlmIdeChatFromANewPhoneKeepsTheKeysEmptyForOlderMacs() throws {
+        let chat = LlmIdeChat(commandId: "c", text: "hi")
+        let json = try XCTUnwrap(String(data: try JSONEncoder().encode(chat), encoding: .utf8))
+        XCTAssertTrue(json.contains(#""history":[]"#), json)
+        XCTAssertTrue(json.contains(#""images":[]"#), json)
+        let decoded = try JSONDecoder().decode(LlmIdeChat.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded, chat)
+    }
+
+    func testLlmIdeChatDecodesWithOnlyTheRequiredFields() throws {
+        let minimal = #"{"type":"llmide_chat","commandId":"c","text":"hi"}"#
+        let decoded = try JSONDecoder().decode(LlmIdeChat.self, from: Data(minimal.utf8))
+        XCTAssertTrue(decoded.history.isEmpty && decoded.images.isEmpty && decoded.files.isEmpty)
+    }
+
     func testOutputHasNestedPayload() throws {
         let out = Output(commandId: "abc", payload: OutputPayload(stream: "reply text", done: true))
         let data = try JSONEncoder().encode(out)

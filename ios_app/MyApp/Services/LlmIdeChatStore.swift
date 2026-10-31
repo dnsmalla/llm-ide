@@ -54,28 +54,24 @@ final class LlmIdeChatStore: ObservableObject {
     /// llm-ide localhost API and the reply streams back through the same
     /// `output`/`done` path, landing in `llmIdeMessages`.
     ///
-    /// `images` are pre-resized JPEG data (displayed as thumbnails on the other
-    /// side); `files` carry text already extracted on-device (PDF/`.md`/`.txt`),
+    /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`),
     /// never binary, so the WS frame stays well under the 8 MiB bridge cap.
-    func sendLlmideChat(_ text: String,
-                        images: [(data: Data, mediaType: String)] = [],
-                        files: [ChatFileText] = []) {
+    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) {
         guard connection?.connectionStatus == .connected else {
             connection?.errorMessage = "Not connected to your Mac — wait for Live status, then try again."
             return
         }
-        // Show only the first attached image as a thumbnail in the local bubble.
-        let (id, history) = mintStreamingTurn(
+        // The Mac's own session store is the transcript: the phone sends only the new text (and files),
+        // never a history window or images (the Mac ignored the first and refused the second).
+        let (id, _) = mintStreamingTurn(
             messages: &llmIdeMessages,
             commandIds: &llmIdeCommandIds,
-            userText: text,
-            imageData: images.first?.data
+            userText: text
         )
         isStreaming = true
         currentCommandId = id
         startStreamTimeout(for: id)
-        let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
-        let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
+        let chat = LlmIdeChat(commandId: id, text: text, files: files)
         // Encode error path preserved exactly from pre-refactor (tear down).
         do {
             let data = try JSONEncoder().encode(chat)

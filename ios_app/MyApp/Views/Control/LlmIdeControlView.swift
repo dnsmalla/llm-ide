@@ -258,14 +258,8 @@ struct LlmIdeControlView: View {
                 onSend: send
             ) {
                 Menu {
-                    Button { showPhotoPicker = true } label: {
-                        Label("Photo Library", systemImage: "photo.on.rectangle")
-                    }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button { showCamera = true } label: {
-                            Label("Camera", systemImage: "camera")
-                        }
-                    }
+                    // No Photo Library / Camera here: the Mac refuses images in this chat ("Images aren't
+                    // supported"), so the phone no longer offers or sends them.
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
                     }
@@ -377,7 +371,7 @@ struct LlmIdeControlView: View {
         let files = pendingFiles
         guard !text.isEmpty || !images.isEmpty || !files.isEmpty else { return }
         if speech.isListening { speech.finish() }
-        llmIdeStore.sendLlmideChat(text, images: images, files: files)
+        llmIdeStore.sendLlmideChat(text, files: files)
         inputText = ""
         pendingImages = []
         pendingFiles = []
