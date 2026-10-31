@@ -4,7 +4,7 @@
 // untrusted text cleaned and capped, one request per row at a time, nothing is enabled without its consent.
 import { cleanText, hasUnsafeChars } from "./sanitize.ts";
 import { DecodeError } from "./decoders.ts";
-import { ExtApiError, errorText, toExtApiError, type ExtResponse } from "./errors.ts";
+import { ExtApiError, shellCode, errorText, toExtApiError, type ExtResponse } from "./errors.ts";
 import type { ExtCore } from "./api.ts";
 
 type Rec = Record<string, unknown>;
@@ -190,8 +190,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     let res: ExtResponse;
     try {
       res = await core.request(method, path, body, { signal });
-    } catch {
-      throw new ExtApiError(0, signal?.aborted ? "ABORTED" : "UNREACHABLE");
+    } catch (e) {
+      throw new ExtApiError(0, signal?.aborted ? "ABORTED" : shellCode(e));
     }
     if (res.status < 200 || res.status >= 300) throw toExtApiError(res);
     try {

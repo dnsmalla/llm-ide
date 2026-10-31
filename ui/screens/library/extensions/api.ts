@@ -2,7 +2,7 @@
 // client owns the base URL, the token and the nonce check); this module builds only fixed paths and
 // JSON bodies, decodes every answer, and never sees a token. Routes that reach GitHub or the MCP
 // registry are POSTs the user started; the GETs read the core's cache only.
-import { ExtApiError, toExtApiError, type ExtResponse } from "./errors.ts";
+import { ExtApiError, shellCode, toExtApiError, type ExtResponse } from "./errors.ts";
 import {
   DecodeError,
   decodeActive,
@@ -63,7 +63,7 @@ export function createExtensionsApi(core: ExtCore): ExtensionsApi {
     } catch (e) {
       if (e instanceof ExtApiError) throw e;
       if (opts.signal?.aborted) throw new ExtApiError(0, "ABORTED");
-      throw new ExtApiError(0, "UNREACHABLE");
+      throw new ExtApiError(0, shellCode(e));
     }
     if (res.status < 200 || res.status >= 300) throw toExtApiError(res);
     try {

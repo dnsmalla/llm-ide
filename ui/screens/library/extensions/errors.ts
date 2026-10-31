@@ -22,6 +22,12 @@ export class ExtApiError extends Error {
   }
 }
 
+/** Code for a transport failure: the shell's own code (UNTRUSTED_CORE, NO_SESSION, TIMEOUT...) survives; only a genuine NETWORK failure is UNREACHABLE. */
+export function shellCode(e: unknown): string {
+  const c = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+  return typeof c === "string" && /^[A-Z_]{3,32}$/.test(c) && c !== "NETWORK" ? c : "UNREACHABLE";
+}
+
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** `{ error: { code, message?, details? } }`, a bare `{ error: "CODE" }`, or a status-only error. */
@@ -136,6 +142,13 @@ export function extErrorText(e: ExtApiError): string {
       return "Not found. It may have been removed or changed. Refresh the list.";
     case "UNREACHABLE":
       return "The local core could not be reached. Check that it is running, then try again.";
+    case "UNTRUSTED_CORE":
+      return "This app has not verified the core it is talking to yet. Confirm it from the status bar, then try again.";
+    case "NO_SESSION":
+    case "SESSION_EXPIRED":
+      return "You are signed out or the session expired. Sign in again.";
+    case "TIMEOUT":
+      return "The core did not answer in time. Try again.";
     case "ABORTED":
       return "Cancelled.";
     case "BAD_RESPONSE":

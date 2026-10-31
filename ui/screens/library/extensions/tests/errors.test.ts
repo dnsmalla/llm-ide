@@ -59,3 +59,15 @@ test("details are kept for the model but never shown", () => {
   assert.deepEqual(e.details, { kinds: ["hook"] });
   assert.ok(!extErrorText(e).includes("hook"));
 });
+
+import { shellCode } from "../errors.ts";
+
+test("a shell transport code survives; only NETWORK or unknown failures are UNREACHABLE", () => {
+  for (const c of ["UNTRUSTED_CORE", "NO_SESSION", "SESSION_EXPIRED", "TIMEOUT"]) {
+    const code = shellCode({ code: c });
+    assert.equal(code, c);
+    assert.ok(!extErrorText(new ExtApiError(0, code)).startsWith("Request failed"), c);
+  }
+  assert.equal(shellCode({ code: "NETWORK" }), "UNREACHABLE");
+  assert.equal(shellCode(new Error("x")), "UNREACHABLE");
+});
