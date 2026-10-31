@@ -33,11 +33,29 @@ export const fixtures = () => readdirSync(FIXTURE_DIR).filter((f) => f.endsWith(
 export const sse = (...events) => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
 
 /** Fake core: scripted JSON routes and stream bodies; honours the abort signal. */
-export function fakeCore({ json = {}, streams = [] } = {}) {
+export function fakeCore({ json = {}, streams = [], attaches = null } = {}) {
   const calls = [];
   const queue = [...streams];
+  const attachQueue = attaches ? [...attaches] : null;
   return {
     calls,
+    // Re-attach stream (GET): scripts are arrays of { id, data } frames, an Error, or (signal, path) => async generator.
+    ...(attachQueue ? {
+      attach(path, signal) {
+        calls.push({ method: "ATTACH", path });
+        const script = attachQueue.shift();
+        return (async function* () {
+          if (signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          if (typeof script === "function") { yield* script(signal, path); return; }
+          if (script instanceof Error) throw script;
+          for (const fr of script ?? []) {
+            if (signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+            yield fr;
+            await Promise.resolve();
+          }
+        })();
+      },
+    } : {}),
     async json(method, path, body, signal) {
       calls.push({ method, path, body });
       if (signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });

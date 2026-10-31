@@ -118,6 +118,10 @@ export function initialState(sessionId: string): ChatState {
 export type Action =
   | { type: "load"; messages: Message[]; hasMoreOlder: boolean }
   | { type: "prepend"; messages: Message[]; hasMoreOlder: boolean }
+  | { type: "reattach"; id: string }
+  | { type: "reattach_cancel" }
+  | { type: "marker"; kind: string; level: "info" | "warning" | "error"; text: string }
+  | { type: "replay_ended" }
   | { type: "send"; id: string; text: string; /** Retry: drop the failed turn's bubbles first. */ replaceFailed?: boolean }
   | { type: "events"; events: readonly AgentEvent[]; malformed?: number }
   | { type: "stream_end" }
@@ -248,6 +252,39 @@ export function reduce(state: ChatState, action: Action): ChatState {
       }
       return startTurn(action.replaceFailed ? dropFailedTurn(state) : state, action.id, action.text);
     }
+    case "reattach": {
+      // A turn running on the core that this client did not start (webview reload): a streaming reply bubble, no user bubble.
+      if (state.phase === "streaming" || state.phase === "aborting") return state;
+      const all: Message[] = [...state.messages, { role: "assistant", id: `${action.id}-a`, parts: [], notices: [], status: "streaming" }];
+      const over = all.length > MAX_MESSAGES_IN_MEMORY;
+      const messages = over ? all.slice(all.length - MAX_MESSAGES_IN_MEMORY) : all;
+      const oldest = messages.find((m) => m.seq !== undefined)?.seq ?? state.oldestSeq;
+      return {
+        ...state, messages, hasMoreOlder: state.hasMoreOlder || over, oldestSeq: over ? oldest : state.oldestSeq,
+        phase: "streaming", error: null, turnSeq: state.turnSeq + 1, applied: 0, ignored: 0, pendingApprovals: [], resolvedMode: null,
+      };
+    }
+    case "reattach_cancel": {
+      // The turn was gone by the time we attached: remove the empty bubble the attach added.
+      if (state.phase !== "streaming") return state;
+      const n = state.messages.length;
+      const a = state.messages[n - 1];
+      const messages = n > 0 && a.role === "assistant" && a.seq === undefined && a.parts.length === 0 ? state.messages.slice(0, n - 1) : state.messages;
+      return { ...state, messages, phase: "idle", pendingApprovals: [] };
+    }
+    case "marker": {
+      const at = lastAssistantIndex(state.messages);
+      if (at < 0) return state;
+      const m = state.messages[at] as AssistantMessage;
+      if (m.notices.length >= MAX_NOTICES_PER_MESSAGE) return state;
+      const messages = state.messages.slice();
+      messages[at] = { ...m, notices: [...m.notices, { kind: action.kind, level: action.level, text: action.text, count: 1, visible: true }] };
+      return { ...state, messages };
+    }
+    case "replay_ended":
+      // The replay closed without a terminal event (its tail was dropped): the reply is as complete as it will get.
+      if (state.phase !== "streaming") return state;
+      return { ...state, phase: "idle", messages: finishLast(state.messages, "done"), pendingApprovals: [] };
     case "events":
       return applyEvents(state, action.events, action.malformed ?? 0);
     case "stream_end": {

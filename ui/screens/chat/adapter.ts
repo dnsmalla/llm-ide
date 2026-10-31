@@ -10,5 +10,8 @@ export function coreTransportFrom(client: CoreClient): CoreTransport {
     async *stream(path, body, signal) {
       for await (const ev of client.stream(path, { method: "POST", body, signal })) yield ev.data;
     },
+    async *attach(path, signal) {
+      for await (const ev of client.stream(path, { method: "GET", signal })) yield { id: ev.id, data: ev.data };
+    },
   };
 }

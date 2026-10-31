@@ -52,6 +52,15 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   );
   const controller = useMemo(() => new ChatController({ core: transport, store, workspaceRoot: () => root.current ?? "" }), [transport, store]);
   useEffect(() => { if (active) void controller.refreshRemoteBusy(); }, [active, controller]);
+  // Webview load/reload and every return to the section: pick up turns still running on the core (replay re-attach).
+  useEffect(() => {
+    if (!active) return;
+    const ac = new AbortController();
+    void controller.reattachRunning(ac.signal);
+    return () => ac.abort();
+  }, [active, controller]);
+  // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
+  useEffect(() => () => controller.dispose(), [controller]);
   // "Open in Explorer": paths named by tool calls, only when they are inside the open project.
   const host = useMemo<ChatHost>(
     () => ({

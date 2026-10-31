@@ -18,7 +18,15 @@ export interface CoreTransport {
    * (validation, 409 TURN_IN_PROGRESS, 402 cap...).
    */
   stream(path: string, body: unknown, signal: AbortSignal): AsyncIterable<string>;
+  /**
+   * GET that answers with an SSE body, keeping each frame's `id:` (the replay sequence number). Optional: a transport
+   * without it cannot re-attach, so the controller does not ask the core to keep a turn alive for it (no `detach`).
+   */
+  attach?(path: string, signal: AbortSignal): AsyncIterable<ReplayFrame>;
 }
+
+/** One SSE frame of the re-attach stream. `id` is the raw `id:` field (null when the frame has none). */
+export interface ReplayFrame { id: string | null; data: string }
 
 /** An HTTP-shaped error from any client (our CoreHttpError or the shell's CoreError): duck-typed, no import. */
 export function httpLike(err: unknown): { status: number; code: string; message: string } | null {

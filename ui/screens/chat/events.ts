@@ -236,3 +236,44 @@ export function decodePayload(payload: string): DecodeResult {
   try { raw = JSON.parse(payload); } catch { return { ok: false, reason: "malformed" }; }
   return decodeEvent(raw);
 }
+
+// --- re-attach stream (GET /agent/v2/turns/stream, API 96) -------------------------------------------------
+
+/** Server-side markers of the replay stream: not agent/v2 events, never reduced as such. */
+export type ReplayMarker =
+  | { kind: "info"; gap: number; dropped: number; ended: boolean }
+  | { kind: "truncated" };
+
+const counter = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), 1_000_000_000) : 0);
+
+/** `replay_info` / `replay_truncated` payloads, or null for anything else. Only the numbers are used (no server text is shown). */
+export function decodeReplayMarker(payload: string): ReplayMarker | null {
+  if (!payload.includes("\"replay_")) return null; // cheap pre-check: the common event is never parsed twice
+  let raw: unknown;
+  try { raw = JSON.parse(payload); } catch { return null; }
+  if (!isObj(raw)) return null;
+  if (raw.type === "replay_info") return { kind: "info", gap: counter(raw.gap), dropped: counter(raw.dropped), ended: raw.ended === true };
+  if (raw.type === "replay_truncated") return { kind: "truncated" };
+  return null;
+}
+
+/** A frame's `id:` as a replay sequence number (a positive integer), or null. */
+export function parseReplaySeq(id: string | null): number | null {
+  if (id === null || !/^[0-9]{1,10}$/.test(id)) return null;
+  const n = Number(id);
+  return n >= 1 && n <= 1_000_000_000 ? n : null;
+}
+
+export const MAX_REATTACH_TURNS = 64;
+
+/** `GET /agent/v2/turns` body -> the running chat ids (strict: wrong shapes yield none; capped). */
+export function decodeRunningTurns(body: unknown): Array<{ sessionId: string; startedAt: string }> {
+  if (!isObj(body) || !Array.isArray(body.turns)) return [];
+  const out: Array<{ sessionId: string; startedAt: string }> = [];
+  for (const t of body.turns) {
+    if (out.length >= MAX_REATTACH_TURNS) break;
+    if (!isObj(t) || !str(t.sessionId) || t.sessionId.length === 0 || t.sessionId.length > 200) continue;
+    out.push({ sessionId: t.sessionId, startedAt: str(t.startedAt) ? t.startedAt : "" });
+  }
+  return out;
+}

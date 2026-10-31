@@ -3,13 +3,14 @@
 // the same rule (one turn per user+chat, 409 TURN_IN_PROGRESS). A turn's stream keeps being read and reduced
 // here while another chat is displayed.
 //
-// Not possible yet (blocked by the core, see the parity checklist): re-attaching to a turn after a webview
-// reload. The core has no replay route for a running stream, so `refreshRemoteBusy` can only tell the user a
-// turn is running on the core; its output is lost to this client.
-import { decodePayload, type AgentEvent } from "./events";
+// Re-attach (core API 96): turns are sent `detach: true` when the transport can re-attach, so a dropped stream or a
+// webview reload does not stop them. `reattachRunning` lists the running turns and follows each through the replay
+// stream; a dropped primary stream follows the same way from the last seen sequence number. Replayed frames pass the
+// same decoder and caps as live ones, and a frame whose sequence number is not above the last one is ignored.
+import { decodePayload, decodeReplayMarker, decodeRunningTurns, parseReplaySeq, type AgentEvent } from "./events";
 import { initialState, reduce, assistantText, type Action, type AssistantMessage, type ChatState } from "./state";
 import { toMessages, type ChatStore } from "./store";
-import { describeError, httpLike, type CoreTransport } from "./transport";
+import { describeError, httpLike, type CoreTransport, type ReplayFrame } from "./transport";
 import { cancelTurn } from "./route";
 import { HISTORY_PAGE } from "./virtual";
 
@@ -50,12 +51,23 @@ interface Runtime {
   lastSend: { text: string; opts: SendOptions } | null;
   loaded: boolean;
   userAborted: boolean;
+  /** Events of the current turn this client has taken in (the replay `after` cursor; in memory only). */
+  seq: number;
+  /** The replay dropped events (ring overflow or an oversized event): the reply is incomplete, so it is not saved. */
+  gap: boolean;
+  /** The running turn was picked up by re-attaching (history may not be loaded yet). */
+  reattached: boolean;
+  /** `startedAt` of the core turn last followed: the same turn resumes at `seq`, a different one starts at 0. */
+  attachedTurn: string | null;
 }
 
 /** Micro-batching of stream events. */
 export const BATCH_MS = 12;
 export const BATCH_MAX = 64;
 const RETRY_409_DELAYS = [400, 700, 1000, 1500];
+/** Consecutive failed re-attach attempts (no new event in between) before giving up. */
+const FOLLOW_DELAYS = [500, 1000, 2000, 4000];
+const macrotask = () => new Promise<void>((r) => setTimeout(r, 0));
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const defaultId = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `t${Date.now()}${Math.random().toString(16).slice(2)}`);
 
@@ -64,6 +76,7 @@ export class ChatController {
   private readonly listeners = new Set<() => void>();
   private remoteBusy: ReadonlySet<string> = new Set();
   private version = 0;
+  private disposed = false;
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -77,7 +90,7 @@ export class ChatController {
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
     if (!r) {
-      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true }, ac: null, lastSend: null, loaded: false, userAborted: false };
+      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true }, ac: null, lastSend: null, loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null };
       this.runtimes.set(id, r);
     }
     return r;
@@ -99,7 +112,7 @@ export class ChatController {
   /** Loads the newest page once; a running or already loaded chat is left alone. */
   async open(id: string, signal?: AbortSignal): Promise<void> {
     const r = this.rt(id);
-    if (r.loaded || r.state.phase === "streaming") return;
+    if (r.loaded || (r.state.phase === "streaming" && !r.reattached)) return;
     try {
       const page = await this.deps.store.loadMessages(id, { limit: HISTORY_PAGE }, signal);
       if (signal?.aborted) return;
@@ -133,6 +146,35 @@ export class ChatController {
       this.remoteBusy = new Set((st.running?.chatTurns ?? []).map((t) => t.chatSessionId).filter((x): x is string => typeof x === "string"));
       this.emit();
     } catch { /* optional hint only */ }
+  }
+
+  /**
+   * Finds the turns running on the core (a webview reload or a section remount lost their streams) and follows each
+   * from where this client left off. Chats already live here are skipped. Returns the chat ids attached.
+   */
+  async reattachRunning(signal?: AbortSignal): Promise<string[]> {
+    if (!this.deps.core.attach || this.disposed) return [];
+    let turns: Array<{ sessionId: string; startedAt: string }>;
+    try {
+      turns = decodeRunningTurns(await this.deps.core.json<unknown>("GET", "/agent/v2/turns", undefined, signal));
+    } catch { return []; } // optional: an older core has no route, an offline core has no turns to show
+    if (signal?.aborted || this.disposed) return [];
+    const started: string[] = [];
+    for (const t of turns) {
+      const r = this.rt(t.sessionId);
+      if (r.ac || r.state.phase === "streaming" || r.state.phase === "aborting") continue;
+      if (r.attachedTurn !== t.startedAt || t.startedAt === "") { r.seq = 0; r.gap = false; }
+      r.attachedTurn = t.startedAt;
+      started.push(t.sessionId);
+      void this.runAttached(t.sessionId);
+    }
+    return started;
+  }
+
+  /** Stops reading every stream (unmount). Turns sent detached keep running on the core; nothing is cancelled there. */
+  dispose(): void {
+    this.disposed = true;
+    for (const r of this.runtimes.values()) r.ac?.abort();
   }
 
   /** Drops a chat's runtime (after delete or when closing an idle chat). A running chat is kept. */
@@ -215,21 +257,72 @@ export class ChatController {
     });
   }
 
+  private async runAttached(id: string): Promise<void> {
+    const r = this.rt(id);
+    const ac = new AbortController();
+    r.ac = ac; r.userAborted = false; r.reattached = true;
+    this.dispatch(id, { type: "reattach", id: (this.deps.newId ?? defaultId)() });
+    try {
+      await this.follow(id, ac, true);
+    } catch (e) {
+      if (this.disposed || r.ac !== ac) return;
+      if (ac.signal.aborted || r.userAborted) this.dispatch(id, { type: "aborted" });
+      else { const d = describeError(e); this.dispatch(id, { type: "transport_error", code: d.code, message: d.message, retryable: d.retryable }); }
+    }
+    if (this.disposed || r.ac !== ac) return;
+    r.ac = null;
+    this.afterTurn(id);
+  }
+
+  /**
+   * Follows a turn through the replay stream from `r.seq` until it ends. Failures that leave no new event (network,
+   * 429) retry with backoff; 404 NO_TURN means the turn is gone. Throws only on abort or an unexpected error.
+   */
+  private async follow(id: string, ac: AbortController, initial: boolean): Promise<void> {
+    const r = this.rt(id);
+    const attach = this.deps.core.attach!;
+    let failures = 0;
+    for (;;) {
+      if (ac.signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      const before = r.seq;
+      try {
+        const frames = attach(`/agent/v2/turns/stream?sessionId=${encodeURIComponent(id)}&after=${r.seq}`, ac.signal);
+        if (await this.readFrames(id, frames, ac, true) === "terminal") return;
+        this.dispatch(id, r.gap ? { type: "replay_ended" } : { type: "stream_end" });
+        return;
+      } catch (e) {
+        if (ac.signal.aborted) throw e;
+        const h = httpLike(e);
+        if (h?.status === 404 && h.code === "NO_TURN") {
+          // The turn ended and its buffer expired: the saved history is the truth now.
+          if (initial) { this.dispatch(id, { type: "reattach_cancel" }); r.reattached = false; r.loaded = false; void this.open(id); }
+          else this.dispatch(id, { type: "stream_end" });
+          return;
+        }
+        const transient = h !== null && ((h.status === 429) || (h.status === 0 && (h.code === "NETWORK" || h.code === "TIMEOUT")));
+        if (r.seq > before) failures = 0;
+        if (!transient || failures >= FOLLOW_DELAYS.length) throw e;
+        await (this.deps.sleep ?? defaultSleep)(FOLLOW_DELAYS[failures++]);
+      }
+    }
+  }
+
   private async runTurn(id: string, text: string, opts: SendOptions, persistUser = true): Promise<void> {
     const r = this.rt(id);
     const ac = new AbortController();
-    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts };
+    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
     if (persistUser) this.persist(id, { role: "user", content: text, meta: { mode: opts.mode } });
     const body = {
-      message: text, mode: opts.mode, language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
+      message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
       ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
       ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       agentContext: { chatSessionId: id, workspaceRoot: this.deps.workspaceRoot(), surface: "desktop" },
     };
+    let dropped = false;
     try {
       for (let attempt = 0; ; attempt++) {
         try {
-          await this.readStream(id, body, ac);
+          dropped = await this.readStream(id, body, ac) === "dropped";
           break;
         } catch (e) {
           // The previous turn of this chat may still be unwinding on the server (it answers 409 until it has).
@@ -239,15 +332,22 @@ export class ChatController {
             await (this.deps.sleep ?? defaultSleep)(RETRY_409_DELAYS[attempt]);
             continue;
           }
+          // A dropped connection mid-turn: the core keeps a detached turn running, so follow it from the last event.
+          if (this.deps.core.attach && h?.status === 0 && (h.code === "NETWORK" || h.code === "TIMEOUT") && r.seq > 0 && !ac.signal.aborted) {
+            dropped = true;
+            break;
+          }
           throw e;
         }
       }
+      if (dropped) await this.follow(id, ac, false);
     } catch (e) {
+      if (this.disposed) return;
       if (r.ac !== ac) return; // already forced idle
       if (ac.signal.aborted || r.userAborted) this.dispatch(id, { type: "aborted" });
       else { const d = describeError(e); this.dispatch(id, { type: "transport_error", code: d.code, message: d.message, retryable: d.retryable }); }
     }
-    if (r.ac !== ac) return;
+    if (this.disposed || r.ac !== ac) return;
     r.ac = null;
     this.afterTurn(id);
   }
@@ -256,7 +356,24 @@ export class ChatController {
    * Reads the stream. Events are micro-batched (one reducer pass per BATCH_MS or BATCH_MAX events, at once on a
    * terminal event) so a 10k-delta reply costs a few hundred passes, not 10k, and the UI renders per frame anyway.
    */
-  private async readStream(id: string, body: unknown, ac: AbortController): Promise<void> {
+  private async readStream(id: string, body: unknown, ac: AbortController): Promise<"done" | "dropped"> {
+    const outcome = await this.readFrames(id, this.deps.core.stream("/agent/v2/stream", body, ac.signal), ac, false);
+    if (outcome === "terminal") return "done";
+    if (ac.signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    // Closed without a result/error: a detached turn is still running on the core, so follow it instead of failing.
+    if (this.deps.core.attach && this.rt(id).seq > 0) return "dropped";
+    this.dispatch(id, { type: "stream_end" });
+    return "done";
+  }
+
+  /**
+   * One reducer pass per BATCH_MS or BATCH_MAX frames (at once on a terminal event); a replay also yields to the UI
+   * thread after each full batch so re-attaching to 2,000 buffered events never freezes the window. Live frames are
+   * counted into `seq`; replay frames carry their own number and are ignored unless it is above the last one.
+   * Resolves "terminal" when a result/error event was applied, else "ended" (the source closed).
+   */
+  private async readFrames(id: string, frames: AsyncIterable<string | ReplayFrame>, ac: AbortController, replay: boolean): Promise<"terminal" | "ended"> {
+    const r = this.rt(id);
     let pending: AgentEvent[] = [];
     let malformed = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -267,29 +384,55 @@ export class ChatController {
       pending = []; malformed = 0;
       this.dispatch(id, { type: "events", events, malformed: bad });
     };
-    const terminal = () => { const ph = this.rt(id).state.phase; return ph === "idle" || ph === "error"; };
+    const terminal = () => { const ph = r.state.phase; return ph === "idle" || ph === "error"; };
     try {
-      for await (const payload of this.deps.core.stream("/agent/v2/stream", body, ac.signal)) {
+      for await (const f of frames) {
         if (ac.signal.aborted) break;
+        let payload: string;
+        if (replay) {
+          const fr = f as ReplayFrame;
+          const marker = decodeReplayMarker(fr.data);
+          if (marker?.kind === "info") {
+            flush();
+            if (marker.gap > 0) {
+              r.gap = true;
+              this.dispatch(id, { type: "marker", kind: "replay_gap", level: "warning", text: "Earlier output of this turn was dropped; the reply may be incomplete." });
+            }
+            continue;
+          }
+          const n = parseReplaySeq(fr.id);
+          if (n === null || n <= r.seq) continue; // stale, repeated, out of order or unnumbered: never applied
+          r.seq = n;
+          if (marker?.kind === "truncated") {
+            flush(); r.gap = true;
+            this.dispatch(id, { type: "marker", kind: "replay_truncated", level: "warning", text: "A very large event was left out of the replay." });
+            continue;
+          }
+          payload = fr.data;
+        } else {
+          r.seq++;
+          payload = f as string;
+        }
         const d = decodePayload(payload);
         if (d.ok) pending.push(d.event);
         else if (d.reason === "malformed") malformed++; // unknown types are ignored silently
-        if (d.ok && (d.event.type === "result" || d.event.type === "error") || pending.length >= BATCH_MAX) flush();
+        if (d.ok && (d.event.type === "result" || d.event.type === "error")) flush();
+        else if (pending.length >= BATCH_MAX) { flush(); if (replay) await macrotask(); }
         else if (!timer) timer = setTimeout(flush, BATCH_MS);
-        if (terminal()) return;
+        if (terminal()) return "terminal";
       }
     } finally {
       flush();
     }
     if (ac.signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
-    this.dispatch(id, { type: "stream_end" });
+    return terminal() ? "terminal" : "ended";
   }
 
   /** After a turn ends: persist the reply, then send the next queued message. */
   private afterTurn(id: string): void {
     const r = this.rt(id);
     const last = [...r.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
-    if (last && last.seq === undefined && (last.status === "done" || last.status === "aborted")) {
+    if (last && last.seq === undefined && (last.status === "done" || last.status === "aborted") && !r.gap) {
       const content = assistantText(last);
       if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status } });
     }

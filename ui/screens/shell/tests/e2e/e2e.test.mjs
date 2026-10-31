@@ -140,6 +140,94 @@ test("the same turn through the core's own chat routes (browser mode: HttpChatSt
   await c.logout();
 });
 
+// Re-attach against the REAL core (API 96): `detach: true` keeps the turn running when the stream drops, and the replay
+// stream hands back every event with its `id:` sequence number.
+async function collect(iterable, limit = 10_000) {
+  const out = [];
+  for await (const f of iterable) { out.push(f); if (out.length >= limit) break; }
+  return out;
+}
+
+test("a detached turn survives a dropped stream; the replay is contiguous, resumable by `after`, and never duplicates", { skip }, async () => {
+  const c = client();
+  await c.login(core.email, core.password);
+  const transport = m.coreTransportFrom(c);
+  const store = new m.HttpChatStore(transport);
+  const s = await store.createSession({ title: "detach chat" });
+  const body = { message: "keep going", mode: "ask", model: "bench-fake", detach: true, agentContext: { chatSessionId: s.id, workspaceRoot: core.workspace, surface: "desktop" } };
+  const ac = new AbortController();
+  const live = [];
+  for await (const data of transport.stream("/agent/v2/stream", body, ac.signal)) { live.push(data); break; } // read one frame, then drop
+  ac.abort();
+  assert.equal(live.length, 1);
+  // The turn is not stopped by the drop: its replay holds the whole turn (the fake engine finishes at once).
+  let all;
+  await until(async () => { all = await collect(transport.attach(`/agent/v2/turns/stream?sessionId=${encodeURIComponent(s.id)}&after=0`, new AbortController().signal)); return all.length >= 3; }, 15_000, () => core.tail(600));
+  const ids = all.map((f) => Number(f.id));
+  assert.deepEqual(ids, ids.map((_, i) => i + 1), "ids are 1..N, contiguous, in order");
+  assert.equal(JSON.parse(all[0].data).type, "init");
+  assert.equal(all[0].data, live[0], "the replayed first event is the one the dropped stream delivered");
+  assert.ok(all.some((f) => JSON.parse(f.data).type === "delta"));
+  const k = 2;
+  const rest = await collect(transport.attach(`/agent/v2/turns/stream?sessionId=${encodeURIComponent(s.id)}&after=${k}`, new AbortController().signal));
+  assert.deepEqual(rest.map((f) => Number(f.id)), ids.slice(k), "after=k resumes exactly after the k-th event");
+  assert.deepEqual([...all.slice(0, k), ...rest].map((f) => f.data), all.map((f) => f.data), "no event lost, none repeated");
+  // The turn ended, so it is no longer listed as running.
+  assert.deepEqual((await c.request("/agent/v2/turns")).turns, []);
+  await c.logout();
+});
+
+test("re-attach errors are typed: unknown turn is 404 NO_TURN, a bad cursor is 400 (nothing is stored on disk)", { skip }, async () => {
+  const c = client();
+  await c.login(core.email, core.password);
+  const transport = m.coreTransportFrom(c);
+  const err = await collect(transport.attach("/agent/v2/turns/stream?sessionId=nope&after=0", new AbortController().signal)).catch((e) => e);
+  assert.equal(err.status, 404);
+  assert.equal(err.code, "NO_TURN");
+  const bad = await collect(transport.attach("/agent/v2/turns/stream?sessionId=x&after=-1", new AbortController().signal)).catch((e) => e);
+  assert.equal(bad.status, 400);
+  await c.logout();
+});
+
+test("the controller follows a dropped primary stream through the replay: same reply as an undropped turn, applied once", { skip }, async () => {
+  const c = client();
+  await c.login(core.email, core.password);
+  const base = m.coreTransportFrom(c);
+  const store = new m.HttpChatStore(base);
+  // Drop the primary connection after two frames (a real client-side disconnect: the generator is closed).
+  const dropping = {
+    ...base,
+    async *stream(path, body, signal) { let n = 0; for await (const d of base.stream(path, body, signal)) { yield d; if (++n === 2) return; } },
+    async *attach(path, signal) {
+      let last = 0;
+      for await (const f of base.attach(path, signal)) { last = Number(f.id); yield f; }
+      yield { id: String(last + 1), data: RESULT }; // the bench engine sends no terminal event (see withResult)
+    },
+  };
+  const ref = new m.ChatController({ core: withResult(base), store, workspaceRoot: () => core.workspace });
+  const a = await store.createSession({ title: "ref" });
+  ref.send(a.id, "same words", { mode: "ask", model: "bench-fake" });
+  await until(() => ref.getState(a.id).messages.at(-1)?.status === "done", 15_000);
+  const b = await store.createSession({ title: "dropped" });
+  const ctl = new m.ChatController({ core: dropping, store, workspaceRoot: () => core.workspace });
+  ctl.send(b.id, "same words", { mode: "ask", model: "bench-fake" });
+  await until(() => ctl.getState(b.id).messages.at(-1)?.status === "done", 15_000, () => JSON.stringify({ p: ctl.getState(b.id).phase, e: ctl.getState(b.id).error, t: core.tail(500) }));
+  const textOf = (st) => st.messages.at(-1).parts.map((p) => p.sealed.join("") + p.open + p.line).join("");
+  assert.equal(textOf(ctl.getState(b.id)), textOf(ref.getState(a.id)), "continuity: identical reply, no duplicated or missing text");
+  assert.equal(ctl.getState(b.id).applied, ref.getState(a.id).applied, "every event applied exactly once");
+  await c.logout();
+});
+
+test("a fresh controller (webview reload) lists the core's turns and shows none for an idle core", { skip }, async () => {
+  const c = client();
+  await c.login(core.email, core.password);
+  const transport = m.coreTransportFrom(c);
+  const ctl = new m.ChatController({ core: transport, store: new m.MemoryChatStore(), workspaceRoot: () => core.workspace });
+  assert.deepEqual(await ctl.reattachRunning(), []);
+  ctl.dispose();
+  await c.logout();
+});
+
 test("a stream before sign-in fails with a session error, never an unauthenticated request", { skip }, async () => {
   const c = client();
   const transport = m.coreTransportFrom(c);
