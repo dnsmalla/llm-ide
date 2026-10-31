@@ -37,7 +37,9 @@ export function buildAnswers(questions: readonly Question[], sels: Selections): 
     // Free text replaces the choice for single select; it is added for multi select.
     const value = q.multiSelect ? [...parts, ...(other ? [sanitizeText(other, MAX_FREE_TEXT).text] : [])].join(",") : other ? sanitizeText(other, MAX_FREE_TEXT).text : parts[0] ?? "";
     if (!value) return { ok: false, reason: "Answer every question." };
-    answers[q.question] = value;
+    // The SDK looks answers up by question text, so a duplicate text cannot be told apart there; never let one answer overwrite the other.
+    const key = q.question in answers ? `${q.question} [${i + 1}]` : q.question;
+    answers[key] = value;
   }
   return { ok: true, answers };
 }

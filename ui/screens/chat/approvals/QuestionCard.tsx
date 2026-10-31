@@ -40,10 +40,10 @@ export function QuestionCard({ approval, ui, position, total, turnClosed, onAnsw
         {questions.map((q, i) => {
           const name = `q${i}-${approval.requestId}`;
           return (
-            <fieldset key={i} className="appr-q" disabled={locked}>
+            <fieldset key={`${i}:${q.question}`} className="appr-q" disabled={locked}>
               <legend>{q.header && <span className="appr-badge">{sanitizeText(q.header, 60).text}</span>} {sanitizeText(q.question, 600).text}</legend>
-              {q.options.slice(0, MAX_OPTIONS).map((o) => (
-                <label key={o.label} className="appr-opt">
+              {q.options.slice(0, MAX_OPTIONS).map((o, oi) => (
+                <label key={`${oi}:${o.label}`} className="appr-opt">
                   <input type={q.multiSelect ? "checkbox" : "radio"} name={name} checked={sels[i].labels.includes(o.label)} onChange={() => set(i, toggle(sels[i], o.label, q.multiSelect))} />
                   <span>
                     {sanitizeText(o.label, 200).text}

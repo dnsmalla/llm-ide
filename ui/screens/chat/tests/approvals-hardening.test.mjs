@@ -316,3 +316,21 @@ test("M1: the rule's scope text names the root the panel was given by the turn, 
   const none = html(h(A.ApprovalsPanel, { state: { pendingApprovals: [a], phase: "streaming", turnWorkspaceRoot: null }, projectRoot: "/other", decide: async () => ({ ok: true }) }));
   assert.ok(!/Always allow/.test(none), "no rule for a turn whose root is unknown");
 });
+
+// ---- LOW: duplicate question text / option labels ----
+test("LOW: duplicate question texts keep both answers; duplicate option labels render without a key clash", () => {
+  const qs = [
+    { question: "Pick", header: "A", multiSelect: false, options: [{ label: "x", description: "" }, { label: "y", description: "" }] },
+    { question: "Pick", header: "B", multiSelect: false, options: [{ label: "x", description: "" }, { label: "y", description: "" }] },
+  ];
+  const r = A.buildAnswers(qs, [{ labels: ["x"], other: "" }, { labels: ["y"], other: "" }]);
+  assert.equal(r.ok, true);
+  assert.deepEqual(Object.values(r.answers).sort(), ["x", "y"]);
+  assert.equal(Object.keys(r.answers).length, 2);
+  const errs = [];
+  const orig = console.error; console.error = (...a) => errs.push(a.join(" "));
+  try {
+    html(h(A.QuestionCard, { approval: { requestId: "q", kind: "AskUserQuestion", questions: [{ question: "Same", multiSelect: false, options: [{ label: "dup", description: "" }, { label: "dup", description: "" }] }] }, ui: undefined, position: 1, total: 1, turnClosed: false, onAnswer() {}, onDecline() {} }));
+  } finally { console.error = orig; }
+  assert.deepEqual(errs.filter((e) => /same key|unique "key"/.test(e)), []);
+});
