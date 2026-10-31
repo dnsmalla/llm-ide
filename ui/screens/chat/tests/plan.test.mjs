@@ -139,11 +139,22 @@ test("planCardFor works on every agent/v2 fixture turn without throwing", () => 
 // --- plan controller (save) -----------------------------------------------------------------------------
 
 function fakePlanFs({ fail } = {}) {
-  const files = new Map(); const dirs = new Set(); const log = [];
-  return { files, dirs, log,
+  const files = new Map(); const dirs = new Set(); const log = []; const hashes = new Map(); let n = 0;
+  return { files, dirs, log, hashes,
     async list() { return { entries: [], nextOffset: null }; }, async readHead() { return { text: "", truncated: false, binary: false }; },
     async ensureDir(p) { log.push(["dir", p]); if (fail === "dir") throw Object.assign(new Error("x"), { code: "no_project" }); dirs.add(p); },
-    async writeText(p, t) { log.push(["write", p]); if (fail === "write") throw Object.assign(new Error("x"), { code: "conflict" }); files.set(p, t); } };
+    // Same contract as the host: no hash = create only; a hash = replace only while the content still has it.
+    async writeText(p, t, expected = null) {
+      log.push(["write", p, expected]);
+      if (fail === "write") throw Object.assign(new Error("x"), { code: "conflict" });
+      if (files.has(p)) {
+        if (expected === null) throw Object.assign(new Error("exists"), { code: "exists" });
+        if (hashes.get(p) !== expected) throw Object.assign(new Error("conflict"), { code: "conflict" });
+      } else if (expected !== null) throw Object.assign(new Error("conflict"), { code: "conflict" });
+      files.set(p, t); const h = `h${++n}`; hashes.set(p, h); return { hash: h };
+    },
+    /** Simulates the user editing a file on disk. */
+    userEdit(p, t) { files.set(p, t); hashes.set(p, `user${++n}`); } };
 }
 
 test("PlanController: saves under llm-doc/plans once, silent on a double click, revisions go into the same file", async () => {
@@ -192,8 +203,44 @@ test("PlanController: errors are readable, no project means no save, empty plans
   const flaky = fakePlanFs({ fail: "write" });
   const pc4 = new c.PlanController(flaky);
   await pc4.save("c", "m", "t", PLAN);
-  flaky.writeText = async (p, t) => { flaky.files.set(p, t); };
+  flaky.writeText = async (p, t) => { flaky.files.set(p, t); return { hash: null }; };
   assert.ok(await pc4.save("c", "m", "t", PLAN));
+});
+
+test("PlanController: two plans with the same title and day never replace each other or a user file", async () => {
+  const fs = fakePlanFs();
+  fs.files.set("llm-doc/plans/2026-10-31-add-dark-mode.md", "USER AUTHORED"); fs.hashes.set("llm-doc/plans/2026-10-31-add-dark-mode.md", "u0");
+  const pc = new c.PlanController(fs, () => new Date(2026, 9, 31));
+  const a = await pc.save("c1", "m1", "Add dark mode", PLAN);
+  assert.equal(a, "llm-doc/plans/2026-10-31-add-dark-mode-2.md");
+  assert.equal(fs.files.get("llm-doc/plans/2026-10-31-add-dark-mode.md"), "USER AUTHORED");
+  // Another chat, same title: its own file again, nothing replaced.
+  const b = await pc.save("c2", "m1", "Add dark mode", "# Other\n\n1. x");
+  assert.equal(b, "llm-doc/plans/2026-10-31-add-dark-mode-3.md");
+  assert.equal(fs.files.get(a), `${PLAN}\n`.replace(/\n\n$/, "\n"));
+  // untitled plans from two chats
+  const u1 = await pc.save("c3", "m1", "", PLAN); const u2 = await pc.save("c4", "m1", "", PLAN);
+  assert.notEqual(u1, u2);
+  assert.equal(fs.files.size, 5);
+});
+
+test("PlanController: a revision replaces only the file this chat wrote, and only while unchanged", async () => {
+  const fs = fakePlanFs();
+  const pc = new c.PlanController(fs, () => new Date(2026, 9, 31));
+  const a = await pc.save("c1", "m1", "Plan", PLAN);
+  assert.equal(await pc.save("c1", "m2", "Other title", "# Rev\n\n1. y"), a, "a later plan of the chat revises its file");
+  assert.equal(fs.files.get(a), "# Rev\n\n1. y\n");
+  assert.deepEqual(fs.log.filter((x) => x[0] === "write").map((x) => x[2] === null), [true, false], "the revision wrote against the hash");
+  // The user edits the file: the next plan of this chat goes to a NEW file, the edit survives.
+  fs.userEdit(a, "MY EDITS");
+  const b = await pc.save("c1", "m3", "Plan", "# Third\n\n1. z");
+  assert.notEqual(b, a);
+  assert.equal(fs.files.get(a), "MY EDITS");
+  // Edit sheet on a saved plan whose file changed on disk: a visible conflict, never a blind write.
+  fs.userEdit(b, "ALSO EDITED");
+  assert.equal(await pc.save("c1", "m3", "Plan", "# Third v2\n\n1. z", true), null);
+  assert.match(pc.get("c1", "m3").save.message, /changed on disk/);
+  assert.equal(fs.files.get(b), "ALSO EDITED");
 });
 
 // --- diff / edit previews ------------------------------------------------------------------------------

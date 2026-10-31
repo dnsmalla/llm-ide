@@ -18,12 +18,17 @@ export interface PlanActionState {
   edited: { title: string; content: string } | null;
 }
 
+const codeOf = (e: unknown): string => (e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "");
+
 const IDLE: PlanActionState = { save: { status: "idle" }, executed: false, edited: null };
 
 export class PlanController {
   private readonly states = new Map<string, PlanActionState>();
-  /** Last plan file written per chat (a later save of that chat goes into it). */
+  /** Last plan file written per chat and the content hash THIS chat wrote (a later save replaces it only while the
+   *  file still has that hash; a file edited by the user, or one we did not create, is never overwritten). */
   private readonly lastPath = new Map<string, string>();
+  /** `chatId\0path` -> the hash this chat's last write of that file produced. */
+  private readonly hashes = new Map<string, string>();
   private readonly subs = new Set<() => void>();
   private version = 0;
 
@@ -50,20 +55,58 @@ export class PlanController {
     if (!this.fs) { this.set(chatId, messageId, { save: { status: "error", message: "Open a project to save a plan." } }); return null; }
     if (content.trim() === "") { this.set(chatId, messageId, { save: { status: "error", message: "The plan has no content." } }); return null; }
     this.set(chatId, messageId, { save: { status: "saving" } });
-    const path = cur.status === "saved" ? cur.path : planFilePath(title, this.now(), this.lastPath.get(chatId));
+    const text = content.endsWith("\n") ? content : `${content}\n`;
     try {
       await this.fs.ensureDir("llm-doc");
       await this.fs.ensureDir(PLANS_DIR);
-      await this.fs.writeText(path, content.endsWith("\n") ? content : `${content}\n`);
-      this.lastPath.set(chatId, path);
+      const path = await this.write(chatId, cur.status === "saved" ? cur.path : null, title, text);
       this.set(chatId, messageId, { save: { status: "saved", path } });
       return path;
     } catch (e) {
-      const code = e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
+      const code = codeOf(e);
       const message = code === "no_project" ? "Open a project to save a plan." : code === "conflict" ? "The plan file changed on disk. Reload and save again." : "The plan could not be saved.";
       this.set(chatId, messageId, { save: { status: "error", message } });
       return null;
     }
+  }
+
+  /**
+   * Writes the plan and returns its path. Replacing is only ever done against a hash this chat wrote itself (a
+   * revision of its own plan file); anything else is created new, with `-2`, `-3` ... on a name clash.
+   */
+  private async write(chatId: string, own: string | null, title: string, text: string): Promise<string> {
+    const fs = this.fs!;
+    const target = own ?? this.lastPath.get(chatId) ?? null;
+    const known = target !== null ? this.hashes.get(`${chatId}\u0000${target}`) ?? null : null;
+    if (target !== null && known !== null) {
+      try {
+        const r = await fs.writeText(target, text, known);
+        this.remember(chatId, target, r.hash);
+        return target;
+      } catch (e) {
+        if (codeOf(e) !== "conflict") throw e;
+        if (own !== null) throw e; // the user's own revision of a saved plan: tell them, never fork silently
+        // the chat's earlier plan file was edited since: leave it alone and save this plan as a new file
+      }
+    } else if (own !== null) {
+      throw Object.assign(new Error("not ours"), { code: "conflict" }); // a saved path we hold no hash for: never blind
+    }
+    for (let attempt = 1; attempt <= 99; attempt++) {
+      const path = planFilePath(title, this.now(), null, attempt);
+      try {
+        const r = await fs.writeText(path, text, null);
+        this.remember(chatId, path, r.hash);
+        return path;
+      } catch (e) {
+        if (codeOf(e) !== "exists") throw e;
+      }
+    }
+    throw Object.assign(new Error("too many plans with this name"), { code: "exists" });
+  }
+
+  private remember(chatId: string, path: string, hash: string | null): void {
+    this.lastPath.set(chatId, path);
+    if (hash !== null) this.hashes.set(`${chatId}\u0000${path}`, hash); else this.hashes.delete(`${chatId}\u0000${path}`);
   }
 
   markExecuted(chatId: string, messageId: string): void { this.set(chatId, messageId, { executed: true }); }
@@ -71,6 +114,7 @@ export class PlanController {
   forget(chatId: string): void {
     for (const k of [...this.states.keys()]) if (k.startsWith(`${chatId}\u0000`)) this.states.delete(k);
     this.lastPath.delete(chatId);
+    for (const k of [...this.hashes.keys()]) if (k.startsWith(`${chatId}\u0000`)) this.hashes.delete(k);
     this.emit();
   }
 }

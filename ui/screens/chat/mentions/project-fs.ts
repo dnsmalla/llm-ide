@@ -12,8 +12,12 @@ export interface ProjectFs {
   readHead(path: string, maxBytes: number): Promise<{ text: string; truncated: boolean; binary: boolean }>;
   /** Creates a directory; resolves quietly when it already exists. */
   ensureDir(path: string): Promise<void>;
-  /** Writes a text file; an existing file is replaced (the caller reads the hash first). */
-  writeText(path: string, text: string): Promise<void>;
+  /**
+   * Writes a text file. Without `expectedHash` the file is only CREATED: an existing one rejects with code `exists`
+   * (never replaced). With the hash the write replaces the file only while its content still has that hash (else
+   * code `conflict`). Resolves with the new content hash when the host reports one.
+   */
+  writeText(path: string, text: string, expectedHash?: string | null): Promise<{ hash: string | null }>;
 }
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -40,17 +44,9 @@ export function createHostProjectFs(invoke: Invoke): ProjectFs {
     async ensureDir(path) {
       try { await invoke("fs_create", { req: { path, kind: "dir" } }); } catch (e) { if (codeOf(e) !== "exists") throw e; }
     },
-    async writeText(path, text) {
-      const write = (expected: string | null) =>
-        invoke("fs_write_file", { req: { path, text, encoding: "utf-8", bom: false, expected_hash: expected, force: false } });
-      try {
-        await write(null); // a new file
-      } catch (e) {
-        if (codeOf(e) !== "exists") throw e;
-        // Replacing a file of ours (a plan saved again): write against its current hash, never blind.
-        const cur = await invoke<{ hash?: string | null }>("fs_read_file", { req: { path, max_bytes: null } });
-        await write(typeof cur?.hash === "string" ? cur.hash : null);
-      }
+    async writeText(path, text, expectedHash = null) {
+      const r = await invoke<{ hash?: unknown }>("fs_write_file", { req: { path, text, encoding: "utf-8", bom: false, expected_hash: expectedHash, force: false } });
+      return { hash: typeof r?.hash === "string" ? r.hash : null };
     },
   };
 }

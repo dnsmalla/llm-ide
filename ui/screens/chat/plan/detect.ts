@@ -243,6 +243,9 @@ export function reusablePlanPath(existing: string | null | undefined): string | 
 }
 
 /** Project-relative file the plan is saved to: always under `llm-doc/plans/`, never agent-supplied. */
-export function planFilePath(title: string, now: Date, existing?: string | null): string {
-  return reusablePlanPath(existing) ?? `${PLANS_DIR}/${datePrefix(now)}-${slugify(title)}.md`;
+export function planFilePath(title: string, now: Date, existing?: string | null, attempt = 1): string {
+  const reuse = reusablePlanPath(existing);
+  if (reuse) return reuse;
+  // `-2`, `-3`, ... keep a second plan of the same title and day out of the first one's file.
+  return `${PLANS_DIR}/${datePrefix(now)}-${slugify(title)}${attempt > 1 ? `-${attempt}` : ""}.md`;
 }

@@ -210,3 +210,15 @@ test("mention menu renders as an accessible listbox with files grouped without h
   assert.match(out, /aria-label="a\.ts, Files, src"/);
   assert.match(out, /Large project/);
 });
+
+test("createHostProjectFs.writeText: create-only without a hash, replace against the given hash, never blind", async () => {
+  const calls = [];
+  const fs = c.createHostProjectFs(async (cmd, args) => { calls.push([cmd, args.req]); return { hash: "h1" }; });
+  assert.deepEqual(await fs.writeText("a.md", "x"), { hash: "h1" });
+  assert.equal(calls[0][1].expected_hash, null);
+  await fs.writeText("a.md", "y", "h0");
+  assert.equal(calls[1][1].expected_hash, "h0");
+  const exists = c.createHostProjectFs(async (cmd) => { if (cmd === "fs_write_file") throw Object.assign(new Error("e"), { code: "exists" }); return {}; });
+  await assert.rejects(exists.writeText("a.md", "x"), (e) => e.code === "exists");
+  assert.ok(!calls.some((x) => x[0] === "fs_read_file"), "no read-then-overwrite");
+});
