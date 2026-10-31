@@ -279,7 +279,7 @@ export function parseIcs(input, limitsIn = {}) {
   const limits = { ...ICS_LIMITS, ...limitsIn };
   const text0 = typeof input === 'string' ? input : Buffer.from(input).toString('utf8');
   if (text0.length > limits.maxInputChars) throw new IcsError('ICAL_TOO_LARGE', 'feed is too large');
-  const text = text0.replace(/^﻿/, '');
+  const text = text0.replace(/^\uFEFF/, '');
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 4096).replace(/\u0000/g, ''))) throw new IcsError('ICAL_PARSE_FAILED', 'not an iCalendar document');
   const warnings = new Set();
   const warn = (c) => warnings.add(c);

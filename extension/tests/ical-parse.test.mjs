@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseIcs, expandEvents, readFeed, parseRrule, parseContentLine, parseDuration, resolveZone, wallToUtc, IcsError, cleanText } from '../connectors/ical/ics-parse.mjs';
+import { parseIcs, readFeed, parseRrule, parseContentLine, parseDuration, resolveZone, wallToUtc, IcsError, cleanText } from '../connectors/ical/ics-parse.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'ical');
 const fx = (n) => fs.readFileSync(path.join(FIX, n), 'utf8');
@@ -114,7 +114,7 @@ test('parseRrule: rejects malformed and unsupported parts without throwing', () 
 });
 
 test('line unfolding, parameters with quoted colons, TEXT escapes', () => {
-  const r = feed(wrap('BEGIN:VEVENT', 'UID:fold', 'DTSTART:20251112T010000Z', 'SUMMARY:A very long su', ' mmary that was fol', '\tded twice', 'DESCRIPTION:a\\nb\\, c\; d\\\\ e', 'ATTENDEE;CN="Doe: John; Jr.";PARTSTAT=ACCEPTED:mailto:j@example.com', 'END:VEVENT'));
+  const r = feed(wrap('BEGIN:VEVENT', 'UID:fold', 'DTSTART:20251112T010000Z', 'SUMMARY:A very long su', ' mmary that was fol', '\tded twice', 'DESCRIPTION:a\\nb\\, c\\; d\\\\ e', 'ATTENDEE;CN="Doe: John; Jr.";PARTSTAT=ACCEPTED:mailto:j@example.com', 'END:VEVENT'));
   const i = r.instances[0];
   assert.equal(i.summary, 'A very long summary that was folded twice');
   assert.equal(i.description, 'a\nb, c; d\\ e');
