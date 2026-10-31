@@ -176,8 +176,8 @@ test("toolbar markup: role=toolbar, aria-current on the active item, disabled it
   assert.match(out, /aria-current="page"[^>]*data-tb-id="library"|data-tb-id="library"[^>]*aria-current="page"/);
   assert.equal((out.match(/tabindex="0"/g) ?? []).length, 1, "exactly one tab stop");
   assert.match(out, /data-tb-id="library"[^>]*tabindex="0"/);
-  for (const id of ["autotasks", "conflicts", "loop"]) assert.match(out, new RegExp(`aria-disabled="true"[^>]*data-tb-id="${id}"|data-tb-id="${id}"[^>]*aria-disabled="true"`));
-  assert.equal((out.match(/Soon/g) ?? []).length, 3);
+  for (const id of ["autotasks", "loop"]) assert.match(out, new RegExp(`aria-disabled="true"[^>]*data-tb-id="${id}"|data-tb-id="${id}"[^>]*aria-disabled="true"`));
+  assert.equal((out.match(/Soon/g) ?? []).length, 2);
   assert.doesNotMatch(out, /Spike/);
   assert.match(html(h(SectionToolbar, { active: "welcome", onSelect() {}, devTools: true })), /Spike/);
   // Active section outside the toolbar (Home, Chat, Settings): the first enabled item is the tab stop.
