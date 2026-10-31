@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -136,7 +137,7 @@ impl fmt::Debug for Secrets {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct SecretsStatus {
     pub backend: &'static str,
     pub available: bool,
@@ -169,10 +170,12 @@ fn get_or_create(b: &dyn SecretBackend, account: &'static str) -> Result<String,
 }
 
 pub fn load_or_create(b: &dyn SecretBackend) -> Result<Secrets, SecretError> {
-    Ok(Secrets {
+    let secrets = Secrets {
         jwt_secret: get_or_create(b, ACCOUNT_JWT)?,
         vault_key: get_or_create(b, ACCOUNT_VAULT)?,
-    })
+    };
+    invalidate_status_cache();
+    Ok(secrets)
 }
 
 /// Read-only: reports presence, creates nothing.
@@ -187,12 +190,44 @@ pub fn status(b: &dyn SecretBackend) -> SecretsStatus {
     }
 }
 
-/// Webview-visible: booleans only, never a value.
+/// How long a `secrets_status` answer is reused. Each uncached call reads the OS
+/// store (a keychain prompt or a securityd round trip), and the webview may poll.
+const STATUS_TTL: Duration = Duration::from_secs(60);
+
+type StatusCache = Mutex<Option<(Instant, SecretsStatus)>>;
+static STATUS_CACHE: StatusCache = Mutex::new(None);
+
+/// Forget the cached status (the secrets just changed).
+pub fn invalidate_status_cache() {
+    *STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// `fetch` runs only when `cache` holds nothing younger than `ttl`; errors are not cached.
+fn cached_status(
+    cache: &StatusCache,
+    ttl: Duration,
+    fetch: impl FnOnce() -> Result<SecretsStatus, String>,
+) -> Result<SecretsStatus, String> {
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, st)) = guard.as_ref() {
+        if at.elapsed() < ttl {
+            return Ok(st.clone());
+        }
+    }
+    let fresh = fetch()?;
+    *guard = Some((Instant::now(), fresh.clone()));
+    Ok(fresh)
+}
+
+/// Webview-visible: booleans only, never a value. Cached for `STATUS_TTL` so a polling
+/// page does not touch the OS credential store on every call.
 #[tauri::command]
 pub async fn secrets_status() -> Result<SecretsStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let b = default_backend().map_err(|e| e.to_string())?;
-        Ok(status(b.as_ref()))
+        cached_status(&STATUS_CACHE, STATUS_TTL, || {
+            let b = default_backend().map_err(|e| e.to_string())?;
+            Ok(status(b.as_ref()))
+        })
     })
     .await
     .map_err(|e| format!("secrets task failed: {e}"))?
@@ -279,5 +314,26 @@ mod tests {
         let s = load_or_create(&b).unwrap();
         let msg = SecretError::Corrupt(ACCOUNT_JWT).to_string();
         assert!(!msg.contains(&s.jwt_secret));
+    }
+
+    #[test]
+    fn status_is_cached_until_invalidated_and_errors_are_not_cached() {
+        let cache: StatusCache = Mutex::new(None);
+        let st = |jwt| SecretsStatus { backend: "t", available: true, jwt_secret: jwt, vault_key: jwt };
+        let mut calls = 0;
+        let ttl = Duration::from_secs(60);
+        for _ in 0..3 {
+            let got = cached_status(&cache, ttl, || { calls += 1; Ok(st(true)) }).unwrap();
+            assert!(got.jwt_secret);
+        }
+        assert_eq!(calls, 1, "the store is read once, not per call");
+        *cache.lock().unwrap() = None;
+        assert!(cached_status(&cache, ttl, || { calls += 1; Ok(st(false)) }).is_ok());
+        assert_eq!(calls, 2);
+        let cache: StatusCache = Mutex::new(None);
+        assert!(cached_status(&cache, ttl, || Err("locked".into())).is_err());
+        assert!(cached_status(&cache, ttl, || Ok(st(true))).is_ok(), "a failure does not poison the cache");
+        assert!(cached_status(&cache, Duration::ZERO, || { calls += 1; Ok(st(true)) }).is_ok());
+        assert_eq!(calls, 3, "ttl expiry refetches");
     }
 }
