@@ -198,6 +198,24 @@ export class ChatController {
     return started;
   }
 
+  private mounts = 0;
+  /**
+   * Marks the controller as shown; returns the unmount function. React StrictMode (dev) runs mount, unmount, mount in
+   * one go: the unmount only disposes when no mount followed it in the same tick, and a mount re-arms a controller
+   * that was disposed, so a double-invoked effect never leaves it dead (no afterTurn, persistence or queue).
+   */
+  mount(): () => void {
+    this.mounts++;
+    this.disposed = false;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.mounts--;
+      queueMicrotask(() => { if (this.mounts === 0) this.dispose(); });
+    };
+  }
+
   /** Stops reading every stream (unmount). Turns sent detached keep running on the core; nothing is cancelled there. */
   dispose(): void {
     this.disposed = true;

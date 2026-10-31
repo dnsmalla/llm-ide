@@ -296,3 +296,23 @@ test("queued messages run in the project they were typed in", async () => {
   await until(() => core.calls.filter((x) => x.method === "STREAM").length === 2 && ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done", 3000);
   assert.deepEqual(core.calls.filter((x) => x.method === "STREAM").map((x) => x.body.agentContext.workspaceRoot), ["/projA", "/projA"]);
 });
+
+test("StrictMode double effect (mount, unmount, mount) leaves the controller alive; a real unmount disposes", async () => {
+  const core = fakeCore({ streams: [turn(), turn(), turn()] });
+  const { ctl, store } = make(core);
+  // dev StrictMode: effect, cleanup, effect - all synchronous
+  const off1 = ctl.mount(); off1(); const off2 = ctl.mount();
+  await tick(5);
+  ctl.send("a", "first", { mode: "ask" });
+  ctl.send("a", "second", { mode: "ask" });
+  await until(() => core.calls.filter((x) => x.method === "STREAM").length === 2 && ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done", 3000);
+  await tick(10);
+  assert.deepEqual((await msgs(store, "a")).map((r) => r.role), ["user", "assistant", "user", "assistant"], "persistence and the queue still work");
+  off1(); // a repeated cleanup call is a no-op
+  await tick(5);
+  ctl.send("a", "third", { mode: "ask" }); // still alive
+  assert.equal(ctl.getState("a").phase, "streaming");
+  off2(); // the real unmount
+  await tick(5);
+  assert.deepEqual(await ctl.reattachRunning(), [], "disposed: no re-attach");
+});

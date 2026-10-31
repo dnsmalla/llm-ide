@@ -69,7 +69,8 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
     return () => ac.abort();
   }, [active, controller]);
   // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
-  useEffect(() => () => controller.dispose(), [controller]);
+  // StrictMode-safe: mount() re-arms and the unmount only disposes if no mount followed in the same tick.
+  useEffect(() => controller.mount(), [controller]);
   // "Open in Explorer": paths named by tool calls, only when they are inside the open project.
   // Slash menu, @ mentions, attachments, plan saving: host-backed only inside the desktop app, and the project fs
   // only while a project is open (the host confines every path to its root; the webview never sends an absolute one).
