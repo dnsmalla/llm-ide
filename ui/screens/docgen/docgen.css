@@ -49,3 +49,13 @@
 @media (prefers-reduced-motion: reduce) { .dg-root * { transition: none !important; animation: none !important; } }
 .dg-mermaid .dg-mermaid-img { display: block; max-width: 100%; height: auto; padding: var(--tok-space-sm); background: var(--tok-color-surface); }
 .dg-mermaid .dg-mermaid-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); }
+/* Steps to generate (Mac GenerationEditorPanel checklist). */
+.dg-steps { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-sm); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.dg-steps-title { margin: 0; font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
+.dg-steps-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.dg-step { display: flex; gap: var(--tok-space-sm); align-items: flex-start; }
+.dg-step-no { flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1px solid var(--tok-color-border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--tok-color-text-muted); }
+.dg-step[data-done] .dg-step-no { background: var(--tok-color-accent); border-color: var(--tok-color-accent); color: var(--tok-color-body); }
+.dg-step-title { font-size: var(--tok-type-body-size); }
+.dg-step[data-done] .dg-step-title { text-decoration: line-through; color: var(--tok-color-text-muted); }
+.dg-step-detail { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }

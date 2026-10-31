@@ -14,7 +14,7 @@ and each feature's `Views/`.
 | **Issues** | Board of repo issues (GitHub/GitLab) with create/edit/close; dispatch to trackers. | Real read + import: provider/state/search/repository filters, kanban columns from the label namespace (else Open/Closed), cards with links, and a GitHub import form that uses the token saved in Settings → Repositories (the server falls back to the vault token when the desktop sends none). GitLab import and create/edit/close are not in the desktop core yet and the card says so. | GitLab import; create/edit/comment/close with provider write clients. |
 | **Gantt** | Gantt timeline over issues (`/kb/issue-schedule`), project/provider filters, day/week zoom, today marker, undated issues, schedule editing. | Real: cached issues merged with the scheduling overlay, day/week zoom, today/weekend tint, dependency marker, provider/repository filters, an undated list, and a schedule editor (start/due/estimate/dependencies) that writes the overlay via PUT/DELETE. | Dependencies as drawn arrows; provider-native GitLab dates. |
 | **Loop** | Loop runs, verification/repair dashboards, regression sweep. | “Soon”. | Needs a core/API model for runs/verification; only `/kb/loop/agent-run` exists today. |
-| **Doc Gen** | Sources (Library categories Code / LLM Doc / Data), template, command/prompt, result + history; save to `llm-doc/`. | Real. Setup + Sources (same categories now), result/history, save, mermaid. | Step chrome and the Mac's refine/save-as-new affordances review. |
+| **Doc Gen** | Sources (Code / LLM Doc / Data), template, command/prompt, "Steps to generate" checklist, result + history; save to `llm-doc/`. | Real. Setup + Sources, the Mac's three-step checklist (template/command, sources, prompt), result/history, save, mermaid. | Refine/save-as-new affordance review. |
 | **Visual** | Same generation views, sources Data / Code, image viewer; save under `llm-doc/`. | Real. Same category restriction now. | Image viewer parity. |
 | **Library** | Sidebar categories (meetings, code, docs, data, input sources, plugins, LLM/MCP sources), item list, detail; write side. | Real. Sidebar, virtualised list, viewer/write side, extensions. | Audit sidebar grouping/order against `LibraryView.swift`. |
 | **Chat** | Code Assistant panel, role labels, markdown, approvals. | Real (Mac-like typography landed). | Turn actions parity. |
@@ -29,6 +29,7 @@ and each feature's `Views/`.
 - Issues: read/import board (columns, filters, GitHub import through the vault token).
 - Gantt: timeline + scheduling overlay editor (start/due/estimate/dependencies).
 - Review Conflicts: code + LLM Doc tree, read-only viewer, Open in Explorer, Code Assistant.
+- Doc Gen/Visual: the Mac's three-step "Steps to generate" checklist with per-tab copy and done states.
 - Repositories settings rebuilt as the Mac's GitLab/GitHub card (see below).
 
 ## Repositories (Settings → Project)

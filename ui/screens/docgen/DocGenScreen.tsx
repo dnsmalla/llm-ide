@@ -9,6 +9,7 @@ import { ResultPanel } from "./ResultPanel";
 import type { MermaidRuntimeApi } from "./mermaid/renderer.ts";
 import { SetupPanel } from "./SetupPanel";
 import { SourcePanel, type SourceEnv } from "./SourcePanel";
+import { checklistSteps } from "./checklist.ts";
 import { estimateChars, sendOrder } from "./sources.ts";
 import type { DocGenStore } from "./store.ts";
 import { TemplateManager } from "./TemplateManager";
@@ -77,6 +78,20 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
     body = (
       <div className="dg-grid">
         <div className="dg-left">
+          <section className="dg-steps" aria-label="Steps to generate">
+            <h2 className="dg-steps-title">Steps to generate</h2>
+            <ol className="dg-steps-list">
+              {checklistSteps(store.surface, Boolean(s.templateId || s.commandId), s.selection.size).map((step, i) => (
+                <li key={step.title} className="dg-step" data-done={step.done || undefined}>
+                  <span className="dg-step-no" aria-hidden="true">{step.done ? "✓" : i + 1}</span>
+                  <div>
+                    <span className="dg-step-title">{step.title}</span>
+                    <p className="dg-step-detail">{step.detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
           <SetupPanel
             surface={store.surface}
             templates={s.templates}
