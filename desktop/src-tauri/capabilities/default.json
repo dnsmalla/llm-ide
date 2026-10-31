@@ -81,6 +81,7 @@
     "allow-attach-read",
     "allow-attach-release",
     "allow-bypass-confirm",
+    "allow-bypass-confirm-signed",
     "allow-trust-confirm"
   ]
 }

@@ -129,9 +129,7 @@ pub(crate) fn bypass_text(summary: &str) -> String {
     }
 }
 
-/// Native, modal confirmation for turning on Bypass permissions. Default button: Cancel.
-#[tauri::command]
-pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
+async fn bypass_dialog(summary: Option<String>) -> Result<bool, FsError> {
     if !BYPASS_LIMIT.allow() {
         return Err(herr("rate_limited", "too many confirmation requests"));
     }
@@ -146,6 +144,24 @@ pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
     let out = tauri::async_runtime::spawn_blocking(move || ask("Turn on Bypass permissions?", &text, "Turn on Bypass", true)).await;
     *BYPASS_OPEN.lock().unwrap_or_else(|p| p.into_inner()) = false;
     out.map_err(|e| herr("io", format!("task failed: {e}")))
+}
+
+/// Native, modal confirmation for turning on Bypass permissions. Default button: Cancel.
+/// Advisory (UX): see `bypass_confirm_signed` for the host-signed variant.
+#[tauri::command]
+pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
+    bypass_dialog(summary).await
+}
+
+/// Same dialog; on accept returns a 60 s, single-use, host-signed approval token (see
+/// `host_approval`) for the core's `x-llmide-host-approval` header, else `None`.
+/// The core cannot verify it yet (blocked-by item), so this is UX-only until it does.
+#[tauri::command]
+pub async fn bypass_confirm_signed(summary: Option<String>) -> Result<Option<String>, FsError> {
+    if !bypass_dialog(summary).await? {
+        return Ok(None);
+    }
+    crate::host_approval::mint(crate::host_approval::PURPOSE_BYPASS).map(Some).map_err(|e| herr("io", e))
 }
 
 // ---- trust_confirm ------------------------------------------------------------------------

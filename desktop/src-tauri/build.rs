@@ -90,6 +90,7 @@ const COMMANDS: &[&str] = &[
     "attach_read",
     "attach_release",
     "bypass_confirm",
+    "bypass_confirm_signed",
     "trust_confirm",
 ];
 

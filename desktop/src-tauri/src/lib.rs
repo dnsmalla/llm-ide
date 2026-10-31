@@ -12,6 +12,7 @@ mod fs_watch;
 mod git;
 mod git_config;
 mod git_scm;
+mod host_approval;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
@@ -376,6 +377,7 @@ pub fn run() {
             attach::attach_read,
             attach::attach_release,
             confirm::bypass_confirm,
+            confirm::bypass_confirm_signed,
             confirm::trust_confirm
         ])
         .build(tauri::generate_context!())

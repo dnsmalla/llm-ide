@@ -151,7 +151,7 @@ mod tests {
             ("HOME", "/Users/a"), ("LANG", "en_US.UTF-8"), ("LC_ALL", "C"), ("https_proxy", "http://p:1"),
             ("LLMIDE_CLAUDE_PATH", "/x/claude"), ("LLMIDE_FEATURES", "agent_chat"),
             ("ANTHROPIC_API_KEY", "sk-1"), ("OPENAI_API_KEY", "sk-2"), ("LLMIDE_JWT_SECRET", "j"),
-            ("LLMIDE_DB_PATH", "/live/kb/data.db"), ("LLMIDE_DATA_DIR", "/live"), ("LLMIDE_CORE_NONCE", "n"),
+            ("LLMIDE_DB_PATH", "/live/kb/data.db"), ("LLMIDE_HOST_APPROVAL_KEY", "k"), ("LLMIDE_DATA_DIR", "/live"), ("LLMIDE_CORE_NONCE", "n"),
             ("NODE_OPTIONS", "--require /evil.js"), ("MEETNOTES_X", "1"), ("GITHUB_TOKEN", "t"),
             ("AWS_SECRET_ACCESS_KEY", "a"), ("PATH", "/usr/bin"), ("EMPTY", ""),
         ]);

@@ -915,6 +915,7 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     let secrets = crate::secrets::default_backend()
         .and_then(|b| crate::secrets::load_or_create(b.as_ref()))
         .map_err(|e| e.to_string())?;
+    let approval_key = crate::host_approval::key_hex()?;
     let mut cmd = core_command(&rt, &db_dir);
     cmd.arg(rt.root.join("extension").join("server.mjs"))
         .env("LLMIDE_PORT", ctx.port.to_string())
@@ -923,6 +924,8 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_CORS_ORIGINS", crate::core_env::spawned_core_cors_origins())
         .env("LLMIDE_JWT_SECRET", &secrets.jwt_secret)
         .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
+        // Host-signed approvals (see host_approval.rs): the spawned core may verify them; never an adopted one.
+        .env("LLMIDE_HOST_APPROVAL_KEY", &approval_key)
         .env("LLMIDE_ENGINE_PREWARM", "0")
         .env("LLMIDE_BACKUP_INTERVAL_HOURS", "0");
     // Host prefs fixed at this launch (token switches default off; only the exact value `on`).
@@ -930,7 +933,7 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     for (k, v) in crate::prefs::core_env_pairs(&crate::prefs::launch(), host_features.as_deref()) {
         cmd.env(k, v);
     }
-    Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone()] })
+    Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
 }
 
 /// `node` with the cleared + allowlisted environment, cwd `extension/`, and the data
