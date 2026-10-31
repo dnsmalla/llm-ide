@@ -16,12 +16,23 @@ const shape = (r) => !r ? null : ({
   createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at,
 });
 
+export const MAX_PAYLOAD_BYTES = 64 * 1024;
+export const MAX_ACTIVE_JOBS_PER_USER = 100; // queued + running
+export const MAX_ATTEMPTS = 3;
+const jobError = (code, message) => Object.assign(new Error(message), { code });
+
 export function enqueueJob(userId, { kind, lane, payload = {} }) {
   if (!userId) throw new Error('enqueueJob: userId required');
   if (!kind || !lane) throw new Error('enqueueJob: kind and lane required');
+  const body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > MAX_PAYLOAD_BYTES) throw jobError('payload_too_large', `job payload is over ${MAX_PAYLOAD_BYTES} bytes`);
   const id = crypto.randomUUID();
-  getDb().prepare('INSERT INTO jobs (id, user_id, kind, lane, payload_json) VALUES (?,?,?,?,?)')
-    .run(id, userId, String(kind), String(lane), JSON.stringify(payload));
+  const db = getDb();
+  db.transaction(() => {
+    const n = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND state IN ('queued','running')").get(userId).n;
+    if (n >= MAX_ACTIVE_JOBS_PER_USER) throw jobError('quota_exceeded', 'too many queued or running jobs; wait for some to finish');
+    db.prepare('INSERT INTO jobs (id, user_id, kind, lane, payload_json) VALUES (?,?,?,?,?)').run(id, userId, String(kind), String(lane), body);
+  })();
   return getJob(userId, id);
 }
 
@@ -90,22 +101,24 @@ export function finishJobSystem(id, state, { result, error } = {}) {
 /**
  * Boot sweep: rows still 'running' belong to a process that no longer exists.
  * Resumable kinds go back to 'queued' (attempts is kept); the rest become
- * 'interrupted'. Returns {requeued, interrupted} ids.
+ * 'interrupted'. A row with cancel_requested is cancelled, never requeued; a resumable row that already ran
+ * `maxAttempts` times is failed ('too_many_attempts'). Returns {requeued, interrupted, cancelled, failed} ids.
  */
-export function sweepInterruptedSystem(resumableKinds = []) {
+export function sweepInterruptedSystem(resumableKinds = [], { maxAttempts = MAX_ATTEMPTS } = {}) {
   const db = getDb();
   return db.transaction(() => {
-    const rows = db.prepare("SELECT id, kind FROM jobs WHERE state='running'").all();
-    const out = { requeued: [], interrupted: [] };
-    for (const { id, kind } of rows) {
-      if (resumableKinds.includes(kind)) {
-        db.prepare("UPDATE jobs SET state='queued', started_at=NULL, cancel_requested=0, updated_at=? WHERE id=?").run(nowIso(), id);
-        out.requeued.push(id);
-      } else {
-        db.prepare("UPDATE jobs SET state='interrupted', error='server_restarted', finished_at=?, updated_at=? WHERE id=?")
-          .run(nowIso(), nowIso(), id);
-        out.interrupted.push(id);
-      }
+    const rows = db.prepare("SELECT id, kind, attempts, cancel_requested FROM jobs WHERE state='running'").all();
+    const out = { requeued: [], interrupted: [], cancelled: [], failed: [] };
+    const end = (id, state, error) => db.prepare('UPDATE jobs SET state=?, error=?, finished_at=?, updated_at=? WHERE id=?').run(state, error, nowIso(), nowIso(), id);
+    for (const { id, kind, attempts, cancel_requested: cancelRequested } of rows) {
+      if (cancelRequested) { end(id, 'cancelled', 'cancelled'); out.cancelled.push(id); } // the user asked: never run it again
+      else if (resumableKinds.includes(kind)) {
+        if (attempts >= maxAttempts) { end(id, 'failed', 'too_many_attempts'); out.failed.push(id); } // poison job: stop the crash loop
+        else {
+          db.prepare("UPDATE jobs SET state='queued', started_at=NULL, updated_at=? WHERE id=?").run(nowIso(), id);
+          out.requeued.push(id);
+        }
+      } else { end(id, 'interrupted', 'server_restarted'); out.interrupted.push(id); }
     }
     return out;
   })();

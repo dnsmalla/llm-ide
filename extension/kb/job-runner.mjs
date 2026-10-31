@@ -5,16 +5,19 @@
 // wired into boot or HTTP, so existing callers are unchanged.
 //
 // A handler is `async ({ job, signal, spawn, log }) => result` (or
-// `{ run, resumable: true }` when re-running after a crash is safe).
+// `{ run, resumable: true, timeoutMs? }` when re-running after a crash is safe). A job that outlives its timeout
+// is aborted and, if the handler ignores the abort, failed 'timeout' anyway so it cannot hold its lane forever.
 import { runGrouped, killGroup } from '../core/process-group.mjs';
 import {
   claimNextJobSystem, finishJobSystem, requestCancel, sweepInterruptedSystem, getJob,
 } from './job-queue.mjs';
 
 export const DEFAULT_MAX_CONCURRENT = 2;
+export const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
-export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger } = {}) {
+export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger, jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS, maxAttempts } = {}) {
   const norm = (h) => (typeof h === 'function' ? { run: h, resumable: false } : h);
+  const timeoutFor = (h) => (Number.isFinite(h?.timeoutMs) && h.timeoutMs > 0 ? h.timeoutMs : jobTimeoutMs);
   const table = new Map(Object.entries(handlers).map(([k, h]) => [k, norm(h)]));
   const limit = Math.max(1, Math.floor(maxConcurrent) || 1);
   /** @type {Map<string, {ctl: AbortController, pids: Set<number>, done: Promise<void>}>} */
@@ -30,21 +33,49 @@ export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CON
     const spawn = (cmd, args, opts = {}) => runGrouped(cmd, args, {
       ...opts, signal: ctl.signal, graceMs,
       onSpawn: (pid) => { pids.add(pid); opts.onSpawn?.(pid); },
+      onExit: (pid) => { pids.delete(pid); opts.onExit?.(pid); },
     });
+    let settled = false;
+    let timer = null;
+    let timeoutFired = false;
+    // Idempotent: the first of {handler returns, handler throws, timeout} wins. The DB write is guarded so a throw
+    // there can never leave the slot taken, and the slot is always freed.
+    const settle = (state, result, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { finishJobSystem(job.id, state, { result: state === 'succeeded' ? result : undefined, error }); }
+      catch (e) { log('error', 'job.finish_failed', { id: job.id, error: String(e?.message || e) }); }
+      finally { active.delete(job.id); if (!stopping) pump(); }
+    };
     const done = (async () => {
       let state; let result; let error;
+      const ms = timeoutFor(handler);
+      const timedOut = new Promise((resolve) => {
+        timer = setTimeout(() => {
+          if (settled) return;
+          timeoutFired = true;
+          ctl.abort();
+          // A handler that ignores the abort must not hold the lane: give it graceMs, then fail it.
+          const t2 = setTimeout(() => { for (const pid of pids) killGroup(pid, 'SIGKILL'); settle('failed', undefined, 'timeout'); resolve(); }, graceMs);
+          t2.unref?.();
+        }, ms);
+        timer.unref?.();
+      });
       try {
         if (!handler) throw new Error(`no handler for kind ${job.kind}`);
-        result = await handler.run({ job, signal: ctl.signal, spawn, log: (m) => log('info', 'job.log', { id: job.id, m }) });
+        const run = Promise.resolve().then(() => handler.run({ job, signal: ctl.signal, spawn, log: (m) => log('info', 'job.log', { id: job.id, m }) }));
+        run.catch(() => {}); // a late rejection after a timeout is already settled
+        result = await Promise.race([run, timedOut.then(() => { throw Object.assign(new Error('timeout'), { jobTimeout: true }); })]);
         state = ctl.signal.aborted ? 'cancelled' : 'succeeded';
       } catch (e) {
+        if (e?.jobTimeout) return; // settled by the timer
         state = ctl.signal.aborted ? 'cancelled' : 'failed';
         error = ctl.signal.aborted ? (stopping ? 'server_quit' : 'cancelled') : String(e?.message || e);
       }
+      if (timeoutFired && state !== 'succeeded') { state = 'failed'; error = 'timeout'; }
       if (state === 'cancelled' && !error) error = stopping ? 'server_quit' : 'cancelled';
-      finishJobSystem(job.id, state, { result: state === 'succeeded' ? result : undefined, error });
-      active.delete(job.id);
-      if (!stopping) pump();
+      settle(state, result, error);
     })();
     active.set(job.id, { ctl, pids, done });
   }
@@ -64,7 +95,7 @@ export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CON
     start() {
       if (started) return { requeued: [], interrupted: [] };
       const resumable = [...table].filter(([, h]) => h.resumable).map(([k]) => k);
-      const swept = sweepInterruptedSystem(resumable);
+      const swept = sweepInterruptedSystem(resumable, maxAttempts ? { maxAttempts } : undefined);
       started = true;
       stopping = false;
       pump();
