@@ -15,7 +15,7 @@ import {
 export const DEFAULT_MAX_CONCURRENT = 2;
 export const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
-export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger, jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS, maxAttempts } = {}) {
+export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CONCURRENT, graceMs = 2000, logger, jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS, maxAttempts, onSettled } = {}) {
   const norm = (h) => (typeof h === 'function' ? { run: h, resumable: false } : h);
   const timeoutFor = (h) => (Number.isFinite(h?.timeoutMs) && h.timeoutMs > 0 ? h.timeoutMs : jobTimeoutMs);
   const table = new Map(Object.entries(handlers).map(([k, h]) => [k, norm(h)]));
@@ -44,7 +44,11 @@ export function createJobRunner({ handlers = {}, maxConcurrent = DEFAULT_MAX_CON
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { finishJobSystem(job.id, state, { result: state === 'succeeded' ? result : undefined, error }); }
+      try {
+        const wrote = finishJobSystem(job.id, state, { result: state === 'succeeded' ? result : undefined, error });
+        // Optional hook (the command bus appends its terminal event here); it can never fail the settle.
+        if (wrote && onSettled) { try { onSettled({ job, state, result: state === 'succeeded' ? result : undefined, error }); } catch (e) { log('error', 'job.on_settled_failed', { id: job.id, error: String(e?.message || e) }); } }
+      }
       catch (e) { log('error', 'job.finish_failed', { id: job.id, error: String(e?.message || e) }); }
       finally { active.delete(job.id); if (!stopping) pump(); }
     };

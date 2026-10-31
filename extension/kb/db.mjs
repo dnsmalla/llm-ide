@@ -1041,6 +1041,8 @@ export function deleteUserCascade(userId) {
       'jobs',
       // migrations 0056, 0057 — workspace trust, per-user extension allowlist
       'workspace_trust', 'ext_source_allowlist',
+      // migration 0058 — command bus (commands, per-command event log, per-kind enable flags)
+      'bus_commands', 'job_events', 'bus_kind_flags',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }

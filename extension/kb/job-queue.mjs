@@ -21,12 +21,14 @@ export const MAX_ACTIVE_JOBS_PER_USER = 100; // queued + running
 export const MAX_ATTEMPTS = 3;
 const jobError = (code, message) => Object.assign(new Error(message), { code });
 
-export function enqueueJob(userId, { kind, lane, payload = {} }) {
+// `id` is for a caller that owns the id space (the command bus gives a job its command's id); omitted = a fresh UUID.
+export function enqueueJob(userId, { kind, lane, payload = {}, id: givenId } = {}) {
   if (!userId) throw new Error('enqueueJob: userId required');
   if (!kind || !lane) throw new Error('enqueueJob: kind and lane required');
   const body = JSON.stringify(payload);
   if (Buffer.byteLength(body, 'utf8') > MAX_PAYLOAD_BYTES) throw jobError('payload_too_large', `job payload is over ${MAX_PAYLOAD_BYTES} bytes`);
-  const id = crypto.randomUUID();
+  if (givenId != null && !/^[A-Za-z0-9_-]{8,64}$/.test(String(givenId))) throw new Error('enqueueJob: bad id');
+  const id = givenId != null ? String(givenId) : crypto.randomUUID();
   const db = getDb();
   db.transaction(() => {
     const n = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND state IN ('queued','running')").get(userId).n;
