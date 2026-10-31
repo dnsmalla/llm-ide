@@ -109,7 +109,7 @@ fn open_nofollow(p: &Path) -> Result<std::fs::File, String> {
 
 /// The real path of an open file, from its descriptor.
 #[cfg(target_os = "macos")]
-fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
+pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
     use std::os::fd::AsRawFd;
     use std::os::unix::ffi::OsStrExt;
     let mut buf = [0u8; libc::PATH_MAX as usize];
@@ -123,13 +123,13 @@ fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
+pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
     use std::os::fd::AsRawFd;
     std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())).ok()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn fd_path(_: &std::fs::File) -> Option<PathBuf> {
+pub(crate) fn fd_path(_: &std::fs::File) -> Option<PathBuf> {
     None
 }
 

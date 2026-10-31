@@ -26,6 +26,11 @@ ctrlc = { version = "=3.5.2", features = ["termination"] }
 libc = "=0.2.191"
 portable-pty = "=0.9.0"
 getrandom = "=0.3.4"
+# Explorer host (S-C): file watching (CC0-1.0), gitignore matching (MIT/Unlicense), OS trash (MIT).
+notify = "=8.2.1"
+ignore = "=0.4.25"
+trash = "=5.2.9"
+sha2 = "=0.10.9"
 
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -1,6 +1,7 @@
 mod ax_probe;
 mod core_env;
 mod core_host;
+mod fs_ops;
 mod fsutil;
 mod graph_file;
 mod notes_fs;
@@ -261,6 +262,13 @@ pub fn run() {
             project::project_open_recent,
             project::project_active,
             project::project_recent,
+            fs_ops::fs_list_dir,
+            fs_ops::fs_read_file,
+            fs_ops::fs_read_range,
+            fs_ops::fs_write_file,
+            fs_ops::fs_create,
+            fs_ops::fs_rename,
+            fs_ops::fs_delete,
             tray::notify,
             tray::tray_status,
             tray::tray_set_close_to_tray,
