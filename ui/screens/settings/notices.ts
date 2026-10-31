@@ -50,7 +50,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   connections:
     "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
   repositories:
-    "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here. Token verification (Save & verify), cloning/sync and the Mac's resolve step are not available in the desktop yet; the core index allow-list is a desktop-only safety control.",
+    "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Token verification (Save & verify), cloning/sync and the Mac's resolve step are not available in the desktop yet.",
   paths:
     "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:

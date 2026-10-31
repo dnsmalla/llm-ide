@@ -112,6 +112,8 @@ export interface SettingsHost {
   clearCoreLog?(): Promise<void>;
   /** The open project's layout and memory files (read-only, host-resolved; the page never supplies a path). */
   projectPaths?(): Promise<ProjectPaths>;
+  /** Re-create the active project's missing canonical folders (never overwrites existing files). */
+  rebuildProjectFolders?(): Promise<void>;
   projectMemory?(): Promise<ProjectMemory>;
   /** Reveals a project-relative path in the OS file manager (the host re-checks it against the root). */
   revealPath?(relPath: string): Promise<void>;

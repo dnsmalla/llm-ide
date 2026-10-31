@@ -95,7 +95,7 @@ export const REPOS_TEXT = {
   cloneGap:
     "The Mac clones a saved repository into the active project's code/ folder and can pull it again. Cloning from Settings is not available in the desktop yet.",
   partial:
-    "The provider tabs, write-only tokens, automation switches and saved repository entries are real. Token verification, clone/sync, and the Mac's resolve step are not in the desktop yet. The core index allow-list below is a desktop-only safety control.",
+    "The provider tabs, write-only tokens, automation switches and saved repository entries are real. Token verification, clone/sync, and the Mac's resolve step are not in the desktop yet; clone destinations default to the project's code/ folder from Settings → Paths.",
 } as const;
 
 /** A plain sentence for a failed catalog or repo call; never the server's raw text. */

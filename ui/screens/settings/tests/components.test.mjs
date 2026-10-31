@@ -213,12 +213,9 @@ test("Repositories: the Mac's GitLab/GitHub tabs, write-only tokens, automation 
   assert.match(out, /Automation &amp; actions/);
   assert.match(out, /Pull \/ Re-sync/);
   assert.match(out, /No repositories added yet/);
-  assert.match(out, /Core index allow-list/);
-  assert.match(out, /Add folder…/);
+  assert.match(out, /Open a project to use its code\/ folder as the clone destination/);
   assert.match(out, /Cloning from Settings is not available/);
-  const noPick = { client: e.client, host: { diagnostics: async () => ({}), copyText: async () => {} } };
-  const bare = html(h(m.context.SettingsEnvProvider, { env: noPick }, h(m.repos.default)));
-  assert.match(bare, /Adding a folder needs the desktop host/);
+  assert.doesNotMatch(out, /Core index allow-list/, "the Mac Repositories card has no folder allow-list");
 });
 
 test("Token Saving: an rtk detection card whose install is host-run, with no process in the page", () => {

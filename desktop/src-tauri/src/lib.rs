@@ -283,6 +283,7 @@ macro_rules! product_handlers {
                 project::project_close,
                 project::project_create,
                 project_layout::project_paths,
+                project_layout::project_rebuild_folders,
                 project_layout::project_memory,
                 fs_ops::fs_list_dir,
                 fs_ops::fs_read_file,

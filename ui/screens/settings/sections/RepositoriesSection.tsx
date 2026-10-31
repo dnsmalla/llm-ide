@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -20,7 +20,7 @@ import {
   type RepoProvider,
   type SavedRepo,
 } from "../repo-config.ts";
-import { REPOS_TEXT, decodeRepos, repoTitle as allowTitle, sourcesError, type RepoEntry } from "../sources-model.ts";
+import { REPOS_TEXT, sourcesError } from "../sources-model.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 
@@ -43,10 +43,8 @@ export default function RepositoriesSection() {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // The core allow-list (a desktop/security feature, not part of the Mac's Repositories card).
-  const [rows, setRows] = useState<RepoEntry[] | null>(null);
-  const [repoBusy, setRepoBusy] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // The project's own code/ path (Settings → Paths); saved repos default their clone destination here.
+  const [codeDir, setCodeDir] = useState<string | null>(null);
 
   const edit = (fn: (c: RepoConfig) => RepoConfig) => {
     setCfg((prev) => {
@@ -75,13 +73,15 @@ export default function RepositoriesSection() {
   }, [client]);
   useRefreshOnFocus(loadSecrets);
 
-  const loadRepos = useCallback(() => {
-    call(client, "GET", "/auth/me/repos").then(
-      (b) => setRows(decodeRepos(b)),
-      (e) => { setRows([]); setError(sourcesError(e)); },
+  useEffect(() => {
+    host.projectPaths?.().then(
+      (p) => {
+        const code = p.folders.find((f) => f.name === "code");
+        if (code) setCodeDir(`${p.root.replace(/\/+$/, "")}/code`);
+      },
+      () => setCodeDir(null),
     );
-  }, [client]);
-  useRefreshOnFocus(loadRepos);
+  }, [host]);
 
   const provider = REPO_PROVIDERS.find((p) => p.id === tab)!;
   const connected = secrets?.has(provider.tokenKey) ?? false;
@@ -125,35 +125,20 @@ export default function RepositoriesSection() {
     }
   };
 
-  // ---- core allow-list actions ---------------------------------------------------------------
-  const addAllow = async () => {
-    if (!host.pickFolder) return;
-    setRepoBusy(true);
-    try {
-      const picked = await host.pickFolder("Choose a repository folder");
-      if (!picked) return;
-      await call(client, "POST", "/auth/me/repos", { path: picked });
-      loadRepos();
-    } catch (e) {
-      setError(sourcesError(e));
-    } finally {
-      setRepoBusy(false);
-    }
+  const repoFolderName = (r: SavedRepo): string => {
+    const fromUrl = /^(?:https?:\/\/[^/]+\/)?([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(r.url.trim())?.[1];
+    if (fromUrl) return fromUrl.split("/")[1]!;
+    return repoTitle(r).replace(/[^A-Za-z0-9._-]+/g, "-");
   };
-
-  const removeAllow = async (r: RepoEntry) => {
-    setRepoBusy(true);
-    try {
-      await call(client, "DELETE", `/auth/me/repos?path=${encodeURIComponent(r.path)}`);
-      setConfirming(null);
-      loadRepos();
-    } catch (e) {
-      setError(sourcesError(e));
-    } finally {
-      setRepoBusy(false);
-    }
+  const cloneDestination = (r: SavedRepo): string | null => {
+    if (r.clonePath.trim()) return r.clonePath.trim();
+    return codeDir ? `${codeDir}/${repoFolderName(r)}` : null;
   };
-
+  const addRepo = () => edit((c) => {
+    const next = addSavedRepo(c, provider.id);
+    const row = next.saved[provider.id][next.saved[provider.id].length - 1];
+    return codeDir && row ? updateSavedRepo(next, provider.id, row.id, { clonePath: `${codeDir}/${repoFolderName(row)}` }) : next;
+  });
   const patchRepo = (r: SavedRepo, patch: Partial<SavedRepo>) => edit((c) => updateSavedRepo(c, provider.id, r.id, patch));
   const urlError = (r: SavedRepo): string | null => (r.url.trim() ? validateRepoUrl(r.url) : null);
 
@@ -262,8 +247,13 @@ export default function RepositoriesSection() {
         <div className="st-stack">
           <div className="st-row">
             <span className="st-label">Repositories</span>
-            <Button disabled={!connected} onClick={() => edit((c) => addSavedRepo(c, provider.id))}>Add repository</Button>
+            <Button disabled={!connected} onClick={addRepo}>Add repository</Button>
           </div>
+          <p className="st-hint">
+            {codeDir
+              ? <>Clone destination: <code>{codeDir}/&lt;repo&gt;</code> — the <code>code/</code> path from Settings → Paths.</>
+              : "Open a project to use its code/ folder as the clone destination."}
+          </p>
           {saved.length === 0 ? (
             <p className="st-hint">No repositories added yet.{connected ? "" : ` Add a ${provider.label} token first.`}</p>
           ) : (
@@ -297,8 +287,14 @@ export default function RepositoriesSection() {
                   </label>
                   <label className="st-field">
                     <span className="st-label">Clone path (optional)</span>
-                    <input className="st-input" value={r.clonePath} placeholder="Where the Mac would clone it; not used yet" spellCheck={false} onChange={(e) => patchRepo(r, { clonePath: e.target.value })} />
+                    <input className="st-input" value={r.clonePath} placeholder={cloneDestination(r) ?? "Where the Mac would clone it; not used yet"} spellCheck={false} onChange={(e) => patchRepo(r, { clonePath: e.target.value })} />
                   </label>
+                  {codeDir ? (
+                    <p className="st-hint">
+                      Clone destination: <code>{cloneDestination(r)}</code>{" "}
+                      {r.clonePath.trim() ? null : <Button onClick={() => patchRepo(r, { clonePath: cloneDestination(r) ?? "" })}>Use project code folder</Button>}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -306,38 +302,6 @@ export default function RepositoriesSection() {
           <p className="st-hint">{REPOS_TEXT.cloneGap}</p>
         </div>
 
-        <details className="st-stack">
-          <summary className="st-label">Core index allow-list (desktop-only)</summary>
-          <p className="st-hint">
-            Folders the core may read for git and issues. This is not part of the Mac's Repositories card; it is shown
-            here so the core's own safety list is reachable.
-          </p>
-          <div className="st-row">
-            {host.pickFolder ? <Button disabled={repoBusy} onClick={() => void addAllow()}>Add folder…</Button> : <span className="st-hint">Adding a folder needs the desktop host.</span>}
-            <Button disabled={repoBusy} onClick={loadRepos}>Refresh</Button>
-          </div>
-          {rows === null ? <p className="st-hint" role="status">Loading…</p> : rows.length === 0 ? (
-            <p className="st-hint">{REPOS_TEXT.empty}</p>
-          ) : (
-            <ul className="st-stack" aria-label="Approved repositories">
-              {rows.map((r) => (
-                <li key={r.path} className="st-note">
-                  <strong>{allowTitle(r)}</strong>
-                  <p className="st-pre">{r.path}</p>
-                  {confirming === r.path ? (
-                    <div className="st-row">
-                      <span className="st-hint" role="alert">{REPOS_TEXT.removeConfirm}</span>
-                      <Button tone="danger" disabled={repoBusy} onClick={() => void removeAllow(r)}>Remove</Button>
-                      <Button disabled={repoBusy} onClick={() => setConfirming(null)}>Cancel</Button>
-                    </div>
-                  ) : (
-                    <div className="st-row"><Button disabled={repoBusy} onClick={() => setConfirming(r.path)}>Remove</Button></div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </details>
       </div>
 
       <ErrorText text={error} />

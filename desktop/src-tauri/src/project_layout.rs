@@ -140,6 +140,35 @@ pub async fn project_memory() -> Result<ProjectMemory, String> {
     Ok(blocking(move || memory(&root)).await)
 }
 
+/// Re-create missing canonical folders/files for the active project (the Mac's "Rebuild missing folders").
+/// Idempotent: `project_scaffold::scaffold` only writes files that are absent, so user edits are never replaced.
+#[tauri::command]
+pub async fn project_rebuild_folders() -> Result<(), String> {
+    let root = active_root()?;
+    blocking(move || crate::project_scaffold::scaffold(&root, &project_meta(&root))).await
+}
+
+/// The project marker's metadata, or a fresh identity derived from the folder name when the marker is missing.
+/// Never invents a different display name when the marker exists.
+pub fn project_meta(root: &Path) -> crate::project_scaffold::NewProject {
+    let fallback_name = root.file_name().and_then(|n| n.to_str()).unwrap_or("Project").to_string();
+    let text = std::fs::read_to_string(root.join("system/project.json")).unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    let str_of = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
+    let language = v.get("settings").and_then(|s| s.get("language")).and_then(|x| x.as_str()).map(str::to_string);
+    let mut p = crate::project_scaffold::NewProject::fresh(&str_of("displayName").unwrap_or(fallback_name));
+    if let Some(id) = str_of("id") {
+        if !id.is_empty() { p.id = id; }
+    }
+    if let Some(created) = str_of("createdAt") {
+        if !created.is_empty() { p.created_iso = created; }
+    }
+    if let Some(lang) = language {
+        if !lang.is_empty() { p.language = lang; }
+    }
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +225,38 @@ mod tests {
         fs::create_dir_all(root.join("system/graph")).unwrap();
         fs::write(root.join("system/graph/graph.json"), "{}").unwrap();
         assert_eq!(graph(&root).unwrap().path, "system/graph/graph.json", "the nested candidate wins");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_meta_preserves_the_marker_and_falls_back_to_the_folder_name() {
+        let root = scratch("meta");
+        fs::create_dir_all(root.join("system")).unwrap();
+        fs::write(
+            root.join("system/project.json"),
+            r#"{"schemaVersion":1,"id":"p-123","displayName":"My Project","createdAt":"2026-10-01T00:00:00Z","settings":{"language":"ja"}}"#,
+        ).unwrap();
+        let p = project_meta(&root);
+        assert_eq!(p.id, "p-123");
+        assert_eq!(p.display_name, "My Project");
+        assert_eq!(p.created_iso, "2026-10-01T00:00:00Z");
+        assert_eq!(p.language, "ja");
+        let bare = scratch("bare-meta");
+        let q = project_meta(&bare);
+        assert_eq!(q.display_name, bare.file_name().unwrap().to_string_lossy());
+        assert!(!q.id.is_empty());
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn rebuild_folders_recreates_missing_directories_without_touching_files() {
+        let root = scratch("rebuild");
+        fs::write(root.join("README.md"), "mine").unwrap();
+        crate::project_scaffold::scaffold(&root, &project_meta(&root)).unwrap();
+        assert!(root.join("code").is_dir());
+        assert!(root.join("llm-doc/plans").is_dir());
+        assert_eq!(fs::read_to_string(root.join("README.md")).unwrap(), "mine", "existing files are never overwritten");
         let _ = fs::remove_dir_all(&root);
     }
 

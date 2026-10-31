@@ -62,13 +62,41 @@ export function bytesLabel(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** The cloud-sync provider a notes folder lives in, when it is one of the Mac's four known providers. */
+export function syncProviderFor(path: string): string | null {
+  if (path.includes("/Library/Mobile Documents/com~apple~CloudDocs/")) return "Synced via iCloud Drive";
+  if (path.includes("/Dropbox/") || path.includes("/Library/CloudStorage/Dropbox")) return "Synced via Dropbox";
+  if (path.includes("/Library/CloudStorage/GoogleDrive-")) return "Synced via Google Drive";
+  if (path.includes("/Library/CloudStorage/OneDrive-")) return "Synced via OneDrive";
+  return null;
+}
+
+/** The Mac Paths panel's one-line explanation per canonical folder. */
+export function folderNote(name: string): string | null {
+  switch (name) {
+    case "source": return "Meeting & email transcripts";
+    case "source/meetings": return "Meeting transcripts";
+    case "source/emails": return "Ingested email";
+    case "source/documents": return "Ingested documents";
+    case "code": return "Code files";
+    case "data": return "Documents, data, images";
+    case "llm-doc": return "Generated LLM docs";
+    case "llm-doc/plans": return "KB plans as Markdown (auto-generated)";
+    case "llm-doc/generated": return "Generated documents";
+    case "templates": return "Doc Gen templates";
+    case "commands": return "Doc Gen commands";
+    case "system": return "Settings, faults, graph, index (managed)";
+    default: return null;
+  }
+}
+
 export const PATHS_TEXT = {
-  hint: "The folders the project uses on disk. This is a read-only view: the layout is fixed by the project, and changing it from Settings is a Mac feature that the desktop does not offer yet.",
+  hint: "The folders the project uses on disk. The layout is read-only: it is fixed by the project, and changing it from Settings is a Mac feature the desktop does not offer. Missing folders can be re-created here.",
   missing: "Missing",
   present: "Present",
   reveal: "Show in Finder",
   partial:
-    "On the Mac this group can also change the project's folder layout with a native dialog. The desktop shows the layout and opens it in Finder; editing is not offered.",
+    "On the Mac this group can also change the project's folder layout with a native dialog and rebuild the notes search index. The desktop shows the layout, opens it in Finder, re-creates missing folders, and links to Library for the index rebuild; editing the layout is not offered.",
   noProject: "Open a project to see its folders.",
 } as const;
 

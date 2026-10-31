@@ -22,6 +22,7 @@
     "allow-project-close",
     "allow-project-create",
     "allow-project-paths",
+    "allow-project-rebuild-folders",
     "allow-project-memory",
     "allow-fs-list-dir",
     "allow-fs-read-file",

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, projectError, safeRelativePath } from "../project-model.ts";
+import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
 
 test("safeRelativePath: project-relative only (no absolute, drive, .., controls)", () => {
   assert.equal(safeRelativePath("system/graph/graph.json"), "system/graph/graph.json");
@@ -57,4 +57,19 @@ test("labels and errors: sizes, and a missing project becomes a sentence", () =>
   assert.equal(projectError("boom"), "boom");
   assert.equal(projectError("x".repeat(500)).length, 200);
   assert.equal(projectError({}), "The project folders could not be read.");
+});
+
+test("the notes folder sync badge recognises the Mac's four providers", () => {
+  assert.match(syncProviderFor("/Users/x/Library/Mobile Documents/com~apple~CloudDocs/Notes")!, /iCloud/);
+  assert.match(syncProviderFor("/Users/x/Dropbox/Notes")!, /Dropbox/);
+  assert.match(syncProviderFor("/Users/x/Library/CloudStorage/GoogleDrive-a/Notes")!, /Google Drive/);
+  assert.match(syncProviderFor("/Users/x/Library/CloudStorage/OneDrive-a/Notes")!, /OneDrive/);
+  assert.equal(syncProviderFor("/Users/x/notes"), null);
+});
+
+test("canonical folders carry the Mac Paths explanations", () => {
+  assert.equal(folderNote("code"), "Code files");
+  assert.equal(folderNote("source"), "Meeting & email transcripts");
+  assert.match(folderNote("llm-doc/plans")!, /KB plans/);
+  assert.equal(folderNote("nope"), null);
 });

@@ -125,6 +125,9 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           if (!p) throw new Error("the desktop host returned a project layout this app cannot read");
           return p;
         },
+        async rebuildProjectFolders() {
+          await d.invoke<unknown>("project_rebuild_folders");
+        },
         async projectMemory() {
           const m = decodeMemory(await d.invoke<unknown>("project_memory"));
           if (!m) throw new Error("the desktop host returned project memory this app cannot read");
