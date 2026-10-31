@@ -73,45 +73,12 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             host?.sendAutoTaskReply(.state(state))
             return true
 
-        case .toggle(let toggle):
-            // Flip the master enable (task == nil), a built-in per-task flag,
-            // or (new) a custom task's isEnabled. Routes through
-            // AutoTaskSettings.setEnabled / .enabled for built-ins so the
-            // @Published didSet persists + arms/disarms the scheduler exactly
-            // as the on-Mac Settings toggle would; custom tasks persist via
-            // CustomAutoTask.save() directly (they have no AutoTaskSettings
-            // entry — enabled-state lives on the struct itself).
-            guard controlAllowed else {
-                host?.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
-                return true
-            }
-            if let m = toggle {
-                if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
-                    settings?.setEnabled(m.enabled, task: t)
-                    host?.logInfo("Auto-task toggle \(t.rawValue)=\(m.enabled)")
-                } else if let taskName = m.task,
-                          var custom = scopedCustomTasks().first(where: { $0.id == taskName }) {
-                    custom.isEnabled = m.enabled
-                    custom.save(in: autoCode?.config.userDefaults ?? .standard)
-                    NotificationCenter.default.post(name: .customAutoTasksChanged, object: nil)
-                    host?.logInfo("Custom auto-task toggle \(custom.name)=\(m.enabled)")
-                } else if m.task == nil {
-                    guard FeatureRegistry.shared.isEnabled(.autoTasks) else {
-                        host?.logInfo("Auto-task master toggle ignored: feature disabled on Mac")
-                        replyAutoTaskStateOrAck()
-                        return true
-                    }
-                    settings?.enabled = m.enabled
-                    host?.logInfo("Auto-task master=\(m.enabled)")
-                } else {
-                    host?.logError("auto_task_toggle: unknown task id \(m.task ?? "?")")
-                }
-                replyAutoTaskStateOrAck()
-            } else {
-                host?.logDecodeFailure(type: type, data: data)
-                host?.replyCommandError(commandId: "auto_task_toggle",
-                                        message: "Invalid auto-task toggle request from phone.")
-            }
+        case .toggle:
+            // Desktop-only: a toggle changes what the scheduler runs next, so the phone may read the
+            // flags (state/list) but not flip them. The reply is a typed refusal, never a crash, so an
+            // older phone that still shows the switch just gets its message.
+            refuseDesktopOnly(commandId: "auto_task_toggle", what: "Turning Auto Tasks on or off")
+            replyAutoTaskStateOrAck()
             return true
 
         case .run(let run):
@@ -292,125 +259,36 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// the filename stem) and repoint other tasks' configs, so an ack would
     /// leave the phone holding state the Mac has already moved past.
     private func handleAutoTaskSetup(_ request: MobileAutoTaskRequest, type: String, data: Data?) {
-        guard let autoCode, let templates = autoCode.autoTaskTemplates else {
-            host?.replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
-            return
-        }
-        // Everything except the snapshot request writes config or templates that a later run acts on.
-        if request != .setupList, !controlAllowed {
-            host?.replyCommandError(commandId: type, message: controlDeniedMessage)
-            return
-        }
-
         switch request {
+        case .configSet, .templateSave, .templateRename, .templateDelete:
+            // Desktop-only. These edit what a later run executes (a template body is a prompt, a config's
+            // paths and skill end up in one a `.implement` task acts on), so the phone may read but never
+            // write them, whatever the Auto Task switch says. A typed refusal, never a crash, for old
+            // phones; answered before any wiring check so it never depends on the Mac's state.
+            refuseDesktopOnly(commandId: type, what: "Editing Auto Task settings and templates")
+            return
         case .setupList:
-            break   // snapshot only — fall through to the reply below
-
-        case .configSet(let configSet):
-            guard let m = configSet else {
-                replyAutoTaskSetupDecodeFailure(type: type, data: data)
-                return
-            }
-            // The phone is a second writer into the Mac's settings, so its
-            // input is validated rather than trusted. An unknown task id would
-            // create a record no Mac surface can reach or delete, and the paths
-            // end up in a prompt that a `.implement` task acts on — so both are
-            // checked before anything is stored.
-            guard isKnownAutoTaskId(m.taskId) else {
-                host?.logError("auto_task_config_set: unknown task id \(m.taskId)")
-                host?.replyCommandError(commandId: "auto_task_config_set",
-                                        message: "That task no longer exists on your Mac. Refresh the task list.")
-                return
-            }
-            guard let inputPath = validatedProjectPath(m.inputPath),
-                  let outputPath = validatedProjectPath(m.outputPath) else {
-                host?.logError("auto_task_config_set: rejected a path outside the project")
-                host?.replyCommandError(commandId: "auto_task_config_set",
-                                        message: "Paths must be folders inside the open project.")
-                return
-            }
-            // `skillName` is interpolated into "Use the <name> skill:" at the head of a prompt a
-            // `.implement` task acts on, so only a skill the project really has may be named.
-            let name = AutoTaskConfig.normalized(m.skillName)
-            if let name, !isKnownSkill(name) {
-                host?.logError("auto_task_config_set: unknown skill \(name)")
-                host?.replyCommandError(commandId: "auto_task_config_set",
-                                        message: "That skill isn't in the open project. Refresh the task settings.")
-                return
-            }
-            // Routed through the same store the Mac page writes to, so the
-            // desktop UI updates live and the value persists identically.
-            autoCode.taskConfigs.update(
-                AutoTaskConfig(inputPath: inputPath, outputPath: outputPath,
-                               skillName: name,
-                               skillDirective: name.map { AutoTaskSkillCatalog.directive(for: $0) },
-                               templateId: m.templateId),
-                for: m.taskId)
-            host?.logInfo("Auto-task config set for \(m.taskId)")
-
-        case .templateSave(let save):
-            guard let m = save else {
-                replyAutoTaskSetupDecodeFailure(type: type, data: data)
-                return
-            }
-            guard let id = m.id else {
-                guard templates.create(name: m.name, body: m.body) != nil else {
-                    host?.replyCommandError(commandId: "auto_task_template_save",
-                                            message: "Could not create “\(m.name)” — is a project open on your Mac?")
-                    return
-                }
-                host?.logInfo("Auto-task template created: \(m.name)")
-                break
-            }
-            // Body and name are applied HERE, in one message, because a rename
-            // moves the file and changes the id: two frames would race, and a
-            // rename serviced first would make the body write target a file
-            // that no longer exists.
-            guard templates.update(id: id, body: m.body) else {
-                host?.replyCommandError(commandId: "auto_task_template_save",
-                                        message: "Could not save “\(m.name)” on your Mac.")
-                return
-            }
-            let trimmedName = m.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedName.isEmpty, templates.template(id: id)?.name != trimmedName,
-               templates.rename(id: id, to: trimmedName) == nil {
-                host?.replyCommandError(commandId: "auto_task_template_save",
-                                        message: "Saved “\(m.name)”, but could not rename it.")
-                return
-            }
-            host?.logInfo("Auto-task template saved: \(id)")
-
-        case .templateRename(let rename):
-            guard let m = rename else {
-                replyAutoTaskSetupDecodeFailure(type: type, data: data)
-                return
-            }
-            guard templates.rename(id: m.id, to: m.name) != nil else {
-                host?.replyCommandError(commandId: "auto_task_template_rename",
-                                        message: "Could not rename that template on your Mac.")
-                return
-            }
-            host?.logInfo("Auto-task template renamed: \(m.id) → \(m.name)")
-
-        case .templateDelete(let delete):
-            guard let m = delete else {
-                replyAutoTaskSetupDecodeFailure(type: type, data: data)
-                return
-            }
-            guard templates.delete(id: m.id) else {
-                host?.replyCommandError(commandId: "auto_task_template_delete",
-                                        message: "Could not delete that template on your Mac.")
-                return
-            }
-            host?.logInfo("Auto-task template deleted: \(m.id)")
-
+            break   // read-only snapshot: the phone keeps read access to templates and per-task config
         case .list, .toggle, .run, .stop, .history, .logsList:
             // Not a setup message; `handle` never routes these here.
             host?.logInfo("Unhandled auto-task setup type: \(type)")
             return
         }
+        guard let autoCode, autoCode.autoTaskTemplates != nil else {
+            host?.replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
+            return
+        }
+        if let templates = autoCode.autoTaskTemplates {
+            replyAutoTaskSetup(autoCode: autoCode, templates: templates)
+        }
+    }
 
-        replyAutoTaskSetup(autoCode: autoCode, templates: templates)
+    /// Typed `desktop_only` refusal: the action exists only on the Mac.
+    private func refuseDesktopOnly(commandId: String, what: String) {
+        host?.logInfo("\(commandId) refused: desktop-only")
+        host?.replyCommandError(commandId: commandId,
+                                message: "\(what) is only available on your Mac.",
+                                code: MobileRefusalCode.desktopOnly)
     }
 
     /// Typed refusal for a phone run of a task that is switched off on the Mac.
@@ -430,38 +308,6 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
 
     private var controlDeniedMessage: String {
         host?.phoneAccessDeniedMessage(.autoTaskControl) ?? ""
-    }
-
-    /// True when `name` is a skill the active project's catalog lists (the same scan the setup reply offers).
-    private func isKnownSkill(_ name: String) -> Bool {
-        guard let root = host?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
-        else { return false }
-        return AutoTaskSkillCatalog.scan(projectRoot: root).contains { $0.name == name }
-    }
-
-    /// True for a built-in task or a custom task that currently exists.
-    private func isKnownAutoTaskId(_ id: String) -> Bool {
-        AutoTask(rawValue: id) != nil || scopedCustomTasks().contains { $0.id == id }
-    }
-
-    /// `.some(path)` when the value is a project-relative folder inside the
-    /// open project (or nil, meaning "not set"); `.none` when it escapes.
-    ///
-    /// Double optional by design: the caller must distinguish "cleared" from
-    /// "rejected", and collapsing them would silently accept a traversal as a
-    /// clear.
-    private func validatedProjectPath(_ value: String?) -> String?? {
-        guard let trimmed = AutoTaskConfig.normalized(value) else { return .some(nil) }
-        guard let root = host?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
-        else { return nil }
-        guard AutoTaskPromptComposer.absolutePath(trimmed, root: root) != nil else { return nil }
-        return .some(trimmed)
-    }
-
-    private func replyAutoTaskSetupDecodeFailure(type: String, data: Data?) {
-        host?.logDecodeFailure(type: type, data: data)
-        host?.replyCommandError(commandId: type,
-                                message: "Invalid auto-task setup request from phone.")
     }
 
     /// Build and send the setup snapshot.

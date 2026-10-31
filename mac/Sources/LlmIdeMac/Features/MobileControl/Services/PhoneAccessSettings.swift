@@ -20,7 +20,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
     case issueComment       // post a comment on an issue
     case selfHealApply      // apply a Self-Heal proposal to the checkout
     case toolApprovals      // answer tool/edit permission prompts
-    case autoTaskControl    // toggle / run auto tasks, edit their config and templates
+    case autoTaskControl    // run auto tasks that are enabled on the Mac (toggles, config and templates are desktop-only)
     case loopControl        // start a Loop run or a single stage
     case generationRun      // run Doc Gen from the phone (writes files under llm-doc/)
     case exploreEdit        // let Explorer chat from the phone edit files / run commands
@@ -36,7 +36,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .issueComment:      return "Comment on issues"
         case .selfHealApply:     return "Apply or discard Self-Heal fixes"
         case .toolApprovals:     return "Approve or deny tool and edit requests"
-        case .autoTaskControl:   return "Control Auto Tasks (run, enable, edit settings and templates)"
+        case .autoTaskControl:   return "Run Auto Tasks (only tasks enabled on the Mac)"
         case .loopControl:       return "Start Loop runs"
         case .generationRun:     return "Run document generation"
         case .exploreEdit:       return "Let phone Explorer chat edit files and run commands"
@@ -52,7 +52,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .issueComment:      return "Posts as you. Closing, editing and deleting stay on the Mac."
         case .selfHealApply:     return "Apply patches the LLM-IDE source checkout (never commits); discard deletes the proposal. Viewing, ignoring and retrying need no switch."
         case .toolApprovals:     return "Lets the phone answer a running chat's permission prompts, one tap each."
-        case .autoTaskControl:   return "Auto Tasks can edit files in the project. Viewing state, history and logs, and Stop, need no switch."
+        case .autoTaskControl:   return "Starts a task that is already enabled on the Mac. Implementing issues and pushing branches also need your confirmation on the Mac. Turning tasks on or off and editing their settings and templates stay on the Mac. Viewing state, history and logs, and Stop, need no switch."
         case .loopControl:       return "A Loop run edits files and runs commands in the project. Viewing and Stop need no switch."
         case .generationRun:     return "Writes generated documents into the project's llm-doc/generated folder and uses your LLM quota."
         case .exploreEdit:       return "Off: phone Explorer chat is read-only. On: it runs with the Mac's Code Assistant permission chip, which can be Auto (no prompts)."

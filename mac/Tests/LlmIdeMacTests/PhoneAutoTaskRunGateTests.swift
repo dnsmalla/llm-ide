@@ -58,3 +58,67 @@ final class PhoneAutoTaskRunGateTests: XCTestCase {
         service.cancel()
     }
 }
+
+/// Templates, per-task config and toggles are desktop-only: the phone keeps read access and gets a
+/// typed `desktop_only` refusal for every write, even with the Auto Task switch on.
+@MainActor
+final class PhoneAutoTaskDesktopOnlyTests: XCTestCase {
+    private var suite: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "phone-desktop-only-\(UUID().uuidString)"
+        suite = UserDefaults(suiteName: suiteName)
+    }
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    func testEveryWriteIsRefusedDesktopOnlyAndChangesNothing() {
+        let (service, settings, logs) = PhoneBridgeFixtures.autoTaskService(suite: suite)
+        let host = PhoneBridgeSpyHost()
+        host.allow(.autoTaskControl)
+        let bridge = MobileAutoTaskBridge(host: host, autoCode: service, settings: settings, logStore: logs)
+
+        let writes: [(String, MobileAutoTaskRequest)] = [
+            ("auto_task_config_set", .configSet(.init(taskId: "reviewCode", inputPath: nil, outputPath: nil,
+                                                      skillName: nil, templateId: nil))),
+            ("auto_task_template_save", .templateSave(.init(id: nil, name: "x", body: "y"))),
+            ("auto_task_template_rename", .templateRename(.init(id: "a", name: "b"))),
+            ("auto_task_template_delete", .templateDelete(.init(id: "a"))),
+            ("auto_task_toggle", .toggle(.init(task: "reviewCode", enabled: true))),
+            ("auto_task_toggle", .toggle(.init(task: nil, enabled: true))),
+            ("auto_task_toggle", .toggle(nil)),
+        ]
+        for (type, request) in writes {
+            host.commandErrors = []
+            host.autoTaskRequest = request
+            XCTAssertTrue(bridge.handle(type: type, data: nil), type)
+            XCTAssertEqual(host.commandErrors.first?.code, MobileRefusalCode.desktopOnly, "\(type) \(request)")
+        }
+        XCTAssertFalse(settings.runReviewCode, "a refused toggle must not flip the flag")
+        XCTAssertFalse(settings.enabled, "a refused master toggle must not flip the master switch")
+    }
+
+    func testReadsStillWork() {
+        let (service, settings, logs) = PhoneBridgeFixtures.autoTaskService(suite: suite)
+        let host = PhoneBridgeSpyHost()
+        let bridge = MobileAutoTaskBridge(host: host, autoCode: service, settings: settings, logStore: logs)
+        host.autoTaskRequest = .list
+        XCTAssertTrue(bridge.handle(type: "auto_task_list", data: nil))
+        let gotState = host.autoTaskReplies.contains { if case .state = $0 { return true } else { return false } }
+        XCTAssertTrue(gotState, "the phone keeps read access to status")
+        XCTAssertTrue(host.commandErrors.isEmpty)
+    }
+
+    func testRefusalWorksEvenWhenTheSwitchIsOff() {
+        let (service, settings, logs) = PhoneBridgeFixtures.autoTaskService(suite: suite)
+        let host = PhoneBridgeSpyHost()   // switch NOT allowed
+        let bridge = MobileAutoTaskBridge(host: host, autoCode: service, settings: settings, logStore: logs)
+        host.autoTaskRequest = .templateSave(.init(id: nil, name: "x", body: "y"))
+        _ = bridge.handle(type: "auto_task_template_save", data: nil)
+        XCTAssertEqual(host.commandErrors.first?.code, MobileRefusalCode.desktopOnly)
+    }
+}
