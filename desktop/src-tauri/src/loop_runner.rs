@@ -320,6 +320,33 @@ fn version_of(program: &str, args: &[&str]) -> Option<String> {
 /// Runs the repo's own `mac/Scripts/feature-boundaries.sh` when present, in the git root, and parses its
 /// `total: N` line. Absent/too-slow script returns None; the report is informational.
 /// Changed paths in the run's worktree, from a fixed `git status --porcelain`. Used by the Loop run record.
+/// Reverts a bounded set of repo-relative paths in the resolved worktree. The page supplies paths only; the host
+/// rejects absolute/parent traversal and never accepts a command. Used by the protected-path guard.
+#[tauri::command]
+pub async fn loop_revert_paths(paths: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+        if paths.len() > 100 { return Err("too many paths to revert".into()); }
+        let work = work_root(&root);
+        for p in &paths {
+            let rel = std::path::Path::new(p);
+            if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir)) {
+                return Err(format!("unsafe path: {p}"));
+            }
+        }
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&work).arg("checkout").arg("--");
+        for p in &paths { cmd.arg(p); }
+        let out = cmd.output().map_err(|e| format!("cannot run git checkout: {e}"))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("git checkout failed: {}", err.lines().next().unwrap_or("unknown error")));
+        }
+        Ok(())
+    }).await.map_err(|e| format!("revert task failed: {e}"))?
+}
+
 #[tauri::command]
 pub async fn loop_changed_paths() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {

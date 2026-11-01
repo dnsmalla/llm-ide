@@ -19,6 +19,7 @@ import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
 import { loadQueue, saveQueue } from "./queue.ts";
+import { protectedPaths } from "./protected.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
@@ -282,6 +283,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
+  const guardProtected = async (paths: readonly string[], target: LoopDefinition): Promise<string | null> => {
+    const bad = protectedPaths(paths, target.config.extraProtectedGlobs);
+    if (bad.length === 0) return null;
+    if (target.config.protectedPathPolicy !== "revert") return `agent touched protected path(s) (${bad.join(", ")}); policy “${target.config.protectedPathPolicy}” is not ported`;
+    try {
+      await invokeHost("loop_revert_paths", { paths: bad });
+      return `agent touched protected path(s) and they were reverted: ${bad.join(", ")}`;
+    } catch (e) {
+      return `agent touched protected path(s) and the revert failed: ${bad.join(", ")} (${e instanceof Error ? e.message : String(e)})`;
+    }
+  };
+
   const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = []): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand") {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
@@ -322,6 +335,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const r = await core.request<{ reply?: string; changedPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
         method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
       });
+      const guard = await guardProtected(r.changedPaths ?? [], target);
+      if (guard) return { ok: false, output: guard };
       return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
     }
     if (s.kind === "testMap" && s.testOp === "ledger") {
@@ -428,6 +443,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
           });
           setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ""]);
+          const guard = await guardProtected(r.changedPaths ?? [], target);
+          if (guard) return { ok: false, output: guard };
           return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: r.reply ?? "" };
         },
         log(line) { setRunLog((l) => [...l, line]); },
@@ -663,7 +680,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
             <label className="loop-field"><span>Repair model (empty = app default)</span><input value={loop.config.repairModel ?? ""} placeholder="model id" onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
-            <label className="loop-field"><span>Protected path policy (not enforced)</span><select disabled value={loop.config.protectedPathPolicy} onChange={() => undefined}><option value="revert">Revert offending edits</option><option value="commit">Commit offending edits</option><option value="ignore">Ignore</option></select></label>
+            <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "commit" | "ignore"; })}><option value="revert">Revert offending edits</option><option value="commit">Commit (not ported)</option><option value="ignore">Ignore (not ported)</option></select></label>
+            <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
@@ -671,7 +689,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, protected-path enforcement, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, commit/ignore protected-path policies, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
