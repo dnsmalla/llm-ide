@@ -144,7 +144,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const deleteLoop = () => {
     if (!store || !loop || loop.defaultKey !== null || store.loops.length <= 1) return;
     if (!window.confirm(`Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.`)) return;
-    mutateStore((s) => { s.loops = s.loops.filter((l) => l.id !== loop.id); });
+    mutateStore((s) => {
+      s.loops = s.loops.filter((l) => l.id !== loop.id);
+      if (loop.isPrimary && s.loops.length > 0 && !s.loops.some((l) => l.isPrimary)) s.loops[0].isPrimary = true;
+    });
     const next = store.loops.find((l) => l.id !== loop.id) ?? null;
     setSelectedLoopId(next?.id ?? null);
     setSelectedStageId(next?.config.stages[0]?.id ?? null);
@@ -180,6 +183,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       l.config.stages.push(copy);
     });
     setSelectedStageId(id);
+  };
+
+  const moveStage = (dir: -1 | 1) => {
+    if (!loop || !stage) return;
+    mutateStore((s) => {
+      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
+      const i = l.config.stages.findIndex((x) => x.id === stage.id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= l.config.stages.length) return;
+      const [moved] = l.config.stages.splice(i, 1);
+      l.config.stages.splice(j, 0, moved);
+      l.config.stages.forEach((x, k) => { x.order = k; });
+    });
   };
 
   const selectLoop = (l: LoopDefinition) => {
@@ -283,6 +299,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <aside className="loop-pane loop-stages" aria-label="Stages">
         <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><button type="button" className="loop-plus" aria-label="Add stage" title="Add stage" onClick={addStage}>＋</button></div>
         <div className="loop-actions">
+          <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
+          <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
           <button type="button" className="loop-btn" onClick={() => void runSelectedStage()} disabled={!stage || dirty || runningStage}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
@@ -322,10 +340,20 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </dl>
           <div className="loop-budgets">
             <label className="loop-field"><span>Max iterations</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Time limit (seconds, empty = none)</span><input type="number" min={0} value={loop.config.wallClockBudgetSeconds ?? ""} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)); })} /></label>
-            <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Repairs per stage</span><input type="number" min={0} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(0, Number(e.target.value) || 0); })} /></label>
+            <label className="loop-field"><span>Time budget (minutes, empty = none)</span><input type="number" min={0} step={15} value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
+            <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Pause timeout (minutes, 0 = none)</span><input type="number" min={0} step={15} value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
           </div>
+          <details className="loop-advanced">
+            <summary>Advanced budgets and policy</summary>
+            <label className="loop-field"><span>Repair model (empty = default)</span><input value={loop.config.repairModel ?? ""} onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
+            <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "commit" | "ignore"; })}><option value="revert">Revert offending edits</option><option value="commit">Commit offending edits</option><option value="ignore">Ignore</option></select></label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Open a merge request after a successful run</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.useWorktreesForConcurrentRuns} onChange={(e) => patchLoop((l) => { l.config.useWorktreesForConcurrentRuns = e.target.checked; })} /> Use an isolated worktree when another run holds the repo</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
+          </details>
         </section>
 
         <section className="loop-card">

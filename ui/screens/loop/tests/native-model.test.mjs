@@ -25,8 +25,10 @@ test("primary/manual-only helpers follow the Mac rules", () => {
   assert.equal(s.primaryLoop(store).name, "B");
   const refactor = m.decodeProjectStore({ loops: [{ name: "R", defaultKey: "refactor", config: { stages: [] } }] }).loops[0];
   assert.equal(s.isManualOnly(refactor), true);
-  const skill = m.decodeProjectStore({ loops: [{ name: "S", config: { stages: [{ name: "x", kind: "skill", enabled: true, order: 0 }] } }] }).loops[0];
+  const skill = m.decodeProjectStore({ loops: [{ name: "S", config: { stages: [{ name: "x", kind: "skill", skillId: "skills/refactor-apply", enabled: true, order: 0 }] } }] }).loops[0];
   assert.equal(s.isManualOnly(skill), true);
+  const writer = m.decodeProjectStore({ loops: [{ name: "W", config: { stages: [{ name: "x", kind: "skill", skillId: "skills/test-gap-writer", enabled: true, order: 0 }] } }] }).loops[0];
+  assert.equal(s.isManualOnly(writer), false);
 });
 
 function fakeFs(contents, hash = "h1") {

@@ -54,8 +54,9 @@ export function primaryLoop(store: LoopProjectStore) {
 }
 
 /** Manual-only follows the recipe: the Refactoring built-in or any enabled code-applying stage. */
+const CODE_APPLY_SKILLS = new Set(["skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup", "skills/refactor-conform"]);
 export function isManualOnly(loop: LoopProjectStore["loops"][number]): boolean {
-  return loop.defaultKey === "refactor" || loop.config.stages.some((s) => s.enabled && (s.kind === "skill" || s.kind === "codeGraph"));
+  return loop.defaultKey === "refactor" || loop.config.stages.some((s) => s.enabled && s.kind === "skill" && s.skillId !== null && CODE_APPLY_SKILLS.has(s.skillId) && s.skillId !== "skills/test-gap-writer");
 }
 
 /** Mac default-loop keys, in creation/display order. */
