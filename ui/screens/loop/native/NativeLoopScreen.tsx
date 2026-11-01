@@ -425,7 +425,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           if (target.goal) message.push(`Loop goal: ${target.goal}`);
           if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
           const r = await core.request<{ reply?: string; changedPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
-            method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000 },
+            method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
           });
           setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ""]);
           return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: r.reply ?? "" };
@@ -662,7 +662,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </div>
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
-            <label className="loop-field"><span>Repair model (not used by this build)</span><input disabled value={loop.config.repairModel ?? ""} onChange={() => undefined} /></label>
+            <label className="loop-field"><span>Repair model (empty = app default)</span><input value={loop.config.repairModel ?? ""} placeholder="model id" onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
             <label className="loop-field"><span>Protected path policy (not enforced)</span><select disabled value={loop.config.protectedPathPolicy} onChange={() => undefined}><option value="revert">Revert offending edits</option><option value="commit">Commit offending edits</option><option value="ignore">Ignore</option></select></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
@@ -671,7 +671,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, protected-path enforcement, repair-model selection, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, protected-path enforcement, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
