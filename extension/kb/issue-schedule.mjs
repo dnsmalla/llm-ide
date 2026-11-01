@@ -86,14 +86,23 @@ function rowToSchedule(r) {
   };
 }
 
-/// All schedule overlays for one repo (one provider), for this user.
+/// All schedule overlays for one repo (one provider), for this user. An empty repo means every cached
+/// repository for the provider — the Gantt's "All repositories" view, matching the Issues listing.
 export function listIssueSchedules(userId, { provider, repo } = {}) {
   requireUser(userId);
-  assertKey(provider, repo, 1); // issueNumber unused here; validates provider+repo
+  if (!ALLOWED_PROVIDERS.has(provider)) {
+    throw new Error(`provider must be one of: ${[...ALLOWED_PROVIDERS].join(', ')}`);
+  }
   const db = getDb();
-  const rows = lazyPrepare(db,
-    'SELECT * FROM issue_schedule WHERE user_id = ? AND provider = ? AND repo = ? ORDER BY issue_number'
-  ).all(userId, provider, repo);
+  const allRepos = repo == null || repo === '';
+  if (!allRepos) assertKey(provider, repo, 1); // issueNumber unused here; validates repo
+  const rows = allRepos
+    ? lazyPrepare(db,
+        'SELECT * FROM issue_schedule WHERE user_id = ? AND provider = ? ORDER BY repo, issue_number'
+      ).all(userId, provider)
+    : lazyPrepare(db,
+        'SELECT * FROM issue_schedule WHERE user_id = ? AND provider = ? AND repo = ? ORDER BY issue_number'
+      ).all(userId, provider, repo);
   return rows.map(rowToSchedule);
 }
 

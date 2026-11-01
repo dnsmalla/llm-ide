@@ -74,6 +74,17 @@ test('dedupes dependsOn and rejects bad values', () => {
   assert.throws(() => db.upsertIssueSchedule(U, { provider: 'github', repo: REPO, issueNumber: 1, dependsOn: [0] }), /positive integer/);
 });
 
+test('an empty repo lists every schedule for the provider (All repositories)', () => {
+  reset();
+  db.upsertIssueSchedule(U, { provider: 'github', repo: 'octo/one', issueNumber: 1, dueDate: '2026-07-10' });
+  db.upsertIssueSchedule(U, { provider: 'github', repo: 'octo/two', issueNumber: 2, dueDate: '2026-07-11' });
+  db.upsertIssueSchedule(U2, { provider: 'github', repo: 'octo/one', issueNumber: 9, dueDate: '2026-08-01' });
+  const all = db.listIssueSchedules(U, { provider: 'github', repo: '' });
+  assert.deepEqual(all.map((x) => [x.repo, x.issueNumber]), [['octo/one', 1], ['octo/two', 2]]);
+  assert.equal(db.listIssueSchedules(U, { provider: 'github' }).length, 2);
+  assert.throws(() => db.listIssueSchedules(U, { provider: 'github', repo: 'bad' }), /owner\/name/);
+});
+
 test('rejects malformed dates, negative estimates, and bad keys', () => {
   reset();
   assert.throws(() => db.upsertIssueSchedule(U, { provider: 'github', repo: REPO, issueNumber: 1, dueDate: '07/10/2026' }), /YYYY-MM-DD/);
