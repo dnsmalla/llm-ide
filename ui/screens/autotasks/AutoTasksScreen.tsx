@@ -2,10 +2,11 @@
 // model routing stay in the Mac app (the same rule as the iPhone): this screen lists, runs, stops and toggles them.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
-import { BridgeRequired, useMacBridge } from "../bridge/BridgeGate.tsx";
-import { macBridge, type BridgeSnapshot, type AutoTaskInfo } from "../bridge/mac-bridge.ts";
+import { useMacBridge } from "../bridge/BridgeGate.tsx";
+import { macBridge, type BridgeSnapshot, type AutoTaskInfo, type AutoTaskState } from "../bridge/mac-bridge.ts";
 import "../bridge/bridge.css";
 import "./autotasks.css";
+import { shellBus } from "../shell/bus";
 
 const when = (ms: number | null): string => {
   if (ms === null) return "Never";
@@ -23,29 +24,40 @@ const GROUP: Record<string, (typeof GROUP_ORDER)[number]> = {
 };
 const groupOf = (t: AutoTaskInfo): string => GROUP[t.id] ?? "Automation";
 
+/** The Mac's task catalog, used while no Mac engine is attached. No fake run state: every task starts Off. */
+const LOCAL_TASKS: AutoTaskInfo[] = [
+  { id: "sourceUpdate", label: "Source Update", enabled: false, lastError: null },
+  { id: "sourcesToIssue", label: "Sources to Issue", enabled: false, lastError: null },
+  { id: "implementIssues", label: "Implement Issues", enabled: false, lastError: null },
+  { id: "reviewMerge", label: "Review Merge", enabled: false, lastError: null },
+  { id: "reviewCode", label: "Review Code", enabled: false, lastError: null },
+  { id: "reviewDoc", label: "Review Doc", enabled: false, lastError: null },
+  { id: "reviewConflicts", label: "Review Conflicts", enabled: false, lastError: null },
+  { id: "updateIssues", label: "Update Issues", enabled: false, lastError: null },
+  { id: "updatePlanStatus", label: "Update Plan Status", enabled: false, lastError: null },
+  { id: "generateDoc", label: "Generate Doc", enabled: false, lastError: null },
+  { id: "regression", label: "Regression", enabled: false, lastError: null },
+  { id: "generateKnowledge", label: "Knowledge", enabled: false, lastError: null },
+];
+const LOCAL_STATE: AutoTaskState = {
+  masterEnabled: false, isRunning: false, currentTask: null, currentStep: null, statusMessage: null,
+  lastRunDate: null, createdCount: 0, implementedCount: 0, failedCount: 0, tasks: LOCAL_TASKS,
+};
+
 function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
-  const s = snap.autoTasks;
+  const connected = snap.autoTasks !== null;
+  const s = snap.autoTasks ?? LOCAL_STATE;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [onlyEnabled, setOnlyEnabled] = useState(false);
 
   useEffect(() => {
-    if (!s) return;
     if (selectedId === null || !s.tasks.some((t) => t.id === selectedId)) setSelectedId(s.tasks[0]?.id ?? null);
   }, [s, selectedId]);
 
   const grouped = useMemo(() => {
-    const tasks = (s?.tasks ?? []).filter((t) => !onlyEnabled || t.enabled);
+    const tasks = s.tasks.filter((t) => !onlyEnabled || t.enabled);
     return GROUP_ORDER.map((g) => [g, tasks.filter((t) => groupOf(t) === g)] as const).filter(([, list]) => list.length > 0);
   }, [s, onlyEnabled]);
-
-  if (!s) {
-    return (
-      <div className="at-page">
-        <p className="st-hint" role="status">Waiting for the Mac’s Auto Tasks state…</p>
-        <button type="button" className="bridge-link" onClick={() => macBridge.refresh()}>Refresh</button>
-      </div>
-    );
-  }
 
   const running = s.isRunning;
   const selected = s.tasks.find((t) => t.id === selectedId) ?? null;
@@ -53,6 +65,13 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
 
   return (
     <div className="at-page">
+      {!connected ? (
+        <div className="at-connect" role="status">
+          <strong>Desktop Auto Tasks</strong>
+          <span>The native task runner is being ported. Until it lands, this page shows the Mac task catalog and settings; no Mobile Control token is required for this screen.</span>
+          <button type="button" className="lib-btn" onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "mobile" })}>Mac bridge (optional)</button>
+        </div>
+      ) : null}
       <header className="at-head">
         <h1>Auto Tasks</h1>
         <span className="st-status" data-tone={s.masterEnabled ? "ok" : "warning"}>{s.masterEnabled ? "Master on" : "Master off"}</span>
@@ -61,10 +80,10 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
           <input type="checkbox" checked={onlyEnabled} onChange={(e) => setOnlyEnabled(e.target.checked)} />
           <span>Show only enabled</span>
         </label>
-        <button type="button" className="lib-btn" onClick={() => macBridge.toggle(null, !s.masterEnabled)}>{s.masterEnabled ? "Turn master off" : "Turn master on"}</button>
-        <button type="button" className="lib-btn lib-btn-primary" disabled={running} onClick={() => macBridge.run(null)}>Run all</button>
-        <button type="button" className="lib-btn" disabled={!running} onClick={() => macBridge.stopAuto()}>Stop</button>
-        <button type="button" className="lib-btn" onClick={() => macBridge.history()}>Action items</button>
+        <button type="button" className="lib-btn" disabled={!connected} onClick={() => macBridge.toggle(null, !s.masterEnabled)}>{s.masterEnabled ? "Turn master off" : "Turn master on"}</button>
+        <button type="button" className="lib-btn lib-btn-primary" disabled={!connected || running} onClick={() => macBridge.run(null)}>Run all</button>
+        <button type="button" className="lib-btn" disabled={!connected || !running} onClick={() => macBridge.stopAuto()}>Stop</button>
+        <button type="button" className="lib-btn" disabled={!connected} onClick={() => macBridge.history()}>Action items</button>
       </header>
 
       <div className="at-meta">
@@ -78,7 +97,7 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
         <aside className="at-list" aria-label="Auto tasks">
           {grouped.map(([group, tasks]) => (
             <section key={group} className="at-group">
-              <h2 className="at-group-title">{group}</h2>
+              <h2 className="at-group-title">{group} Tasks</h2>
               <ul className="at-ulist">
                 {tasks.map((t) => (
                   <li key={t.id}>
@@ -101,8 +120,8 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
                 <h2>{selected.label}</h2>
                 <span className="st-status" data-tone={selected.enabled ? "ok" : "warning"}>{selected.enabled ? "Enabled" : "Off"}</span>
                 <span className="bridge-spacer" />
-                <button type="button" className="lib-btn" onClick={() => macBridge.toggle(selected.id, !selected.enabled)}>{selected.enabled ? "Turn off" : "Turn on"}</button>
-                <button type="button" className="lib-btn lib-btn-primary" disabled={running} onClick={() => macBridge.run(selected.id)}>Run task</button>
+                <button type="button" className="lib-btn" disabled={!connected} onClick={() => macBridge.toggle(selected.id, !selected.enabled)}>{selected.enabled ? "Turn off" : "Turn on"}</button>
+                <button type="button" className="lib-btn lib-btn-primary" disabled={!connected || running} onClick={() => macBridge.run(selected.id)}>Run task</button>
               </header>
               {selected.lastError ? <p className="bridge-error" role="alert">{selected.lastError}</p> : null}
               <p className="st-hint">Schedules, prompt templates, model routing and task inputs are edited in the Mac app; this is the same remote control the iPhone uses.</p>
@@ -153,5 +172,8 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
 
 export default function AutoTasksScreen(_props: SectionProps): ReactNode {
   const snap = useMacBridge();
-  return <BridgeRequired>{() => <Content snap={snap} />}</BridgeRequired>;
+  useEffect(() => {
+    if (macBridge.paired) macBridge.connect();
+  }, []);
+  return <Content snap={snap} />;
 }

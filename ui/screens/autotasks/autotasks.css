@@ -18,3 +18,5 @@
 .at-history { border-top: 1px solid var(--tok-color-border); padding-top: var(--tok-space-sm); }
 .at-history h2 { margin: 0 0 var(--tok-space-xs); font-size: var(--tok-type-section-size); }
 @media (max-width: 900px) { .at-workspace { grid-template-columns: 1fr; } .at-list { border-right: 0; border-bottom: 1px solid var(--tok-color-border); } }
+.at-connect { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-surface2); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.at-connect strong { color: var(--tok-color-text); }
