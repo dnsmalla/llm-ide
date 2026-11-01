@@ -15,6 +15,7 @@ export interface LoopRunIndexEntry {
 }
 
 export type HistoryFs = Pick<FsApi, "list" | "read">;
+export type WriteHistoryFs = HistoryFs & Pick<FsApi, "create" | "write">;
 const MAX = 50;
 
 function decodeLine(line: string): LoopRunIndexEntry | null {
@@ -57,4 +58,23 @@ export async function readRecentRuns(fs: HistoryFs, limit = 20): Promise<LoopRun
     } catch { /* unreadable index is skipped */ }
   }
   return out;
+}
+
+
+/** Appends one run record/index entry under `system/loop-runs/` (month-bucketed, like the Mac journal). */
+export async function appendRunRecord(fs: WriteHistoryFs, entry: LoopRunIndexEntry, record: Record<string, unknown>): Promise<void> {
+  const d = new Date(entry.startedAt);
+  const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const dir = `system/loop-runs/${month}`;
+  try { await fs.create(dir, "dir"); } catch (e) { if (typeof e === "object" && e !== null && (e as { code?: unknown }).code !== "exists") throw e; }
+  await fs.write(`${dir}/${entry.id}.json`, JSON.stringify(record, null, 2) + "\n", { expected_hash: null });
+  const idx = `system/loop-runs/index-${month}.jsonl`;
+  let prior = "";
+  let hash: string | null = null;
+  try {
+    const r = await fs.read(idx, 2_000_000);
+    if (r.status === "ok" && r.text !== null) { prior = r.text; hash = r.hash; }
+  } catch { /* new index */ }
+  const body = prior + JSON.stringify(entry) + "\n";
+  await fs.write(idx, body, { expected_hash: hash });
 }

@@ -15,3 +15,17 @@ test("Loop journal index is read newest-first, month-rotated before legacy", asy
   assert.deepEqual(runs.map((r) => r.id), ["r1", "r2"]);
   assert.equal((await h.readRecentRuns({ async list() { throw Object.assign(new Error("x"), { code: "missing" }); }, async read() { throw new Error("no"); } })).length, 0);
 });
+
+test("a native run appends a month-bucketed record and index line", async () => {
+  const writes = [];
+  const fs = {
+    async create() { return "dir"; },
+    async read() { throw Object.assign(new Error("missing"), { code: "missing" }); },
+    async write(path, text, opts) { writes.push({ path, text, opts }); return { path, hash: "h" }; },
+  };
+  await h.appendRunRecord(fs, { id: "r1", loopId: "l", loopName: "L", startedAt: "2026-09-30T00:00:00Z", durationSeconds: 1, iterationsUsed: 1, statusCode: "success", statusSummary: "ok", trigger: "manual" }, { id: "r1" });
+  assert.equal(writes[0].path, "system/loop-runs/2026-09/r1.json");
+  assert.equal(writes[1].path, "system/loop-runs/index-2026-09.jsonl");
+  assert.match(writes[1].text, /"id":"r1"/);
+  assert.equal(writes[1].opts.expected_hash, null);
+});

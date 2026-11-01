@@ -9,7 +9,7 @@ import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
-import { readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -200,6 +200,27 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } finally { setRunningStage(false); }
   };
 
+  const runLoop = async () => {
+    if (!loop || dirty || runningStage) return;
+    if (!window.confirm(`Run “${loop.name}”?\n\nThis native slice runs the loop's enabled shell-command stages once; other stage kinds stop the run.`)) return;
+    setRunningStage(true);
+    setRunLog((l) => [...l, `▶ ${loop.name}`, ""]);
+    try {
+      const r = await invokeHost<{ loopName: string; passed: boolean; stages: Array<{ stageName: string; severity: string; run: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number } }> }>("loop_run_loop", { loopId: loop.id });
+      const lines: string[] = [];
+      for (const s of r.stages) lines.push(`$ ${s.stageName}`, s.run.stdout, s.run.stderr, `${s.run.timedOut ? "TIMED OUT" : `exit ${s.run.exitCode ?? "?"}`} · ${s.run.durationMs} ms`, "");
+      lines.push(r.passed ? "Loop passed." : "Loop failed.");
+      setRunLog((l) => [...l, ...lines]);
+      setNotice(r.passed ? "The loop passed." : "The loop did not pass.");
+      const startedAt = new Date().toISOString();
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: loop.id, loopName: loop.name, startedAt, durationSeconds: r.stages.reduce((n, x) => n + x.run.durationMs, 0) / 1000, iterationsUsed: 1, statusCode: r.passed ? "success" : "failed", statusSummary: r.stages.map((x) => `${x.stageName}: ${x.run.exitCode === 0 ? "pass" : "fail"}`).join(", "), trigger: "manual" };
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: projectRoot, config: loop.config, stages: r.stages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+    } catch (e) {
+      setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
+      setNotice(e instanceof Error ? e.message : "The loop could not run.");
+    } finally { setRunningStage(false); }
+  };
+
   const save = async () => {
     if (!store || load?.kind !== "ok" || saving) return;
     setSaving(true);
@@ -254,6 +275,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <aside className="loop-pane loop-stages" aria-label="Stages">
         <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><button type="button" className="loop-plus" aria-label="Add stage" title="Add stage" onClick={addStage}>＋</button></div>
         <div className="loop-actions">
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()} disabled={!stage || dirty || runningStage}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
@@ -272,7 +294,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={!stage || stage.kind !== "shellCommand" || !stage.command || dirty || runningStage} title={dirty ? "Save the Loop first" : stage?.kind !== "shellCommand" ? "Only shell-command stages run in this slice" : undefined} onClick={() => void runSelectedStage()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty || runningStage} title={dirty ? "Save the Loop first" : "Runs the enabled shell-command stages once"} onClick={() => void runLoop()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>

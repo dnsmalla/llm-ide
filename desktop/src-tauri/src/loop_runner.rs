@@ -22,6 +22,24 @@ pub struct StageRun {
     pub duration_ms: u64,
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopStageResult {
+    pub stage_id: String,
+    pub stage_name: String,
+    pub severity: String,
+    pub run: StageRun,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopRunResult {
+    pub loop_id: String,
+    pub loop_name: String,
+    pub passed: bool,
+    pub stages: Vec<LoopStageResult>,
+}
+
 const MAX_CAPTURE: usize = 400_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
@@ -111,6 +129,46 @@ pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Resu
     })
 }
 
+/// Runs every enabled stage of one loop in order. This slice supports only `shellCommand` stages: a loop with any
+/// other enabled stage is refused before anything runs, instead of silently reporting a green run that skipped the
+/// verification the user asked for. Blocking failures stop the pass; advisory failures are recorded and continue.
+pub fn run_loop(root: &Path, loop_id: &str, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
+    let text = std::fs::read_to_string(root.join("system").join("loop.json"))
+        .map_err(|e| format!("cannot read system/loop.json: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))?;
+    let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
+    let loop_v = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
+    let loop_name = loop_v.get("name").and_then(|x| x.as_str()).unwrap_or("Loop").to_string();
+    let stages = loop_v.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).ok_or("loop has no stages")?;
+    let mut plan: Vec<(String, String, String, String)> = Vec::new();
+    for s in stages {
+        if s.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue; }
+        let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let name = s.get("name").and_then(|x| x.as_str()).unwrap_or("Stage").to_string();
+        let kind = s.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+        let severity = s.get("severity").and_then(|x| x.as_str()).unwrap_or("blocking").to_string();
+        if kind != "shellCommand" {
+            return Err(format!("“{name}” is a {kind} stage; only shell-command stages run in this slice"));
+        }
+        let cmd = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        if cmd.is_empty() { return Err(format!("“{name}” has no command")); }
+        plan.push((id, name, severity, cmd));
+    }
+    if plan.is_empty() { return Err("this loop has no enabled stages".into()); }
+    let mut results = Vec::new();
+    let mut passed = true;
+    for (id, name, severity, _cmd) in plan {
+        let run = run_stage(root, &id, timeout_secs)?;
+        let ok = !run.timed_out && run.exit_code == Some(0);
+        results.push(LoopStageResult { stage_id: id, stage_name: name, severity: severity.clone(), run });
+        if !ok {
+            passed = false;
+            if severity == "blocking" { break; }
+        }
+    }
+    Ok(LoopRunResult { loop_id: loop_id.to_string(), loop_name, passed, stages: results })
+}
+
 /// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC.
 #[tauri::command]
 pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
@@ -119,6 +177,15 @@ pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Resu
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
         run_stage(&root, &stage_id, timeout_secs)
     }).await.map_err(|e| format!("Loop stage task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn loop_run_loop(loop_id: String, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop".to_string())?;
+        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+        run_loop(&root, &loop_id, timeout_secs)
+    }).await.map_err(|e| format!("Loop task failed: {e}"))?
 }
 
 #[cfg(test)]
@@ -144,6 +211,22 @@ mod tests {
         assert_eq!(r.exit_code, Some(3));
         assert!(!r.timed_out);
         assert!(stage_command(&root, "missing").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loop_runs_shell_stages_in_order_and_stops_at_blocking_failure() {
+        let root = project("loop", "printf one");
+        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"maxIterations":2,"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"printf one","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        let r = run_loop(&root, "l1", Some(10)).unwrap();
+        assert!(r.passed);
+        assert_eq!(r.stages.len(), 2);
+        assert_eq!(r.stages[0].run.stdout, "one");
+        assert_eq!(r.stages[1].run.stdout, "two");
+        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"exit 1","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        let r = run_loop(&root, "l1", Some(10)).unwrap();
+        assert!(!r.passed);
+        assert_eq!(r.stages.len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 

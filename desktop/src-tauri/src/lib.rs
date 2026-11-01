@@ -282,6 +282,7 @@ macro_rules! product_handlers {
                 backend_pick::backend_detect,
                 graph_gen::graph_generate,
                 loop_runner::loop_run_stage,
+                loop_runner::loop_run_loop,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
