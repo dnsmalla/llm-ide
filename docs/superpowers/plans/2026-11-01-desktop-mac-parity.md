@@ -29,7 +29,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | single scroll, gist, toolbar/re-summarize/export, menus/prefs/⌘F |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit/sign-out-forget; updates honest note |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target, reset banner; recency timestamps Mac-only |
-| 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home/approvals/terminal; cross-chat badge Mac-only |
+| 15 | Shell chrome | `Shell/AppShell.swift`, status bar, app menu | `ui/screens/shell/`, `src-tauri/src/menu.rs` | activity/home/approvals/terminal + native app menu |
 
 ## Final state (round 40)
 
@@ -58,6 +58,16 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 ### Settings / Home / Shell
 - **Settings**: toolbar visibility, provider edit, SDK restart, source/server controls, sign-out and Sign out-and-forget. Updates are the Mac’s Sparkle surface; the desktop shows the honest note. Account sign-out variants collapse to one local account.
 - **Home / Shell**: effective Home, activity navigation, approval badge, version-too-old/crash/notification surfaces remain limited by the host. Welcome recency timestamps are not stored by the desktop recent-projects file.
+
+
+### Native app menu (round 41)
+The macOS menu is built by the host, not by the webview: `desktop/src-tauri/src/menu.rs` installs the same top-level
+groups as the frozen Mac app — **LLM-IDE** (About, Settings… ⌘, Services, Hide/Hide Others/Show All, Quit),
+**File** (Close Window), **Edit** (Undo/Redo/Cut/Copy/Paste/Select All), **View** (Full Screen), **Window**
+(Minimize, Bring All to Front, Quick Switch Project… ⌘P, LLM Chat… ⇧⌘L), **Help** (LLM-IDE Help). Commands emit a
+single `app-menu` event; `ui/screens/shell/menu-model.ts` maps it onto section navigation only:
+Settings → Settings, Quick Switch → Home, LLM Chat → Chat, Help → the Welcome guide. Mac-only commands
+(Start/Stop Recording, Check for Updates) are deliberately not invented.
 
 ## Mac-only limits (stated in the UI, never faked)
 
