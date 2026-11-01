@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
+import { invokeHost } from "../../shell/host";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate } from "./templates.ts";
@@ -52,6 +53,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [testCommand, setTestCommand] = useState<string | null>(null);
   const [envReason, setEnvReason] = useState("Checking the project environment…");
   const [checkingEnv, setCheckingEnv] = useState(false);
+  const [runLog, setRunLog] = useState<string[]>([]);
+  const [runningStage, setRunningStage] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -172,6 +175,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
+  const runSelectedStage = async () => {
+    if (!stage || dirty || runningStage) return;
+    if (stage.kind !== "shellCommand" || !stage.command) { setNotice("Only a saved shell-command stage can run in this slice."); return; }
+    if (!window.confirm(`Run this stage?\n\n${stage.command}`)) return;
+    setRunningStage(true);
+    setRunLog((l) => [...l, `$ ${stage.command}`, ""]);
+    try {
+      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }>("loop_run_stage", { stageId: stage.id, timeoutSecs: stage.timeoutSeconds });
+      setRunLog((l) => [...l, r.stdout, r.stderr, `${r.timedOut ? "TIMED OUT" : `exit ${r.exitCode ?? "?"}`} · ${r.durationMs} ms`].filter(Boolean));
+      setNotice(r.timedOut ? "The stage timed out." : r.exitCode === 0 ? "The stage passed." : `The stage exited ${r.exitCode ?? "without a code"}.`);
+    } catch (e) {
+      setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
+      setNotice(e instanceof Error ? e.message : "The stage could not run.");
+    } finally { setRunningStage(false); }
+  };
+
   const save = async () => {
     if (!store || load?.kind !== "ok" || saving) return;
     setSaving(true);
@@ -240,7 +259,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={!stage || stage.kind !== "shellCommand" || !stage.command || dirty || runningStage} title={dirty ? "Save the Loop first" : stage?.kind !== "shellCommand" ? "Only shell-command stages run in this slice" : undefined} onClick={() => void runSelectedStage()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
@@ -308,8 +327,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </main>
 
       <aside className="loop-log" aria-label="Run log">
-        <div className="loop-pane-head"><span>RUN LOG</span><span className="loop-native-hint">Clear</span></div>
-        <p className="loop-native-hint">No runs yet.</p>
+        <div className="loop-pane-head"><span>RUN LOG</span><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
+        {runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
       </aside>
     </div>
   );

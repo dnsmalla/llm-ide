@@ -44,3 +44,7 @@
 .loop-actions .loop-btn { flex: 1 1 auto; }
 .loop-budgets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .loop-budgets input { width: 100%; box-sizing: border-box; }
+.loop-spacer { flex: 1; }
+.loop-run-btn { align-self: center; margin-left: auto; }
+.loop-clear { background: none; border: 0; cursor: pointer; }
+.loop-run-log { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); color: var(--tok-color-text); }

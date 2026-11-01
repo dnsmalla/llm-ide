@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "backend_pick_dir",
     "backend_detect",
     "graph_generate",
+    "loop_run_stage",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",

@@ -21,6 +21,7 @@ mod fsutil;
 mod graph_file;
 mod mermaid_runtime;
 mod menu;
+mod loop_runner;
 mod notes_fs;
 mod notes_write;
 mod os_open;
@@ -280,6 +281,7 @@ macro_rules! product_handlers {
                 backend_pick::backend_pick_dir,
                 backend_pick::backend_detect,
                 graph_gen::graph_generate,
+                loop_runner::loop_run_stage,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,

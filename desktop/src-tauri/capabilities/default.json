@@ -15,6 +15,7 @@
     "allow-backend-pick-dir",
     "allow-backend-detect",
     "allow-graph-generate",
+    "allow-loop-run-stage",
     "allow-repo-clone",
     "allow-feature-rebuild",
     "allow-core-log-read",
