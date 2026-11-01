@@ -47,14 +47,14 @@
 .lib-scroll:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: -2px; }
 .lib-canvas { position: relative; width: 100%; }
 .lib-group { position: absolute; left: 0; right: 0; display: flex; align-items: flex-end; gap: var(--tok-space-sm); padding: 0 var(--tok-space-md) 4px; box-sizing: border-box; font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.4px; color: var(--tok-color-text-muted); background: var(--tok-color-body); }
-.lib-row { position: absolute; left: 0; right: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-content: center; column-gap: var(--tok-space-sm); padding: 0 var(--tok-space-md); box-sizing: border-box; cursor: pointer; border-bottom: 1px solid color-mix(in srgb, var(--tok-color-border) 50%, transparent); overflow: hidden; }
+.lib-row { position: absolute; left: 0; right: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; align-content: center; column-gap: var(--tok-space-sm); padding: 0 var(--tok-space-md); box-sizing: border-box; cursor: pointer; border-bottom: 1px solid color-mix(in srgb, var(--tok-color-border) 50%, transparent); overflow: hidden; }
 .lib-row:hover { background: var(--tok-color-row-alt); }
 .lib-row[data-selected="true"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
 .lib-row[data-placeholder="true"] { opacity: 0.65; }
 .lib-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-row-date { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); font-variant-numeric: tabular-nums; }
 .lib-row-meta, .lib-row-gist { grid-column: 1 / -1; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-row-gist { display: none; }
+.lib-row-gist { display: block; white-space: normal; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
 .lib-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--tok-space-sm); padding: var(--tok-space-xl); text-align: center; color: var(--tok-color-text-muted); flex: 1; }
 .lib-empty-title { margin: 0; font-size: var(--tok-type-body-strong-size); font-weight: var(--tok-type-body-strong-weight); color: var(--tok-color-text); }
 

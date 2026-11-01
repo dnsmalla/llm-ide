@@ -88,12 +88,12 @@ test("the list is a keyboard listbox that mounts only the visible rows (5,000 no
 test("row heights: mixed header and note rows are windowed exactly", async () => {
   const rows = [{ kind: "header" }, { kind: "note" }, { kind: "note" }, { kind: "header" }, { kind: "note" }];
   const o = L.rowOffsets(rows);
-  assert.deepEqual([...o], [0, 28, 80, 132, 160, 212]);
+  assert.deepEqual([...o], [0, 28, 96, 164, 192, 260]);
   assert.equal(L.rowAt(o, 0), 0);
   assert.equal(L.rowAt(o, 27), 0);
   assert.equal(L.rowAt(o, 28), 1);
-  assert.equal(L.rowAt(o, 131), 2);
-  assert.equal(L.rowAt(o, 160), 4);
+  assert.equal(L.rowAt(o, 163), 2);
+  assert.equal(L.rowAt(o, 192), 4);
   assert.equal(L.rowAt(o, 9999), 4);
   assert.equal(L.rowAt(L.rowOffsets([]), 10), 0);
 });

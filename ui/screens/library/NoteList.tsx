@@ -7,7 +7,7 @@ import type { LibraryState, LibraryStore } from "./library-store.ts";
 import { filtersActive, formatDate, formatDuration, sectionLabel, stepNoteRow, type DateRange, type GroupKey, type NoteRecord, type Row, type SortKey } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
 
-export const ROW_HEIGHT = 52;
+export const ROW_HEIGHT = 68;
 const HEADER_HEIGHT = 28;
 
 const RANGES: { id: DateRange; label: string }[] = [
