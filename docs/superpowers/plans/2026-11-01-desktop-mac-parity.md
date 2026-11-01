@@ -18,76 +18,61 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all, PDF open |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | badge, context/memory, dictation, copy, usage, retry, dock rename/delete |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell dock/status/persistence/title/cwd done |
-| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | modes + scan target done; repo quick-pick/routines/storage pending |
-| 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs, setup snapshot; custom/editing pending |
+| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | modes + scan target; routines/storage Mac-only |
+| 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, list+detail, logs, setup snapshot; custom/editing Mac-only |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts/saved-repo picker done |
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
-| 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
+| 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, history/poll; budgets/policy Mac-only |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | destination, Use chat, templates/import, commands, chat column |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources + source preview done; result viewer/thumbnails pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | single scroll, gist, toolbar/re-summarize/export, menus/prefs/⌘F |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit/sign-out-forget; updates honest note |
-| 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
-| 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
+| 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target, reset banner; recency timestamps Mac-only |
+| 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home/approvals/terminal; cross-chat badge Mac-only |
 
-## Findings (from the per-surface audits)
+## Final state (round 40)
 
 ### Explorer / Chat / Terminal
-- Terminal is now shell-wide with a status-bar toggle and persisted height; Explorer keeps its embedded dock.
-- Explorer now has Reveal in Finder, Copy Absolute Path, Markdown Preview/Source, PNG/JPEG/GIF/WebP preview an internal cut/copy/paste clipboard and Replace All; still no PDF preview; no file cut/copy/paste; Search has no replace or
-  Find-in-Folder hand-off; no Reveal in Finder per row; Project Folders sheet cannot create/reindex; no git
-  gutter; open-file hand-off drops the line number.
-- Chat now auto-attaches the active Explorer file and shows a pending-approval badge in the shell header; still no project-memory chip/viewer, voice dictation; flat
-  model picker (no grouped/provider/effort/custom); no per-turn retry/usage/collapse/jump; dock header lacks
-  counters/search/rename/delete; no app-wide pending-approval badge; context meter has no breakdown.
-- Terminal: the dock is now shell-wide and its height persists; tab titles are still static and cwd is always
-  the project root.
+- **Explorer**: Reveal in Finder, Copy Absolute Path, Markdown Preview/Source, PNG/JPEG/GIF/WebP preview, internal cut/copy/paste, Replace All, and PDF **Open in Preview** (the webview cannot embed PDFs). Still absent: inline PDF, Find in Folder, git gutter, line-number hand-off.
+- **Chat**: active-file auto-attach, pending-approval badge, context breakdown, memory chip, upload/turn copy, token usage, per-message retry, dictation where the webview exposes a recogniser, and dock rename/delete. Still absent: project-memory viewer, grouped model/effort picker, cross-chat approval aggregation (the shell badge follows the active chat).
+- **Terminal**: shell-wide dock, persisted height, status-bar toggle, OSC titles, new shells in the active repository clone.
 
 ### Graph / Doc Gen / Visual
-- Graph System: missing routines and storage card; stale on project switch; openFile unvalidated; failures not
-  surfaced; no deep link to the Code page.
-- Graph Code: Code/InfiniteBrain/All generation is done; no scan target/repo quick-pick/Library tree; only zoom controls; missing
-  auto-update settings card (D→M and M→D gaps both exist).
-- Doc Gen: manual edit and Preview/Raw are done; still no Use-chat toggle, output destination, chat panel/
-  Save-chat-output, template import/command editing, or panel toggles.
-- Visual: images are now accepted as generation sources (PNG/JPEG/GIF/WebP up to 5 MB); still no image result viewer or thumbnail strip; no thumbnail strip or visual result affordance; tab/panel
-  state not persisted; checklist promises interactions that are not wired.
+- **Graph**: Code / InfiniteBrain / All generation, project-relative scan target, filters/search/detail/zoom. Routines and storage cards remain Mac-local (no desktop host); the scan target is a folder picker rather than the Mac repo quick-pick; the canvas is 2D.
+- **Doc Gen**: editable result, Preview/Raw, configurable project-relative destination, Use-chat source, Markdown template import, template/command management, embedded Chat column. The Mac-only destination providers (Box/Slack/email) are shown as not wired.
+- **Visual**: image sources and source preview are real. The core returns text for Visual, so there is no image result viewer to mirror; the Mac’s local image viewer has no desktop equivalent.
 
 ### Issues / Gantt / Review Conflicts
-- Issues: no detail/editor surface (now a read-only cached detail pane), no create/comment/close/drag, thin
-  filters, columns diverged (fixed), metadata missing (core lacks it), provider/repo ignores saved repos,
-  silent 100-row cap, no screen shortcuts.
-- Gantt: no milestone/edges, day/week only (month added), no today line/scroll, no legend, thin filters
-  (search/state added), one-line rows, no issue detail/context menu, due<start was silently swapped (now
-  rejected), silent 100-row cap, no ⌘R.
-- Review: no tabs (done), no chrome/tree toggle, no New Change, chat state not persisted (done), fixed tree
-  roots, no linked-repo banner (done), stale on project switch (done), raw `<pre>` viewer (markdown done).
+- **Issues**: read-only cached detail, Mac column order, label/state filters, saved-repository picker, shortcuts. Create/comment/close/drag need provider write routes the core does not expose, so they remain absent; metadata is core-limited.
+- **Gantt**: month zoom, today, filters, due-before-start rejection, reload, paging. Milestones/edges are not in the core issue model.
+- **Review Conflicts**: tabs, resizable persisted chat, project-change reload, linked repo, Markdown rendering. “New Change” remains a Mac/chat-workflow surface.
 
 ### Auto Tasks / Loop
-- Desktop toggles/templates were refused by the Mac tier gate before the bridge (fixed with a loopback
-  desktop class that may use D-tier writes); bridge error frames are now surfaced.
-- Auto Tasks is a flat list, not Mac's list+detail; no groups/filter/custom tasks/model-limits/banners;
-  "History" is the action-items registry, not run history; live logs requested but dropped.
-- Loop history is never requested; budgets/policy/wizard/multi-loop home are Mac-only over the wire;
-  iteration is hard-coded 0 but rendered as authoritative; no live polling while running; shell-stage
-  approvals have no desktop path.
+- **Auto Tasks**: bridge, desktop-class permission, list+detail, toggle/run/stop, per-task live log, setup snapshot (paths/skill/template). Custom tasks and setup edits are not carried by the Mac bridge; editing stays on the Mac.
+- **Loop**: bridge, status/stages, start/stop, polling, past runs, honest max iterations. Budgets/policy/wizard/multi-loop and shell-stage approvals are Mac-only over the wire.
 
 ### Library
-- Desktop now uses the active project's `llm-doc` as its notes root (Settings → Paths owns the layout) and hides
-  the separate notes-folder chooser while a project is open; Code/Data are top-level rows and Connections was
-  renamed/moved to Connectors. Remaining: it is still a stacked nav+list, not Mac's one sectioned list; section set/order differs (no Connectors
-  section, extra All notes); no collapse/persistence; filters are section-scoped; rows lack gist/counts/
-  icons/states; detail chrome lacks Export/backfill/banners; no context menus; Code/Data refresh stale;
-  extensions/connectors are panes, not counted list sections; no per-section empty/retry/index status.
+- **Library**: active project `llm-doc`, one continuous scroll with notes + Sources/Code/Data/LLM Doc/Extensions/Connectors sections, collapsible sections, gist rows, ⌘F search, persisted filters/sort/group/section, row context menu (open/copy path/reveal), detail toolbar with Re-summarise/⌘R, Copy path, Reveal, Export, and note Context menus. Action/decision/blocker chips and platform icons would need the Mac’s local meeting index; the desktop intentionally does not fabricate them.
 
 ### Settings / Home / Shell
-- Settings: no toolbar visibility (now added), pending-approval badge, Updates controls, second account
-  sign-out, full sign-in affordances, provider row editing, routing reconcile, agent-history fields. Server
-  URL/log auto-scroll/pid/relaunch and Mobile Control/Loop defaults/Self-Heal/Code Graph auto-update are
-  host/Mac limits or planned.
-- Shell: Home always went to Welcome (now effective home); Activity rows were inert (now navigate); no
-  pending-approval badge; no version-too-old state; crash/notification surfaces missing.
+- **Settings**: toolbar visibility, provider edit, SDK restart, source/server controls, sign-out and Sign out-and-forget. Updates are the Mac’s Sparkle surface; the desktop shows the honest note. Account sign-out variants collapse to one local account.
+- **Home / Shell**: effective Home, activity navigation, approval badge, version-too-old/crash/notification surfaces remain limited by the host. Welcome recency timestamps are not stored by the desktop recent-projects file.
+
+## Mac-only limits (stated in the UI, never faked)
+
+| Area | Why the desktop cannot mirror it |
+|---|---|
+| Updates | The desktop bundle has no Sparkle/updater channel; Settings shows the Mac-only note. |
+| Issues write actions | Core exposes read/index routes only; create/comment/close/drag need provider clients the desktop does not have. |
+| Gantt milestones/edges | The core issue model has no milestone/edge fields. |
+| Review New Change | Depends on the Mac’s chat/code-workflow sheet. |
+| Graph routines/storage | Mac-local host state; there are no desktop host commands or routes. |
+| Loop budgets/policy/wizard | Not in the Mobile Control wire; the Mac remains the source of truth. |
+| Auto Task custom tasks/editing | The bridge carries a read-only setup snapshot; mutations stay on the Mac. |
+| Visual image result | The core generation response is text; image artifacts are a Mac-local view. |
+| Library entity chips | The Mac’s local meeting index supplies counts; the desktop has no equivalent SQLite index. |
+| Welcome recency timestamps | The desktop recent-projects file stores paths only. |
 
 ## Execution order
 
