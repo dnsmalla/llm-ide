@@ -15,7 +15,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
-| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
+| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all, PDF open |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach, badge, context/memory, dictation, copy, usage; retry pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell dock/status/persistence/title/cwd done |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | modes + scan target done; repo quick-pick/routines/storage pending |
