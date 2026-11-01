@@ -1,6 +1,7 @@
 // The docked Code Assistant's header (Mac `ChatSessionHeader` inside `CodeAssistantPanel`): the CODE ASSISTANT label,
 // the Route (token limit) chip, a chat history menu, New chat, and Hide. History is a bounded native select over the
 // chats already loaded (the Chat section has the full searchable list). Chat titles are untrusted text: rendered as text.
+import { useState } from "react";
 import { Icon } from "@llmide/ui-kit";
 import { CapChip } from "./Pickers";
 import type { RouteView } from "./route";
@@ -36,10 +37,16 @@ export interface DockHeaderProps {
   onNew: () => void;
   onCollapse?: () => void;
   onSetLimit: (limit: number | null) => Promise<{ coldSwitch?: boolean; estimatedPrefillTokens?: number } | void>;
+  onRename?: (title: string) => void;
+  onDelete?: () => void;
 }
 
-export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, onSelect, onNew, onCollapse, onSetLimit }: DockHeaderProps) {
+export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete }: DockHeaderProps) {
   const options = historyOptions(sessions, activeId, busyIds);
+  const [actions, setActions] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [confirm, setConfirm] = useState(false);
   return (
     <header className="chat-dock-head">
       <h2 className="chat-dock-title">{DOCK_TITLE}</h2>
@@ -51,6 +58,28 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
           {options.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
         </select>
       )}
+      {activeId && (onRename || onDelete) ? <button type="button" className="chat-dock-btn" aria-label="Chat actions" aria-haspopup="menu" aria-expanded={actions} title="Chat actions" onClick={() => setActions((v) => !v)}>⋯</button> : null}
+      {actions && activeId ? (
+        <div className="chat-dock-menu" role="menu" aria-label="Chat actions">
+          {renaming && onRename ? (
+            <form onSubmit={(e) => { e.preventDefault(); const t = draft.trim(); if (t) onRename(t); setRenaming(false); setActions(false); }}>
+              <input className="chat-input" aria-label="Chat title" autoFocus maxLength={200} value={draft} onChange={(e) => setDraft(e.target.value)} />
+              <button type="submit" className="chat-btn chat-primary">Save</button>
+            </form>
+          ) : confirm && onDelete ? (
+            <div className="chat-dock-confirm">
+              <span>Delete this chat?</span>
+              <button type="button" className="chat-btn chat-danger" onClick={() => { onDelete(); setConfirm(false); setActions(false); }}>Delete chat</button>
+              <button type="button" className="chat-btn" onClick={() => setConfirm(false)}>Keep</button>
+            </div>
+          ) : (
+            <>
+              {onRename ? <button type="button" role="menuitem" className="chat-link-btn" onClick={() => { setDraft(sessions.find((s) => s.id === activeId)?.title ?? ""); setRenaming(true); }}>Rename chat</button> : null}
+              {onDelete ? <button type="button" role="menuitem" className="chat-link-btn chat-danger" onClick={() => setConfirm(true)}>Delete chat</button> : null}
+            </>
+          )}
+        </div>
+      ) : null}
       <button type="button" className="chat-dock-btn" aria-label="New chat" title="New chat" onClick={onNew}><Icon name="plus" size={13} /></button>
       {onCollapse && <button type="button" className="chat-dock-btn" aria-label="Hide Code Assistant" title="Hide Code Assistant" onClick={onCollapse}><Icon name="panel-right" size={14} /></button>}
     </header>

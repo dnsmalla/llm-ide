@@ -223,16 +223,21 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     if (r === "approved") setPermission("bypass"); // declined: previous mode, no banner
   };
 
+  const renameSession = (id: string, title: string) => {
+    setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s)));
+    store.renameSession(id, title).then(bumpSessions).catch(reportStoreError);
+  };
+  const deleteSession = (id: string) => {
+    store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); bumpSessions(); })
+      .catch(reportStoreError);
+  };
   return (
     <div className={dock ? "chat-screen chat-dock-mode" : "chat-screen"} data-dock={dock ? "" : undefined}>
       {!dock && <SessionList
         sessions={sessions} activeId={activeId} busyIds={busyIds} hasMore={hasMoreSessions} onLoadMore={loadMoreSessions}
         onSelect={setActiveId} onNew={() => void newChat()}
-        onRename={(id, title) => { setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s))); store.renameSession(id, title).then(bumpSessions).catch(reportStoreError); }}
-        onDelete={(id) => {
-          store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); bumpSessions(); })
-            .catch(reportStoreError);
-        }}
+        onRename={renameSession}
+        onDelete={deleteSession}
         unreadableNotice={unreadable}
       />}
       <section className="chat-main" aria-label={dock ? "Code Assistant" : "Chat"}>
@@ -240,6 +245,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           <DockHeader
             sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
             onSelect={setActiveId} onNew={() => void newChat()} onCollapse={onCollapse}
+            onRename={(title) => activeId && renameSession(activeId, title)}
+            onDelete={() => activeId && deleteSession(activeId)}
             onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
           />
         )}

@@ -98,3 +98,6 @@
 
 .chat-copy { font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); background: none; border: 0; padding: 0 2px; cursor: pointer; }
 .chat-copy:hover { color: var(--tok-color-text); text-decoration: underline; }
+
+.chat-dock-menu { position: absolute; top: 34px; right: 34px; z-index: 30; min-width: 210px; display: flex; flex-direction: column; gap: var(--tok-space-xs); padding: var(--tok-space-sm); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); box-shadow: none; }
+.chat-dock-menu form, .chat-dock-confirm { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
