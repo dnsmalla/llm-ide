@@ -51,7 +51,15 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     return { fs, notes, store: storeFor(surface, fs, notes) };
   }, [surface]);
   const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
-  const env = useMemo(() => ({ fs: available ? deps.fs : null, notes: available ? deps.notes : null }), [available, deps]);
+  const env = useMemo(() => ({
+    fs: available ? deps.fs : null,
+    notes: available ? deps.notes : null,
+    readImage: available ? async (path: string) => {
+      const raw = await invokeHost<unknown>("fs_read_image", { path });
+      const o = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      return typeof o.dataUrl === "string" ? o.dataUrl : null;
+    } : undefined,
+  }), [available, deps]);
   const onOpenFile = useCallback((path: string) => {
     const rel = safeRelativePath(path);
     if (rel) shellBus.publish({ type: "open-file", path: rel });

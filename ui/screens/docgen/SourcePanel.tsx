@@ -14,6 +14,8 @@ import { VirtualList } from "./VirtualList";
 export interface SourceEnv {
   notes: Pick<NotesHost, "rootGet" | "list"> | null;
   fs: Pick<FsApi, "list"> | null;
+  /** Visual image preview through the host's root-confined image reader. */
+  readImage?: (path: string) => Promise<string | null>;
 }
 
 export interface SourcePanelProps {
@@ -96,6 +98,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [walk, setWalk] = useState<WalkProgress | null>(null);
+  const [preview, setPreview] = useState<{ path: string; url: string } | null>(null);
   const [walkNote, setWalkNote] = useState<string | null>(null);
   const walkCtl = useRef<AbortController | null>(null);
   const fs = env.fs;
@@ -200,6 +203,12 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
       {err && (
         <StatusBanner severity="error" message={<>{err}</>} />
       )}
+      {preview ? (
+        <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`}>
+          <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
+          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" /><button type="button" className="dg-btn" onClick={() => setPreview(null)}>Close</button></div>
+        </div>
+      ) : null}
       <VirtualList
         items={rows}
         rowHeight={30}
@@ -224,6 +233,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
               <input type="checkbox" checked={checked} disabled={reason !== null} onChange={() => (checked ? onRemove([key]) : onAdd([fileItem(r.path, r.size)]))} />
               <span className="dg-name">{r.name}</span>
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
+              {image && reason === null && env.readImage ? (
+                <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && setPreview({ path: r.path, url })); }}>View</button>
+              ) : null}
             </label>
           );
         }}

@@ -61,3 +61,5 @@
 .dg-step-detail { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .dg-edit { width: 100%; min-height: 420px; resize: vertical; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); background: var(--tok-color-surface); color: var(--tok-color-text); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-sm); }
 .dg-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
+.dg-image-preview { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-sm); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.dg-image-canvas { height: 220px; background-repeat: no-repeat; background-position: center; background-size: contain; background-color: var(--tok-color-surface); }
