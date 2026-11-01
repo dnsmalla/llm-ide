@@ -283,6 +283,7 @@ macro_rules! product_handlers {
                 graph_gen::graph_generate,
                 loop_runner::loop_run_stage,
                 loop_runner::loop_run_loop,
+                loop_runner::loop_work_root,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,

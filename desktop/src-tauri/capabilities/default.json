@@ -17,6 +17,7 @@
     "allow-graph-generate",
     "allow-loop-run-stage",
     "allow-loop-run-loop",
+    "allow-loop-work-root",
     "allow-repo-clone",
     "allow-feature-rebuild",
     "allow-core-log-read",

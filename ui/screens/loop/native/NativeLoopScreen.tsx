@@ -57,6 +57,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
+  const [workRoot, setWorkRoot] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [customTemplates, setCustomTemplates] = useState(() => loadCustomTemplates());
@@ -78,6 +79,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
   }, [fs, projectRoot]);
+
+  useEffect(() => {
+    if (!projectRoot) { setWorkRoot(null); return; }
+    let live = true;
+    void invokeHost<string>("loop_work_root").then((p) => { if (live) setWorkRoot(p); }).catch(() => { if (live) setWorkRoot(null); });
+    return () => { live = false; };
+  }, [projectRoot]);
 
   useEffect(() => {
     if (!projectRoot) { setRuns([]); return; }
@@ -238,7 +246,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setNotice(r.passed ? "The loop passed." : "The loop did not pass.");
       const startedAt = new Date().toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: loop.id, loopName: loop.name, startedAt, durationSeconds: r.stages.reduce((n, x) => n + x.run.durationMs, 0) / 1000, iterationsUsed: 1, statusCode: r.passed ? "success" : "failed", statusSummary: r.stages.map((x) => `${x.stageName}: ${x.run.exitCode === 0 ? "pass" : "fail"}`).join(", "), trigger: "manual" };
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: projectRoot, config: loop.config, stages: r.stages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: loop.config, stages: r.stages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -333,7 +341,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <ol>{loop.config.stages.filter((s) => s.enabled).map((s, i) => <li key={s.id}><span>{i + 1}</span> {s.name} <code>{s.severity === "blocking" ? "verify" : "advisory"}</code> <code>{stageCheck(s)}</code></li>)}</ol>
           </div>
           <dl className="loop-meta">
-            <dt>Runs in</dt><dd>{projectRoot}</dd>
+            <dt>Runs in</dt><dd>{workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
             <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations · {loop.config.wallClockBudgetSeconds ? `${loop.config.wallClockBudgetSeconds}s time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in the scheduled Loop Engineering run" : "no — run it from here"}</dd>

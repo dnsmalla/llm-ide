@@ -16,6 +16,7 @@ const COMMANDS: &[&str] = &[
     "graph_generate",
     "loop_run_stage",
     "loop_run_loop",
+    "loop_work_root",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",

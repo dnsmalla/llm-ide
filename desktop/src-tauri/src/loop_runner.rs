@@ -68,6 +68,18 @@ fn read_capped<R: Read + Send + 'static>(mut r: R) -> mpsc::Receiver<String> {
     rx
 }
 
+/// The Mac runs a Loop in the project's git root (the first code repo), not necessarily the project root. A
+/// project that is itself a git repo wins; otherwise the first `code/*` directory is the working tree.
+pub fn work_root(root: &Path) -> std::path::PathBuf {
+    if root.join(".git").exists() { return root.to_path_buf(); }
+    let code = root.join("code");
+    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(&code).ok().into_iter().flatten().flatten()
+        .map(|e| e.path()).filter(|p| p.is_dir() && !p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with('.')).unwrap_or(false)).collect();
+    dirs.sort();
+    if let Some(repo) = dirs.iter().find(|p| p.join(".git").exists()) { return repo.clone(); }
+    dirs.into_iter().next().unwrap_or_else(|| root.to_path_buf())
+}
+
 /// Finds the command of a shell stage in `system/loop.json`. No command is accepted from the caller.
 pub fn stage_command(root: &Path, stage_id: &str) -> Result<String, String> {
     let path = root.join("system").join("loop.json");
@@ -97,7 +109,7 @@ pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Resu
     let mut child = Command::new("/bin/sh")
         .arg("-lc")
         .arg(&command)
-        .current_dir(root)
+        .current_dir(work_root(root))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -180,6 +192,13 @@ pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Resu
 }
 
 #[tauri::command]
+pub fn loop_work_root() -> Result<String, String> {
+    let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+    crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+    Ok(work_root(&root).to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 pub async fn loop_run_loop(loop_id: String, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop".to_string())?;
@@ -227,6 +246,17 @@ mod tests {
         let r = run_loop(&root, "l1", Some(10)).unwrap();
         assert!(!r.passed);
         assert_eq!(r.stages.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn work_root_prefers_the_first_code_repo() {
+        let root = std::env::temp_dir().join(format!("llmide-loop-cwd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("code/repo/.git")).unwrap();
+        assert_eq!(work_root(&root), root.join("code/repo"));
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        assert_eq!(work_root(&root), root);
         let _ = std::fs::remove_dir_all(&root);
     }
 
