@@ -6,6 +6,8 @@ import type { ExplorerController, ExplorerSnapshot } from "./controller";
 import type { EditorHost } from "./editor-types";
 import { canSave } from "./conflict";
 import { formatSize } from "./labels";
+import { invokeHost } from "../shell/host";
+import { MarkdownView } from "../library/MarkdownView";
 
 interface Props {
   controller: ExplorerController;
@@ -22,7 +24,30 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
   const [loadError, setLoadError] = useState<string | null>(null);
   const activeId = snap.tabs.activeId;
   const doc = activeId ? snap.docs.get(activeId) : undefined;
-  const showEditor = !!doc && (doc.status === "ready" || doc.status === "range");
+  const markdown = !!activeId && /\.(md|markdown)$/i.test(activeId);
+  const [preview, setPreview] = useState<"render" | "raw" | null>(null);
+  const [previewText, setPreviewText] = useState("");
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const showEditor = !!doc && (doc.status === "ready" || doc.status === "range") && (!markdown || preview === "raw");
+  useEffect(() => {
+    setPreview(markdown ? "render" : null);
+    setPreviewText("");
+    setPreviewError(null);
+  }, [activeId, markdown]);
+  useEffect(() => {
+    if (preview !== "render" || !activeId) return;
+    let live = true;
+    void invokeHost<unknown>("fs_read_file", { req: { path: activeId, max_bytes: 1_500_000 } }).then(
+      (body) => {
+        if (!live) return;
+        const o = body && typeof body === "object" ? body as Record<string, unknown> : {};
+        if (o.status === "ok" && typeof o.text === "string") setPreviewText(o.text);
+        else setPreviewError("This Markdown file could not be read for preview.");
+      },
+      () => live && setPreviewError("This Markdown file could not be read for preview."),
+    );
+    return () => { live = false; };
+  }, [preview, activeId]);
 
   // Load and mount Monaco the first time a tab exists.
   useEffect(() => {
@@ -101,7 +126,12 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
             )}
             {showEditor && (
               <>
-                <button type="button" className="ex-tool" onClick={() => editorRef.current?.find()} title="Find in file (Cmd/Ctrl+F)" aria-label="Find in file">Find</button>
+                {markdown ? (
+                  <button type="button" className="ex-tool" aria-pressed={preview === "render"} onClick={() => setPreview(preview === "render" ? "raw" : "render")} title={preview === "render" ? "Show the Markdown source" : "Preview Markdown"}>
+                    {preview === "render" ? "Source" : "Preview"}
+                  </button>
+                ) : null}
+                {showEditor ? <button type="button" className="ex-tool" onClick={() => editorRef.current?.find()} title="Find in file (Cmd/Ctrl+F)" aria-label="Find in file">Find</button> : null}
                 {snap.git && d.status === "ready" && (
                   <button type="button" className="ex-tool" aria-pressed={snap.diffPath === activeId} onClick={() => void controller.toggleDiff(activeId)} title="Compare with the last commit">Diff</button>
                 )}
@@ -137,7 +167,11 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
       )}
       <div className="ex-editor-body">
         <div ref={mountEl} className="ex-monaco" hidden={!showEditor} />
-        {!showEditor && <Placeholder doc={d} controller={controller} activeId={activeId} hasTabs={snap.tabs.tabs.length > 0} />}
+        {markdown && preview === "render" ? (
+          <div className="ex-markdown" aria-label="Markdown preview">
+            {previewError ? <StatusBanner severity="warning" message={previewError} /> : <MarkdownView text={previewText} baseRel={activeId} initialSections={4} />}
+          </div>
+        ) : !showEditor ? <Placeholder doc={d} controller={controller} activeId={activeId} hasTabs={snap.tabs.tabs.length > 0} /> : null}
       </div>
     </section>
   );

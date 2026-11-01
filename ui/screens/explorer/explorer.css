@@ -89,3 +89,4 @@
 .ex-folders { margin: 0 0 var(--tok-space-sm); padding: 0; list-style: none; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
 .ex-folder-row { display: flex; align-items: center; gap: var(--tok-space-sm); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
 .ex-danger { color: var(--tok-color-danger); }
+.ex-markdown { flex: 1; min-height: 0; overflow-y: auto; padding: var(--tok-space-lg); background: var(--tok-color-editor-background, var(--tok-color-body)); }
