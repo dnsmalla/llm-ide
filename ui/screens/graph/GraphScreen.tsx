@@ -73,13 +73,20 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   }
   const wrap = (child: React.ReactNode) => <div className="gr-root" data-active={active}>{child}</div>;
   if (s.phase === "no-project") return wrap(<NoProjectState />);
+  const runGeneration = (targetPath: string, modeOverride: "code" | "memory" | "all" = mode) => {
+    if (!onGenerate || generating) return;
+    setGenerating(true);
+    setGenerateError(null);
+    void onGenerate(modeOverride, targetPath).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
+  };
+
   const runFooter = (
     <div className="gr-run-footer">
       {repos.length > 0 ? (
         <div className="gr-quick" aria-label="Quick pick repositories">
           <h3 className="gr-quick-title">Quick Pick</h3>
           {repos.map((r) => (
-            <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} title={`Generate from ${r}`} onClick={() => setTarget(r)}>
+            <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setMode("code"); setTarget(r); runGeneration(r, "code"); }}>
               <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
             </button>
           ))}
@@ -97,12 +104,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         type="button"
         className="gr-btn gr-btn-primary"
         disabled={generating || !onGenerate}
-        onClick={() => {
-          if (!onGenerate) return;
-          setGenerating(true);
-          setGenerateError(null);
-          void onGenerate(mode, target).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
-        }}
+        onClick={() => runGeneration(target)}
       >
         {generating ? "Generating…" : mode === "code" ? "Generate Code Graph" : mode === "memory" ? "Generate InfiniteBrain" : "Generate Graph"}
       </button>
