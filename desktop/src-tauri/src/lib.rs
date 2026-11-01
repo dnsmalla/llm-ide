@@ -287,6 +287,7 @@ macro_rules! product_handlers {
                 loop_runner::loop_run_fault_verify,
                 loop_runner::loop_environment_check,
                 loop_runner::loop_cancel,
+                loop_runner::loop_boundary_warnings,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,

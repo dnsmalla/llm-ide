@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "loop_run_fault_verify",
     "loop_environment_check",
     "loop_cancel",
+    "loop_boundary_warnings",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",
