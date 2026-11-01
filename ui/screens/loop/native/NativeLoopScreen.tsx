@@ -534,6 +534,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return () => window.clearInterval(timer);
   }, [projectRoot, load]);
 
+  const runScheduledNow = () => {
+    if (!store) return;
+    const scheduled = store.loops.filter((l) => l.runsOnSchedule);
+    if (scheduled.length === 0) { setNotice("No loop is marked Run on schedule."); return; }
+    for (const l of scheduled) runLoop(l, true);
+  };
+
   const saveSchedule = (cron: string) => {
     if (!projectRoot) return;
     setScheduleCron(cron);
@@ -730,6 +737,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <label className="loop-field"><span>Cron (page-resident scheduler)</span><input value={scheduleCron} placeholder="0 2 * * *" onChange={(e) => saveSchedule(e.target.value)} /></label>
           <p className="loop-native-hint">{scheduleCron && validateCron(scheduleCron) ? `${describeCron(scheduleCron)}. Fires while the Loop page is open; background scheduling is not ported.` : "No valid schedule. The desktop scheduler runs only while this page is open."}</p>
           <p className="loop-native-hint">Loops marked “Run on schedule” are queued when the cron fires.</p>
+          <button type="button" className="loop-btn" onClick={runScheduledNow}>Run scheduled loops now</button>
         </section>
 
         <section className="loop-card">
