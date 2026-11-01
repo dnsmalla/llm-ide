@@ -14,6 +14,7 @@ import { estimateChars, sendOrder } from "./sources.ts";
 import type { DocGenStore } from "./store.ts";
 import { TemplateManager } from "./TemplateManager";
 import type { FsApi } from "../explorer/fs";
+import { chatOutputStore } from "../shell/chat-output";
 
 export interface DocGenScreenProps {
   store: DocGenStore;
@@ -41,7 +42,10 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   useEffect(() => {
     void store.setProject(p.projectRoot);
   }, [store, p.projectRoot]);
-  const items = useMemo(() => sendOrder(s.selection.items()), [s.selection]);
+  const chatOutput = useSyncExternalStore(chatOutputStore.subscribe, chatOutputStore.get, chatOutputStore.get);
+  const [useChat, setUseChat] = useState(false);
+  const chatItem = useMemo(() => (useChat && chatOutput ? { key: "chat:latest", kind: "paste" as const, rel: "", name: "Latest chat reply", bytes: chatOutput.text.length, text: chatOutput.text } : null), [useChat, chatOutput]);
+  const items = useMemo(() => sendOrder([...s.selection.items(), ...(chatItem ? [chatItem] : [])]), [s.selection, chatItem]);
   const fit = useMemo(() => (items.length ? estimateFit(items.map((i) => ({ name: i.name, chars: i.kind === "paste" ? i.bytes : estimateChars(i.bytes) }))) : null), [items]);
   const title = store.surface === "visual" ? "Visual" : "Doc Gen";
   const busy = run.phase === "reading" || run.phase === "generating";
@@ -102,7 +106,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             command={s.command}
             prompt={s.prompt}
             fit={fit}
-            sourceCount={s.selection.size}
+            sourceCount={s.selection.size + (chatItem ? 1 : 0)}
             run={run}
             onTemplate={(id) => store.selectTemplate(id)}
             onCommandPick={(id) => store.selectCommand(id)}
@@ -110,10 +114,13 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             onPrompt={(t) => store.setPrompt(t)}
             destination={s.destination}
             onDestination={(dir) => { store.setDestination(dir); try { localStorage.setItem("llmide.docgen.destination", store.getSnapshot().destination); } catch { /* session */ } }}
+            useChat={useChat}
+            chatAvailable={chatOutput !== null}
+            onUseChat={(on) => setUseChat(on)}
             onManage={() => setManage(true)}
             onGenerate={() => {
               setView("result");
-              void store.generate();
+              void store.generate(chatItem ? [chatItem] : []);
             }}
             onCancel={() => store.run.cancel()}
           />

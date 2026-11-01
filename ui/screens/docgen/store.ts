@@ -219,9 +219,9 @@ export class DocGenStore {
   }
 
   /** Start a generation from the current choice and selection. */
-  generate(): Promise<void> {
+  generate(extra: readonly SourceItem[] = []): Promise<void> {
     const s = this.state;
-    return this.run.generate({ template: this.template, command: s.command, prompt: s.prompt }, s.selection.items());
+    return this.run.generate({ template: this.template, command: s.command, prompt: s.prompt }, [...s.selection.items(), ...extra]);
   }
 
   dispose(): void {

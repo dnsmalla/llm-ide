@@ -23,6 +23,9 @@ export interface SetupPanelProps {
   onPrompt: (text: string) => void;
   destination: string;
   onDestination: (dir: string) => void;
+  useChat?: boolean;
+  chatAvailable?: boolean;
+  onUseChat?: (on: boolean) => void;
   onManage: () => void;
   onGenerate: () => void;
   onCancel: () => void;

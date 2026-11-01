@@ -17,6 +17,7 @@ import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
+import { chatOutputStore } from "../shell/chat-output";
 import {
   AUTO_MODE, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, putRoute,
   type ModelGroup, type PermissionMode, type RouteView,
@@ -152,6 +153,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     chatApprovalStore.set(state.pendingApprovals.length);
     return () => chatApprovalStore.set(0);
   }, [state.pendingApprovals.length]);
+  useEffect(() => {
+    const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+    if (!last || last.role !== "assistant") return;
+    const text = last.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("").trim();
+    if (text) chatOutputStore.set({ title: "Latest chat reply", text: text.slice(0, 80_000), at: Date.now() });
+  }, [state.messages]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
 
