@@ -59,7 +59,7 @@ test("loaded: navigation landmark, sections with counts, aria-current, Unsorted,
   assert.match(out, /<span class="lib-nav-label">Meetings<\/span><span class="lib-count" aria-label="1 notes">1</);
   assert.match(out, /<span class="lib-nav-label">Unsorted<\/span>/);
   assert.match(out, /<span class="lib-nav-label">Emails?<\/span>|<span class="lib-nav-label">Emails<\/span>/);
-  for (const label of ["Plugins", "LLM Sources", "MCP Plugins", "Extensions"]) assert.match(out, new RegExp(`<span class="lib-nav-label">${label}</span>`));
+  for (const label of ["Plugins", "LLM Sources", "MCP Plugins", "Extensions"]) assert.match(out, new RegExp(`${label} <span`));
   assert.match(out, /aria-label="Refresh notes"/);
   assert.match(out, /Change notes folder/);
   assert.ok(!out.includes("Rebuild search index"), "no rebuild button without a runner");
@@ -75,7 +75,7 @@ test("the list is a keyboard listbox that mounts only the visible rows (5,000 no
   store.select(store.rows().find((r) => r.kind === "note").rec.rel);
   const out = html(screen(store, host, { initialHeight: 600 }));
   assert.match(out, /role="listbox"[^>]*tabindex="0"/);
-  assert.match(out, /aria-label="Meetings, 5000 notes"/);
+  assert.match(out, /aria-label="Meetings, 5,000 notes"/);
   const options = count(out, /role="option"/g);
   assert.ok(options > 5 && options < 60, `${options} options mounted for 5000 notes`);
   assert.equal(count(out, /aria-selected="true"/g), 1);
@@ -110,26 +110,20 @@ test("hostile titles and frontmatter are text: no markup survives in the list or
   assert.match(out, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
-test("search box and filters have names; reset appears only when filters are active", async () => {
+test("Library is the Mac search bar over one list, with no desktop filter/action presets", async () => {
   const { host, store } = await mkStore((hh) => hh.add("a.md", L.meetingText(1)));
-  let out = html(screen(store, host));
+  const out = html(screen(store, host));
   assert.match(out, /<input type="search"[^>]*aria-label="Filter and search notes"/);
   assert.match(out, /placeholder="Search meetings…"/);
-  assert.match(out, /role="group"[^>]*aria-label="Filters"/);
-  assert.match(out, /aria-pressed="false"[^>]*>[\s\S]*With summary/);
-  for (const name of ["Date range", "Sort", "Group"]) assert.match(out, new RegExp(`<span class="lib-sr">${name}</span>`));
-  assert.ok(!out.includes(">Reset<"));
-  store.setFilters({ hasSummary: true });
-  out = html(screen(store, host));
-  assert.match(out, /aria-pressed="true"/);
-  assert.match(out, />Reset</);
-  assert.match(out, /No notes match the filters/);
+  assert.ok(!out.includes("lib-chips"), "no filter presets");
+  assert.ok(!out.includes("New note"), "no New note row in the Mac list");
+  assert.ok(!out.includes("Select notes"), "no Select notes row in the Mac list");
 });
 
 test("empty folder and listing states are announced politely", async () => {
   const { host, store } = await mkStore();
   const out = html(screen(store, host));
-  assert.match(out, /role="status"[\s\S]*No notes in this folder/);
+  assert.match(out, /role="status"[\s\S]*No meetings yet/);
 });
 
 test("Extensions entries: a supplied render replaces the placeholder (S-J seam)", async () => {
@@ -137,7 +131,7 @@ test("Extensions entries: a supplied render replaces the placeholder (S-J seam)"
   const custom = [...L.EXTENSION_PLACEHOLDERS.slice(0, 1), { id: "extensions", label: "Extensions", render: () => h("div", { id: "ext-pane" }, "pane") }];
   const nav = html(screen(store, host, { extensions: custom }));
   assert.ok(!nav.includes("lib-ext"), "the pane shows only when its entry is selected");
-  assert.match(nav, /<span class="lib-nav-label">Extensions<\/span>/);
+  assert.match(nav, /Extensions/);
 });
 
 test("meeting detail: gist, TL;DR, action lists with task state, transcript with speakers and counts", () => {

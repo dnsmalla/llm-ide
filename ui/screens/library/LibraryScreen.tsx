@@ -8,15 +8,13 @@ import type { LibraryStore } from "./library-store.ts";
 import { IDLE_REBUILD, type RebuildProgress } from "./index-rebuild.ts";
 import type { NoteRecord } from "./notes-model.ts";
 import { EXTENSION_PLACEHOLDERS, LibraryNav, type LibraryExtension } from "./LibraryNav";
-import { NoteList, type BulkSelect } from "./NoteList";
+import { NoteList } from "./NoteList";
 import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./ProjectFiles.tsx";
 import { NoteViewer } from "./NoteViewer";
-import { BulkBar } from "./write/BulkBar";
 import { DiscardDialog, NewNoteDialog } from "./write/WriteDialogs";
 import { NoteWorkspace } from "./write/NoteWorkspace";
 import { initialNoteText, newNoteRel } from "./write/note-ops.ts";
 import type { SummarizeCore } from "./write/resummarize.ts";
-import { EMPTY_SELECTION, extendRange, prune, selectAll, toggle, type Selection } from "./write/selection.ts";
 import { toWriteError, writeErrorText, type WriteHost } from "./write/write-host.ts";
 import { WriteQueue } from "./write/write-queue.ts";
 import { NoFolder, LoadError } from "./States";
@@ -65,8 +63,6 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
   // ---- write side
   const queue = useMemo(() => new WriteQueue(), []);
-  const [selecting, setSelecting] = useState(false);
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
   const [dirty, setDirty] = useState(false);
   const [pendingNav, setPendingNav] = useState<{ proceed: () => void } | null>(null);
   const [newNote, setNewNote] = useState<{ error: string | null; busy: boolean } | null>(null);
@@ -137,16 +133,6 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
 
   const ext = extensionId === null ? undefined : [...extensions, ...(connections ?? [])].find((x) => x.id === extensionId);
 
-  const bulk = useMemo<BulkSelect | null>(() => {
-    if (!write || !selecting) return null;
-    const ordered = (): string[] => store.rows().flatMap((r) => (r.kind === "note" ? [r.rec.rel] : []));
-    return {
-      selected: selection.ids,
-      onToggle: (rel, shift) => setSelection((sel) => (shift ? extendRange(sel, ordered(), rel) : toggle(sel, rel))),
-      onSelectAll: () => setSelection(selectAll(ordered())),
-    };
-  }, [write, selecting, selection, store]);
-
   const createNote = useCallback(
     async (title: string, folder: string) => {
       if (!write) return;
@@ -167,11 +153,6 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
     },
     [write, queue, store],
   );
-
-  const leaveSelection = useCallback(() => {
-    setSelecting(false);
-    setSelection(EMPTY_SELECTION);
-  }, []);
 
   if (state.rootStatus === "unknown" || state.rootStatus === "loading") {
     return (
@@ -203,34 +184,12 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
         <div className="lib-list-col">
           {linkNotice && <StatusBanner severity="info" message={linkNotice} onDismiss={() => setLinkNotice(null)} />}
           {state.error && state.records.length > 0 && <StatusBanner severity="warning" message="Some notes could not be listed. The list may be incomplete." />}
-          {write && (
-            <div className="lib-list-actions" role="toolbar" aria-label="Library actions">
-              <button type="button" className="lib-btn lib-btn-primary" onClick={() => setNewNote({ error: null, busy: false })}>
-                New note
-              </button>
-              <button type="button" className="lib-btn" aria-pressed={selecting} onClick={() => (selecting ? leaveSelection() : setSelecting(true))}>
-                {selecting ? "Stop selecting" : "Select notes"}
-              </button>
-            </div>
-          )}
-          {write && selecting && (
-            <BulkBar
-              store={store}
-              write={write.host}
-              selection={selection}
-              viewCount={store.rows().reduce((n, r) => n + (r.kind === "note" ? 1 : 0), 0)}
-              onSelectAll={() => bulk?.onSelectAll()}
-              onClear={() => setSelection(EMPTY_SELECTION)}
-              onDone={leaveSelection}
-              onChanged={() => setSelection((sel) => prune(sel, (rel) => store.record(rel) !== undefined))}
-            />
-          )}
           <NoteList
             store={store}
             state={state}
-            bulk={bulk}
             initialHeight={initialHeight}
             active={active}
+            onRefresh={refresh}
             onContext={(rel, x, y) => setNoteMenu({ rel, x, y })}
             footer={
               <LibraryNav
@@ -298,8 +257,9 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             <NoteViewer key={selected} host={host} rel={selected} record={store.record(selected)} reloadKey={reloadKey} onOpenExternal={openExternal} onOpenNote={openNote} />
           ) : (
             <div className="lib-empty" role="status">
-              <p className="lib-empty-title">Select a note</p>
-              <p className="lib-muted">Use the arrow keys in the list, or click a note.</p>
+              <div className="lib-empty-icon" aria-hidden="true">▤</div>
+              <p className="lib-empty-title">Select an Item</p>
+              <p className="lib-muted">Choose a meeting, file, plugin, or LLM source from the list.</p>
             </div>
           )}
         </main>

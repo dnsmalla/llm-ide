@@ -127,9 +127,9 @@ test("screen: read-only without write props; with them the list has labelled act
   const ro = html(h(L.LibraryScreen, { store, host }));
   assert.ok(!ro.includes("New note") && !ro.includes("Select notes") && !ro.includes('aria-label="Note actions"'));
   const rw = html(h(L.LibraryScreen, { store, host, write: { host: write, summarize: null } }));
-  assert.match(rw, /role="toolbar" aria-label="Library actions"/);
-  assert.match(rw, />New note<\/button>/);
-  assert.match(rw, /aria-pressed="false"[^>]*>Select notes<\/button>/);
+  assert.ok(!rw.includes("Library actions"), "the Mac list has no top action row");
+  assert.ok(!rw.includes("New note"));
+  assert.ok(!rw.includes("Select notes"));
   assert.match(rw, /role="toolbar" aria-label="Note actions"/);
   for (const label of ["Edit", "Rename…", "Delete…"]) assert.match(rw, new RegExp(`>${label}</button>`));
   assert.ok(!rw.includes("Re-summarise"), "hidden without a core summariser");

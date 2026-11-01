@@ -2,20 +2,13 @@
 // Only the rows in view are mounted, so 50,000+ notes scroll like 50; the visible rows' headers are
 // requested first from the background head reader.
 import { useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Chip, SearchIcon, StatusBanner, XIcon } from "@llmide/ui-kit";
+import { RefreshIcon, SearchIcon, StatusBanner, XIcon } from "@llmide/ui-kit";
 import type { LibraryState, LibraryStore } from "./library-store.ts";
-import { filtersActive, formatDate, formatDuration, sectionLabel, stepNoteRow, type DateRange, type GroupKey, type NoteRecord, type Row, type SortKey } from "./notes-model.ts";
+import { formatDate, formatDuration, sectionLabel, stepNoteRow, type NoteRecord, type Row } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
 
 export const ROW_HEIGHT = 68;
 const HEADER_HEIGHT = 28;
-
-const RANGES: { id: DateRange; label: string }[] = [
-  { id: "all", label: "Any time" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
-  { id: "year", label: "Last year" },
-];
 
 function rowHeight(r: Row | undefined): number {
   return r?.kind === "header" ? HEADER_HEIGHT : ROW_HEIGHT;
@@ -70,9 +63,11 @@ export interface NoteListProps {
   onContext?: (rel: string, x: number, y: number) => void;
   /** Sections rendered after the notes inside the SAME scroll (Mac's one sectioned list). */
   footer?: ReactNode;
+  /** Refresh every section, like the Mac search bar's refresh button. */
+  onRefresh?: () => void;
 }
 
-export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext, footer }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext, footer, onRefresh }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
@@ -257,49 +252,10 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
               <XIcon />
             </button>
           )}
+          {onRefresh ? <button type="button" className="ui-icon-button" aria-label="Refresh library" title="Reload files, plugins and connectors" onClick={onRefresh}><RefreshIcon /></button> : null}
         </div>
-        <div className="lib-chips" role="group" aria-label="Filters">
-          <Chip label="With summary" compact active={f.hasSummary} onClick={() => store.setFilters({ hasSummary: !f.hasSummary })} />
-          <label className="lib-select">
-            <span className="lib-sr">Date range</span>
-            <select value={f.range} onChange={(e) => store.setFilters({ range: e.target.value as DateRange })}>
-              {RANGES.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="lib-select">
-            <span className="lib-sr">Sort</span>
-            <select value={state.sort} onChange={(e) => store.setSort(e.target.value as SortKey)}>
-              <option value="date-desc">Newest first</option>
-              <option value="date-asc">Oldest first</option>
-              <option value="title">Title</option>
-              <option value="path">Path</option>
-            </select>
-          </label>
-          <label className="lib-select">
-            <span className="lib-sr">Group</span>
-            <select value={state.group} onChange={(e) => store.setGroup(e.target.value as GroupKey)}>
-              <option value="month">By month</option>
-              <option value="folder">By folder</option>
-              <option value="none">No grouping</option>
-            </select>
-          </label>
-          {filtersActive(f) && (
-            <button type="button" className="lib-link-btn" onClick={() => store.setFilters({ query: "", platform: null, hasSummary: false, range: "all" })}>
-              Reset
-            </button>
-          )}
-        </div>
-        <p className="lib-muted lib-status" role="status" aria-live="polite">
-          {noteCount.toLocaleString()} {noteCount === 1 ? "note" : "notes"}
-          {state.listing.phase === "listing" && " · listing…"}
-          {state.heads.total > state.heads.done && ` · reading details ${state.heads.done.toLocaleString()} of ${state.heads.total.toLocaleString()}`}
-        </p>
-        <SearchResults store={store} state={state} />
       </div>
+      <SearchResults store={store} state={state} />
       {search.phase === "unavailable" && store.searchAvailable && f.query.trim().length >= 2 && (
         <StatusBanner severity="info" message="This core has no note search yet (it needs a newer core). Filtering titles, paths and summaries only." />
       )}
@@ -309,7 +265,7 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
         role={rows.length === 0 ? undefined : "listbox"}
         aria-multiselectable={bulk ? true : undefined}
         tabIndex={rows.length === 0 ? undefined : 0}
-        aria-label={rows.length === 0 ? undefined : `${title}, ${noteCount} notes`}
+        aria-label={rows.length === 0 ? undefined : `${title}, ${noteCount.toLocaleString("en-US")} notes`}
         aria-activedescendant={state.selectedRel ? optionId(state.selectedRel) : undefined}
         onKeyDown={rows.length === 0 ? undefined : onKey}
       >
@@ -376,14 +332,14 @@ function Empty({ state }: { state: LibraryState }): ReactNode {
   if (state.records.length === 0) {
     return (
       <div className="lib-empty" role="status">
-        <p className="lib-empty-title">No notes in this folder</p>
-        <p className="lib-muted">Notes appear here when meetings are captured or sources are fetched into this folder.</p>
+        <p className="lib-empty-title">No meetings yet</p>
+        <p className="lib-muted">Meetings captured in the Mac app and sources fetched into this folder appear here.</p>
       </div>
     );
   }
   return (
     <div className="lib-empty" role="status">
-      <p className="lib-empty-title">{filtersActive(state.filters) ? "No notes match the filters" : "Nothing in this section yet"}</p>
+      <p className="lib-empty-title">Nothing in this section yet</p>
     </div>
   );
 }

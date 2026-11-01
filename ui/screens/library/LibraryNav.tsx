@@ -1,7 +1,7 @@
 // Sidebar: sections (Sources, LLM Doc), the Extensions entries (placeholders until S-J lands them), the
 // notes folder and the index rebuild. Counts update as the background reader classifies notes.
-import { useState, type ReactNode } from "react";
-import { ChevronIcon, DocIcon, FolderIcon, PuzzleIcon, RefreshIcon, WaveIcon } from "@llmide/ui-kit";
+import { Fragment, useState, type ReactNode } from "react";
+import { DocIcon, FolderIcon, PuzzleIcon, RefreshIcon, WaveIcon } from "@llmide/ui-kit";
 import type { LibraryState } from "./library-store.ts";
 import type { NotesRoot } from "./host.ts";
 import type { SectionDef } from "./notes-model.ts";
@@ -119,20 +119,15 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           ) : null}
         </>
       )}
-      <GroupHead id="extensions" icon={<PuzzleIcon />} label="Extensions" count={p.extensions.length} />
-      {open("extensions") ? <ul className="lib-nav-list">
-        {p.extensions.map((x) => {
-          const sel = p.extensionId === x.id;
-          return (
-            <li key={x.id}>
-              <button type="button" className="lib-nav-item" aria-current={sel ? "page" : undefined} data-selected={sel} onClick={() => p.onExtension(x.id)}>
-                <span className="lib-nav-label">{x.label}</span>
-                {!x.render && <ChevronIcon />}
-              </button>
-            </li>
-          );
-        })}
-      </ul> : null}
+      {p.extensions.map((x) => (
+        <Fragment key={x.id}>
+          <h3 className="lib-nav-group">
+            <button type="button" className="lib-nav-group-btn" aria-expanded={open(x.id)} onClick={() => p.onExtension(x.id)}>
+              <PuzzleIcon /> {x.label} <span aria-hidden="true">›</span>
+            </button>
+          </h3>
+        </Fragment>
+      ))}
       {p.connections && p.connections.length > 0 && (
         <>
           <GroupHead id="connectors" icon={<WaveIcon />} label="Connectors" count={p.connections.length} />

@@ -132,3 +132,4 @@
 
 /* Mac Library is a search field over one sectioned list; these desktop-only controls were never in the Mac. */
 .lib-list-actions, .lib-chips, .lib-status, .lib-nav-head, .lib-nav-foot { display: none; }
+.lib-empty-icon { font-size: 30px; color: var(--tok-color-text-muted); opacity: .7; }
