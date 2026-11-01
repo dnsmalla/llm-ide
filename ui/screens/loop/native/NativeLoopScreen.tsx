@@ -6,6 +6,8 @@ import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate } from "./templates.ts";
+import { detectTestCommand } from "./environment.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -46,6 +48,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [templateId, setTemplateId] = useState(BUILT_IN_TEMPLATES[0].id);
+  const [testCommand, setTestCommand] = useState<string | null>(null);
+  const [envReason, setEnvReason] = useState("Checking the project environment…");
+  const [checkingEnv, setCheckingEnv] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -63,6 +69,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       }
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
+  }, [fs, projectRoot]);
+
+  const checkEnvironment = async () => {
+    setCheckingEnv(true);
+    try {
+      const r = await detectTestCommand(fs);
+      setTestCommand(r.command);
+      setEnvReason(r.reason);
+    } finally { setCheckingEnv(false); }
+  };
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    void checkEnvironment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fs, projectRoot]);
 
   const store = load?.kind === "ok" ? load.store : null;
@@ -247,14 +268,29 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
         <section className="loop-card">
           <h2>ENVIRONMENT</h2>
-          <p><span className="loop-ready" aria-hidden="true">●</span> Environment check is not ported yet.</p>
-          <p className="loop-native-hint">The Mac checks the project’s test command and Python environment. The next port slice adds it.</p>
+          <p><span className="loop-ready" aria-hidden="true">●</span> {testCommand ? "Test command detected" : "No test command detected"}</p>
+          <p>Recommended test command: <code>{testCommand ?? "none"}</code></p>
+          <p className="loop-native-hint">{envReason} Nothing is installed or changed.</p>
+          <button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkEnvironment()}>{checkingEnv ? "Checking…" : "Check again"}</button>
         </section>
 
         <section className="loop-card">
           <h2>TEMPLATE</h2>
-          <div className="loop-inline"><select aria-label="Template" disabled><option>Built-in prompt</option></select><button type="button" className="loop-btn" disabled>Apply</button><button type="button" className="loop-btn" disabled>Save as…</button></div>
-          <p className="loop-native-hint">Template recipes are ported with the next editing slice.</p>
+          <div className="loop-inline">
+            <select aria-label="Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+              {BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button type="button" className="loop-btn" onClick={() => {
+              const t = BUILT_IN_TEMPLATES.find((x) => x.id === templateId);
+              if (!t) return;
+              const config = applyTemplate(t, testCommand);
+              if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
+              patchLoop((l) => { l.config = config; });
+              setSelectedStageId(config.stages[0]?.id ?? null);
+              setNotice(`Applied ${t.name}.`);
+            }}>Apply</button>
+          </div>
+          <p className="loop-native-hint">{BUILT_IN_TEMPLATES.find((x) => x.id === templateId)?.summary}</p>
         </section>
 
         {stage ? (
