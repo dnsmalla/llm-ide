@@ -1,6 +1,6 @@
 // Loop, controlled through the Mac app's Mobile Control bridge. The loop definition (stages, budgets, verify
 // commands, repair policy) stays in the Mac app; this is the remote-control surface the iPhone also uses.
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { BridgeGate, useMacBridge } from "../bridge/BridgeGate.tsx";
 import { macBridge, type BridgeSnapshot } from "../bridge/mac-bridge.ts";
@@ -11,6 +11,11 @@ const when = (s: number | null): string => (s === null ? "Never" : new Date(s * 
 
 function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
   const l = snap.loop;
+  useEffect(() => {
+    if (!l?.running) return undefined;
+    const t = window.setInterval(() => macBridge.loopRefresh(), 2000);
+    return () => window.clearInterval(t);
+  }, [l?.running]);
   if (!l) {
     return (
       <div className="bridge-page">
@@ -41,7 +46,7 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
       </div>
 
       <div className="bridge-meta">
-        <span>Iteration {l.iteration} of {l.maxIterations}</span>
+        <span>{l.iteration > 0 ? `Iteration ${l.iteration} of ${l.maxIterations}` : `Max iterations: ${l.maxIterations}`}</span>
         {l.queuedCount > 0 ? <span>{l.queuedCount} queued</span> : null}
         {l.startedHere ? <span>Started from this desktop</span> : null}
         <span>Last: {l.lastStatusSummary ?? "no finished run"} · {when(l.lastFinishedAt)}</span>
@@ -64,6 +69,17 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
       <section aria-label="Loop log">
         <h2>Log</h2>
         <pre className="bridge-log">{l.logTail.length > 0 ? l.logTail.join("\n") : "No log lines yet."}</pre>
+      </section>
+
+      <section aria-label="Past loop runs">
+        <h2>Past runs</h2>
+        {snap.loopRuns.length === 0 ? <p className="st-hint">No finished runs yet.</p> : (
+          <ul className="bridge-acks">
+            {snap.loopRuns.slice(0, 20).map((r) => (
+              <li key={r.id}>{new Date(r.startedAt * 1000).toLocaleString()} · {r.statusSummary || r.statusCode} · {Math.round(r.durationSeconds)}s · {r.iterationsUsed} iteration{r.iterationsUsed === 1 ? "" : "s"} · {r.trigger}</li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {snap.acks.length > 0 ? (

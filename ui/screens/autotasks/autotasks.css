@@ -1,1 +1,20 @@
-/* Auto Tasks uses the shared bridge styles; this file exists so the screen is a normal lazy chunk. */
+.at-page { display: flex; flex-direction: column; gap: var(--tok-space-md); padding: var(--tok-space-lg); min-height: 0; height: 100%; overflow-y: auto; }
+.at-head { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.at-head h1 { margin: 0; font-size: var(--tok-type-title-size); }
+.at-check { display: flex; align-items: center; gap: var(--tok-space-xs); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.at-meta { display: flex; gap: var(--tok-space-lg); flex-wrap: wrap; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.at-workspace { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: var(--tok-space-md); min-height: 0; flex: 1; }
+.at-list { border-right: 1px solid var(--tok-color-border); padding-right: var(--tok-space-sm); overflow-y: auto; }
+.at-group { margin-bottom: var(--tok-space-md); }
+.at-group-title { margin: 0 0 2px; font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: .4px; color: var(--tok-color-text-muted); }
+.at-ulist { list-style: none; margin: 0; padding: 0; }
+.at-item { display: flex; justify-content: space-between; align-items: center; gap: var(--tok-space-sm); width: 100%; font: inherit; color: inherit; background: none; border: 0; border-radius: var(--tok-radius-sm); padding: var(--tok-space-xs) var(--tok-space-sm); cursor: pointer; text-align: left; }
+.at-item:hover { background: var(--tok-color-row-alt); }
+.at-item[data-on="true"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
+.at-item-state { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.at-detail { min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--tok-space-md); }
+.at-detail-head { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.at-detail-head h2 { margin: 0; font-size: var(--tok-type-section-size); }
+.at-history { border-top: 1px solid var(--tok-color-border); padding-top: var(--tok-space-sm); }
+.at-history h2 { margin: 0 0 var(--tok-space-xs); font-size: var(--tok-type-section-size); }
+@media (max-width: 900px) { .at-workspace { grid-template-columns: 1fr; } .at-list { border-right: 0; border-bottom: 1px solid var(--tok-color-border); } }

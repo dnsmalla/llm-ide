@@ -19,15 +19,15 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | audited, fixes pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | audited, fixes pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | audited, fixes pending |
-| 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge + desktop-class permissions fixed |
+| 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs done; setup/custom pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts done |
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
-| 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge + desktop-class permissions fixed |
+| 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | audited, fixes pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | audited, fixes pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | 2-pane done; single-list sections pending |
-| 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; more pending |
+| 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; updates/accounts/providers pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
 | 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
 

@@ -62,6 +62,8 @@ final class PhoneTierTableTests: XCTestCase {
         if case .refuse(let code, _) = PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskState) {
             XCTAssertEqual(code, MobileRefusalCode.tierRefused)
         } else { XCTFail("a Mac-to-phone type must be refused inbound") }
+        XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskToggle, desktop: true), .allow(.approvalConfirm),
+                       "the loopback desktop companion may use desktop-only writes")
         XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskList), .allow(.read))
         XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.llmIdeChat), .allow(.command))
     }

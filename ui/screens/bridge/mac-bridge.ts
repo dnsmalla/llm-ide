@@ -33,6 +33,9 @@ export interface LoopState {
   stages: LoopStage[];
   queuedCount: number;
 }
+export interface AutoTaskLogLine { id: string; timestamp: number; level: string; text: string }
+export interface AutoTaskLogs { currentTask: string | null; tasks: { id: string; label: string; lines: AutoTaskLogLine[] }[] }
+export interface LoopRun { id: string; startedAt: number; durationSeconds: number; iterationsUsed: number; statusCode: string; statusSummary: string; trigger: string }
 export interface BridgeSnapshot {
   phase: BridgePhase;
   deviceName: string | null;
@@ -42,6 +45,8 @@ export interface BridgeSnapshot {
   loop: LoopState | null;
   acks: { ok: boolean; message: string | null; code: string | null; at: number }[];
   history: { actionText: string; status: string; lastUpdated: number }[];
+  logs: AutoTaskLogs | null;
+  loopRuns: LoopRun[];
 }
 
 type Msg = Record<string, unknown> & { type?: unknown };
@@ -94,7 +99,7 @@ function randomId(): string {
 export class MacBridge {
   private ws: WebSocket | null = null;
   private heartbeat: number | null = null;
-  private snapshot: BridgeSnapshot = { phase: "idle", deviceName: null, capabilities: [], error: null, autoTasks: null, loop: null, acks: [], history: [] };
+  private snapshot: BridgeSnapshot = { phase: "idle", deviceName: null, capabilities: [], error: null, autoTasks: null, loop: null, acks: [], history: [], logs: null, loopRuns: [] };
   private listeners = new Set<() => void>();
   private deviceId: string;
   private token: string | null = null;
@@ -178,6 +183,7 @@ export class MacBridge {
         this.send({ type: "auto_task_list" });
         this.send({ type: "auto_task_logs_list" });
         this.send({ type: "loop_status_list" });
+        this.send({ type: "loop_history" });
         break;
       }
       case "error":
@@ -208,6 +214,33 @@ export class MacBridge {
       case "loop_state":
         this.emit({ loop: decodeLoop(msg) });
         break;
+      case "loop_history_reply":
+        this.emit({
+          loopRuns: Array.isArray(msg.runs)
+            ? msg.runs.filter(isObj).map((r) => ({
+                id: str(r.id) ?? "",
+                startedAt: num(r.startedAt) ?? 0,
+                durationSeconds: num(r.durationSeconds) ?? 0,
+                iterationsUsed: num(r.iterationsUsed) ?? 0,
+                statusCode: str(r.statusCode) ?? "",
+                statusSummary: str(r.statusSummary) ?? "",
+                trigger: str(r.trigger) ?? "",
+              })).filter((r) => r.id !== "")
+            : [],
+        });
+        break;
+      case "auto_task_logs_reply": {
+        const tasks = Array.isArray(msg.tasks)
+          ? msg.tasks.filter(isObj).map((t) => ({
+              id: str(t.id) ?? "", label: str(t.label) ?? "Task",
+              lines: Array.isArray(t.lines) ? t.lines.filter(isObj).map((l) => ({
+                id: str(l.id) ?? "", timestamp: num(l.timestamp) ?? 0, level: str(l.level) ?? "info", text: str(l.text) ?? "",
+              })).filter((l) => l.text !== "") : [],
+            })).filter((t) => t.id !== "")
+          : [];
+        this.emit({ logs: { currentTask: str(msg.currentTask), tasks } });
+        break;
+      }
       case "loop_ack":
         this.emit({ acks: [{ ok: bool(msg.accepted), message: str(msg.message), code: null, at: Date.now() }, ...this.snapshot.acks].slice(0, 20) });
         break;
@@ -225,6 +258,8 @@ export class MacBridge {
   run(task: string | null): void { this.send({ type: "auto_task_run", task }); }
   stopAuto(): void { this.send({ type: "auto_task_stop" }); }
   toggle(task: string | null, enabled: boolean): void { this.send({ type: "auto_task_toggle", task, enabled }); }
+  loopHistory(): void { this.send({ type: "loop_history" }); }
+  loopRefresh(): void { this.send({ type: "loop_status_list" }); }
   startLoop(): void { this.send({ type: "loop_start" }); }
   startStage(stageId: string): void { this.send({ type: "loop_start_stage", stageId }); }
   stopLoop(): void { this.send({ type: "loop_stop" }); }
