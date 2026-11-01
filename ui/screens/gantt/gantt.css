@@ -39,3 +39,6 @@
 .gnt-editor-actions { display: flex; gap: var(--tok-space-sm); }
 .gnt-error { margin: 0; color: var(--tok-color-danger); font-size: var(--tok-type-caption-size); }
 .gnt-foot { margin-top: auto; padding-top: var(--tok-space-sm); }
+
+.gnt-schedule { margin-left: auto; }
+.gnt-empty-dates { margin: 0 0 var(--tok-space-sm); }

@@ -130,6 +130,11 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         </div>
       ) : (
         <>
+          {dated.length === 0 && undated.length > 0 ? (
+            <p className="gnt-hint gnt-empty-dates" role="status">
+              These issues have no start or due date yet. Choose <strong>Set dates</strong> below to put one on the timeline.
+            </p>
+          ) : null}
           <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
             <div className="gnt-labels" aria-hidden="true">
               <div className="gnt-labels-head">Issue</div>
@@ -183,6 +188,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                       {r.issue.number !== null ? `#${r.issue.number} ` : ""}{r.issue.title}
                     </button>
                     <span className="gnt-hint"> {r.issue.repo}</span>
+                    <button type="button" className="gnt-btn gnt-schedule" onClick={() => setSelected(r)}>Set dates</button>
                   </li>
                 ))}
               </ul>
