@@ -40,6 +40,7 @@ const COMMANDS: &[&str] = &[
     "fs_rename",
     "fs_delete",
     "fs_copy",
+    "fs_open_pdf",
     "fs_watch_start",
     "fs_watch_set",
     "fs_watch_stop",

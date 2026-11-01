@@ -190,6 +190,15 @@ function Placeholder({ doc, controller, activeId, hasTabs }: { doc: ReturnType<E
     );
   }
   if (!doc || doc.status === "loading") return <div className="ex-empty" role="status"><p className="ex-empty-title">Opening…</p></div>;
+  if (activeId && /\.pdf$/i.test(activeId)) {
+    return (
+      <div className="ex-empty" role="status">
+        <p className="ex-empty-title">PDF</p>
+        <p className="ex-empty-hint">PDFs are not embedded in the desktop webview. Open this one in Preview.</p>
+        <button type="button" className="ex-tool" onClick={() => void invokeHost("fs_open_pdf", { path: activeId }).catch(() => undefined)}>Open in Preview</button>
+      </div>
+    );
+  }
   if (doc.status === "binary") {
     return (
       <div className="ex-empty" role="status">

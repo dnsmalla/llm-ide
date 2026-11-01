@@ -1115,6 +1115,24 @@ pub async fn fs_rename(req: RenameReq) -> R<String> {
     blocking(move |root| rename(&root, &req)).await
 }
 
+/// Opens a PDF inside the active project with the OS viewer. The page never supplies an arbitrary path and
+/// only `.pdf` is accepted; the host resolves/confines it first. This is the desktop's Quick Look equivalent —
+/// the webview does not embed PDFs.
+#[tauri::command]
+pub async fn fs_open_pdf(path: String) -> R<()> {
+    blocking(move |root| {
+        let p = resolve_existing(&root, &path)?;
+        if p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")) != Some(true) {
+            return err("invalid_path", "only PDF files can be opened in the system viewer");
+        }
+        let mut cmd = if cfg!(target_os = "macos") { std::process::Command::new("open") }
+            else if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", "start", ""]); c }
+            else { std::process::Command::new("xdg-open") };
+        cmd.arg(&p).spawn().map_err(|e| io_err("cannot open the PDF", e))?;
+        Ok(())
+    }).await
+}
+
 #[tauri::command]
 pub async fn fs_copy(req: CopyReq) -> R<String> {
     blocking(move |root| copy(&root, &req)).await

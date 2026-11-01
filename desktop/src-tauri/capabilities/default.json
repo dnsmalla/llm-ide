@@ -41,6 +41,7 @@
     "allow-fs-rename",
     "allow-fs-delete",
     "allow-fs-copy",
+    "allow-fs-open-pdf",
     "allow-fs-watch-start",
     "allow-fs-watch-set",
     "allow-fs-watch-stop",

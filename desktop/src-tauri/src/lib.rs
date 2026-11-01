@@ -305,6 +305,7 @@ macro_rules! product_handlers {
                 fs_ops::fs_rename,
                 fs_ops::fs_delete,
                 fs_ops::fs_copy,
+                fs_ops::fs_open_pdf,
                 fs_watch::fs_watch_start,
                 fs_watch::fs_watch_set,
                 fs_watch::fs_watch_stop,
