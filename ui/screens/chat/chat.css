@@ -92,3 +92,6 @@
 .chat-dock-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; }
 .chat-dock-btn:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
 .chat-dock-mode .chat-controls { flex-wrap: wrap; }
+.chat-context { position: relative; }
+.chat-context-list { list-style: none; margin: var(--tok-space-xs) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); }
+.chat-context-list li { display: flex; justify-content: space-between; gap: var(--tok-space-md); }

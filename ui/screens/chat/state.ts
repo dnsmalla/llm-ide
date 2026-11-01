@@ -6,7 +6,7 @@
 //  * Only the last message object is replaced per applied batch; every older message is shared.
 //  * Memory is bounded: tool output kept in state is capped (TOOL_STATE_CAP), the in-memory message
 //    window is capped (MAX_MESSAGES_IN_MEMORY, oldest dropped on append and `hasMoreOlder` set).
-import type { AgentEvent, ApprovalSuggestion, Question, TaskItem } from "./events";
+import type { AgentEvent, ApprovalSuggestion, ContextCategory, Question, TaskItem } from "./events";
 
 export const TOOL_STATE_CAP = 20_000;
 export const TOOL_ARGS_CAP = 8_000;
@@ -92,7 +92,7 @@ export interface ChatState {
   /** Mode the server resolved for the running/last turn (`mode_set`). */
   resolvedMode: string | null;
   model: string | null;
-  context: { totalTokens: number; maxTokens: number; percentage: number } | null;
+  context: { totalTokens: number; maxTokens: number; percentage: number; categories: ContextCategory[] } | null;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null;
   tasks: TaskItem[];
   pendingApprovals: PendingApproval[];
@@ -410,7 +410,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
         next.usage = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens };
         break;
       case "context_usage":
-        next.context = { totalTokens: ev.totalTokens, maxTokens: ev.maxTokens, percentage: ev.percentage };
+        next.context = { totalTokens: ev.totalTokens, maxTokens: ev.maxTokens, percentage: ev.percentage, categories: ev.categories };
         break;
       case "tasks":
       case "tasks_progress":

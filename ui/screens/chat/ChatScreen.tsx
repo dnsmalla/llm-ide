@@ -79,6 +79,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const [unreadable, setUnreadable] = useState<string | null>(null);
   // Errors the user caused or can ignore are not alarms: a declined confirm is silent, bookkeeping is an info notice.
   const reportStoreError = useCallback((e: unknown) => {
@@ -244,7 +245,23 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           <>
             <header className="chat-header">
               <h2 className="chat-title">{sessions.find((s) => s.id === activeId)?.title || "Untitled chat"}</h2>
-              {state.context && <span className="chat-muted" aria-label={`Context ${state.context.percentage} percent used`}>Context {state.context.percentage}%</span>}
+              {state.context && (
+                <div className="chat-context">
+                  <button type="button" className="chat-chip-btn" aria-label={`Context ${state.context.percentage} percent used`} aria-haspopup="dialog" aria-expanded={contextOpen} onClick={() => setContextOpen((v) => !v)}>
+                    Context {state.context.percentage}%
+                  </button>
+                  {contextOpen ? (
+                    <div role="dialog" aria-label="Context usage" className="chat-popover">
+                      <p className="chat-muted">{state.context.totalTokens.toLocaleString()} of {state.context.maxTokens.toLocaleString()} tokens</p>
+                      <ul className="chat-context-list">
+                        {state.context.categories.map((c) => (
+                          <li key={`${c.kind}:${c.name}`}><span>{c.name}</span><span>{c.tokens.toLocaleString()}</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              )}
               {state.model && <span className="chat-muted">{state.model}</span>}
               <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />
