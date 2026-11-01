@@ -15,6 +15,8 @@ export interface AccountActions {
   openHelp: () => void;
   openPermissions: () => void;
   signOut: () => Promise<void>;
+  /** Sign out AND clear this device's local UI settings (the Mac's broader sign-out). */
+  signOutAndForget?: () => Promise<void>;
 }
 
 /** The menu rows (pure, so the order and wording are tested without a DOM). */
@@ -32,17 +34,17 @@ export function accountMenuItems(user: SessionUser, a: Pick<AccountActions, "ope
   ];
 }
 
-export function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => void; onConfirm: () => void; busy?: boolean }) {
+export function SignOutDialog({ onCancel, onConfirm, busy, title = SIGN_OUT_TITLE, body = SIGN_OUT_BODY, confirmLabel = "Sign out" }: { onCancel: () => void; onConfirm: () => void; busy?: boolean; title?: string; body?: string; confirmLabel?: string }) {
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   return (
     <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-signout-title" aria-describedby="sh-signout-body" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
       <div className="sh-modal-card">
-        <h2 id="sh-signout-title" className="sh-panel-title">{SIGN_OUT_TITLE}</h2>
-        <p id="sh-signout-body" className="sh-panel-text sh-muted">{SIGN_OUT_BODY}</p>
+        <h2 id="sh-signout-title" className="sh-panel-title">{title}</h2>
+        <p id="sh-signout-body" className="sh-panel-text sh-muted">{body}</p>
         <div className="sh-form-actions">
           <button ref={cancel} type="button" className="sh-button" onClick={onCancel}>Cancel</button>
-          <button type="button" className="sh-button sh-button-danger" disabled={busy} onClick={onConfirm}>Sign out</button>
+          <button type="button" className="sh-button sh-button-danger" disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -51,14 +53,29 @@ export function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => v
 
 export const AccountMenu = memo(function AccountMenu({ user, actions, mac }: { user: SessionUser | null; actions: AccountActions; mac: boolean }) {
   const [confirm, setConfirm] = useState(false);
+  const [forget, setForget] = useState(false);
   const [busy, setBusy] = useState(false);
   if (!user) return null;
   const items = accountMenuItems(user, { ...actions, askSignOut: () => setConfirm(true) }, mac);
+  items.push(...(actions.signOutAndForget ? [{ id: "signout-forget", label: "Sign out and forget this device…", onSelect: () => setForget(true) } as MenuItem] : []));
   return (
     <>
       <MenuButton ariaLabel={`Account: ${safeText(user.email, 120)}`} className="sh-icon-button sh-account" items={items} end>
         <Icon name="circle-user" size={18} />
       </MenuButton>
+      {forget && actions.signOutAndForget ? (
+        <SignOutDialog
+          busy={busy}
+          title="Sign out and forget this device?"
+          body="Signing out clears this computer's local UI settings (panels, terminal, Library view, save destinations) and your session. Project files and notes are not deleted."
+          confirmLabel="Sign out and forget"
+          onCancel={() => setForget(false)}
+          onConfirm={() => {
+            setBusy(true);
+            void actions.signOutAndForget!().finally(() => { setBusy(false); setForget(false); });
+          }}
+        />
+      ) : null}
       {confirm && (
         <SignOutDialog
           busy={busy}

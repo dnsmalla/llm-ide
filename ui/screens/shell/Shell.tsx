@@ -1,6 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ComponentType } from "react";
 import { HomeIcon, StatusBanner, type ThemeId } from "@llmide/ui-kit";
 import { AccountMenu, type AccountActions } from "./AccountMenu";
+import { forgetLocalSettings } from "./forget-device";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
 import { host as shellHost, invokeHost } from "./host";
@@ -157,6 +158,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       openHelp: () => shellBus.publish({ type: "goto-section", section: "welcome", anchor: "guide" }),
       openPermissions: () => shellBus.publish({ type: "goto-section", section: "settings", anchor: "tool-permissions" }),
       signOut: () => core.logout(),
+      signOutAndForget: async () => { forgetLocalSettings(); await core.logout(); },
     }),
     [],
   );
