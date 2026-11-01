@@ -16,7 +16,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
-| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach, approval badge, context breakdown done; memory/voice/turn actions pending |
+| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach, approval badge, context+memory done; voice/turn actions pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs, setup snapshot; custom/editing pending |
