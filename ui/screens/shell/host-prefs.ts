@@ -14,6 +14,15 @@ export interface HostPrefs {
   theme: "dark" | "light" | "midnight";
   /** The feature profile: an explicit subset of the server's feature keys; empty = every feature. */
   features: string[];
+  /** Run the core from a source checkout instead of the bundled copy. */
+  backendSource: boolean;
+  /** Source checkout: node binary and `extension` folder (empty = auto-detect). */
+  backendNode: string;
+  backendDir: string;
+  /** Source checkout: loopback port (0 = the app's default range). */
+  backendPort: number;
+  /** Start the core when the app launches. */
+  backendAutoStart: boolean;
 }
 
 export interface HostPrefsView {
@@ -38,7 +47,12 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const features = Array.isArray(raw.features)
     ? raw.features.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 40).slice(0, 32)
     : [];
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features };
+  const backendSource = raw.backendSource === true;
+  const backendNode = typeof raw.backendNode === "string" ? raw.backendNode.slice(0, 4096) : "";
+  const backendDir = typeof raw.backendDir === "string" ? raw.backendDir.slice(0, 4096) : "";
+  const backendPort = typeof raw.backendPort === "number" && Number.isInteger(raw.backendPort) && raw.backendPort >= 0 && raw.backendPort <= 65535 ? raw.backendPort : 0;
+  const backendAutoStart = raw.backendAutoStart !== false;
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {

@@ -11,6 +11,16 @@ export type ThemeChoice = "dark" | "light" | "midnight";
 /** How the shell came to talk to its core. */
 export type CoreTrust = "spawned" | "adopted-unverified";
 
+/** Server & Backend's editable backend settings (source-checkout mode). */
+export interface BackendConfig {
+  source: boolean;
+  node: string;
+  dir: string;
+  /** 0 = the app's default 3457-3459 range. */
+  port: number;
+  autoStart: boolean;
+}
+
 export interface DiagnosticsInfo {
   appVersion: string;
   coreTrust: CoreTrust;
@@ -89,6 +99,11 @@ export interface SettingsHost {
   setFeatureProfile?(features: string[]): Promise<{ stored: string[]; launch: string[] }>;
   /** Starts a reduced build from the source checkout with `features` compiled in; the app restarts when it is ready. */
   rebuildFeatures?(features: string[]): Promise<{ started: boolean; message: string }>;
+  getBackendConfig?(): Promise<BackendConfig>;
+  setBackendConfig?(patch: Partial<BackendConfig>): Promise<BackendConfig>;
+  pickNode?(): Promise<string | null>;
+  pickBackendDir?(): Promise<string | null>;
+  detectBackend?(): Promise<{ node: string; dir: string }>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;

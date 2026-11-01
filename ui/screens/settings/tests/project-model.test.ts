@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, parseBackendUrl, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
 
 test("safeRelativePath: project-relative only (no absolute, drive, .., controls)", () => {
   assert.equal(safeRelativePath("system/graph/graph.json"), "system/graph/graph.json");
@@ -72,4 +72,12 @@ test("canonical folders carry the Mac Paths explanations", () => {
   assert.equal(folderNote("source"), "Meeting & email transcripts");
   assert.match(folderNote("llm-doc/plans")!, /KB plans/);
   assert.equal(folderNote("nope"), null);
+});
+
+test("backend URLs are loopback-only and need an explicit port", () => {
+  assert.deepEqual(parseBackendUrl("http://127.0.0.1:3457"), { port: 3457 });
+  assert.deepEqual(parseBackendUrl("http://localhost:4567"), { port: 4567 });
+  for (const bad of ["http://example.com:3457", "http://127.0.0.1", "ftp://127.0.0.1:1", "nope", "http://127.0.0.1:80"]) {
+    assert.ok("error" in parseBackendUrl(bad), bad);
+  }
 });

@@ -28,6 +28,7 @@ mod project;
 mod project_layout;
 mod project_scaffold;
 mod repo_clone;
+mod backend_pick;
 mod prefs;
 mod project_search;
 mod pty;
@@ -273,6 +274,9 @@ macro_rules! product_handlers {
                 core_host::core_stop,
                 core_host::core_start,
                 core_host::core_restart,
+                backend_pick::backend_pick_node,
+                backend_pick::backend_pick_dir,
+                backend_pick::backend_detect,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
@@ -480,7 +484,14 @@ pub fn run() {
             }) {
                 eprintln!("core: signal handler not installed: {e}");
             }
-            setup_host.start_in_background(fsutil::desktop_data_dir().ok());
+            let data_dir = fsutil::desktop_data_dir().ok();
+            let auto_start = data_dir.as_ref().map(|d| prefs::load_from(d).backend_auto_start).unwrap_or(true);
+            if auto_start {
+                setup_host.start_in_background(data_dir);
+            } else {
+                // "Start backend on app launch" is off: the app opens with the core stopped; Start uses this dir.
+                setup_host.mark_stopped(data_dir);
+            }
             Ok(())
         })
         .invoke_handler(app_handler!())

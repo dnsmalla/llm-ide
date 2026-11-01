@@ -68,11 +68,25 @@ pub struct Prefs {
     pub theme: Theme,
     /// The feature profile (an explicit subset of `FEATURE_KEYS`; empty = every feature, the historical behaviour).
     pub features: Vec<String>,
+    // ---- backend (Server & Backend) ----
+    /// False = the app's bundled core (the default); true = run the core from a source checkout.
+    pub backend_source: bool,
+    /// Source-checkout mode only: node binary (empty = auto-detect).
+    pub backend_node: String,
+    /// Source-checkout mode only: the checkout's `extension` folder (empty = auto-detect).
+    pub backend_dir: String,
+    /// Source-checkout mode only: loopback port (0 = the app's 3457-3459 range).
+    pub backend_port: u16,
+    /// Start the core when the app starts (false leaves it stopped until Start).
+    pub backend_auto_start: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark, features: Vec::new() }
+        Self {
+            lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark,
+            features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
+        }
     }
 }
 
@@ -88,6 +102,11 @@ pub struct PrefsPatch {
     pub terminal: Option<bool>,
     pub theme: Option<Theme>,
     pub features: Option<Vec<String>>,
+    pub backend_source: Option<bool>,
+    pub backend_node: Option<String>,
+    pub backend_dir: Option<String>,
+    pub backend_port: Option<u16>,
+    pub backend_auto_start: Option<bool>,
 }
 
 /// An explicit feature list: only keys the server knows, in the canonical order, with `agent_chat` always on.
@@ -113,6 +132,11 @@ impl Prefs {
         if let Some(v) = p.learn { n.learn = v; }
         if let Some(v) = p.terminal { n.terminal = v; }
         if let Some(v) = p.theme { n.theme = v; }
+        if let Some(v) = p.backend_source { n.backend_source = v; }
+        if let Some(v) = &p.backend_node { n.backend_node = v.trim().to_string(); }
+        if let Some(v) = &p.backend_dir { n.backend_dir = v.trim().to_string(); }
+        if let Some(v) = p.backend_port { n.backend_port = v; }
+        if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.features {
             if v.is_empty() {
                 // Empty stays "inherit every feature"; the Terminal flag is left as it was.
@@ -148,6 +172,8 @@ pub fn parse(text: &str) -> Prefs {
         learn: Some(p.learn), terminal: Some(p.terminal), theme: Some(p.theme),
         // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
         features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
+        backend_source: Some(p.backend_source), backend_node: Some(p.backend_node.clone()), backend_dir: Some(p.backend_dir.clone()),
+        backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
     })).unwrap_or_default()
 }
 

@@ -1,9 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeHealth, type Health } from "../decoders.ts";
-import type { CoreLogText, DiagnosticsInfo } from "../host.ts";
+import type { BackendConfig, CoreLogText, DiagnosticsInfo, SettingsHost } from "../host.ts";
 import { describeError } from "../errors.ts";
 import { LOG_TEXT, componentError, shortPath } from "../components-model.ts";
+import { parseBackendUrl } from "../project-model.ts";
 import { serverRows } from "../notices.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
@@ -89,6 +90,7 @@ export default function ServerSection() {
 
       <div className="st-note">
         <span className="st-label">Managed backend</span>
+        {host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
         {info?.coreUrl ? (
           <div className="st-row">
             <span className="st-hint">Server URL</span>
@@ -97,9 +99,9 @@ export default function ServerSection() {
           </div>
         ) : <p className="st-hint">Server URL: starting…</p>}
         <p className="st-hint">
-          Start on launch: always. The desktop app starts and supervises the core bundled inside it, so it has no
-          editable server URL, Node binary, project folder or launch toggle — those configure a source-checkout backend
-          in the Mac app. A crashed core is restarted automatically with a bounded backoff.
+          The default backend is the core bundled inside the app. Turn on a source checkout to run the core from a
+          checkout with its own Node binary, project folder and loopback port — the same layout the Mac's Backend
+          card edits. Changes to those paths apply on Kill &amp; Restart; the launch toggle applies on the next app start.
         </p>
         {host.coreStart || host.coreStop || host.coreRestart ? (
           <div className="st-row">
@@ -144,6 +146,100 @@ export default function ServerSection() {
       ) : null}
 
       <PartialNote id="server" />
+    </div>
+  );
+}
+
+
+/** The Mac's editable backend fields: source checkout, node, extension folder, loopback URL and launch toggle. */
+function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => void }) {
+  const [cfg, setCfg] = useState<BackendConfig | null>(null);
+  const [url, setUrl] = useState("http://127.0.0.1:3457");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    host.getBackendConfig?.().then((c) => {
+      setCfg(c);
+      setUrl(c.port > 0 ? `http://127.0.0.1:${c.port}` : "http://127.0.0.1:3457");
+    }, () => setCfg(null));
+  }, [host]);
+  useEffect(load, [load]);
+
+  if (!cfg) return <p className="st-hint" role="status">Reading the backend settings...</p>;
+
+  const parsePort = (): number | string => {
+    if (!cfg.source) return 0;
+    const parsed = parseBackendUrl(url);
+    return "error" in parsed ? parsed.error : parsed.port;
+  };
+
+  const save = async () => {
+    const port = parsePort();
+    if (typeof port === "string") { setError(port); return; }
+    setSaving(true); setError(null); setNotice(null);
+    try {
+      const next = await host.setBackendConfig!({ source: cfg.source, node: cfg.node.trim(), dir: cfg.dir.trim(), port, autoStart: cfg.autoStart });
+      setCfg(next);
+      setNotice("Backend settings saved. Use Kill & Restart to apply the paths; the launch toggle applies on the next app start.");
+      onSaved();
+    } catch (e) {
+      setError(componentError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const detect = async () => {
+    setError(null);
+    try {
+      const d = await host.detectBackend?.();
+      if (d) setCfg({ ...cfg, node: d.node || cfg.node, dir: d.dir || cfg.dir });
+    } catch (e) {
+      setError(componentError(e));
+    }
+  };
+
+  return (
+    <div className="st-stack">
+      <label className="st-row">
+        <input type="checkbox" checked={cfg.source} onChange={(e) => setCfg({ ...cfg, source: e.target.checked })} />
+        <span>Use a source checkout instead of the bundled core</span>
+      </label>
+      {cfg.source ? (
+        <>
+          <label className="st-field">
+            <span className="st-label">Node binary</span>
+            <div className="st-row">
+              <input className="st-input st-grow" value={cfg.node} placeholder="Auto-detect (/opt/homebrew/bin/node)" spellCheck={false} onChange={(e) => setCfg({ ...cfg, node: e.target.value })} />
+              {host.pickNode ? <Button onClick={() => void host.pickNode!().then((p) => p && setCfg({ ...cfg, node: p }))}>Browse…</Button> : null}
+            </div>
+          </label>
+          <label className="st-field">
+            <span className="st-label">Project folder (extension)</span>
+            <div className="st-row">
+              <input className="st-input st-grow" value={cfg.dir} placeholder="Auto-detect: <checkout>/extension" spellCheck={false} onChange={(e) => setCfg({ ...cfg, dir: e.target.value })} />
+              {host.pickBackendDir ? <Button onClick={() => void host.pickBackendDir!().then((p) => p && setCfg({ ...cfg, dir: p }))}>Browse…</Button> : null}
+            </div>
+          </label>
+          <label className="st-field">
+            <span className="st-label">Server URL</span>
+            <input className="st-input" value={url} spellCheck={false} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:3457" />
+            <span className="st-hint">Loopback only. The source backend listens on this port; the bundled core uses 3457-3459.</span>
+          </label>
+        </>
+      ) : null}
+      <label className="st-row">
+        <input type="checkbox" checked={cfg.autoStart} onChange={(e) => setCfg({ ...cfg, autoStart: e.target.checked })} />
+        <span>Start backend on app launch</span>
+      </label>
+      <div className="st-row">
+        <Button disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save backend settings"}</Button>
+        {host.detectBackend ? <Button disabled={saving} onClick={() => void detect()}>Auto-detect</Button> : null}
+      </div>
+      {notice ? <p className="st-ok" role="status">{notice}</p> : null}
+      <ErrorText text={error} />
     </div>
   );
 }

@@ -187,8 +187,8 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /Refresh log/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Clear log<\/button>/, "nothing to clear before a log exists");
   assert.match(out, /Managed backend/);
-  assert.match(out, /Start on launch: always/);
-  assert.match(out, /no editable server URL, Node binary, project folder or launch toggle/);
+  assert.match(out, /default backend is the core bundled inside the app/);
+  assert.match(out, /source checkout/);
   assert.match(out, /Start backend/, "before the diagnostics load the safe action is Start");
   assert.match(out, /Kill &amp; Restart/);
   assert.doesNotMatch(out, /<input/, "the desktop backend is managed; no dead config fields");

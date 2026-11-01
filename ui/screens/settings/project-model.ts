@@ -62,6 +62,20 @@ export function bytesLabel(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A loopback backend URL -> its port, or a sentence explaining what is wrong. */
+export function parseBackendUrl(raw: string): { port: number } | { error: string } {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return { error: "Use an http(s) loopback URL." };
+    if (u.hostname !== "127.0.0.1" && u.hostname !== "localhost") return { error: "Only localhost / 127.0.0.1 is allowed." };
+    if (!u.port) return { error: "Include the port, for example http://127.0.0.1:3457." };
+    const port = Number(u.port);
+    return Number.isInteger(port) && port >= 1024 && port <= 65535 ? { port } : { error: "The port must be 1024-65535." };
+  } catch {
+    return { error: "That is not a valid server URL." };
+  }
+}
+
 /** The cloud-sync provider a notes folder lives in, when it is one of the Mac's four known providers. */
 export function syncProviderFor(path: string): string | null {
   if (path.includes("/Library/Mobile Documents/com~apple~CloudDocs/")) return "Synced via iCloud Drive";

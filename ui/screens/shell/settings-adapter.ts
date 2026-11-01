@@ -89,6 +89,36 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const v = await writePrefs({ features });
           return { stored: v.stored.features, launch: v.launch.features };
         },
+        async getBackendConfig() {
+          const p = (await readPrefs()).stored;
+          return { source: p.backendSource, node: p.backendNode, dir: p.backendDir, port: p.backendPort, autoStart: p.backendAutoStart };
+        },
+        async setBackendConfig(patch) {
+          const cur = (await readPrefs()).stored;
+          const next = {
+            backendSource: patch.source ?? cur.backendSource,
+            backendNode: patch.node ?? cur.backendNode,
+            backendDir: patch.dir ?? cur.backendDir,
+            backendPort: patch.port ?? cur.backendPort,
+            backendAutoStart: patch.autoStart ?? cur.backendAutoStart,
+          };
+          const v = await writePrefs(next);
+          const p = v.stored;
+          return { source: p.backendSource, node: p.backendNode, dir: p.backendDir, port: p.backendPort, autoStart: p.backendAutoStart };
+        },
+        async pickNode() {
+          const r = await d.invoke<unknown>("backend_pick_node");
+          return typeof r === "string" && r.length > 0 ? r : null;
+        },
+        async pickBackendDir() {
+          const r = await d.invoke<unknown>("backend_pick_dir");
+          return typeof r === "string" && r.length > 0 ? r : null;
+        },
+        async detectBackend() {
+          const raw = await d.invoke<unknown>("backend_detect");
+          const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+          return { node: typeof o.node === "string" ? o.node : "", dir: typeof o.dir === "string" ? o.dir : "" };
+        },
         async coreStop() {
           await d.invoke<unknown>("core_stop");
         },

@@ -402,6 +402,20 @@ impl CoreHost {
         *lock(&self.inner.startup) = Some(handle);
     }
 
+    /// Initial state when "Start backend on app launch" is off: nothing was spawned, but Start can.
+    pub fn mark_stopped(&self, data_dir: Option<PathBuf>) {
+        *lock(&self.inner.data_dir) = data_dir;
+        let mut s = lock(&self.inner.status);
+        s.closing = true;
+        s.state = Phase::Stopped;
+        s.trust = "spawned";
+        s.pid = None;
+        s.nonce = None;
+        s.error = None;
+        s.fatal = false;
+        s.restart_at = None;
+    }
+
     /// Stop the core the user sees (never an adopted server). Blocks until the supervisor has ended so a following
     /// Start cannot race it. The app keeps running; Settings offers Start.
     pub fn stop(&self) -> Result<(), String> {
@@ -573,9 +587,15 @@ impl CoreHost {
             }
         };
         lock(&self.inner.literals).push(nonce.clone());
+        let prefs_now = crate::prefs::load_from(data_dir);
+        let ports = if prefs_now.backend_source && prefs_now.backend_port > 0 {
+            vec![prefs_now.backend_port]
+        } else {
+            t.ports.clone()
+        };
         let mut last = String::from("no port tried");
         let mut busy = 0usize;
-        for &port in &t.ports {
+        for &port in &ports {
             if self.is_closing() {
                 return Started::Closed;
             }
@@ -595,14 +615,14 @@ impl CoreHost {
         if self.is_closing() {
             return Started::Closed;
         }
-        let all_busy = busy == t.ports.len();
-        self.set_failed(spawn_url(t.ports[t.ports.len() - 1]), format!("could not start the core: {last}"));
+        let all_busy = busy == ports.len();
+        self.set_failed(spawn_url(*ports.last().unwrap_or(&t.ports[0])), format!("could not start the core: {last}"));
         if all_busy {
-            let first = t.ports.first().copied().unwrap_or(0);
-            let last_port = t.ports.last().copied().unwrap_or(0);
+            let first = ports.first().copied().unwrap_or(0);
+            let last_port = ports.last().copied().unwrap_or(0);
             let mut s = lock(&self.inner.status);
             s.error_code = Some("ports_busy");
-            s.ports_tried = t.ports.clone();
+            s.ports_tried = ports.clone();
             s.error = Some(format!("Ports {first}-{last_port} are busy: free one of them or restart"));
         }
         Started::Failed
@@ -1047,7 +1067,7 @@ fn bundled_core_dir(resources: &Path) -> Option<PathBuf> {
 }
 
 /// `LLMIDE_NODE`, else the first well-known Homebrew/system node, else PATH.
-fn node_binary() -> PathBuf {
+pub(crate) fn node_binary() -> PathBuf {
     if let Ok(n) = std::env::var("LLMIDE_NODE") {
         return PathBuf::from(n);
     }
@@ -1060,10 +1080,39 @@ fn node_binary() -> PathBuf {
     PathBuf::from("node")
 }
 
+/// The runtime the backend prefs select: the bundled/repo default, or an explicit source checkout with its own
+/// node binary and `extension` folder. Empty source fields auto-detect from the checkout.
+pub(crate) fn runtime_for(p: &crate::prefs::Prefs) -> Result<Runtime, String> {
+    if !p.backend_source {
+        return resolve_runtime();
+    }
+    let dir = if !p.backend_dir.is_empty() {
+        PathBuf::from(&p.backend_dir)
+    } else {
+        let root = repo_root().or_else(|_| crate::feature_rebuild::source_root().ok_or_else(|| "source checkout not found (set the project folder)".to_string()))?;
+        root.join("extension")
+    };
+    let (extension, root) = if dir.join("server.mjs").is_file() {
+        let root = dir.parent().ok_or_else(|| "the project folder has no parent".to_string())?.to_path_buf();
+        (dir, root)
+    } else if dir.join("extension").join("server.mjs").is_file() {
+        (dir.join("extension"), dir)
+    } else {
+        return Err(format!("{} does not contain server.mjs (choose the extension folder or the checkout)", dir.display()));
+    };
+    let node = if p.backend_node.is_empty() { node_binary() } else { PathBuf::from(&p.backend_node) };
+    if node.is_absolute() && !node.is_file() {
+        return Err(format!("node binary not found: {}", node.display()));
+    }
+    let _ = extension;
+    Ok(Runtime { mode: "source", node, root })
+}
+
 /// The spawn used in production: the bundled (or repo) node running `server.mjs` with a
 /// scrubbed environment, the two secrets, and the data dir. Fails closed without secrets.
 fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
-    let rt = resolve_runtime()?;
+    let p = crate::prefs::load_from(ctx.data_dir);
+    let rt = runtime_for(&p)?;
     eprintln!("core: runtime={} node={} root={} port={}", rt.mode, rt.node.display(), rt.root.display(), ctx.port);
     let db_dir = fsutil::private_dir(&ctx.data_dir.join("core"))?;
     // Fail closed: no secrets, no sidecar. Values go in the child's env only.
@@ -1085,7 +1134,7 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_BACKUP_INTERVAL_HOURS", "0");
     // Host prefs fixed at this launch (token switches default off; only the exact value `on`).
     let host_features = std::env::var("LLMIDE_FEATURES").ok();
-    for (k, v) in crate::prefs::core_env_pairs(&crate::prefs::launch(), host_features.as_deref()) {
+    for (k, v) in crate::prefs::core_env_pairs(&p, host_features.as_deref()) {
         cmd.env(k, v);
     }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
@@ -1117,7 +1166,8 @@ process.stdout.write('\\nLLMIDE_CLAUDE_PROBE ' + JSON.stringify({ found: Boolean
 /// Runs the server's own `claude-path.mjs` under the core's node and environment, so the
 /// answer is exactly what the engine will find. Any failure is `unknown`, never `missing`.
 fn real_claude_probe(data_dir: &Path) -> ClaudeInfo {
-    let Ok(rt) = resolve_runtime() else { return ClaudeInfo::unknown() };
+    let prefs = crate::prefs::load_from(data_dir);
+    let Ok(rt) = runtime_for(&prefs) else { return ClaudeInfo::unknown() };
     let Ok(db_dir) = fsutil::private_dir(&data_dir.join("core")) else { return ClaudeInfo::unknown() };
     let mut cmd = core_command(&rt, &db_dir);
     cmd.args(["--input-type=module", "-e", CLAUDE_PROBE_JS])
@@ -1330,6 +1380,25 @@ mod tests {
         assert_eq!(host.status().state, Phase::Stopped);
         assert_eq!(host.status().trust, "spawned", "a stopped own core is not a trust warning");
         assert!(host.start().is_err(), "there is no data dir to start against");
+    }
+
+    #[test]
+    fn source_backend_prefs_select_the_checkout_runtime() {
+        let dir = std::env::temp_dir().join(format!("llmide-source-rt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("extension")).unwrap();
+        std::fs::write(dir.join("extension/server.mjs"), "//").unwrap();
+        let mut p = crate::prefs::Prefs::default();
+        p.backend_source = true;
+        p.backend_dir = dir.join("extension").to_string_lossy().into_owned();
+        p.backend_node = "node".into();
+        let rt = runtime_for(&p).unwrap();
+        assert_eq!(rt.mode, "source");
+        assert_eq!(rt.root, dir);
+        assert_eq!(rt.node, PathBuf::from("node"));
+        p.backend_dir = dir.join("missing").to_string_lossy().into_owned();
+        assert!(runtime_for(&p).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
