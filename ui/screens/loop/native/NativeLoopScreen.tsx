@@ -5,6 +5,7 @@ import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
+import { core } from "../../shell/runtime";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
@@ -255,6 +256,28 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } finally { setRunningStage(false); }
   };
 
+  const runSkillStage = async () => {
+    if (!loop || !stage || stage.kind !== "skill" || !stage.skillId || dirty || runningStage) return;
+    const parts = [stage.prompt?.trim() || `Run the ${stage.name} skill for this loop.`];
+    if (loop.goal) parts.push(`Loop goal: ${loop.goal}`);
+    if (loop.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+    if (stage.targetPath) parts.push(`Target path: ${stage.targetPath}`);
+    if (stage.outputPath) parts.push(`Output path: ${stage.outputPath}`);
+    if (!window.confirm(`Run the ${stage.skillId} skill in ${workRoot ?? projectRoot}?`)) return;
+    setRunningStage(true);
+    setRunLog((l) => [...l, `$ skill ${stage.skillId}`, ""]);
+    try {
+      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+        method: "POST", body: { message: parts.join("\n\n"), skills: [stage.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (stage.timeoutSeconds ?? 1800) * 1000 },
+      });
+      setRunLog((l) => [...l, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])]);
+      setNotice(r.resultSubtype ?? "Skill stage finished.");
+    } catch (e) {
+      setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
+      setNotice(e instanceof Error ? e.message : "The skill stage failed.");
+    } finally { setRunningStage(false); }
+  };
+
   const save = async () => {
     if (!store || load?.kind !== "ok" || saving) return;
     setSaving(true);
@@ -325,7 +348,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()} disabled={!stage || dirty || runningStage || (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep")}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => stage?.kind === "skill" ? void runSkillStage() : void runSelectedStage()} disabled={!stage || dirty || runningStage || (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep" && !(stage.kind === "skill" && stage.skillId))}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
