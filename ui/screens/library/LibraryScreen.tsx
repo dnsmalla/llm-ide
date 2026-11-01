@@ -47,10 +47,12 @@ export interface LibraryScreenProps {
   active?: boolean;
   /** True inside the desktop app: the folder dialog exists. */
   hostAvailable?: boolean;
+  /** A project is open: its Paths layout owns the Library folders, so there is no separate notes-folder chooser. */
+  projectOpen?: boolean;
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
@@ -211,7 +213,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             else setExtensionId(id);
           }}
           onRefresh={refresh}
-          onChangeFolder={() => void store.chooseRoot()}
+          onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
           rebuild={rebuild}
           onRebuild={runRebuild ? startRebuild : null}
           onCancelRebuild={cancelRebuild}

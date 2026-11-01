@@ -144,6 +144,17 @@ fn save_root(dir: &Path, root: &Path) -> Result<(), String> {
 /// The root to use now: the one accepted through `notes_root_choose` this session, else the
 /// persisted one (re-validated), else (debug builds only) `LLMIDE_NOTES_ROOT`.
 pub(crate) fn current_root() -> Result<PathBuf, String> {
+    // The active project's canonical `llm-doc` is the Library root (the Mac's ProjectLayout.notesDir).
+    // Settings → Paths owns that layout; the Library never chooses a separate notes folder while a project is open.
+    if let Some(project) = crate::project::active_root() {
+        let notes = project.join("llm-doc");
+        if notes.is_dir() {
+            if let Ok(mut g) = ROOT.lock() {
+                *g = Some(notes.clone());
+            }
+            return Ok(notes);
+        }
+    }
     if let Some(r) = ROOT.lock().ok().and_then(|g| g.clone()) {
         return Ok(r);
     }

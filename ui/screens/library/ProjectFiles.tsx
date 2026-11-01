@@ -53,7 +53,6 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
 
   return (
     <section className="lib-project" aria-label="Project files">
-      <h3 className="lib-nav-group">Project files</h3>
       {PROJECT_ROOTS.map((root) => {
         const entries = roots[root.path];
         const open = !closedRoots.has(root.path);

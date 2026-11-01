@@ -35,7 +35,8 @@ export interface LibraryNavProps {
   onSection: (id: string | null) => void;
   onExtension: (id: string) => void;
   onRefresh: () => void;
-  onChangeFolder: () => void;
+  /** Null when the project's Paths layout owns the folders (no separate notes-folder chooser). */
+  onChangeFolder: (() => void) | null;
   rebuild: RebuildProgress | null;
   onRebuild: (() => void) | null;
   onCancelRebuild: () => void;
@@ -98,25 +99,6 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           </ul>
         </>
       )}
-      {p.connections && p.connections.length > 0 && (
-        <>
-          <h3 className="lib-nav-group">
-            <WaveIcon /> Connections
-          </h3>
-          <ul className="lib-nav-list">
-            {p.connections.map((x) => {
-              const sel = p.extensionId === x.id;
-              return (
-                <li key={x.id}>
-                  <button type="button" className="lib-nav-item" aria-current={sel ? "page" : undefined} data-selected={sel} onClick={() => p.onExtension(x.id)}>
-                    <span className="lib-nav-label">{x.label}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
       <h3 className="lib-nav-group">
         <PuzzleIcon /> Extensions
       </h3>
@@ -133,15 +115,36 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           );
         })}
       </ul>
+      {p.connections && p.connections.length > 0 && (
+        <>
+          <h3 className="lib-nav-group">
+            <WaveIcon /> Connectors
+          </h3>
+          <ul className="lib-nav-list">
+            {p.connections.map((x) => {
+              const sel = p.extensionId === x.id;
+              return (
+                <li key={x.id}>
+                  <button type="button" className="lib-nav-item" aria-current={sel ? "page" : undefined} data-selected={sel} onClick={() => p.onExtension(x.id)}>
+                    <span className="lib-nav-label">{x.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
       <div className="lib-nav-foot">
         {root && (
           <p className="lib-folder" title={root.root}>
             <FolderIcon /> <span className="lib-folder-name">{root.name}</span>
           </p>
         )}
-        <button type="button" className="lib-btn" onClick={p.onChangeFolder}>
-          Change notes folder
-        </button>
+        {p.onChangeFolder ? (
+          <button type="button" className="lib-btn" onClick={p.onChangeFolder}>
+            Change notes folder
+          </button>
+        ) : null}
         {p.onRebuild && (
           <>
             <button type="button" className="lib-btn" onClick={p.onRebuild} disabled={busy || state.listing.phase !== "done" || state.records.length === 0} title="Rebuilds the search index from the notes. Nothing is removed from it.">

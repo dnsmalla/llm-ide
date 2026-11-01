@@ -18,7 +18,7 @@ const mkEnv = () => {
 };
 const count = (s, re) => (s.match(re) ?? []).length;
 
-test("connection entries: six panes with stable ids, and the nav shows them under Connections", async () => {
+test("connection entries: six panes with stable ids, and the nav shows them under Connectors", async () => {
   const env = mkEnv();
   const list = L.sourceConnections(env);
   assert.deepEqual(list.map((x) => x.label), ["Email", "Google", "Slack", "Box", "Repositories", "Connectors"]);
@@ -30,10 +30,10 @@ test("connection entries: six panes with stable ids, and the nav shows them unde
   await store.init();
   await L.settle(store);
   const out = html(h(L.LibraryScreen, { store, host, connections: list }));
-  assert.match(out, /<h3 class="lib-nav-group">[\s\S]*?Connections<\/h3>/);
+  assert.match(out, /<h3 class="lib-nav-group">[\s\S]*?Connectors<\/h3>/);
   for (const label of ["Email", "Google", "Slack", "Box", "Repositories", "Connectors"]) assert.match(out, new RegExp(`<span class="lib-nav-label">${label}</span>`));
   const none = html(h(L.LibraryScreen, { store, host }));
-  assert.ok(!none.includes("Connections</h3>"));
+  assert.ok(!none.includes("Connectors</h3>"));
 });
 
 test("email pane: labelled region and fields, secret input is write-only, both auth routes explained", () => {

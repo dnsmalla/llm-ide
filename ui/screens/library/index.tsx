@@ -55,7 +55,7 @@ async function openAuth(url: string): Promise<boolean> {
   return (await invokeHost<boolean>("open_external_url", { url })) === true;
 }
 
-export default function Library({ active }: SectionProps) {
+export default function Library({ active, projectRoot }: SectionProps) {
   const { store, host, writeHost } = useMemo(app, []);
   const runRebuild = useCallback(
     (records: Parameters<typeof rebuildIndex>[0], report: Parameters<typeof rebuildIndex>[2], signal: AbortSignal) =>
@@ -92,5 +92,5 @@ export default function Library({ active }: SectionProps) {
       : undefined),
     [available],
   );
-  return <LibraryScreen store={store} host={host} write={write} connections={connections} files={files} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={available} />;
+  return <LibraryScreen store={store} host={host} write={write} connections={connections} files={files} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={available} projectOpen={projectRoot !== null} />;
 }

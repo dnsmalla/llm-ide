@@ -26,7 +26,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | audited, fixes pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | audited, fixes pending |
-| 12 | Library | `Features/Library/` | `ui/screens/library/` | 2-pane done; single-list sections pending |
+| 12 | Library | `Features/Library/` | `ui/screens/library/` | 2-pane + project `<root>/llm-doc` root done; single-list sections pending |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; updates/accounts/providers pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
 | 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
@@ -73,7 +73,9 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
   approvals have no desktop path.
 
 ### Library
-- Desktop is stacked nav+list, not Mac's one sectioned list; section set/order differs (no Connectors
+- Desktop now uses the active project's `llm-doc` as its notes root (Settings → Paths owns the layout) and hides
+  the separate notes-folder chooser while a project is open; Code/Data are top-level rows and Connections was
+  renamed/moved to Connectors. Remaining: it is still a stacked nav+list, not Mac's one sectioned list; section set/order differs (no Connectors
   section, extra All notes); no collapse/persistence; filters are section-scoped; rows lack gist/counts/
   icons/states; detail chrome lacks Export/backfill/banners; no context menus; Code/Data refresh stale;
   extensions/connectors are panes, not counted list sections; no per-section empty/retry/index status.
