@@ -17,7 +17,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 |---|---|---|---|---|
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/absolute copy done; previews/clipboard/search pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach done; memory/voice/pickers/approvals pending |
-| 3 | Terminal | `Features/Terminal/` | terminal dock | audited, fixes pending |
+| 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | generate button done; modes/target/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs done; setup/custom pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
@@ -34,14 +34,15 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 ## Findings (from the per-surface audits)
 
 ### Explorer / Chat / Terminal
+- Terminal is now shell-wide with a status-bar toggle and persisted height; Explorer keeps its embedded dock.
 - Explorer now has Reveal in Finder and Copy Absolute Path; still no document/image preview or Raw toggle; no file cut/copy/paste; Search has no replace or
   Find-in-Folder hand-off; no Reveal in Finder per row; Project Folders sheet cannot create/reindex; no git
   gutter; open-file hand-off drops the line number.
 - Chat now auto-attaches the active Explorer file in the Code Assistant; still no project-memory chip/viewer, voice dictation; flat
   model picker (no grouped/provider/effort/custom); no per-turn retry/usage/collapse/jump; dock header lacks
   counters/search/rename/delete; no app-wide pending-approval badge; context meter has no breakdown.
-- Terminal: dock exists only in Explorer; Ctrl+` and status-bar toggle are Explorer-only; open/height not
-  persisted; tab titles are static; cwd is always the project root.
+- Terminal: the dock is now shell-wide and its height persists; tab titles are still static and cwd is always
+  the project root.
 
 ### Graph / Doc Gen / Visual
 - Graph System: missing routines and storage card; stale on project switch; openFile unvalidated; failures not
