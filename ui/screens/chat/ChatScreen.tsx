@@ -80,6 +80,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [unreadable, setUnreadable] = useState<string | null>(null);
   // Errors the user caused or can ignore are not alarms: a declined confirm is silent, bookkeeping is an info notice.
   const reportStoreError = useCallback((e: unknown) => {
@@ -262,6 +263,18 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                   ) : null}
                 </div>
               )}
+              {state.memory ? (
+                <div className="chat-context">
+                  <button type="button" className="chat-chip-btn" aria-label={`Session memory ${state.memory.approxTokens} tokens`} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
+                    Memory {state.memory.sessionFacts}
+                  </button>
+                  {memoryOpen ? (
+                    <div role="dialog" aria-label="Session memory" className="chat-popover">
+                      <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {state.model && <span className="chat-muted">{state.model}</span>}
               <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />

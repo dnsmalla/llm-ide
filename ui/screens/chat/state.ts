@@ -93,6 +93,8 @@ export interface ChatState {
   resolvedMode: string | null;
   model: string | null;
   context: { totalTokens: number; maxTokens: number; percentage: number; categories: ContextCategory[] } | null;
+  /** Session memory injected by the agent (`memory` event): number of facts, source chars and approx tokens. */
+  memory: { sessionFacts: number; chars: number; approxTokens: number } | null;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null;
   tasks: TaskItem[];
   pendingApprovals: PendingApproval[];
@@ -113,7 +115,7 @@ export interface ChatState {
 export function initialState(sessionId: string): ChatState {
   return {
     sessionId, messages: [], hasMoreOlder: false, oldestSeq: null, phase: "idle", error: null, resolvedMode: null, model: null,
-    context: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, turnWorkspaceRoot: null, applied: 0, ignored: 0,
+    context: null, memory: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, turnWorkspaceRoot: null, applied: 0, ignored: 0,
   };
 }
 
@@ -464,6 +466,8 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
         if (target && target.status === "streaming") target.status = "error";
         break;
       case "memory":
+        next.memory = { sessionFacts: ev.sessionFacts, chars: ev.chars, approxTokens: ev.approxTokens };
+        break;
       case "sdk":
         break;
     }
