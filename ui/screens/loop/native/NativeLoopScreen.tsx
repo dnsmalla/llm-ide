@@ -16,6 +16,7 @@ import { approve, isApproved } from "./approvals.ts";
 import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
+import { writeSummaryNote } from "./summary.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -391,6 +392,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         for (const rel of faultPaths) if (await reopenFault(fs, rel)) reopened += 1;
         if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
       }
+      if (target.config.writeSummaryNote) {
+        try { const path = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${path}`]); }
+        catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
+      }
       setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
@@ -641,11 +646,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
             {runRecord && Array.isArray(runRecord.stages) ? (
-              <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; return <li key={i}>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</li>; })}</ul>
+              <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; const output = String(run.stdout ?? ""); return <li key={i}><details><summary>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</summary>{output ? <pre className="loop-run-log">{output}</pre> : <p className="loop-native-hint">No captured output.</p>}</details></li>; })}</ul>
             ) : null}
             {runRecord && Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? (
               <div className="loop-past-iterations">
-                {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <p key={j} className="loop-native-hint">{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</p>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
+                {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <details key={j}><summary>{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</summary><pre className="loop-run-log">{String(x.output ?? "")}</pre></details>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
               </div>
             ) : null}
           </div>
