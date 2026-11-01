@@ -16,7 +16,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
-| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach done; memory/voice/pickers/approvals pending |
+| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach + approval badge done; memory/voice/pickers/turn actions pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs, setup snapshot; custom/editing pending |
@@ -38,7 +38,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 - Explorer now has Reveal in Finder, Copy Absolute Path, Markdown Preview/Source, PNG/JPEG/GIF/WebP preview an internal cut/copy/paste clipboard and Replace All; still no PDF preview; no file cut/copy/paste; Search has no replace or
   Find-in-Folder hand-off; no Reveal in Finder per row; Project Folders sheet cannot create/reindex; no git
   gutter; open-file hand-off drops the line number.
-- Chat now auto-attaches the active Explorer file in the Code Assistant; still no project-memory chip/viewer, voice dictation; flat
+- Chat now auto-attaches the active Explorer file and shows a pending-approval badge in the shell header; still no project-memory chip/viewer, voice dictation; flat
   model picker (no grouped/provider/effort/custom); no per-turn retry/usage/collapse/jump; dock header lacks
   counters/search/rename/delete; no app-wide pending-approval badge; context meter has no breakdown.
 - Terminal: the dock is now shell-wide and its height persists; tab titles are still static and cwd is always
