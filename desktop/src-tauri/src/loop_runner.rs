@@ -8,7 +8,10 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+static CANCEL: AtomicBool = AtomicBool::new(false);
 
 use serde::Serialize;
 
@@ -19,6 +22,7 @@ pub struct StageRun {
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+    pub cancelled: bool,
     pub duration_ms: u64,
 }
 
@@ -135,7 +139,7 @@ fn run_regression(root: &Path) -> Result<StageRun, String> {
     }
     Ok(StageRun {
         exit_code: Some(0), stdout: "No fixed faults to re-check.".into(), stderr: String::new(),
-        timed_out: false, duration_ms: 0,
+        timed_out: false, cancelled: false, duration_ms: 0,
     })
 }
 
@@ -168,6 +172,9 @@ pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Resu
 pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
+    if CANCEL.load(Ordering::SeqCst) {
+        return Ok(StageRun { exit_code: None, stdout: String::new(), stderr: String::new(), timed_out: false, cancelled: true, duration_ms: 0 });
+    }
     let mut child = Command::new("/bin/sh")
         .arg("-lc")
         .arg(command)
@@ -180,9 +187,16 @@ pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Res
     let out_rx = child.stdout.take().map(read_capped);
     let err_rx = child.stderr.take().map(read_capped);
     let mut timed_out = false;
+    let mut cancelled = false;
     let status = loop {
         match child.try_wait().map_err(|e| format!("cannot wait for the stage: {e}"))? {
             Some(s) => break Some(s),
+            None if CANCEL.load(Ordering::SeqCst) => {
+                cancelled = true;
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
             None if started.elapsed() >= timeout => {
                 timed_out = true;
                 let _ = child.kill();
@@ -199,6 +213,7 @@ pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Res
         stdout: clipped(stdout),
         stderr: clipped(stderr),
         timed_out,
+        cancelled,
         duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
     })
 }
@@ -249,11 +264,17 @@ pub fn run_loop(root: &Path, loop_id: &str, timeout_secs: Option<u64>) -> Result
 /// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC.
 #[tauri::command]
 pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    CANCEL.store(false, Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
         if stage_kind(&root, &stage_id)? == "regressionSweep" { run_regression(&root) } else { run_stage(&root, &stage_id, timeout_secs) }
     }).await.map_err(|e| format!("Loop stage task failed: {e}"))?
+}
+
+#[tauri::command]
+pub fn loop_cancel() {
+    CANCEL.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]

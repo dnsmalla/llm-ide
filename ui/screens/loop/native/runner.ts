@@ -10,6 +10,8 @@ export interface RunnerDeps {
   /** Ask the repair agent to fix a failed stage. `attempt` is 1-based for this stage/run. */
   repair(stage: LoopStage, output: string, attempt: number): Promise<StageRunResult>;
   log(line: string): void;
+  /** Asked between stages so Stop can end the run without starting the next stage. */
+  isCancelled?(): boolean;
 }
 export interface StageOutcome { stage: LoopStage; ok: boolean; output: string }
 export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
@@ -34,11 +36,13 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const iterations: LoopIterationOutcome[] = [];
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
+    if (deps.isCancelled?.()) throw new Error("Run cancelled.");
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
+      if (deps.isCancelled?.()) throw new Error("Run cancelled.");
       const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output };
       outcomes.push(outcome);
@@ -50,6 +54,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
       return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
     }
+    if (deps.isCancelled?.()) throw new Error("Run cancelled.");
     const used = repairs.get(failed.stage.id) ?? 0;
     if (!failed.stage.allowsRepair) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });

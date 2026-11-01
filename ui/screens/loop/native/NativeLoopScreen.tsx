@@ -66,6 +66,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
   const runningRef = useRef(false);
+  const cancelledRef = useRef(false);
   const queueRef = useRef<LoopDefinition[]>([]);
   const [queued, setQueued] = useState(0);
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
@@ -237,8 +238,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = []): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand") {
-      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
-      return { ok: !r.timedOut && r.exitCode === 0, output: [r.stdout, r.stderr].filter(Boolean).join("\n") };
+      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
+      if (r.cancelled) cancelledRef.current = true;
+      return { ok: !r.timedOut && !r.cancelled && r.exitCode === 0, output: r.cancelled ? "Stage cancelled." : [r.stdout, r.stderr].filter(Boolean).join("\n") };
     }
     if (s.kind === "regressionSweep") {
       const root = projectRoot ?? "";
@@ -341,6 +343,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return null;
   };
 
+  const stopRun = () => {
+    cancelledRef.current = true;
+    void invokeHost("loop_cancel").catch(() => undefined);
+    setNotice("Stopping the current stage; the loop will end after it returns.");
+  };
+
   const executeLoop = async (target: LoopDefinition) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
@@ -349,11 +357,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (approval) { setNotice(approval); return; }
     if (!window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
     runningRef.current = true;
+    cancelledRef.current = false;
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ""]);
     const started = Date.now();
     try {
       const outcome = await runNativeLoop(target.config, {
+        isCancelled() { return cancelledRef.current; },
         async runStage(s, prior) {
           const r = await runOneStage(s, target, prior);
           setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
@@ -512,7 +522,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
