@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { ChatBubbleIcon, ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { ActivityBell } from "./ActivityBell";
 import { MenuButton, type MenuItem } from "./MenuButton";
@@ -141,13 +141,15 @@ const ChatItem = memo(function ChatItem({ active }: { active: boolean }) {
 });
 
 interface Props {
+  /** Status-bar terminal toggle (non-Explorer sections). */
+  terminalItem?: ReactNode | null;
   theme: ThemeId;
   /** The Chat section is showing (the item is marked current). */
   chatActive?: boolean;
   onTheme: (id: ThemeId) => void;
 }
 
-export const StatusBar = memo(function StatusBar({ theme, onTheme, chatActive = false }: Props) {
+export const StatusBar = memo(function StatusBar({ theme, onTheme, chatActive = false, terminalItem = null }: Props) {
   const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
@@ -166,6 +168,7 @@ export const StatusBar = memo(function StatusBar({ theme, onTheme, chatActive = 
           <ChevronIcon />
         </span>
       </MenuButton>
+      {terminalItem}
       <ActivityBell />
       {signedIn && <ChatItem active={chatActive} />}
     </footer>

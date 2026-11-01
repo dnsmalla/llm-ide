@@ -42,6 +42,7 @@ export async function load(entryRel) {
     }],
     // The dock chunk imports the kit stylesheet; bundle it as text (side-effect only) instead of failing.
     loader: { ".css": "text" },
+    external: ["../../../../desktop/src/terminal/dockRuntime", "../../../desktop/src/terminal/dockRuntime"],
     alias: {
       "@llmide/ui-kit/styles.css": join(REPO, "ui/kit/src/styles/kit.css"),
       "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts"),

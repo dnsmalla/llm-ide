@@ -24,6 +24,7 @@ import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
+import { TERMINAL_BUILT as SHARED_TERMINAL_BUILT, loadTerminalRuntime as sharedLoadRuntime, sharedTerminalManager } from "./terminal/shared";
 import { TerminalDock, DOCK_DEFAULT, clampDock } from "./terminal/TerminalDock";
 import type { TerminalRuntime } from "./terminal/runtime-types";
 
@@ -55,25 +56,9 @@ const defaultLoadEditor = (): Promise<EditorHost> => import("../../../desktop/sr
 const defaultChannel = (cb: (b: WatchBatch) => void): Promise<unknown> => import("../../../desktop/src/editor/explorerBridge").then((m) => m.createWatchChannel(cb));
 
 // Terminal and search bridges live in desktop/ (xterm and Tauri channels are not resolvable from ui/screens).
-type DockModule = typeof import("../../../desktop/src/terminal/dockRuntime");
-let dockModule: Promise<DockModule> | null = null;
-declare const __FEATURE_TERMINAL__: boolean | undefined;
-/** False only when this build excluded the Terminal feature; the lazy xterm import is then dead code. */
-const TERMINAL_BUILT: boolean = typeof __FEATURE_TERMINAL__ === "undefined" ? true : __FEATURE_TERMINAL__;
-const loadDock = (): Promise<DockModule> =>
-  typeof __FEATURE_TERMINAL__ === "undefined" || __FEATURE_TERMINAL__
-    ? (dockModule ??= import("../../../desktop/src/terminal/dockRuntime"))
-    : Promise.reject(new Error("Terminal is not part of this build"));
-const lazyTermHost: TermHost = {
-  status: async () => (await loadDock()).hostTerminal.status(),
-  retryConsent: async () => (await loadDock()).hostTerminal.retryConsent(),
-  spawn: async (c, r, cb) => (await loadDock()).hostTerminal.spawn(c, r, cb),
-};
+const TERMINAL_BUILT: boolean = SHARED_TERMINAL_BUILT;
 const defaultSearchChannel = (cb: (e: never) => void): Promise<unknown> => import("../../../desktop/src/search/searchBridge").then((m) => m.createSearchChannel(cb));
-const loadDefaultRuntime = async (): Promise<TerminalRuntime> => {
-  const m = await loadDock();
-  return { create: (el, o) => m.createTermView(el, o), openUrl: (u) => m.hostTerminal.openUrl(u) };
-};
+const loadDefaultRuntime = (): Promise<TerminalRuntime> => sharedLoadRuntime();
 
 const copy = (text: string) => {
   try {
@@ -142,7 +127,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [controller],
   );
-  const terminal = useMemo(() => new TerminalManager(deps?.terminal?.host ?? lazyTermHost),
+  const terminal = useMemo(() => (deps?.terminal?.host ? new TerminalManager(deps.terminal.host) : sharedTerminalManager()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []);
 

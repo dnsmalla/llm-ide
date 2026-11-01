@@ -7,6 +7,9 @@ import { host as shellHost, invokeHost } from "./host";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { StatusBar } from "./StatusBar";
+import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
+import { TERMINAL_BUILT } from "../explorer/terminal/shared";
+import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, type SectionDef, type SectionId } from "./sections";
@@ -51,6 +54,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [, bumpDev] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeDevTools(() => bumpDev()), []);
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
+  const [terminalOpen, setTerminalOpen] = useState(() => readTerminalPrefs().open);
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
@@ -180,6 +184,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>
       <div className="sh-body">
+        <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
           {notice && gate === "open" && (
@@ -207,8 +212,21 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             </div>
           )}
         </main>
+        <ShellTerminalDock
+          activeSection={nav.active}
+          projectRoot={project?.root ?? null}
+          projectName={project?.name ?? ""}
+          open={terminalOpen}
+          onToggle={(open) => { setTerminalOpen(open); writeTerminalPrefs({ open, height: readTerminalPrefs().height }); }}
+        />
+        </div>
       </div>
-      <StatusBar theme={theme} onTheme={onTheme} chatActive={nav.active === "chat"} />
+      <StatusBar
+        theme={theme}
+        onTheme={onTheme}
+        chatActive={nav.active === "chat"}
+        terminalItem={<ShellTerminalItem activeSection={nav.active} built={TERMINAL_BUILT} onToggle={() => { const next = !terminalOpen; setTerminalOpen(next); writeTerminalPrefs({ open: next, height: readTerminalPrefs().height }); }} />}
+      />
     </div>
   );
 }

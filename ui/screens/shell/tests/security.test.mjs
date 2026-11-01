@@ -18,7 +18,7 @@ test("tokens never touch web storage: only theme, section id and home section ar
   for (const [f, s] of sources) {
     const code = s.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
     if (/localStorage|sessionStorage|indexedDB|document\.cookie/.test(code)) {
-      assert.ok(["theme.ts", "sections.ts", "landing.ts", "toolbar-model.ts"].includes(f), `${f} uses web storage`);
+      assert.ok(["theme.ts", "sections.ts", "landing.ts", "toolbar-model.ts", "terminal-prefs.ts"].includes(f), `${f} uses web storage`);
     }
   }
   const core = readFileSync(join(SHELL, "core.ts"), "utf8").replace(/\/\/.*$/gm, "");
