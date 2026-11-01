@@ -89,6 +89,15 @@ navigation commands. The matrix is item-by-item:
 Desktop-only fields (mode/scan presets, pairing forms) were removed from the screens they did not belong to:
 Auto Tasks/Loop pair in Settings → Mobile Control, and Graph uses the left run panel.
 
+### Account menu and menu-bar extra
+
+- The account menu now matches the Mac shape: name/email, Settings…, Help & Guide, Permissions…, a divider, and a
+  single **Sign out** row. The confirmation dialog offers **Sign out** and **Sign out and forget this device**
+  (local UI settings only; provider credentials are not revoked because the desktop has no Keychain wipe).
+- The Mac's `MenuBarExtra` is a global quick-chat popover. The desktop tray is a project/window quick menu; the
+  quick-chat popover is Mac-only and is not faked.
+
+
 ## Mac-only limits (stated in the UI, never faked)
 
 | Area | Why the desktop cannot mirror it |
