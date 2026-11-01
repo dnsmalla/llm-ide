@@ -10,6 +10,7 @@ import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
+import { runNativeLoop } from "./runner.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
@@ -235,21 +236,60 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } finally { setRunningStage(false); }
   };
 
+  const runOneStage = async (s: LoopStage): Promise<{ ok: boolean; output: string }> => {
+    if (s.kind === "shellCommand" || s.kind === "regressionSweep") {
+      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
+      return { ok: !r.timedOut && r.exitCode === 0, output: [r.stdout, r.stderr].filter(Boolean).join("\n") };
+    }
+    if (s.kind === "skill") {
+      if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
+      const parts = [s.prompt?.trim() || `Run the ${s.name} skill for this loop.`];
+      if (loop?.goal) parts.push(`Loop goal: ${loop.goal}`);
+      if (loop?.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+      if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
+      if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
+      const r = await core.request<{ reply?: string; changedPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+        method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+      });
+      const ok = r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
+      return { ok, output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
+    }
+    throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression and skill stages`);
+  };
+
   const runLoop = async () => {
     if (!loop || dirty || runningStage) return;
-    if (!window.confirm(`Run “${loop.name}”?\n\nThis native slice runs the loop's enabled shell-command stages once; other stage kinds stop the run.`)) return;
+    const unsupported = loop.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill"].includes(s.kind));
+    if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
+    if (!window.confirm(`Run “${loop.name}”?\n\nIt will iterate up to ${loop.config.maxIterations} time(s), repair blocking failures up to ${loop.config.maxRepairsPerStage} per stage, and stop after ${loop.config.consecutiveFailureStop} non-improving failures.`)) return;
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${loop.name}`, ""]);
+    const started = Date.now();
     try {
-      const r = await invokeHost<{ loopName: string; passed: boolean; stages: Array<{ stageName: string; severity: string; run: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number } }> }>("loop_run_loop", { loopId: loop.id });
-      const lines: string[] = [];
-      for (const s of r.stages) lines.push(`$ ${s.stageName}`, s.run.stdout, s.run.stderr, `${s.run.timedOut ? "TIMED OUT" : `exit ${s.run.exitCode ?? "?"}`} · ${s.run.durationMs} ms`, "");
-      lines.push(r.passed ? "Loop passed." : "Loop failed.");
-      setRunLog((l) => [...l, ...lines]);
-      setNotice(r.passed ? "The loop passed." : "The loop did not pass.");
-      const startedAt = new Date().toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: loop.id, loopName: loop.name, startedAt, durationSeconds: r.stages.reduce((n, x) => n + x.run.durationMs, 0) / 1000, iterationsUsed: 1, statusCode: r.passed ? "success" : "failed", statusSummary: r.stages.map((x) => `${x.stageName}: ${x.run.exitCode === 0 ? "pass" : "fail"}`).join(", "), trigger: "manual" };
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: loop.config, stages: r.stages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      const outcome = await runNativeLoop(loop.config, {
+        async runStage(s) {
+          const r = await runOneStage(s);
+          setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
+          return r;
+        },
+        async repair(s, output, attempt) {
+          const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
+          if (loop.goal) message.push(`Loop goal: ${loop.goal}`);
+          if (loop.acceptanceCriteria) message.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+          const r = await core.request<{ reply?: string; changedPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+            method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000 },
+          });
+          setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ""]);
+          return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: r.reply ?? "" };
+        },
+        log(line) { setRunLog((l) => [...l, line]); },
+      });
+      setRunLog((l) => [...l, outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
+      setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
+      const startedAt = new Date(started).toISOString();
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: loop.id, loopName: loop.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
+      const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: loop.config, stages: recordStages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
