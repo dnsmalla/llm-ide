@@ -552,7 +552,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             {runRecord && Array.isArray(runRecord.stages) ? (
               <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; return <li key={i}>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</li>; })}</ul>
             ) : null}
-            {runRecord && Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? <p className="loop-native-hint">{runRecord.iterations.length} iterations recorded by the Mac journal.</p> : null}
+            {runRecord && Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? (
+              <div className="loop-past-iterations">
+                {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <p key={j} className="loop-native-hint">{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</p>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
+              </div>
+            ) : null}
           </div>
         ) : runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
       </aside>

@@ -12,10 +12,12 @@ export interface RunnerDeps {
   log(line: string): void;
 }
 export interface StageOutcome { stage: LoopStage; ok: boolean; output: string }
+export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
 export interface LoopRunOutcome {
   passed: boolean;
   iterationsUsed: number;
   stages: StageOutcome[];
+  iterations: LoopIterationOutcome[];
   /** The blocking stage that ended the run, when it failed. */
   failedStage: LoopStage | null;
   statusSummary: string;
@@ -29,41 +31,48 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   let nonImproving = 0;
   let iterationsUsed = 0;
   const outcomes: StageOutcome[] = [];
+  const iterations: LoopIterationOutcome[] = [];
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
+    const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
       const result = await deps.runStage(stage);
       const outcome = { stage, ok: result.ok, output: result.output };
       outcomes.push(outcome);
+      iterationOutcomes.push(outcome);
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
     }
     if (!failed) {
-      return { passed: true, iterationsUsed, stages: outcomes, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
+      iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
+      return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
     }
     const used = repairs.get(failed.stage.id) ?? 0;
     if (!failed.stage.allowsRepair) {
-      return { passed: false, iterationsUsed, stages: outcomes, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair is disabled for this stage` };
+      iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
+      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair is disabled for this stage` };
     }
     if (used >= Math.max(1, config.maxRepairsPerStage)) {
-      return { passed: false, iterationsUsed, stages: outcomes, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair budget exhausted` };
+      iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
+      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair budget exhausted` };
     }
     deps.log(`↻ repairing ${failed.stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
     repairs.set(failed.stage.id, used + 1);
+    iterations.push({ index: iteration, stages: iterationOutcomes, repair: { stageId: failed.stage.id, attempt: used + 1, ok: repair.ok } });
     if (!repair.ok) {
-      return { passed: false, iterationsUsed, stages: outcomes, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
+      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
     }
     const signature = failed.output.trim().slice(0, 2000);
     if (signature === lastFailure) nonImproving += 1; else nonImproving = 1;
     lastFailure = signature;
     if (nonImproving >= Math.max(1, config.consecutiveFailureStop)) {
-      return { passed: false, iterationsUsed, stages: outcomes, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed ${nonImproving} times without improvement` };
+      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed ${nonImproving} times without improvement` };
     }
   }
   const last = outcomes[outcomes.length - 1] ?? null;
-  return { passed: false, iterationsUsed, stages: outcomes, failedStage: last?.stage ?? null, statusSummary: `max iterations (${iterationsUsed}) reached` };
+  return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: last?.stage ?? null, statusSummary: `max iterations (${iterationsUsed}) reached` };
 }
