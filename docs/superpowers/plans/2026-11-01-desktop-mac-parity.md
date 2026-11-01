@@ -25,7 +25,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | edit/Preview/Raw + save destination done; chat/templates pending |
-| 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | audited, fixes pending |
+| 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources done; image viewer/thumbnails pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | project root, meetings-first, collapsible groups done; single-list merge pending |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; updates/accounts/providers pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
@@ -51,7 +51,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
   auto-update settings card (D→M and M→D gaps both exist).
 - Doc Gen: manual edit and Preview/Raw are done; still no Use-chat toggle, output destination, chat panel/
   Save-chat-output, template import/command editing, or panel toggles.
-- Visual: images cannot be sources or previewed; no thumbnail strip or visual result affordance; tab/panel
+- Visual: images are now accepted as generation sources (PNG/JPEG/GIF/WebP up to 5 MB); still no image result viewer or thumbnail strip; no thumbnail strip or visual result affordance; tab/panel
   state not persisted; checklist promises interactions that are not wired.
 
 ### Issues / Gantt / Review Conflicts
