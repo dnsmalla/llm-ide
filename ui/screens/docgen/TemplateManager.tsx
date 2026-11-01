@@ -28,6 +28,8 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
   const titleId = useId();
   const [editing, setEditing] = useState<string | "new" | null>(initialEditing);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importText, setImportText] = useState("");
   const current = editing && editing !== "new" ? templates.find((t) => t.id === editing) ?? null : null;
   const [name, setName] = useState(current?.name ?? "");
   const [sections, setSections] = useState(current ? current.sections.join("\n") : "");
@@ -39,6 +41,7 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
   };
   const parsed = parseSections(sections);
   const valid = name.trim() !== "" && parsed.length > 0 && parsed.length <= MAX_SECTIONS;
+  const imported = parseMarkdownTemplate(importText);
   return (
     <div className="dg-dialog-wrap">
       <div className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
@@ -53,6 +56,15 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
         {error && <StatusBanner severity="error" message={<>{error.message}</>} />}
         {editing === null ? (
           <>
+            {importing ? (
+              <form className="dg-tform" onSubmit={(e) => { e.preventDefault(); if (!imported) return; void onSave({ folder: null, name: imported.name, sections: imported.sections }).then((t) => { if (t) { setImporting(false); setImportText(""); } }); }}>
+                <label className="dg-field"><span>Paste a Markdown template</span><textarea rows={10} value={importText} placeholder={"# Template name\n\n## Section one\n\n## Section two"} onChange={(e) => setImportText(e.target.value)} /></label>
+                <p className="dg-muted">{imported ? `${imported.sections.length} section${imported.sections.length === 1 ? "" : "s"}: ${imported.sections.join(", ")}` : "Use # for the name and ## for each section."}</p>
+                <div className="dg-actions"><button type="submit" className="dg-btn dg-primary" disabled={!imported || busy}>Import template</button><button type="button" className="dg-btn" onClick={() => setImporting(false)}>Cancel</button></div>
+              </form>
+            ) : (
+              <button type="button" className="dg-btn" onClick={() => setImporting(true)}>Import Markdown</button>
+            )}
             <ul className="dg-tlist" aria-label="Templates">
               {templates.map((t) => (
                 <li key={t.id} className="dg-trow">
@@ -122,4 +134,14 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
       </div>
     </div>
   );
+}
+
+
+/** Parse a pasted Markdown template: `# name`, then `## section` headings (or non-blank lines as a fallback). */
+export function parseMarkdownTemplate(text: string): { name: string; sections: string[] } | null {
+  const lines = text.split(/\r?\n/);
+  const name = (lines.find((l) => /^#\s+/.test(l)) ?? "").replace(/^#\s+/, "").trim() || "Imported template";
+  const headings = lines.map((l) => /^##\s+(.+)/.exec(l)?.[1]?.trim() ?? "").filter(Boolean);
+  const sections = (headings.length ? headings : lines.filter((l) => l.trim() && !/^#\s+/.test(l)).map((l) => l.trim())).slice(0, MAX_SECTIONS);
+  return sections.length ? { name: name.slice(0, 200), sections } : null;
 }

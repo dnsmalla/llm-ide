@@ -4,7 +4,7 @@ export { SetupPanel } from "../SetupPanel.tsx";
 export { SourcePanel } from "../SourcePanel.tsx";
 export { ResultPanel } from "../ResultPanel.tsx";
 export { HistoryPanel } from "../HistoryPanel.tsx";
-export { TemplateManager } from "../TemplateManager.tsx";
+export { TemplateManager, parseMarkdownTemplate } from "../TemplateManager.tsx";
 export { VirtualList } from "../VirtualList.tsx";
 export { DocGenStore } from "../store.ts";
 export { INITIAL_RUN } from "../run.ts";
