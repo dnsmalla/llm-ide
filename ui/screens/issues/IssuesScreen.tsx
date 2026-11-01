@@ -16,6 +16,7 @@ import {
   type IssueFilters,
 } from "./issues-model.ts";
 import "./issues.css";
+import { readRepoConfig } from "../settings/repo-config.ts";
 
 export interface IssuesReply {
   status: number;
@@ -41,6 +42,17 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
+  const configuredRepos = useMemo(() => {
+    const c = readRepoConfig();
+    const slug = (url: string) => {
+      const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(url.trim());
+      return m ? `${m[1]}/${m[2]}` : url;
+    };
+    return [
+      ...c.saved.github.map((r) => ({ ...r, provider: "github" as const, slug: slug(r.url) })),
+      ...c.saved.gitlab.map((r) => ({ ...r, provider: "gitlab" as const, slug: slug(r.url) })),
+    ];
+  }, []);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -143,6 +155,13 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       </header>
 
       <div className="iss-sub">
+        <label className="iss-field">
+          <span>Saved repository</span>
+          <select value={configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo) ? filters.repo : ""} onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value }))}>
+            <option value="">All repositories</option>
+            {configuredRepos.filter((r) => r.provider === filters.provider).map((r) => <option key={r.id} value={r.slug}>{r.displayName || r.slug}</option>)}
+          </select>
+        </label>
         <label className="iss-field iss-grow">
           <span>Repository filter</span>
           <input list="iss-repos" value={filters.repo} placeholder="owner/name" onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value }))} />
@@ -184,9 +203,11 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
         <div className="iss-empty">
           <p>No {filters.provider === "github" ? "GitHub" : "GitLab"} issues are cached yet.</p>
           <p className="iss-hint">
-            {filters.provider === "github"
-              ? "Import a repository's issues above; the GitHub token lives in Settings → Repositories."
-              : "GitLab issue import is not available in the desktop yet. The Mac app imports GitLab issues through its provider client."}
+            {configuredRepos.length === 0
+              ? "Add a repository in Settings → Repositories first; that is also where the provider token lives."
+              : filters.provider === "github"
+                ? "Import a repository's issues above; the GitHub token lives in Settings → Repositories."
+                : "GitLab issue import is not available in the desktop yet. The Mac app imports GitLab issues through its provider client."}
           </p>
         </div>
       ) : visible.length === 0 ? (
