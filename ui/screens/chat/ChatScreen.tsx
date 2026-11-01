@@ -282,6 +282,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                   ) : null}
                 </div>
               ) : null}
+              {state.usage ? <span className="chat-muted" title="Input and output tokens for this turn">↑ {state.usage.inputTokens.toLocaleString()} ↓ {state.usage.outputTokens.toLocaleString()}</span> : null}
               {state.model && <span className="chat-muted">{state.model}</span>}
               <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />
