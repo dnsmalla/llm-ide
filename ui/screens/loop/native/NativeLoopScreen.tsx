@@ -1,6 +1,6 @@
 // Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -59,6 +59,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [checkingEnv, setCheckingEnv] = useState(false);
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
+  const runningRef = useRef(false);
+  const queueRef = useRef<LoopDefinition[]>([]);
+  const [queued, setQueued] = useState(0);
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
@@ -219,7 +222,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
-  const runOneStage = async (s: LoopStage): Promise<{ ok: boolean; output: string }> => {
+  const runOneStage = async (s: LoopStage, target: LoopDefinition): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand" || s.kind === "regressionSweep") {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
       return { ok: !r.timedOut && r.exitCode === 0, output: [r.stdout, r.stderr].filter(Boolean).join("\n") };
@@ -227,8 +230,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (s.kind === "skill") {
       if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
       const parts = [s.prompt?.trim() || `Run the ${s.name} skill for this loop.`];
-      if (loop?.goal) parts.push(`Loop goal: ${loop.goal}`);
-      if (loop?.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+      if (target.goal) parts.push(`Loop goal: ${target.goal}`);
+      if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
       if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
       if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
       const r = await core.request<{ reply?: string; changedPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
@@ -240,31 +243,32 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
       const root = projectRoot ?? "";
       const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
-      const r = await evaluateArtifact(fs, s.check, loop?.config.stages ?? [], { repoPrefix, projectPrefix: "" });
+      const r = await evaluateArtifact(fs, s.check, target.config.stages, { repoPrefix, projectPrefix: "" });
       return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
     }
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
-  const runLoop = async () => {
-    if (!loop || dirty || runningStage) return;
-    const unsupported = loop.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind));
+  const executeLoop = async (target: LoopDefinition) => {
+    if (dirty) return;
+    const unsupported = target.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    if (!window.confirm(`Run “${loop.name}”?\n\nIt will iterate up to ${loop.config.maxIterations} time(s), repair blocking failures up to ${loop.config.maxRepairsPerStage} per stage, and stop after ${loop.config.consecutiveFailureStop} non-improving failures.`)) return;
+    if (!window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
+    runningRef.current = true;
     setRunningStage(true);
-    setRunLog((l) => [...l, `▶ ${loop.name}`, ""]);
+    setRunLog((l) => [...l, `▶ ${target.name}`, ""]);
     const started = Date.now();
     try {
-      const outcome = await runNativeLoop(loop.config, {
+      const outcome = await runNativeLoop(target.config, {
         async runStage(s) {
-          const r = await runOneStage(s);
+          const r = await runOneStage(s, target);
           setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
           return r;
         },
         async repair(s, output, attempt) {
           const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
-          if (loop.goal) message.push(`Loop goal: ${loop.goal}`);
-          if (loop.acceptanceCriteria) message.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+          if (target.goal) message.push(`Loop goal: ${target.goal}`);
+          if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
           const r = await core.request<{ reply?: string; changedPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
             method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000 },
           });
@@ -276,17 +280,34 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setRunLog((l) => [...l, outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: loop.id, loopName: loop.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: loop.config, stages: recordStages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, stages: recordStages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
-    } finally { setRunningStage(false); }
+    } finally {
+      runningRef.current = false;
+      setRunningStage(false);
+      const next = queueRef.current.shift();
+      setQueued(queueRef.current.length);
+      if (next) window.setTimeout(() => void executeLoop(next), 0);
+    }
+  };
+
+  const runLoop = (target: LoopDefinition | null = loop) => {
+    if (!target) return;
+    if (runningRef.current) {
+      if (!queueRef.current.some((l) => l.id === target.id)) queueRef.current.push(target);
+      setQueued(queueRef.current.length);
+      setNotice(`Queued “${target.name}”.`);
+      return;
+    }
+    void executeLoop(target);
   };
 
   const runSelectedStage = async () => {
-    if (!stage || dirty || runningStage) return;
+    if (!loop || !stage || dirty || runningStage) return;
     if (!["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
@@ -295,7 +316,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setRunningStage(true);
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
-      const r = await runOneStage(stage);
+      const r = await runOneStage(stage, loop);
       setRunLog((l) => [...l, r.output, r.ok ? "Stage passed." : "Stage failed."]);
       setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {
@@ -393,7 +414,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty || runningStage} title={dirty ? "Save the Loop first" : "Runs enabled shell stages and empty Regression stages once"} onClick={() => void runLoop()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
