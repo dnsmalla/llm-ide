@@ -35,12 +35,13 @@ test("custom Loop templates persist, unique-name and delete", () => {
   assert.equal(b.name, "Mine");
 });
 
-test("missing Loop config can be seeded natively with the detected test command", () => {
+test("missing Loop config seeds the Mac starter loops with the detected test command", () => {
   const withTest = t.initialProjectStore("npm test");
-  assert.deepEqual(withTest.loops.map((l) => l.name), ["Regression", "Test"]);
+  assert.deepEqual(withTest.loops.map((l) => l.name), ["Regression", "Test", "Plan", "Main Loop", "Refactoring", "Doc Optimization"]);
   assert.equal(withTest.loops[0].isPrimary, true);
   assert.equal(withTest.loops[0].config.stages[1].command, "npm test");
   const noTest = t.initialProjectStore(null);
-  assert.deepEqual(noTest.loops.map((l) => l.name), ["Regression"]);
+  assert.equal(noTest.loops.length, 6);
   assert.deepEqual(noTest.loops[0].config.stages.map((s) => s.kind), ["regressionSweep"]);
+  assert.ok(noTest.loops.find((l) => l.name === "Plan").config.stages.some((s) => s.kind === "skill"));
 });
