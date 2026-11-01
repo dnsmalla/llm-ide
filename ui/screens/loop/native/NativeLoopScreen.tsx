@@ -319,7 +319,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const root = projectRoot ?? "";
       const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
       const before = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/refactor/graph/before.json`;
-      const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before);
+      const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before, async () => {
+        await invokeHost("graph_generate", { mode: "code", target: repoPrefix || undefined });
+      });
       return { ok: r.passed, output: r.output };
     }
     if (s.kind === "artifactCheck") {

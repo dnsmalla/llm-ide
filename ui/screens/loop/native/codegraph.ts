@@ -21,7 +21,10 @@ async function ensureDir(fs: CodeGraphFs, path: string): Promise<void> {
   for (const seg of path.split("/").slice(0, -1)) { at = at ? `${at}/${seg}` : seg; try { await fs.create(at, "dir"); } catch (e) { if ((e as { code?: string })?.code !== "exists") throw e; } }
 }
 
-export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", graphPath: string, beforePath: string): Promise<CodeGraphResult> {
+export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", graphPath: string, beforePath: string, rescan?: () => Promise<void>): Promise<CodeGraphResult> {
+  if (rescan) {
+    try { await rescan(); } catch (e) { return { passed: false, output: `graph rescan failed: ${e instanceof Error ? e.message : String(e)}` }; }
+  }
   const current = await readShape(fs, graphPath);
   if (!current) return { passed: false, output: `no readable graph at ${graphPath}; run the Graph page scan first` };
   if (op === "snapshot") {
