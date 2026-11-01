@@ -207,6 +207,7 @@ function TerminalPane({ id, manager, runtime, visible, exited, scrollback, confi
     const v = runtime.create(host, {
       scrollback,
       isMac: isMac(),
+      onTitle: (title) => manager.setTitle(id, title),
       sanitizePaste,
       needsPasteConfirm,
       findUrls,

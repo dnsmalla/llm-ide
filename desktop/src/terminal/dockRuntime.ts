@@ -28,6 +28,7 @@ export interface ViewOptions {
   needsPasteConfirm(text: string, bracketed: boolean): boolean;
   findUrls(line: string): Array<{ start: number; end: number; url: string }>;
   isMac: boolean;
+  onTitle?(title: string): void;
 }
 
 export interface TermView {
@@ -59,6 +60,7 @@ export function createTermView(el: HTMLElement, o: ViewOptions): TermView {
   }
   const subs: IDisposable[] = [];
   subs.push(t.onData((d) => o.onData(d)));
+  if (o.onTitle) subs.push(t.onTitleChange((title) => o.onTitle!(title.slice(0, 120))));
   subs.push(t.onResize(({ cols, rows }) => o.onResize(cols, rows)));
   subs.push(
     t.registerLinkProvider({

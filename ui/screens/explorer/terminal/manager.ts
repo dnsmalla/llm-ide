@@ -101,6 +101,11 @@ export class TerminalManager {
   }
 
   /** Adds a tab entry; the view mounts, fits, then calls `start`. A user action only. */
+  setTitle(id: number, title: string): void {
+    const clean = title.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 80);
+    this.patchTab(id, { title: clean || `${this.snap.status?.shell ?? "shell"} ${id}` });
+  }
+
   openTab(): number | null {
     if (this.snap.tabs.length >= MAX_TABS || this.snap.phase === "disabled") return null;
     const id = this.nextId++;

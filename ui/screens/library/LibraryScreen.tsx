@@ -235,7 +235,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
           onSection={(id) => {
             setProjectFile(null);
             setExtensionId(null);
-            store.setSection(id);
+            store.setSection(state.sectionId === id ? null : id);
           }}
           onExtension={(id) => {
             if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });

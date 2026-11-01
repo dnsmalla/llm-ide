@@ -10,6 +10,8 @@ export interface TermViewOptions {
   needsPasteConfirm(text: string, bracketed: boolean): boolean;
   findUrls(line: string): Array<{ start: number; end: number; url: string }>;
   isMac: boolean;
+  /** The shell's OSC 0/2 title, already bounded by the runtime. */
+  onTitle?(title: string): void;
 }
 
 export interface TermView {

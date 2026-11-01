@@ -84,7 +84,6 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
   const sources = state.sections.filter((s) => s.group === "sources");
   const docs = state.sections.filter((s) => s.group === "docs");
   const busy = p.rebuild !== null && ["reading", "scanning", "uploading"].includes(p.rebuild.phase);
-  const allSelected = state.sectionId === null && p.extensionId === null;
   return (
     <nav className="lib-nav" aria-label="Library sections">
       <div className="lib-nav-head">
@@ -93,14 +92,6 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           <RefreshIcon />
         </button>
       </div>
-      <ul className="lib-nav-list">
-        <li>
-          <button type="button" className="lib-nav-item" aria-current={allSelected ? "page" : undefined} data-selected={allSelected} onClick={() => p.onSection(null)}>
-            <span className="lib-nav-label">All notes</span>
-            <span className="lib-count">{state.records.length.toLocaleString()}</span>
-          </button>
-        </li>
-      </ul>
       <GroupHead id="sources" icon={<WaveIcon />} label="Sources" count={sources.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} />
       {open("sources") ? (
         <ul className="lib-nav-list">
