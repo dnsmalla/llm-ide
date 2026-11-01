@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
 import { readRepoConfig } from "../../settings/repo-config.ts";
+import { core } from "../../shell/runtime";
+import { invokeHost } from "../../shell/host";
 import { GROUPS, TASKS, TASK_BY_ID, loadState, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import "./native-autotasks.css";
@@ -16,6 +18,9 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [notice, setNotice] = useState<string | null>(null);
   const [cronDraft, setCronDraft] = useState("");
   const [scheduleError, setScheduleError] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+  const [runs, setRuns] = useState<Array<{ id: string; task: string; at: string; ok: boolean; summary: string }>>([]);
   const task = TASK_BY_ID[selected];
   const config = state.configs[selected];
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
@@ -30,6 +35,39 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
       return next;
     });
   };
+  const runTask = async (id: AutoTaskId = selected) => {
+    if (running) return;
+    const t = TASK_BY_ID[id]; const c = state.configs[id];
+    if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
+    if (!hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
+    if (!window.confirm(`Run “${t.label}” now?\n\n${c.prompt.slice(0, 500)}`)) return;
+    setRunning(true);
+    setLog((l) => [...l, `▶ ${t.label}`, ""]);
+    const started = new Date();
+    try {
+      const workRoot = await invokeHost<string>("loop_work_root");
+      const parts = [c.prompt];
+      if (c.inputPath.trim()) parts.push(`Input: ${c.inputPath.trim()}`);
+      if (c.outputPath.trim()) parts.push(`Output: ${c.outputPath.trim()}`);
+      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+        method: "POST", body: { message: parts.join("\n\n"), repoRoot: workRoot, skills: c.skillName ? [c.skillName] : undefined, timeoutMs: 30 * 60 * 1000 },
+      });
+      let touched = r.changedPaths ?? [];
+      if (t.readOnlyOutput && touched.length) {
+        try { await invokeHost("loop_revert_paths", { paths: touched }); setLog((l) => [...l, `read-only task reverted: ${touched.join(", ")}`]); touched = []; }
+        catch (e) { setLog((l) => [...l, `read-only revert failed: ${e instanceof Error ? e.message : String(e)}`]); }
+      }
+      const ok = r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
+      setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : [])]);
+      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed") }, ...xs].slice(0, 20));
+      setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);
+    } catch (e) {
+      setLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
+      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed" }, ...xs].slice(0, 20));
+      setNotice(e instanceof Error ? e.message : "The task could not run.");
+    } finally { setRunning(false); }
+  };
+
   const setMaster = (v: boolean) => setState((s) => { const n = { ...s, masterEnabled: v }; saveState(n); return n; });
 
   return (
@@ -66,9 +104,9 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           {grouped.length === 0 ? <p className="atn-hint">No tasks match this filter.</p> : null}
         </div>
         <button type="button" className="atn-model" onClick={() => setNotice("Model & Limits is part of the runner/settings port.")}>Model &amp; Limits</button>
-        <section className="atn-history"><h3>Recent runs</h3><p className="atn-hint">No runs yet. The native runner will record them here.</p></section>
+        <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 5).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{new Date(r.at).toLocaleTimeString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
-        <button type="button" className="atn-run-now" disabled title="The native runner is the next port phase">▶ Run Now</button>
+        <button type="button" className="atn-run-now" disabled={running} title={running ? "A task is running" : "Run the selected task now"} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run Now"}</button>
       </aside>
 
       <main className="atn-main">
@@ -76,7 +114,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <span className="atn-title-icon" aria-hidden="true">✓</span>
           <h1>{task.label}</h1>
           <span className="atn-spacer" />
-          <button type="button" className="atn-btn atn-primary" disabled title="The native runner is the next port phase">▶ Run</button>
+          <button type="button" className="atn-btn atn-primary" disabled={running} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
         <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${config.cron}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => document.getElementById("atn-schedule")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Edit</button></div>
@@ -102,10 +140,10 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
             <button type="button" className="atn-btn" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim(), scheduleActive: config.scheduleActive }); setNotice(null); }}>Save</button>
           </div>
           <p className={scheduleError ? "atn-error" : "atn-hint"}>{scheduleError ? "Invalid five-field cron expression." : describeCron(cronDraft)}</p>
-          <p className="atn-hint">{config.scheduleActive ? "Armed for the native scheduler (not ported yet)." : "Manual only — Run Now will run it; the schedule is off."}</p>
+          <p className="atn-hint">{config.scheduleActive ? "Saved schedule; firing in the background is not ported yet." : "Manual only — Run Now will run it; the schedule is off."}</p>
         </section>
 
-        <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setNotice("Clear is available once the native runner exists.")}>Clear</button></header><p className="atn-hint">No log lines yet. The native runner will stream here.</p></section>
+        <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>
       </main>
     </div>
   );

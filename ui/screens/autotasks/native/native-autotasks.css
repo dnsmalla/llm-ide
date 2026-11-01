@@ -44,3 +44,4 @@
 .atn-error { color: var(--tok-color-danger, #c62828); font-size: var(--tok-type-caption-size); }
 .atn-task-icon { width: 14px; text-align: center; color: var(--tok-color-accent); font-size: 11px; }
 .atn-stars { color: var(--tok-color-text-muted); letter-spacing: 3px; font-size: 11px; margin-top: 4px; }
+.atn-log-pre { margin: 0; white-space: pre-wrap; font-family: var(--tok-type-mono-family, ui-monospace, monospace); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
