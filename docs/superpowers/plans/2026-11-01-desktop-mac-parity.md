@@ -17,7 +17,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 |---|---|---|---|---|
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach, approval badge, context+memory done; voice/turn actions pending |
-| 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
+| 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence/title done; cwd pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs, setup snapshot; custom/editing pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
@@ -26,7 +26,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | edit/Preview/Raw + save destination done; chat/templates pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources done; image viewer/thumbnails pending |
-| 12 | Library | `Features/Library/` | `ui/screens/library/` | project root, meetings-first, collapsible groups done; single-list merge pending |
+| 12 | Library | `Features/Library/` | `ui/screens/library/` | project root, meetings-first, collapse, no All-notes row; single-list merge pending |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit done; updates/account variants pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
 | 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
