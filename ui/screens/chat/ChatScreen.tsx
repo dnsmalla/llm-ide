@@ -302,7 +302,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             <MessageList
               key={activeId} messages={state.messages} hasMoreOlder={state.hasMoreOlder} onLoadOlder={onLoadOlder}
               initialScrollTop={controller.getView(activeId).stickToBottom ? null : controller.getView(activeId).scrollTop}
-              onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files}
+              onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files} onRetry={() => controller.retry(activeId)}
               empty={<p className="chat-muted chat-pad">Ask anything. Mode and model are below.</p>}
             />
             {state.tasks.length > 0 && (

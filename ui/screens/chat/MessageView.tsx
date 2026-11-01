@@ -17,6 +17,8 @@ export interface MessageHost {
   onCopy?: (text: string) => void;
   /** "Open in Explorer" for tool calls that name a file. */
   files?: FileRefs;
+  /** Retry the failed turn from the message itself. */
+  onRetry?: () => void;
 }
 
 const PATH_KEYS = ["file_path", "path", "filePath", "notebook_path"] as const;
@@ -145,6 +147,7 @@ function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
         {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
         {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
+        {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
       </div>
     </article>
   );
