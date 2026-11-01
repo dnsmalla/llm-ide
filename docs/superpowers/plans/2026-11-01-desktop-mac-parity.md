@@ -15,7 +15,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
-| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, file clipboard done; PDF/search-replace pending |
+| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach done; memory/voice/pickers/approvals pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
@@ -35,7 +35,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 
 ### Explorer / Chat / Terminal
 - Terminal is now shell-wide with a status-bar toggle and persisted height; Explorer keeps its embedded dock.
-- Explorer now has Reveal in Finder, Copy Absolute Path, Markdown Preview/Source, PNG/JPEG/GIF/WebP preview and an internal cut/copy/paste clipboard; still no PDF preview or search replace; no file cut/copy/paste; Search has no replace or
+- Explorer now has Reveal in Finder, Copy Absolute Path, Markdown Preview/Source, PNG/JPEG/GIF/WebP preview an internal cut/copy/paste clipboard and Replace All; still no PDF preview; no file cut/copy/paste; Search has no replace or
   Find-in-Folder hand-off; no Reveal in Finder per row; Project Folders sheet cannot create/reindex; no git
   gutter; open-file hand-off drops the line number.
 - Chat now auto-attaches the active Explorer file in the Code Assistant; still no project-memory chip/viewer, voice dictation; flat
