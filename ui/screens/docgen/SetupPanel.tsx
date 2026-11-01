@@ -27,6 +27,7 @@ export interface SetupPanelProps {
   chatAvailable?: boolean;
   onUseChat?: (on: boolean) => void;
   onManage: () => void;
+  onManageCommands?: () => void;
   onGenerate: () => void;
   onCancel: () => void;
 }
@@ -56,6 +57,7 @@ export function SetupPanel(p: SetupPanelProps): ReactNode {
           <button type="button" className="dg-btn" onClick={p.onManage}>
             Manage templates
           </button>
+          {p.onManageCommands ? <button type="button" className="dg-btn" onClick={p.onManageCommands}>Manage commands</button> : null}
         </div>
         {tpl && <p className="dg-muted">Sections: {tpl.sections.length ? tpl.sections.join(", ") : "none (a template needs at least one ## section)"}</p>}
         {p.truncated && <p className="dg-muted">There are more templates than the core lists (2,000).</p>}

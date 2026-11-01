@@ -76,6 +76,12 @@ export function decodeCommands(v: unknown): Page<DocCommand> {
   return { items: v.commands.map(decodeCommand).filter((c): c is DocCommand => c !== null), truncated: v.truncated === true };
 }
 
+export function decodeCommandWrite(v: unknown): DocCommand {
+  const c = isRecord(v) ? decodeCommand(v.command) : null;
+  if (!c) throw new DecodeError("command");
+  return c;
+}
+
 export function decodeTemplateWrite(v: unknown): DocTemplate {
   const t = isRecord(v) ? decodeTemplate(v.template) : null;
   if (!t) throw new DecodeError("template");

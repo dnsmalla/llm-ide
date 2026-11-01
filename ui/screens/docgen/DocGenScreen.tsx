@@ -13,6 +13,7 @@ import { checklistSteps } from "./checklist.ts";
 import { estimateChars, sendOrder } from "./sources.ts";
 import type { DocGenStore } from "./store.ts";
 import { TemplateManager } from "./TemplateManager";
+import { CommandManager } from "./CommandManager";
 import type { FsApi } from "../explorer/fs";
 import { chatOutputStore } from "../shell/chat-output";
 
@@ -39,6 +40,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const run = useSyncExternalStore(store.run.subscribe, store.run.getSnapshot, store.run.getSnapshot);
   const [view, setView] = useState<"result" | "history">(p.initialView ?? "result");
   const [manage, setManage] = useState(p.showManager ?? false);
+  const [manageCommands, setManageCommands] = useState(false);
   useEffect(() => {
     void store.setProject(p.projectRoot);
   }, [store, p.projectRoot]);
@@ -118,6 +120,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             chatAvailable={chatOutput !== null}
             onUseChat={(on) => setUseChat(on)}
             onManage={() => setManage(true)}
+            onManageCommands={() => setManageCommands(true)}
             onGenerate={() => {
               setView("result");
               void store.generate(chatItem ? [chatItem] : []);
@@ -180,6 +183,16 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
         {s.setup === "ready" && <p className="dg-muted">{store.surface === "visual" ? "Describe or diagram your sources." : "Turn sources into a document."}</p>}
       </header>
       {body}
+      {manageCommands && s.setup === "ready" && (
+        <CommandManager
+          commands={s.commands}
+          busy={s.templateBusy}
+          error={s.templateError}
+          onSave={(input) => store.saveCommand(input)}
+          onDelete={(c) => store.deleteCommand(c)}
+          onClose={() => setManageCommands(false)}
+        />
+      )}
       {manage && s.setup === "ready" && (
         <TemplateManager
           templates={s.templates}

@@ -205,6 +205,41 @@ export class DocGenStore {
     }
   }
 
+  async saveCommand(input: { folder: string | null; name: string; instruction: string }): Promise<DocCommand | null> {
+    const folder = input.folder ?? folderForName(input.name);
+    if (!folder) {
+      this.set({ templateError: { message: "Use a name with letters or numbers.", retryable: false, action: "none" } });
+      return null;
+    }
+    if (input.instruction.trim() === "") {
+      this.set({ templateError: { message: "A command needs an instruction.", retryable: false, action: "none" } });
+      return null;
+    }
+    this.set({ templateBusy: true, templateError: null });
+    try {
+      const saved = await this.requireApi().putCommand(folder, { name: input.name.trim(), instruction: input.instruction, surface: this.surface });
+      const others = this.state.commands.filter((c) => c.folderName !== saved.folderName);
+      this.set({ templateBusy: false, commands: [...others, saved].sort((a, b) => a.name.localeCompare(b.name)), commandId: saved.id, command: saved.instruction });
+      return saved;
+    } catch (e) {
+      this.set({ templateBusy: false, templateError: describeFailure(e) });
+      return null;
+    }
+  }
+
+  async deleteCommand(c: DocCommand): Promise<boolean> {
+    if (!c.folderName || !c.isProjectCommand) return false;
+    this.set({ templateBusy: true, templateError: null });
+    try {
+      await this.requireApi().deleteCommand(c.folderName);
+      this.set({ templateBusy: false, commands: this.state.commands.filter((x) => x.id !== c.id), commandId: this.state.commandId === c.id ? null : this.state.commandId });
+      return true;
+    } catch (e) {
+      this.set({ templateBusy: false, templateError: describeFailure(e) });
+      return false;
+    }
+  }
+
   async deleteTemplate(t: DocTemplate): Promise<boolean> {
     if (!t.folderName || !t.isProjectTemplate) return false;
     this.set({ templateBusy: true, templateError: null });

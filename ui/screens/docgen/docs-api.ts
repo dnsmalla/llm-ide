@@ -3,7 +3,7 @@
 // guard, timeouts live there). Every path is built from validated pieces; the project is addressed by an id the
 // webview derives from the host-reported root, never by a path in a URL.
 import type { CoreClient } from "../shell/core";
-import { decodeCommands, decodeDeleted, decodeGenerateResult, decodeRegistered, decodeSeed, decodeTemplateWrite, decodeTemplates, type Page } from "./decode.ts";
+import { decodeCommandWrite, decodeCommands, decodeDeleted, decodeGenerateResult, decodeRegistered, decodeSeed, decodeTemplateWrite, decodeTemplates, type Page } from "./decode.ts";
 import type { DocCommand, DocTemplate, GenerateBody, GenerateResult, Surface } from "./model.ts";
 
 export type DocsClient = Pick<CoreClient, "request">;
@@ -28,6 +28,8 @@ export interface DocsApi {
   templates(signal?: AbortSignal): Promise<Page<DocTemplate>>;
   commands(signal?: AbortSignal): Promise<Page<DocCommand>>;
   putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface }, signal?: AbortSignal): Promise<DocTemplate>;
+  putCommand(folder: string, c: { name: string; instruction: string; surface: Surface }, signal?: AbortSignal): Promise<DocCommand>;
+  deleteCommand(folder: string, signal?: AbortSignal): Promise<boolean>;
   deleteTemplate(folder: string, signal?: AbortSignal): Promise<boolean>;
   seed(signal?: AbortSignal): Promise<{ written: number }>;
   generate(body: GenerateBody, signal: AbortSignal): Promise<GenerateResult>;
@@ -52,6 +54,12 @@ export function createDocsApi(client: DocsClient, projectId: string, projectRoot
     },
     async putTemplate(folder, t, signal) {
       return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body: { name: t.name, sections: t.sections, surface: t.surface }, signal }));
+    },
+    async putCommand(folder, c, signal) {
+      return decodeCommandWrite(await client.request(folderPath("commands", folder), { method: "PUT", body: { name: c.name, instruction: c.instruction, surface: c.surface }, signal }));
+    },
+    async deleteCommand(folder, signal) {
+      return decodeDeleted(await client.request(folderPath("commands", folder), { method: "DELETE", signal }));
     },
     async deleteTemplate(folder, signal) {
       return decodeDeleted(await client.request(folderPath("templates", folder), { method: "DELETE", signal }));
