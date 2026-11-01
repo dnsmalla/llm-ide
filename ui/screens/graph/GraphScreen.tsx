@@ -18,7 +18,7 @@ export interface GraphScreenProps {
   active: boolean;
   projectRoot: string | null;
   /** Generate system/graph/graph.json with the host's GraphKit runner (`code`, `memory`, `all`). */
-  onGenerate?: (mode: "code" | "memory" | "all") => Promise<void>;
+  onGenerate?: (mode: "code" | "memory" | "all", target: string) => Promise<void>;
   /** Ask the shell to open a project-relative file in Explorer. */
   openFile: (path: string) => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
@@ -59,7 +59,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         tried={s.tried}
         onOpen={(p) => store.openPath(p)}
         onRetry={() => void store.reload()}
-        onGenerate={onGenerate ? async (mode) => { await onGenerate(mode); await store.reload(); } : undefined}
+        onGenerate={onGenerate ? async (mode, target) => { await onGenerate(mode, target); await store.reload(); } : undefined}
       />,
     );
   }

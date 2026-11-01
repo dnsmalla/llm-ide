@@ -40,7 +40,7 @@ function CodeGraphPage({ active, projectRoot }: SectionProps) {
       store={store}
       active={active}
       projectRoot={projectRoot}
-      onGenerate={async (mode) => { await invokeHost("graph_generate", { mode }); }}
+      onGenerate={async (mode, target) => { await invokeHost("graph_generate", { mode, target: target || null }); }}
       openFile={(path) => shellBus.publish({ type: "open-file", path })}
     />
   );

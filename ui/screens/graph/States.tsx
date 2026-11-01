@@ -36,9 +36,10 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
   );
 }
 
-export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: (mode: "code" | "memory" | "all") => Promise<void> }) {
+export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: (mode: "code" | "memory" | "all", target: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"code" | "memory" | "all">("code");
+  const [target, setTarget] = useState("");
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="gr-state">
@@ -55,6 +56,17 @@ export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: stri
               <option value="all">All (merge)</option>
             </select>
           </label>
+          {mode !== "memory" ? (
+            <label className="gr-field">
+              <span>Scan folder</span>
+              <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy}>
+                <option value="">Project root</option>
+                <option value="code">code/</option>
+                <option value="data">data/</option>
+                <option value="source">source/</option>
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             className="gr-btn gr-btn-primary"
@@ -62,7 +74,7 @@ export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: stri
             onClick={() => {
               setBusy(true);
               setError(null);
-              void onGenerate(mode).catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
+              void onGenerate(mode, target).catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
             }}
           >
             {busy ? "Generating…" : mode === "code" ? "Generate code graph" : mode === "memory" ? "Generate memory graph" : "Generate all"}

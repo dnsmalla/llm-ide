@@ -53,7 +53,7 @@ fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     Err(if msg.trim().is_empty() { "the GraphKit generator failed".into() } else { format!("the GraphKit generator failed: {msg}") })
 }
 
-fn generate(app: &tauri::AppHandle, mode: &str) -> Result<GraphGenerated, String> {
+fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<GraphGenerated, String> {
     let (node, cli) = toolchain(app)?;
     let root = crate::project::active_root().ok_or_else(|| "open a project before generating a graph".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
@@ -61,6 +61,14 @@ fn generate(app: &tauri::AppHandle, mode: &str) -> Result<GraphGenerated, String
     }
     let out_dir = root.join("system").join("graph");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create system/graph: {e}"))?;
+    let scan_code = match target.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => {
+            let p = crate::fs_ops::resolve_existing(&root, t).map_err(|e| e.message)?;
+            if !p.is_dir() { return Err("the graph target is not a folder".into()); }
+            p
+        }
+        None => root.clone(),
+    };
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let temp = |suffix: &str| std::env::temp_dir().join(format!("llmide-graph-{}-{stamp}-{suffix}.json", std::process::id()));
     let code_out = temp("code");
@@ -71,7 +79,7 @@ fn generate(app: &tauri::AppHandle, mode: &str) -> Result<GraphGenerated, String
     let result = (|| -> Result<PathBuf, String> {
         match mode {
             "code" => {
-                run_gk(&node, &cli, &["code".into(), root.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
+                run_gk(&node, &cli, &["code".into(), scan_code.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
                 Ok(code_out.clone())
             }
             "memory" => {
@@ -81,7 +89,7 @@ fn generate(app: &tauri::AppHandle, mode: &str) -> Result<GraphGenerated, String
                 Ok(doc_out.clone())
             }
             "all" => {
-                run_gk(&node, &cli, &["code".into(), root.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
+                run_gk(&node, &cli, &["code".into(), scan_code.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
                 let docs = root.join("llm-doc");
                 if !docs.is_dir() { return Err("this project has no llm-doc folder".into()); }
                 run_gk(&node, &cli, &["memory".into(), docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
@@ -126,9 +134,9 @@ fn generate(app: &tauri::AppHandle, mode: &str) -> Result<GraphGenerated, String
 }
 
 #[tauri::command]
-pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>) -> Result<GraphGenerated, String> {
+pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>) -> Result<GraphGenerated, String> {
     let mode = mode.unwrap_or_else(|| "code".into());
-    tauri::async_runtime::spawn_blocking(move || generate(&app, &mode)).await.map_err(|e| format!("graph task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || generate(&app, &mode, target.as_deref())).await.map_err(|e| format!("graph task failed: {e}"))?
 }
 
 #[cfg(test)]
