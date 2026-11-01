@@ -101,7 +101,7 @@ export interface ChatSurface {
  * Wires one chat surface to the shared runtime. `active` = this surface is on screen: only then does it re-check
  * what is running on the core and re-attach to running turns (a hidden surface stays quiet).
  */
-export function useChatSurface(projectRoot: string | null, active: boolean): ChatSurface {
+export function useChatSurface(projectRoot: string | null, active: boolean, initialPath: string | null = null): ChatSurface {
   const rt = chatRuntime();
   rt.root.current = projectRoot;
   const { controller, transport, bypass } = rt;
@@ -132,8 +132,9 @@ export function useChatSurface(projectRoot: string | null, active: boolean): Cha
       attachHost: desktop ? createHostAttach(invokeHost) : null,
       openSection: (section) => { const target = sections[section]; if (!target) return false; shellBus.publish({ type: "goto-section", section: target }); return true; },
       openLibraryTarget: () => shellBus.publish({ type: "goto-section", section: "library" }),
+      initialPath: hasProject ? initialPath : null,
     };
-  }, [transport, hasProject]);
+  }, [transport, hasProject, initialPath]);
   const host = useMemo<ChatHost>(
     () => ({
       ...BASE_HOST,

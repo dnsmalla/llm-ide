@@ -31,7 +31,7 @@ test("wiring: the shell installs the Chat dock, and both chat surfaces use the o
   const dock = readFileSync(join(chat, "dock.tsx"), "utf8");
   const section = readFileSync(join(chat, "index.tsx"), "utf8");
   for (const [name, src] of [["dock", dock], ["section", section]]) {
-    assert.match(src, /useChatSurface\(projectRoot, active\)/, `${name} uses the shared surface`);
+    assert.match(src, /useChatSurface\(projectRoot, active(?:, [^)]+)?\)/, `${name} uses the shared surface`);
     assert.match(src, /shared=\{rt\.ui\}/, `${name} shares the UI state`);
     assert.match(src, /controller=\{rt\.controller\} store=\{rt\.store\}/, `${name} shares controller and store`);
     assert.doesNotMatch(src, /new ChatController|new TauriChatStore|new HttpChatStore/, `${name} must not build its own chat engine`);

@@ -9,6 +9,8 @@ export interface ChatDockProps {
   /** The dock is on screen (its section is current and it is open): only then does it poll or re-attach. */
   active: boolean;
   projectRoot: string | null;
+  /** The active Explorer file, auto-attached when the dock opens (Mac `initialURL`). */
+  initialPath?: string | null;
   /** Hides the dock; the dock's header shows a button when given. */
   onCollapse?: () => void;
 }

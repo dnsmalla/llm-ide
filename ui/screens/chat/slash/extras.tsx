@@ -22,6 +22,8 @@ export interface ComposeServices {
   blobs?: BlobUrls | null;
   /** Open a Library row (hook / MCP). */
   openLibraryTarget?: (target: { kind: "plugin" | "mcp"; id: string }) => void;
+  /** An Explorer file to attach when the composer opens (Mac's auto-attached active file). */
+  initialPath?: string | null;
   /** Built-in section navigation ("settings", "library", "loopEngine"). */
   openSection?: (section: string) => boolean;
 }
@@ -83,6 +85,9 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
 
   // The model reads the draft on every change (draft state is owned by the caller).
   useEffect(() => { model.update(o.draft); }, [model, o.draft]);
+  useEffect(() => {
+    if (services.initialPath) void attachments.addProjectFile(services.initialPath);
+  }, [services.initialPath, attachments]);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (e.nativeEvent.isComposing) return false;
