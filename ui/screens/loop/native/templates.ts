@@ -1,6 +1,6 @@
 // Built-in Loop recipes. The full Mac template library is larger; these are the safe starting points the desktop
 // can create without hidden defaults. Test-stage commands are detected at apply time, never hard-coded.
-import type { LoopEngineConfig, LoopStage } from "./model.ts";
+import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { DETECTED_TEST } from "./environment.ts";
 
 export interface LoopTemplate {
@@ -81,4 +81,20 @@ export function saveCustomTemplate(name: string, summary: string, config: LoopEn
 }
 export function deleteCustomTemplate(id: string, storage: Storage | undefined = globalThis.localStorage): void {
   persist(loadCustomTemplates(storage).filter((t) => t.id !== id), storage);
+}
+
+/** Initial loops for a project that has no `system/loop.json`: the Mac's Regression starter (and Test when the
+ *  project has a detectable test command). Stage ids are fresh; detected commands replace the sentinel. */
+export function initialProjectStore(testCommand: string | null) {
+  const regression = applyTemplate(BUILT_IN_TEMPLATES.find((t) => t.id === "test-and-fix")!, testCommand);
+  const loops: LoopDefinition[] = [{
+    id: crypto.randomUUID(), name: "Regression", isPrimary: true, goal: "Find the code behind each known fault and fix it for real.",
+    acceptanceCriteria: "The fault sweep reports no failing faults and the test suite still passes.",
+    scopeGlobs: [], defaultKey: "regression", runsOnSchedule: false, config: regression,
+  }];
+  if (testCommand) {
+    const test = applyTemplate(BUILT_IN_TEMPLATES.find((t) => t.id === "test")!, testCommand);
+    loops.push({ id: crypto.randomUUID(), name: "Test", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "test", runsOnSchedule: false, config: test });
+  }
+  return { schemaVersion: 2 as const, loops };
 }

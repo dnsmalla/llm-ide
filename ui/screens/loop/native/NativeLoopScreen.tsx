@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -270,7 +270,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   if (openError) return <div className="loop-native-empty"><StatusBanner severity="error" message={openError} /></div>;
   if (!load) return <div className="loop-native-empty" role="status"><p>Loading loops…</p></div>;
   if (load.kind === "missing") {
-    return <div className="loop-native-empty"><h1>No Loop configuration</h1><p>This project has no <code>system/loop.json</code>. Open the project in the Mac app once to seed the default loops, or create them here in the next port slice.</p></div>;
+    const create = async () => {
+      setSaving(true);
+      try {
+        const env = await detectTestCommand(fs);
+        const store = initialProjectStore(env.command);
+        const r = await saveLoops(fs, store, null);
+        setLoad({ kind: "ok", store, hash: r.hash });
+        setSelectedLoopId(store.loops[0].id);
+        setSelectedStageId(store.loops[0].config.stages[0]?.id ?? null);
+        setNotice("Created the default loops from this project's detected test command.");
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : "The default loops could not be created.");
+      } finally { setSaving(false); }
+    };
+    return <div className="loop-native-empty"><h1>No Loop configuration</h1><p>This project has no <code>system/loop.json</code> yet. Create the native starter loops here; no Mac app is needed.</p><button type="button" className="loop-btn loop-btn-primary" disabled={saving} onClick={() => void create()}>{saving ? "Creating…" : "Create default loops"}</button>{notice ? <p className="loop-native-hint">{notice}</p> : null}</div>;
   }
   if (load.kind === "corrupt") return <div className="loop-native-empty"><StatusBanner severity="error" message={load.message} /><p className="loop-native-hint">The file was not overwritten. Recover or remove it in the Mac app.</p></div>;
   if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;

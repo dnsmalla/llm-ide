@@ -34,3 +34,13 @@ test("custom Loop templates persist, unique-name and delete", () => {
   assert.deepEqual(t.loadCustomTemplates(storage).map((x) => x.name), ["Mine"]);
   assert.equal(b.name, "Mine");
 });
+
+test("missing Loop config can be seeded natively with the detected test command", () => {
+  const withTest = t.initialProjectStore("npm test");
+  assert.deepEqual(withTest.loops.map((l) => l.name), ["Regression", "Test"]);
+  assert.equal(withTest.loops[0].isPrimary, true);
+  assert.equal(withTest.loops[0].config.stages[1].command, "npm test");
+  const noTest = t.initialProjectStore(null);
+  assert.deepEqual(noTest.loops.map((l) => l.name), ["Regression"]);
+  assert.deepEqual(noTest.loops[0].config.stages.map((s) => s.kind), ["regressionSweep"]);
+});
