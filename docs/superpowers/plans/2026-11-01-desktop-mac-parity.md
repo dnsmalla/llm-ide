@@ -39,7 +39,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 - **Terminal**: shell-wide dock, persisted height, status-bar toggle, OSC titles, new shells in the active repository clone.
 
 ### Graph / Doc Gen / Visual
-- **Graph**: Code / InfiniteBrain / All generation, project-relative scan target, filters/search/detail/zoom. Routines and storage cards remain Mac-local (no desktop host); the scan target is a folder picker rather than the Mac repo quick-pick; the canvas is 2D.
+- **Graph**: Code / InfiniteBrain / All generation through the Mac-style left run panel; no desktop-only mode/scan presets, no arbitrary graph.json opener. Routines and storage cards remain Mac-local (no desktop host); the Mac Library tree/quick-pick and 3D canvas are not reproduced.
 - **Doc Gen**: editable result, Preview/Raw, configurable project-relative destination, Use-chat source, Markdown template import, template/command management, embedded Chat column. The Mac-only destination providers (Box/Slack/email) are shown as not wired.
 - **Visual**: image sources and source preview are real. The core returns text for Visual, so there is no image result viewer to mirror; the Mac’s local image viewer has no desktop equivalent.
 
@@ -49,11 +49,11 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 - **Review Conflicts**: tabs, resizable persisted chat, project-change reload, linked repo, Markdown rendering. “New Change” remains a Mac/chat-workflow surface.
 
 ### Auto Tasks / Loop
-- **Auto Tasks**: bridge, desktop-class permission, list+detail, toggle/run/stop, per-task live log, setup snapshot (paths/skill/template). Custom tasks and setup edits are not carried by the Mac bridge; editing stays on the Mac.
+- **Auto Tasks**: bridge, desktop-class permission, list+detail, toggle/run/stop, per-task live log, setup snapshot. Pairing lives only in Settings → Mobile Control; the page states when the Mac app is not connected. Custom tasks/edits stay on the Mac.
 - **Loop**: bridge, status/stages, start/stop, polling, past runs, honest max iterations. Budgets/policy/wizard/multi-loop and shell-stage approvals are Mac-only over the wire.
 
 ### Library
-- **Library**: active project `llm-doc`, one continuous scroll with notes + Sources/Code/Data/LLM Doc/Extensions/Connectors sections, collapsible sections, gist rows, ⌘F search, persisted filters/sort/group/section, row context menu (open/copy path/reveal), detail toolbar with Re-summarise/⌘R, Copy path, Reveal, Export, and note Context menus. Action/decision/blocker chips and platform icons would need the Mac’s local meeting index; the desktop intentionally does not fabricate them.
+- **Library**: active project `llm-doc`, one continuous scroll with notes + Sources/Code/Data/LLM Doc/Extensions/Connectors sections, Mac search-bar wording, sections collapsed on open, gist rows, ⌘F, persisted filters/sort/group/section, row context menu, and detail toolbar with Re-summarise/⌘R, Copy path, Reveal, Export. The desktop-only New note/Select notes/filter/sort bars are hidden to match the Mac list; action/decision/blocker chips and platform icons would need the Mac’s local meeting index.
 
 ### Settings / Home / Shell
 - **Settings**: toolbar visibility, provider edit, SDK restart, source/server controls, sign-out and Sign out-and-forget. Updates are the Mac’s Sparkle surface; the desktop shows the honest note. Account sign-out variants collapse to one local account.
