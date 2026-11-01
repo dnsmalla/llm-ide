@@ -38,3 +38,12 @@ test("native runner stops at the repair budget and ignores advisory failures", a
   });
   assert.equal(advisory.passed, true);
 });
+
+test("native runner stops at the wall-clock budget", async () => {
+  const out = await runNativeLoop(cfg([stage("a", "A")], { wallClockBudgetSeconds: 0.001, maxIterations: 5 }), {
+    async runStage() { await new Promise((r) => setTimeout(r, 5)); return { ok: false, output: "no" }; },
+    async repair() { return { ok: true, output: "fixed" }; }, log() {},
+  });
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /wall-clock/);
+});

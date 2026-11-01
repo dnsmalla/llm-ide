@@ -34,15 +34,20 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   let iterationsUsed = 0;
   const outcomes: StageOutcome[] = [];
   const iterations: LoopIterationOutcome[] = [];
+  const started = Date.now();
+  const budgetMs = config.wallClockBudgetSeconds === null ? null : Math.max(0, config.wallClockBudgetSeconds) * 1000;
+  const expired = () => budgetMs !== null && Date.now() - started >= budgetMs;
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
     if (deps.isCancelled?.()) throw new Error("Run cancelled.");
+    if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
       if (deps.isCancelled?.()) throw new Error("Run cancelled.");
+      if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output };
       outcomes.push(outcome);

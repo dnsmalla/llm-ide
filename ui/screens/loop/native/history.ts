@@ -62,6 +62,9 @@ export async function readRecentRuns(fs: HistoryFs, limit = 20): Promise<LoopRun
 
 
 /** Appends one run record/index entry under `system/loop-runs/` (month-bucketed, like the Mac journal). */
+/** The journal is newest-first in the UI but append-only on disk; keep the last 200 entries like the Mac. */
+export const MAX_RUN_RECORDS = 200;
+
 export async function appendRunRecord(fs: WriteHistoryFs, entry: LoopRunIndexEntry, record: Record<string, unknown>): Promise<void> {
   const d = new Date(entry.startedAt);
   const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -75,7 +78,8 @@ export async function appendRunRecord(fs: WriteHistoryFs, entry: LoopRunIndexEnt
     const r = await fs.read(idx, 2_000_000);
     if (r.status === "ok" && r.text !== null) { prior = r.text; hash = r.hash; }
   } catch { /* new index */ }
-  const body = prior + JSON.stringify(entry) + "\n";
+  const lines = (prior + JSON.stringify(entry) + "\n").split("\n").filter((l) => l.trim() !== "");
+  const body = lines.slice(-MAX_RUN_RECORDS).join("\n") + "\n";
   await fs.write(idx, body, { expected_hash: hash });
 }
 
