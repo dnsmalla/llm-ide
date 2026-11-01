@@ -19,13 +19,18 @@ public struct Pairing: Codable, Equatable {
     public let token: String?
     public let deviceId: String?
     public let deviceName: String?
-    public init(pin: String, token: String? = nil, deviceId: String? = nil, deviceName: String? = nil) {
+    /// Client class hint. `"desktop"` is accepted only for a loopback connection (the Tauri companion);
+    /// it lets that client use the desktop automation controls instead of phone-only policies.
+    public let clientClass: String?
+    public init(pin: String, token: String? = nil, deviceId: String? = nil, deviceName: String? = nil,
+                clientClass: String? = nil) {
         self.pin = pin
         self.token = token
         self.deviceId = deviceId
         self.deviceName = deviceName
+        self.clientClass = clientClass
     }
-    private enum CodingKeys: String, CodingKey { case type, pin, token, deviceId, deviceName }
+    private enum CodingKeys: String, CodingKey { case type, pin, token, deviceId, deviceName, clientClass }
 }
 
 /// Client → server keepalive.

@@ -41,6 +41,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// The device id of the client that just paired — nil for an older phone
     /// that paired with a bare PIN. Fired just before `onClientPaired`.
     private let onClientIdentified: (String?) -> Void
+    /// The client class this connection declared (`desktop`), only ever set for a loopback peer.
+    private let onClientClass: (String?) -> Void
+    private(set) var clientClass: String?
     /// A PIN pairing just issued a token: the PIN has served its purpose and
     /// the owner should rotate it so a shoulder-surfed or captured PIN can't
     /// be replayed.
@@ -105,6 +108,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
          onClientIdentified: @escaping (String?) -> Void = { _ in },
+         onClientClass: @escaping (String?) -> Void = { _ in },
          onPinConsumed: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
@@ -124,6 +128,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         self.onLog = onLog
         self.onClientPaired = onClientPaired
         self.onClientIdentified = onClientIdentified
+        self.onClientClass = onClientClass
         self.onPinConsumed = onPinConsumed
         self.onClientDisconnected = onClientDisconnected
         self.onBindFailed = onBindFailed
@@ -413,6 +418,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
                     self.client = nil
                     self.paired = false
                     self.clientDeviceId = nil
+                    self.clientClass = nil
+                    self.onClientClass(nil)
                     self.onClientDisconnected()
                 }
                 // Break the conn → handler → conn retain cycle.
@@ -514,6 +521,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             return
         }
         let deviceId = Self.cleanDeviceId(pairing.deviceId)
+        // A desktop-class hint is honoured only for a peer on this Mac; a phone on the LAN cannot claim it.
+        let requestedClass = pairing.clientClass == "desktop" && Self.isLoopback(host) ? "desktop" : nil
         // Token auth: a phone that paired before. The token stands in for the
         // PIN entirely — no PIN is examined, so a rotated PIN changes nothing
         // for an already-paired phone. A stale or revoked token is a plain
@@ -529,7 +538,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 return
             }
             throttle.registerSuccess(host: host)
-            admit(conn, deviceId: deviceId, reply: makeConnected())
+            admit(conn, deviceId: deviceId, clientClass: requestedClass, reply: makeConnected())
             return
         }
         if validatePin(pairing.pin) {
@@ -545,7 +554,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
             if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
                 reply = makeConnected(token: token, deviceId: deviceId)
             }
-            admit(conn, deviceId: reply.token != nil ? deviceId : nil, reply: reply)
+            admit(conn, deviceId: reply.token != nil ? deviceId : nil, clientClass: requestedClass, reply: reply)
             onPinConsumed()
         } else {
             throttle.registerFailure(host: host, now: Date())
@@ -568,7 +577,11 @@ final class MobileWebSocketServer: @unchecked Sendable {
                          capabilities: caps.isEmpty ? nil : caps)
     }
 
-    private func admit(_ conn: NWConnection, deviceId: String?, reply: Connected) {
+    private static func isLoopback(_ host: String) -> Bool {
+        host == "127.0.0.1" || host == "::1" || host.lowercased() == "localhost"
+    }
+
+    private func admit(_ conn: NWConnection, deviceId: String?, clientClass: String?, reply: Connected) {
         // NOW the incumbent may be replaced — after proven credentials, never
         // before. Its handler is cleared first so the cancellation below can't
         // race the `client` reassignment through the state handler. It is told
@@ -590,8 +603,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
         client = conn
         paired = true
         clientDeviceId = deviceId
+        self.clientClass = clientClass
         onLog(deviceId == nil ? "Client paired (PIN only)" : "Client paired (device \(deviceId!.prefix(8))…)")
         onClientIdentified(deviceId)
+        onClientClass(clientClass)
         onClientPaired()
         // Directly to THIS connection, synchronously on the queue — not via
         // `send`, which (a) targets whoever `client` is by the time its Task
@@ -641,6 +656,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             self.client = nil
             self.paired = false
             self.clientDeviceId = nil
+            self.clientClass = nil
+            self.onClientClass(nil)
             self.onClientDisconnected()
             self.queue.asyncAfter(deadline: .now() + 0.2) { conn.cancel() }
         }

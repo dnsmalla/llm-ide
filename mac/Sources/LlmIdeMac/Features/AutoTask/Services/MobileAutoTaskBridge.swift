@@ -60,10 +60,18 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             host?.sendAutoTaskReply(.state(state))
             return true
 
-        case .toggle:
-            // Desktop-only: a toggle changes what the scheduler runs next, so the phone may read the
-            // flags (state/list) but not flip them. The reply is a typed refusal, never a crash, so an
-            // older phone that still shows the switch just gets its message.
+        case .toggle(let toggle):
+            // The loopback desktop companion is a desktop-class client; a phone may read the flags
+            // but not flip them. The reply is a typed refusal, never a crash.
+            if host?.isDesktopBridge == true, let settings {
+                if let raw = toggle?.task, let task = AutoTask(rawValue: raw) {
+                    settings.setEnabled(toggle?.enabled == true, task: task)
+                } else if toggle?.task == nil {
+                    settings.enabled = toggle?.enabled == true
+                }
+                replyAutoTaskStateOrAck()
+                return true
+            }
             refuseDesktopOnly(commandId: "auto_task_toggle", what: "Turning Auto Tasks on or off")
             replyAutoTaskStateOrAck()
             return true
@@ -79,6 +87,23 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             }
             guard let ac = autoCode else {
                 host?.replyNotConfigured(commandId: "auto_task_run", logLabel: "auto_task_run")
+                return true
+            }
+            // The desktop companion is the Mac UI by another window: it may run all tasks and run a
+            // T1/T2 task directly (the user clicked it here), instead of the phone's per-task/approval path.
+            if host?.isDesktopBridge == true {
+                if let raw = run?.task {
+                    guard let task = AutoTask(rawValue: raw) else {
+                        host?.sendAutoTaskReply(.ack(ok: false, message: "Unknown task.", code: MobileRefusalCode.tierRefused))
+                        return true
+                    }
+                    let started = ac.runSingle(task, trigger: .manual)
+                    host?.sendAutoTaskReply(.ack(ok: started, message: started ? "Started \(task.label)." : "The Mac declined to start \(task.label)."))
+                } else {
+                    let started = ac.runNow(trigger: .manual)
+                    host?.sendAutoTaskReply(.ack(ok: started, message: started ? "Started all enabled tasks." : "The Mac declined to start the run."))
+                }
+                replyAutoTaskStateOrAck()
                 return true
             }
             if let m = run {
@@ -378,7 +403,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// Re-read on every request: a phone may hold an old capability list after the switch flips off.
     /// Fails closed: no host means no switch to consult.
     private var controlAllowed: Bool {
-        host?.isPhoneAccessAllowed(.autoTaskControl) == true
+        host?.isDesktopBridge == true || host?.isPhoneAccessAllowed(.autoTaskControl) == true
     }
 
     private var controlDeniedMessage: String {

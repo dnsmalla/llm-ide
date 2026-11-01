@@ -114,7 +114,10 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
   s = nav.navReducer(s, { type: "select", id: "chat" });
   assert.deepEqual([s.active, s.visited], ["chat", ["welcome", "library", "chat"]]);
   const before = s;
-  for (const id of ["loop", "autotasks"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
+  for (const id of ["loop", "autotasks"]) {
+    const next = nav.navReducer(s, { type: "select", id });
+    assert.equal(next.active, id, `${id} is a real screen now`);
+  }
   assert.equal(nav.navReducer(s, { type: "select", id: "nope" }), before);
   assert.equal(nav.navReducer(s, { type: "select", id: "chat" }), before, "same section: same object (no re-render)");
   assert.equal(nav.navReducer(s, { type: "select", id: "spike" }), before, "Spike is not selectable without developer tools");
@@ -139,7 +142,7 @@ test("section registry: toolbar sections first in the Mac's order; Settings last
   nav.enableDevToolsForSession();
   assert.equal(nav.devToolsEnabled(), true, "a spike launch shows its item for this session");
   nav.setDevTools(false);
-  for (const id of ["autotasks", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
+  for (const id of ["autotasks", "loop"]) assert.equal(nav.SECTIONS.find((d) => d.id === id).enabled, true, `${id} is a real screen now`);
   assert.equal(nav.SECTIONS.find((d) => d.id === "issues").enabled, true, "Issues is a real screen now");
   assert.equal(nav.SECTIONS.find((d) => d.id === "conflicts").enabled, true, "Review Conflicts is a real screen now");
   assert.equal(nav.SECTIONS.find((d) => d.id === "gantt").enabled, true, "Gantt is a real screen now");

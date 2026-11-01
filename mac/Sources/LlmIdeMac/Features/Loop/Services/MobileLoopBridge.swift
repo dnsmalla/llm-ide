@@ -76,6 +76,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// access switch and the project. Replies with the refusal and returns false unless all hold.
     private func confirmOnMac(title: String, lines: [String], stopGeneration: Int,
                               projectAtReceipt: String?, label: String) async -> Bool {
+        if host?.isDesktopBridge == true { return true }
         // Tier from PhoneApprovalPolicy (loopStart / loopStartStage are T1, pinned to the registry by a test).
         assert(PhoneApprovalPolicy.tier(forKey: PhoneApprovalPolicy.loopStart).needsDesktopApproval)
         guard let host else { return false }
@@ -307,7 +308,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// Stop is deliberately ungated so a phone can always halt a run. Fails
     /// closed: no host means no switch to consult.
     private var loopControlAllowed: Bool {
-        host?.isPhoneAccessAllowed(.loopControl) == true
+        host?.isDesktopBridge == true || host?.isPhoneAccessAllowed(.loopControl) == true
     }
 
     private var loopControlDeniedMessage: String {

@@ -13,8 +13,6 @@ export interface SectionDef {
   shortcut?: number;
 }
 
-const SOON = "Planned for a later phase";
-
 /**
  * Section registry. The top toolbar (`toolbar-model.ts`) lists the ids of `TOOLBAR_IDS` in the Mac's
  * `ShellSection.toolbarOrder` (a drift test parses the Swift source); Home (the Welcome page) is the toolbar's Home
@@ -26,11 +24,11 @@ export const SECTIONS: readonly SectionDef[] = [
   { id: "welcome", label: "Home", enabled: true },
   { id: "explorer", label: "Explorer", enabled: true, shortcut: 2 },
   { id: "graph", label: "Graph", enabled: true },
-  { id: "autotasks", label: "Auto Tasks", enabled: false, note: SOON },
+  { id: "autotasks", label: "Auto Tasks", enabled: true },
   { id: "conflicts", label: "Review Conflicts", enabled: true },
   { id: "issues", label: "Issues", enabled: true },
   { id: "gantt", label: "Gantt", enabled: true },
-  { id: "loop", label: "Loop", enabled: false, note: SOON },
+  { id: "loop", label: "Loop", enabled: true },
   { id: "docgen", label: "Doc Gen", enabled: true },
   { id: "visual", label: "Visual", enabled: true },
   { id: "library", label: "Library", enabled: true, shortcut: 3 },

@@ -37,6 +37,8 @@ protocol MobileBridgeHosting: AnyObject {
     /// True while an authenticated phone is connected. Push helpers check it
     /// so a desktop-side change sends nothing when no phone is listening.
     var mobileClientPaired: Bool { get }
+    /// True when the connected peer is the loopback Tauri companion (it may use desktop controls).
+    var isDesktopBridge: Bool { get }
 
     /// Whether the Mac-side Phone-access switch allows `access` right now.
     /// Callers re-read it per request — a phone may hold a stale capability list.
@@ -87,4 +89,10 @@ extension MobileBridgeHosting {
     func replyCommandError(commandId: String, message: String) {
         replyCommandError(commandId: commandId, message: message, code: nil)
     }
+}
+
+
+extension MobileBridgeHosting {
+    /// Most conformers are the phone host; only MobileControlManager can be a desktop bridge.
+    var isDesktopBridge: Bool { false }
 }

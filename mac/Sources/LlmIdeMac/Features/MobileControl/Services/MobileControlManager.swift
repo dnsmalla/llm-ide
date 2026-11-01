@@ -239,6 +239,9 @@ final class MobileControlManager {
     /// Device id of the phone currently connected; nil when none is, or when a
     /// legacy phone paired with a bare PIN and has no id.
     private(set) var connectedDeviceId: String?
+    /// The class the paired peer declared. Only a loopback peer may claim `desktop`.
+    private(set) var connectedClientClass: String?
+    var isDesktopBridge: Bool { connectedClientClass == "desktop" }
     /// Bumped on every successful pairing (including a replacement and a
     /// token reconnect). State that must belong to ONE phone session — the
     /// Self-Heal reviewed-patch cache — binds to `phoneSessionIdentity`, so
@@ -388,6 +391,9 @@ final class MobileControlManager {
                     self?.connectedDeviceId = deviceId
                     self?.refreshPairedDevices()
                 }
+            },
+            onClientClass: { [weak self] cls in
+                Task { @MainActor [weak self] in self?.connectedClientClass = cls }
             },
             onPinConsumed: { [weak self] in
                 // Retire the PIN HERE, synchronously on the server's queue, so
@@ -1378,6 +1384,7 @@ final class MobileControlManager {
     private func onMobileClientDisconnected() {
         mobileClientPaired = false
         connectedDeviceId = nil
+        connectedClientClass = nil
         // A reviewed patch belongs to the session that saw it; nothing may
         // apply it once that phone is gone.
         selfHealBridge?.forgetReviewedPatches()

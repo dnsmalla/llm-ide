@@ -12,6 +12,7 @@ declare const __FEATURE_FILE_EXPLORER__: boolean | undefined;
 declare const __FEATURE_CODE_GRAPH_3D__: boolean | undefined;
 declare const __FEATURE_DOC_GEN__: boolean | undefined;
 declare const __FEATURE_GANTT_ISSUES__: boolean | undefined;
+declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 
 type Loader = () => Promise<{ default?: ComponentType<SectionProps> }>;
 
@@ -44,6 +45,10 @@ if (typeof __FEATURE_GANTT_ISSUES__ === "undefined" || __FEATURE_GANTT_ISSUES__)
 if (typeof __FEATURE_DOC_GEN__ === "undefined" || __FEATURE_DOC_GEN__) {
   loaders.docgen = () => import("../docgen/index.tsx");
   loaders.visual = () => import("../docgen/visual.tsx");
+}
+if (typeof __FEATURE_AUTO_TASKS__ === "undefined" || __FEATURE_AUTO_TASKS__) {
+  loaders.autotasks = () => import("../autotasks/index.tsx");
+  loaders.loop = () => import("../loop/index.tsx");
 }
 
 const cache = new Map<string, LazyExoticComponent<ComponentType<SectionProps>>>();
