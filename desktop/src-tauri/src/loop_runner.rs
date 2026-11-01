@@ -272,6 +272,35 @@ pub async fn loop_run_loop(loop_id: String, timeout_secs: Option<u64>) -> Result
     }).await.map_err(|e| format!("Loop task failed: {e}"))?
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentStatus {
+    pub python: Option<String>,
+    pub node: Option<String>,
+    pub git: Option<String>,
+}
+
+fn version_of(program: &str, args: &[&str]) -> Option<String> {
+    let out = Command::new(program).args(args).output().ok()?;
+    if !out.status.success() { return None; }
+    let text = String::from_utf8_lossy(&out.stdout).lines().next()?.trim().to_string();
+    if text.is_empty() { None } else { Some(text.chars().take(160).collect()) }
+}
+
+/// Fixed environment probe: no command comes from the page. Used by the Mac-style Environment card.
+#[tauri::command]
+pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+        Ok(EnvironmentStatus {
+            python: version_of("python3", &["--version"]),
+            node: version_of("node", &["--version"]),
+            git: version_of("git", &["--version"]),
+        })
+    }).await.map_err(|e| format!("environment task failed: {e}"))?
+}
+
 #[tauri::command]
 pub async fn loop_run_fault_verify(rel: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     tauri::async_runtime::spawn_blocking(move || {

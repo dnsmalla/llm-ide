@@ -58,6 +58,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [testCommand, setTestCommand] = useState<string | null>(null);
   const [envReason, setEnvReason] = useState("Checking the project environment…");
   const [checkingEnv, setCheckingEnv] = useState(false);
+  const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
   const runningRef = useRef(false);
@@ -104,6 +105,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const openRun = async (entry: LoopRunIndexEntry) => {
     setSelectedRun(entry);
     setRunRecord(await loadRunRecord(fs, entry.id, entry.startedAt));
+  };
+
+  const checkToolchain = async () => {
+    setCheckingEnv(true);
+    try { setEnvVersions(await invokeHost<{ python: string | null; node: string | null; git: string | null }>("loop_environment_check")); }
+    catch { setEnvVersions({ python: null, node: null, git: null }); }
+    finally { setCheckingEnv(false); }
   };
 
   const checkEnvironment = async () => {
@@ -470,10 +478,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
         <section className="loop-card">
           <h2>ENVIRONMENT</h2>
-          <p><span className="loop-ready" aria-hidden="true">●</span> {testCommand ? "Test command detected" : "No test command detected"}</p>
+          <p><span className="loop-ready" aria-hidden="true">●</span> {testCommand ? "Ready to run" : "No test command detected"}</p>
           <p>Recommended test command: <code>{testCommand ?? "none"}</code></p>
           <p className="loop-native-hint">{envReason} Nothing is installed or changed.</p>
-          <button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkEnvironment()}>{checkingEnv ? "Checking…" : "Check again"}</button>
+          {envVersions ? <p className="loop-native-hint">Python: {envVersions.python ?? "not found"} · Node: {envVersions.node ?? "not found"} · Git: {envVersions.git ?? "not found"}</p> : null}
+          <div className="loop-inline"><button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkEnvironment()}>{checkingEnv ? "Checking…" : "Check again"}</button><button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkToolchain()}>{checkingEnv ? "Checking…" : "Check Python environment…"}</button></div>
         </section>
 
         <section className="loop-card">
