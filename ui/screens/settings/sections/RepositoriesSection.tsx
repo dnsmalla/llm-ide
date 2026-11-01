@@ -203,8 +203,9 @@ export default function RepositoriesSection() {
   /** Adding/finishing a repository URL should make its code and issues appear without another trip to Settings. */
   const autoProvision = (r: SavedRepo) => {
     void importIssuesFor(r, true);
-    const token = memoryTokens[provider.id];
-    if (host.cloneRepository && codeDir && token && !cloning) void doClone(r, token, true);
+    // Attempt the clone even without a session token: public repositories clone that way; a private one
+    // reports the auth failure and the explicit Clone prompt still accepts a token.
+    if (host.cloneRepository && codeDir && !cloning) void doClone(r, memoryTokens[provider.id] ?? "", true);
   };
   const startClone = (r: SavedRepo) => {
     setError(null);
