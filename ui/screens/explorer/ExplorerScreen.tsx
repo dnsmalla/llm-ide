@@ -18,6 +18,7 @@ import { DOCK_MAX, DOCK_MIN, clampDockWidth, dockFits, readDockPrefs, writeDockP
 import { ExplorerTabBar } from "./TabBar";
 import { topLevel } from "./tree-model";
 import { DEFAULT_PANEL, isDockToggleKey, panelForKey, type PanelId } from "./panels";
+import { terminalCwd } from "../settings/repo-config.ts";
 import { PanelTabs } from "./PanelTabs";
 import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
@@ -455,7 +456,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           <TerminalDock
             manager={terminal}
             runtime={runtime}
-            projectRoot={projectRoot}
+            projectRoot={terminalCwd(projectRoot)}
             projectName={name}
             open={dockOpen}
             height={dockHeight}

@@ -127,6 +127,20 @@ export function writeRepoConfig(c: RepoConfig, storage: Storage | undefined = gl
   }
 }
 
+/** The active saved clone's absolute path when it lives inside `projectRoot`; otherwise the project root. */
+export function terminalCwd(projectRoot: string | null): string | null {
+  if (!projectRoot) return null;
+  const root = projectRoot.replace(/\/+$/, "");
+  try {
+    const c = readRepoConfig();
+    const repo = [...c.saved.github, ...c.saved.gitlab].find((r) => r.active && r.clonePath.trim() !== "");
+    const path = repo?.clonePath.trim();
+    return path && path.startsWith(`${root}/`) ? path : projectRoot;
+  } catch {
+    return projectRoot;
+  }
+}
+
 /** Trim, drop trailing slashes, default when empty. The path is kept (GitLab under a subpath is valid). */
 export function normalizeBase(raw: string): string {
   const t = raw.trim();

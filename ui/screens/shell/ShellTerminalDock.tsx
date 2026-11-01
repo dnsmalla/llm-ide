@@ -6,6 +6,7 @@ import { TERMINAL_BUILT, loadTerminalRuntime, sharedTerminalManager } from "../e
 import type { TerminalRuntime } from "../explorer/terminal/runtime-types";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
 import type { SectionId } from "./sections";
+import { terminalCwd } from "../settings/repo-config.ts";
 
 export function ShellTerminalDock({ activeSection, projectRoot, projectName, open, onToggle }: { activeSection: SectionId; projectRoot: string | null; projectName: string; open: boolean; onToggle: (open: boolean) => void }): ReactNode {
   const initial = readTerminalPrefs();
@@ -44,7 +45,7 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
     <TerminalDock
       manager={terminal}
       runtime={runtime}
-      projectRoot={projectRoot}
+      projectRoot={terminalCwd(projectRoot)}
       projectName={projectName}
       open={open}
       height={height === DOCK_DEFAULT ? clampDock(DOCK_DEFAULT) : height}
