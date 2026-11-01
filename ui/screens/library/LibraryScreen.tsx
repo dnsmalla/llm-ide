@@ -49,10 +49,12 @@ export interface LibraryScreenProps {
   hostAvailable?: boolean;
   /** A project is open: its Paths layout owns the Library folders, so there is no separate notes-folder chooser. */
   projectOpen?: boolean;
+  onCopyPath?: (text: string) => Promise<void> | void;
+  onRevealPath?: (projectRelative: string) => Promise<void> | void;
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
@@ -60,6 +62,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [reloadKey, setReloadKey] = useState(0);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [projectFile, setProjectFile] = useState<string | null>(null);
+  const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
   // ---- write side
   const queue = useMemo(() => new WriteQueue(), []);
   const [selecting, setSelecting] = useState(false);
@@ -223,7 +226,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 onChanged={() => setSelection((sel) => prune(sel, (rel) => store.record(rel) !== undefined))}
               />
             )}
-            <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} active={active} />
+            <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} active={active} onContext={(rel, x, y) => setNoteMenu({ rel, x, y })} />
           </div>
         ) : null}
         <LibraryNav
@@ -292,6 +295,13 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
           )}
         </main>
       )}
+      {noteMenu ? (
+        <div className="lib-context" role="menu" style={{ left: noteMenu.x, top: noteMenu.y }} onMouseLeave={() => setNoteMenu(null)}>
+          <button type="button" role="menuitem" onClick={() => { store.select(noteMenu.rel); setNoteMenu(null); }}>Open</button>
+          <button type="button" role="menuitem" onClick={() => { void onCopyPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Copy relative path</button>
+          <button type="button" role="menuitem" onClick={() => { void onRevealPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Reveal in Finder</button>
+        </div>
+      ) : null}
       {newNote && (
         <NewNoteDialog
           defaultFolder="notes"

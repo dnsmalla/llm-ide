@@ -92,5 +92,19 @@ export default function Library({ active, projectRoot }: SectionProps) {
       : undefined),
     [available],
   );
-  return <LibraryScreen store={store} host={host} write={write} connections={connections} files={files} runRebuild={runRebuild} onOpenExternal={openExternal} extensions={extensions} active={active} hostAvailable={available} projectOpen={projectRoot !== null} />;
+  return <LibraryScreen
+    store={store}
+    host={host}
+    write={write}
+    connections={connections}
+    files={files}
+    runRebuild={runRebuild}
+    onOpenExternal={openExternal}
+    extensions={extensions}
+    active={active}
+    hostAvailable={available}
+    projectOpen={projectRoot !== null}
+    onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
+    onRevealPath={async (path) => { await invokeHost("reveal_in_os", { rel_path: path }); }}
+  />;
 }

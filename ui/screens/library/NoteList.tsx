@@ -66,9 +66,11 @@ export interface NoteListProps {
   initialHeight?: number;
   /** The Library section is showing: ⌘F may focus the search box. */
   active?: boolean;
+  /** A note row was right-clicked (project-relative path, viewport coordinates). */
+  onContext?: (rel: string, x: number, y: number) => void;
 }
 
-export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
@@ -203,6 +205,9 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
         data-cursor={bulk ? cursor : undefined}
         data-placeholder={rec.placeholder}
         style={{ top, height: ROW_HEIGHT }}
+        onContextMenu={(e) => {
+          if (onContext) { e.preventDefault(); onContext(rec.rel, e.clientX, e.clientY); }
+        }}
         onClick={(e) => {
           if (bulk) {
             store.select(rec.rel);
