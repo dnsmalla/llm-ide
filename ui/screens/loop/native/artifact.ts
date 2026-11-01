@@ -1,0 +1,133 @@
+// Deterministic artifact checks (LoopStage.Kind.artifactCheck). This port covers required paths, sibling-stage
+// Outputs, line caps, directory globs and section rules. Citation resolution is deliberately refused instead of
+// passing a check it did not perform.
+import type { FsApi } from "../../explorer/fs";
+import type { LoopStage } from "./model.ts";
+
+export interface ArtifactCheck {
+  requiredPaths?: string[];
+  lineLimits?: { glob: string; maxLines: number; excludes?: string[] }[];
+  citationGlobs?: string[];
+  projectRootFallback?: boolean;
+  outputRules?: { stage: string; skillId?: string | null; shape: "file" | "directory"; maxLines: number; subGlob?: string | null; excludeStages?: string[]; citations?: boolean }[];
+  sectionRules?: { headerPrefix: string; requiredLinePrefixes: string[] }[];
+}
+
+export type ArtifactFs = Pick<FsApi, "read" | "list">;
+
+function globRe(glob: string): RegExp {
+  let out = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") { out += ".*"; i++; if (glob[i + 1] === "/") i++; }
+      else out += "[^/]*";
+    } else if (c === "?") out += "[^/]";
+    else out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${out}$`);
+}
+
+function trimPath(p: string): string {
+  let s = p.trim();
+  while (s.startsWith("./")) s = s.slice(2);
+  while (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  return s === "." ? "" : s;
+}
+
+/** Expands a glob under a project-relative directory. Hidden/build dirs are skipped like the Mac. */
+async function expand(fs: ArtifactFs, base: string, glob: string, limit = 2000): Promise<string[]> {
+  const target = glob.startsWith("**/") ? glob : `**/${glob}`;
+  const re = globRe(trimPath(target));
+  const out: string[] = [];
+  const skip = new Set([".git", "node_modules", ".build", ".swiftpm", "DerivedData"]);
+  const walk = async (dir: string) => {
+    if (out.length >= limit) return;
+    let entries;
+    try { entries = (await fs.list(dir)).entries; } catch { return; }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      if (e.name.startsWith(".") || skip.has(e.name)) continue;
+      if (e.kind === "dir") await walk(e.path);
+      else if (e.kind === "file" && (glob.startsWith("**/") ? re.test(e.path) : re.test(e.path.slice(base.length + 1)))) out.push(e.path);
+    }
+  };
+  await walk(base);
+  return out;
+}
+
+async function exists(fs: ArtifactFs, path: string): Promise<boolean> {
+  try { return (await fs.read(path, 1)).status === "ok"; } catch { return false; }
+}
+
+async function lineCount(fs: ArtifactFs, path: string): Promise<number> {
+  const r = await fs.read(path, 8_000_000);
+  return r.text === null ? 0 : r.text.split("\n").length;
+}
+
+export interface ArtifactRoots { repoPrefix: string; projectPrefix: string }
+export interface ArtifactResult { passed: boolean; failures: string[] }
+
+export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, stages: readonly LoopStage[], roots: ArtifactRoots): Promise<ArtifactResult> {
+  const failures: string[] = [];
+  if ((check.citationGlobs?.length ?? 0) > 0) failures.push("citation checks are not ported yet");
+  const hasCit = (check.outputRules ?? []).some((r) => r.citations);
+  if (hasCit) failures.push("citation checks are not ported yet");
+  const required = [...(check.requiredPaths ?? [])];
+  const limits = [...(check.lineLimits ?? [])];
+  const sections = check.sectionRules ?? [];
+  const sectionTargets: string[] = [];
+  const outputs = new Map<string, string>();
+  for (const st of stages) {
+    if (st.outputPath) outputs.set(st.defaultKey ?? st.skillId ?? st.id, trimPath(st.outputPath));
+  }
+  const sibling = (key: string, skill?: string | null) => stages.find((s) => s.defaultKey === key) ?? (skill ? stages.find((s) => s.skillId === skill) : undefined);
+  for (const rule of check.outputRules ?? []) {
+    const st = sibling(rule.stage, rule.skillId);
+    const out = st?.outputPath ? trimPath(st.outputPath) : "";
+    if (!out) continue;
+    if (rule.shape === "file") {
+      required.push(out);
+      limits.push({ glob: out, maxLines: rule.maxLines });
+      sectionTargets.push(out);
+    } else {
+      sectionTargets.push(`${out}/${rule.subGlob ?? "**/*.md"}`);
+      if (rule.subGlob) {
+        limits.push({ glob: `${out}/${rule.subGlob}`, maxLines: rule.maxLines, excludes: (rule.excludeStages ?? []).map((k) => outputs.get(k) ?? "").filter(Boolean) });
+      }
+    }
+  }
+  const prefix = roots.repoPrefix ? `${roots.repoPrefix}/` : "";
+  for (const p of required) {
+    const rel = `${prefix}${p}`;
+    if (!(await exists(fs, rel))) failures.push(`missing: ${p}`);
+  }
+  for (const limit of limits) {
+    const files = await expand(fs, roots.repoPrefix || ".", limit.glob);
+    for (const file of files) {
+      const rel = roots.repoPrefix ? file.slice(roots.repoPrefix.length + 1) : file;
+      if ((limit.excludes ?? []).some((ex) => globRe(trimPath(ex)).test(rel))) continue;
+      const n = await lineCount(fs, file);
+      if (n > limit.maxLines) failures.push(`${rel}: ${n} lines (limit ${limit.maxLines})`);
+    }
+  }
+  for (const s of sections) {
+    for (const target of sectionTargets) {
+      const files = target.endsWith(".md") ? await expand(fs, roots.repoPrefix || ".", target) : [];
+      for (const file of files) {
+        const r = await fs.read(file, 8_000_000);
+        const lines = r.text?.split("\n") ?? [];
+        let i = 0;
+        while (i < lines.length) {
+          if (!lines[i].startsWith(s.headerPrefix)) { i++; continue; }
+          let end = i + 1;
+          while (end < lines.length && !lines[end].startsWith("### ")) end++;
+          const body = lines.slice(i + 1, end);
+          for (const prefix of s.requiredLinePrefixes) if (!body.some((l) => l.startsWith(prefix))) failures.push(`${file}: ${lines[i]} missing \`${prefix}\``);
+          i = end;
+        }
+      }
+    }
+  }
+  return { passed: failures.length === 0, failures };
+}

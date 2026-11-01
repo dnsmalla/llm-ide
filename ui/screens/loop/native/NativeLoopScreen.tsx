@@ -11,6 +11,7 @@ import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
+import { evaluateArtifact } from "./artifact.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
@@ -218,24 +219,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
-  const runSelectedStage = async () => {
-    if (!stage || dirty || runningStage) return;
-    if (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep") { setNotice("Only a shell-command stage or an empty Regression stage can run in this slice."); return; }
-    if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
-    const label = stage.command ?? "Regression sweep (only runs when there are no fixed faults to re-ask)";
-    if (!window.confirm(`Run this stage?\n\n${label}`)) return;
-    setRunningStage(true);
-    setRunLog((l) => [...l, `$ ${label}`, ""]);
-    try {
-      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }>("loop_run_stage", { stageId: stage.id, timeoutSecs: stage.timeoutSeconds });
-      setRunLog((l) => [...l, r.stdout, r.stderr, `${r.timedOut ? "TIMED OUT" : `exit ${r.exitCode ?? "?"}`} · ${r.durationMs} ms`].filter(Boolean));
-      setNotice(r.timedOut ? "The stage timed out." : r.exitCode === 0 ? "The stage passed." : `The stage exited ${r.exitCode ?? "without a code"}.`);
-    } catch (e) {
-      setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
-      setNotice(e instanceof Error ? e.message : "The stage could not run.");
-    } finally { setRunningStage(false); }
-  };
-
   const runOneStage = async (s: LoopStage): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand" || s.kind === "regressionSweep") {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
@@ -251,15 +234,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const r = await core.request<{ reply?: string; changedPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
         method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
       });
-      const ok = r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
-      return { ok, output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
+      return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
     }
-    throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression and skill stages`);
+    if (s.kind === "artifactCheck") {
+      if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
+      const root = projectRoot ?? "";
+      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const r = await evaluateArtifact(fs, s.check, loop?.config.stages ?? [], { repoPrefix, projectPrefix: "" });
+      return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
+    }
+    throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
   const runLoop = async () => {
     if (!loop || dirty || runningStage) return;
-    const unsupported = loop.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill"].includes(s.kind));
+    const unsupported = loop.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     if (!window.confirm(`Run “${loop.name}”?\n\nIt will iterate up to ${loop.config.maxIterations} time(s), repair blocking failures up to ${loop.config.maxRepairsPerStage} per stage, and stop after ${loop.config.consecutiveFailureStop} non-improving failures.`)) return;
     setRunningStage(true);
@@ -296,25 +285,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } finally { setRunningStage(false); }
   };
 
-  const runSkillStage = async () => {
-    if (!loop || !stage || stage.kind !== "skill" || !stage.skillId || dirty || runningStage) return;
-    const parts = [stage.prompt?.trim() || `Run the ${stage.name} skill for this loop.`];
-    if (loop.goal) parts.push(`Loop goal: ${loop.goal}`);
-    if (loop.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
-    if (stage.targetPath) parts.push(`Target path: ${stage.targetPath}`);
-    if (stage.outputPath) parts.push(`Output path: ${stage.outputPath}`);
-    if (!window.confirm(`Run the ${stage.skillId} skill in ${workRoot ?? projectRoot}?`)) return;
+  const runSelectedStage = async () => {
+    if (!stage || dirty || runningStage) return;
+    if (!["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
+    if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
+    if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
+    const label = stage.command ?? (stage.kind === "skill" ? `skill ${stage.skillId}` : stage.kind === "artifactCheck" ? "artifact check" : "Regression sweep");
+    if (!window.confirm(`Run this stage?\n\n${stage.name}: ${label}`)) return;
     setRunningStage(true);
-    setRunLog((l) => [...l, `$ skill ${stage.skillId}`, ""]);
+    setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
-      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
-        method: "POST", body: { message: parts.join("\n\n"), skills: [stage.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (stage.timeoutSeconds ?? 1800) * 1000 },
-      });
-      setRunLog((l) => [...l, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])]);
-      setNotice(r.resultSubtype ?? "Skill stage finished.");
+      const r = await runOneStage(stage);
+      setRunLog((l) => [...l, r.output, r.ok ? "Stage passed." : "Stage failed."]);
+      setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
-      setNotice(e instanceof Error ? e.message : "The skill stage failed.");
+      setNotice(e instanceof Error ? e.message : "The stage could not run.");
     } finally { setRunningStage(false); }
   };
 
@@ -388,7 +374,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => stage?.kind === "skill" ? void runSkillStage() : void runSelectedStage()} disabled={!stage || dirty || runningStage || (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep" && !(stage.kind === "skill" && stage.skillId))}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
