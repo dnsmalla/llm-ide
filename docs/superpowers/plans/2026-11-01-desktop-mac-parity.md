@@ -24,7 +24,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts/saved-repo picker done |
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
-| 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | edit/preview/destination, Use chat, Markdown template import |
+| 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | destination, Use chat, template import, command manager |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources + source preview done; result viewer/thumbnails pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | single scroll, gist, toolbar/re-summarize/export, menus/prefs/⌘F |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit done; updates/account variants pending |
