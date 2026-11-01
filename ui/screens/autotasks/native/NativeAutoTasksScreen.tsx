@@ -1,10 +1,11 @@
 // Native Auto Tasks screen. Independent of Mobile Control: the task catalog and per-task settings are local. The
 // runner/scheduler is the next port phase; while it is absent, Run controls are explicitly disabled rather than
 // pretending to execute.
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
 import { GROUPS, TASKS, TASK_BY_ID, loadState, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { describeCron, validateCron } from "./cron.ts";
 import "./native-autotasks.css";
 
 export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
@@ -12,8 +13,11 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [selected, setSelected] = useState<AutoTaskId>("reviewCode");
   const [onlyEnabled, setOnlyEnabled] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cronDraft, setCronDraft] = useState("");
+  const [scheduleError, setScheduleError] = useState(false);
   const task = TASK_BY_ID[selected];
   const config = state.configs[selected];
+  useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
   const enabledCount = TASKS.filter((t) => state.configs[t.id]?.enabled).length;
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
@@ -84,6 +88,16 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => update({ template: "builtin", prompt: task.prompt })}>Restore Default</button><button type="button" className="atn-link" onClick={() => setNotice("Saving named prompt templates is part of the template-store port.")}>New…</button></header>
           <select aria-label="Template" value={config.template} onChange={(e) => update({ template: e.target.value as "builtin" | "custom" })}><option value="builtin">Built-in prompt</option><option value="custom">Custom prompt</option></select>
           <textarea aria-label="Prompt" rows={7} value={config.prompt} onChange={(e) => update({ prompt: e.target.value, template: "custom" })} />
+        </section>
+
+        <section className="atn-card">
+          <header><span aria-hidden="true">◷</span><h2>SCHEDULE</h2><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.scheduleActive} onChange={(e) => update({ scheduleActive: e.target.checked })} /> Run on schedule</label></header>
+          <div className="atn-inline atn-schedule-row">
+            <input className="atn-cron" aria-label="Cron expression" value={cronDraft} spellCheck={false} placeholder="0 * * * *" onChange={(e) => { setCronDraft(e.target.value); setScheduleError(!validateCron(e.target.value)); }} />
+            <button type="button" className="atn-btn" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim(), scheduleActive: config.scheduleActive }); setNotice("Schedule saved. The native scheduler is the next port phase, so it will not fire yet."); }}>Save</button>
+          </div>
+          <p className={scheduleError ? "atn-error" : "atn-hint"}>{scheduleError ? "Invalid five-field cron expression." : describeCron(cronDraft)}</p>
+          <p className="atn-hint">{config.scheduleActive ? "Armed for the native scheduler (not ported yet)." : "Manual only — Run Now will run it; the schedule is off."}</p>
         </section>
 
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setNotice("Clear is available once the native runner exists.")}>Clear</button></header><p className="atn-hint">No log lines yet. The native runner will stream here.</p></section>

@@ -8,7 +8,17 @@ export type AutoTaskId =
 
 export type AutoTaskGroup = "Pipeline" | "Review" | "Automation" | "Maintenance";
 export interface AutoTaskDef { id: AutoTaskId; label: string; group: AutoTaskGroup; prompt: string; readOnlyOutput?: boolean }
-export interface AutoTaskConfig { enabled: boolean; inputPath: string; outputPath: string; skillName: string; template: "builtin" | "custom"; prompt: string }
+export interface AutoTaskConfig {
+  enabled: boolean;
+  inputPath: string;
+  outputPath: string;
+  skillName: string;
+  template: "builtin" | "custom";
+  prompt: string;
+  /** Five-field cron; an expression alone does not arm a schedule. */
+  cron: string;
+  scheduleActive: boolean;
+}
 export interface AutoTaskLocalState { masterEnabled: boolean; configs: Record<string, AutoTaskConfig>; }
 
 export const TASKS: readonly AutoTaskDef[] = [
@@ -30,7 +40,7 @@ export const GROUPS: readonly AutoTaskGroup[] = ["Pipeline", "Review", "Automati
 export const TASK_BY_ID = Object.fromEntries(TASKS.map((t) => [t.id, t])) as Record<AutoTaskId, AutoTaskDef>;
 
 const KEY = "llmide.autoTasks.v1";
-function blankConfig(t: AutoTaskDef): AutoTaskConfig { return { enabled: false, inputPath: "", outputPath: "", skillName: "", template: "builtin", prompt: t.prompt }; }
+function blankConfig(t: AutoTaskDef): AutoTaskConfig { return { enabled: false, inputPath: "", outputPath: "", skillName: "", template: "builtin", prompt: t.prompt, cron: "0 * * * *", scheduleActive: false }; }
 export function defaultState(): AutoTaskLocalState {
   return { masterEnabled: false, configs: Object.fromEntries(TASKS.map((t) => [t.id, blankConfig(t)])) };
 }

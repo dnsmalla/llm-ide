@@ -39,3 +39,6 @@
 .atn-field em { font-style: normal; color: var(--tok-color-text-muted); }
 .atn-card > textarea { resize: vertical; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); margin-top: 6px; }
 .atn-log { min-height: 200px; }
+.atn-schedule-row { margin: 4px 0; }
+.atn-cron { flex: 1; min-width: 0; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: 4px; padding: 5px 7px; }
+.atn-error { color: var(--tok-color-danger, #c62828); font-size: var(--tok-type-caption-size); }
