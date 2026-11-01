@@ -45,3 +45,11 @@ test("missing Loop config seeds the Mac starter loops with the detected test com
   assert.deepEqual(noTest.loops[0].config.stages.map((s) => s.kind), ["regressionSweep"]);
   assert.ok(noTest.loops.find((l) => l.name === "Plan").config.stages.some((s) => s.kind === "skill"));
 });
+
+test("the Mac loop recipes are available as templates", () => {
+  for (const id of ["plan-director", "refactoring", "doc-optimization", "test-growth"]) {
+    const t0 = t.BUILT_IN_TEMPLATES.find((x) => x.id === id);
+    assert.ok(t0, `${id} missing`);
+    assert.ok(t0.config.stages.length > 0, `${id} has no stages`);
+  }
+});

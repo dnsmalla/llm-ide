@@ -37,6 +37,19 @@ export const BUILT_IN_TEMPLATES: LoopTemplate[] = [
     config: config([{ name: "Lint", command: "make lint", severity: "advisory" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep" }]) },
 ];
 
+function defaultConfig(key: string): LoopEngineConfig {
+  const spec = DEFAULT_LOOP_SPECS.find((l) => l.defaultKey === key);
+  if (!spec) return config([]);
+  return structuredClone(spec.config);
+}
+
+BUILT_IN_TEMPLATES.push(
+  { id: "plan-director", name: "Plan Director", summary: "Index the plans, write the master plan, then run the artifact check.", config: defaultConfig("plan") },
+  { id: "refactoring", name: "Refactoring", summary: "Structure, graph, test map, plan, apply and verify a refactor batch.", config: defaultConfig("refactor") },
+  { id: "doc-optimization", name: "Doc Optimization", summary: "Index docs, rewrite them, then run the artifact check.", config: defaultConfig("docs") },
+  { id: "test-growth", name: "Test Growth", summary: "Test structure, map, writer and ledger in one loop.", config: defaultConfig("test") },
+);
+
 /** Apply a recipe to a repo: new stage ids, resolved test commands, and no Mac "default" identities. */
 export function applyTemplate(t: LoopTemplate, detected: string | null): LoopEngineConfig {
   const c = structuredClone(t.config);
