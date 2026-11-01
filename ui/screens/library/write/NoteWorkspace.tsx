@@ -42,6 +42,8 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [del, setDel] = useState<BulkProgress | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const delAbort = useRef<AbortController | null>(null);
   const [sum, setSum] = useState<{ phase: SummarizePhase | null; message: string | null; ok: boolean }>({ phase: null, message: null, ok: false });
   const sumAbort = useRef<AbortController | null>(null);
@@ -104,6 +106,32 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
     }
   }, [p, rel, write, store]);
 
+  const doExport = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportNotice(null);
+    try {
+      const opened = await write.open(rel);
+      const base = (p.record?.title ?? rel.split("/").pop() ?? "note").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "note";
+      const date = new Date().toISOString().slice(0, 10);
+      for (let i = 0; i < 50; i++) {
+        const path = `export/${base}-${date}${i === 0 ? "" : `-${i + 1}`}.md`;
+        try {
+          const saved = await write.create(path, opened.text);
+          setExportNotice(`Exported to ${saved.rel}.`);
+          break;
+        } catch (e) {
+          if (toWriteError(e).code === "exists") continue;
+          throw e;
+        }
+      }
+    } catch (e) {
+      setExportNotice(writeErrorText(toWriteError(e).code));
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, p.record?.title, rel, write]);
+
   const titles = useMemo(() => new Map([[rel, p.record?.title ?? rel]]), [rel, p.record?.title]);
   const isMeeting = p.record?.sourceId === "meeting" && p.summarize !== null;
   const summarising = sum.phase !== null;
@@ -156,6 +184,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
             </button>
           </>
         )}
+        <button type="button" className="lib-btn" onClick={() => void doExport()} disabled={exporting}>{exporting ? "Exporting…" : "Export"}</button>
         {p.onCopyPath ? <button type="button" className="lib-btn" onClick={() => void p.onCopyPath!(`llm-doc/${rel}`)}>Copy path</button> : null}
         {p.onRevealPath ? <button type="button" className="lib-btn" onClick={() => void p.onRevealPath!(`llm-doc/${rel}`)}>Reveal</button> : null}
         <button type="button" className="lib-btn lib-btn-danger" onClick={() => { setDel(null); setDialog("delete"); }}>
@@ -163,6 +192,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
         </button>
       </div>
       {sum.message && <StatusBanner severity={sum.ok ? "info" : "warning"} message={sum.message} onDismiss={() => setSum({ phase: null, message: null, ok: false })} />}
+      {exportNotice && <StatusBanner severity={exportNotice.startsWith("Exported") ? "info" : "warning"} message={exportNotice} onDismiss={() => setExportNotice(null)} />}
       <NoteViewer host={p.host} rel={rel} record={p.record} reloadKey={p.reloadKey} onOpenExternal={p.onOpenExternal} onOpenNote={p.onOpenNote} />
       {dialog === "rename" && <RenameDialog rel={rel} onRename={(n) => void doRename(n)} onClose={() => setDialog(null)} error={dialogError} busy={busy} />}
       {dialog === "delete" && (
