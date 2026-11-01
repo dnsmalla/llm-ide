@@ -194,42 +194,29 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const selected = state.selectedRel;
   return (
     <div className="lib-screen" hidden={!active}>
-      <LibraryNav
-        state={state}
-        extensionId={extensionId}
-        extensions={extensions}
-        connections={connections}
-        projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
-        onSection={(id) => {
-          setProjectFile(null);
-          setExtensionId(null);
-          store.setSection(id);
-        }}
-        onExtension={(id) => {
-          if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
-          else setExtensionId(id);
-        }}
-        onRefresh={refresh}
-        onChangeFolder={() => void store.chooseRoot()}
-        rebuild={rebuild}
-        onRebuild={runRebuild ? startRebuild : null}
-        onCancelRebuild={cancelRebuild}
-      />
-      {ext ? (
-        <div className="lib-ext" role="region" aria-label={ext.label}>
-          {ext.render ? ext.render() : (
-            <>
-              <h2>{ext.label}</h2>
-              <p className="lib-muted">{ext.note ?? "Coming soon."}</p>
-            </>
-          )}
-        </div>
-      ) : state.rootStatus === "error" || (state.listing.phase === "error" && state.records.length === 0) ? (
-        <div className="lib-ext">
-          <LoadError code={state.error ?? "io"} onRetry={() => void store.scan()} />
-        </div>
-      ) : (
-        <>
+      <div className="lib-list-pane">
+        <LibraryNav
+          state={state}
+          extensionId={extensionId}
+          extensions={extensions}
+          connections={connections}
+          projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
+          onSection={(id) => {
+            setProjectFile(null);
+            setExtensionId(null);
+            store.setSection(id);
+          }}
+          onExtension={(id) => {
+            if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
+            else setExtensionId(id);
+          }}
+          onRefresh={refresh}
+          onChangeFolder={() => void store.chooseRoot()}
+          rebuild={rebuild}
+          onRebuild={runRebuild ? startRebuild : null}
+          onCancelRebuild={cancelRebuild}
+        />
+        {!ext && !(state.rootStatus === "error" || (state.listing.phase === "error" && state.records.length === 0)) ? (
           <div className="lib-list-col">
             {linkNotice && <StatusBanner severity="info" message={linkNotice} onDismiss={() => setLinkNotice(null)} />}
             {state.error && state.records.length > 0 && <StatusBanner severity="warning" message="Some notes could not be listed. The list may be incomplete." />}
@@ -257,36 +244,51 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             )}
             <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} />
           </div>
-          <main className="lib-detail" aria-label={projectFile ? "Project file" : "Note"}>
-            {projectFile ? (
-              <ProjectFileView path={projectFile} deps={files!} />
-            ) : selected && write ? (
-              <NoteWorkspace
-                key={selected}
-                host={host}
-                write={write.host}
-                queue={queue}
-                summarize={write.summarize}
-                store={store}
-                rel={selected}
-                record={store.record(selected)}
-                reloadKey={reloadKey + writeKey}
-                startEditing={editNew === selected}
-                onDirtyChange={setDirty}
-                onChanged={() => setWriteKey((k) => k + 1)}
-                onOpenExternal={openExternal}
-                onOpenNote={openNote}
-              />
-            ) : selected ? (
-              <NoteViewer key={selected} host={host} rel={selected} record={store.record(selected)} reloadKey={reloadKey} onOpenExternal={openExternal} onOpenNote={openNote} />
-            ) : (
-              <div className="lib-empty" role="status">
-                <p className="lib-empty-title">Select a note</p>
-                <p className="lib-muted">Use the arrow keys in the list, or click a note.</p>
-              </div>
-            )}
-          </main>
-        </>
+        ) : null}
+      </div>
+      {ext ? (
+        <div className="lib-ext" role="region" aria-label={ext.label}>
+          {ext.render ? ext.render() : (
+            <>
+              <h2>{ext.label}</h2>
+              <p className="lib-muted">{ext.note ?? "Coming soon."}</p>
+            </>
+          )}
+        </div>
+      ) : state.rootStatus === "error" || (state.listing.phase === "error" && state.records.length === 0) ? (
+        <div className="lib-ext">
+          <LoadError code={state.error ?? "io"} onRetry={() => void store.scan()} />
+        </div>
+      ) : (
+        <main className="lib-detail" aria-label={projectFile ? "Project file" : "Note"}>
+          {projectFile ? (
+            <ProjectFileView path={projectFile} deps={files!} />
+          ) : selected && write ? (
+            <NoteWorkspace
+              key={selected}
+              host={host}
+              write={write.host}
+              queue={queue}
+              summarize={write.summarize}
+              store={store}
+              rel={selected}
+              record={store.record(selected)}
+              reloadKey={reloadKey + writeKey}
+              startEditing={editNew === selected}
+              onDirtyChange={setDirty}
+              onChanged={() => setWriteKey((k) => k + 1)}
+              onOpenExternal={openExternal}
+              onOpenNote={openNote}
+            />
+          ) : selected ? (
+            <NoteViewer key={selected} host={host} rel={selected} record={store.record(selected)} reloadKey={reloadKey} onOpenExternal={openExternal} onOpenNote={openNote} />
+          ) : (
+            <div className="lib-empty" role="status">
+              <p className="lib-empty-title">Select a note</p>
+              <p className="lib-muted">Use the arrow keys in the list, or click a note.</p>
+            </div>
+          )}
+        </main>
       )}
       {newNote && (
         <NewNoteDialog

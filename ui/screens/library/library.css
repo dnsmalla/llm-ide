@@ -1,5 +1,5 @@
 /* Library screen styles: tokens only (--tok-*), no raw colours, no remote resources. */
-.lib-screen { display: grid; grid-template-columns: 220px minmax(280px, 380px) minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
+.lib-screen { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
 .lib-screen[hidden] { display: none; }
 .lib-screen-single { display: flex; align-items: center; justify-content: center; }
 .lib-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -11,7 +11,8 @@
 .lib-link-btn { font: inherit; color: var(--tok-color-accent2); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-align: left; }
 
 /* sidebar */
-.lib-nav { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-sm); gap: var(--tok-space-xs); }
+.lib-list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--tok-color-border); }
+.lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 48%; overflow-y: auto; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-sm); gap: var(--tok-space-xs); }
 .lib-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--tok-space-xs); }
 .lib-nav-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
 .lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-xs); margin: var(--tok-space-md) 0 0; padding: 0 var(--tok-space-xs); font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
@@ -26,7 +27,7 @@
 .lib-progress { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
 
 /* list */
-.lib-list-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--tok-color-border); }
+.lib-list-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
 .lib-list { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .lib-list-head { display: flex; flex-direction: column; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .lib-search { display: flex; align-items: center; gap: var(--tok-space-sm); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 0 var(--tok-space-sm); }
@@ -58,9 +59,9 @@
 .lib-empty-title { margin: 0; font-size: var(--tok-type-body-strong-size); font-weight: var(--tok-type-body-strong-weight); color: var(--tok-color-text); }
 
 /* detail */
-.lib-detail, .lib-ext { min-width: 0; min-height: 0; overflow-y: auto; padding: var(--tok-space-lg); grid-column: span 2; }
-.lib-detail { grid-column: auto; }
-.lib-ext { grid-column: 2 / -1; }
+.lib-detail, .lib-ext { min-width: 0; min-height: 0; overflow-y: auto; padding: var(--tok-space-lg); grid-column: 2; }
+.lib-detail { grid-column: 2; }
+.lib-ext { grid-column: 2; }
 .lib-viewer { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--tok-space-md); }
 .lib-viewer-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); overflow-wrap: anywhere; }
 .lib-path { overflow-wrap: anywhere; }
@@ -103,7 +104,7 @@
 .lib-nofolder { max-width: 520px; display: flex; flex-direction: column; gap: var(--tok-space-md); padding: var(--tok-space-xl); }
 .lib-nofolder h2 { margin: 0; }
 @media (max-width: 1000px) {
-  .lib-screen { grid-template-columns: 180px minmax(240px, 320px) minmax(0, 1fr); }
+  .lib-screen { grid-template-columns: 220px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .lib-screen * { transition: none !important; animation: none !important; } }
 /* Library > Project files (Mac Code/Data categories). */
