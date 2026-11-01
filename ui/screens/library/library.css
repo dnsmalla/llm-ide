@@ -122,3 +122,5 @@
 .lib-project-view-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .lib-project-spacer { flex: 1; }
 .lib-project-text { margin: 0; padding: var(--tok-space-sm); overflow: auto; flex: 1; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); white-space: pre; tab-size: 2; }
+.lib-nav-group-btn { display: flex; align-items: center; gap: var(--tok-space-xs); width: 100%; font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; text-transform: inherit; letter-spacing: inherit; }
+.lib-nav-group-btn .lib-count { margin-left: auto; }

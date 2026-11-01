@@ -1,6 +1,6 @@
 // Sidebar: sections (Sources, LLM Doc), the Extensions entries (placeholders until S-J lands them), the
 // notes folder and the index rebuild. Counts update as the background reader classifies notes.
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronIcon, DocIcon, FolderIcon, PuzzleIcon, RefreshIcon, WaveIcon } from "@llmide/ui-kit";
 import type { LibraryState } from "./library-store.ts";
 import type { NotesRoot } from "./host.ts";
@@ -55,8 +55,31 @@ function SectionButton({ def, count, selected, onClick }: { def: SectionDef; cou
   );
 }
 
+const COLLAPSE_KEY = "llmide.library.collapsed";
+function readCollapsed(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+  } catch { return new Set(); }
+}
+
 export function LibraryNav(p: LibraryNavProps): ReactNode {
   const { state } = p;
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
+  const toggle = (id: string) => setCollapsed((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* session only */ }
+    return next;
+  });
+  const open = (id: string) => !collapsed.has(id);
+  const GroupHead = ({ id, icon, label, count }: { id: string; icon: ReactNode; label: string; count: number }) => (
+    <h3 className="lib-nav-group">
+      <button type="button" className="lib-nav-group-btn" aria-expanded={open(id)} onClick={() => toggle(id)}>
+        {icon} {label} <span className="lib-count">{count.toLocaleString()}</span> <span aria-hidden="true">{open(id) ? "▾" : "▸"}</span>
+      </button>
+    </h3>
+  );
   const root: NotesRoot | null = state.root;
   const sources = state.sections.filter((s) => s.group === "sources");
   const docs = state.sections.filter((s) => s.group === "docs");
@@ -78,31 +101,29 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           </button>
         </li>
       </ul>
-      <h3 className="lib-nav-group">
-        <WaveIcon /> Sources
-      </h3>
-      <ul className="lib-nav-list">
-        {sources.map((s) => (
-          <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
-        ))}
-      </ul>
+      <GroupHead id="sources" icon={<WaveIcon />} label="Sources" count={sources.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} />
+      {open("sources") ? (
+        <ul className="lib-nav-list">
+          {sources.map((s) => (
+            <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
+          ))}
+        </ul>
+      ) : null}
       {p.projectNav}
       {docs.length > 0 && (
         <>
-          <h3 className="lib-nav-group">
-            <DocIcon /> LLM Doc
-          </h3>
-          <ul className="lib-nav-list">
-            {docs.map((s) => (
-              <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
-            ))}
-          </ul>
+          <GroupHead id="docs" icon={<DocIcon />} label="LLM Doc" count={docs.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} />
+          {open("docs") ? (
+            <ul className="lib-nav-list">
+              {docs.map((s) => (
+                <SectionButton key={s.id} def={s} count={state.counts.get(s.id) ?? 0} selected={p.extensionId === null && state.sectionId === s.id} onClick={() => p.onSection(s.id)} />
+              ))}
+            </ul>
+          ) : null}
         </>
       )}
-      <h3 className="lib-nav-group">
-        <PuzzleIcon /> Extensions
-      </h3>
-      <ul className="lib-nav-list">
+      <GroupHead id="extensions" icon={<PuzzleIcon />} label="Extensions" count={p.extensions.length} />
+      {open("extensions") ? <ul className="lib-nav-list">
         {p.extensions.map((x) => {
           const sel = p.extensionId === x.id;
           return (
@@ -114,13 +135,11 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
             </li>
           );
         })}
-      </ul>
+      </ul> : null}
       {p.connections && p.connections.length > 0 && (
         <>
-          <h3 className="lib-nav-group">
-            <WaveIcon /> Connectors
-          </h3>
-          <ul className="lib-nav-list">
+          <GroupHead id="connectors" icon={<WaveIcon />} label="Connectors" count={p.connections.length} />
+          {open("connectors") ? <ul className="lib-nav-list">
             {p.connections.map((x) => {
               const sel = p.extensionId === x.id;
               return (
@@ -131,7 +150,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
                 </li>
               );
             })}
-          </ul>
+          </ul> : null}
         </>
       )}
       <div className="lib-nav-foot">
