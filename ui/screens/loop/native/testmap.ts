@@ -54,11 +54,12 @@ export async function detectTestStructure(fs: TestMapFs, repoPrefix: string, now
     if (pkgSwift?.includes(".testTarget(")) {
       const names = [...pkgSwift.matchAll(/\.testTarget\(\s*name:\s*"([^"]+)"/g)].map((m) => m[1]);
       const testDir = await firstDir(fs, base, names.map((n) => `Tests/${n}`));
-      if (testDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}Tests`, runner: "xctest", command: pkg ? `cd ${pkg} && swift test` : "swift test", languages: ["swift"] });
+      if (testDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${testDir}`, runner: "xctest", command: pkg ? `cd ${pkg} && swift test` : "swift test", languages: ["swift"] });
       else notes.push(`${label}: Package.swift has a testTarget but no Tests directory`);
     }
     if (await file(fs, `${join(base, "pytest.ini")}`) !== null || ((await file(fs, `${join(base, "pyproject.toml")}`))?.includes("pytest") ?? false)) {
-      if (await firstDir(fs, base, ["tests", "test"])) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}tests`, runner: "pytest", command: pkg ? `cd ${pkg} && pytest` : "pytest", languages: ["py"] });
+      const pyDir = await firstDir(fs, base, ["tests", "test"]);
+      if (pyDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${pyDir}`, runner: "pytest", command: pkg ? `cd ${pkg} && pytest` : "pytest", languages: ["py"] });
       else notes.push(`${label}: pytest configured but no tests directory`);
     }
     if (await file(fs, `${join(base, "go.mod")}`) !== null) roots.push({ packageDir: pkg, testDir: pkg || ".", runner: "go", command: pkg ? `cd ${pkg} && go test ./...` : "go test ./...", languages: ["go"] });
