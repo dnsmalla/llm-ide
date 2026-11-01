@@ -53,3 +53,8 @@ test("the Mac loop recipes are available as templates", () => {
     assert.ok(t0.config.stages.length > 0, `${id} has no stages`);
   }
 });
+
+test("all twelve Mac built-in recipes are present", () => {
+  const names = t.BUILT_IN_TEMPLATES.map((x) => x.name);
+  for (const n of ["Test & Fix", "Full Verify", "Regression", "Test", "Skill Loop", "Docs Refresh", "Operation App Diagnosis", "System Check", "Plan Director", "Refactoring", "Doc Optimization", "Test Growth"]) assert.ok(names.includes(n), `${n} missing`);
+});

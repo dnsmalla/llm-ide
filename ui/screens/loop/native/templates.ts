@@ -37,6 +37,23 @@ export const BUILT_IN_TEMPLATES: LoopTemplate[] = [
     config: config([{ name: "Lint", command: "make lint", severity: "advisory" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep" }]) },
 ];
 
+BUILT_IN_TEMPLATES.push(
+  { id: "skill-loop", name: "Skill Loop", summary: "Run a chosen skill as a generate step, gated by tests and the fault sweep.", config: config([{ name: "Apply skill", kind: "skill" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep" }], { maxIterations: 6 }) },
+  { id: "docs-refresh", name: "Docs Refresh", summary: "Regenerate documentation with a skill, then run the project docs check.", config: config([{ name: "Write docs", kind: "skill" }, { name: "Docs check", command: "make docs-check" }], { maxIterations: 4, maxRepairsPerStage: 2 }) },
+  { id: "operation-diagnosis", name: "Operation App Diagnosis", summary: "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.", config: config([{ name: "Server health", command: "curl -sf http://127.0.0.1:3456/health" }, { name: "Extension build", command: "cd extension && npm run build" }, { name: "Mac app build", command: "cd mac && swift build" }, { name: "Regression", kind: "regressionSweep" }], { maxIterations: 6 }) },
+  { id: "system-check", name: "System Check", summary: "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the Mac app and known faults.", config: config([
+    { name: "Skills", command: "cd extension && node --test tests/agent-skills.test.mjs tests/agent-skill-telemetry.test.mjs tests/skill-library.test.mjs tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs" },
+    { name: "Plugins", command: "cd extension && node --test tests/plugins-loader.test.mjs tests/plugins-installer.test.mjs" },
+    { name: "Plugins + MCP", command: "cd extension && node --test tests/mcp-config.test.mjs tests/mcp-state.test.mjs tests/mcp-plugin-servers.test.mjs tests/plugin-mcp-wiring.test.mjs tests/agent-v2-user-mcp.test.mjs tests/plugin-hook-trust.test.mjs tests/plugin-hook-runner.test.mjs tests/plugin-hook-trust-route.test.mjs tests/agent-v2-plugin-hooks.test.mjs tests/mcp-cli-args.test.mjs tests/route-mcp-mode.test.mjs" },
+    { name: "Connectors", command: "cd extension && node --test tests/box-connector.test.mjs tests/box-routes.test.mjs tests/slack-source.test.mjs tests/slack-oauth.test.mjs tests/slack-oauth-routes.test.mjs tests/email-source.test.mjs tests/scip-connector.test.mjs tests/scip-scanner.test.mjs tests/git-connector-chunking.test.mjs" },
+    { name: "GitHub dispatch", command: "cd extension && node --test tests/dispatch-concurrency.test.mjs tests/dispatch-preview.test.mjs tests/github-pr-secrets.test.mjs tests/outcome-dispatch-sentinel.test.mjs" },
+    { name: "Backend", command: "cd extension && npm test" },
+    { name: "iOS ↔ Mac shared protocol", command: "make test-shared-protocol" },
+    { name: "Mac app", command: "cd mac && swift test" },
+    { name: "Regression", kind: "regressionSweep" },
+  ], { maxIterations: 8 }) },
+);
+
 function defaultConfig(key: string): LoopEngineConfig {
   const spec = DEFAULT_LOOP_SPECS.find((l) => l.defaultKey === key);
   if (!spec) return config([]);
