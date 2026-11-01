@@ -197,27 +197,6 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   return (
     <div className="lib-screen" hidden={!active}>
       <div className="lib-list-pane">
-        <LibraryNav
-          state={state}
-          extensionId={extensionId}
-          extensions={extensions}
-          connections={connections}
-          projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
-          onSection={(id) => {
-            setProjectFile(null);
-            setExtensionId(null);
-            store.setSection(id);
-          }}
-          onExtension={(id) => {
-            if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
-            else setExtensionId(id);
-          }}
-          onRefresh={refresh}
-          onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
-          rebuild={rebuild}
-          onRebuild={runRebuild ? startRebuild : null}
-          onCancelRebuild={cancelRebuild}
-        />
         {!ext && !(state.rootStatus === "error" || (state.listing.phase === "error" && state.records.length === 0)) ? (
           <div className="lib-list-col">
             {linkNotice && <StatusBanner severity="info" message={linkNotice} onDismiss={() => setLinkNotice(null)} />}
@@ -247,6 +226,27 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} />
           </div>
         ) : null}
+        <LibraryNav
+          state={state}
+          extensionId={extensionId}
+          extensions={extensions}
+          connections={connections}
+          projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
+          onSection={(id) => {
+            setProjectFile(null);
+            setExtensionId(null);
+            store.setSection(id);
+          }}
+          onExtension={(id) => {
+            if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
+            else setExtensionId(id);
+          }}
+          onRefresh={refresh}
+          onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
+          rebuild={rebuild}
+          onRebuild={runRebuild ? startRebuild : null}
+          onCancelRebuild={cancelRebuild}
+        />
       </div>
       {ext ? (
         <div className="lib-ext" role="region" aria-label={ext.label}>

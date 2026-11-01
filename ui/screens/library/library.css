@@ -12,7 +12,7 @@
 
 /* sidebar */
 .lib-list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--tok-color-border); }
-.lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 48%; overflow-y: auto; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-sm); gap: var(--tok-space-xs); }
+.lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 45%; flex: 0 0 auto; overflow-y: auto; border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-sm); gap: var(--tok-space-xs); }
 .lib-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--tok-space-xs); }
 .lib-nav-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
 .lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-xs); margin: var(--tok-space-md) 0 0; padding: 0 var(--tok-space-xs); font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
@@ -27,7 +27,7 @@
 .lib-progress { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
 
 /* list */
-.lib-list-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
+.lib-list-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; border-bottom: 1px solid var(--tok-color-border); }
 .lib-list { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .lib-list-head { display: flex; flex-direction: column; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .lib-search { display: flex; align-items: center; gap: var(--tok-space-sm); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 0 var(--tok-space-sm); }
