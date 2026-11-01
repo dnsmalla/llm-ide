@@ -1,7 +1,7 @@
 // The detail pane when writing is available: a toolbar (Edit, Rename, Re-summarise, Delete) over the
 // viewer, or the editor while editing. Dialogs and long-running actions live here; all state changes of
 // the list go through the store's incremental methods.
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { NotesHost } from "../host.ts";
 import type { LibraryStore } from "../library-store.ts";
@@ -31,6 +31,8 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   onDirtyChange: (dirty: boolean) => void;
   /** The viewer must reload this note (it was saved, summarised or replaced). */
   onChanged: () => void;
+  onCopyPath?: (text: string) => Promise<void> | void;
+  onRevealPath?: (projectRelative: string) => Promise<void> | void;
 }
 
 export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
@@ -105,6 +107,14 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
   const titles = useMemo(() => new Map([[rel, p.record?.title ?? rel]]), [rel, p.record?.title]);
   const isMeeting = p.record?.sourceId === "meeting" && p.summarize !== null;
   const summarising = sum.phase !== null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isMeeting || summarising || editing) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void doSummarize(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [doSummarize, editing, isMeeting, summarising]);
 
   if (editing) {
     return (
@@ -146,6 +156,8 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
             </button>
           </>
         )}
+        {p.onCopyPath ? <button type="button" className="lib-btn" onClick={() => void p.onCopyPath!(`llm-doc/${rel}`)}>Copy path</button> : null}
+        {p.onRevealPath ? <button type="button" className="lib-btn" onClick={() => void p.onRevealPath!(`llm-doc/${rel}`)}>Reveal</button> : null}
         <button type="button" className="lib-btn lib-btn-danger" onClick={() => { setDel(null); setDialog("delete"); }}>
           Delete…
         </button>

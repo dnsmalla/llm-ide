@@ -291,6 +291,8 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
               onChanged={() => setWriteKey((k) => k + 1)}
               onOpenExternal={openExternal}
               onOpenNote={openNote}
+              onCopyPath={onCopyPath}
+              onRevealPath={onRevealPath}
             />
           ) : selected ? (
             <NoteViewer key={selected} host={host} rel={selected} record={store.record(selected)} reloadKey={reloadKey} onOpenExternal={openExternal} onOpenNote={openNote} />
