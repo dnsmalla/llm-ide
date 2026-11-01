@@ -26,7 +26,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | edit/Preview/Raw + save destination done; chat/templates pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources + source preview done; result viewer/thumbnails pending |
-| 12 | Library | `Features/Library/` | `ui/screens/library/` | root, order, collapse, ⌘F, row menu, persisted prefs; single-list merge pending |
+| 12 | Library | `Features/Library/` | `ui/screens/library/` | single scroll: notes + sections; context menus/prefs/⌘F done |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit done; updates/account variants pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
 | 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
