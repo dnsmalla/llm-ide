@@ -12,6 +12,7 @@ import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProject
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
+import { approve, isApproved } from "./approvals.ts";
 import { runRegression } from "./regression.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -275,10 +276,23 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
+  const ensureApprovals = (target: LoopDefinition): string | null => {
+    const root = workRoot ?? projectRoot ?? "";
+    for (const s of target.config.stages) {
+      if (!s.enabled || s.kind !== "shellCommand" || !s.command) continue;
+      if (isApproved(root, s.command)) continue;
+      if (!window.confirm(`Approve this command for ${target.name}?\n\n${s.command}`)) return `“${s.name}” needs command approval before it can run.`;
+      approve(root, s.command);
+    }
+    return null;
+  };
+
   const executeLoop = async (target: LoopDefinition) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
+    const approval = ensureApprovals(target);
+    if (approval) { setNotice(approval); return; }
     if (!window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
     runningRef.current = true;
     setRunningStage(true);
@@ -337,6 +351,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
+    if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
+      if (!window.confirm(`Approve this command?\n\n${stage.command}`)) return;
+      approve(workRoot ?? projectRoot ?? "", stage.command);
+    }
     const label = stage.command ?? (stage.kind === "skill" ? `skill ${stage.skillId}` : stage.kind === "artifactCheck" ? "artifact check" : "Regression sweep");
     if (!window.confirm(`Run this stage?\n\n${stage.name}: ${label}`)) return;
     setRunningStage(true);
