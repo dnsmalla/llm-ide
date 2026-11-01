@@ -83,3 +83,9 @@
 .gr-page-panel > * { flex: 1; min-width: 0; min-height: 0; }
 .gr-system { overflow: auto; }
 .gr-row { display: flex; align-items: flex-end; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.gr-empty-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; min-height: 0; }
+.gr-run-panel { display: flex; flex-direction: column; gap: var(--tok-space-sm); padding: var(--tok-space-md); border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
+.gr-run-modes { display: flex; gap: 2px; }
+.gr-empty-main { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.gr-state-icon { font-size: 28px; color: var(--tok-color-text-muted); }
+@media (max-width: 880px) { .gr-empty-shell { grid-template-columns: minmax(0, 1fr); } .gr-run-panel { border-right: 0; border-bottom: 1px solid var(--tok-color-border); } }

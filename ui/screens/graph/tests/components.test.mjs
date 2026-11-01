@@ -20,14 +20,13 @@ async function ready(nodes = 300, extra = {}) {
   return store;
 }
 
-test("empty state explains how to get a graph, names the file, offers a labelled open field, never a command to run", () => {
-  const out = html(h(G.EmptyState, { tried: ["system/graph/graph.json"], onOpen: () => true, onRetry: noop }));
-  assert.match(out, /No code graph for this project yet/);
-  assert.match(out, /system\/graph\/graph\.json/);
-  assert.match(out, /macOS app/);
-  assert.match(out, /<label[^>]*>[\s\S]*Open another graph\.json/);
-  assert.match(out, /Check again/);
-  assert.doesNotMatch(out, /npm |sudo |<script/);
+test("empty state gives the Mac's three-mode message and no preset controls", () => {
+  const out = html(h(G.EmptyState, { mode: "code" }));
+  assert.match(out, /No code graph yet/);
+  assert.match(out, /Generate Code Graph/);
+  assert.doesNotMatch(out, /Scan folder|Open another graph|Mode/);
+  assert.match(html(h(G.EmptyState, { mode: "memory" })), /No InfiniteBrain graph yet/);
+  assert.match(html(h(G.EmptyState, { mode: "all" })), /No graph yet/);
 });
 
 test("too large, no project, loading and error states are announced and have a next step", () => {
@@ -132,7 +131,7 @@ test("screen states by phase: empty, no project, too large, error, loading", asy
   const render = (store) => html(h(G.GraphScreen, { store, active: true, projectRoot: "/p", openFile: noop }));
   const e = mk(async () => { throw new Error("cannot resolve x: No such file"); });
   await e.load("/p");
-  assert.match(render(e), /No code graph for this project yet/);
+  assert.match(render(e), /No code graph yet/);
   const n = mk(async () => ""); await n.load(null);
   assert.match(render(n), /Open or create a project to see the code graph/);
   const t = mk(async () => { throw new Error("graph.json is not a regular file within the size limit"); }); await t.load("/p");

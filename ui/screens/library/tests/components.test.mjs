@@ -114,7 +114,7 @@ test("search box and filters have names; reset appears only when filters are act
   const { host, store } = await mkStore((hh) => hh.add("a.md", L.meetingText(1)));
   let out = html(screen(store, host));
   assert.match(out, /<input type="search"[^>]*aria-label="Filter and search notes"/);
-  assert.match(out, /placeholder="Filter notes"/, "no full-text search without a search runner");
+  assert.match(out, /placeholder="Search meetings…"/);
   assert.match(out, /role="group"[^>]*aria-label="Filters"/);
   assert.match(out, /aria-pressed="false"[^>]*>[\s\S]*With summary/);
   for (const name of ["Date range", "Sort", "Group"]) assert.match(out, new RegExp(`<span class="lib-sr">${name}</span>`));

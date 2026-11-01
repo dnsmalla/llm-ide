@@ -236,7 +236,7 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
             ref={searchRef}
             type="search"
             className="lib-search-input"
-            placeholder={store.searchAvailable ? "Search notes…" : "Filter notes"}
+            placeholder="Search meetings…"
             aria-label="Filter and search notes"
             value={f.query}
             onChange={(e) => {

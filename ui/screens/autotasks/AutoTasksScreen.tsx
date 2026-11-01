@@ -2,7 +2,7 @@
 // model routing stay in the Mac app (the same rule as the iPhone): this screen lists, runs, stops and toggles them.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
-import { BridgeGate, useMacBridge } from "../bridge/BridgeGate.tsx";
+import { BridgeRequired, useMacBridge } from "../bridge/BridgeGate.tsx";
 import { macBridge, type BridgeSnapshot, type AutoTaskInfo } from "../bridge/mac-bridge.ts";
 import "../bridge/bridge.css";
 import "./autotasks.css";
@@ -153,5 +153,5 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
 
 export default function AutoTasksScreen(_props: SectionProps): ReactNode {
   const snap = useMacBridge();
-  return <BridgeGate>{() => <Content snap={snap} />}</BridgeGate>;
+  return <BridgeRequired>{() => <Content snap={snap} />}</BridgeRequired>;
 }

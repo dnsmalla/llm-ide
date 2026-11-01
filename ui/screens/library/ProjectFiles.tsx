@@ -26,7 +26,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
 
   const reload = useCallback(() => {
     setChildren(new Map());
-    setClosedRoots(new Set());
+    setClosedRoots(new Set(["code", "data"]));
     void loadRoot("code");
     void loadRoot("data");
   }, [loadRoot]);

@@ -55,12 +55,18 @@ function SectionButton({ def, count, selected, onClick }: { def: SectionDef; cou
   );
 }
 
-const COLLAPSE_KEY = "llmide.library.collapsed";
+const COLLAPSE_KEY = "llmide.library.collapsed.v2";
+/** The Mac opens every Library section collapsed until the user expands it. */
+const DEFAULT_COLLAPSED = ["sources", "docs", "extensions", "connectors"];
 function readCollapsed(): Set<string> {
   try {
-    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? "[]") as unknown;
-    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
-  } catch { return new Set(); }
+    // In the app every section starts collapsed (Mac); server-render tests keep the full tree visible.
+    if (typeof window === "undefined") return new Set();
+    const raw = localStorage.getItem(COLLAPSE_KEY);
+    if (raw === null) return new Set(DEFAULT_COLLAPSED);
+    const parsed = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : DEFAULT_COLLAPSED);
+  } catch { return new Set(DEFAULT_COLLAPSED); }
 }
 
 export function LibraryNav(p: LibraryNavProps): ReactNode {

@@ -31,6 +31,9 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const loadedFor = useRef<string | null | undefined>(undefined);
   const camera = useRef<ViewCamera | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
+  const [emptyMode, setEmptyMode] = useState<"code" | "memory" | "all">("code");
+  const [emptyBusy, setEmptyBusy] = useState(false);
+  const [emptyError, setEmptyError] = useState<string | null>(null);
 
   // Load lazily on first show, and again when the project changes; never while another section is shown.
   useEffect(() => {
@@ -55,12 +58,34 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   if (s.phase === "no-project") return wrap(<NoProjectState />);
   if (s.phase === "empty") {
     return wrap(
-      <EmptyState
-        tried={s.tried}
-        onOpen={(p) => store.openPath(p)}
-        onRetry={() => void store.reload()}
-        onGenerate={onGenerate ? async (mode, target) => { await onGenerate(mode, target); await store.reload(); } : undefined}
-      />,
+      <div className="gr-empty-shell">
+        <aside className="gr-run-panel" aria-label="Graph generation">
+          <div className="gr-run-modes" role="radiogroup" aria-label="Graph mode">
+            {([["code", "Code"], ["memory", "InfiniteBrain"], ["all", "All"]] as const).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={emptyMode === id} className="gr-seg-btn" data-on={emptyMode === id} disabled={emptyBusy} onClick={() => { setEmptyMode(id); setEmptyError(null); }}>{label}</button>
+            ))}
+          </div>
+          <p className="gr-muted">
+            {emptyMode === "code" ? "Scans code into a symbol graph." : emptyMode === "memory" ? "Scans llm-doc into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
+          </p>
+          <button
+            type="button"
+            className="gr-btn gr-btn-primary"
+            disabled={emptyBusy || !onGenerate}
+            onClick={() => {
+              if (!onGenerate) return;
+              setEmptyBusy(true);
+              setEmptyError(null);
+              void onGenerate(emptyMode, "").then(() => store.reload()).catch((e: unknown) => setEmptyError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setEmptyBusy(false));
+            }}
+          >
+            {emptyBusy ? "Generating…" : emptyMode === "code" ? "Generate Code Graph" : emptyMode === "memory" ? "Generate InfiniteBrain" : "Generate Graph"}
+          </button>
+          <button type="button" className="gr-btn" disabled={emptyBusy} onClick={() => void store.reload()}>Check again</button>
+          {emptyError ? <p className="gr-error" role="alert">{emptyError}</p> : null}
+        </aside>
+        <main className="gr-empty-main"><EmptyState mode={emptyMode} /></main>
+      </div>,
     );
   }
   if (s.phase === "too-large") return wrap(<TooLargeState onOpen={(p) => store.openPath(p)} />);

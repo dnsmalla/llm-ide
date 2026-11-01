@@ -137,7 +137,7 @@ test("SettingsScreen: the real registry renders the Mac's 19 App groups in order
 });
 
 test("Mac-only and planned groups render an honest status card with no control (buttons, inputs, switches)", () => {
-  for (const [name, status] of [["MobileGroup", "Managed in the Mac app"], ["SelfHealGroup", "Managed in the Mac app"], ["LoopDefaultsGroup", "Status: planned"]]) {
+  for (const [name, status] of [["SelfHealGroup", "Managed in the Mac app"], ["LoopDefaultsGroup", "Status: planned"]]) {
     const out = html(h(m.notices[name], {}, null));
     assert.ok(out.includes(status), name);
     assert.match(out, /role="group" aria-label="Status on the desktop"/);

@@ -129,3 +129,6 @@
 .lib-context button:hover { background: var(--tok-color-row-alt); }
 .lib-footer-nav { border-top: 1px solid var(--tok-color-border); }
 .lib-footer-nav .lib-nav { max-height: none; overflow: visible; border-top: 0; padding: var(--tok-space-sm); }
+
+/* Mac Library is a search field over one sectioned list; these desktop-only controls were never in the Mac. */
+.lib-list-actions, .lib-chips, .lib-status, .lib-nav-head, .lib-nav-foot { display: none; }

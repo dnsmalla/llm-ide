@@ -3,9 +3,27 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, ErrorText } from "../settings/ui.tsx";
 import { macBridge, type BridgeSnapshot } from "./mac-bridge.ts";
+import { shellBus } from "../shell/bus";
 
 export function useMacBridge(): BridgeSnapshot {
   return useSyncExternalStore(macBridge.subscribe, macBridge.getSnapshot, macBridge.getSnapshot);
+}
+
+/** The Mac bridge is configured in Settings; pages only state that it is not connected. */
+export function BridgeRequired({ children }: { children: (snap: BridgeSnapshot) => ReactNode }) {
+  const snap = useMacBridge();
+  useEffect(() => {
+    if (macBridge.paired) macBridge.connect();
+  }, []);
+  if (snap.phase === "connected") return <>{children(snap)}</>;
+  return (
+    <div className="bridge-gate" role="status">
+      <h2>Mac app not connected</h2>
+      <p>Auto Tasks and Loop are controlled through the Mac app. Pair the bridge in Settings → Mobile Control, then return here.</p>
+      <Button tone="primary" onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "mobile" })}>Open Settings → Mobile Control</Button>
+      <ErrorText text={snap.error} />
+    </div>
+  );
 }
 
 export function BridgeGate({ children }: { children: (snap: BridgeSnapshot) => ReactNode }) {

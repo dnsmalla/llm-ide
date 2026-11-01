@@ -2,7 +2,6 @@
 // runs a command: generating a graph is the Mac scanners' job today (see the blocked-by note in the doc).
 import { useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
-import { GRAPH_CANDIDATES } from "./source.ts";
 import { NoProjectCard } from "../shell/NoProjectCard";
 
 export function LoadingState({ stage, onCancel }: { stage: string; onCancel: () => void }) {
@@ -36,54 +35,18 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
   );
 }
 
-export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: (mode: "code" | "memory" | "all", target: string) => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"code" | "memory" | "all">("code");
-  const [target, setTarget] = useState("");
-  const [error, setError] = useState<string | null>(null);
+export function EmptyState({ mode }: { mode: "code" | "memory" | "all" }) {
+  const title = mode === "code" ? "No code graph yet" : mode === "memory" ? "No InfiniteBrain graph yet" : "No graph yet";
+  const message = mode === "code"
+    ? "Pick a project folder on the left, then click Generate Code Graph."
+    : mode === "memory"
+      ? "Generate InfiniteBrain to build a doc graph from the project's llm-doc folder."
+      : "Generate Graph to build one graph from all code and docs.";
   return (
     <div className="gr-state">
-      <h2 className="gr-state-title">No code graph for this project yet</h2>
-      <p>This screen shows the graph that the Code Graph scanners write to <code>{GRAPH_CANDIDATES[0]}</code> inside the project.</p>
-      <p className="gr-muted">Generate it here with the host's GraphKit runner, or in the macOS app (<strong>Code Graph → Generate</strong>) and come back. Looked for: {(tried.length ? tried : [...GRAPH_CANDIDATES]).join(", ")}.</p>
-      {onGenerate ? (
-        <div className="gr-row">
-          <label className="gr-field">
-            <span>Mode</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} disabled={busy}>
-              <option value="code">Code</option>
-              <option value="memory">InfiniteBrain (llm-doc)</option>
-              <option value="all">All (merge)</option>
-            </select>
-          </label>
-          {mode !== "memory" ? (
-            <label className="gr-field">
-              <span>Scan folder</span>
-              <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy}>
-                <option value="">Project root</option>
-                <option value="code">code/</option>
-                <option value="data">data/</option>
-                <option value="source">source/</option>
-              </select>
-            </label>
-          ) : null}
-          <button
-            type="button"
-            className="gr-btn gr-btn-primary"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError(null);
-              void onGenerate(mode, target).catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
-            }}
-          >
-            {busy ? "Generating…" : mode === "code" ? "Generate code graph" : mode === "memory" ? "Generate memory graph" : "Generate all"}
-          </button>
-        </div>
-      ) : null}
-      <button type="button" className="gr-btn" onClick={onRetry}>Check again</button>
-      {error ? <p className="gr-error" role="alert">{error}</p> : null}
-      <OpenPath onOpen={onOpen} />
+      <div className="gr-state-icon" aria-hidden="true">◇</div>
+      <h2 className="gr-state-title">{title}</h2>
+      <p className="gr-muted">{message}</p>
     </div>
   );
 }

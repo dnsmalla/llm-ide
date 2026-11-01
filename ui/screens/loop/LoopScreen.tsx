@@ -2,7 +2,7 @@
 // commands, repair policy) stays in the Mac app; this is the remote-control surface the iPhone also uses.
 import { useEffect, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
-import { BridgeGate, useMacBridge } from "../bridge/BridgeGate.tsx";
+import { BridgeRequired, useMacBridge } from "../bridge/BridgeGate.tsx";
 import { macBridge, type BridgeSnapshot } from "../bridge/mac-bridge.ts";
 import "../bridge/bridge.css";
 import "./loop.css";
@@ -94,5 +94,5 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
 
 export default function LoopScreen(_props: SectionProps): ReactNode {
   const snap = useMacBridge();
-  return <BridgeGate>{() => <Content snap={snap} />}</BridgeGate>;
+  return <BridgeRequired>{() => <Content snap={snap} />}</BridgeRequired>;
 }
