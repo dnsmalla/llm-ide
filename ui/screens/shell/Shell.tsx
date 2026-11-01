@@ -10,6 +10,7 @@ import { CoreDownPanel, LoginPanel } from "./Panels";
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore } from "./chat-approvals";
+import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
@@ -165,6 +166,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const onTheme = useCallback((id: ThemeId) => applyThemeChoice(id), []);
   // Settings > Appearance changes the theme through the same store (a launch override stays unpersisted until the user picks).
   useEffect(() => subscribeTheme(() => setTheme(getTheme())), []);
+  // Native app-menu commands (Settings, Quick Switch, LLM Chat, Help) arrive as host events.
+  useEffect(() => {
+    if (!shellHost.isAvailable()) return undefined;
+    let off: (() => void) | undefined;
+    let gone = false;
+    void import("@tauri-apps/api/event").then(({ listen }) => listen<string>("app-menu", (ev) => {
+      const action = menuAction(ev.payload);
+      if (action) shellBus.publish(action);
+    })).then((un) => { if (gone) un(); else off = un; }).catch(() => undefined);
+    return () => { gone = true; off?.(); };
+  }, []);
 
   const inert = isInert(gate);
   const overlay = hasOverlayTitlebar(platform, hostAvailable);

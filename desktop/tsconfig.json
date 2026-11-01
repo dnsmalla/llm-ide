@@ -16,6 +16,8 @@
     "paths": {
       "@llmide/ui-kit": ["../ui/kit/src/index.ts"],
       "@llmide/screens/*": ["../ui/screens/*"],
+      "@tauri-apps/api": ["./node_modules/@tauri-apps/api/index.d.ts"],
+      "@tauri-apps/api/event": ["./node_modules/@tauri-apps/api/event.d.ts"],
       "graphology": ["./node_modules/graphology"],
       "sigma": ["./node_modules/sigma"],
       "react": ["./node_modules/@types/react"],

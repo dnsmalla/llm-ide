@@ -20,6 +20,7 @@ mod host_approval;
 mod fsutil;
 mod graph_file;
 mod mermaid_runtime;
+mod menu;
 mod notes_fs;
 mod notes_write;
 mod os_open;
@@ -478,6 +479,7 @@ pub fn run() {
                 core_host::set_resource_dir(res);
             }
             tray::setup(app.handle());
+            menu::setup(app.handle())?;
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();
             let signal_chat = app.state::<chat_cmds::ChatService>().inner().clone();

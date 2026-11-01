@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     // @llmide/ui-kit is consumed from source (../ui/kit): one React for kit and app.
     alias: [
+      { find: /^@tauri-apps\/api\/event$/, replacement: fileURLToPath(new URL("./node_modules/@tauri-apps/api/event.js", import.meta.url)) },
       { find: /^@llmide\/ui-kit\/styles\.css$/, replacement: fileURLToPath(new URL("../ui/kit/src/styles/kit.css", import.meta.url)) },
       { find: /^@llmide\/ui-kit$/, replacement: fileURLToPath(new URL("../ui/kit/src/index.ts", import.meta.url)) },
       // Phase 3 screens live in ../ui/screens/<name> (one owner per folder; see ui/screens/README.md).
