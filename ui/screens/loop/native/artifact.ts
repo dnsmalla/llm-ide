@@ -104,10 +104,14 @@ export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, sta
   const prefix = roots.repoPrefix ? `${roots.repoPrefix}/` : "";
   for (const p of required) {
     const rel = `${prefix}${p}`;
-    if (!(await exists(fs, rel))) failures.push(`missing: ${p}`);
+    const fallback = `${roots.projectPrefix ? `${roots.projectPrefix}/` : ""}${p}`;
+    if (!(await exists(fs, rel)) && !(check.projectRootFallback && await exists(fs, fallback))) failures.push(`missing: ${p}`);
   }
   for (const limit of limits) {
     const files = await expand(fs, roots.repoPrefix || ".", limit.glob);
+    if (check.projectRootFallback && roots.projectPrefix !== roots.repoPrefix) {
+      for (const f of await expand(fs, roots.projectPrefix || ".", limit.glob)) if (!files.includes(f)) files.push(f);
+    }
     for (const file of files) {
       const rel = roots.repoPrefix ? file.slice(roots.repoPrefix.length + 1) : file;
       if ((limit.excludes ?? []).some((ex) => globRe(trimPath(ex)).test(rel))) continue;
@@ -135,7 +139,9 @@ export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, sta
   }
   const seen = new Set<string>();
   for (const glob of citationGlobs) {
-    for (const file of await expand(fs, roots.repoPrefix || ".", glob)) {
+    const candidates = await expand(fs, roots.repoPrefix || ".", glob);
+    if (check.projectRootFallback && roots.projectPrefix !== roots.repoPrefix) for (const f of await expand(fs, roots.projectPrefix || ".", glob)) if (!candidates.includes(f)) candidates.push(f);
+    for (const file of candidates) {
       if (!file.endsWith(".md") || seen.has(file)) continue;
       seen.add(file);
       const r = await fs.read(file, 8_000_000);

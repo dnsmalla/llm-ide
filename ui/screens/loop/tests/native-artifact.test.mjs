@@ -43,3 +43,11 @@ test("citation checks resolve backticked repo paths and report missing ones", as
   assert.equal(bad.passed, false);
   assert.match(bad.failures[0], /citation/);
 });
+
+test("projectRootFallback checks the project root when the repo path misses", async () => {
+  const fs = mem({ "llm-doc/plan.md": "x" });
+  const r = await evaluateArtifact(fs, { requiredPaths: ["llm-doc/plan.md"], projectRootFallback: true }, [], { repoPrefix: "code/repo", projectPrefix: "" });
+  assert.equal(r.passed, true);
+  const noFallback = await evaluateArtifact(fs, { requiredPaths: ["llm-doc/plan.md"] }, [], { repoPrefix: "code/repo", projectPrefix: "" });
+  assert.equal(noFallback.passed, false);
+});
