@@ -9,7 +9,7 @@ import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
@@ -192,6 +192,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     const id = crypto.randomUUID();
     mutateStore((s) => {
       s.loops.push({ id, name: `New Loop ${s.loops.length + 1}`, isPrimary: s.loops.length === 0, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: null, runsOnSchedule: false, config: { ...loopConfigTemplate(), stages: [] } });
+    });
+    setSelectedLoopId(id);
+    setSelectedStageId(null);
+  };
+
+  const addLoopFromTemplate = (t: LoopTemplate) => {
+    const id = crypto.randomUUID();
+    mutateStore((s) => {
+      s.loops.push({
+        id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
+        defaultKey: null, runsOnSchedule: false, config: applyTemplate(t, testCommand),
+      });
     });
     setSelectedLoopId(id);
     setSelectedStageId(null);
@@ -606,7 +618,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
-        <div className="loop-pane-head"><span>LOOPS</span><button type="button" className="loop-plus" aria-label="New loop" title="New loop" onClick={addLoop}>＋</button></div>
+        <div className="loop-pane-head"><span>LOOPS</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { if (e.target.value === "__blank") addLoop(); else { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); } }}>
+          <option value="">＋ New loop…</option>
+          <option value="__blank">Blank loop</option>
+          {BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select></div>
         <div className="loop-actions">
           <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
           <button type="button" className="loop-btn" disabled={isManualOnly(loop)} title={isManualOnly(loop) ? "Manual-only: it applies code" : "Include in the scheduled run"} onClick={() => patchLoop((l) => { l.runsOnSchedule = !l.runsOnSchedule; })}>{loop.runsOnSchedule ? "◷ Scheduled" : "◷ Schedule"}</button>
