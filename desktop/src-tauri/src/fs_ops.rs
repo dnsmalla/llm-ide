@@ -1017,6 +1017,40 @@ pub async fn fs_read_file(req: ReadReq) -> R<ReadResult> {
     blocking(move |root| read_file(&root, &req)).await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageResult {
+    pub mime: String,
+    pub data_url: String,
+    pub size: u64,
+}
+
+/// An image as a data URL for the Explorer's image preview. Root-confined, extension allowlist, 25 MB cap; no
+/// SVG (it can carry script) and no PDF (the webview cannot render it inline under the CSP).
+pub fn read_image(root: &Path, path: &str) -> R<ImageResult> {
+    const MAX: u64 = 25 * 1024 * 1024;
+    let canonical = resolve_existing(root, path)?;
+    let ext = canonical.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return err("unsupported", "only PNG, JPEG, GIF and WebP images are previewed here"),
+    };
+    let meta = std::fs::metadata(&canonical).map_err(|e| io_err("cannot read image", e))?;
+    if !meta.is_file() { return err("invalid_path", "not a file"); }
+    if meta.len() > MAX { return err("too_large", "image is larger than 25 MB"); }
+    let bytes = std::fs::read(&canonical).map_err(|e| io_err("cannot read image", e))?;
+    let data = crate::repo_clone::base64(&bytes);
+    Ok(ImageResult { mime: mime.into(), data_url: format!("data:{mime};base64,{data}"), size: meta.len() })
+}
+
+#[tauri::command]
+pub async fn fs_read_image(path: String) -> R<ImageResult> {
+    blocking(move |root| read_image(&root, &path)).await
+}
+
 #[tauri::command]
 pub async fn fs_read_range(req: RangeReq) -> R<RangeResult> {
     blocking(move |root| read_range(&root, &req)).await
@@ -1053,6 +1087,20 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         fs::canonicalize(&d).unwrap()
     }
+    #[test]
+    fn image_preview_is_root_confined_and_extension_checked() {
+        let root = scratch("image");
+        std::fs::write(root.join("a.png"), [0x89, b'P', b'N', b'G', 1, 2, 3]).unwrap();
+        let img = read_image(&root, "a.png").unwrap();
+        assert_eq!(img.mime, "image/png");
+        assert!(img.data_url.starts_with("data:image/png;base64,"));
+        assert!(read_image(&root, "missing.png").is_err());
+        std::fs::write(root.join("a.svg"), "<svg/>").unwrap();
+        assert!(read_image(&root, "a.svg").is_err());
+        assert!(read_image(&root, "../outside.png").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn lr(path: &str) -> ListReq {
         ListReq { path: path.into(), ..Default::default() }
     }

@@ -1,6 +1,6 @@
 // Editor column: banners, toolbar and the Monaco host. Monaco is loaded lazily (first open file) through
 // `loadEditor`, so it stays out of the entry chunk; the controller owns documents, this owns the surface.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExplorerController, ExplorerSnapshot } from "./controller";
 import type { EditorHost } from "./editor-types";
@@ -25,6 +25,7 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
   const activeId = snap.tabs.activeId;
   const doc = activeId ? snap.docs.get(activeId) : undefined;
   const markdown = !!activeId && /\.(md|markdown)$/i.test(activeId);
+  const image = !!activeId && /\.(png|jpe?g|gif|webp)$/i.test(activeId);
   const [preview, setPreview] = useState<"render" | "raw" | null>(null);
   const [previewText, setPreviewText] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -171,6 +172,8 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
           <div className="ex-markdown" aria-label="Markdown preview">
             {previewError ? <StatusBanner severity="warning" message={previewError} /> : <MarkdownView text={previewText} baseRel={activeId} initialSections={4} />}
           </div>
+        ) : image && activeId && (!d || d.status === "binary") ? (
+          <ImagePreview path={activeId} size={d?.size ?? 0} />
         ) : !showEditor ? <Placeholder doc={d} controller={controller} activeId={activeId} hasTabs={snap.tabs.tabs.length > 0} /> : null}
       </div>
     </section>
@@ -208,6 +211,34 @@ function Placeholder({ doc, controller, activeId, hasTabs }: { doc: ReturnType<E
     <div className="ex-empty" role="alert">
       <p className="ex-empty-title">Cannot open this file</p>
       <p className="ex-empty-hint">{doc.error ?? "Unknown error."}</p>
+    </div>
+  );
+}
+
+
+/** A host-read image preview (PNG/JPEG/GIF/WebP), bounded by the host and rendered from a data URL. */
+function ImagePreview({ path, size }: { path: string; size: number }): ReactNode {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setUrl(null);
+    setError(null);
+    void invokeHost<unknown>("fs_read_image", { path }).then(
+      (body) => {
+        if (!live) return;
+        const o = body && typeof body === "object" ? body as Record<string, unknown> : {};
+        if (typeof o.dataUrl === "string") setUrl(o.dataUrl);
+        else setError("The image could not be read.");
+      },
+      (e) => live && setError(typeof e === "string" ? e : "The image could not be read."),
+    );
+    return () => { live = false; };
+  }, [path]);
+  return (
+    <div className="ex-image" aria-label="Image preview">
+      {error ? <StatusBanner severity="warning" message={error} /> : url ? <div className="ex-image-canvas" role="img" aria-label={path} style={{ backgroundImage: `url(${url})` }} /> : <p className="ex-empty-title" role="status">Loading image…</p>}
+      <p className="ex-muted">{path} · {formatSize(size)}</p>
     </div>
   );
 }

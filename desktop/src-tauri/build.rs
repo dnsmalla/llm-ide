@@ -33,6 +33,7 @@ const COMMANDS: &[&str] = &[
     "project_memory",
     "fs_list_dir",
     "fs_read_file",
+    "fs_read_image",
     "fs_read_range",
     "fs_write_file",
     "fs_create",

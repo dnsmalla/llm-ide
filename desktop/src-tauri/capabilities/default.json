@@ -34,6 +34,7 @@
     "allow-project-memory",
     "allow-fs-list-dir",
     "allow-fs-read-file",
+    "allow-fs-read-image",
     "allow-fs-read-range",
     "allow-fs-write-file",
     "allow-fs-create",

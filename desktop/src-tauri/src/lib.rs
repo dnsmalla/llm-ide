@@ -298,6 +298,7 @@ macro_rules! product_handlers {
                 project_layout::project_memory,
                 fs_ops::fs_list_dir,
                 fs_ops::fs_read_file,
+                fs_ops::fs_read_image,
                 fs_ops::fs_read_range,
                 fs_ops::fs_write_file,
                 fs_ops::fs_create,
