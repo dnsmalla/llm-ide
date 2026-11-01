@@ -36,6 +36,14 @@ export interface LoopState {
 export interface AutoTaskLogLine { id: string; timestamp: number; level: string; text: string }
 export interface AutoTaskLogs { currentTask: string | null; tasks: { id: string; label: string; lines: AutoTaskLogLine[] }[] }
 export interface LoopRun { id: string; startedAt: number; durationSeconds: number; iterationsUsed: number; statusCode: string; statusSummary: string; trigger: string }
+export interface AutoTaskSetup {
+  hasProject: boolean;
+  projectName: string | null;
+  templates: { id: string; name: string; body: string }[];
+  configs: { taskId: string; inputPath: string | null; outputPath: string | null; skillName: string | null; templateId: string | null }[];
+  skills: { name: string; description: string }[];
+  folders: string[];
+}
 export interface BridgeSnapshot {
   phase: BridgePhase;
   deviceName: string | null;
@@ -47,6 +55,7 @@ export interface BridgeSnapshot {
   history: { actionText: string; status: string; lastUpdated: number }[];
   logs: AutoTaskLogs | null;
   loopRuns: LoopRun[];
+  setup: AutoTaskSetup | null;
 }
 
 type Msg = Record<string, unknown> & { type?: unknown };
@@ -99,7 +108,7 @@ function randomId(): string {
 export class MacBridge {
   private ws: WebSocket | null = null;
   private heartbeat: number | null = null;
-  private snapshot: BridgeSnapshot = { phase: "idle", deviceName: null, capabilities: [], error: null, autoTasks: null, loop: null, acks: [], history: [], logs: null, loopRuns: [] };
+  private snapshot: BridgeSnapshot = { phase: "idle", deviceName: null, capabilities: [], error: null, autoTasks: null, loop: null, acks: [], history: [], logs: null, loopRuns: [], setup: null };
   private listeners = new Set<() => void>();
   private deviceId: string;
   private token: string | null = null;
@@ -182,6 +191,7 @@ export class MacBridge {
         this.startHeartbeat();
         this.send({ type: "auto_task_list" });
         this.send({ type: "auto_task_logs_list" });
+        this.send({ type: "auto_task_setup_list" });
         this.send({ type: "loop_status_list" });
         this.send({ type: "loop_history" });
         break;
@@ -229,6 +239,13 @@ export class MacBridge {
             : [],
         });
         break;
+      case "auto_task_setup_reply": {
+        const templates = Array.isArray(msg.templates) ? msg.templates.filter(isObj).map((t) => ({ id: str(t.id) ?? "", name: str(t.name) ?? "Template", body: str(t.body) ?? "" })).filter((t) => t.id !== "") : [];
+        const configs = Array.isArray(msg.configs) ? msg.configs.filter(isObj).map((c) => ({ taskId: str(c.taskId) ?? "", inputPath: str(c.inputPath), outputPath: str(c.outputPath), skillName: str(c.skillName), templateId: str(c.templateId) })).filter((c) => c.taskId !== "") : [];
+        const skills = Array.isArray(msg.skills) ? msg.skills.filter(isObj).map((k) => ({ name: str(k.name) ?? "", description: str(k.description) ?? "" })).filter((k) => k.name !== "") : [];
+        this.emit({ setup: { hasProject: bool(msg.hasProject), projectName: str(msg.projectName), templates, configs, skills, folders: Array.isArray(msg.folders) ? msg.folders.filter((x): x is string => typeof x === "string") : [] } });
+        break;
+      }
       case "auto_task_logs_reply": {
         const tasks = Array.isArray(msg.tasks)
           ? msg.tasks.filter(isObj).map((t) => ({
@@ -252,6 +269,7 @@ export class MacBridge {
   refresh(): void {
     if (!this.send({ type: "auto_task_list" })) return;
     this.send({ type: "auto_task_logs_list" });
+    this.send({ type: "auto_task_setup_list" });
     this.send({ type: "loop_status_list" });
   }
   history(): void { this.send({ type: "auto_task_history" }); }

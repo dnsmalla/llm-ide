@@ -110,6 +110,24 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
                 <h3>Log</h3>
                 <pre className="bridge-log">{logs.length > 0 ? logs.map((l) => `${new Date(l.timestamp * 1000).toLocaleTimeString()}  ${l.text}`).join("\n") : "No log lines for this task yet."}</pre>
               </section>
+              {(() => {
+                const cfg = snap.setup?.configs.find((c) => c.taskId === selected.id);
+                const template = cfg?.templateId ? snap.setup?.templates.find((t) => t.id === cfg.templateId) : null;
+                return (
+                  <section aria-label="Task setup">
+                    <h3>Setup</h3>
+                    <dl className="bridge-meta">
+                      <div><dt>Project</dt><dd>{snap.setup?.hasProject ? snap.setup.projectName ?? "Open" : "No project open on the Mac"}</dd></div>
+                      <div><dt>Input</dt><dd>{cfg?.inputPath ?? "Not set"}</dd></div>
+                      <div><dt>Output</dt><dd>{cfg?.outputPath ?? "Not set"}</dd></div>
+                      <div><dt>Skill</dt><dd>{cfg?.skillName ?? "Not set"}</dd></div>
+                      <div><dt>Template</dt><dd>{template?.name ?? cfg?.templateId ?? "Not set"}</dd></div>
+                    </dl>
+                    {template ? <pre className="bridge-log" aria-label="Prompt template">{template.body}</pre> : null}
+                    <p className="st-hint">Templates, paths, skills and schedules are edited in the Mac app; this snapshot is read-only.</p>
+                  </section>
+                );
+              })()}
             </>
           ) : <p className="st-hint">Select a task.</p>}
         </section>
