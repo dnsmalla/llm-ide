@@ -39,7 +39,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 - **Terminal**: shell-wide dock, persisted height, status-bar toggle, OSC titles, new shells in the active repository clone.
 
 ### Graph / Doc Gen / Visual
-- **Graph**: Code / InfiniteBrain / All generation through the Mac-style left run panel; no desktop-only mode/scan presets, no arbitrary graph.json opener. Routines and storage cards remain Mac-local (no desktop host); the Mac Library tree/quick-pick and 3D canvas are not reproduced.
+- **Graph**: Code / InfiniteBrain / All generation through the Mac-style left run panel; no desktop-only mode/scan presets, no arbitrary graph.json opener. The bundled GraphKit CLI runs from a temp `.cjs` copy (a checkout app under `desktop/` otherwise makes Node treat it as ESM and every generate fails); a lost WebGL context rebuilds the view automatically with the saved camera. Empty `llm-doc` reports why InfiniteBrain has nothing to draw. Routines/storage, the Mac Library tree/quick-pick and 3D canvas remain Mac-local.
 - **Doc Gen**: editable result, Preview/Raw, configurable project-relative destination, Use-chat source, Markdown template import, template/command management, embedded Chat column. The Mac-only destination providers (Box/Slack/email) are shown as not wired.
 - **Visual**: image sources and source preview are real. The core returns text for Visual, so there is no image result viewer to mirror; the Mac’s local image viewer has no desktop equivalent.
 
