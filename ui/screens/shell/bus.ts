@@ -11,7 +11,9 @@ export type ShellEvent =
   /** Open a file of the open project in Explorer (switches to the Explorer section). */
   | { type: "open-file"; path: string; line?: number }
   /** Switch section; `anchor` is a section-specific sub-page id (Settings: "about", "providers", ...). */
-  | { type: "goto-section"; section: SectionId; anchor?: string };
+  | { type: "goto-section"; section: SectionId; anchor?: string }
+  /** The project's files or cached repository issues changed (clone, import); owners reload. */
+  | { type: "project-changed" };
 
 export type ShellEventType = ShellEvent["type"];
 type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) => void;

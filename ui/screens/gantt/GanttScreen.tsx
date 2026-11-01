@@ -1,6 +1,7 @@
 // The Gantt section: the Mac's timeline over repository issues, with GitHub's dates supplied by the
 // /kb/issue-schedule overlay. The desktop reads cached issues (Issues imports them) and can edit the overlay's
 // start/due/estimate/dependencies; there is no provider write, so nothing here changes an issue itself.
+import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -75,6 +76,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
+  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) void load(); }), [active, load]);
 
   const rows = useMemo(() => buildRows(issues, schedules, provider, repo), [issues, schedules, provider, repo]);
   const dated = useMemo(() => datedRows(rows), [rows]);

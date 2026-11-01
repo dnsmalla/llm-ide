@@ -1,6 +1,7 @@
 // The Issues section, read + import: the Mac's kanban shape (columns from the label namespace, else Open/Closed)
 // over the core's cached tickets. Creating, editing and closing issues needs the provider write clients the Mac app
 // has; the desktop core has no such routes yet, and the card says so rather than showing dead buttons.
+import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -61,6 +62,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
+  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) void load(); }), [active, load]);
 
   const importIssues = async () => {
     const repo = repoDraft.trim();

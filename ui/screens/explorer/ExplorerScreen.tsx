@@ -1,5 +1,6 @@
 // The Explorer section: file tree (left), editor tabs and Monaco (right). Wiring only; behaviour lives in
 // `controller.ts` and the pure models, which are tested without a DOM.
+import { shellBus } from "../shell/bus";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -275,6 +276,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     for (const d of snap.tree.dirs.keys()) await controller.refreshDir(d);
     void controller.refreshGit();
   };
+  useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!active) return;

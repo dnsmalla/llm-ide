@@ -24,14 +24,17 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     }
   }, [deps]);
 
-  useEffect(() => {
-    if (!active) return;
-    // Re-read on every visit so a repository cloned from Settings appears without a reload.
+  const reload = useCallback(() => {
     setChildren(new Map());
     setClosedRoots(new Set());
     void loadRoot("code");
     void loadRoot("data");
-  }, [active, loadRoot]);
+  }, [loadRoot]);
+
+  useEffect(() => {
+    if (active) reload();
+  }, [active, reload]);
+  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) reload(); }), [active, reload]);
 
   const toggle = async (path: string) => {
     if (expanded.has(path)) {

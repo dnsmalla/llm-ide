@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { shellBus } from "../../shell/bus";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
@@ -49,6 +49,7 @@ export default function RepositoriesSection() {
   const [cloneToken, setCloneToken] = useState("");
   const [cloning, setCloning] = useState<string | null>(null);
   const [cloneNotice, setCloneNotice] = useState<string | null>(null);
+  const imported = useRef(new Set<string>());
 
   // The project's own code/ path (Settings → Paths); saved repos default their clone destination here.
   const [codeDir, setCodeDir] = useState<string | null>(null);
@@ -147,7 +148,30 @@ export default function RepositoriesSection() {
   };
   const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
 
-  const doClone = async (r: SavedRepo, token: string) => {
+  const repoSlug = (raw: string): string | null => {
+    const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(raw.trim());
+    return m ? `${m[1]}/${m[2]}` : null;
+  };
+  /** Import the cached GitHub issues a repository clone should make visible in Issues and Gantt. */
+  const importIssuesFor = async (r: SavedRepo, quiet: boolean): Promise<number | null> => {
+    if (provider.id !== "github" || imported.current.has(r.id) || !connected) return null;
+    const slug = repoSlug(r.url);
+    if (!slug) return null;
+    imported.current.add(r.id);
+    try {
+      const body = await call(client, "POST", "/kb/connect-github-issues", { repo: slug, state: "open" });
+      const n = body && typeof body === "object" && typeof (body as { imported?: unknown }).imported === "number" ? (body as { imported: number }).imported : null;
+      shellBus.publish({ type: "project-changed" });
+      if (!quiet) setStatus(n === null ? `Imported ${slug} issues.` : `Imported ${n} issue${n === 1 ? "" : "s"} from ${slug}.`);
+      return n;
+    } catch (e) {
+      imported.current.delete(r.id);
+      if (!quiet) setError(sourcesError(e));
+      return null;
+    }
+  };
+
+  const doClone = async (r: SavedRepo, token: string, quiet = false) => {
     if (!host.cloneRepository) return;
     const dest = cloneDestination(r);
     if (!dest) {
@@ -164,12 +188,23 @@ export default function RepositoriesSection() {
       await call(client, "POST", "/auth/me/repos", { path: result.path }).catch(() => undefined);
       setCloneFor(null);
       setCloneToken("");
-      setCloneNotice(`Cloned ${result.name} into code/. Open Library to browse it.`);
+      shellBus.publish({ type: "project-changed" });
+      setCloneNotice(`Cloned ${result.name} into code/. Open Library or Explorer to browse it.`);
+      // Make the same repository visible in Issues/Gantt: import its open GitHub issues into the core cache.
+      await importIssuesFor(r, true);
     } catch (e) {
-      setError(sourcesError(e));
+      const msg = sourcesError(e);
+      if (!(quiet && /already exists/i.test(msg))) setError(msg);
     } finally {
       setCloning(null);
     }
+  };
+
+  /** Adding/finishing a repository URL should make its code and issues appear without another trip to Settings. */
+  const autoProvision = (r: SavedRepo) => {
+    void importIssuesFor(r, true);
+    const token = memoryTokens[provider.id];
+    if (host.cloneRepository && codeDir && token && !cloning) void doClone(r, token, true);
   };
   const startClone = (r: SavedRepo) => {
     setError(null);
@@ -320,6 +355,7 @@ export default function RepositoriesSection() {
                       spellCheck={false}
                       aria-invalid={urlError(r) !== null}
                       onChange={(e) => patchRepo(r, { url: e.target.value })}
+                      onBlur={() => autoProvision(r)}
                     />
                     {urlError(r) ? <span className="st-hint" role="alert">{urlError(r)}</span> : null}
                   </label>
