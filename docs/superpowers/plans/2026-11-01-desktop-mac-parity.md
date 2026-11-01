@@ -18,7 +18,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, clipboard, replace-all done; PDF pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach, approval badge, context+memory done; voice/turn actions pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell dock/status/persistence/title/cwd done |
-| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
+| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | modes + scan target done; repo quick-pick/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs, setup snapshot; custom/editing pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts/saved-repo picker done |
