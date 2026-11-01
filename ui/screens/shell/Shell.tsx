@@ -8,6 +8,8 @@ import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
+import { chatApprovalStore } from "./chat-approvals";
+import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
 import { computeGate, isInert, shouldMountSections } from "./gate";
@@ -181,6 +183,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
+        <ApprovalBadge onReveal={() => dispatch({ type: "select", id: "chat" })} />
         <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>
       <div className="sh-body">
@@ -228,5 +231,16 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         terminalItem={<ShellTerminalItem activeSection={nav.active} built={TERMINAL_BUILT} onToggle={() => { const next = !terminalOpen; setTerminalOpen(next); writeTerminalPrefs({ open: next, height: readTerminalPrefs().height }); }} />}
       />
     </div>
+  );
+}
+
+
+function ApprovalBadge({ onReveal }: { onReveal: () => void }) {
+  const count = useSyncExternalStore(chatApprovalStore.subscribe, chatApprovalStore.get, chatApprovalStore.get);
+  if (count <= 0) return null;
+  return (
+    <button type="button" className="sh-approval-badge" aria-label={`${count} pending approval${count === 1 ? "" : "s"}. Open chat`} title="A tool is waiting for your approval in Chat" onClick={onReveal}>
+      {count} approval{count === 1 ? "" : "s"}
+    </button>
   );
 }

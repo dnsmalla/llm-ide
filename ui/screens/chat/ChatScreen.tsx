@@ -16,6 +16,7 @@ import { ModeBanner } from "./approvals/ModeBanner";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
+import { chatApprovalStore } from "../shell/chat-approvals";
 import {
   AUTO_MODE, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, putRoute,
   type ModelGroup, type PermissionMode, type RouteView,
@@ -145,6 +146,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [activeId, controller, core]);
 
   const state = useChatState(controller, activeId ?? "");
+  useEffect(() => {
+    chatApprovalStore.set(state.pendingApprovals.length);
+    return () => chatApprovalStore.set(0);
+  }, [state.pendingApprovals.length]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
 
