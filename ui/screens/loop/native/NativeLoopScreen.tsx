@@ -250,9 +250,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           return { ok: !v.timedOut && v.exitCode === 0, output: [v.stdout, v.stderr].filter(Boolean).join("\n") };
         },
         async ask(prompt) {
-          const a = await core.request<{ reply?: string; resultSubtype?: string }>("/kb/loop/agent-run", { method: "POST", body: { message: prompt, repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 } });
-          if (a.resultSubtype && a.resultSubtype !== "success") throw new Error(a.resultSubtype);
+          const a = await core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
           return a.reply ?? "";
+        },
+        async judge(saved, fresh) {
+          const prompt = ["Compare two answers about a software fault.", "Are they the same meaning for the fault and its fix? Reply with JSON only: {\"same\":true} or {\"same\":false}.", `Saved answer:\n${saved.slice(0, 12_000)}`, `Fresh answer:\n${fresh.slice(0, 12_000)}`].join("\n\n");
+          const j = await core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
+          const text = j.reply ?? "";
+          const m = /\{[\s\S]*?\}/.exec(text);
+          if (!m) return false;
+          try { return (JSON.parse(m[0]) as { same?: unknown }).same === true; } catch { return false; }
         },
       });
       return { ok: r.passed, output: r.checked === 0 ? "No fixed faults to re-check." : [...r.notes, ...r.failures].join("\n") };

@@ -20,7 +20,9 @@ test("regression prefers verify commands and re-asks legacy faults", async () =>
   const r = await runRegression(fs, "system/faults", { async verify() { return { ok: true, output: "" }; }, async ask() { return "R2"; } });
   assert.equal(r.checked, 2);
   assert.equal(r.passed, true);
-  const bad = await runRegression(fs, "system/faults", { async verify() { return { ok: false, output: "fail" }; }, async ask() { return "different"; } });
+  const semantic = await runRegression(fs, "system/faults", { async verify() { return { ok: true, output: "" }; }, async ask() { return "different words"; }, async judge() { return true; } });
+  assert.equal(semantic.passed, true);
+  const bad = await runRegression(fs, "system/faults", { async verify() { return { ok: false, output: "fail" }; }, async ask() { return "different"; }, async judge() { return false; } });
   assert.equal(bad.passed, false);
   assert.equal(bad.failures.length, 2);
 });

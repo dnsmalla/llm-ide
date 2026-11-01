@@ -7,6 +7,8 @@ export interface FaultReport { rel: string; prompt: string; response: string; ve
 export type RegressionFs = Pick<FsApi, "read" | "list">;
 export interface RegressionDeps {
   ask(prompt: string): Promise<string>;
+  /** Same-meaning judge over the saved and fresh answers. Absent = exact text comparison. */
+  judge?(saved: string, fresh: string): Promise<boolean>;
   verify(fault: FaultReport): Promise<{ ok: boolean; output: string }>;
 }
 export interface RegressionResult { passed: boolean; checked: number; failures: string[]; notes: string[] }
@@ -67,8 +69,10 @@ export async function runRegression(fs: RegressionFs, faultsRoot: string, deps: 
     } else {
       try {
         const fresh = await deps.ask(f.prompt);
-        if (norm(fresh) !== norm(f.response)) failures.push(`${f.rel}: response changed (semantic judge not ported)`);
-        else notes.push(`${f.rel}: unchanged`);
+        if (norm(fresh) !== norm(f.response)) {
+          if (deps.judge && (await deps.judge(f.response, fresh))) notes.push(`${f.rel}: unchanged (same meaning)`);
+          else failures.push(`${f.rel}: response changed`);
+        } else notes.push(`${f.rel}: unchanged`);
       } catch (e) {
         failures.push(`${f.rel}: could not re-ask (${e instanceof Error ? e.message : String(e)})`);
       }
