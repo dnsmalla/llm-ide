@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { BridgeRequired, useMacBridge } from "../bridge/BridgeGate.tsx";
+import { NativeLoopScreen } from "./native/NativeLoopScreen.tsx";
 import { macBridge, type BridgeSnapshot } from "../bridge/mac-bridge.ts";
 import "../bridge/bridge.css";
 import "./loop.css";
@@ -92,7 +93,12 @@ function Content({ snap }: { snap: BridgeSnapshot }): ReactNode {
   );
 }
 
-export default function LoopScreen(_props: SectionProps): ReactNode {
+export default function LoopScreen(props: SectionProps): ReactNode {
+  return <NativeLoopScreen {...props} />;
+}
+
+/** The previous Mobile Control remote-control screen, kept for reference while the native runner is ported. */
+export function BridgeLoopScreen(): ReactNode {
   const snap = useMacBridge();
   return <BridgeRequired>{() => <Content snap={snap} />}</BridgeRequired>;
 }

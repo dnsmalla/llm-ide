@@ -1,0 +1,280 @@
+// Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
+// Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { SectionProps } from "@llmide/screens/shell";
+import { createHostFs } from "../../explorer/fs";
+import { StatusBanner } from "@llmide/ui-kit";
+import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
+import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
+import "./native-loop.css";
+
+const stageKindLabel: Record<string, string> = {
+  regressionSweep: "Regression sweep", shellCommand: "Shell command", skill: "Skill", artifactCheck: "Artifact check",
+  testMap: "Test map", testPrune: "Test prune", incidentTriage: "Incident triage", codeGraph: "Code graph",
+  sdkSurfaceDiff: "SDK diff", unsupported: "Unsupported",
+};
+
+function stageCheck(s: LoopStage): string {
+  if (s.command) return s.command;
+  if (s.skillId) return s.skillId;
+  if (s.testOp) return `test ${s.testOp}`;
+  if (s.graphOp) return `graph ${s.graphOp}`;
+  if (s.kind === "regressionSweep") return "system/faults/";
+  return stageKindLabel[s.kind] ?? s.kind;
+}
+
+function loopConfigTemplate() {
+  return {
+    stages: [], maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: null,
+    pauseTimeoutSeconds: 1800, maxRepairsPerStage: 3, repairModel: null,
+    protectedPathPolicy: "revert" as const, writeSummaryNote: false, extraProtectedGlobs: [],
+    useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false, openMergeRequest: true,
+    refactorBatchesPerRun: null,
+  };
+}
+
+function cloneStore(store: LoopProjectStore): LoopProjectStore {
+  return structuredClone(store);
+}
+
+export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNode {
+  const fs = useMemo(() => createHostFs(), []);
+  const [load, setLoad] = useState<LoopLoad | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [selectedLoopId, setSelectedLoopId] = useState<string | null>(null);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setLoad(null);
+    setOpenError(null);
+    if (!projectRoot) return undefined;
+    void loadLoops(fs).then((r) => {
+      if (!live) return;
+      setLoad(r);
+      if (r.kind === "ok") {
+        const loop = primaryLoop(r.store);
+        setSelectedLoopId(loop?.id ?? null);
+        setSelectedStageId(loop?.config.stages[0]?.id ?? null);
+        setDirty(false);
+      }
+    }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
+    return () => { live = false; };
+  }, [fs, projectRoot]);
+
+  const store = load?.kind === "ok" ? load.store : null;
+  const loop = store?.loops.find((l) => l.id === selectedLoopId) ?? store?.loops[0] ?? null;
+  const stage = loop?.config.stages.find((s) => s.id === selectedStageId) ?? loop?.config.stages[0] ?? null;
+
+  const mutateStore = (fn: (store: LoopProjectStore) => void) => {
+    if (!store) return;
+    const next = cloneStore(store);
+    fn(next);
+    setLoad({ kind: "ok", store: next, hash: load?.kind === "ok" ? load.hash : "" });
+    setDirty(true);
+    setNotice(null);
+  };
+
+  const addLoop = () => {
+    if (!store) return;
+    const id = crypto.randomUUID();
+    mutateStore((s) => {
+      s.loops.push({ id, name: `New Loop ${s.loops.length + 1}`, isPrimary: s.loops.length === 0, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: null, runsOnSchedule: false, config: { ...loopConfigTemplate(), stages: [] } });
+    });
+    setSelectedLoopId(id);
+    setSelectedStageId(null);
+  };
+
+  const duplicateLoop = () => {
+    if (!loop) return;
+    const id = crypto.randomUUID();
+    mutateStore((s) => {
+      const copy = structuredClone(loop);
+      copy.id = id; copy.name = `${loop.name} Copy`; copy.isPrimary = false; copy.defaultKey = null; copy.runsOnSchedule = false;
+      s.loops.push(copy);
+    });
+    setSelectedLoopId(id);
+    setSelectedStageId(null);
+  };
+
+  const deleteLoop = () => {
+    if (!store || !loop || loop.defaultKey !== null || store.loops.length <= 1) return;
+    if (!window.confirm(`Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.`)) return;
+    mutateStore((s) => { s.loops = s.loops.filter((l) => l.id !== loop.id); });
+    const next = store.loops.find((l) => l.id !== loop.id) ?? null;
+    setSelectedLoopId(next?.id ?? null);
+    setSelectedStageId(next?.config.stages[0]?.id ?? null);
+  };
+
+  const setPrimary = () => {
+    if (!loop) return;
+    mutateStore((s) => { for (const l of s.loops) l.isPrimary = l.id === loop.id; });
+  };
+
+  const addStage = () => {
+    if (!loop) return;
+    const id = crypto.randomUUID();
+    mutateStore((s) => {
+      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
+      l.config.stages.push({ id, name: "New Stage", kind: "shellCommand", command: "", order: l.config.stages.length, skillId: null, targetPath: null, outputPath: null, prompt: null, isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null, detectedCommand: null, check: null, testOp: null, graphOp: null, allowsRepair: true, defaultRevision: null, disabledByDetection: null, raw: null });
+    });
+    setSelectedStageId(id);
+  };
+
+  const deleteStage = () => {
+    if (!stage || stage.isDefault || !loop) return;
+    mutateStore((s) => { const l = s.loops.find((x) => x.id === loop.id); if (l) l.config.stages = l.config.stages.filter((x) => x.id !== stage.id); });
+    setSelectedStageId(loop.config.stages.find((x) => x.id !== stage.id)?.id ?? null);
+  };
+
+  const duplicateStage = () => {
+    if (!stage || !loop) return;
+    const id = crypto.randomUUID();
+    mutateStore((s) => {
+      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
+      const copy = structuredClone(stage); copy.id = id; copy.isDefault = false; copy.defaultKey = null; copy.order = l.config.stages.length; copy.name = `${stage.name} Copy`;
+      l.config.stages.push(copy);
+    });
+    setSelectedStageId(id);
+  };
+
+  const selectLoop = (l: LoopDefinition) => {
+    setSelectedLoopId(l.id);
+    setSelectedStageId(l.config.stages[0]?.id ?? null);
+  };
+
+  const patchLoop = (fn: (l: LoopDefinition) => void) => {
+    if (!loop) return;
+    mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
+  };
+
+  const save = async () => {
+    if (!store || load?.kind !== "ok" || saving) return;
+    setSaving(true);
+    try {
+      const r = await saveLoops(fs, store, load.hash);
+      setLoad({ kind: "ok", store, hash: r.hash });
+      setDirty(false);
+      setNotice("Loop configuration saved.");
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "The Loop file could not be saved.");
+    } finally { setSaving(false); }
+  };
+
+  if (!projectRoot) return <div className="loop-native-empty"><p>Open a project to use Loop.</p></div>;
+  if (openError) return <div className="loop-native-empty"><StatusBanner severity="error" message={openError} /></div>;
+  if (!load) return <div className="loop-native-empty" role="status"><p>Loading loops…</p></div>;
+  if (load.kind === "missing") {
+    return <div className="loop-native-empty"><h1>No Loop configuration</h1><p>This project has no <code>system/loop.json</code>. Open the project in the Mac app once to seed the default loops, or create them here in the next port slice.</p></div>;
+  }
+  if (load.kind === "corrupt") return <div className="loop-native-empty"><StatusBanner severity="error" message={load.message} /><p className="loop-native-hint">The file was not overwritten. Recover or remove it in the Mac app.</p></div>;
+  if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;
+
+  const enabledGates = loop.config.stages.filter((s) => s.enabled && s.severity === "blocking");
+  return (
+    <div className="loop-native" data-active={active}>
+      <aside className="loop-pane loop-loops" aria-label="Loops">
+        <div className="loop-pane-head"><span>LOOPS</span><button type="button" className="loop-plus" aria-label="New loop" title="New loop" onClick={addLoop}>＋</button></div>
+        <div className="loop-actions">
+          <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
+          <button type="button" className="loop-btn" disabled={isManualOnly(loop)} title={isManualOnly(loop) ? "Manual-only: it applies code" : "Include in the scheduled run"} onClick={() => patchLoop((l) => { l.runsOnSchedule = !l.runsOnSchedule; })}>{loop.runsOnSchedule ? "◷ Scheduled" : "◷ Schedule"}</button>
+          <button type="button" className="loop-btn" onClick={duplicateLoop}>Duplicate</button>
+          {loop.defaultKey === null && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
+        </div>
+        <ul className="loop-list">
+          {store.loops.map((l) => (
+            <li key={l.id}>
+              <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
+                <span className="loop-row-name">{l.name}</span>
+                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}</span>
+                <span className="loop-row-menu" aria-hidden="true">⋯</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="loop-pane-foot"><span className="loop-native-hint">{dirty ? "Unsaved changes" : "Saved to system/loop.json"}</span>{dirty ? <button type="button" className="loop-btn" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}</div>
+      </aside>
+
+      <aside className="loop-pane loop-stages" aria-label="Stages">
+        <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><button type="button" className="loop-plus" aria-label="Add stage" title="Add stage" onClick={addStage}>＋</button></div>
+        <div className="loop-actions">
+          <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
+          <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
+        </div>
+        <ul className="loop-list">
+          {loop.config.stages.map((s) => (
+            <li key={s.id}>
+              <button type="button" className="loop-stage-row" data-on={s.id === stage?.id || undefined} onClick={() => setSelectedStageId(s.id)}>
+                <span className="loop-stage-name">{s.name}</span>
+                {s.isDefault ? <span className="loop-lock" title="Default stage">🔒</span> : null}
+                <span className="loop-row-menu" aria-hidden="true">⋯</span>
+              </button>
+            </li>
+          ))}
+          {loop.config.stages.length === 0 ? <li className="loop-empty-row">No stages yet.</li> : null}
+        </ul>
+      </aside>
+
+      <main className="loop-run" aria-label="Run">
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span></div>
+        {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
+        <section className="loop-card loop-overview">
+          <h2>OVERVIEW</h2>
+          <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>
+          <label className="loop-field"><span>Goal — what is this loop trying to achieve?</span><textarea rows={2} value={loop.goal ?? ""} onChange={(e) => patchLoop((l) => { l.goal = e.target.value || null; })} /></label>
+          <label className="loop-field"><span>Acceptance criteria — what observable condition means done?</span><textarea rows={2} value={loop.acceptanceCriteria ?? ""} placeholder="Optional; included in repair/skill prompts." onChange={(e) => patchLoop((l) => { l.acceptanceCriteria = e.target.value || null; })} /></label>
+          <div className="loop-gates">
+            <h3>{enabledGates.length} gating check{enabledGates.length === 1 ? "" : "s"}.</h3>
+            <p className="loop-native-hint">Every iteration re-runs all stages from the top until each gating check passes.</p>
+            <ol>{loop.config.stages.filter((s) => s.enabled).map((s, i) => <li key={s.id}><span>{i + 1}</span> {s.name} <code>{s.severity === "blocking" ? "verify" : "advisory"}</code> <code>{stageCheck(s)}</code></li>)}</ol>
+          </div>
+          <dl className="loop-meta">
+            <dt>Runs in</dt><dd>{projectRoot}</dd>
+            <dt>Project root</dt><dd>{projectRoot}</dd>
+            <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations · {loop.config.wallClockBudgetSeconds ? `${loop.config.wallClockBudgetSeconds}s time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
+            <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in the scheduled Loop Engineering run" : "no — run it from here"}</dd>
+          </dl>
+          <div className="loop-budgets">
+            <label className="loop-field"><span>Max iterations</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Time limit (seconds, empty = none)</span><input type="number" min={0} value={loop.config.wallClockBudgetSeconds ?? ""} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)); })} /></label>
+            <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Repairs per stage</span><input type="number" min={0} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(0, Number(e.target.value) || 0); })} /></label>
+          </div>
+        </section>
+
+        <section className="loop-card">
+          <h2>ENVIRONMENT</h2>
+          <p><span className="loop-ready" aria-hidden="true">●</span> Environment check is not ported yet.</p>
+          <p className="loop-native-hint">The Mac checks the project’s test command and Python environment. The next port slice adds it.</p>
+        </section>
+
+        <section className="loop-card">
+          <h2>TEMPLATE</h2>
+          <div className="loop-inline"><select aria-label="Template" disabled><option>Built-in prompt</option></select><button type="button" className="loop-btn" disabled>Apply</button><button type="button" className="loop-btn" disabled>Save as…</button></div>
+          <p className="loop-native-hint">Template recipes are ported with the next editing slice.</p>
+        </section>
+
+        {stage ? (
+          <section className="loop-card">
+            <h2>PROCESS</h2>
+            <div className="loop-stage-editor">
+              <div className="loop-stage-editor-head"><span>{loop.config.stages.indexOf(stage) + 1}</span><span>{stage.enabled ? "●" : "○"} {stage.name}</span><span className="loop-native-hint">{stage.severity}</span></div>
+              <label className="loop-field"><span>Name</span><input value={stage.name} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.name = e.target.value; })} /></label>
+              <div className="loop-inline"><label className="loop-check"><input type="checkbox" checked={stage.enabled} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.enabled = e.target.checked; })} /> Enabled</label><label className="loop-field"><span>Severity</span><select value={stage.severity} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.severity = e.target.value as "blocking" | "advisory"; })}><option value="blocking">Blocking</option><option value="advisory">Advisory</option></select></label></div>
+              {stage.command ? <label className="loop-field"><span>Command</span><input value={stage.command} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = e.target.value; })} /></label> : null}
+              <p className="loop-native-hint">{stageKindLabel[stage.kind] ?? stage.kind}{stage.defaultKey ? ` · ${stage.defaultKey}` : ""}</p>
+            </div>
+          </section>
+        ) : null}
+      </main>
+
+      <aside className="loop-log" aria-label="Run log">
+        <div className="loop-pane-head"><span>RUN LOG</span><span className="loop-native-hint">Clear</span></div>
+        <p className="loop-native-hint">No runs yet.</p>
+      </aside>
+    </div>
+  );
+}
