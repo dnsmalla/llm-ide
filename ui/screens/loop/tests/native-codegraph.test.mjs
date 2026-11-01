@@ -23,3 +23,11 @@ test("code graph snapshot and verify detect a shrunken graph", async () => {
   assert.equal(shrunk.passed, false);
   assert.match(shrunk.output, /shrank/);
 });
+
+test("code graph reads the canonical GraphKit files/calls shape", async () => {
+  const files = { "system/graph/graph.json": JSON.stringify({ files: [{ functions: [{ name: "a" }, { name: "b" }] }], calls: [{ from: "x", to: "y" }] }) };
+  const r = await runCodeGraph(mem(files), "snapshot", "system/graph/graph.json", "system/loop/refactor/graph/before.json");
+  assert.equal(r.passed, true);
+  assert.match(r.output, /2 node\(s\)/);
+  assert.match(r.output, /1 edge\(s\)/);
+});

@@ -133,9 +133,21 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   const graphText = await file(fs, graphPath);
   if (graphText) {
     try {
-      const g = JSON.parse(graphText) as { nodes?: Array<{ kind?: string; title?: string; id?: string; metadata?: { path?: string; source_file?: string; line?: number } }> };
+      const g = JSON.parse(graphText) as {
+        nodes?: Array<{ kind?: string; title?: string; id?: string; metadata?: { path?: string; source_file?: string; line?: number } }>;
+        files?: Array<{ path?: string; name?: string; loc?: number; usedBy?: string[]; imports?: string[]; functions?: Array<{ name?: string; line?: number }> }>;
+      };
       source = "graph";
-      for (const n of g.nodes ?? []) {
+      for (const f of g.files ?? []) {
+        if (!f.path) continue;
+        const base = f.name?.replace(/\.[^.]+$/, "") ?? f.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+        for (const fn of f.functions ?? []) {
+          if (!fn.name || fn.name.startsWith("_") || ["init", "deinit", "body", "main", "description"].includes(fn.name)) continue;
+          const testedBy = tests.filter((t) => t.tokens.has(fn.name!) || (base !== "" && t.tokens.has(base))).map((t) => t.path).sort();
+          entries.push({ path: f.path, function: fn.name, line: fn.line ?? 1, fanIn: (f.usedBy?.length ?? 0) + (f.imports?.length ?? 0), loc: f.loc ?? 0, testedBy });
+        }
+      }
+      if (entries.length === 0) for (const n of g.nodes ?? []) {
         if (n.kind !== "function" || !n.title) continue;
         const path = n.metadata?.path ?? n.metadata?.source_file;
         if (!path) continue;

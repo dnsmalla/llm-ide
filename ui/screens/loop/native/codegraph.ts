@@ -11,8 +11,9 @@ async function readShape(fs: CodeGraphFs, path: string): Promise<GraphShape | nu
   try {
     const r = await fs.read(path, 20_000_000);
     if (r.status !== "ok" || !r.text) return null;
-    const g = JSON.parse(r.text) as { nodes?: unknown[]; edges?: unknown[]; files?: unknown[] };
-    return { nodes: g.nodes?.length ?? 0, edges: g.edges?.length ?? 0, files: g.files?.length ?? 0 };
+    const g = JSON.parse(r.text) as { nodes?: unknown[]; edges?: unknown[]; files?: Array<{ functions?: unknown[] }>; calls?: unknown[] };
+    const fnCount = (g.files ?? []).reduce((n, f) => n + (Array.isArray(f.functions) ? f.functions.length : 0), 0);
+    return { nodes: g.nodes?.length ?? fnCount, edges: (g.edges?.length ?? 0) + (g.calls?.length ?? 0), files: g.files?.length ?? 0 };
   } catch { return null; }
 }
 
