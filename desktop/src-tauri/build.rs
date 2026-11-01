@@ -21,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "loop_environment_check",
     "loop_cancel",
     "loop_boundary_warnings",
+    "loop_changed_paths",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",

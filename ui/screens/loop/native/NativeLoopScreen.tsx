@@ -432,6 +432,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         },
         log(line) { setRunLog((l) => [...l, line]); },
       });
+      let changedPaths: string[] = [];
+      try { changedPaths = await invokeHost<string[]>("loop_changed_paths"); } catch { changedPaths = []; }
+      if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
       setRunLog((l) => [...l, outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
@@ -752,6 +755,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <h3>{selectedRun.loopName}</h3>
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
+            {runRecord && Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
             {runRecord && Array.isArray(runRecord.stages) ? (
               <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; const output = String(run.stdout ?? ""); return <li key={i}><details><summary>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</summary>{output ? <pre className="loop-run-log">{output}</pre> : <p className="loop-native-hint">No captured output.</p>}</details></li>; })}</ul>
             ) : null}
