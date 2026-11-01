@@ -6,6 +6,7 @@
 //! the checkout. The page never chooses a path — the active project root and its llm-doc are host state.
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use tauri::Manager;
@@ -40,13 +41,23 @@ fn toolchain(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
     Err("the GraphKit generator is not bundled and no checkout CLI was found".into())
 }
 
+static NEXT_COPY: AtomicU64 = AtomicU64::new(0);
+
 fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
+    // A bundled CLI sits inside the app bundle. In a checkout build the bundle lives under `desktop/`,
+    // whose package.json says `"type": "module"`, so Node treats the CLI's `require` calls as ESM and fails.
+    // Run a `.cjs` copy from the temp dir: the CLI is self-contained, and this also avoids any package scope
+    // when the app is installed under a user's project tree.
+    let n = NEXT_COPY.fetch_add(1, Ordering::Relaxed);
+    let temp = std::env::temp_dir().join(format!("llmide-graphkit-{}-{n}.cjs", std::process::id()));
+    std::fs::copy(cli, &temp).map_err(|e| format!("cannot prepare the GraphKit CLI: {e}"))?;
     let output = Command::new(node)
-        .arg(cli)
+        .arg(&temp)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| format!("cannot run the GraphKit generator: {e}"))?;
+    let _ = std::fs::remove_file(&temp);
     if output.status.success() { return Ok(()); }
     let err = String::from_utf8_lossy(&output.stderr);
     let msg: String = err.chars().filter(|c| !c.is_control()).take(500).collect();
@@ -125,6 +136,9 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("the generator produced invalid JSON: {e}"))?;
     let nodes = value.get("nodes").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0);
     let edges = value.get("edges").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0);
+    if mode == "memory" && nodes == 0 {
+        return Err("This project's llm-doc has no documents to graph yet.".into());
+    }
     let dest = out_dir.join("graph.json");
     // Write to a sibling temp then rename so a reader never sees half a graph.
     let partial = out_dir.join("graph.json.partial");

@@ -38,7 +38,7 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
 export function EmptyState({ mode }: { mode: "code" | "memory" | "all" }) {
   const title = mode === "code" ? "No code graph yet" : mode === "memory" ? "No InfiniteBrain graph yet" : "No graph yet";
   const message = mode === "code"
-    ? "Pick a project folder on the left, then click Generate Code Graph."
+    ? "Click Generate Code Graph to scan the project."
     : mode === "memory"
       ? "Generate InfiniteBrain to build a doc graph from the project's llm-doc folder."
       : "Generate Graph to build one graph from all code and docs.";
