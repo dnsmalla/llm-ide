@@ -21,3 +21,16 @@ test("project environment detection reads manifests without executing anything",
   const none = { async read() { throw Object.assign(new Error("missing"), { code: "missing" }); } };
   assert.equal((await e.detectTestCommand(none)).command, null);
 });
+
+test("custom Loop templates persist, unique-name and delete", () => {
+  const map = new Map();
+  const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v) };
+  const cfg = t.BUILT_IN_TEMPLATES[0].config;
+  const a = t.saveCustomTemplate("Test & Fix", "mine", cfg, storage);
+  assert.equal(a.name, "Test & Fix 2");
+  const b = t.saveCustomTemplate("Mine", "", cfg, storage);
+  assert.equal(t.loadCustomTemplates(storage).length, 2);
+  t.deleteCustomTemplate(a.id, storage);
+  assert.deepEqual(t.loadCustomTemplates(storage).map((x) => x.name), ["Mine"]);
+  assert.equal(b.name, "Mine");
+});

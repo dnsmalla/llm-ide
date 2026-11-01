@@ -49,3 +49,36 @@ export function applyTemplate(t: LoopTemplate, detected: string | null): LoopEng
   }).map((s, i) => ({ ...s, order: i }));
   return c;
 }
+
+// User recipes are app-wide like the Mac's LoopTemplateStore, not project state. Stored locally; built-ins are
+// constants so a later improvement reaches every project.
+const CUSTOM_KEY = "llmide.loopTemplates.v1";
+export function loadCustomTemplates(storage: Storage | undefined = globalThis.localStorage): LoopTemplate[] {
+  try {
+    const raw = storage?.getItem(CUSTOM_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((t): t is LoopTemplate => typeof t === "object" && t !== null && typeof (t as LoopTemplate).id === "string" && typeof (t as LoopTemplate).name === "string" && typeof (t as LoopTemplate).config === "object").slice(0, 100);
+  } catch { return []; }
+}
+function persist(list: LoopTemplate[], storage: Storage | undefined): void {
+  try { storage?.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* session only */ }
+}
+export function uniqueTemplateName(name: string, taken: readonly LoopTemplate[]): string {
+  const base = name.trim() || "Untitled loop";
+  const names = new Set(taken.map((t) => t.name.toLowerCase()));
+  if (!names.has(base.toLowerCase())) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`.toLowerCase())) n++;
+  return `${base} ${n}`;
+}
+export function saveCustomTemplate(name: string, summary: string, config: LoopEngineConfig, storage: Storage | undefined = globalThis.localStorage): LoopTemplate {
+  const list = loadCustomTemplates(storage);
+  const t: LoopTemplate = { id: crypto.randomUUID(), name: uniqueTemplateName(name, [...BUILT_IN_TEMPLATES, ...list]), summary: summary.trim(), config: structuredClone(config) };
+  persist([...list, t], storage);
+  return t;
+}
+export function deleteCustomTemplate(id: string, storage: Storage | undefined = globalThis.localStorage): void {
+  persist(loadCustomTemplates(storage).filter((t) => t.id !== id), storage);
+}

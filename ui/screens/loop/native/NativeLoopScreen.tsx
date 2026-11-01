@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { appendRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -57,6 +57,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
+  const [customTemplates, setCustomTemplates] = useState(() => loadCustomTemplates());
 
   useEffect(() => {
     let live = true;
@@ -333,9 +334,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <div className="loop-inline">
             <select aria-label="Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
               {BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <button type="button" className="loop-btn" onClick={() => {
-              const t = BUILT_IN_TEMPLATES.find((x) => x.id === templateId);
+              const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId);
               if (!t) return;
               const config = applyTemplate(t, testCommand);
               if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
@@ -344,7 +346,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               setNotice(`Applied ${t.name}.`);
             }}>Apply</button>
           </div>
-          <p className="loop-native-hint">{BUILT_IN_TEMPLATES.find((x) => x.id === templateId)?.summary}</p>
+          <div className="loop-inline">
+            <button type="button" className="loop-btn" onClick={() => {
+              const name = window.prompt("Save the current stages and budgets as a template named:", `${loop.name} Recipe`);
+              if (!name) return;
+              const t = saveCustomTemplate(name, "", loop.config);
+              setCustomTemplates(loadCustomTemplates());
+              setTemplateId(t.id);
+              setNotice(`Saved template “${t.name}”.`);
+            }}>Save as…</button>
+            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => { if (!window.confirm("Delete this saved template?")) return; deleteCustomTemplate(templateId); setCustomTemplates(loadCustomTemplates()); setTemplateId(BUILT_IN_TEMPLATES[0].id); }}>Delete template</button> : null}
+          </div>
+          <p className="loop-native-hint">{[...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId)?.summary}</p>
         </section>
 
         {stage ? (
