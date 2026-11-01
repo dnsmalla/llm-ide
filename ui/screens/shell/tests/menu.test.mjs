@@ -18,4 +18,5 @@ test("Rust menu mirrors the Mac command groups without inventing Mac-only action
     assert.ok(src.includes(label), label);
   }
   assert.ok(!src.includes('"Start Recording"') && !src.includes('"Check for Updates…"'));
+  assert.ok(!src.includes('"Settings…"'), "Settings belongs to the account menu, not the Mac app menu");
 });

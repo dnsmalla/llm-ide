@@ -74,7 +74,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         match event.id().as_ref() {
-            "menu_settings" | "menu_quick_switch" | "menu_chat" | "menu_help" => {
+            "menu_quick_switch" | "menu_chat" | "menu_help" => {
                 let _ = app.emit("app-menu", event.id().as_ref());
             }
             "menu_close_all" => {
