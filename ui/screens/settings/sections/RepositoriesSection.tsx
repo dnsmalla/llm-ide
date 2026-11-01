@@ -50,6 +50,7 @@ export default function RepositoriesSection() {
   const [cloning, setCloning] = useState<string | null>(null);
   const [cloneNotice, setCloneNotice] = useState<string | null>(null);
   const imported = useRef(new Set<string>());
+  const autoTimer = useRef<number | null>(null);
 
   // The project's own code/ path (Settings → Paths); saved repos default their clone destination here.
   const [codeDir, setCodeDir] = useState<string | null>(null);
@@ -171,12 +172,12 @@ export default function RepositoriesSection() {
     }
   };
 
-  const doClone = async (r: SavedRepo, token: string, quiet = false) => {
-    if (!host.cloneRepository) return;
+  const doClone = async (r: SavedRepo, token: string, quiet = false): Promise<boolean> => {
+    if (!host.cloneRepository) return false;
     const dest = cloneDestination(r);
     if (!dest) {
       setError("Save a repository URL first.");
-      return;
+      return false;
     }
     setCloning(r.id);
     setError(null);
@@ -192,12 +193,24 @@ export default function RepositoriesSection() {
       setCloneNotice(`Cloned ${result.name} into code/. Open Library or Explorer to browse it.`);
       // Make the same repository visible in Issues/Gantt: import its open GitHub issues into the core cache.
       await importIssuesFor(r, true);
+      return true;
     } catch (e) {
       const msg = sourcesError(e);
-      if (!(quiet && /already exists/i.test(msg))) setError(msg);
+      if (quiet && /already exists/i.test(msg)) return true;
+      setError(msg);
+      return false;
     } finally {
       setCloning(null);
     }
+  };
+
+  /** Adding a repository URL provisions it shortly after typing stops, not only on blur. */
+  const scheduleProvision = (r: SavedRepo) => {
+    if (autoTimer.current !== null) window.clearTimeout(autoTimer.current);
+    autoTimer.current = window.setTimeout(() => {
+      autoTimer.current = null;
+      if (repoSlug(r.url)) autoProvision(r);
+    }, 900);
   };
 
   /** Adding/finishing a repository URL should make its code and issues appear without another trip to Settings. */
@@ -209,8 +222,10 @@ export default function RepositoriesSection() {
   };
   const startClone = (r: SavedRepo) => {
     setError(null);
-    if (memoryTokens[provider.id]) void doClone(r, memoryTokens[provider.id]!);
-    else { setCloneFor(r.id); setCloneToken(""); }
+    // Public repositories clone on the first click; only an auth failure reveals the token prompt.
+    void doClone(r, memoryTokens[provider.id] ?? "", true).then((ok) => {
+      if (!ok) { setCloneFor(r.id); setCloneToken(""); }
+    });
   };
   const patchRepo = (r: SavedRepo, patch: Partial<SavedRepo>) => edit((c) => updateSavedRepo(c, provider.id, r.id, patch));
   const urlError = (r: SavedRepo): string | null => (r.url.trim() ? validateRepoUrl(r.url) : null);
@@ -355,21 +370,16 @@ export default function RepositoriesSection() {
                       placeholder={provider.id === "gitlab" ? "https://gitlab.com/owner/repo" : "https://github.com/owner/repo"}
                       spellCheck={false}
                       aria-invalid={urlError(r) !== null}
-                      onChange={(e) => patchRepo(r, { url: e.target.value })}
+                      onChange={(e) => { patchRepo(r, { url: e.target.value }); scheduleProvision({ ...r, url: e.target.value }); }}
                       onBlur={() => autoProvision(r)}
                     />
                     {urlError(r) ? <span className="st-hint" role="alert">{urlError(r)}</span> : null}
                   </label>
-                  <label className="st-field">
-                    <span className="st-label">Clone path (optional)</span>
-                    <input className="st-input" value={r.clonePath} placeholder={cloneDestination(r) ?? "Where the Mac would clone it; not used yet"} spellCheck={false} onChange={(e) => patchRepo(r, { clonePath: e.target.value })} />
-                  </label>
-                  {codeDir && cloneDestination(r) ? (
-                    <p className="st-hint">
-                      Clone destination: <code>{cloneDestination(r)}</code>{" "}
-                      {r.clonePath.trim() ? null : <Button onClick={() => patchRepo(r, { clonePath: cloneDestination(r) ?? "" })}>Use project code folder</Button>}
-                    </p>
-                  ) : null}
+                  <div className="st-field">
+                    <span className="st-label">Local clone</span>
+                    <span className="st-pre">{r.clonePath.trim() || "Not cloned"}</span>
+                    {codeDir && cloneDestination(r) ? <span className="st-hint">Clone destination: <code>{cloneDestination(r)}</code></span> : null}
+                  </div>
                   {host.cloneRepository && codeDir && cloneDestination(r) ? (
                     cloneFor === r.id ? (
                       <div className="st-row">
