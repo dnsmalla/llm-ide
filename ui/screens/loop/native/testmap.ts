@@ -94,7 +94,7 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
 export interface TestMapEntry { path: string; function: string; line: number; fanIn: number; loc: number; testedBy: string[] }
 export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number }
 
-async function walkFiles(fs: TestMapFs, dir: string, out: string[] = [], limit = 5000): Promise<string[]> {
+export async function walkFiles(fs: TestMapFs, dir: string, out: string[] = [], limit = 5000): Promise<string[]> {
   if (out.length >= limit) return out;
   let entries;
   try { entries = (await fs.list(dir)).entries; } catch { return out; }

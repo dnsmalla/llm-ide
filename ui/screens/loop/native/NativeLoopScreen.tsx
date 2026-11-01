@@ -15,6 +15,7 @@ import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved } from "./approvals.ts";
 import { runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
+import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -296,6 +297,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const writes = await writeTestMap(fs, repoPrefix, map);
       return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
     }
+    if (s.kind === "testPrune") {
+      const root = projectRoot ?? "";
+      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const structure = await detectTestStructure(fs, repoPrefix);
+      const findings = await scanTestPrune(fs, repoPrefix, structure);
+      const path = await writeTestPrune(fs, repoPrefix, findings);
+      return { ok: true, output: `${findings.length} finding(s); report only at ${path}` };
+    }
     if (s.kind === "codeGraph") {
       if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
       const root = projectRoot ?? "";
@@ -327,7 +336,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const executeLoop = async (target: LoopDefinition) => {
     if (dirty) return;
-    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
+    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     const approval = ensureApprovals(target);
     if (approval) { setNotice(approval); return; }
@@ -386,7 +395,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runSelectedStage = async () => {
     if (!loop || !stage || dirty || runningStage) return;
-    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
+    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
     if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
@@ -477,7 +486,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
