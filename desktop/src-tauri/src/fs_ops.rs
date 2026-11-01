@@ -980,6 +980,50 @@ pub fn rename(root: &Path, req: &RenameReq) -> R<String> {
     Ok(rel_of(root, &to))
 }
 
+#[derive(serde::Deserialize)]
+pub struct CopyReq {
+    pub from: String,
+    pub to: String,
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(src)?;
+    if meta.file_type().is_symlink() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "symlinks are not copied"));
+    }
+    if meta.is_file() {
+        std::fs::copy(src, dst)?;
+        return Ok(());
+    }
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file or folder"));
+    }
+    std::fs::create_dir(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        copy_tree(&entry.path(), &dst.join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
+/// Copies one file/folder inside the project. Never overwrites, never follows symlinks, refuses copying a
+/// folder into itself. Used by the Explorer's internal file clipboard (the Mac's ⌘C/⌘V behaviour).
+pub fn copy(root: &Path, req: &CopyReq) -> R<String> {
+    let from = resolve_entry(root, &req.from)?;
+    deny_git_rel(&req.to)?;
+    let (to_dir, to_name) = resolve_new(root, &req.to)?;
+    let to = to_dir.join(&to_name);
+    deny_git_abs(root, &to)?;
+    if to.exists() {
+        return err("exists", "the destination already exists");
+    }
+    if to.starts_with(&from) {
+        return err("invalid_path", "cannot copy a folder into itself");
+    }
+    copy_tree(&from, &to).map_err(|e| io_err("cannot copy", e))?;
+    Ok(rel_of(root, &to))
+}
+
 /// Moves the entry to the OS trash. Never deletes permanently, never follows a final symlink.
 pub fn delete(root: &Path, rel: &str) -> R<()> {
     delete_with(root, rel, &crate::trash_guard::OsTrash)
@@ -1072,6 +1116,11 @@ pub async fn fs_rename(req: RenameReq) -> R<String> {
 }
 
 #[tauri::command]
+pub async fn fs_copy(req: CopyReq) -> R<String> {
+    blocking(move |root| copy(&root, &req)).await
+}
+
+#[tauri::command]
 pub async fn fs_delete(path: String) -> R<()> {
     blocking(move |root| delete(&root, &path)).await
 }
@@ -1099,6 +1148,21 @@ mod tests {
         assert!(read_image(&root, "a.svg").is_err());
         assert!(read_image(&root, "../outside.png").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_is_non_overwriting_root_confined_and_refuses_self_nesting() {
+        let root = scratch("copy");
+        fs::create_dir_all(root.join("dir/inner")).unwrap();
+        fs::write(root.join("a.txt"), "hello").unwrap();
+        fs::write(root.join("dir/b.txt"), "b").unwrap();
+        let to = copy(&root, &CopyReq { from: "a.txt".into(), to: "dir/a.txt".into() }).unwrap();
+        assert_eq!(to, "dir/a.txt");
+        assert_eq!(fs::read_to_string(root.join("dir/a.txt")).unwrap(), "hello");
+        assert!(copy(&root, &CopyReq { from: "a.txt".into(), to: "dir/a.txt".into() }).is_err(), "no overwrite");
+        assert!(copy(&root, &CopyReq { from: "dir".into(), to: "dir/inner/x".into() }).is_err(), "no self nesting");
+        assert!(copy(&root, &CopyReq { from: "../outside".into(), to: "x".into() }).is_err());
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn lr(path: &str) -> ListReq {

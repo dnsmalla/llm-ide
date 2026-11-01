@@ -208,6 +208,9 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     const isFile = path !== null && findEntry(snap, path)?.kind === "file";
     return [
       ...(isFile && single ? [{ id: "open", label: "Open" }] : []),
+      { id: "cut", label: sel.length > 1 ? `Cut ${sel.length} Items` : "Cut", disabled: sel.length === 0 },
+      { id: "copy", label: sel.length > 1 ? `Copy ${sel.length} Items` : "Copy", disabled: sel.length === 0 },
+      { id: "paste", label: "Paste", disabled: controller.getClipboard() === null, separator: true },
       { id: "new-file", label: "New File…", separator: isFile && single },
       { id: "new-dir", label: "New Folder…" },
       { id: "rename", label: "Rename…", disabled: !single, separator: true },
@@ -245,7 +248,10 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     }
     const path = m.target.path;
     const sel = path !== null && snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : path !== null ? [path] : [];
-    if (id === "open" && path) void controller.openFile(path, false);
+    if (id === "cut") controller.setClipboard("cut");
+    else if (id === "copy") controller.setClipboard("copy");
+    else if (id === "paste") void controller.paste(targetDir(path));
+    else if (id === "open" && path) void controller.openFile(path, false);
     else if (id === "new-file") setDialog({ type: "prompt", kind: "new-file", dir: targetDir(path) });
     else if (id === "new-dir") setDialog({ type: "prompt", kind: "new-dir", dir: targetDir(path) });
     else if (id === "rename" && path) setDialog({ type: "prompt", kind: "rename", path });
@@ -283,7 +289,16 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       openDock(!dockOpen);
       return;
     }
-    if (mod && e.key.toLowerCase() === "s" && id) {
+    const target = e.target as HTMLElement | null;
+    const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+    const key = e.key.toLowerCase();
+    if (mod && !typing && (key === "c" || key === "x" || key === "v")) {
+      e.preventDefault();
+      if (key === "v") void controller.paste(targetDir(topLevel(snap.selection.paths)[0] ?? null));
+      else controller.setClipboard(key === "x" ? "cut" : "copy");
+      return;
+    }
+    if (mod && key === "s" && id) {
       e.preventDefault();
       void controller.save(id);
     } else if (mod && e.key.toLowerCase() === "w" && id) {

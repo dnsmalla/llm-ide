@@ -84,6 +84,7 @@ export class ExplorerController {
   private listeners = new Set<() => void>();
   private snap: ExplorerSnapshot;
   private pendingText = new Map<string, ReadResult>();
+  private clipboard: { mode: "copy" | "cut"; paths: string[] } | null = null;
   private gitTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -698,6 +699,42 @@ export class ExplorerController {
   }
 
   /** Moves to the OS trash (the UI confirmed). Open clean tabs under it close; dirty ones are kept and flagged. */
+  getClipboard(): { mode: "copy" | "cut"; paths: readonly string[] } | null {
+    return this.clipboard;
+  }
+
+  setClipboard(mode: "copy" | "cut"): void {
+    const paths = topLevel(this.snap.selection.paths);
+    this.clipboard = paths.length ? { mode, paths } : null;
+    this.set({ notice: this.clipboard ? { severity: "info", message: `${this.clipboard.paths.length} item${this.clipboard.paths.length === 1 ? "" : "s"} ${mode === "copy" ? "copied" : "cut"}.` } : null });
+  }
+
+  /** Paste the internal clipboard into `destDir` ("" = project root). Never overwrites; skips conflicts with a notice. */
+  async paste(destDir: string): Promise<void> {
+    const clip = this.clipboard;
+    if (!clip?.paths.length) return;
+    const moved: string[] = [];
+    const conflicts: string[] = [];
+    for (const src of clip.paths) {
+      const base = src.split("/").pop() ?? src;
+      const to = destDir === "" ? base : `${destDir}/${base}`;
+      if (to === src) { conflicts.push(base); continue; }
+      try {
+        if (clip.mode === "copy") await this.fs.copy(src, to);
+        else await this.fs.rename(src, to);
+        moved.push(to);
+      } catch { conflicts.push(base); }
+    }
+    if (clip.mode === "cut") this.clipboard = null;
+    await this.refreshDir(destDir);
+    for (const p of clip.paths) await this.refreshDir(p.split("/").slice(0, -1).join("/"));
+    this.set({
+      notice: conflicts.length
+        ? { severity: "warning", message: `${moved.length} pasted; ${conflicts.length} skipped because the destination exists or could not be written: ${conflicts.slice(0, 3).join(", ")}` }
+        : moved.length ? { severity: "info", message: `${moved.length} item${moved.length === 1 ? "" : "s"} pasted.` } : null,
+    });
+  }
+
   async deleteEntries(paths: string[]): Promise<void> {
     for (const p of topLevel(paths)) {
       try {

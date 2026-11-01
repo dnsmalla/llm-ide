@@ -132,6 +132,7 @@ export interface FsApi {
   write(path: string, text: string, opts: WriteOptions): Promise<WriteResult>;
   create(path: string, kind: "file" | "dir"): Promise<string>;
   rename(from: string, to: string): Promise<string>;
+  copy(from: string, to: string): Promise<string>;
   /** Moves to the OS trash. */
   remove(path: string): Promise<void>;
   watchStart(onBatch: (b: WatchBatch) => void): Promise<{ mode: "native" | "poll" }>;
@@ -163,6 +164,7 @@ export function createHostFs(channelFactory?: (onMessage: (b: WatchBatch) => voi
       }),
     create: (path, kind) => call("fs_create", { req: { path, kind } }),
     rename: (from, to) => call("fs_rename", { req: { from, to } }),
+    copy: (from, to) => call("fs_copy", { req: { from, to } }),
     remove: (path) => call("fs_delete", { path }),
     async watchStart(onBatch) {
       if (!channelFactory) throw new FsError("unavailable", "file watching needs the desktop host");
