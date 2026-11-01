@@ -18,6 +18,7 @@ import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
+import { loadQueue, saveQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
@@ -71,6 +72,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
   const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
+  const queueRestored = useRef(false);
+  const persistQueue = () => {
+    if (!projectRoot) return;
+    saveQueue(projectRoot, queueRef.current.map((x) => ({ loopId: x.loop.id, scheduled: x.scheduled, at: new Date().toISOString() })));
+  };
   const [queued, setQueued] = useState(0);
   const runLoopRef = useRef<(l: LoopDefinition, scheduled?: boolean) => void>(() => undefined);
   const [scheduleCron, setScheduleCron] = useState("");
@@ -119,6 +125,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     void invokeHost<string>("loop_work_root").then((p) => { if (live) setWorkRoot(p); }).catch(() => { if (live) setWorkRoot(null); });
     return () => { live = false; };
   }, [projectRoot]);
+
+  useEffect(() => {
+    if (!projectRoot || !load || load.kind !== "ok" || queueRestored.current) return;
+    queueRestored.current = true;
+    const byId = new Map(load.store.loops.map((l) => [l.id, l]));
+    const restored = loadQueue(projectRoot).flatMap((q) => { const l = byId.get(q.loopId); return l ? [{ loop: l, scheduled: q.scheduled }] : []; });
+    if (restored.length) {
+      queueRef.current = restored;
+      setQueued(restored.length);
+      setNotice(`${restored.length} queued run(s) restored. Resume them when ready.`);
+      saveQueue(projectRoot, restored.map((x) => ({ loopId: x.loop.id, scheduled: x.scheduled, at: new Date().toISOString() })));
+    }
+  }, [projectRoot, load]);
 
   useEffect(() => {
     if (!projectRoot) { setRuns([]); return; }
@@ -438,6 +457,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setRunningStage(false);
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
+      persistQueue();
       if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
     }
   };
@@ -447,6 +467,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (runningRef.current) {
       if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
       setQueued(queueRef.current.length);
+      persistQueue();
       setNotice(`Queued “${target.name}”.`);
       return;
     }
@@ -485,6 +506,15 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!projectRoot) return;
     setScheduleCron(cron);
     try { localStorage.setItem(`llmide.loopSchedule.v1.${projectRoot}`, JSON.stringify({ cron: cron.trim(), last: "" })); } catch { /* session only */ }
+  };
+
+  const resumeQueue = () => {
+    if (runningRef.current) return;
+    const next = queueRef.current.shift();
+    if (!next) return;
+    setQueued(queueRef.current.length);
+    persistQueue();
+    void executeLoop(next.loop, next.scheduled);
   };
 
   const runSelectedStage = async () => {
@@ -602,7 +632,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
