@@ -15,7 +15,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
-| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | audited, fixes pending |
+| 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/absolute copy done; previews/clipboard/search pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | audited, fixes pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | audited, fixes pending |
 | 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | audited, fixes pending |
@@ -26,7 +26,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | audited, fixes pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | audited, fixes pending |
-| 12 | Library | `Features/Library/` | `ui/screens/library/` | 2-pane + project `<root>/llm-doc` root done; single-list sections pending |
+| 12 | Library | `Features/Library/` | `ui/screens/library/` | project root + meetings-first order done; single-list sections pending |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; updates/accounts/providers pending |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target done; recency/banner pending |
 | 15 | Shell chrome | `Shell/AppShell.swift`, status bar | `ui/screens/shell/` | activity/home done; approvals/terminal pending |
