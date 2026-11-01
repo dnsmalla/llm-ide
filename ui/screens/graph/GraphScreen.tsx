@@ -17,6 +17,8 @@ export interface GraphScreenProps {
   store: GraphStore;
   active: boolean;
   projectRoot: string | null;
+  /** Generate system/graph/graph.json with the host's GraphKit runner. */
+  onGenerate?: () => Promise<void>;
   /** Ask the shell to open a project-relative file in Explorer. */
   openFile: (path: string) => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
@@ -24,7 +26,7 @@ export interface GraphScreenProps {
 
 const num = (n: number) => n.toLocaleString("en-US");
 
-export function GraphScreen({ store, active, projectRoot, openFile, createView }: GraphScreenProps) {
+export function GraphScreen({ store, active, projectRoot, openFile, createView, onGenerate }: GraphScreenProps) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const loadedFor = useRef<string | null | undefined>(undefined);
   const camera = useRef<ViewCamera | null>(null);
@@ -51,7 +53,16 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView }
   }
   const wrap = (child: React.ReactNode) => <div className="gr-root" data-active={active}>{child}</div>;
   if (s.phase === "no-project") return wrap(<NoProjectState />);
-  if (s.phase === "empty") return wrap(<EmptyState tried={s.tried} onOpen={(p) => store.openPath(p)} onRetry={() => void store.reload()} />);
+  if (s.phase === "empty") {
+    return wrap(
+      <EmptyState
+        tried={s.tried}
+        onOpen={(p) => store.openPath(p)}
+        onRetry={() => void store.reload()}
+        onGenerate={onGenerate ? async () => { await onGenerate(); await store.reload(); } : undefined}
+      />,
+    );
+  }
   if (s.phase === "too-large") return wrap(<TooLargeState onOpen={(p) => store.openPath(p)} />);
   if (s.phase === "error" || !entry || !adj) return wrap(<ErrorState message={s.error ?? "Unknown error."} onRetry={() => void store.reload()} />);
 

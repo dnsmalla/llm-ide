@@ -36,17 +36,30 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
   );
 }
 
-export function EmptyState({ tried, onOpen, onRetry }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void }) {
+export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
     <div className="gr-state">
       <h2 className="gr-state-title">No code graph for this project yet</h2>
       <p>This screen shows the graph that the Code Graph scanners write to <code>{GRAPH_CANDIDATES[0]}</code> inside the project.</p>
-      <ol className="gr-steps">
-        <li>In the macOS app, open <strong>Code Graph</strong> for this project and run <strong>Generate</strong>.</li>
-        <li>Come back here and choose <strong>Check again</strong>.</li>
-      </ol>
-      <p className="gr-muted">Generating the graph from this app is not available yet: the scanners are part of the macOS app. Looked for: {(tried.length ? tried : [...GRAPH_CANDIDATES]).join(", ")}.</p>
-      <button type="button" className="gr-btn gr-btn-primary" onClick={onRetry}>Check again</button>
+      <p className="gr-muted">Generate it here with the host's GraphKit runner, or in the macOS app (<strong>Code Graph → Generate</strong>) and come back. Looked for: {(tried.length ? tried : [...GRAPH_CANDIDATES]).join(", ")}.</p>
+      {onGenerate ? (
+        <button
+          type="button"
+          className="gr-btn gr-btn-primary"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            void onGenerate().catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "Generating…" : "Generate code graph"}
+        </button>
+      ) : null}
+      <button type="button" className="gr-btn" onClick={onRetry}>Check again</button>
+      {error ? <p className="gr-error" role="alert">{error}</p> : null}
       <OpenPath onOpen={onOpen} />
     </div>
   );

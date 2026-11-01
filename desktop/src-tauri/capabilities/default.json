@@ -14,6 +14,7 @@
     "allow-backend-pick-node",
     "allow-backend-pick-dir",
     "allow-backend-detect",
+    "allow-graph-generate",
     "allow-repo-clone",
     "allow-feature-rebuild",
     "allow-core-log-read",

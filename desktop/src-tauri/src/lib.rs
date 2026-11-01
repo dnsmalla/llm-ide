@@ -29,6 +29,7 @@ mod project_layout;
 mod project_scaffold;
 mod repo_clone;
 mod backend_pick;
+mod graph_gen;
 mod prefs;
 mod project_search;
 mod pty;
@@ -277,6 +278,7 @@ macro_rules! product_handlers {
                 backend_pick::backend_pick_node,
                 backend_pick::backend_pick_dir,
                 backend_pick::backend_detect,
+                graph_gen::graph_generate,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,

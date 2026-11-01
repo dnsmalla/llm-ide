@@ -35,7 +35,15 @@ function app(): GraphStore {
 
 function CodeGraphPage({ active, projectRoot }: SectionProps) {
   const store = useMemo(app, []);
-  return <GraphScreen store={store} active={active} projectRoot={projectRoot} openFile={(path) => shellBus.publish({ type: "open-file", path })} />;
+  return (
+    <GraphScreen
+      store={store}
+      active={active}
+      projectRoot={projectRoot}
+      onGenerate={async () => { await invokeHost("graph_generate"); }}
+      openFile={(path) => shellBus.publish({ type: "open-file", path })}
+    />
+  );
 }
 
 export default function CodeGraph({ active, projectRoot }: SectionProps) {
