@@ -1,7 +1,7 @@
 // Composer: multiline, Enter sends, Shift+Enter newline, history recall (Up on an empty draft), Stop while a
 // turn runs, queue while streaming. File attachments need a host dialog command (the page never supplies a
 // path): `onAttach` is optional and the button is hidden without it.
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
 
@@ -36,7 +36,43 @@ export function nextRecall(history: readonly string[], cursor: number | null, di
   return c >= history.length ? { cursor: null, text: "" } : { cursor: c, text: history[c] };
 }
 
+interface SpeechEventLike { results: ArrayLike<ArrayLike<{ transcript: string }>> }
+interface SpeechRecognitionLike {
+  lang: string; continuous: boolean; interimResults: boolean;
+  start(): void; stop(): void;
+  onresult: ((e: SpeechEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+}
+type SpeechCtor = new () => SpeechRecognitionLike;
+function speechCtor(): SpeechCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
 export function Composer(p: ComposerProps) {
+  const speech = useRef<SpeechRecognitionLike | null>(null);
+  const [listening, setListening] = useState(false);
+  const voice = speechCtor();
+  const toggleVoice = () => {
+    if (!voice) return;
+    if (speech.current) { speech.current.stop(); return; }
+    const rec = new voice();
+    rec.lang = navigator.language || "en-US";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      let text = "";
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0]?.transcript ?? "";
+      if (text.trim()) p.onDraft(`${p.draft}${p.draft.trim() ? " " : ""}${text.trim()}`);
+    };
+    rec.onerror = () => { speech.current = null; setListening(false); };
+    rec.onend = () => { speech.current = null; setListening(false); };
+    speech.current = rec;
+    setListening(true);
+    try { rec.start(); } catch { speech.current = null; setListening(false); }
+  };
   const recall = useRef<number | null>(null);
   const ime = useRef<ImeGuard | null>(null);
   if (!ime.current) ime.current = new ImeGuard();
@@ -81,6 +117,7 @@ export function Composer(p: ComposerProps) {
         }}
       />
       <div className="chat-composer-bar">
+        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title="Dictate with the system speech recogniser">{listening ? "Listening…" : "Dictate"}</button> : null}
         {p.extras?.toolbar}
         {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
