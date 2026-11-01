@@ -166,7 +166,14 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         Skip to content
       </a>
       <header className="sh-titlebar" aria-label="LLM-IDE" data-tauri-drag-region>
-        <button type="button" className="sh-tool sh-tool-home" aria-label="Home" aria-current={nav.active === "welcome" ? "page" : undefined} title="Home (Welcome)" onClick={() => dispatch({ type: "select", id: "welcome" })}>
+        <button
+          type="button"
+          className="sh-tool sh-tool-home"
+          aria-label="Home"
+          aria-current={nav.active === "welcome" || nav.active === (projectRoot ? usableHome() : "welcome") ? "page" : undefined}
+          title={projectRoot ? "Home (your home section)" : "Home (Welcome)"}
+          onClick={() => dispatch({ type: "select", id: projectRoot ? usableHome() : "welcome" })}
+        >
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />

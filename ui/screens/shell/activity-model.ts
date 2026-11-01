@@ -9,6 +9,8 @@ export interface ActivityItem {
   title: string;
   /** Epoch ms (the server sends SQLite UTC `YYYY-MM-DD HH:MM:SS`). */
   at: number;
+  /** Optional Mac deep link (never rendered as an anchor; used only to choose a section). */
+  link: string | null;
 }
 
 export interface ActivityFeed {
@@ -46,7 +48,7 @@ export function decodeFeed(raw: unknown): ActivityFeed {
     const title = safeText(o.title, 200);
     const at = parseServerTime(o.created_at);
     if (id === null || title === "" || Number.isNaN(at)) continue;
-    items.push({ id, kind: typeof o.kind === "string" ? safeText(o.kind, 40) || null : null, title, at });
+    items.push({ id, kind: typeof o.kind === "string" ? safeText(o.kind, 40) || null : null, title, at, link: typeof o.link === "string" ? safeText(o.link, 300) || null : null });
   }
   return { items, unread: asInt(r.unread) ?? 0, lastId: asInt(r.lastId) ?? items.reduce((m, i) => Math.max(m, i.id), 0) };
 }

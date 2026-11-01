@@ -23,6 +23,7 @@ export interface IssueFilters {
   provider: "github" | "gitlab";
   state: "open" | "closed" | "all";
   repo: string;
+  label: string;
   query: string;
 }
 
@@ -141,13 +142,14 @@ export function columnsFor(issues: readonly Issue[]): IssueColumn[] {
       if (col) col.issues.push(i);
       else loose.push(i);
     }
-    if (loose.length) cols.push({ id: NO_STATUS, title: "No status", issues: loose });
-    return cols;
+    // The Mac puts "No status" FIRST and hides columns with no issues.
+    if (loose.length) cols.unshift({ id: NO_STATUS, title: "No status", issues: loose });
+    return cols.filter((c) => c.issues.length > 0);
   }
   return [
     { id: "open", title: "Open", issues: issues.filter((i) => i.state !== "closed") },
     { id: "closed", title: "Closed", issues: issues.filter((i) => i.state === "closed") },
-  ];
+  ].filter((c) => c.issues.length > 0);
 }
 
 /** The client-side filters on top of the server's provider/state query. Pull requests are not issues. */
@@ -158,9 +160,15 @@ export function filterIssues(issues: readonly Issue[], f: IssueFilters): Issue[]
     if (i.provider !== f.provider) return false;
     if (f.state !== "all" && i.state !== f.state) return false;
     if (f.repo && !i.repo.toLowerCase().includes(f.repo.trim().toLowerCase())) return false;
+    if (f.label && !i.labels.some((l) => l.toLowerCase() === f.label.trim().toLowerCase())) return false;
     if (q && !`${i.title} ${i.body} ${i.labels.join(" ")} #${i.number ?? ""} ${i.repo}`.toLowerCase().includes(q)) return false;
     return true;
   });
+}
+
+/** Distinct labels of the loaded rows, for the label filter. */
+export function labelOptions(issues: readonly Issue[]): string[] {
+  return [...new Set(issues.filter((i) => !i.isPR).flatMap((i) => i.labels))].sort((a, b) => a.localeCompare(b, "en"));
 }
 
 /** Distinct repositories of the loaded rows, for the filter datalist. */

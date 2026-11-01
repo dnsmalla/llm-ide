@@ -7,10 +7,12 @@ const v = (x: string | null | undefined): string => x ?? "Unknown";
 
 /** The Mac's "Claude Agent SDK" group: running / installed / latest version and the in-place update. */
 export default function AgentSdkSection() {
-  const { client } = useEnv();
+  const { client, host } = useEnv();
   const m = useModel(() => new AgentSdkModel(client));
   const s = useStore(m);
   const [confirming, setConfirming] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartNotice, setRestartNotice] = useState<string | null>(null);
   useRefreshOnFocus(() => void m.load(false));
   const st = s.status;
   const log = sdkLogText(s.result?.log ?? null);
@@ -27,7 +29,27 @@ export default function AgentSdkSection() {
       ) : s.error ? null : <p className="st-hint" role="status">Loading...</p>}
       {st?.error ? <p className="st-hint">Could not check for updates: {st.error}</p> : null}
       {st && !st.canUpdate ? <p className="st-hint">{SDK_TEXT.remoteOff}</p> : null}
-      {st?.restartNeeded || s.result?.restartNeeded ? <p className="st-hint" role="status">{SDK_TEXT.restartNote}</p> : null}
+      {st?.restartNeeded || s.result?.restartNeeded ? (
+        <div className="st-row">
+          <p className="st-hint" role="status">{SDK_TEXT.restartNote}</p>
+          {host.coreRestart ? (
+            <Button
+              disabled={restarting}
+              onClick={() => {
+                setRestarting(true);
+                setRestartNotice(null);
+                void host.coreRestart!().then(
+                  () => setRestartNotice("Backend restart requested; the app will reconnect."),
+                  () => setRestartNotice("The backend could not be restarted."),
+                ).finally(() => setRestarting(false));
+              }}
+            >
+              {restarting ? "Restarting…" : "Restart backend"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {restartNotice ? <p className="st-hint" role="status">{restartNotice}</p> : null}
       {s.result ? <p className={s.result.ok ? "st-ok" : "st-error"} role="status">{s.result.ok ? (s.result.rolledBack ? "The update did not load and was rolled back." : `Updated to ${v(s.result.to)}.`) : "The update did not run."}</p> : null}
       {log ? <pre className="st-pre" aria-label="Update log">{log}</pre> : null}
       {s.updating ? <p className="st-hint" role="status">Updating. Downloading can take a few minutes...</p> : null}

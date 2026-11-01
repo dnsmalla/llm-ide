@@ -118,3 +118,9 @@
 .sh-button-danger { background: var(--tok-color-danger); border-color: var(--tok-color-danger); color: var(--tok-color-body); font-weight: 600; }
 .sh-dock-note { padding: var(--tok-space-md); }
 .sh-row { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.sh-activity-hit { display: flex; align-items: center; gap: var(--tok-space-sm); width: 100%; font: inherit; color: inherit; background: none; border: 0; text-align: left; padding: 0; cursor: pointer; }
+.sh-activity-hit:hover { background: var(--tok-color-row-alt); }
+.sh-activity-go { color: var(--tok-color-text-muted); margin-left: auto; }
+.sh-password { display: flex; align-items: center; gap: var(--tok-space-xs); }
+.sh-password input { flex: 1; min-width: 0; }
+.sh-password-toggle { font: inherit; color: var(--tok-color-text-muted); background: none; border: 0; cursor: pointer; padding: 0 2px; }

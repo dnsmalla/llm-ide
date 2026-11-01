@@ -1,10 +1,12 @@
 // Review Conflicts: the Mac's tree + viewer + Code Assistant layout over the project's code and llm-doc folders.
 // It is deliberately read-only — reviewing is a conversation with the assistant; editing belongs in Explorer.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { shellBus } from "../shell/bus";
+import { Markdown } from "../chat/MarkdownView";
+import { readRepoConfig } from "../settings/repo-config.ts";
 import { REVIEW_EMPTY, REVIEW_ROOTS, decodeEntries, decodeFile, type ReviewEntry } from "./review-model.ts";
 import "./review.css";
 
@@ -20,7 +22,18 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   const [selected, setSelected] = useState<{ path: string; text: string; bytes: number } | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showChat, setShowChat] = useState(true);
+  const [showChat, setShowChat] = useState(() => {
+    try { return localStorage.getItem("llmide.review.chat") !== "0"; } catch { return true; }
+  });
+  const [chatWidth, setChatWidth] = useState(() => {
+    try { const n = Number(localStorage.getItem("llmide.review.chatWidth")); return Number.isFinite(n) && n >= 240 && n <= 640 ? n : 320; } catch { return 320; }
+  });
+  const [tabs, setTabs] = useState<string[]>([]);
+  const linked = useMemo(() => {
+    const c = readRepoConfig();
+    const repo = [...c.saved.github, ...c.saved.gitlab].find((r) => r.active) ?? [...c.saved.github, ...c.saved.gitlab][0];
+    return repo ? { label: repo.displayName || repo.url, path: repo.clonePath } : null;
+  }, []);
 
   const loadRoots = useCallback(async () => {
     setBusy(true);
@@ -39,6 +52,21 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
 
   useEffect(() => {
     if (active) void loadRoots();
+  }, [active, loadRoots, projectRoot]);
+  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) void loadRoots(); }), [active, loadRoots]);
+  useEffect(() => {
+    try { localStorage.setItem("llmide.review.chat", showChat ? "1" : "0"); } catch { /* session only */ }
+  }, [showChat]);
+  useEffect(() => {
+    try { localStorage.setItem("llmide.review.chatWidth", String(chatWidth)); } catch { /* session only */ }
+  }, [chatWidth]);
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void loadRoots(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [active, loadRoots]);
 
   const openDir = async (path: string) => {
@@ -57,6 +85,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   };
 
   const openFile = async (path: string) => {
+    setTabs((t) => (t.includes(path) ? t : [...t, path]));
     setSelected({ path, text: "", bytes: 0 });
     setFileError(null);
     try {
@@ -86,6 +115,21 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
         <button type="button" className="rv-btn" aria-pressed={showChat} onClick={() => setShowChat((v) => !v)}>Code Assistant</button>
       </header>
 
+      {linked ? (
+        <p className="rv-linked">Linked: <strong>{linked.label}</strong>{linked.path ? <span className="rv-hint"> · {linked.path}</span> : null}</p>
+      ) : (
+        <p className="rv-linked rv-hint">No repository is linked. Add one in Settings → Repositories to include its clone in review.</p>
+      )}
+      {tabs.length > 0 ? (
+        <div className="rv-tabs" role="tablist" aria-label="Open review files">
+          {tabs.map((t) => (
+            <span key={t} className="rv-tab" data-on={selected?.path === t || undefined}>
+              <button type="button" role="tab" aria-selected={selected?.path === t} onClick={() => void openFile(t)}>{t.split("/").pop()}</button>
+              <button type="button" className="rv-tab-x" aria-label={`Close ${t.split("/").pop()}`} onClick={() => setTabs((all) => all.filter((x) => x !== t))}>×</button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="rv-body">
         <aside className="rv-tree" aria-label="Review files">
           {roots.map(({ root, entries, error }) => (
@@ -119,15 +163,35 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
                 <strong>{selectedName}</strong>
                 <span className="rv-hint">{selected.bytes.toLocaleString("en")} bytes · read-only</span>
               </div>
-              <pre className="rv-content" aria-label={`${selectedName} contents`}>{selected.text}</pre>
+              {selected.path.startsWith("llm-doc/") && selected.path.endsWith(".md") ? (
+                <div className="rv-content rv-markdown"><Markdown text={selected.text} /></div>
+              ) : (
+                <pre className="rv-content" aria-label={`${selectedName} contents`}>{selected.text}</pre>
+              )}
             </>
           )}
         </main>
 
         {showChat ? (
-          <aside className="rv-chat" aria-label="Code Assistant">
-            <ChatDockSlot active={active} projectRoot={projectRoot} onCollapse={() => setShowChat(false)} />
-          </aside>
+          <>
+            <div
+              className="rv-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize Code Assistant"
+              onPointerDown={(e) => {
+                const startX = e.clientX;
+                const startW = chatWidth;
+                const move = (ev: PointerEvent) => setChatWidth(Math.round(Math.min(640, Math.max(240, startW + (startX - ev.clientX)))));
+                const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+                window.addEventListener("pointermove", move);
+                window.addEventListener("pointerup", up);
+              }}
+            />
+            <aside className="rv-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
+              <ChatDockSlot active={active} projectRoot={projectRoot} onCollapse={() => setShowChat(false)} />
+            </aside>
+          </>
         ) : null}
       </div>
       <p className="rv-hint rv-foot">Reviewing is conversational: ask the assistant to compare the selected code with the LLM Doc and flag conflicts or undecided items. This page never edits files.</p>

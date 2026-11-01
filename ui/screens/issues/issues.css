@@ -23,3 +23,9 @@
 .iss-meta { display: flex; gap: var(--tok-space-xs); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); flex-wrap: wrap; }
 .iss-labels { display: flex; gap: 4px; flex-wrap: wrap; }
 .iss-label { font-size: var(--tok-type-caption-size); padding: 0 4px; border-radius: var(--tok-radius-sm); background: var(--tok-color-surface-2); color: var(--tok-color-text-muted); }
+.iss-detail-backdrop { position: fixed; inset: 0; background: color-mix(in srgb, #000 45%, transparent); display: flex; justify-content: flex-end; z-index: 40; }
+.iss-detail { width: min(560px, 90vw); height: 100%; overflow-y: auto; background: var(--tok-color-surface); border-left: 1px solid var(--tok-color-border); padding: var(--tok-space-lg); display: flex; flex-direction: column; gap: var(--tok-space-md); }
+.iss-detail-head { display: flex; align-items: flex-start; gap: var(--tok-space-sm); }
+.iss-detail-head h2 { margin: 0; font-size: var(--tok-type-title-size); }
+.iss-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); line-height: 1.5; }
+.iss-detail-actions { display: flex; gap: var(--tok-space-sm); flex-wrap: wrap; }

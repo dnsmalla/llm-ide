@@ -14,6 +14,8 @@ import {
 } from "@llmide/screens/shell";
 import { useEnv } from "../context.tsx";
 import { ErrorText, NeedsHost } from "../ui.tsx";
+import { TOOLBAR_IDS, readHiddenToolbar, writeHiddenToolbar } from "../../shell/toolbar-model";
+import { SECTIONS } from "../../shell/sections";
 
 const label = (f: AppFeature): string => featureDef(f).label;
 const names = (list: readonly AppFeature[]): string => list.map(label).join(", ");
@@ -140,6 +142,31 @@ export function FeatureProfileSection() {
       {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       <ErrorText text={error} />
       <p className="st-hint">Running now: {FEATURES.filter((f) => launch.has(f.id)).map((f) => f.label).join(", ")}.</p>
+
+      <div className="st-stack">
+        <span className="st-label">Toolbar items</span>
+        <p className="st-hint">Hide a section from the top toolbar. It stays reachable from the status bar and shortcuts.</p>
+        {TOOLBAR_IDS.map((id) => {
+          const label = SECTIONS.find((x) => x.id === id)?.label ?? id;
+          return (
+            <label key={id} className="st-row">
+              <input
+                type="checkbox"
+                checked={!readHiddenToolbar().has(id)}
+                onChange={(e) => {
+                  const next = readHiddenToolbar();
+                  if (e.target.checked) next.delete(id); else next.add(id);
+                  writeHiddenToolbar(next);
+                  window.dispatchEvent(new Event("llmide-toolbar"));
+                  setNotice("Toolbar updated.");
+                }}
+              />
+              <span>{label}</span>
+            </label>
+          );
+        })}
+        <button type="button" className="st-btn" onClick={() => { writeHiddenToolbar([]); window.dispatchEvent(new Event("llmide-toolbar")); setNotice("All toolbar items shown."); }}>Show all toolbar items</button>
+      </div>
     </div>
   );
 }

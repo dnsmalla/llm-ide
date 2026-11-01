@@ -10,6 +10,20 @@ import { ALL_FEATURES, isSectionEnabled, type AppFeature } from "./features";
  */
 export const TOOLBAR_IDS: readonly SectionId[] = ["explorer", "graph", "autotasks", "conflicts", "issues", "gantt", "loop", "docgen", "visual", "library"];
 
+/** Mac `ShellSection.visibleInToolbar` equivalents, persisted per viewer in the app's storage. */
+const HIDDEN_KEY = "llmide.toolbar.hidden";
+export function readHiddenToolbar(storage: Storage | undefined = globalThis.localStorage): Set<SectionId> {
+  try {
+    const raw = JSON.parse(storage?.getItem(HIDDEN_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is SectionId => typeof x === "string" && TOOLBAR_IDS.includes(x as SectionId)) : []);
+  } catch {
+    return new Set();
+  }
+}
+export function writeHiddenToolbar(hidden: Iterable<SectionId>, storage: Storage | undefined = globalThis.localStorage): void {
+  try { storage?.setItem(HIDDEN_KEY, JSON.stringify([...hidden])); } catch { /* session only */ }
+}
+
 /** Mac `ShellSection` case name -> desktop section id. `null` = the Mac item has no desktop counterpart (yet). */
 export const MAC_CASE_TO_ID: Readonly<Record<string, SectionId | null>> = {
   explorer: "explorer",
@@ -31,12 +45,13 @@ const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
 export function toolbarSections(
   devTools: boolean = devToolsEnabled(),
   usable: ReadonlySet<AppFeature> = new Set(ALL_FEATURES),
+  hidden: ReadonlySet<SectionId> = readHiddenToolbar(),
 ): SectionDef[] {
   const out: SectionDef[] = [];
   for (const id of TOOLBAR_IDS) {
     const d = BY_ID.get(id);
-    // A feature that is off (or not compiled into this build) hides its toolbar item, as on the Mac.
-    if (d && isSectionEnabled(d.id, usable)) out.push(d);
+    // A feature that is off (or not compiled into this build), or a section the user hid, leaves the toolbar.
+    if (d && isSectionEnabled(d.id, usable) && !hidden.has(d.id)) out.push(d);
   }
   const spike = BY_ID.get("spike");
   if (devTools && spike) out.push(spike);

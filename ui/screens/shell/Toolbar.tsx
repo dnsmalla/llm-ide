@@ -1,10 +1,10 @@
 // The top toolbar (Mac `AppShell.shellToolbar`): Home, the section buttons in the Mac's order with icon and label, a
 // More menu when the window is too narrow, and the account menu on the right. On macOS the host window has an
 // overlay title bar, so the traffic lights sit on this row (left inset) and the empty parts of the row drag the window.
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
-import { estimateWidth, partitionToolbar, rovingStop, samePartition, toolbarKeyTarget, toolbarSections, type Partition } from "./toolbar-model";
+import { estimateWidth, partitionToolbar, readHiddenToolbar, rovingStop, samePartition, toolbarKeyTarget, toolbarSections, type Partition } from "./toolbar-model";
 import type { SectionDef, SectionId } from "./sections";
 import { useFeatures } from "./use-shell";
 
@@ -57,7 +57,13 @@ const ToolButton = memo(function ToolButton({ def, active, stop, onSelect, onFoc
 
 export const SectionToolbar = memo(function SectionToolbar({ active, onSelect, devTools }: ToolbarProps) {
   const features = useFeatures();
-  const defs = useMemo(() => toolbarSections(devTools, features.usable), [devTools, features.usable]);
+  const [hiddenIds, setHiddenIds] = useState(() => readHiddenToolbar());
+  useEffect(() => {
+    const refresh = () => setHiddenIds(readHiddenToolbar());
+    window.addEventListener("llmide-toolbar", refresh);
+    return () => window.removeEventListener("llmide-toolbar", refresh);
+  }, []);
+  const defs = useMemo(() => toolbarSections(devTools, features.usable, hiddenIds), [devTools, features.usable, hiddenIds]);
   const bar = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>());
   const widths = useRef(new Map<string, number>());

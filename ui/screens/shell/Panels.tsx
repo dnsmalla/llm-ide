@@ -109,6 +109,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
   );
   const blocked = trust !== null && !trust.allowed;
   const [mode, setMode] = useState<"signin" | "create">("signin");
+  const [showPassword, setShowPassword] = useState(false);
   const [canRegister, setCanRegister] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +166,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
     <div className="sh-panel">
       <h2 className="sh-panel-title">{create ? "Create your account" : "Sign in to LLM-IDE"}</h2>
       <p className="sh-panel-text sh-muted">The account lives only on this computer. You sign in again each time the app starts.</p>
+      {getStatus?.()?.url ? <p className="sh-panel-text sh-muted">Server: <code>{getStatus()!.url}</code></p> : null}
       {trust?.needsConfirm && gate && <UntrustedCoreNotice url={trust.url} onConfirm={() => gate.confirm()} />}
       <form className="sh-form" onSubmit={submit} aria-busy={pending}>
         <label className="sh-field">
@@ -179,7 +181,12 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
         )}
         <label className="sh-field">
           <span>Password</span>
-          <input name="password" type="password" autoComplete={create ? "new-password" : "current-password"} required disabled={pending} />
+          <div className="sh-password">
+            <input name="password" type={showPassword ? "text" : "password"} autoComplete={create ? "new-password" : "current-password"} required disabled={pending} />
+            <button type="button" className="sh-password-toggle" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((v) => !v)}>
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
         </label>
         {error && (
           <div role="alert" className="sh-form-error">

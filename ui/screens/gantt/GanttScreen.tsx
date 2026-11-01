@@ -32,16 +32,18 @@ export interface GanttDeps {
   openExternal: (url: string) => Promise<void>;
 }
 
-type Zoom = "day" | "week";
+type Zoom = "day" | "week" | "month";
 type Phase = "idle" | "loading" | "ready" | "error";
 
-const ZOOM_WIDTH: Record<Zoom, number> = { day: 26, week: 12 };
+const ZOOM_WIDTH: Record<Zoom, number> = { day: 26, week: 12, month: 4 };
 const LABEL_WIDTH = 240;
 
 export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }): ReactNode {
   const [provider, setProvider] = useState<"github" | "gitlab">("github");
   const [repo, setRepo] = useState("");
   const [hideUndated, setHideUndated] = useState(false);
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("all");
   const [zoom, setZoom] = useState<Zoom>("week");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -78,13 +80,37 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   }, [active, load]);
   useEffect(() => shellBus.subscribe("project-changed", () => { if (active) void load(); }), [active, load]);
 
-  const rows = useMemo(() => buildRows(issues, schedules, provider, repo), [issues, schedules, provider, repo]);
+  const filteredIssues = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return issues.filter((i) => {
+      if (stateFilter !== "all" && i.state !== stateFilter) return false;
+      if (q && !`${i.title} ${i.repo} ${i.labels.join(" ")} #${i.number ?? ""}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [issues, query, stateFilter]);
+  const rows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
   const dated = useMemo(() => datedRows(rows), [rows]);
   const undated = useMemo(() => undatedRows(rows), [rows]);
   const range = useMemo<TimelineRange>(() => timelineRange(rows), [rows]);
   const repos = useMemo(() => [...new Set(issues.filter((i) => !i.isPR).map((i) => i.repo).filter(Boolean))].sort(), [issues]);
   const dayWidth = ZOOM_WIDTH[zoom];
   const timelineWidth = range.days * dayWidth;
+  const today = Math.floor(Date.now() / 86_400_000);
+  const todayLeft = (today - range.start) * dayWidth;
+  const counts = useMemo(() => ({
+    open: filteredIssues.filter((i) => !i.isPR && i.state !== "closed").length,
+    closed: filteredIssues.filter((i) => !i.isPR && i.state === "closed").length,
+    overdue: dated.filter((r) => r.end !== null && r.end < today && r.issue.state !== "closed").length,
+  }), [filteredIssues, dated, today]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void load(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, load]);
 
   return (
     <div className="gnt-root" data-active={active}>
@@ -104,18 +130,34 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             {repos.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </label>
+        <label className="gnt-field gnt-grow">
+          <span>Search</span>
+          <input type="search" value={query} placeholder="Title, label, repo, #number" onChange={(e) => setQuery(e.target.value)} />
+        </label>
+        <label className="gnt-field">
+          <span>State</span>
+          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>
+            <option value="all">All</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
         <label className="gnt-check">
           <input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} />
           <span>Hide undated</span>
         </label>
         <div className="gnt-zoom" role="tablist" aria-label="Zoom">
-          {(["day", "week"] as const).map((z) => (
-            <button key={z} type="button" role="tab" aria-selected={zoom === z} className="gnt-zbtn" onClick={() => setZoom(z)}>{z === "day" ? "Day" : "Week"}</button>
+          {(["day", "week", "month"] as const).map((z) => (
+            <button key={z} type="button" role="tab" aria-selected={zoom === z} className="gnt-zbtn" onClick={() => setZoom(z)}>{z[0]!.toUpperCase() + z.slice(1)}</button>
           ))}
         </div>
         <button type="button" className="gnt-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
       </header>
 
+      <div className="gnt-legend" role="status">
+        <span>{counts.open} open</span><span>{counts.closed} closed</span><span>{counts.overdue} overdue</span>
+        <span className="gnt-hint">{rows.length >= 100 ? "Showing the first 100 cached issues." : ""}</span>
+      </div>
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
 
@@ -146,10 +188,12 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             </div>
             <div className="gnt-scroll">
               <div className="gnt-timeline" style={{ width: timelineWidth }}>
+                {todayLeft >= 0 && todayLeft <= timelineWidth ? <div className="gnt-today" style={{ left: todayLeft }} aria-hidden="true" /> : null}
                 <div className="gnt-header">
                   {Array.from({ length: range.days }, (_, k) => {
                     const day = range.start + k;
-                    const label = zoom === "day" || new Date(day * 86_400_000).getUTCDay() === 1 ? dayString(day).slice(5) : "";
+                    const dt = new Date(day * 86_400_000);
+                    const label = zoom === "day" ? dayString(day).slice(5) : zoom === "week" ? (dt.getUTCDay() === 1 ? dayString(day).slice(5) : "") : (dt.getUTCDate() === 1 ? dayString(day).slice(0, 7) : "");
                     return <div key={day} className="gnt-day" data-weekend={isWeekend(day) || undefined} data-today={day === Math.floor(Date.now() / 86_400_000) || undefined} style={{ width: dayWidth }}>{label}</div>;
                   })}
                 </div>
@@ -248,6 +292,10 @@ function ScheduleEditor({ row, deps, onClose, onSaved, onOpenIssue }: {
     }
     if (!clear && ((start && dayNumber(start) === null) || (due && dayNumber(due) === null))) {
       setError("Dates are YYYY-MM-DD or empty.");
+      return;
+    }
+    if (!clear && start && due && (dayNumber(due)! < dayNumber(start)!)) {
+      setError("Due cannot be before start.");
       return;
     }
     const est = estimate.trim() === "" ? null : Number(estimate);

@@ -52,7 +52,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   repositories:
     "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones); token verification (Save & verify), pull/re-sync and the Mac's resolve step are not available in the desktop yet.",
   paths:
-    "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
+    "The project folder layout is owned by the project on both apps; this group lists the folders (present or missing), reveals them in Finder and re-creates missing ones. Changing the layout itself is not offered on either side.",
   workspace:
     "On the Mac this group also holds per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the full feature profile (presets and switches); toolbar visibility is not offered.",
   build:
@@ -64,7 +64,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   updates:
     "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
   general:
-    "On the Mac this group also holds a bilingual switch, which is Planned here. The menu-bar icon switch is real (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
+    "The Mac hides its bilingual switch; the desktop does not show one either. The menu-bar icon switch is real here (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
 };
 
 // ---- Server & Backend rows (pure; the section renders them) -------------------------------------------

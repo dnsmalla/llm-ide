@@ -106,14 +106,16 @@ enum PhoneTierTable {
         case refuse(code: String, message: String)
     }
 
-    /// The single decision for an inbound frame's `type`.
-    static func verdict(for type: String) -> Verdict {
+    /// The single decision for an inbound frame's `type`. A loopback desktop-class client may use messages
+    /// the phone may not (settings/templates/toggles), but never Mac-to-phone or unknown types.
+    static func verdict(for type: String, desktop: Bool = false) -> Verdict {
         guard let tier = tiers[type] else {
             return .refuse(code: MobileRefusalCode.unknownType,
                            message: "Your Mac doesn't know this request. Update LLM-IDE or the phone app.")
         }
         switch tier {
         case .desktopOnly:
+            if desktop { return .allow(.approvalConfirm) }
             return .refuse(code: MobileRefusalCode.desktopOnly, message: "This is only available on your Mac.")
         case .macToPhone:
             return .refuse(code: MobileRefusalCode.tierRefused, message: "A phone cannot send this message.")

@@ -22,3 +22,12 @@
 .rv-hint { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .rv-chat { flex: none; width: 320px; border-left: 1px solid var(--tok-color-border); min-height: 0; }
 .rv-foot { margin: 0; padding: var(--tok-space-xs) var(--tok-space-md); border-top: 1px solid var(--tok-color-border); }
+.rv-linked { margin: 0; padding: 4px var(--tok-space-lg); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); border-bottom: 1px solid var(--tok-color-border); }
+.rv-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px var(--tok-space-sm) 0; border-bottom: 1px solid var(--tok-color-border); }
+.rv-tab { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--tok-color-border); border-bottom: 0; border-radius: var(--tok-radius-sm) var(--tok-radius-sm) 0 0; background: var(--tok-color-surface); padding: 2px 4px 2px 8px; }
+.rv-tab[data-on="true"] { background: var(--tok-color-surface2); }
+.rv-tab button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.rv-tab-x { color: var(--tok-color-text-muted); }
+.rv-resizer { width: 4px; cursor: col-resize; background: var(--tok-color-border); flex: 0 0 4px; }
+.rv-resizer:hover { background: var(--tok-color-accent); }
+.rv-markdown { padding: var(--tok-space-lg); overflow-y: auto; font-family: var(--tok-type-sans-family); white-space: normal; }

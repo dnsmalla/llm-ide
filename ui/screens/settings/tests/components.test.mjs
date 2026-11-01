@@ -260,7 +260,7 @@ test("Paths and Memory: read-only project views, labelled, with no path the page
   const paths = html(wrap(h(m.paths.default)));
   assert.match(paths, /Loading the project folders/);
   assert.match(paths, /read-only/i);
-  assert.match(paths, /On the Mac this group can also change/);
+  assert.match(paths, /The project folder layout is owned by the project on both apps/);
   const memory = html(wrap(h(m.memory.default)));
   assert.match(memory, /Loading project memory/);
   assert.match(memory, /knowledge graph/i);

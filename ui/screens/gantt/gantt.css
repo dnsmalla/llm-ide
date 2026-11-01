@@ -42,3 +42,7 @@
 
 .gnt-schedule { margin-left: auto; }
 .gnt-empty-dates { margin: 0 0 var(--tok-space-sm); }
+.gnt-grow { flex: 1; min-width: 160px; }
+.gnt-legend { display: flex; gap: var(--tok-space-md); align-items: center; flex-wrap: wrap; padding: var(--tok-space-xs) var(--tok-space-lg); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.gnt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tok-color-accent); z-index: 3; pointer-events: none; }
+.gnt-timeline { position: relative; }

@@ -10,6 +10,7 @@ import {
   decodeIssues,
   filterIssues,
   issueNumber,
+  labelOptions,
   repoOptions,
   type Issue,
   type IssueFilters,
@@ -31,7 +32,7 @@ type Phase = "idle" | "loading" | "ready" | "error";
 const REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
 
 export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps }): ReactNode {
-  const [filters, setFilters] = useState<IssueFilters>({ provider: "github", state: "open", repo: "", query: "" });
+  const [filters, setFilters] = useState<IssueFilters>({ provider: "github", state: "open", repo: "", label: "", query: "" });
   const [rows, setRows] = useState<Issue[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [importOpen, setImportOpen] = useState(false);
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Issue | null>(null);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -95,10 +97,21 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const visible = useMemo(() => filterIssues(rows, filters), [rows, filters]);
   const columns = useMemo(() => columnsFor(visible), [visible]);
   const repos = useMemo(() => repoOptions(rows), [rows]);
+  const labels = useMemo(() => labelOptions(rows), [rows]);
   const open = (i: Issue) => {
     if (!i.url) return;
     void deps.openExternal(i.url).catch(() => setNotice("That issue's link could not be opened."));
   };
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setSelected(null); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void load(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, load]);
 
   return (
     <div className="iss-root" data-active={active}>
@@ -134,6 +147,13 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           <span>Repository filter</span>
           <input list="iss-repos" value={filters.repo} placeholder="owner/name" onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value }))} />
           <datalist id="iss-repos">{repos.map((r) => <option key={r} value={r} />)}</datalist>
+        </label>
+        <label className="iss-field">
+          <span>Label</span>
+          <select value={filters.label} onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}>
+            <option value="">All labels</option>
+            {labels.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
         </label>
         <span className="iss-count" role="status">{visible.length.toLocaleString("en")} issue{visible.length === 1 ? "" : "s"}</span>
       </div>
@@ -179,7 +199,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
               <ul className="iss-cards">
                 {col.issues.map((i) => (
                   <li key={i.id} className="iss-card">
-                    <button type="button" className="iss-card-title" onClick={() => open(i)} disabled={!i.url} title={i.url || "No link"}>
+                    <button type="button" className="iss-card-title" onClick={() => setSelected(i)} title="Open issue details">
                       {i.title}
                     </button>
                     <div className="iss-meta">
@@ -195,6 +215,28 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           ))}
         </div>
       )}
+
+      {selected ? (
+        <div className="iss-detail-backdrop" role="presentation" onClick={() => setSelected(null)}>
+          <section className="iss-detail" role="dialog" aria-modal="true" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
+            <header className="iss-detail-head">
+              <div className="iss-grow">
+                <h2>{issueNumber(selected)} {selected.title}</h2>
+                <p className="iss-hint">{selected.repo} · {selected.state}{selected.author ? ` · ${selected.author}` : ""}</p>
+              </div>
+              <button type="button" className="iss-btn" onClick={() => setSelected(null)}>Close</button>
+            </header>
+            {selected.labels.length ? <div className="iss-labels">{selected.labels.map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
+            <pre className="iss-body">{selected.body || "No description."}</pre>
+            <div className="iss-detail-actions">
+              <button type="button" className="iss-btn iss-primary" disabled={!selected.url} onClick={() => open(selected)}>Open on GitHub</button>
+              <button type="button" className="iss-btn" disabled title="Creating, commenting and closing are Mac-only until the core has provider write routes">Comment</button>
+              <button type="button" className="iss-btn" disabled title="Closing is Mac-only until the core has provider write routes">Close issue</button>
+            </div>
+            <p className="iss-hint">Read-only detail from the cached issue. Comments, edits and state changes stay in the Mac app until the core gains provider write routes.</p>
+          </section>
+        </div>
+      ) : null}
 
       <p className="iss-hint iss-foot">
         Reading and importing are real. Creating, editing, commenting on or closing issues is not in the desktop core

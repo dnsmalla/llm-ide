@@ -267,12 +267,13 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     private func handleAutoTaskSetup(_ request: MobileAutoTaskRequest, type: String, data: Data?) {
         switch request {
         case .configSet, .templateSave, .templateRename, .templateDelete:
-            // Desktop-only. These edit what a later run executes (a template body is a prompt, a config's
-            // paths and skill end up in one a `.implement` task acts on), so the phone may read but never
-            // write them, whatever the Auto Task switch says. A typed refusal, never a crash, for old
-            // phones; answered before any wiring check so it never depends on the Mac's state.
-            refuseDesktopOnly(commandId: type, what: "Editing Auto Task settings and templates")
-            return
+            // The loopback desktop companion is desktop-class and edits these; a phone may read but never
+            // write them, whatever the Auto Task switch says. A typed refusal, never a crash, for phones.
+            if host?.isDesktopBridge != true {
+                refuseDesktopOnly(commandId: type, what: "Editing Auto Task settings and templates")
+                return
+            }
+            break
         case .setupList:
             break   // read-only snapshot: the phone keeps read access to templates and per-task config
         case .list, .toggle, .run, .stop, .history, .logsList:

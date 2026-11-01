@@ -610,7 +610,7 @@ final class MobileControlManager {
 
         // THE tier gate: one table, one place, before any bridge sees the frame. Unknown types, Mac-to-phone
         // types and desktop-only types are refused here with a typed code (never a crash, never silent).
-        if case .refuse(let code, let message) = PhoneTierTable.verdict(for: env.type) {
+        if case .refuse(let code, let message) = PhoneTierTable.verdict(for: env.type, desktop: isDesktopBridge) {
             append(.stderr, "Tier gate refused '\(MobileLogPolicy.typeLabel(env.type))' (\(code))")
             reply(CommandError(commandId: MobileLogPolicy.typeLabel(env.type), message: message, code: code))
             return

@@ -27,15 +27,15 @@ test("the label namespace with the most issues wins; columns keep values and a n
   ] });
   assert.equal(labelNamespace(rows), "status");
   const cols = columnsFor(rows);
-  assert.deepEqual(cols.map((c) => c.title), ["doing", "todo", "No status"]);
+  assert.deepEqual(cols.map((c) => c.title), ["No status", "doing", "todo"]);
   assert.deepEqual(cols.find((c) => c.title === "No status")?.issues.map((i) => i.id), ["c", "d"]);
 });
 
-test("without a namespaced label the board is Open/Closed, including empty columns", () => {
+test("without a namespaced label the board is Open/Closed and hides empty columns", () => {
   const rows = decodeIssues({ issues: [issue({ id: "a", state: "open" }), issue({ id: "b", state: "closed" })] });
   const cols = columnsFor(rows);
   assert.deepEqual(cols.map((c) => [c.title, c.issues.length]), [["Open", 1], ["Closed", 1]]);
-  assert.deepEqual(columnsFor([]).map((c) => c.title), ["Open", "Closed"]);
+  assert.deepEqual(columnsFor([]).map((c) => c.title), []);
 });
 
 test("filters: provider, state, repo substring, text; pull requests never appear", () => {
@@ -45,7 +45,7 @@ test("filters: provider, state, repo substring, text; pull requests never appear
     issue({ id: "c", title: "PR", isPR: true }),
     issue({ id: "d", title: "GitLab", provider: "gitlab", repo: "g/p" }),
   ] });
-  const base = { provider: "github" as const, state: "all" as const, repo: "", query: "" };
+  const base = { provider: "github" as const, state: "all" as const, repo: "", label: "", query: "" };
   assert.deepEqual(filterIssues(rows, base).map((i) => i.id), ["a", "b"]);
   assert.deepEqual(filterIssues(rows, { ...base, query: "login" }).map((i) => i.id), ["a"]);
   assert.deepEqual(filterIssues(rows, { ...base, state: "closed" }).map((i) => i.id), ["b"]);

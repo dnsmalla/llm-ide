@@ -180,6 +180,10 @@ export class MacBridge {
         this.send({ type: "loop_status_list" });
         break;
       }
+      case "error":
+        // CommandError from the Mac's tier gate or a bridge refusal (e.g. before desktop-class writes were allowed).
+        this.emit({ acks: [{ ok: false, message: str(msg.message) ?? "The Mac refused that request.", code: str(msg.code), at: Date.now() }, ...this.snapshot.acks].slice(0, 20) });
+        break;
       case "auth_failed":
         this.token = null;
         this.save();
