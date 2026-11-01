@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runCodeGraph } from "../native/codegraph.ts";
+import { cycleCount, runCodeGraph } from "../native/codegraph.ts";
 
 function mem(files) {
   return {
@@ -21,7 +21,7 @@ test("code graph snapshot and verify detect a shrunken graph", async () => {
   files["system/graph/graph.json"] = JSON.stringify({ nodes: [1], edges: [1], files: [1] });
   const shrunk = await runCodeGraph(fs, "verify", "system/graph/graph.json", "system/loop/refactor/graph/before.json");
   assert.equal(shrunk.passed, false);
-  assert.match(shrunk.output, /shrank/);
+  assert.match(shrunk.output, /regressed/);
 });
 
 test("code graph reads the canonical GraphKit files/calls shape", async () => {
@@ -30,4 +30,10 @@ test("code graph reads the canonical GraphKit files/calls shape", async () => {
   assert.equal(r.passed, true);
   assert.match(r.output, /2 node\(s\)/);
   assert.match(r.output, /1 edge\(s\)/);
+});
+
+test("cycleCount counts SCCs and self-loops", async () => {
+  assert.equal(cycleCount([{ from: "a", to: "b" }, { from: "b", to: "a" }]), 1);
+  assert.equal(cycleCount([{ from: "a", to: "a" }]), 1);
+  assert.equal(cycleCount([{ from: "a", to: "b" }, { from: "b", to: "c" }]), 0);
 });
