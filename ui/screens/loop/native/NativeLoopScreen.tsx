@@ -14,7 +14,7 @@ import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved } from "./approvals.ts";
 import { runRegression } from "./regression.ts";
-import { detectTestStructure, writeTestStructure } from "./testmap.ts";
+import { buildTestMap, detectTestStructure, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
@@ -268,12 +268,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
     }
     if (s.kind === "testMap") {
-      if (s.testOp !== "structure") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
+      if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
       const root = projectRoot ?? "";
       const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
       const structure = await detectTestStructure(fs, repoPrefix);
-      const writes = await writeTestStructure(fs, repoPrefix, structure);
-      return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
+      if (s.testOp === "structure") {
+        const writes = await writeTestStructure(fs, repoPrefix, structure);
+        return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
+      }
+      const map = await buildTestMap(fs, repoPrefix, structure, "system/graph/graph.json");
+      const writes = await writeTestMap(fs, repoPrefix, map);
+      return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
     }
     if (s.kind === "artifactCheck") {
       if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
@@ -298,7 +303,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const executeLoop = async (target: LoopDefinition) => {
     if (dirty) return;
-    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind) || (s.kind === "testMap" && s.testOp === "structure")));
+    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map"))));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     const approval = ensureApprovals(target);
     if (approval) { setNotice(approval); return; }
@@ -357,7 +362,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runSelectedStage = async () => {
     if (!loop || !stage || dirty || runningStage) return;
-    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && stage.testOp === "structure"))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
+    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
     if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
@@ -448,7 +453,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && stage.testOp === "structure")) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>

@@ -90,3 +90,87 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
   await fs.write(json, JSON.stringify(s, null, 2) + "\n", { expected_hash: null });
   return { md, json };
 }
+
+export interface TestMapEntry { path: string; function: string; line: number; fanIn: number; loc: number; testedBy: string[] }
+export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number }
+
+async function walkFiles(fs: TestMapFs, dir: string, out: string[] = [], limit = 5000): Promise<string[]> {
+  if (out.length >= limit) return out;
+  let entries;
+  try { entries = (await fs.list(dir)).entries; } catch { return out; }
+  for (const e of entries) {
+    if (out.length >= limit) return out;
+    if (e.name.startsWith(".") || SKIP.has(e.name)) continue;
+    if (e.kind === "dir") await walkFiles(fs, e.path, out, limit);
+    else if (e.kind === "file") out.push(e.path);
+  }
+  return out;
+}
+
+function tokensOf(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/[A-Za-z0-9_]+/g)) out.add(m[0]);
+  for (const m of text.matchAll(/"([^"\n]*)"/g)) out.add(m[1]);
+  return out;
+}
+
+const TEST_MARKER = /(describe|it|test|specify|@Test|def test_|func test[A-Z])/;
+
+export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure: TestStructure, graphPath: string, now = new Date()): Promise<TestMap> {
+  const prefix = repoPrefix ? `${repoPrefix}/` : "";
+  const tests: { path: string; tokens: Set<string> }[] = [];
+  for (const root of structure.roots) {
+    const files = await walkFiles(fs, `${prefix}${root.testDir}`.replace(/\/$/, ""));
+    for (const f of files) {
+      const text = await file(fs, f);
+      if (text === null || !TEST_MARKER.test(text)) continue;
+      const rel = repoPrefix && f.startsWith(`${repoPrefix}/`) ? f.slice(repoPrefix.length + 1) : f;
+      tests.push({ path: rel, tokens: tokensOf(text) });
+    }
+  }
+  const entries: TestMapEntry[] = [];
+  let source: "graph" | "files" = "files";
+  const graphText = await file(fs, graphPath);
+  if (graphText) {
+    try {
+      const g = JSON.parse(graphText) as { nodes?: Array<{ kind?: string; title?: string; id?: string; metadata?: { path?: string; source_file?: string; line?: number } }> };
+      source = "graph";
+      for (const n of g.nodes ?? []) {
+        if (n.kind !== "function" || !n.title) continue;
+        const path = n.metadata?.path ?? n.metadata?.source_file;
+        if (!path) continue;
+        const base = path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+        const testedBy = tests.filter((t) => t.tokens.has(n.title!) || (base !== "" && t.tokens.has(base))).map((t) => t.path).sort();
+        entries.push({ path, function: n.title, line: n.metadata?.line ?? 1, fanIn: 0, loc: 0, testedBy });
+      }
+    } catch { source = "files"; }
+  }
+  if (entries.length === 0) {
+    source = "files";
+    for (const t of tests) entries.push({ path: t.path.replace(/\.(test|spec)\.[^.]+$/, ""), function: "*", line: 1, fanIn: 0, loc: 0, testedBy: [t.path] });
+  }
+  entries.sort((a, b) => Number(a.testedBy.length > 0) - Number(b.testedBy.length > 0) || b.fanIn - a.fanIn || a.path.localeCompare(b.path) || a.function.localeCompare(b.function));
+  const tested = entries.filter((e) => e.testedBy.length > 0).length;
+  const files = new Set(entries.map((e) => e.path));
+  const testedFiles = new Set(entries.filter((e) => e.testedBy.length > 0).map((e) => e.path));
+  return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length };
+}
+
+function renderTestMap(m: TestMap): string {
+  const lines = [`# Test map (${m.source}, ${m.generatedAt})`, "", "| counter | value |", "|---|---|", `| untestedFunctions | ${m.untestedFunctions} |`, `| testedFunctions | ${m.testedFunctions} |`, `| untestedFiles | ${m.untestedFiles} |`, "", "## Untested functions", ""];
+  for (const e of m.entries.filter((x) => x.testedBy.length === 0).slice(0, 80)) lines.push(`- ${e.path}:${e.line} ${e.function}`);
+  lines.push("", "## Tested functions", "");
+  for (const e of m.entries.filter((x) => x.testedBy.length > 0).slice(0, 80)) lines.push(`- ${e.path}:${e.line} ${e.function} — ${e.testedBy.join(", ")}`);
+  return lines.join("\n") + "\n";
+}
+
+export async function writeTestMap(fs: TestMapFs, repoPrefix: string, m: TestMap): Promise<{ md: string; json: string }> {
+  const prefix = repoPrefix ? `${repoPrefix}/` : "";
+  const md = `${prefix}llm-doc/loop/test/TEST-MAP.md`;
+  const json = `${prefix}system/loop/test/TEST-MAP.json`;
+  await ensureDir(fs, md.split("/").slice(0, -1).join("/"));
+  await ensureDir(fs, json.split("/").slice(0, -1).join("/"));
+  await fs.write(md, renderTestMap(m), { expected_hash: null });
+  await fs.write(json, JSON.stringify(m, null, 2) + "\n", { expected_hash: null });
+  return { md, json };
+}
