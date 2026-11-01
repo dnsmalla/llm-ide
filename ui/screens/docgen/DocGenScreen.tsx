@@ -16,6 +16,7 @@ import { TemplateManager } from "./TemplateManager";
 import { CommandManager } from "./CommandManager";
 import type { FsApi } from "../explorer/fs";
 import { chatOutputStore } from "../shell/chat-output";
+import { ChatDockSlot } from "../shell/chat-dock";
 
 export interface DocGenScreenProps {
   store: DocGenStore;
@@ -41,6 +42,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const [view, setView] = useState<"result" | "history">(p.initialView ?? "result");
   const [manage, setManage] = useState(p.showManager ?? false);
   const [manageCommands, setManageCommands] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   useEffect(() => {
     void store.setProject(p.projectRoot);
   }, [store, p.projectRoot]);
@@ -82,7 +84,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
     );
   } else {
     body = (
-      <div className="dg-grid">
+      <div className="dg-grid" data-chat={showChat}>
         <div className="dg-left">
           <section className="dg-steps" aria-label="Steps to generate">
             <h2 className="dg-steps-title">Steps to generate</h2>
@@ -139,6 +141,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             initialViewport={p.initialViewport}
           />
         </div>
+        {showChat ? <aside className="dg-chat" aria-label="Chat assistant"><ChatDockSlot active={p.active && showChat} projectRoot={p.projectRoot} /></aside> : null}
         <div className="dg-right">
           <div className="dg-tabs" role="tablist" aria-label="Output">
             <button type="button" role="tab" id="dg-out-result" aria-selected={view === "result"} aria-controls="dg-out-pane" tabIndex={view === "result" ? 0 : -1} className="dg-tab" onClick={() => setView("result")}>
@@ -180,6 +183,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
     <div className="dg-root" data-active={p.active} data-surface={store.surface} aria-busy={busy}>
       <header className="dg-top">
         <h1 className="dg-title">{title}</h1>
+        <button type="button" className="dg-btn" aria-pressed={showChat} onClick={() => setShowChat((v) => !v)}>{showChat ? "Hide chat" : "Chat assistant"}</button>
         {s.setup === "ready" && <p className="dg-muted">{store.surface === "visual" ? "Describe or diagram your sources." : "Turn sources into a document."}</p>}
       </header>
       {body}
