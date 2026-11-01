@@ -120,10 +120,34 @@ pub async fn repo_clone(provider: String, url: String, token: Option<String>, fo
     let remote = remote_url(&provider, &owner, &repo);
     let token = token.filter(|t| !t.trim().is_empty() && t.len() <= 512 && !t.chars().any(|c| c.is_control()));
     let dest_for_task = dest.clone();
-    tauri::async_runtime::spawn_blocking(move || clone_into(&remote, &dest_for_task, &provider, token.as_deref()))
+    tauri::async_runtime::spawn_blocking(move || clone_with_fallback(&remote, &dest_for_task, &provider, token.as_deref()))
         .await
         .map_err(|e| format!("clone task failed: {e}"))?
         .map(|_| CloneResult { path: dest.to_string_lossy().into_owned(), name })
+}
+
+/// True for git errors that mean the supplied credential was rejected (a stale token on a public repository,
+/// or a token without access to a private one). The clone then retries anonymously once.
+pub fn is_auth_failure(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    ["http basic: access denied", "authentication failed", "could not read username", "invalid username or password", "permission denied (publickey)"]
+        .iter()
+        .any(|needle| m.contains(needle))
+}
+
+fn clone_with_fallback(remote: &str, dest: &Path, provider: &str, token: Option<&str>) -> Result<(), String> {
+    let first = clone_into(remote, dest, provider, token);
+    let Err(err) = first else { return first };
+    if token.is_none() || !is_auth_failure(&err) {
+        return Err(err);
+    }
+    // A stale/expired token must not make a public repository unclonable. Retry with the same URL and no
+    // credential; if the repository is private this fails too and we return the original (clearer) error.
+    let _ = std::fs::remove_dir_all(dest);
+    match clone_into(remote, dest, provider, None) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(err),
+    }
 }
 
 fn clone_into(remote: &str, dest: &Path, provider: &str, token: Option<&str>) -> Result<(), String> {
@@ -197,6 +221,14 @@ mod tests {
         clone_into(base.to_str().unwrap(), &dest2, "github", Some("tok")).unwrap();
         assert_eq!(std::fs::read_to_string(dest2.join("README.md")).unwrap(), "hello");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn auth_failures_are_recognised_for_anonymous_retry() {
+        assert!(is_auth_failure("git clone failed: remote: HTTP Basic: Access denied."));
+        assert!(is_auth_failure("fatal: Authentication failed for 'https://github.com/x/y.git/'"));
+        assert!(!is_auth_failure("repository not found"));
+        assert!(!is_auth_failure("could not resolve host: github.com"));
     }
 
     #[test]
