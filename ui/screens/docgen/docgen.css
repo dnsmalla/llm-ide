@@ -59,3 +59,5 @@
 .dg-step-title { font-size: var(--tok-type-body-size); }
 .dg-step[data-done] .dg-step-title { text-decoration: line-through; color: var(--tok-color-text-muted); }
 .dg-step-detail { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.dg-edit { width: 100%; min-height: 420px; resize: vertical; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); background: var(--tok-color-surface); color: var(--tok-color-text); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-sm); }
+.dg-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }

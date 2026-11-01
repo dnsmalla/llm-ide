@@ -19,6 +19,8 @@ export interface ResultPanelProps {
   onRefine: (instruction: string) => void;
   onSave: () => void;
   onSaveAsNew: () => void;
+  /** Manual edit (Mac Edit → Apply Edit); absent = read-only. */
+  onEditDocument?: (text: string) => void;
   onOpenSaved: (path: string) => void;
   onDiscard: () => void;
   onOpenExternal: (url: string) => void;
@@ -98,6 +100,8 @@ export function ResultPanel(p: ResultPanelProps): ReactNode {
 function Done(p: ResultPanelProps): ReactNode {
   const r = p.run;
   const [instruction, setInstruction] = useState("");
+  const [mode, setMode] = useState<"preview" | "raw">("preview");
+  const [editing, setEditing] = useState(false);
   const revising = r.revising;
   const runtime = p.mermaid;
   const renderFence = useCallback((lang: string, text: string) => (runtime && isMermaidLang(lang) ? <MermaidView source={text} runtime={runtime} /> : null), [runtime]);
@@ -122,6 +126,13 @@ function Done(p: ResultPanelProps): ReactNode {
             Open in Explorer
           </button>
         )}
+        {p.onEditDocument ? (
+          <button type="button" className="dg-btn" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>
+            {editing ? "Done editing" : "Edit"}
+          </button>
+        ) : null}
+        <button type="button" className="dg-btn" aria-pressed={mode === "preview"} onClick={() => { setMode("preview"); setEditing(false); }}>Preview</button>
+        <button type="button" className="dg-btn" aria-pressed={mode === "raw"} onClick={() => { setMode("raw"); setEditing(false); }}>Raw</button>
         <button type="button" className="dg-btn" disabled={revising} onClick={p.onDiscard}>
           {r.saved && !r.dirty ? "Start another" : "Discard"}
         </button>
@@ -142,7 +153,13 @@ function Done(p: ResultPanelProps): ReactNode {
         </div>
       )}
       <div className="dg-doc">
-        <MarkdownView text={r.doc} baseRel={null} onOpenExternal={p.onOpenExternal} renderFence={renderFence} initialSections={p.initialSections} />
+        {editing && p.onEditDocument ? (
+          <textarea className="dg-edit" aria-label="Document markdown" value={r.doc} spellCheck={false} onChange={(e) => p.onEditDocument!(e.target.value)} />
+        ) : mode === "raw" ? (
+          <pre className="dg-raw" aria-label="Document markdown source">{r.doc}</pre>
+        ) : (
+          <MarkdownView text={r.doc} baseRel={null} onOpenExternal={p.onOpenExternal} renderFence={renderFence} initialSections={p.initialSections} />
+        )}
       </div>
       <form
         className="dg-refine"

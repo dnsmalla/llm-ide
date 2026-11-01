@@ -146,6 +146,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
                 onRefine={(t) => void store.run.refine(t)}
                 onSave={() => void store.run.save()}
                 onSaveAsNew={() => void store.run.save({ asNew: true })}
+                onEditDocument={(text) => store.run.setDocument(text)}
                 onOpenSaved={p.onOpenFile}
                 onDiscard={() => store.run.reset()}
                 onOpenExternal={p.onOpenExternal}
