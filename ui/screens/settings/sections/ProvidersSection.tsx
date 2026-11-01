@@ -16,6 +16,7 @@ export default function ProvidersSection() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [modelsFor, setModelsFor] = useState<ProviderRow | null>(null);
+  const [editing, setEditing] = useState<ProviderRow | null>(null);
   const [typed, setTyped] = useState("");
   useRefreshOnFocus(() => void model.load());
 
@@ -70,6 +71,7 @@ export default function ProvidersSection() {
                   <>
                     <Button label={`Test ${r.name}`} disabled={busy} onClick={() => void model.test(r)}>Test</Button>
                     <Button label={`Models of ${r.name}`} onClick={() => setModelsFor(r)}>Models</Button>
+                    <Button label={`Edit ${r.name}`} disabled={busy} onClick={() => setEditing(r)}>Edit</Button>
                     <input type="checkbox" role="switch" aria-label={`Enable ${r.name}`} aria-checked={r.enabled} checked={r.enabled} disabled={busy} onChange={(e) => void model.setEnabled(r, e.target.checked)} />
                     <Button tone="danger" label={`Remove ${r.name}`} disabled={busy} onClick={() => model.requestRemove(r)}>Remove</Button>
                   </>
@@ -80,6 +82,14 @@ export default function ProvidersSection() {
         />
       ) : null}
       {s.rows.length > 0 && rows.length === 0 ? <p className="st-hint">No connection matches that filter.</p> : null}
+      {editing ? (
+        <EditConnection
+          key={editing.id}
+          row={editing}
+          onCancel={() => setEditing(null)}
+          onSave={async (patch) => { const ok = await model.update(editing, patch); if (ok) setEditing(null); }}
+        />
+      ) : null}
       {modelsFor ? (
         <SettingsSectionCard icon={<PlusIcon />} title={`Models of ${modelsFor.name}`} defaultExpanded>
           <ModelsPanel row={modelsFor} onClose={() => setModelsFor(null)} />
@@ -222,5 +232,28 @@ function ModelsPanel({ row, onClose }: { row: ProviderRow; onClose: () => void }
         }}
       />
     </div>
+  );
+}
+
+
+/** Edit a managed connection's name/address (Mac Providers row actions). The key stays write-only and unchanged. */
+function EditConnection({ row, onSave, onCancel }: { row: ProviderRow; onSave: (patch: { name: string; baseURL: string; allowPrivate: boolean }) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(row.name);
+  const [baseURL, setBaseURL] = useState(row.baseURL);
+  const [allowPrivate, setAllowPrivate] = useState(row.allowPrivate);
+  const [busy, setBusy] = useState(false);
+  return (
+    <SettingsSectionCard icon={<PlusIcon />} title={`Edit ${row.name}`} defaultExpanded>
+      <div className="st-stack" role="group" aria-label={`Edit ${row.name}`}>
+        <Field label="Name"><input className="st-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Address" hint="The full endpoint address. Leave unchanged unless the gateway moved."><input className="st-input" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} spellCheck={false} /></Field>
+        <Switch label="This address is on my own network" checked={allowPrivate} onChange={setAllowPrivate} />
+        <p className="st-hint">The API key is write-only and is kept unchanged. Rotate it by reconnecting the provider, or clear it on the Mac.</p>
+        <div className="st-row">
+          <Button tone="primary" disabled={busy || name.trim() === ""} onClick={() => { setBusy(true); void onSave({ name, baseURL, allowPrivate }).finally(() => setBusy(false)); }}>{busy ? "Saving…" : "Save changes"}</Button>
+          <Button onClick={onCancel}>Cancel</Button>
+        </div>
+      </div>
+    </SettingsSectionCard>
   );
 }

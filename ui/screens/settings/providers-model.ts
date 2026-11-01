@@ -403,6 +403,29 @@ export class ProvidersModel extends Store<ProvidersState> {
     }
   }
 
+  /** Re-sends the connection with an edited name/address; no key is sent, so the stored key is kept. */
+  async update(row: ProviderRow, patch: { name?: string; baseURL?: string; allowPrivate?: boolean }): Promise<boolean> {
+    if (this.getState().busy.has(row.id) || row.readOnly) return false;
+    this.#mark(row.id, true);
+    this.#generation++;
+    try {
+      const body: ConnectBody & { enabled: boolean } = { catalogId: row.catalogId, enabled: row.enabled, name: (patch.name ?? row.name).trim(), allowPrivate: patch.allowPrivate ?? row.allowPrivate };
+      const baseURL = (patch.baseURL ?? row.baseURL).trim();
+      if (baseURL) body.baseURL = baseURL;
+      const slug = slugOfRow(row);
+      if (slug !== null) body.slug = slug;
+      await this.#api.connect(body);
+      this.set({ error: null });
+      await this.load();
+      return true;
+    } catch (e) {
+      this.set({ error: describeError(e) });
+      return false;
+    } finally {
+      this.#mark(row.id, false);
+    }
+  }
+
   async setEnabled(row: ProviderRow, enabled: boolean): Promise<void> {
     if (this.getState().busy.has(row.id) || row.readOnly) return;
     this.#mark(row.id, true);
