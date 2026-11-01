@@ -96,3 +96,6 @@
 .gr-quick-title { margin: 0 0 2px; font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .4px; color: var(--tok-color-text-muted); }
 .gr-quick-repo { display: flex; justify-content: space-between; gap: var(--tok-space-sm); font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 5px 8px; cursor: pointer; }
 .gr-quick-repo[data-on="true"] { border-color: var(--tok-color-accent); }
+.gr-legend-inline { display: inline-flex; gap: var(--tok-space-sm); flex-wrap: wrap; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.gr-legend-inline span { display: inline-flex; align-items: center; gap: 3px; }
+.gr-legend-inline i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }

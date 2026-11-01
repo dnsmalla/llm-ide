@@ -40,7 +40,7 @@ export function EmptyState({ mode }: { mode: "code" | "memory" | "all" }) {
   const message = mode === "code"
     ? "Click Generate Code Graph to scan the project."
     : mode === "memory"
-      ? "Generate InfiniteBrain to build a doc graph from the project's llm-doc folder."
+      ? "Generate InfiniteBrain to build a doc graph from the selected repo's .md/.txt docs."
       : "Generate Graph to build one graph from all code and docs.";
   return (
     <div className="gr-state">

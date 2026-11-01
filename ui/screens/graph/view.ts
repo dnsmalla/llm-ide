@@ -11,7 +11,7 @@ import type { GraphModel, LayoutResult } from "./model.ts";
 import { buildAdjacency, edgeWeights, type Adjacency, type FilterState } from "./filters.ts";
 import { planLod, weightHistogram, type LodPlan } from "./lod.ts";
 import { edgeShown, labelShown, visibleNodes } from "./visibility.ts";
-import { communityColor, DIM_COLOR, EDGE_COLORS, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
+import { communityColor, DIM_COLOR, EDGE_COLORS, kindColor, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
 
 export interface ViewCamera {
   x: number;
@@ -28,6 +28,8 @@ export interface ViewOptions {
   camera: ViewCamera | null;
   /** Draw node labels; the canvas toolbar can turn them off without rebuilding the graph. */
   showLabels?: boolean;
+  /** Colour by InfiniteBrain node kind rather than community (Mac doc-graph legend). */
+  colorByKind?: boolean;
   onSelect(i: number): void;
   onCamera(c: ViewCamera): void;
   /** Called when WebGL is unavailable or the context is lost for good. */
@@ -174,7 +176,8 @@ export class GraphView {
     if (this.visible[i] === 0) return { ...d, hidden: true };
     const sel = this.selected;
     const isNb = this.neighbour[i] === 1;
-    let color = communityColor(layout.community[i]);
+    const byKind = this.o.colorByKind ? kindColor(model.nodeKinds[model.kindOf[i]]) : null;
+    let color = byKind ?? communityColor(layout.community[i]);
     let zIndex = 0;
     let size = d.size as number;
     if (sel >= 0) {

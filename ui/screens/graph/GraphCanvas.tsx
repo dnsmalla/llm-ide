@@ -15,6 +15,7 @@ export interface GraphCanvasProps {
   active: boolean;
   camera: { current: ViewCamera | null };
   showLabels?: boolean;
+  colorByKind?: boolean;
   onSelect: (node: number) => void;
   onFatal: (message: string) => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
@@ -46,6 +47,7 @@ export function GraphCanvas(p: GraphCanvasProps) {
       selected: latest.current.selected,
       camera: p.camera.current,
       showLabels: p.showLabels,
+      colorByKind: p.colorByKind,
       onSelect: p.onSelect,
       onCamera: (c) => { p.camera.current = c; },
       onFatal: p.onFatal,

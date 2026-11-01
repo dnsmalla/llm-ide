@@ -21,3 +21,38 @@ export const SELECT_COLOR = "#ff3b6b";
 export const NEIGHBOUR_COLOR = "#ffb020";
 export const DIM_COLOR = "#8a8f9855";
 export const EDGE_COLORS = ["#8a8f9833", "#8a8f9855", "#8a8f9888", "#6c727e"] as const;
+
+/** InfiniteBrain node-kind colours (Mac legend): notes are blue, documents purple, and the annotation kinds
+ *  keep the Mac's semantic palette. Unknown kinds stay community-coloured. */
+const KIND_COLORS: Readonly<Record<string, string>> = {
+  note: "#3b82f6",
+  noteNote: "#3b82f6",
+  memoryChunk: "#3b82f6",
+  memoryDoc: "#8b5cf6",
+  docPage: "#8b5cf6",
+  noteConcept: "#14b8a6",
+  noteDecision: "#ef4444",
+  noteFact: "#22c55e",
+  notePlaybook: "#06b6d4",
+  noteQuestion: "#eab308",
+  noteSource: "#d97706",
+  noteTask: "#f97316",
+  noteEvent: "#a855f7",
+};
+
+export function kindColor(kind: string): string | null {
+  return KIND_COLORS[kind] ?? null;
+}
+
+/** Legend rows shown for a doc graph, in the Mac's order. */
+export const DOC_LEGEND: ReadonlyArray<{ kind: string; label: string }> = [
+  { kind: "memoryChunk", label: "Note" },
+  { kind: "memoryDoc", label: "Document" },
+  { kind: "noteConcept", label: "Concept" },
+  { kind: "noteDecision", label: "Decision" },
+  { kind: "noteFact", label: "Fact" },
+  { kind: "notePlaybook", label: "Playbook" },
+  { kind: "noteQuestion", label: "Question" },
+  { kind: "noteSource", label: "Source" },
+  { kind: "noteTask", label: "Task" },
+];

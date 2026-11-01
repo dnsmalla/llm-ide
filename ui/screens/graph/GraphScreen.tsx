@@ -10,6 +10,7 @@ import { GraphFileTree } from "./FileTree.tsx";
 import { NodeList } from "./NodeList.tsx";
 import { EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
 import { buildAdjacency, communitySummary } from "./filters.ts";
+import { DOC_LEGEND, kindColor } from "./colors.ts";
 import { searchNodes } from "./search.ts";
 import type { GraphStore } from "./store.ts";
 import type { ViewCamera, ViewOptions, GraphView } from "./view.ts";
@@ -98,7 +99,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         ))}
       </div>
       <p className="gr-muted">
-        {mode === "code" ? "Scans code into a symbol graph." : mode === "memory" ? "Scans llm-doc into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
+        {mode === "code" ? "Scans code into a symbol graph." : mode === "memory" ? "Scans the selected repo's .md/.txt docs into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
       </p>
       <button
         type="button"
@@ -128,6 +129,9 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const sel = s.selected;
   const notices = [...entry.notices];
   if (layout.engine === "fallback") notices.unshift("Showing a simplified layout because the layout engine could not start.");
+  const kindSet = new Set(model.nodeKinds);
+  const docGraph = model.nodeKinds.some((k) => k.startsWith("note") || k === "memoryDoc" || k === "memoryChunk" || k === "docPage");
+  const legend = DOC_LEGEND.filter((l) => kindSet.has(l.kind));
 
   return (
     <div className="gr-root" data-active={active}>
@@ -151,6 +155,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           </div>
           <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
           <span className="gr-muted">{num(model.n)} nodes</span>
+          {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) ?? "transparent" }} aria-hidden="true" />{l.label}</span>)}</span> : null}
           <button type="button" className="gr-btn" title="Toggle full screen" onClick={() => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()).catch(() => undefined); }}>⛶</button>
         </div>
         <div role="tablist" aria-label="Graph views" className="gr-seg">
@@ -188,7 +193,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         </div>
         <main className="gr-main">
           <div id="gr-panel-graph" role="tabpanel" aria-labelledby="gr-tab-graph" hidden={s.tab !== "graph"} className="gr-panel">
-            <GraphCanvas model={model} layout={layout} adj={adj} filters={s.filters} selected={sel} active={active && s.tab === "graph"} camera={camera} showLabels={showLabels} onSelect={(i) => store.select(i)} onFatal={setFatal} createView={createView} />
+            <GraphCanvas model={model} layout={layout} adj={adj} filters={s.filters} selected={sel} active={active && s.tab === "graph"} camera={camera} showLabels={showLabels} colorByKind={docGraph} onSelect={(i) => store.select(i)} onFatal={setFatal} createView={createView} />
           </div>
           <div id="gr-panel-list" role="tabpanel" aria-labelledby="gr-tab-list" hidden={s.tab !== "list"} className="gr-panel">
             {s.tab === "list" && (

@@ -72,14 +72,31 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     }
     let out_dir = root.join("system").join("graph");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create system/graph: {e}"))?;
-    let scan_code = match target.map(str::trim).filter(|t| !t.is_empty()) {
+    let explicit = match target.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
             let p = crate::fs_ops::resolve_existing(&root, t).map_err(|e| e.message)?;
             if !p.is_dir() { return Err("the graph target is not a folder".into()); }
-            p
+            Some(p)
         }
-        None => root.clone(),
+        None => None,
     };
+    let scan_code = explicit.clone().unwrap_or_else(|| root.clone());
+    // InfiniteBrain walks the selected repo for .md/.txt (the Mac's activeRepoRoot), not only the
+    // library's llm-doc folder — a repo's README/docs are exactly its doc graph.
+    let scan_docs = explicit.clone().unwrap_or_else(|| {
+        // The Mac's activeRepoRoot: the first code repo is the default doc target, so InfiniteBrain
+        // works without an explicit pick. Fall back to the library's llm-doc when there is no repo.
+        let code = root.join("code");
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&code).ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && !p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with('.')).unwrap_or(false))
+            .collect();
+        dirs.sort();
+        dirs.into_iter().next().unwrap_or_else(|| root.join("llm-doc"))
+    });
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let temp = |suffix: &str| std::env::temp_dir().join(format!("llmide-graph-{}-{stamp}-{suffix}.json", std::process::id()));
     let code_out = temp("code");
@@ -94,16 +111,14 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
                 Ok(code_out.clone())
             }
             "memory" => {
-                let docs = root.join("llm-doc");
-                if !docs.is_dir() { return Err("this project has no llm-doc folder".into()); }
-                run_gk(&node, &cli, &["memory".into(), docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
+                if !scan_docs.is_dir() { return Err("this project has no folder to scan for documents".into()); }
+                run_gk(&node, &cli, &["memory".into(), scan_docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
                 Ok(doc_out.clone())
             }
             "all" => {
                 run_gk(&node, &cli, &["code".into(), scan_code.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
-                let docs = root.join("llm-doc");
-                if !docs.is_dir() { return Err("this project has no llm-doc folder".into()); }
-                run_gk(&node, &cli, &["memory".into(), docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
+                if !scan_docs.is_dir() { return Err("this project has no folder to scan for documents".into()); }
+                run_gk(&node, &cli, &["memory".into(), scan_docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
                 // `memory` emits additive `chunks`/`docCount` keys, but `merge` parses the doc strictly. Split them
                 // into the canonical document and the chunk array the merger expects.
                 let raw = std::fs::read_to_string(&doc_out).map_err(|e| format!("cannot read the memory graph: {e}"))?;
@@ -137,7 +152,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     let nodes = value.get("nodes").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0);
     let edges = value.get("edges").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0);
     if mode == "memory" && nodes == 0 {
-        return Err("This project's llm-doc has no documents to graph yet.".into());
+        return Err("This target has no .md/.txt documents to graph yet.".into());
     }
     let dest = out_dir.join("graph.json");
     // Write to a sibling temp then rename so a reader never sees half a graph.
