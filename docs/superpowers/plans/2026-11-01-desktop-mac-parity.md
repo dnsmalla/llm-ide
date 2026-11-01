@@ -16,15 +16,15 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | # | Surface | Mac source | Desktop source | Status |
 |---|---|---|---|---|
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/absolute copy done; previews/clipboard/search pending |
-| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | audited, fixes pending |
+| 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach done; memory/voice/pickers/approvals pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | audited, fixes pending |
-| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | audited, fixes pending |
+| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | generate button done; modes/target/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs done; setup/custom pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts done |
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, permissions, history/poll done; budgets/approvals pending |
-| 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | audited, fixes pending |
+| 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | manual edit/Preview/Raw done; chat/output/templates pending |
 | 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | audited, fixes pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | project root + meetings-first order done; single-list sections pending |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/notices/login done; updates/accounts/providers pending |
@@ -34,10 +34,10 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 ## Findings (from the per-surface audits)
 
 ### Explorer / Chat / Terminal
-- Explorer: no document/image preview or Raw toggle; no file cut/copy/paste; Search has no replace or
+- Explorer now has Reveal in Finder and Copy Absolute Path; still no document/image preview or Raw toggle; no file cut/copy/paste; Search has no replace or
   Find-in-Folder hand-off; no Reveal in Finder per row; Project Folders sheet cannot create/reindex; no git
   gutter; open-file hand-off drops the line number.
-- Chat: opening a file does not auto-attach it; project-memory chip/viewer missing; no voice dictation; flat
+- Chat now auto-attaches the active Explorer file in the Code Assistant; still no project-memory chip/viewer, voice dictation; flat
   model picker (no grouped/provider/effort/custom); no per-turn retry/usage/collapse/jump; dock header lacks
   counters/search/rename/delete; no app-wide pending-approval badge; context meter has no breakdown.
 - Terminal: dock exists only in Explorer; Ctrl+` and status-bar toggle are Explorer-only; open/height not
@@ -48,8 +48,8 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
   surfaced; no deep link to the Code page.
 - Graph Code: one Generate mode and no scan target/repo quick-pick/Library tree; only zoom controls; missing
   auto-update settings card (D→M and M→D gaps both exist).
-- Doc Gen: no Use-chat toggle, output destination, chat panel/Save-chat-output, manual edit, Preview/Raw, or
-  template import/command editing; panel chrome not toggleable.
+- Doc Gen: manual edit and Preview/Raw are done; still no Use-chat toggle, output destination, chat panel/
+  Save-chat-output, template import/command editing, or panel toggles.
 - Visual: images cannot be sources or previewed; no thumbnail strip or visual result affordance; tab/panel
   state not persisted; checklist promises interactions that are not wired.
 
