@@ -22,6 +22,8 @@ import { PanelTabs } from "./PanelTabs";
 import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
+import { buildReplacer, replaceAll } from "./search/replace";
+import type { SearchOptions } from "./search/model";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
 import { TERMINAL_BUILT as SHARED_TERMINAL_BUILT, loadTerminalRuntime as sharedLoadRuntime, sharedTerminalManager } from "./terminal/shared";
@@ -70,8 +72,9 @@ const copy = (text: string) => {
 
 export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { deps?: ExplorerDeps }) {
   const editorRef = useRef<EditorHost | null>(null);
+  const fs = useMemo(() => deps?.fs ?? createHostFs(defaultChannel), []);
   const controller = useMemo(
-    () => new ExplorerController({ fs: deps?.fs ?? createHostFs(defaultChannel), editor: () => editorRef.current, kv: deps?.kv }),
+    () => new ExplorerController({ fs, editor: () => editorRef.current, kv: deps?.kv }),
     // The dependencies are fixed for the life of the screen.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -273,6 +276,28 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   };
   useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
 
+  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string) => {
+    const re = buildReplacer(query, opts);
+    if (!re) return { files: 0, replacements: 0, failed: ["The query is not a valid regular expression."] };
+    let files = 0;
+    let replacements = 0;
+    const failed: string[] = [];
+    for (const path of paths) {
+      try {
+        const read = await fs.read(path, 4_000_000);
+        if (read.status !== "ok" || read.text === null || read.hash === null) { failed.push(path); continue; }
+        const result = replaceAll(read.text, re, replacement);
+        if (result.count === 0) continue;
+        await fs.write(path, result.text, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
+        files++;
+        replacements += result.count;
+      } catch {
+        failed.push(path);
+      }
+    }
+    void refreshAll();
+    return { files, replacements, failed };
+  }, [fs]);
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!active) return;
     const mod = e.metaKey || e.ctrlKey;
@@ -391,7 +416,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
         />
         </div>
         <div className="ex-panel" role="tabpanel" id="ex-panel-search" aria-labelledby="ex-ptab-search" hidden={panel !== "search"}>
-          <SearchPanel controller={search} focusSignal={focusSearch} />
+          <SearchPanel controller={search} focusSignal={focusSearch} onReplaceAll={replaceAllInSearch} />
         </div>
         {scmSeen && (
           <div className="ex-panel" role="tabpanel" id="ex-panel-scm" aria-labelledby="ex-ptab-scm" hidden={panel !== "scm"}>

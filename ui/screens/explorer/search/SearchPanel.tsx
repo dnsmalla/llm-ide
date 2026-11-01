@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SearchController } from "./controller";
-import { skippedNotice, summaryText, scrollToReveal, truncationNotice, windowRows, type Hit, type Row } from "./model";
+import { skippedNotice, summaryText, scrollToReveal, truncationNotice, windowRows, type Hit, type Row, type SearchOptions } from "./model";
 
 export const ROW_HEIGHT = 22;
 const DEFAULT_VIEWPORT = 400;
@@ -14,6 +14,8 @@ export interface SearchPanelProps {
   focusSignal?: number;
   /** Initial viewport height before the first measurement (tests, first paint). */
   initialViewport?: number;
+  /** Replace all matches in the listed files; absent = read-only search. */
+  onReplaceAll?: (query: string, opts: SearchOptions, paths: string[], replacement: string) => Promise<{ files: number; replacements: number; failed: string[] }>;
 }
 
 function HitText({ hit }: { hit: Hit }) {
@@ -36,13 +38,16 @@ function dirOf(p: string): string {
   return i < 0 ? "" : p.slice(0, i);
 }
 
-export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEFAULT_VIEWPORT }: SearchPanelProps) {
+export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEFAULT_VIEWPORT, onReplaceAll }: SearchPanelProps) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const rows = controller.rows();
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(initialViewport);
   const [filters, setFilters] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const [replacement, setReplacement] = useState("");
+  const [replacing, setReplacing] = useState(false);
+  const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const uid = useId();
 
@@ -168,6 +173,37 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
           {toggle("W", "Match whole word", o.wholeWord, () => controller.setOptions({ wholeWord: !o.wholeWord }))}
           {toggle(".*", "Use regular expression", o.regex, () => controller.setOptions({ regex: !o.regex }))}
         </div>
+        {onReplaceAll ? (
+          <div className="sx-inputrow">
+            <input
+              type="text"
+              className="sx-input"
+              aria-label="Replace with"
+              placeholder="Replace with"
+              spellCheck={false}
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+            />
+            <button
+              type="button"
+              className="sx-toggle"
+              disabled={replacing || snap.query === "" || snap.files.length === 0 || snap.done?.truncated === "matches" || snap.done?.truncated === "time"}
+              title={snap.done?.truncated ? "Replace all is disabled when the search was truncated; narrow the search first." : "Replace all matches in the listed text files"}
+              onClick={() => {
+                setReplacing(true);
+                setReplaceNotice(null);
+                const paths = snap.files.filter((f) => f.hits.length > 0).map((f) => f.path);
+                void onReplaceAll(snap.query, snap.opts, paths, replacement).then(
+                  (r) => setReplaceNotice(`Replaced ${r.replacements.toLocaleString()} match${r.replacements === 1 ? "" : "es"} in ${r.files.toLocaleString()} file${r.files === 1 ? "" : "s"}${r.failed.length ? `; ${r.failed.length} could not be written` : ""}.`),
+                  () => setReplaceNotice("Replace all failed."),
+                ).finally(() => setReplacing(false));
+              }}
+            >
+              {replacing ? "Replacing…" : "Replace all"}
+            </button>
+          </div>
+        ) : null}
+        {replaceNotice ? <p className="sx-note" role="status">{replaceNotice}</p> : null}
         <div className="sx-filterhead">
           <button type="button" className="ex-link" aria-expanded={filters} aria-controls={`${uid}-filters`} onClick={() => setFilters(!filters)}>
             {filters ? "Hide filters" : "Filters…"}
