@@ -127,3 +127,5 @@
 .lib-context { position: fixed; z-index: 60; min-width: 180px; display: flex; flex-direction: column; padding: 4px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); box-shadow: 0 6px 20px color-mix(in srgb, #000 35%, transparent); }
 .lib-context button { font: inherit; color: inherit; text-align: left; background: none; border: 0; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
 .lib-context button:hover { background: var(--tok-color-row-alt); }
+.lib-footer-nav { border-top: 1px solid var(--tok-color-border); }
+.lib-footer-nav .lib-nav { max-height: none; overflow: visible; border-top: 0; padding: var(--tok-space-sm); }

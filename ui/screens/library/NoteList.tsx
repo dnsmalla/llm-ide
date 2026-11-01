@@ -68,9 +68,11 @@ export interface NoteListProps {
   active?: boolean;
   /** A note row was right-clicked (project-relative path, viewport coordinates). */
   onContext?: (rel: string, x: number, y: number) => void;
+  /** Sections rendered after the notes inside the SAME scroll (Mac's one sectioned list). */
+  footer?: ReactNode;
 }
 
-export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext, footer }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
@@ -301,24 +303,25 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
       {search.phase === "unavailable" && store.searchAvailable && f.query.trim().length >= 2 && (
         <StatusBanner severity="info" message="This core has no note search yet (it needs a newer core). Filtering titles, paths and summaries only." />
       )}
-      {rows.length === 0 ? (
-        <Empty state={state} />
-      ) : (
-        <div
-          ref={scroller}
-          className="lib-scroll"
-          role="listbox"
-          aria-multiselectable={bulk ? true : undefined}
-          tabIndex={0}
-          aria-label={`${title}, ${noteCount} notes`}
-          aria-activedescendant={state.selectedRel ? optionId(state.selectedRel) : undefined}
-          onKeyDown={onKey}
-        >
+      <div
+        ref={scroller}
+        className="lib-scroll"
+        role={rows.length === 0 ? undefined : "listbox"}
+        aria-multiselectable={bulk ? true : undefined}
+        tabIndex={rows.length === 0 ? undefined : 0}
+        aria-label={rows.length === 0 ? undefined : `${title}, ${noteCount} notes`}
+        aria-activedescendant={state.selectedRel ? optionId(state.selectedRel) : undefined}
+        onKeyDown={rows.length === 0 ? undefined : onKey}
+      >
+        {rows.length === 0 ? (
+          <Empty state={state} />
+        ) : (
           <div className="lib-canvas" style={{ height: total }}>
             {visible}
           </div>
-        </div>
-      )}
+        )}
+        {footer ? <div className="lib-footer-nav">{footer}</div> : null}
+      </div>
     </section>
   );
 }

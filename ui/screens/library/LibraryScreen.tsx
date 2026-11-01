@@ -200,56 +200,63 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   return (
     <div className="lib-screen" hidden={!active}>
       <div className="lib-list-pane">
-        {!ext && !(state.rootStatus === "error" || (state.listing.phase === "error" && state.records.length === 0)) ? (
-          <div className="lib-list-col">
-            {linkNotice && <StatusBanner severity="info" message={linkNotice} onDismiss={() => setLinkNotice(null)} />}
-            {state.error && state.records.length > 0 && <StatusBanner severity="warning" message="Some notes could not be listed. The list may be incomplete." />}
-            {write && (
-              <div className="lib-list-actions" role="toolbar" aria-label="Library actions">
-                <button type="button" className="lib-btn lib-btn-primary" onClick={() => setNewNote({ error: null, busy: false })}>
-                  New note
-                </button>
-                <button type="button" className="lib-btn" aria-pressed={selecting} onClick={() => (selecting ? leaveSelection() : setSelecting(true))}>
-                  {selecting ? "Stop selecting" : "Select notes"}
-                </button>
-              </div>
-            )}
-            {write && selecting && (
-              <BulkBar
-                store={store}
-                write={write.host}
-                selection={selection}
-                viewCount={store.rows().reduce((n, r) => n + (r.kind === "note" ? 1 : 0), 0)}
-                onSelectAll={() => bulk?.onSelectAll()}
-                onClear={() => setSelection(EMPTY_SELECTION)}
-                onDone={leaveSelection}
-                onChanged={() => setSelection((sel) => prune(sel, (rel) => store.record(rel) !== undefined))}
+        <div className="lib-list-col">
+          {linkNotice && <StatusBanner severity="info" message={linkNotice} onDismiss={() => setLinkNotice(null)} />}
+          {state.error && state.records.length > 0 && <StatusBanner severity="warning" message="Some notes could not be listed. The list may be incomplete." />}
+          {write && (
+            <div className="lib-list-actions" role="toolbar" aria-label="Library actions">
+              <button type="button" className="lib-btn lib-btn-primary" onClick={() => setNewNote({ error: null, busy: false })}>
+                New note
+              </button>
+              <button type="button" className="lib-btn" aria-pressed={selecting} onClick={() => (selecting ? leaveSelection() : setSelecting(true))}>
+                {selecting ? "Stop selecting" : "Select notes"}
+              </button>
+            </div>
+          )}
+          {write && selecting && (
+            <BulkBar
+              store={store}
+              write={write.host}
+              selection={selection}
+              viewCount={store.rows().reduce((n, r) => n + (r.kind === "note" ? 1 : 0), 0)}
+              onSelectAll={() => bulk?.onSelectAll()}
+              onClear={() => setSelection(EMPTY_SELECTION)}
+              onDone={leaveSelection}
+              onChanged={() => setSelection((sel) => prune(sel, (rel) => store.record(rel) !== undefined))}
+            />
+          )}
+          <NoteList
+            store={store}
+            state={state}
+            bulk={bulk}
+            initialHeight={initialHeight}
+            active={active}
+            onContext={(rel, x, y) => setNoteMenu({ rel, x, y })}
+            footer={
+              <LibraryNav
+                state={state}
+                extensionId={extensionId}
+                extensions={extensions}
+                connections={connections}
+                projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
+                onSection={(id) => {
+                  setProjectFile(null);
+                  setExtensionId(null);
+                  store.setSection(state.sectionId === id ? null : id);
+                }}
+                onExtension={(id) => {
+                  if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
+                  else setExtensionId(id);
+                }}
+                onRefresh={refresh}
+                onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
+                rebuild={rebuild}
+                onRebuild={runRebuild ? startRebuild : null}
+                onCancelRebuild={cancelRebuild}
               />
-            )}
-            <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} active={active} onContext={(rel, x, y) => setNoteMenu({ rel, x, y })} />
-          </div>
-        ) : null}
-        <LibraryNav
-          state={state}
-          extensionId={extensionId}
-          extensions={extensions}
-          connections={connections}
-          projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
-          onSection={(id) => {
-            setProjectFile(null);
-            setExtensionId(null);
-            store.setSection(state.sectionId === id ? null : id);
-          }}
-          onExtension={(id) => {
-            if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
-            else setExtensionId(id);
-          }}
-          onRefresh={refresh}
-          onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
-          rebuild={rebuild}
-          onRebuild={runRebuild ? startRebuild : null}
-          onCancelRebuild={cancelRebuild}
-        />
+            }
+          />
+        </div>
       </div>
       {ext ? (
         <div className="lib-ext" role="region" aria-label={ext.label}>
