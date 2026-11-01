@@ -61,13 +61,33 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 
 
 ### Native app menu (round 41)
-The macOS menu is built by the host, not by the webview: `desktop/src-tauri/src/menu.rs` installs the same top-level
-groups as the frozen Mac app — **LLM-IDE** (About, Settings… ⌘, Services, Hide/Hide Others/Show All, Quit),
-**File** (Close Window), **Edit** (Undo/Redo/Cut/Copy/Paste/Select All), **View** (Full Screen), **Window**
-(Minimize, Bring All to Front, Quick Switch Project… ⌘P, LLM Chat… ⇧⌘L), **Help** (LLM-IDE Help). Commands emit a
-single `app-menu` event; `ui/screens/shell/menu-model.ts` maps it onto section navigation only:
-Settings → Settings, Quick Switch → Home, LLM Chat → Chat, Help → the Welcome guide. Mac-only commands
-(Start/Stop Recording, Check for Updates) are deliberately not invented.
+
+The menu bar is built in `desktop/src-tauri/src/menu.rs` and checked against a SwiftUI menu dump of the same
+`WindowGroup` + command groups. Commands emit one `app-menu` event; `ui/screens/shell/menu-model.ts` maps the
+navigation commands. The matrix is item-by-item:
+
+| Menu | Item | Desktop |
+|---|---|---|
+| LLM-IDE | About LLM-IDE | Working (native About) |
+| LLM-IDE | Check for Updates… | Mac-only (Sparkle feed); omitted |
+| LLM-IDE | Settings… | Not in the Mac app menu; the account menu owns Settings |
+| LLM-IDE | Services / Hide / Hide Others / Show All / Quit | Working (native) |
+| File | New Window (⌘N) | Disabled: a second window would start signed out (one authenticated webview) |
+| File | Close (⌘W) | Working |
+| File | Close All (⇧⌘W) | Working (closes every window) |
+| Edit | Undo / Redo / Cut / Copy / Paste / Select All | Working (native) |
+| Edit | Delete / Writing Tools / AutoFill / Dictation / Emoji | OS text services, handled by the webview; not duplicated as fake items |
+| View | — | Empty, matching the Mac's View group |
+| Window | Minimize / Zoom / Bring All to Front | Working (native) |
+| Window | Quick Switch Project… (⌘P) | Opens Home (the Mac opens an overlay; no desktop overlay yet) |
+| Window | LLM Chat… (⇧⌘L) | Opens the Chat section |
+| Window | Start/Stop Recording (⌘N) | Mac-only live-capture engine; omitted |
+| Window | LLM-IDE window list | Main Window entry focuses the window |
+| Help | LLM-IDE Help | Opens the Welcome guide |
+| Help | Toggle Sidebar (⇧⌘S) | Mac sidebar only; no desktop sidebar |
+
+Desktop-only fields (mode/scan presets, pairing forms) were removed from the screens they did not belong to:
+Auto Tasks/Loop pair in Settings → Mobile Control, and Graph uses the left run panel.
 
 ## Mac-only limits (stated in the UI, never faked)
 
