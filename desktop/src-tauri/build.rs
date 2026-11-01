@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "loop_run_stage",
     "loop_run_loop",
     "loop_work_root",
+    "loop_run_fault_verify",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",

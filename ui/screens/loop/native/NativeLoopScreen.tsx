@@ -12,6 +12,7 @@ import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProject
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
+import { runRegression } from "./regression.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
@@ -223,9 +224,26 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const runOneStage = async (s: LoopStage, target: LoopDefinition): Promise<{ ok: boolean; output: string }> => {
-    if (s.kind === "shellCommand" || s.kind === "regressionSweep") {
+    if (s.kind === "shellCommand") {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
       return { ok: !r.timedOut && r.exitCode === 0, output: [r.stdout, r.stderr].filter(Boolean).join("\n") };
+    }
+    if (s.kind === "regressionSweep") {
+      const root = projectRoot ?? "";
+      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const faultsRoot = repoPrefix ? `${repoPrefix}/system/faults` : "system/faults";
+      const r = await runRegression(fs, faultsRoot, {
+        async verify(f) {
+          const v = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_fault_verify", { rel: f.rel, timeoutSecs: s.timeoutSeconds });
+          return { ok: !v.timedOut && v.exitCode === 0, output: [v.stdout, v.stderr].filter(Boolean).join("\n") };
+        },
+        async ask(prompt) {
+          const a = await core.request<{ reply?: string; resultSubtype?: string }>("/kb/loop/agent-run", { method: "POST", body: { message: prompt, repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 } });
+          if (a.resultSubtype && a.resultSubtype !== "success") throw new Error(a.resultSubtype);
+          return a.reply ?? "";
+        },
+      });
+      return { ok: r.passed, output: r.checked === 0 ? "No fixed faults to re-check." : [...r.notes, ...r.failures].join("\n") };
     }
     if (s.kind === "skill") {
       if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };

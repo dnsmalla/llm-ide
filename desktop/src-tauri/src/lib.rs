@@ -284,6 +284,7 @@ macro_rules! product_handlers {
                 loop_runner::loop_run_stage,
                 loop_runner::loop_run_loop,
                 loop_runner::loop_work_root,
+                loop_runner::loop_run_fault_verify,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,

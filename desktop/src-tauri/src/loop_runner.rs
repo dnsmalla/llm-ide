@@ -140,13 +140,37 @@ fn run_regression(root: &Path) -> Result<StageRun, String> {
 }
 
 /// Runs one already-saved shell stage. The caller is the Loop page's explicit Run action.
+/// Reads a fault report's `verify` command (frontmatter) and runs it in the git root. The webview supplies only the
+/// project-relative fault path, never a command.
+pub fn run_fault_verify(root: &Path, rel: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    let p = crate::fs_ops::resolve_existing(root, rel).map_err(|e| e.message)?;
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("cannot read the fault report: {e}"))?;
+    let mut verify = None;
+    for line in text.lines() {
+        let t = line.trim();
+        if let Some(v) = t.strip_prefix("verify:") {
+            let v = v.trim();
+            if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+                if let Ok(s) = serde_json::from_str::<String>(v) { verify = Some(s); }
+            } else if !v.is_empty() { verify = Some(v.to_string()); }
+            break;
+        }
+    }
+    let command = verify.filter(|c| !c.trim().is_empty()).ok_or("this fault has no verify command")?;
+    run_command(root, &command, timeout_secs)
+}
+
 pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     let command = stage_command(root, stage_id)?;
+    run_command(root, &command, timeout_secs)
+}
+
+pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
     let mut child = Command::new("/bin/sh")
         .arg("-lc")
-        .arg(&command)
+        .arg(command)
         .current_dir(work_root(root))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -248,6 +272,15 @@ pub async fn loop_run_loop(loop_id: String, timeout_secs: Option<u64>) -> Result
     }).await.map_err(|e| format!("Loop task failed: {e}"))?
 }
 
+#[tauri::command]
+pub async fn loop_run_fault_verify(rel: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+        run_fault_verify(&root, &rel, timeout_secs)
+    }).await.map_err(|e| format!("fault verify task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +346,16 @@ mod tests {
         std::fs::create_dir_all(root.join("system/faults")).unwrap();
         std::fs::write(root.join("system/faults/f.md"), "---\nstatus: fixed\n---\n").unwrap();
         assert!(run_loop(&root, "l", Some(10)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fault_verify_reads_the_saved_command_only() {
+        let root = std::fs::canonicalize(project("fault", "printf ok")).unwrap();
+        std::fs::create_dir_all(root.join("system/faults")).unwrap();
+        std::fs::write(root.join("system/faults/f.md"), "---\nverify: \"printf verified\"\nstatus: fixed\n---\nnotes\n").unwrap();
+        let r = run_fault_verify(&root, "system/faults/f.md", Some(5)).unwrap();
+        assert_eq!(r.stdout, "verified");
         let _ = std::fs::remove_dir_all(&root);
     }
 
