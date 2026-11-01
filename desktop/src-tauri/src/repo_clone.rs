@@ -77,8 +77,9 @@ pub fn base64(input: &[u8]) -> String {
 /// `http.<scope>.extraHeader` + value for one provider/token; empty when no token.
 pub fn auth_config(provider: &str, token: Option<&str>) -> (String, String) {
     let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else { return (String::new(), String::new()) };
-    let scope = if provider == "gitlab" { "https://gitlab.com/" } else { "https://github.com/" };
-    let key = format!("http.{scope}extraHeader");
+    // Git's key is `http.<url>.<variable>`: `http.https://github.com.extraHeader`.
+    let scope = if provider == "gitlab" { "https://gitlab.com" } else { "https://github.com" };
+    let key = format!("http.{scope}.extraHeader");
     let value = if provider == "gitlab" {
         format!("PRIVATE-TOKEN: {token}")
     } else {
@@ -191,16 +192,20 @@ mod tests {
         let dest = base.join("dest");
         clone_into(base.to_str().unwrap(), &dest, "github", None).unwrap();
         assert_eq!(std::fs::read_to_string(dest.join("README.md")).unwrap(), "hello");
+        // A token must produce a VALID GIT_CONFIG_KEY_0 even when the local remote needs no auth.
+        let dest2 = base.join("dest2");
+        clone_into(base.to_str().unwrap(), &dest2, "github", Some("tok")).unwrap();
+        assert_eq!(std::fs::read_to_string(dest2.join("README.md")).unwrap(), "hello");
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn auth_headers_are_provider_specific_and_never_in_argv() {
         let (k, v) = auth_config("github", Some("tok"));
-        assert_eq!(k, "http.https://github.com/extraHeader");
+        assert_eq!(k, "http.https://github.com.extraHeader");
         assert_eq!(v, "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dG9r");
         let (k2, v2) = auth_config("gitlab", Some("glpat"));
-        assert_eq!(k2, "http.https://gitlab.com/extraHeader");
+        assert_eq!(k2, "http.https://gitlab.com.extraHeader");
         assert_eq!(v2, "PRIVATE-TOKEN: glpat");
         assert_eq!(auth_config("github", None), (String::new(), String::new()));
         assert_eq!(base64(b"x-access-token:tok"), "eC1hY2Nlc3MtdG9rZW46dG9r");
