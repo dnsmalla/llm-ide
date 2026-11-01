@@ -8,8 +8,10 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use tauri::Emitter;
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
@@ -55,19 +57,21 @@ fn clipped(mut s: String) -> String {
     s
 }
 
-fn read_capped<R: Read + Send + 'static>(mut r: R) -> mpsc::Receiver<String> {
+fn read_capped_stream<R: Read + Send + 'static>(mut reader: R, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stdout: bool) -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 8192];
-        while let Ok(n) = r.read(&mut chunk) {
-            if n == 0 { break; }
-            if buf.len() < MAX_CAPTURE {
-                let room = MAX_CAPTURE - buf.len();
-                buf.extend_from_slice(&chunk[..n.min(room)]);
+        let mut kept: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if kept.len() < MAX_CAPTURE { let room = (MAX_CAPTURE - kept.len()).min(n); kept.extend_from_slice(&buf[..room]); }
+                    if let Some(cb) = &sink { cb(&String::from_utf8_lossy(&buf[..n]), stdout); }
+                }
             }
         }
-        let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+        let _ = tx.send(String::from_utf8_lossy(&kept).into_owned());
     });
     rx
 }
@@ -170,6 +174,10 @@ pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Resu
 }
 
 pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    run_command_with(root, command, timeout_secs, None)
+}
+
+pub fn run_command_with(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
     if CANCEL.load(Ordering::SeqCst) {
@@ -184,8 +192,8 @@ pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Res
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot start the stage command: {e}"))?;
-    let out_rx = child.stdout.take().map(read_capped);
-    let err_rx = child.stderr.take().map(read_capped);
+    let out_rx = child.stdout.take().map(|r| read_capped_stream(r, sink.clone(), true));
+    let err_rx = child.stderr.take().map(|r| read_capped_stream(r, sink.clone(), false));
     let mut timed_out = false;
     let mut cancelled = false;
     let status = loop {

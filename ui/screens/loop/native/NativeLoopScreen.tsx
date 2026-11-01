@@ -1,6 +1,7 @@
 // Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -93,6 +94,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
   }, [fs, projectRoot]);
+
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    void listen<{ stageId: string; stream: "stdout" | "stderr"; text: string }>("loop-stage-output", (e) => {
+      const text = e.payload.text;
+      if (!text) return;
+      setRunLog((l) => {
+        if (l.length === 0) return [text];
+        const copy = [...l];
+        copy[copy.length - 1] = copy[copy.length - 1] + text;
+        return copy;
+      });
+    }).then((fn) => { un = fn; }).catch(() => undefined);
+    return () => { if (un) un(); };
+  }, []);
 
   useEffect(() => {
     if (!projectRoot) { setWorkRoot(null); return; }
