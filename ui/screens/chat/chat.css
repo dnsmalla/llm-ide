@@ -95,3 +95,6 @@
 .chat-context { position: relative; }
 .chat-context-list { list-style: none; margin: var(--tok-space-xs) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); }
 .chat-context-list li { display: flex; justify-content: space-between; gap: var(--tok-space-md); }
+
+.chat-copy { font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); background: none; border: 0; padding: 0 2px; cursor: pointer; }
+.chat-copy:hover { color: var(--tok-color-text); text-decoration: underline; }

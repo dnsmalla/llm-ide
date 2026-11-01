@@ -133,9 +133,11 @@ function NoticeLine({ n }: { n: Notice }) {
 function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
   const live = m.status === "streaming";
   const lastIdx = m.parts.length - 1;
+  const text = m.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("").trim();
   return (
     <article className="chat-msg chat-assistant" aria-label="Assistant message" aria-busy={live}>
       <span className="chat-role">llm-agent</span>
+      {host.onCopy && text && !live ? <button type="button" className="chat-copy" onClick={() => host.onCopy!(text)} aria-label="Copy the reply">Copy</button> : null}
       <div className="chat-assistant-body">
         {m.parts.map((p, i) => p.kind === "text"
           ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
@@ -155,6 +157,7 @@ export const MessageView = memo(function MessageView({ m, host }: { m: Message; 
       <article className="chat-msg chat-user-row" aria-label="Your message">
         <div className="chat-turn">
           <span className="chat-role">You</span>
+          {host.onCopy ? <button type="button" className="chat-copy" onClick={() => host.onCopy!(m.text)} aria-label="Copy your message">Copy</button> : null}
           <div className="chat-user-bubble"><p>{m.text}</p></div>
         </div>
       </article>
