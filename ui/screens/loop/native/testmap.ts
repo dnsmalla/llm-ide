@@ -174,3 +174,43 @@ export async function writeTestMap(fs: TestMapFs, repoPrefix: string, m: TestMap
   await fs.write(json, JSON.stringify(m, null, 2) + "\n", { expected_hash: null });
   return { md, json };
 }
+
+export interface TestLedger { runId: string; recordedAt: string; failing: string[]; passing: string[] }
+export interface LedgerDiff { newFailures: string[]; stillFailing: string[]; fixed: string[] }
+
+export function parseTestResults(output: string): { failing: string[]; passing: string[] } {
+  const failing = new Set<string>(); const passing = new Set<string>();
+  for (const line of output.split("\n")) {
+    let m = /Test Case '-\[([^\]]+)\]'\s+(passed|failed)/.exec(line);
+    if (m) { (m[2] === "passed" ? passing : failing).add(m[1]); continue; }
+    m = /(?:✔|✓|✕|✗|×)\s+(?:Test\s+)?"([^"]+)"\s+(passed|failed)/i.exec(line);
+    if (m) { (m[2].toLowerCase() === "passed" ? passing : failing).add(m[1]); continue; }
+    m = /^\s*(?:✓|✕|●)\s+(.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?$/.exec(line);
+    if (m) { (line.includes("✕") ? failing : passing).add(m[1].trim()); }
+  }
+  return { failing: [...failing].sort(), passing: [...passing].sort() };
+}
+
+export function ledgerDiff(previous: TestLedger | null, current: { failing: string[]; passing: string[] }, runPassed: boolean): LedgerDiff {
+  const prev = new Set(previous?.failing ?? []);
+  const cur = new Set(current.failing); const pass = new Set(current.passing);
+  return {
+    newFailures: current.failing.filter((x) => !prev.has(x)),
+    stillFailing: current.failing.filter((x) => prev.has(x)),
+    fixed: [...prev].filter((x) => !cur.has(x) && (runPassed || pass.has(x))),
+  };
+}
+
+export async function readLedger(fs: TestMapFs, path: string): Promise<TestLedger | null> {
+  const text = await file(fs, path);
+  if (!text) return null;
+  try {
+    const v = JSON.parse(text) as Partial<TestLedger>;
+    return { runId: String(v.runId ?? ""), recordedAt: String(v.recordedAt ?? ""), failing: Array.isArray(v.failing) ? v.failing.map(String) : [], passing: Array.isArray(v.passing) ? v.passing.map(String) : [] };
+  } catch { return null; }
+}
+
+export async function writeLedger(fs: TestMapFs, path: string, ledger: TestLedger): Promise<void> {
+  await ensureDir(fs, path.split("/").slice(0, -1).join("/"));
+  await fs.write(path, JSON.stringify(ledger, null, 2) + "\n", { expected_hash: null });
+}

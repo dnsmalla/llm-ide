@@ -58,3 +58,14 @@ test("test map uses graph function nodes and test tokens", async () => {
   assert.equal(map.testedFunctions, 1);
   assert.equal(map.entries[0].function, "add");
 });
+
+test("ledger parses XCTest lines and diffs against the previous run", async () => {
+  const out = "Test Case '-[MathTests testAdd]' passed (0.01 seconds).\nTest Case '-[MathTests testSub]' failed (0.02 seconds).";
+  const parsed = m.parseTestResults(out);
+  assert.deepEqual(parsed.passing, ["MathTests testAdd"]);
+  assert.deepEqual(parsed.failing, ["MathTests testSub"]);
+  const diff = m.ledgerDiff({ runId: "old", recordedAt: "", failing: ["MathTests testSub", "MathTests testOld"], passing: [] }, parsed, true);
+  assert.deepEqual(diff.newFailures, []);
+  assert.deepEqual(diff.stillFailing, ["MathTests testSub"]);
+  assert.deepEqual(diff.fixed, ["MathTests testOld"]);
+});

@@ -5,8 +5,8 @@ import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
 export interface StageRunResult { ok: boolean; output: string }
 export interface RunnerDeps {
-  /** Execute one stage once. Throws for a kind this build cannot run. */
-  runStage(stage: LoopStage): Promise<StageRunResult>;
+  /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
+  runStage(stage: LoopStage, prior: readonly StageOutcome[]): Promise<StageRunResult>;
   /** Ask the repair agent to fix a failed stage. `attempt` is 1-based for this stage/run. */
   repair(stage: LoopStage, output: string, attempt: number): Promise<StageRunResult>;
   log(line: string): void;
@@ -39,7 +39,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
-      const result = await deps.runStage(stage);
+      const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output };
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);

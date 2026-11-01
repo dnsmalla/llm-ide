@@ -14,7 +14,8 @@ import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved } from "./approvals.ts";
 import { runRegression } from "./regression.ts";
-import { buildTestMap, detectTestStructure, writeTestMap, writeTestStructure } from "./testmap.ts";
+import { runCodeGraph } from "./codegraph.ts";
+import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
@@ -233,7 +234,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
-  const runOneStage = async (s: LoopStage, target: LoopDefinition): Promise<{ ok: boolean; output: string }> => {
+  const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = []): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand") {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
       return { ok: !r.timedOut && r.exitCode === 0, output: [r.stdout, r.stderr].filter(Boolean).join("\n") };
@@ -267,6 +268,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       });
       return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
     }
+    if (s.kind === "testMap" && s.testOp === "ledger") {
+      const lastTest = [...prior].reverse().find((o) => o.stage.kind === "shellCommand" && /test/i.test(o.stage.name));
+      if (!lastTest) return { ok: false, output: "the ledger stage needs a Test stage output earlier in this run" };
+      const parsed = parseTestResults(lastTest.output);
+      if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: false, output: "no test results could be parsed from the Test stage output" };
+      const root = projectRoot ?? "";
+      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const path = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/test/ledger.json`;
+      const previous = await readLedger(fs, path);
+      const diff = ledgerDiff(previous, parsed, lastTest.ok);
+      const ledger = { runId: crypto.randomUUID(), recordedAt: new Date().toISOString(), failing: parsed.failing, passing: parsed.passing };
+      await writeLedger(fs, path, ledger);
+      return { ok: true, output: [`${ledger.failing.length} failing · ${ledger.passing.length} passing`, `new failures: ${diff.newFailures.length ? diff.newFailures.join(", ") : "none"}`, `still failing: ${diff.stillFailing.length ? diff.stillFailing.join(", ") : "none"}`, `fixed: ${diff.fixed.length ? diff.fixed.join(", ") : "none"}`, `wrote ${path}`].join("\n") };
+    }
+
     if (s.kind === "testMap") {
       if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
       const root = projectRoot ?? "";
@@ -279,6 +295,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const map = await buildTestMap(fs, repoPrefix, structure, "system/graph/graph.json");
       const writes = await writeTestMap(fs, repoPrefix, map);
       return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
+    }
+    if (s.kind === "codeGraph") {
+      if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
+      const root = projectRoot ?? "";
+      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const before = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/refactor/graph/before.json`;
+      const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before);
+      return { ok: r.passed, output: r.output };
     }
     if (s.kind === "artifactCheck") {
       if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
@@ -303,7 +327,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const executeLoop = async (target: LoopDefinition) => {
     if (dirty) return;
-    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map"))));
+    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     const approval = ensureApprovals(target);
     if (approval) { setNotice(approval); return; }
@@ -314,8 +338,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     const started = Date.now();
     try {
       const outcome = await runNativeLoop(target.config, {
-        async runStage(s) {
-          const r = await runOneStage(s, target);
+        async runStage(s, prior) {
+          const r = await runOneStage(s, target, prior);
           setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
           return r;
         },
@@ -362,7 +386,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runSelectedStage = async () => {
     if (!loop || !stage || dirty || runningStage) return;
-    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
+    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
     if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
@@ -453,7 +477,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
