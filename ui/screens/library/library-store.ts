@@ -19,6 +19,12 @@ export const HEAD_CONCURRENCY = 3;
 
 export type RootStatus = "unknown" | "loading" | "ready" | "none" | "error";
 
+const PREFS_KEY = "llmide.library.prefs";
+interface LibraryPrefs { sectionId?: string | null; filters?: Partial<Filters>; sort?: SortKey; group?: GroupKey }
+function readPrefs(): LibraryPrefs {
+  try { return JSON.parse(globalThis.localStorage?.getItem(PREFS_KEY) ?? "{}") as LibraryPrefs; } catch { return {}; }
+}
+
 export interface LibraryState {
   rootStatus: RootStatus;
   root: NotesRoot | null;
@@ -77,6 +83,7 @@ export class LibraryStore {
           onChange: (s) => this.patch({ search: s }),
         })
       : null;
+    const prefs = readPrefs();
     this.state = {
       rootStatus: "unknown",
       root: null,
@@ -87,11 +94,11 @@ export class LibraryStore {
       records: [],
       counts: new Map(),
       sections: sectionsFor(new Map()),
-      sectionId: "meeting",
+      sectionId: prefs.sectionId === undefined ? "meeting" : prefs.sectionId,
       selectedRel: null,
-      filters: NO_FILTERS,
-      sort: "date-desc",
-      group: "month",
+      filters: { ...NO_FILTERS, ...(prefs.filters ?? {}) },
+      sort: prefs.sort ?? "date-desc",
+      group: prefs.group ?? "month",
       search: IDLE_SEARCH,
     };
   }
@@ -384,20 +391,29 @@ export class LibraryStore {
     this.guarded(rel, () => this.patch({ selectedRel: rel }));
   }
 
+  private savePrefs(): void {
+    try {
+      globalThis.localStorage?.setItem(PREFS_KEY, JSON.stringify({ sectionId: this.state.sectionId, filters: this.state.filters, sort: this.state.sort, group: this.state.group }));
+    } catch { /* session only */ }
+  }
+
   setSection(id: string | null): void {
-    this.guarded(null, () => this.patch({ sectionId: id, selectedRel: null }));
+    this.guarded(null, () => { this.patch({ sectionId: id, selectedRel: null }); this.savePrefs(); });
   }
 
   setFilters(f: Partial<Filters>): void {
     this.patch({ filters: { ...this.state.filters, ...f } });
+    this.savePrefs();
   }
 
   setSort(sort: SortKey): void {
     this.patch({ sort });
+    this.savePrefs();
   }
 
   setGroup(group: GroupKey): void {
     this.patch({ group });
+    this.savePrefs();
   }
 
   setSearchQuery(q: string): void {
