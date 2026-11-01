@@ -20,8 +20,11 @@ function globRe(glob: string): RegExp {
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === "*") {
-      if (glob[i + 1] === "*") { out += ".*"; i++; if (glob[i + 1] === "/") i++; }
-      else out += "[^/]*";
+      if (glob[i + 1] === "*") {
+        i++;
+        if (glob[i + 1] === "/") { out += "(?:.*/)?"; i++; }
+        else out += ".*";
+      } else out += "[^/]*";
     } else if (c === "?") out += "[^/]";
     else out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
@@ -37,8 +40,8 @@ function trimPath(p: string): string {
 
 /** Expands a glob under a project-relative directory. Hidden/build dirs are skipped like the Mac. */
 async function expand(fs: ArtifactFs, base: string, glob: string, limit = 2000): Promise<string[]> {
-  const target = glob.startsWith("**/") ? glob : `**/${glob}`;
-  const re = globRe(trimPath(target));
+  const cleanBase = base === "." ? "" : trimPath(base);
+  const re = globRe(trimPath(glob));
   const out: string[] = [];
   const skip = new Set([".git", "node_modules", ".build", ".swiftpm", "DerivedData"]);
   const walk = async (dir: string) => {
@@ -48,8 +51,9 @@ async function expand(fs: ArtifactFs, base: string, glob: string, limit = 2000):
     for (const e of entries) {
       if (out.length >= limit) return;
       if (e.name.startsWith(".") || skip.has(e.name)) continue;
+      const rel = cleanBase === "" ? e.path : e.path.startsWith(`${cleanBase}/`) ? e.path.slice(cleanBase.length + 1) : e.path;
       if (e.kind === "dir") await walk(e.path);
-      else if (e.kind === "file" && (glob.startsWith("**/") ? re.test(e.path) : re.test(e.path.slice(base.length + 1)))) out.push(e.path);
+      else if (e.kind === "file" && re.test(rel)) out.push(e.path);
     }
   };
   await walk(base);
@@ -70,9 +74,7 @@ export interface ArtifactResult { passed: boolean; failures: string[] }
 
 export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, stages: readonly LoopStage[], roots: ArtifactRoots): Promise<ArtifactResult> {
   const failures: string[] = [];
-  if ((check.citationGlobs?.length ?? 0) > 0) failures.push("citation checks are not ported yet");
-  const hasCit = (check.outputRules ?? []).some((r) => r.citations);
-  if (hasCit) failures.push("citation checks are not ported yet");
+  const citationGlobs = [...(check.citationGlobs ?? [])];
   const required = [...(check.requiredPaths ?? [])];
   const limits = [...(check.lineLimits ?? [])];
   const sections = check.sectionRules ?? [];
@@ -90,10 +92,12 @@ export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, sta
       required.push(out);
       limits.push({ glob: out, maxLines: rule.maxLines });
       sectionTargets.push(out);
+      if (rule.citations) citationGlobs.push(out);
     } else {
       sectionTargets.push(`${out}/${rule.subGlob ?? "**/*.md"}`);
       if (rule.subGlob) {
         limits.push({ glob: `${out}/${rule.subGlob}`, maxLines: rule.maxLines, excludes: (rule.excludeStages ?? []).map((k) => outputs.get(k) ?? "").filter(Boolean) });
+        if (rule.citations) citationGlobs.push(`${out}/${rule.subGlob}`);
       }
     }
   }
@@ -125,6 +129,29 @@ export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, sta
           const body = lines.slice(i + 1, end);
           for (const prefix of s.requiredLinePrefixes) if (!body.some((l) => l.startsWith(prefix))) failures.push(`${file}: ${lines[i]} missing \`${prefix}\``);
           i = end;
+        }
+      }
+    }
+  }
+  const seen = new Set<string>();
+  for (const glob of citationGlobs) {
+    for (const file of await expand(fs, roots.repoPrefix || ".", glob)) {
+      if (!file.endsWith(".md") || seen.has(file)) continue;
+      seen.add(file);
+      const r = await fs.read(file, 8_000_000);
+      const text = r.text ?? "";
+      let fence = false;
+      for (const line of text.split("\n")) {
+        if (line.trim().startsWith("```")) { fence = !fence; continue; }
+        if (fence) continue;
+        for (const m of line.matchAll(/`([^`]+)`/g)) {
+          const raw = m[1].trim();
+          if (!raw || raw.startsWith("/") || raw.startsWith("~") || raw.includes("://") || /[ *<>{}$()|\\"']/.test(raw)) continue;
+          const path = raw.replace(/:\d+(-\d+)?$/, "");
+          if (!path.includes("/")) continue;
+          const rel = path.replace(/^(\.\/)+/, "");
+          const target = roots.repoPrefix ? `${roots.repoPrefix}/${rel}` : rel;
+          if (!(await exists(fs, target))) failures.push(`${file}: citation does not resolve: \`${raw}\``);
         }
       }
     }

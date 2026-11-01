@@ -36,8 +36,10 @@ test("artifact output rules follow a sibling stage Output and section rules", as
   assert.equal(r.passed, true);
 });
 
-test("citation checks refuse rather than passing", async () => {
-  const r = await evaluateArtifact(mem({}), { citationGlobs: ["**/*.md"] }, [], { repoPrefix: "", projectPrefix: "" });
-  assert.equal(r.passed, false);
-  assert.match(r.failures[0], /citation/);
+test("citation checks resolve backticked repo paths and report missing ones", async () => {
+  const ok = await evaluateArtifact(mem({ "docs/a.md": "see `src/app.ts:12`\n", "src/app.ts": "x" }), { citationGlobs: ["docs/**/*.md"] }, [], { repoPrefix: "", projectPrefix: "" });
+  assert.equal(ok.passed, true);
+  const bad = await evaluateArtifact(mem({ "docs/a.md": "see `src/missing.ts`\n" }), { citationGlobs: ["docs/**/*.md"] }, [], { repoPrefix: "", projectPrefix: "" });
+  assert.equal(bad.passed, false);
+  assert.match(bad.failures[0], /citation/);
 });
