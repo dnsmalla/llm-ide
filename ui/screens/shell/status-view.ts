@@ -109,6 +109,17 @@ export function deriveStatusView(state: StatusState): StatusView {
         claudeNotice,
         hints,
       };
+    case "stopped":
+      return {
+        level: "error",
+        label: "Core stopped",
+        detail: "The core was stopped from Settings. Start it there, or use the button below.",
+        down: true,
+        fatal: false,
+        trustNotice,
+        claudeNotice,
+        hints,
+      };
     case "failed":
     default:
       return {

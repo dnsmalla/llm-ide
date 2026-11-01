@@ -8,7 +8,7 @@
 //  - Other slices import `host` (and `invokeHost` for commands of their own) from here instead
 //    of importing `@tauri-apps/api` themselves, so tests can swap one bridge.
 
-export type CoreState = "starting" | "ready" | "restarting" | "failed";
+export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped";
 export type CoreTrust = "pending" | "spawned" | "adopted_unverified";
 export type ClaudeState = "unknown" | "found" | "missing";
 
@@ -130,7 +130,7 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
   return bridge.invoke<T>(command, args);
 }
 
-const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed"];
+const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped"];
 const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const asNum = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

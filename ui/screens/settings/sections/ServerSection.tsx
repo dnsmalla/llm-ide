@@ -23,6 +23,7 @@ export default function ServerSection() {
   const [logError, setLogError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [coreBusy, setCoreBusy] = useState<string | null>(null);
 
   const loadLog = useCallback(() => {
     if (!host.coreLog) return;
@@ -36,6 +37,23 @@ export default function ServerSection() {
   };
   useRefreshOnFocus(load);
   const rows = serverRows(info, health);
+
+  const coreAction = async (what: "start" | "stop" | "restart") => {
+    const fn = what === "start" ? host.coreStart : what === "stop" ? host.coreStop : host.coreRestart;
+    if (!fn) return;
+    setCoreBusy(what);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      setNotice(what === "stop" ? "Core stopped." : what === "restart" ? "Core restarted." : "Core starting…");
+      load();
+    } catch (e) {
+      setError(componentError(e));
+    } finally {
+      setCoreBusy(null);
+    }
+  };
 
   const copyLog = async () => {
     try {
@@ -80,9 +98,22 @@ export default function ServerSection() {
         ) : <p className="st-hint">Server URL: starting…</p>}
         <p className="st-hint">
           Start on launch: always. The desktop app starts and supervises the core bundled inside it, so it has no
-          editable server URL, Node binary, project folder or launch toggle, and no Kill &amp; Restart — those configure a
-          source-checkout backend in the Mac app. A crashed core is restarted automatically with a bounded backoff.
+          editable server URL, Node binary, project folder or launch toggle — those configure a source-checkout backend
+          in the Mac app. A crashed core is restarted automatically with a bounded backoff.
         </p>
+        {host.coreStart || host.coreStop || host.coreRestart ? (
+          <div className="st-row">
+            {info?.coreState === "stopped" || info?.coreState === "failed" || !info ? (
+              <Button tone="primary" disabled={coreBusy !== null} onClick={() => void coreAction("start")}>{coreBusy === "start" ? "Starting…" : "Start backend"}</Button>
+            ) : (
+              <>
+                <Button disabled={coreBusy !== null} onClick={() => void coreAction("stop")}>{coreBusy === "stop" ? "Stopping…" : "Stop backend"}</Button>
+                <Button disabled={coreBusy !== null} onClick={() => void coreAction("restart")}>{coreBusy === "restart" ? "Restarting…" : "Kill & Restart"}</Button>
+              </>
+            )}
+            <span className="st-hint">Stop leaves the app open; Start brings the core back. Kill &amp; Restart stops and starts it in one step.</span>
+          </div>
+        ) : null}
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       </div>
 

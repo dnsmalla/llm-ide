@@ -117,3 +117,4 @@
 .sh-modal-card { width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: var(--tok-space-md); padding: var(--tok-space-xl); border: 1px solid var(--tok-color-border); border-radius: 12px; background: var(--tok-color-surface); }
 .sh-button-danger { background: var(--tok-color-danger); border-color: var(--tok-color-danger); color: var(--tok-color-body); font-weight: 600; }
 .sh-dock-note { padding: var(--tok-space-md); }
+.sh-row { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }

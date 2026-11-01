@@ -50,7 +50,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   connections:
     "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
   repositories:
-    "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Token verification (Save & verify), cloning/sync and the Mac's resolve step are not available in the desktop yet.",
+    "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones); token verification (Save & verify), pull/re-sync and the Mac's resolve step are not available in the desktop yet.",
   paths:
     "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:
@@ -60,7 +60,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   "doc-gen":
     "On the Mac a beta switch chooses between the server and the folder on disk. The desktop has only the server path (the core's docs routes over the project's templates/ and commands/ folders), so the switch has one state and is not shown.",
   server:
-    "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and supervises the core bundled inside it: the live server URL, status and log are real, but those editable paths and a manual Kill & Restart do not apply and are not shown as dead controls.",
+    "On the Mac this group also edits the server URL and the Node and project paths. Here the app starts and supervises the core bundled inside it: the live server URL, status/log, Start, Stop and Kill & Restart are real; the editable Node/project paths and server URL do not apply and are not shown as dead controls.",
   updates:
     "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
   general:

@@ -187,7 +187,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             ))}
           {gate === "core" && (
             <div className="sh-overlay">
-              <CoreDownPanel view={view} onRetry={() => void coreStatusStore.refreshNow()} />
+              <CoreDownPanel
+                view={view}
+                onRetry={() => void coreStatusStore.refreshNow()}
+                onStart={shellHost.isAvailable() ? () => { void invokeHost<unknown>("core_start").then(() => coreStatusStore.refreshNow()).catch(() => undefined); } : undefined}
+              />
             </div>
           )}
           {gate === "login" && (

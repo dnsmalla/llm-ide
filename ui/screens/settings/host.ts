@@ -18,6 +18,8 @@ export interface DiagnosticsInfo {
   platform: string;
   /** The core URL this launch is using (desktop-managed; absent on older hosts). */
   coreUrl?: string | null;
+  /** The host's core phase, for the Start/Stop/Restart controls. */
+  coreState?: string | null;
 }
 
 /** One optional component the host can install on demand (the Mermaid diagram renderer today). */
@@ -87,6 +89,12 @@ export interface SettingsHost {
   setFeatureProfile?(features: string[]): Promise<{ stored: string[]; launch: string[] }>;
   /** Starts a reduced build from the source checkout with `features` compiled in; the app restarts when it is ready. */
   rebuildFeatures?(features: string[]): Promise<{ started: boolean; message: string }>;
+  /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
+  coreStop?(): Promise<void>;
+  coreStart?(): Promise<void>;
+  coreRestart?(): Promise<void>;
+  /** Clones a saved repository into the active project's code/ folder (token optional for public repos). */
+  cloneRepository?(args: { provider: "github" | "gitlab"; url: string; token?: string }): Promise<{ path: string; name: string }>;
   /** Active project folder, if the shell has one. */
   activeProjectPath?(): string | null;
   notesFolderPath?(): Promise<string | null>;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { shellBus } from "../../shell/bus";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -42,6 +43,12 @@ export default function RepositoriesSection() {
   const [draft, setDraft] = useState("");
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Tokens saved in this session live only in memory; the vault never returns them. They make Clone one click.
+  const [memoryTokens, setMemoryTokens] = useState<Record<RepoProvider, string | null>>({ gitlab: null, github: null });
+  const [cloneFor, setCloneFor] = useState<string | null>(null);
+  const [cloneToken, setCloneToken] = useState("");
+  const [cloning, setCloning] = useState<string | null>(null);
+  const [cloneNotice, setCloneNotice] = useState<string | null>(null);
 
   // The project's own code/ path (Settings → Paths); saved repos default their clone destination here.
   const [codeDir, setCodeDir] = useState<string | null>(null);
@@ -98,6 +105,7 @@ export default function RepositoriesSection() {
     try {
       await call(client, "POST", "/auth/me/secrets", { key: provider.tokenKey, value });
       edit((c) => ({ ...c, gitlabBaseUrl: normalizeBase(c.gitlabBaseUrl) }));
+      setMemoryTokens((m) => ({ ...m, [provider.id]: value }));
       setDraft("");
       setVisible(false);
       setStatus("Token saved.");
@@ -115,6 +123,7 @@ export default function RepositoriesSection() {
     setStatus(null);
     try {
       await call(client, "POST", "/auth/me/secrets", { key: provider.tokenKey, value: null });
+      setMemoryTokens((m) => ({ ...m, [provider.id]: null }));
       setDraft("");
       setStatus("Token cleared. Saved repositories kept.");
       loadSecrets();
@@ -137,6 +146,36 @@ export default function RepositoriesSection() {
     return codeDir && name ? `${codeDir}/${name}` : null;
   };
   const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
+
+  const doClone = async (r: SavedRepo, token: string) => {
+    if (!host.cloneRepository) return;
+    const dest = cloneDestination(r);
+    if (!dest) {
+      setError("Save a repository URL first.");
+      return;
+    }
+    setCloning(r.id);
+    setError(null);
+    setCloneNotice(null);
+    try {
+      const result = await host.cloneRepository({ provider: provider.id, url: r.url, token: token.trim() || undefined });
+      edit((c) => updateSavedRepo(c, provider.id, r.id, { clonePath: result.path }));
+      // Register the clone with the core so issues/graph may read it; Library → Sources owns this allow-list.
+      await call(client, "POST", "/auth/me/repos", { path: result.path }).catch(() => undefined);
+      setCloneFor(null);
+      setCloneToken("");
+      setCloneNotice(`Cloned ${result.name} into code/. Open Library to browse it.`);
+    } catch (e) {
+      setError(sourcesError(e));
+    } finally {
+      setCloning(null);
+    }
+  };
+  const startClone = (r: SavedRepo) => {
+    setError(null);
+    if (memoryTokens[provider.id]) void doClone(r, memoryTokens[provider.id]!);
+    else { setCloneFor(r.id); setCloneToken(""); }
+  };
   const patchRepo = (r: SavedRepo, patch: Partial<SavedRepo>) => edit((c) => updateSavedRepo(c, provider.id, r.id, patch));
   const urlError = (r: SavedRepo): string | null => (r.url.trim() ? validateRepoUrl(r.url) : null);
 
@@ -221,6 +260,7 @@ export default function RepositoriesSection() {
         </label>
         {connected ? <p className="st-ok" role="status">Connected · {provider.id === "gitlab" ? hostOf(cfg.gitlabBaseUrl) : "github.com"}</p> : null}
         {status ? <p className="st-ok" role="status">{status}</p> : null}
+        {cloneNotice ? <p className="st-ok" role="status">{cloneNotice} <Button onClick={() => shellBus.publish({ type: "goto-section", section: "library" })}>Open Library</Button></p> : null}
 
         <div className="st-stack">
           <span className="st-label">Automation &amp; actions</span>
@@ -292,6 +332,29 @@ export default function RepositoriesSection() {
                       Clone destination: <code>{cloneDestination(r)}</code>{" "}
                       {r.clonePath.trim() ? null : <Button onClick={() => patchRepo(r, { clonePath: cloneDestination(r) ?? "" })}>Use project code folder</Button>}
                     </p>
+                  ) : null}
+                  {host.cloneRepository && codeDir && cloneDestination(r) ? (
+                    cloneFor === r.id ? (
+                      <div className="st-row">
+                        <input
+                          className="st-input st-grow"
+                          type="password"
+                          value={cloneToken}
+                          placeholder={memoryTokens[provider.id] ? "Saved token will be used" : "Token (optional for public repositories)"}
+                          onChange={(e) => setCloneToken(e.target.value)}
+                          aria-label={`${provider.label} token for clone`}
+                        />
+                        <Button tone="primary" disabled={cloning !== null} onClick={() => void doClone(r, cloneToken || memoryTokens[provider.id] || "")}>
+                          {cloning === r.id ? "Cloning…" : "Clone"}
+                        </Button>
+                        <Button disabled={cloning !== null} onClick={() => setCloneFor(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <div className="st-row">
+                        <Button disabled={cloning !== null || !r.url.trim()} onClick={() => startClone(r)}>{cloning === r.id ? "Cloning…" : "Clone repository"}</Button>
+                        {memoryTokens[provider.id] ? <span className="st-hint">Uses the token saved in this session.</span> : null}
+                      </div>
+                    )
                   ) : null}
                 </li>
               ))}

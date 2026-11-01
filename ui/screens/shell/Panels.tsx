@@ -49,7 +49,7 @@ export function HintNote({ hint }: { hint: StatusHint }) {
 }
 
 /** Full-area panel while the core is down. Never blank: always says what is happening. */
-export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: () => void }) {
+export function CoreDownPanel({ view, onRetry, onStart }: { view: StatusView; onRetry: () => void; onStart?: () => void }) {
   const [busy, setBusy] = useState(false);
   const live = view.level === "error" ? "assertive" : "polite";
   return (
@@ -68,18 +68,34 @@ export function CoreDownPanel({ view, onRetry }: { view: StatusView; onRetry: ()
         <HintNote key={h.id} hint={h} />
       ))}
       {view.claudeNotice && <StatusBanner severity="warning" message={view.claudeNotice} />}
-      <button
-        type="button"
-        className="sh-button"
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          onRetry();
-          setTimeout(() => setBusy(false), 600);
-        }}
-      >
-        Check again
-      </button>
+      <div className="sh-row">
+        <button
+          type="button"
+          className="sh-button"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            onRetry();
+            setTimeout(() => setBusy(false), 600);
+          }}
+        >
+          Check again
+        </button>
+        {onStart ? (
+          <button
+            type="button"
+            className="sh-button"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              onStart();
+              setTimeout(() => setBusy(false), 800);
+            }}
+          >
+            Start core
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

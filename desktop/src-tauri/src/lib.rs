@@ -27,6 +27,7 @@ mod proc_tree;
 mod project;
 mod project_layout;
 mod project_scaffold;
+mod repo_clone;
 mod prefs;
 mod project_search;
 mod pty;
@@ -269,6 +270,10 @@ macro_rules! product_handlers {
     ($($spike:path),* $(,)?) => {
         tauri::generate_handler![
                 core_host::core_status,
+                core_host::core_stop,
+                core_host::core_start,
+                core_host::core_restart,
+                repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
                 core_log::core_log_clear,

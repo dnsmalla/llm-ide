@@ -199,7 +199,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
         extensionId={extensionId}
         extensions={extensions}
         connections={connections}
-        projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} /> : undefined}
+        projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
         onSection={(id) => {
           setProjectFile(null);
           setExtensionId(null);

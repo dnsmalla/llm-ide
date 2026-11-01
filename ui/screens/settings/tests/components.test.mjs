@@ -174,10 +174,11 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   const e = {
     client: { request: async () => ({ status: 200, body: {} }) },
     host: {
-      diagnostics: async () => ({ appVersion: "0.0.0", coreTrust: "spawned", coreLogPath: "/d/core.log", platform: "macOS" }),
+      diagnostics: async () => ({ appVersion: "0.0.0", coreTrust: "spawned", coreLogPath: "/d/core.log", platform: "macOS", coreUrl: "http://127.0.0.1:3457", coreState: "ready" }),
       copyText: async () => {},
       coreLog: async () => ({ path: "/d/core/server.log", text: "", exists: false }),
       clearCoreLog: async () => {},
+      coreStart: async () => {}, coreStop: async () => {}, coreRestart: async () => {},
     },
   };
   const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.server.default)));
@@ -188,6 +189,8 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /Managed backend/);
   assert.match(out, /Start on launch: always/);
   assert.match(out, /no editable server URL, Node binary, project folder or launch toggle/);
+  assert.match(out, /Start backend/, "before the diagnostics load the safe action is Start");
+  assert.match(out, /Kill &amp; Restart/);
   assert.doesNotMatch(out, /<input/, "the desktop backend is managed; no dead config fields");
 });
 
@@ -218,7 +221,7 @@ test("Repositories: the Mac's GitLab/GitHub tabs, write-only tokens, automation 
   assert.match(out, /Pull \/ Re-sync/);
   assert.match(out, /No repositories added yet/);
   assert.match(out, /Open a project to use its code\/ folder as the clone destination/);
-  assert.match(out, /Cloning from Settings is not available/);
+  assert.match(out, /Clone repository/);
   assert.doesNotMatch(out, /Core index allow-list/, "the Mac Repositories card has no folder allow-list");
 });
 

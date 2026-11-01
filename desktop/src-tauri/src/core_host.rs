@@ -156,6 +156,8 @@ pub enum Phase {
     /// The core stopped unexpectedly and a bounded restart is pending or running.
     Restarting,
     Failed,
+    /// Stopped by the user from Settings; Start resumes it.
+    Stopped,
 }
 
 /// What the claude probe found (state: `unknown` before the first probe, then `found`/`missing`).
@@ -227,6 +229,8 @@ pub type ClaudeProbe = Arc<dyn Fn(&Path) -> ClaudeInfo + Send + Sync>;
 struct Inner {
     status: Mutex<Status>,
     child: Mutex<Option<ManagedChild>>,
+    /// The supervisor thread, so a user Stop can join it before a later Start.
+    startup: Mutex<Option<std::thread::JoinHandle<()>>>,
     log: Arc<Mutex<VecDeque<String>>>,
     data_dir: Mutex<Option<PathBuf>>,
     /// Literal secret values to scrub from anything written to the failure log.
@@ -308,6 +312,7 @@ impl CoreHost {
                     closing: false,
                 }),
                 child: Mutex::new(None),
+                startup: Mutex::new(None),
                 log: Arc::new(Mutex::new(VecDeque::new())),
                 data_dir: Mutex::new(None),
                 literals: Mutex::new(Vec::new()),
@@ -393,7 +398,61 @@ impl CoreHost {
     pub fn start_in_background(&self, data_dir: Option<PathBuf>) {
         *lock(&self.inner.data_dir) = data_dir;
         let host = self.clone();
-        thread::spawn(move || host.run_startup());
+        let handle = thread::spawn(move || host.run_startup());
+        *lock(&self.inner.startup) = Some(handle);
+    }
+
+    /// Stop the core the user sees (never an adopted server). Blocks until the supervisor has ended so a following
+    /// Start cannot race it. The app keeps running; Settings offers Start.
+    pub fn stop(&self) -> Result<(), String> {
+        self.shutdown();
+        if let Some(handle) = lock(&self.inner.startup).take() {
+            let _ = handle.join();
+        }
+        let mut s = lock(&self.inner.status);
+        s.state = Phase::Stopped;
+        s.trust = "pending";
+        s.pid = None;
+        s.nonce = None;
+        s.error = None;
+        s.fatal = false;
+        s.restart_at = None;
+        s.error_code = None;
+        Ok(())
+    }
+
+    /// Start the core again after a user Stop (or a failed start). Idempotent while starting/running.
+    pub fn start(&self) -> Result<(), String> {
+        let data = lock(&self.inner.data_dir).clone().ok_or_else(|| "the app data folder is not available".to_string())?;
+        {
+            let s = lock(&self.inner.status);
+            if matches!(s.state, Phase::Starting | Phase::Ready | Phase::Restarting) {
+                return Ok(());
+            }
+        }
+        if let Some(handle) = lock(&self.inner.startup).take() {
+            let _ = handle.join();
+        }
+        {
+            let mut s = lock(&self.inner.status);
+            s.closing = false;
+            s.state = Phase::Starting;
+            s.error = None;
+            s.error_code = None;
+            s.fatal = false;
+            s.pid = None;
+            s.nonce = None;
+            s.restart_at = None;
+            s.trust = "pending";
+        }
+        self.start_in_background(Some(data));
+        Ok(())
+    }
+
+    /// Kill & Restart from Settings: a clean Stop followed by a Start.
+    pub fn restart(&self) -> Result<(), String> {
+        self.stop()?;
+        self.start()
     }
 
     fn run_startup(&self) {
@@ -1098,6 +1157,27 @@ pub fn core_status(host: tauri::State<'_, CoreHost>) -> CoreStatus {
     host.status()
 }
 
+/// Stop the user-visible core. The app keeps running; Settings (or the core-down panel) offers Start.
+#[tauri::command]
+pub async fn core_stop(host: tauri::State<'_, CoreHost>) -> Result<(), String> {
+    let h = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || h.stop()).await.map_err(|e| format!("stop task failed: {e}"))?
+}
+
+/// Start the core after a user Stop.
+#[tauri::command]
+pub async fn core_start(host: tauri::State<'_, CoreHost>) -> Result<(), String> {
+    let h = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || h.start()).await.map_err(|e| format!("start task failed: {e}"))?
+}
+
+/// Kill & Restart: a clean Stop followed by a Start.
+#[tauri::command]
+pub async fn core_restart(host: tauri::State<'_, CoreHost>) -> Result<(), String> {
+    let h = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || h.restart()).await.map_err(|e| format!("restart task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1237,6 +1317,15 @@ mod tests {
         lock(&host.inner.status).nonce = Some("good".into());
         lock(&host.inner.status).state = Phase::Restarting;
         assert!(host.verified_url().is_none());
+    }
+
+    #[test]
+    fn a_user_stop_marks_the_core_stopped_and_start_without_a_data_dir_fails() {
+        let host = CoreHost::new();
+        host.stop().unwrap();
+        assert_eq!(host.status().state, Phase::Stopped);
+        assert_eq!(host.status().trust, "pending");
+        assert!(host.start().is_err(), "there is no data dir to start against");
     }
 
     #[test]
@@ -1435,6 +1524,22 @@ process.on('SIGTERM', () => process.exit(0));
         let s = host.status();
         assert!(s.adopted && s.trust == "adopted_unverified" && s.foreign_core.is_none(), "{s:?}");
         assert!(host.verified_url().is_none());
+    }
+
+    #[test]
+    fn a_user_stop_then_start_restarts_a_real_child() {
+        let Some(f) = Fake::new("stopstart", "ok", tuning_fast(free_ports(2))) else { return };
+        f.wait_for("ready", 5, |s| s.state == Phase::Ready);
+        let first = f.host.status().pid;
+        f.host.stop().unwrap();
+        assert_eq!(f.host.status().state, Phase::Stopped);
+        assert!(f.host.status().pid.is_none());
+        f.host.start().unwrap();
+        let s = f.wait_for("ready after start", 5, |s| s.state == Phase::Ready);
+        assert!(s.pid.is_some());
+        assert_ne!(s.pid, first, "the user start launched a new child");
+        f.host.stop().unwrap();
+        assert_eq!(f.host.status().state, Phase::Stopped);
     }
 
     #[test]

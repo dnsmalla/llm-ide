@@ -256,7 +256,7 @@ test("settings adapter: real routes through requestRaw, error envelopes as data,
   const missing = await env.client.request("GET", "/kb/definitely-not-a-route");
   assert.ok(missing.status >= 400 && missing.status < 500, `unknown route answers 4xx, got ${missing.status}`);
   const diag = await env.host.diagnostics();
-  assert.deepEqual(diag, { appVersion: "9.9.9", coreTrust: "spawned", coreLogPath: null, platform: "test", coreUrl: null });
+  assert.deepEqual(diag, { appVersion: "9.9.9", coreTrust: "spawned", coreLogPath: null, platform: "test", coreUrl: null, coreState: null });
   assert.equal(env.host.activeProjectPath(), core.workspace);
   assert.equal(await env.host.notesFolderPath(), null);
   await assert.rejects(env.host.copyText("x"), /clipboard unavailable/);

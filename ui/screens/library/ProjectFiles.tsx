@@ -9,7 +9,7 @@ export interface ProjectFilesDeps {
   read: (path: string) => Promise<unknown>;
 }
 
-export function ProjectFilesNav({ deps, selected, onSelect }: { deps: ProjectFilesDeps; selected: string | null; onSelect: (path: string | null) => void }): ReactNode {
+export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { deps: ProjectFilesDeps; selected: string | null; onSelect: (path: string | null) => void; active?: boolean }): ReactNode {
   const [roots, setRoots] = useState<Record<string, ProjectEntry[] | "error" | undefined>>({});
   const [children, setChildren] = useState<Map<string, ProjectEntry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -25,9 +25,13 @@ export function ProjectFilesNav({ deps, selected, onSelect }: { deps: ProjectFil
   }, [deps]);
 
   useEffect(() => {
+    if (!active) return;
+    // Re-read on every visit so a repository cloned from Settings appears without a reload.
+    setChildren(new Map());
+    setClosedRoots(new Set());
     void loadRoot("code");
     void loadRoot("data");
-  }, [loadRoot]);
+  }, [active, loadRoot]);
 
   const toggle = async (path: string) => {
     if (expanded.has(path)) {

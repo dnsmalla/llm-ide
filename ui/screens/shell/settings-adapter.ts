@@ -89,6 +89,21 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const v = await writePrefs({ features });
           return { stored: v.stored.features, launch: v.launch.features };
         },
+        async coreStop() {
+          await d.invoke<unknown>("core_stop");
+        },
+        async coreStart() {
+          await d.invoke<unknown>("core_start");
+        },
+        async coreRestart() {
+          await d.invoke<unknown>("core_restart");
+        },
+        async cloneRepository(args) {
+          const raw = await d.invoke<unknown>("repo_clone", args);
+          const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+          if (typeof o.path !== "string" || typeof o.name !== "string") throw new Error("the host returned no cloned path");
+          return { path: o.path, name: o.name };
+        },
         async rebuildFeatures(features) {
           const raw = await d.invoke<unknown>("feature_rebuild", { features });
           const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -160,7 +175,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
     : {};
   const host: SettingsHost = {
     async diagnostics(): Promise<DiagnosticsInfo> {
-      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: d.coreStatus()?.core_log_path ?? null, platform: d.platform(), coreUrl: d.coreStatus()?.url ?? null };
+      return { appVersion: d.appVersion(), coreTrust: trustOf(d.coreStatus()), coreLogPath: d.coreStatus()?.core_log_path ?? null, platform: d.platform(), coreUrl: d.coreStatus()?.url ?? null, coreState: d.coreStatus()?.state ?? null };
     },
     getTheme: () => d.theme.get(),
     setTheme: (t) => {
