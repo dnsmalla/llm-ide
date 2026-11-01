@@ -8,7 +8,7 @@ import type { SessionUser } from "./core";
 
 /** Mac's confirmation wording, adjusted to what the desktop actually clears. */
 export const SIGN_OUT_TITLE = "Sign out of LLM-IDE?";
-export const SIGN_OUT_BODY = "Signing out ends your session on this computer. Your projects, notes and saved chats stay where they are.";
+export const SIGN_OUT_BODY = "Signing out clears your session and local chat history. Your provider keys and saved repositories stay on this computer unless you choose to forget this device.";
 
 export interface AccountActions {
   openSettings: () => void;
@@ -34,7 +34,7 @@ export function accountMenuItems(user: SessionUser, a: Pick<AccountActions, "ope
   ];
 }
 
-export function SignOutDialog({ onCancel, onConfirm, busy, title = SIGN_OUT_TITLE, body = SIGN_OUT_BODY, confirmLabel = "Sign out" }: { onCancel: () => void; onConfirm: () => void; busy?: boolean; title?: string; body?: string; confirmLabel?: string }) {
+export function SignOutDialog({ onCancel, onConfirm, onForget, busy, title = SIGN_OUT_TITLE, body = SIGN_OUT_BODY, confirmLabel = "Sign out" }: { onCancel: () => void; onConfirm: () => void; onForget?: () => void; busy?: boolean; title?: string; body?: string; confirmLabel?: string }) {
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   return (
@@ -44,6 +44,7 @@ export function SignOutDialog({ onCancel, onConfirm, busy, title = SIGN_OUT_TITL
         <p id="sh-signout-body" className="sh-panel-text sh-muted">{body}</p>
         <div className="sh-form-actions">
           <button ref={cancel} type="button" className="sh-button" onClick={onCancel}>Cancel</button>
+          {onForget ? <button type="button" className="sh-button" disabled={busy} onClick={onForget}>Sign out and forget this device</button> : null}
           <button type="button" className="sh-button sh-button-danger" disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>
@@ -53,33 +54,22 @@ export function SignOutDialog({ onCancel, onConfirm, busy, title = SIGN_OUT_TITL
 
 export const AccountMenu = memo(function AccountMenu({ user, actions, mac }: { user: SessionUser | null; actions: AccountActions; mac: boolean }) {
   const [confirm, setConfirm] = useState(false);
-  const [forget, setForget] = useState(false);
   const [busy, setBusy] = useState(false);
   if (!user) return null;
   const items = accountMenuItems(user, { ...actions, askSignOut: () => setConfirm(true) }, mac);
-  items.push(...(actions.signOutAndForget ? [{ id: "signout-forget", label: "Sign out and forget this device…", onSelect: () => setForget(true) } as MenuItem] : []));
   return (
     <>
       <MenuButton ariaLabel={`Account: ${safeText(user.email, 120)}`} className="sh-icon-button sh-account" items={items} end>
         <Icon name="circle-user" size={18} />
       </MenuButton>
-      {forget && actions.signOutAndForget ? (
-        <SignOutDialog
-          busy={busy}
-          title="Sign out and forget this device?"
-          body="Signing out clears this computer's local UI settings (panels, terminal, Library view, save destinations) and your session. Project files and notes are not deleted."
-          confirmLabel="Sign out and forget"
-          onCancel={() => setForget(false)}
-          onConfirm={() => {
-            setBusy(true);
-            void actions.signOutAndForget!().finally(() => { setBusy(false); setForget(false); });
-          }}
-        />
-      ) : null}
       {confirm && (
         <SignOutDialog
           busy={busy}
           onCancel={() => setConfirm(false)}
+          onForget={actions.signOutAndForget ? () => {
+            setBusy(true);
+            void actions.signOutAndForget!().finally(() => { setBusy(false); setConfirm(false); });
+          } : undefined}
           onConfirm={() => {
             setBusy(true);
             void actions.signOut().finally(() => {

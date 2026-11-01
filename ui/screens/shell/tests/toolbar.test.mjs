@@ -192,6 +192,8 @@ test("sign-out dialog: alert dialog with Cancel first, text from the Mac wording
   assert.match(out, /aria-labelledby="sh-signout-title"/);
   assert.ok(out.includes(SIGN_OUT_TITLE) && out.includes(SIGN_OUT_BODY));
   assert.ok(out.indexOf("Cancel") < out.indexOf(">Sign out<"), "Cancel precedes the destructive action");
+  const both = html(h(SignOutDialog, { onCancel() {}, onConfirm() {}, onForget() {} }));
+  assert.match(both, />Sign out and forget this device</);
 });
 
 test("Settings > General developer-tools switch: the adapter exposes it only when wired, and it drives Spike", async () => {
