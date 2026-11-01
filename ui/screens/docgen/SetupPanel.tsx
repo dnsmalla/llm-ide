@@ -21,6 +21,8 @@ export interface SetupPanelProps {
   onCommandPick: (id: string | null) => void;
   onCommandText: (text: string) => void;
   onPrompt: (text: string) => void;
+  destination: string;
+  onDestination: (dir: string) => void;
   onManage: () => void;
   onGenerate: () => void;
   onCancel: () => void;

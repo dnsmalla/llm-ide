@@ -5,6 +5,7 @@ import { folderForName, projectIdFor, type DocsApi } from "./docs-api.ts";
 import type { DocCommand, DocTemplate, Surface } from "./model.ts";
 import { GenerationRun, type RunDeps } from "./run.ts";
 import { SourceSelection, type SourceItem } from "./sources.ts";
+import { GENERATED_DIR } from "./naming.ts";
 
 export type SetupPhase = "no_project" | "loading" | "ready" | "error";
 
@@ -26,6 +27,8 @@ export interface DocGenState {
   /** A template write/delete is in flight, or its failure. */
   templateBusy: boolean;
   templateError: Failure | null;
+  /** Project-relative folder new documents are saved in (Mac Setup destination). */
+  destination: string;
 }
 
 export interface StoreDeps {
@@ -50,6 +53,7 @@ const EMPTY: DocGenState = {
   selectionNote: null,
   templateBusy: false,
   templateError: null,
+  destination: GENERATED_DIR,
 };
 
 export class DocGenStore {
@@ -76,6 +80,12 @@ export class DocGenStore {
     return () => this.listeners.delete(l);
   };
   getSnapshot = (): DocGenState => this.state;
+
+  setDestination(dir: string): void {
+    this.run.setDestination(dir);
+    const clean = dir.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+    this.set({ destination: clean === "" || clean.split("/").some((p) => p === "..") ? GENERATED_DIR : clean });
+  }
 
   private set(p: Partial<DocGenState>): void {
     this.state = { ...this.state, ...p };

@@ -66,6 +66,8 @@ export interface RunDeps {
   fs: SaveFs;
   now?: () => number;
   today?: () => Date;
+  /** Initial project-relative destination for new saves (Mac Setup). */
+  destination?: string;
 }
 
 export const REVISION_SOURCE_NAME = "Current document (existing draft to revise — return the complete revised document, not a diff or fragment)";
@@ -81,10 +83,12 @@ export class GenerationRun {
   private token = 0;
   private preRevision: string | null = null;
   private lastSelection: Selection | null = null;
+  private destinationDir = "llm-doc/generated";
   private readonly deps: RunDeps;
 
   constructor(deps: RunDeps) {
     this.deps = deps;
+    if (deps.destination) this.setDestination(deps.destination);
   }
 
   subscribe = (l: () => void): (() => void) => {
@@ -209,6 +213,12 @@ export class GenerationRun {
     this.set({ ...INITIAL_RUN });
   }
 
+  /** Project-relative folder for new saves (Mac's Setup destination). Empty/invalid falls back to the default. */
+  setDestination(dir: string): void {
+    const clean = dir.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+    this.destinationDir = clean === "" || clean.split("/").some((p) => p === ".." || p === ".") ? "llm-doc/generated" : clean;
+  }
+
   /** The user edited the document text by hand (the viewer is read-only; this serves paste-in and tests). */
   setDocument(text: string): void {
     if (this.busy || text === this.state.doc) return;
@@ -230,7 +240,7 @@ export class GenerationRun {
       } else {
         const sel = this.lastSelection;
         const stem = documentStem({ templateName: sel?.template?.name ?? null, commandName: null, date: (this.deps.today ?? (() => new Date()))() });
-        const r = await saveNewDocument(this.deps.fs, stem, s.doc);
+        const r = await saveNewDocument(this.deps.fs, stem, s.doc, this.destinationDir);
         saved = { ...r, stem };
       }
       if (my !== this.token) return;

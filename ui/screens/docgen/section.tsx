@@ -26,7 +26,7 @@ function storeFor(surface: Surface, fs: ReturnType<typeof createHostFs>, notes: 
     s = new DocGenStore({
       surface,
       makeApi: (id, root) => createDocsApi(core, id, root),
-      run: { readers: { file: fileReader(fs), note: notesReader(notes) }, fs },
+      run: { readers: { file: fileReader(fs), note: notesReader(notes) }, fs, destination: (() => { try { return localStorage.getItem("llmide.docgen.destination") ?? undefined; } catch { return undefined; } })() },
     });
     stores.set(surface, s);
   }

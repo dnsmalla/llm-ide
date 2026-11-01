@@ -108,6 +108,8 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             onCommandPick={(id) => store.selectCommand(id)}
             onCommandText={(t) => store.setCommandText(t)}
             onPrompt={(t) => store.setPrompt(t)}
+            destination={s.destination}
+            onDestination={(dir) => { store.setDestination(dir); try { localStorage.setItem("llmide.docgen.destination", store.getSnapshot().destination); } catch { /* session */ } }}
             onManage={() => setManage(true)}
             onGenerate={() => {
               setView("result");
