@@ -52,3 +52,6 @@
 .loop-recent h3 { margin: 0 0 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); letter-spacing: .4px; }
 .loop-recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); }
 .loop-recent li { display: flex; justify-content: space-between; gap: 6px; }
+.loop-run-link { display: flex; justify-content: space-between; gap: 6px; width: 100%; border: 0; background: none; color: inherit; font: inherit; font-size: var(--tok-type-caption-size); padding: 2px 0; cursor: pointer; text-align: left; }
+.loop-past-run h3 { margin: 4px 0; font-size: var(--tok-type-body-size); }
+.loop-past-run ul { margin: 6px 0; padding-left: 16px; font-size: var(--tok-type-caption-size); }

@@ -9,7 +9,7 @@ import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, loadCustomTemplates, saveCustomTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
-import { appendRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -57,6 +57,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
+  const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
+  const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [customTemplates, setCustomTemplates] = useState(() => loadCustomTemplates());
 
   useEffect(() => {
@@ -83,6 +85,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     void readRecentRuns(fs).then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setRuns([]); });
     return () => { live = false; };
   }, [fs, projectRoot, notice]);
+
+  const openRun = async (entry: LoopRunIndexEntry) => {
+    setSelectedRun(entry);
+    setRunRecord(await loadRunRecord(fs, entry.id, entry.startedAt));
+  };
 
   const checkEnvironment = async () => {
     setCheckingEnv(true);
@@ -268,7 +275,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         </ul>
         <section className="loop-recent" aria-label="Recent runs">
           <h3>RECENT RUNS</h3>
-          {runs.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.loopName}</span><span className="loop-native-hint">{r.statusCode} · {Math.round(r.durationSeconds)}s</span></li>)}</ul>}
+          {runs.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><button type="button" className="loop-run-link" onClick={() => void openRun(r)}><span>{r.loopName}</span><span className="loop-native-hint">{r.statusCode} · {Math.round(r.durationSeconds)}s</span></button></li>)}</ul>}
         </section>
         <div className="loop-pane-foot"><span className="loop-native-hint">{dirty ? "Unsaved changes" : "Saved to system/loop.json"}</span>{dirty ? <button type="button" className="loop-btn" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}</div>
       </aside>
@@ -376,7 +383,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
       <aside className="loop-log" aria-label="Run log">
         <div className="loop-pane-head"><span>RUN LOG</span><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
-        {runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
+        {selectedRun ? (
+          <div className="loop-past-run">
+            <h3>{selectedRun.loopName}</h3>
+            <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
+            <p>{selectedRun.statusSummary}</p>
+            {runRecord && Array.isArray(runRecord.stages) ? (
+              <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; return <li key={i}>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</li>; })}</ul>
+            ) : null}
+            {runRecord && Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? <p className="loop-native-hint">{runRecord.iterations.length} iterations recorded by the Mac journal.</p> : null}
+          </div>
+        ) : runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
       </aside>
     </div>
   );

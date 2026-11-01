@@ -29,3 +29,10 @@ test("a native run appends a month-bucketed record and index line", async () => 
   assert.match(writes[1].text, /"id":"r1"/);
   assert.equal(writes[1].opts.expected_hash, null);
 });
+
+test("a run record is read from its month bucket", async () => {
+  const fs = { async read(path) { assert.equal(path, "system/loop-runs/2026-09/r9.json"); return { status: "ok", text: '{"id":"r9","statusCode":"success"}' }; } };
+  const r = await h.loadRunRecord(fs, "r9", "2026-09-30T01:02:03Z");
+  assert.equal(r.statusCode, "success");
+  assert.equal(await h.loadRunRecord({ async read() { throw new Error("no"); } }, "r9", "2026-09-30T01:02:03Z"), null);
+});

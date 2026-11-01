@@ -78,3 +78,16 @@ export async function appendRunRecord(fs: WriteHistoryFs, entry: LoopRunIndexEnt
   const body = prior + JSON.stringify(entry) + "\n";
   await fs.write(idx, body, { expected_hash: hash });
 }
+
+
+/** Reads a run record from the month bucket its index entry names. Missing/corrupt records return null. */
+export async function loadRunRecord(fs: Pick<FsApi, "read">, id: string, startedAt: string): Promise<Record<string, unknown> | null> {
+  const d = new Date(startedAt);
+  const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  try {
+    const r = await fs.read(`system/loop-runs/${month}/${id}.json`, 4_000_000);
+    if (r.status !== "ok" || !r.text) return null;
+    const v = JSON.parse(r.text) as unknown;
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null;
+  } catch { return null; }
+}
