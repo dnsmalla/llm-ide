@@ -14,6 +14,7 @@ export interface GraphCanvasProps {
   selected: number;
   active: boolean;
   camera: { current: ViewCamera | null };
+  showLabels?: boolean;
   onSelect: (node: number) => void;
   onFatal: (message: string) => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
@@ -44,6 +45,7 @@ export function GraphCanvas(p: GraphCanvasProps) {
       filters: latest.current.filters,
       selected: latest.current.selected,
       camera: p.camera.current,
+      showLabels: p.showLabels,
       onSelect: p.onSelect,
       onCamera: (c) => { p.camera.current = c; },
       onFatal: p.onFatal,
@@ -74,6 +76,9 @@ export function GraphCanvas(p: GraphCanvasProps) {
 
   const stepRef = useRef<{ origin: number; k: number; current: number } | null>(null);
   const prevSel = useRef(-1);
+  useEffect(() => {
+    view.current?.setLabels(p.showLabels !== false);
+  }, [p.showLabels]);
   useEffect(() => {
     view.current?.update(p.filters, p.selected);
     if (p.selected >= 0 && p.selected !== prevSel.current) view.current?.focus(p.selected);

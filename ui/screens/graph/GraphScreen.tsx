@@ -2,6 +2,7 @@
 // `GraphStore`; the section entry (index.tsx) wires the real host, worker and shell bus, tests wire fakes.
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { invokeHost } from "../shell/host";
 import { Controls } from "./Controls.tsx";
 import { NodeDetails } from "./Details.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
@@ -31,9 +32,13 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const loadedFor = useRef<string | null | undefined>(undefined);
   const camera = useRef<ViewCamera | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [emptyMode, setEmptyMode] = useState<"code" | "memory" | "all">("code");
-  const [emptyBusy, setEmptyBusy] = useState(false);
-  const [emptyError, setEmptyError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"code" | "memory" | "all">("code");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [showLabels, setShowLabels] = useState(true);
+  const [showSymbols, setShowSymbols] = useState(true);
+  const [repos, setRepos] = useState<string[]>([]);
+  const [target, setTarget] = useState("");
 
   // Load lazily on first show, and again when the project changes; never while another section is shown.
   useEffect(() => {
@@ -44,6 +49,18 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     void store.load(projectRoot);
   }, [active, projectRoot, store]);
   useEffect(() => () => store.cancel(), [store]);
+  useEffect(() => {
+    if (!projectRoot) { setRepos([]); setTarget(""); return; }
+    let live = true;
+    void invokeHost<unknown>("fs_list_dir", { req: { path: "code" } }).then((raw) => {
+      if (!live) return;
+      const o = raw && typeof raw === "object" ? raw as { entries?: Array<{ path?: unknown; kind?: unknown; hidden?: unknown; ignored?: unknown }> } : {};
+      const dirs = (o.entries ?? []).filter((e) => e.kind === "dir" && e.hidden !== true && e.ignored !== true && typeof e.path === "string").map((e) => e.path as string);
+      setRepos(dirs);
+      setTarget((cur) => cur || dirs[0] || "");
+    }).catch(() => { if (live) setRepos([]); });
+    return () => { live = false; };
+  }, [projectRoot]);
 
   const entry = s.entry;
   const adj = useMemo(() => (entry ? buildAdjacency(entry.model) : null), [entry]);
@@ -56,35 +73,49 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   }
   const wrap = (child: React.ReactNode) => <div className="gr-root" data-active={active}>{child}</div>;
   if (s.phase === "no-project") return wrap(<NoProjectState />);
+  const runFooter = (
+    <div className="gr-run-footer">
+      {repos.length > 0 ? (
+        <div className="gr-quick" aria-label="Quick pick repositories">
+          <h3 className="gr-quick-title">Quick Pick</h3>
+          {repos.map((r) => (
+            <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} title={`Generate from ${r}`} onClick={() => setTarget(r)}>
+              <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="gr-run-modes" role="radiogroup" aria-label="Graph mode">
+        {([["code", "Code"], ["memory", "InfiniteBrain"], ["all", "All"]] as const).map(([id, label]) => (
+          <button key={id} type="button" role="radio" aria-checked={mode === id} className="gr-seg-btn" data-on={mode === id} disabled={generating} onClick={() => { setMode(id); setGenerateError(null); }}>{label}</button>
+        ))}
+      </div>
+      <p className="gr-muted">
+        {mode === "code" ? "Scans code into a symbol graph." : mode === "memory" ? "Scans llm-doc into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
+      </p>
+      <button
+        type="button"
+        className="gr-btn gr-btn-primary"
+        disabled={generating || !onGenerate}
+        onClick={() => {
+          if (!onGenerate) return;
+          setGenerating(true);
+          setGenerateError(null);
+          void onGenerate(mode, target).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
+        }}
+      >
+        {generating ? "Generating…" : mode === "code" ? "Generate Code Graph" : mode === "memory" ? "Generate InfiniteBrain" : "Generate Graph"}
+      </button>
+      <button type="button" className="gr-btn" disabled={generating} onClick={() => void store.reload()}>Check again</button>
+      {generateError ? <p className="gr-error" role="alert">{generateError}</p> : null}
+    </div>
+  );
+
   if (s.phase === "empty") {
     return wrap(
       <div className="gr-empty-shell">
-        <aside className="gr-run-panel" aria-label="Graph generation">
-          <div className="gr-run-modes" role="radiogroup" aria-label="Graph mode">
-            {([["code", "Code"], ["memory", "InfiniteBrain"], ["all", "All"]] as const).map(([id, label]) => (
-              <button key={id} type="button" role="radio" aria-checked={emptyMode === id} className="gr-seg-btn" data-on={emptyMode === id} disabled={emptyBusy} onClick={() => { setEmptyMode(id); setEmptyError(null); }}>{label}</button>
-            ))}
-          </div>
-          <p className="gr-muted">
-            {emptyMode === "code" ? "Scans code into a symbol graph." : emptyMode === "memory" ? "Scans llm-doc into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
-          </p>
-          <button
-            type="button"
-            className="gr-btn gr-btn-primary"
-            disabled={emptyBusy || !onGenerate}
-            onClick={() => {
-              if (!onGenerate) return;
-              setEmptyBusy(true);
-              setEmptyError(null);
-              void onGenerate(emptyMode, "").then(() => store.reload()).catch((e: unknown) => setEmptyError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setEmptyBusy(false));
-            }}
-          >
-            {emptyBusy ? "Generating…" : emptyMode === "code" ? "Generate Code Graph" : emptyMode === "memory" ? "Generate InfiniteBrain" : "Generate Graph"}
-          </button>
-          <button type="button" className="gr-btn" disabled={emptyBusy} onClick={() => void store.reload()}>Check again</button>
-          {emptyError ? <p className="gr-error" role="alert">{emptyError}</p> : null}
-        </aside>
-        <main className="gr-empty-main"><EmptyState mode={emptyMode} /></main>
+        <aside className="gr-run-panel" aria-label="Graph generation">{runFooter}</aside>
+        <main className="gr-empty-main"><EmptyState mode={mode} /></main>
       </div>,
     );
   }
@@ -105,6 +136,21 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           {s.cached ? ", from cache" : `, laid out in ${layout.ms < 1000 ? `${Math.round(layout.ms)} ms` : `${(layout.ms / 1000).toFixed(1)} s`}`}
           {s.sourcePath ? ` · ${s.sourcePath}` : ""}
         </p>
+        <div className="gr-canvas-tools" role="group" aria-label="Graph display">
+          <button type="button" className="gr-btn" aria-pressed={showSymbols} onClick={() => {
+            const next = new Set(s.filters.hiddenKinds);
+            if (showSymbols) next.add("symbol"); else next.delete("symbol");
+            setShowSymbols(!showSymbols);
+            store.setFilters({ hiddenKinds: next });
+          }}>Symbols</button>
+          <div className="gr-seg" role="radiogroup" aria-label="Dimensions">
+            <button type="button" role="radio" aria-checked="true" className="gr-seg-btn" data-on="true">2D</button>
+            <button type="button" role="radio" aria-checked="false" className="gr-seg-btn" disabled title="3D is not available in the desktop renderer">3D</button>
+          </div>
+          <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
+          <span className="gr-muted">{num(model.n)} nodes</span>
+          <button type="button" className="gr-btn" title="Toggle full screen" onClick={() => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()).catch(() => undefined); }}>⛶</button>
+        </div>
         <div role="tablist" aria-label="Graph views" className="gr-seg">
           <button type="button" role="tab" id="gr-tab-graph" aria-selected={s.tab === "graph"} aria-controls="gr-panel-graph" className="gr-seg-btn" data-on={s.tab === "graph"} onClick={() => store.setTab("graph")}>Graph</button>
           <button type="button" role="tab" id="gr-tab-list" aria-selected={s.tab === "list"} aria-controls="gr-panel-list" className="gr-seg-btn" data-on={s.tab === "list"} onClick={() => store.setTab("list")}>Nodes</button>
@@ -136,10 +182,11 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
             </div>
           )}
           <Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} />
+          {runFooter}
         </div>
         <main className="gr-main">
           <div id="gr-panel-graph" role="tabpanel" aria-labelledby="gr-tab-graph" hidden={s.tab !== "graph"} className="gr-panel">
-            <GraphCanvas model={model} layout={layout} adj={adj} filters={s.filters} selected={sel} active={active && s.tab === "graph"} camera={camera} onSelect={(i) => store.select(i)} onFatal={setFatal} createView={createView} />
+            <GraphCanvas model={model} layout={layout} adj={adj} filters={s.filters} selected={sel} active={active && s.tab === "graph"} camera={camera} showLabels={showLabels} onSelect={(i) => store.select(i)} onFatal={setFatal} createView={createView} />
           </div>
           <div id="gr-panel-list" role="tabpanel" aria-labelledby="gr-tab-list" hidden={s.tab !== "list"} className="gr-panel">
             {s.tab === "list" && (

@@ -26,6 +26,8 @@ export interface ViewOptions {
   filters: FilterState;
   selected: number;
   camera: ViewCamera | null;
+  /** Draw node labels; the canvas toolbar can turn them off without rebuilding the graph. */
+  showLabels?: boolean;
   onSelect(i: number): void;
   onCamera(c: ViewCamera): void;
   /** Called when WebGL is unavailable or the context is lost for good. */
@@ -48,6 +50,7 @@ export class GraphView {
   private selected: number;
   private neighbour: Uint8Array = new Uint8Array(0);
   private disposed = false;
+  private showLabels = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly adj: Adjacency;
   private readonly weights: Float32Array;
@@ -57,6 +60,7 @@ export class GraphView {
   private readonly maxRadius: number;
 
   private constructor(private readonly o: ViewOptions) {
+    this.showLabels = o.showLabels !== false;
     this.filters = o.filters;
     this.selected = o.selected;
     this.adj = buildAdjacency(o.model);
@@ -178,7 +182,7 @@ export class GraphView {
       else if (isNb) { color = NEIGHBOUR_COLOR; zIndex = 2; }
       else color = DIM_COLOR;
     }
-    return { ...d, color, size, zIndex, label: labelShown(i, layout, this.plan, sel, isNb) ? model.titles[i] : null };
+    return { ...d, color, size, zIndex, label: this.showLabels && labelShown(i, layout, this.plan, sel, isNb) ? model.titles[i] : null };
   }
 
   private edgeAttrs(d: Record<string, unknown>): Record<string, unknown> {
@@ -213,6 +217,12 @@ export class GraphView {
   }
 
   /** Filters or selection changed. */
+  setLabels(on: boolean): void {
+    if (this.showLabels === on) return;
+    this.showLabels = on;
+    this.sigma?.refresh();
+  }
+
   update(filters: FilterState, selected: number): void {
     this.filters = filters;
     this.selected = selected;

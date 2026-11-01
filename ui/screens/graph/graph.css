@@ -89,3 +89,10 @@
 .gr-empty-main { display: flex; align-items: center; justify-content: center; min-width: 0; }
 .gr-state-icon { font-size: 28px; color: var(--tok-color-text-muted); }
 @media (max-width: 880px) { .gr-empty-shell { grid-template-columns: minmax(0, 1fr); } .gr-run-panel { border-right: 0; border-bottom: 1px solid var(--tok-color-border); } }
+.gr-canvas-tools { display: flex; align-items: center; gap: var(--tok-space-xs); flex-wrap: wrap; }
+.gr-run-footer { margin-top: auto; display: flex; flex-direction: column; gap: var(--tok-space-xs); padding-top: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); }
+.gr-run-footer .gr-run-modes { display: flex; gap: 2px; }
+.gr-quick { display: flex; flex-direction: column; gap: 4px; }
+.gr-quick-title { margin: 0 0 2px; font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .4px; color: var(--tok-color-text-muted); }
+.gr-quick-repo { display: flex; justify-content: space-between; gap: var(--tok-space-sm); font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 5px 8px; cursor: pointer; }
+.gr-quick-repo[data-on="true"] { border-color: var(--tok-color-accent); }

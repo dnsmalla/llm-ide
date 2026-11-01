@@ -141,6 +141,6 @@ test("search over 50k nodes is quick and windowing renders a constant number of 
 
 test("colours: stable, distinct for the first 8, valid for any id", () => {
   assert.equal(new Set(Array.from({ length: 8 }, (_, i) => communityColor(i))).size, 8);
-  assert.match(communityColor(5000), /^hsl\(/);
+  assert.match(communityColor(5000), /^#[0-9a-f]{6}$/);
   assert.equal(communityColor(3), communityColor(3));
 });
