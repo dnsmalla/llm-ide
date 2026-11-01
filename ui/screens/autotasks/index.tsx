@@ -1,1 +1,1 @@
-export { default } from "./AutoTasksScreen.tsx";
+export { default } from "./native/NativeAutoTasksScreen.tsx";
