@@ -655,16 +655,20 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-field"><span>Time budget (minutes, empty = none)</span><input type="number" min={0} step={15} value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Pause timeout (minutes, 0 = none)</span><input type="number" min={0} step={15} value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
+            <label className="loop-field"><span>Pause timeout (not enforced in this build)</span><input type="number" min={0} step={15} disabled value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={() => undefined} /></label>
           </div>
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
-            <label className="loop-field"><span>Repair model (empty = default)</span><input value={loop.config.repairModel ?? ""} onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
-            <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "commit" | "ignore"; })}><option value="revert">Revert offending edits</option><option value="commit">Commit offending edits</option><option value="ignore">Ignore</option></select></label>
+            <label className="loop-field"><span>Repair model (not used by this build)</span><input disabled value={loop.config.repairModel ?? ""} onChange={() => undefined} /></label>
+            <label className="loop-field"><span>Protected path policy (not enforced)</span><select disabled value={loop.config.protectedPathPolicy} onChange={() => undefined}><option value="revert">Revert offending edits</option><option value="commit">Commit offending edits</option><option value="ignore">Ignore</option></select></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Open a merge request after a successful run</label>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.useWorktreesForConcurrentRuns} onChange={(e) => patchLoop((l) => { l.config.useWorktreesForConcurrentRuns = e.target.checked; })} /> Use an isolated worktree when another run holds the repo</label>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
+            <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
+            <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
+            <label className="loop-check"><input type="checkbox" disabled checked={loop.config.alwaysUseWorktree} onChange={() => undefined} /> Always run in an isolated worktree (not ported)</label>
+          </details>
+          <details className="loop-advanced">
+            <summary>Desktop limits (explicit)</summary>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, protected-path enforcement, repair-model selection, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
