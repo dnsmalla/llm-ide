@@ -227,7 +227,9 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       { id: "new-dir", label: "New Folder…" },
       { id: "rename", label: "Rename…", disabled: !single, separator: true },
       { id: "delete", label: sel.length > 1 ? `Move ${sel.length} Items to Trash` : "Move to Trash", disabled: sel.length === 0, danger: true },
-      { id: "copy-path", label: "Copy Relative Path", disabled: !single, separator: true },
+      { id: "copy-path", label: "Copy Relative Path", disabled: !single },
+      { id: "copy-abs", label: "Copy Absolute Path", disabled: !single || !projectRoot, separator: true },
+      { id: "reveal", label: "Reveal in Finder", disabled: !single || !projectRoot },
       { id: "refresh", label: "Refresh" },
     ];
   };
@@ -264,6 +266,8 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     else if (id === "rename" && path) setDialog({ type: "prompt", kind: "rename", path });
     else if (id === "delete" && sel.length) setDialog({ type: "delete", paths: sel });
     else if (id === "copy-path" && path) copy(path);
+    else if (id === "copy-abs" && path && projectRoot) copy(`${projectRoot.replace(/\/+$/, "")}/${path}`);
+    else if (id === "reveal" && path) void invokeHost("reveal_in_os", { rel_path: path }).catch(() => undefined);
     else if (id === "refresh") void refreshAll();
   };
 
