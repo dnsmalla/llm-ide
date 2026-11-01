@@ -30,6 +30,8 @@ export interface ViewOptions {
   onCamera(c: ViewCamera): void;
   /** Called when WebGL is unavailable or the context is lost for good. */
   onFatal(message: string): void;
+  /** The WebGL context was lost. The canvas can recover by discarding this view and creating a new one. */
+  onContextLost?(): void;
   /** Polled between build chunks: true when the screen no longer wants this view. */
   shouldAbort?: () => boolean;
 }
@@ -143,7 +145,8 @@ export class GraphView {
     const canvas = container.querySelector("canvas");
     canvas?.addEventListener("webglcontextlost", (ev) => {
       ev.preventDefault();
-      this.o.onFatal("The graphics context was lost. Reopen the graph to draw it again.");
+      if (this.o.onContextLost) this.o.onContextLost();
+      else this.o.onFatal("The graphics context was lost. Reopen the graph to draw it again.");
     });
     return true;
   }

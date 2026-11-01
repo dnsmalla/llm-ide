@@ -25,6 +25,8 @@ export function GraphCanvas(p: GraphCanvasProps) {
   const latest = useRef({ filters: p.filters, selected: p.selected });
   latest.current = { filters: p.filters, selected: p.selected };
   const [building, setBuilding] = useState(false);
+  const [recover, setRecover] = useState(0);
+  const lost = useRef(0);
   // The saved camera belongs to one layout: a new layout (preview replaced by the full one) starts fitted.
   const cameraFor = useRef<LayoutResult | null>(null);
   const create = p.createView ?? GraphView.create;
@@ -45,6 +47,15 @@ export function GraphCanvas(p: GraphCanvasProps) {
       onSelect: p.onSelect,
       onCamera: (c) => { p.camera.current = c; },
       onFatal: p.onFatal,
+      onContextLost: () => {
+        if (lost.current < 2) {
+          lost.current += 1;
+          setBuilding(true);
+          setRecover((n) => n + 1);
+        } else {
+          p.onFatal("The graphics context was lost twice. Reopen the graph to draw it again; the Nodes tab still works.");
+        }
+      },
       shouldAbort: () => cancelled,
     }).then((v) => {
       if (cancelled) { v?.dispose(); return; }
@@ -59,7 +70,7 @@ export function GraphCanvas(p: GraphCanvasProps) {
     };
     // The view is rebuilt only when it appears or the graph changes; filters and selection update it in place.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.active, p.model, p.layout]);
+  }, [p.active, p.model, p.layout, recover]);
 
   const stepRef = useRef<{ origin: number; k: number; current: number } | null>(null);
   const prevSel = useRef(-1);
