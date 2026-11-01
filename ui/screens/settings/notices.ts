@@ -84,7 +84,8 @@ export function serverRows(info: DiagnosticsInfo | null, health: Health | null):
     rows.push({ label: "Health checks", value: failing.length === 0 ? "All passing" : `Failing: ${failing.join(", ")}`, tone: failing.length === 0 ? "ok" : "warning" });
   }
   if (info) {
-    rows.push({ label: "Identity", value: coreTrustLabel(info.coreTrust), tone: info.coreTrust === "spawned" ? "ok" : "warning" });
+    if (info.coreState === "stopped") rows.push({ label: "Identity", value: "Stopped", tone: "warning" });
+    else rows.push({ label: "Identity", value: coreTrustLabel(info.coreTrust), tone: info.coreTrust === "spawned" ? "ok" : "warning" });
     rows.push({ label: "Log file", value: info.coreLogPath ?? "Not available" });
   }
   return rows;

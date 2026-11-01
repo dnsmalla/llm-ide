@@ -410,8 +410,12 @@ impl CoreHost {
             let _ = handle.join();
         }
         let mut s = lock(&self.inner.status);
+        // A stopped own core is still the app's core: reporting "unverified" would show a false trust warning.
+        // An adopted external server keeps its (unverified) identity.
+        if !s.adopted {
+            s.trust = "spawned";
+        }
         s.state = Phase::Stopped;
-        s.trust = "pending";
         s.pid = None;
         s.nonce = None;
         s.error = None;
@@ -1324,7 +1328,7 @@ mod tests {
         let host = CoreHost::new();
         host.stop().unwrap();
         assert_eq!(host.status().state, Phase::Stopped);
-        assert_eq!(host.status().trust, "pending");
+        assert_eq!(host.status().trust, "spawned", "a stopped own core is not a trust warning");
         assert!(host.start().is_err(), "there is no data dir to start against");
     }
 
