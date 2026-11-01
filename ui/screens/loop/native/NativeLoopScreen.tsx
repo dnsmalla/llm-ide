@@ -206,12 +206,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { for (const l of s.loops) l.isPrimary = l.id === loop.id; });
   };
 
-  const addStage = () => {
+  const addStage = (kind: LoopStage["kind"] = "shellCommand") => {
     if (!loop) return;
     const id = crypto.randomUUID();
     mutateStore((s) => {
       const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
-      l.config.stages.push({ id, name: "New Stage", kind: "shellCommand", command: "", order: l.config.stages.length, skillId: null, targetPath: null, outputPath: null, prompt: null, isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null, detectedCommand: null, check: null, testOp: null, graphOp: null, allowsRepair: true, defaultRevision: null, disabledByDetection: null, raw: null });
+      l.config.stages.push({
+        id, name: stageKindLabel[kind] ?? "New Stage", kind, command: kind === "shellCommand" ? "" : null,
+        order: l.config.stages.length, skillId: null, targetPath: null, outputPath: null, prompt: null,
+        isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null,
+        detectedCommand: null, check: null, testOp: kind === "testMap" ? "structure" : null,
+        graphOp: kind === "codeGraph" ? "snapshot" : null, allowsRepair: true, defaultRevision: null,
+        disabledByDetection: null, raw: null,
+      });
     });
     setSelectedStageId(id);
   };
@@ -569,7 +576,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <aside className="loop-pane loop-stages" aria-label="Stages">
-        <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><button type="button" className="loop-plus" aria-label="Add stage" title="Add stage" onClick={addStage}>＋</button></div>
+        <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><select className="loop-add-stage" aria-label="Add stage" value="" onChange={(e) => { if (e.target.value) addStage(e.target.value as LoopStage["kind"]); }}>
+            <option value="">＋ Add stage…</option>
+            {Object.entries(stageKindLabel).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select></div>
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
