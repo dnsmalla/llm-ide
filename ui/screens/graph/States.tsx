@@ -36,8 +36,9 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
   );
 }
 
-export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: () => Promise<void> }) {
+export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: string[]; onOpen: (p: string) => boolean; onRetry: () => void; onGenerate?: (mode: "code" | "memory" | "all") => Promise<void> }) {
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"code" | "memory" | "all">("code");
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="gr-state">
@@ -45,18 +46,28 @@ export function EmptyState({ tried, onOpen, onRetry, onGenerate }: { tried: stri
       <p>This screen shows the graph that the Code Graph scanners write to <code>{GRAPH_CANDIDATES[0]}</code> inside the project.</p>
       <p className="gr-muted">Generate it here with the host's GraphKit runner, or in the macOS app (<strong>Code Graph → Generate</strong>) and come back. Looked for: {(tried.length ? tried : [...GRAPH_CANDIDATES]).join(", ")}.</p>
       {onGenerate ? (
-        <button
-          type="button"
-          className="gr-btn gr-btn-primary"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setError(null);
-            void onGenerate().catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
-          }}
-        >
-          {busy ? "Generating…" : "Generate code graph"}
-        </button>
+        <div className="gr-row">
+          <label className="gr-field">
+            <span>Mode</span>
+            <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} disabled={busy}>
+              <option value="code">Code</option>
+              <option value="memory">InfiniteBrain (llm-doc)</option>
+              <option value="all">All (merge)</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="gr-btn gr-btn-primary"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setError(null);
+              void onGenerate(mode).catch((e: unknown) => setError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Generating…" : mode === "code" ? "Generate code graph" : mode === "memory" ? "Generate memory graph" : "Generate all"}
+          </button>
+        </div>
       ) : null}
       <button type="button" className="gr-btn" onClick={onRetry}>Check again</button>
       {error ? <p className="gr-error" role="alert">{error}</p> : null}
