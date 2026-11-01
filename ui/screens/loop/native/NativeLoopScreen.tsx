@@ -18,6 +18,7 @@ import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
+import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -69,8 +70,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runningStage, setRunningStage] = useState(false);
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
-  const queueRef = useRef<LoopDefinition[]>([]);
+  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
   const [queued, setQueued] = useState(0);
+  const runLoopRef = useRef<(l: LoopDefinition, scheduled?: boolean) => void>(() => undefined);
+  const [scheduleCron, setScheduleCron] = useState("");
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
@@ -353,11 +356,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
-  const ensureApprovals = (target: LoopDefinition): string | null => {
+  const ensureApprovals = (target: LoopDefinition, prompt = true): string | null => {
     const root = workRoot ?? projectRoot ?? "";
     for (const s of target.config.stages) {
       if (!s.enabled || s.kind !== "shellCommand" || !s.command) continue;
       if (isApproved(root, s.command)) continue;
+      if (!prompt) return `“${s.name}” needs command approval before a scheduled run: ${s.command}`;
       if (!window.confirm(`Approve this command for ${target.name}?\n\n${s.command}`)) return `“${s.name}” needs command approval before it can run.`;
       approve(root, s.command);
     }
@@ -370,13 +374,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setNotice("Stopping the current stage; the loop will end after it returns.");
   };
 
-  const executeLoop = async (target: LoopDefinition) => {
+  const executeLoop = async (target: LoopDefinition, scheduled = false) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    const approval = ensureApprovals(target);
+    const approval = ensureApprovals(target, !scheduled);
     if (approval) { setNotice(approval); return; }
-    if (!window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
+    if (!scheduled && !window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
     runningRef.current = true;
     cancelledRef.current = false;
     setRunningStage(true);
@@ -427,19 +431,53 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setRunningStage(false);
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
-      if (next) window.setTimeout(() => void executeLoop(next), 0);
+      if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
     }
   };
 
-  const runLoop = (target: LoopDefinition | null = loop) => {
+  const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
     if (runningRef.current) {
-      if (!queueRef.current.some((l) => l.id === target.id)) queueRef.current.push(target);
+      if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
       setQueued(queueRef.current.length);
       setNotice(`Queued “${target.name}”.`);
       return;
     }
-    void executeLoop(target);
+    void executeLoop(target, scheduled);
+  };
+
+  runLoopRef.current = runLoop;
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    const key = `llmide.loopSchedule.v1.${projectRoot}`;
+    let saved: { cron?: string; last?: string } = {};
+    try { saved = JSON.parse(localStorage.getItem(key) ?? "{}") as typeof saved; } catch { saved = {}; }
+    const cron = (saved.cron ?? "").trim();
+    setScheduleCron(cron);
+    if (!cron || !validateCron(cron)) return;
+    let last = saved.last ?? "";
+    const tick = () => {
+      const now = new Date();
+      const minute = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+      if (minute === last || !cronMatches(cron, now)) return;
+      last = minute;
+      try { localStorage.setItem(key, JSON.stringify({ cron, last })); } catch { /* session only */ }
+      const scheduled = (load?.kind === "ok" ? load.store.loops : []).filter((l) => l.runsOnSchedule);
+      if (scheduled.length === 0) { setNotice("The schedule fired, but no loop is marked Run on schedule."); return; }
+      if (runningRef.current) { setNotice("The schedule fired while a run is active; scheduled loops were skipped."); return; }
+      setNotice(`Schedule fired: running ${scheduled.length} loop(s).`);
+      for (const l of scheduled) runLoopRef.current(l, true);
+    };
+    tick();
+    const timer = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(timer);
+  }, [projectRoot, load]);
+
+  const saveSchedule = (cron: string) => {
+    if (!projectRoot) return;
+    setScheduleCron(cron);
+    try { localStorage.setItem(`llmide.loopSchedule.v1.${projectRoot}`, JSON.stringify({ cron: cron.trim(), last: "" })); } catch { /* session only */ }
   };
 
   const runSelectedStage = async () => {
@@ -597,6 +635,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <p className="loop-native-hint">{envReason} Nothing is installed or changed.</p>
           {envVersions ? <p className="loop-native-hint">Python: {envVersions.python ?? "not found"} · Node: {envVersions.node ?? "not found"} · Git: {envVersions.git ?? "not found"}</p> : null}
           <div className="loop-inline"><button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkEnvironment()}>{checkingEnv ? "Checking…" : "Check again"}</button><button type="button" className="loop-btn" disabled={checkingEnv} onClick={() => void checkToolchain()}>{checkingEnv ? "Checking…" : "Check Python environment…"}</button></div>
+        </section>
+
+        <section className="loop-card">
+          <h2>SCHEDULE</h2>
+          <label className="loop-field"><span>Cron (page-resident scheduler)</span><input value={scheduleCron} placeholder="0 2 * * *" onChange={(e) => saveSchedule(e.target.value)} /></label>
+          <p className="loop-native-hint">{scheduleCron && validateCron(scheduleCron) ? `${describeCron(scheduleCron)}. Fires while the Loop page is open; background scheduling is not ported.` : "No valid schedule. The desktop scheduler runs only while this page is open."}</p>
+          <p className="loop-native-hint">Loops marked “Run on schedule” are queued when the cron fires.</p>
         </section>
 
         <section className="loop-card">

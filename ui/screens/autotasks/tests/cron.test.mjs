@@ -11,3 +11,12 @@ test("Auto Task cron validates five fields and describes the common schedules", 
   assert.equal(c.describeCron("0 * * * *"), "Every hour");
   assert.equal(c.describeCron("0 9 * * 1-5"), "Weekdays at 09:00");
 });
+
+test("cronMatches handles steps, ranges, lists and the day OR rule", () => {
+  const t = new Date(2026, 10, 2, 9, 30); // Monday
+  assert.equal(c.cronMatches("30 9 * * *", t), true);
+  assert.equal(c.cronMatches("*/15 9-17 * * 1-5", t), true);
+  assert.equal(c.cronMatches("0,30 9 * * *", t), true);
+  assert.equal(c.cronMatches("30 9 1 * 1", t), true); // dom OR dow
+  assert.equal(c.cronMatches("31 9 * * *", t), false);
+});
