@@ -13,7 +13,7 @@ import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved } from "./approvals.ts";
-import { runRegression } from "./regression.ts";
+import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
@@ -382,6 +382,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         log(line) { setRunLog((l) => [...l, line]); },
       });
       setRunLog((l) => [...l, outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
+      if (!outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
+        const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
+        const faultPaths = [...new Set(Array.from(failedRun?.output.matchAll(/^([^\n:]+\\.md):/gm) ?? [], (m) => m[1].trim()))];
+        let reopened = 0;
+        for (const rel of faultPaths) if (await reopenFault(fs, rel)) reopened += 1;
+        if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
+      }
       setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };

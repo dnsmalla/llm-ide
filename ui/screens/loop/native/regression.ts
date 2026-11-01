@@ -80,3 +80,12 @@ export async function runRegression(fs: RegressionFs, faultsRoot: string, deps: 
   }
   return { passed: failures.length === 0, checked: faults.length, failures, notes };
 }
+
+/** Marks a fixed fault open again after a run exhausted repair. Keeps the notes body untouched. */
+export async function reopenFault(fs: RegressionFs & { write: FsApi["write"] }, rel: string): Promise<boolean> {
+  let text: string;
+  try { const r = await fs.read(rel, 2_000_000); if (r.status !== "ok" || !r.text) return false; text = r.text; } catch { return false; }
+  if (!/^status:\s*fixed\s*$/m.test(text)) return false;
+  const next = text.replace(/^status:\s*fixed\s*$/m, "status: open");
+  try { await fs.write(rel, next, { expected_hash: null }); return true; } catch { return false; }
+}
