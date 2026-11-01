@@ -782,7 +782,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               <label className="loop-field"><span>Kind</span><select value={stage.kind} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.kind = e.target.value as LoopStage["kind"]; })}>
                 {Object.entries(stageKindLabel).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select></label>
-              {stage.kind === "shellCommand" ? <label className="loop-field"><span>Command</span><input value={stage.command ?? ""} placeholder="npm test" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = e.target.value; })} /></label> : null}
+              {stage.kind === "shellCommand" ? <label className="loop-field"><span>Command</span><input value={stage.command ?? ""} placeholder="npm test" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = e.target.value; })} />{testCommand && stage.command !== testCommand ? <button type="button" className="loop-btn" onClick={() => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = testCommand; })}>Use detected: {testCommand}</button> : null}</label> : null}
               {stage.kind === "skill" ? <>
                 <label className="loop-field"><span>Skill id</span><input value={stage.skillId ?? ""} placeholder="family/skill" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.skillId = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Target path (optional)</span><input value={stage.targetPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.targetPath = e.target.value || null; })} /></label>
@@ -800,7 +800,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </main>
 
       <aside className="loop-log" aria-label="Run log">
-        <div className="loop-pane-head"><span>RUN LOG</span><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
+        <div className="loop-pane-head"><span>RUN LOG</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
         {selectedRun ? (
           <div className="loop-past-run">
             <h3>{selectedRun.loopName}</h3>
