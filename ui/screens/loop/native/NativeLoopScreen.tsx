@@ -9,6 +9,7 @@ import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
+import { readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -55,6 +56,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [checkingEnv, setCheckingEnv] = useState(false);
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
+  const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -73,6 +75,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
   }, [fs, projectRoot]);
+
+  useEffect(() => {
+    if (!projectRoot) { setRuns([]); return; }
+    let live = true;
+    void readRecentRuns(fs).then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setRuns([]); });
+    return () => { live = false; };
+  }, [fs, projectRoot, notice]);
 
   const checkEnvironment = async () => {
     setCheckingEnv(true);
@@ -235,6 +244,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             </li>
           ))}
         </ul>
+        <section className="loop-recent" aria-label="Recent runs">
+          <h3>RECENT RUNS</h3>
+          {runs.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.loopName}</span><span className="loop-native-hint">{r.statusCode} · {Math.round(r.durationSeconds)}s</span></li>)}</ul>}
+        </section>
         <div className="loop-pane-foot"><span className="loop-native-hint">{dirty ? "Unsaved changes" : "Saved to system/loop.json"}</span>{dirty ? <button type="button" className="loop-btn" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}</div>
       </aside>
 

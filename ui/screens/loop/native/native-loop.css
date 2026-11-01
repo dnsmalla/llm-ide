@@ -48,3 +48,7 @@
 .loop-run-btn { align-self: center; margin-left: auto; }
 .loop-clear { background: none; border: 0; cursor: pointer; }
 .loop-run-log { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); color: var(--tok-color-text); }
+.loop-recent { margin-top: auto; border-top: 1px solid var(--tok-color-border); padding: 6px 8px; }
+.loop-recent h3 { margin: 0 0 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); letter-spacing: .4px; }
+.loop-recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); }
+.loop-recent li { display: flex; justify-content: space-between; gap: 6px; }
