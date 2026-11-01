@@ -18,7 +18,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 1 | Explorer | `Features/Explorer/` | `ui/screens/explorer/` | reveal/copy, previews, file clipboard done; PDF/search-replace pending |
 | 2 | Chat | `Features/Chat/` | `ui/screens/chat/` | auto-attach done; memory/voice/pickers/approvals pending |
 | 3 | Terminal | `Features/Terminal/` | terminal dock | shell-wide dock/status/persistence done; cwd/title pending |
-| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | generate button done; modes/target/routines/storage pending |
+| 4 | Graph (System + Code graph) | `Features/CodeGraph/` | `ui/screens/graph/` | Code/InfiniteBrain/All generate done; target picker/routines/storage pending |
 | 5 | Auto Tasks | `Features/AutoTask/` | `ui/screens/autotasks/` | bridge, permissions, two-pane/logs done; setup/custom pending |
 | 6 | Review Conflicts | `Features/ReviewConflicts/` | `ui/screens/review/` | tabs/linked/refresh/viewer done |
 | 7 | Issues | `Features/Issues/` | `ui/screens/issues/` | detail/columns/filter/shortcuts done |
@@ -47,7 +47,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 ### Graph / Doc Gen / Visual
 - Graph System: missing routines and storage card; stale on project switch; openFile unvalidated; failures not
   surfaced; no deep link to the Code page.
-- Graph Code: one Generate mode and no scan target/repo quick-pick/Library tree; only zoom controls; missing
+- Graph Code: Code/InfiniteBrain/All generation is done; no scan target/repo quick-pick/Library tree; only zoom controls; missing
   auto-update settings card (D→M and M→D gaps both exist).
 - Doc Gen: manual edit and Preview/Raw are done; still no Use-chat toggle, output destination, chat panel/
   Save-chat-output, template import/command editing, or panel toggles.
