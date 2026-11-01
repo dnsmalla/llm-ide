@@ -24,7 +24,12 @@ export interface SourceItem {
 export interface SourceReaders {
   file(rel: string, maxBytes: number, signal: AbortSignal): Promise<{ text: string | null; truncated: boolean }>;
   note(rel: string, maxBytes: number, signal: AbortSignal): Promise<{ text: string | null; truncated: boolean }>;
+  /** A project image as the core's `[binary:<mime>]\n<base64>` source content; null when it cannot be read. */
+  image?(rel: string, signal: AbortSignal): Promise<{ content: string | null }>;
 }
+
+const IMAGE_RE = /\.(png|jpe?g|gif|webp)$/i;
+export const isImageFile = (rel: string): boolean => IMAGE_RE.test(rel);
 
 export const READ_BYTES = MAX_SOURCE_CONTENT * 4;
 export const READ_CONCURRENCY = 4;
@@ -148,9 +153,13 @@ export async function collectSources(items: readonly SourceItem[], readers: Sour
   let need = 0;
   let done = 0;
   let notRead = 0;
-  const readOne = async (it: SourceItem): Promise<{ it: SourceItem; text: string | null; cut: boolean }> => {
+  const readOne = async (it: SourceItem): Promise<{ it: SourceItem; text: string | null; cut: boolean; image?: boolean }> => {
     if (it.kind === "paste") return { it, text: (it.text ?? "").slice(0, MAX_SOURCE_CONTENT), cut: (it.text ?? "").length > MAX_SOURCE_CONTENT };
     try {
+      if (it.kind === "file" && isImageFile(it.rel) && readers.image) {
+        const r = await readers.image(it.rel, signal);
+        return { it, text: r.content, cut: false, image: true };
+      }
       const r = it.kind === "file" ? await readers.file(it.rel, READ_BYTES, signal) : await readers.note(it.rel, READ_BYTES, signal);
       if (r.text === null) return { it, text: null, cut: false };
       return { it, text: r.text.slice(0, MAX_SOURCE_CONTENT), cut: r.truncated || r.text.length > MAX_SOURCE_CONTENT };
@@ -178,7 +187,7 @@ export async function collectSources(items: readonly SourceItem[], readers: Sour
         continue;
       }
       const step = `### ${r.it.name}\n`.length + Math.min(MIN_SOURCE_CONTENT, r.text.length) + (sources.length > 0 ? 2 : 0);
-      if (need + step > MAX_TOTAL_SOURCE_CHARS || chars + r.text.length + r.it.name.length > MAX_BODY_CHARS) {
+      if (!r.image && (need + step > MAX_TOTAL_SOURCE_CHARS || chars + r.text.length + r.it.name.length > MAX_BODY_CHARS)) {
         full = true;
         notRead += 1;
         continue;
