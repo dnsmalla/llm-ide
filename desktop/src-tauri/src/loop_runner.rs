@@ -101,6 +101,44 @@ pub fn stage_command(root: &Path, stage_id: &str) -> Result<String, String> {
     Err("that stage is not in system/loop.json".into())
 }
 
+fn stage_kind(root: &Path, stage_id: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(root.join("system").join("loop.json")).map_err(|e| format!("cannot read system/loop.json: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))?;
+    for l in v.get("loops").and_then(|x| x.as_array()).into_iter().flatten() {
+        for s in l.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).into_iter().flatten() {
+            if s.get("id").and_then(|x| x.as_str()) == Some(stage_id) {
+                return Ok(s.get("kind").and_then(|x| x.as_str()).unwrap_or("").to_string());
+            }
+        }
+    }
+    Err("that stage is not in system/loop.json".into())
+}
+
+/// True when any `system/faults/**/*.md` is still marked `status: fixed`. The desktop's deterministic slice cannot
+/// re-ask the agent those questions, so it refuses rather than reporting a green sweep it never performed.
+fn has_fixed_faults(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() { if has_fixed_faults(&p) { return true; } continue; }
+        if p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("md")) != Some(true) { continue; }
+        let text = std::fs::read_to_string(&p).unwrap_or_default();
+        let head = text.split("\n---").next().unwrap_or("");
+        if head.lines().any(|l| l.trim().eq_ignore_ascii_case("status: fixed")) { return true; }
+    }
+    false
+}
+
+fn run_regression(root: &Path) -> Result<StageRun, String> {
+    if has_fixed_faults(&root.join("system").join("faults")) {
+        return Err("the Regression sweep has fixed faults to re-ask; the native regression/agent slice is not ported yet".into());
+    }
+    Ok(StageRun {
+        exit_code: Some(0), stdout: "No fixed faults to re-check.".into(), stderr: String::new(),
+        timed_out: false, duration_ms: 0,
+    })
+}
+
 /// Runs one already-saved shell stage. The caller is the Loop page's explicit Run action.
 pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     let command = stage_command(root, stage_id)?;
@@ -152,25 +190,28 @@ pub fn run_loop(root: &Path, loop_id: &str, timeout_secs: Option<u64>) -> Result
     let loop_v = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
     let loop_name = loop_v.get("name").and_then(|x| x.as_str()).unwrap_or("Loop").to_string();
     let stages = loop_v.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).ok_or("loop has no stages")?;
-    let mut plan: Vec<(String, String, String, String)> = Vec::new();
+    let mut plan: Vec<(String, String, String, String, String)> = Vec::new();
     for s in stages {
         if s.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue; }
         let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
         let name = s.get("name").and_then(|x| x.as_str()).unwrap_or("Stage").to_string();
         let kind = s.get("kind").and_then(|x| x.as_str()).unwrap_or("");
         let severity = s.get("severity").and_then(|x| x.as_str()).unwrap_or("blocking").to_string();
-        if kind != "shellCommand" {
-            return Err(format!("“{name}” is a {kind} stage; only shell-command stages run in this slice"));
+        if kind != "shellCommand" && kind != "regressionSweep" {
+            return Err(format!("“{name}” is a {kind} stage; this native slice runs shell-command and empty Regression stages"));
+        }
+        if kind == "regressionSweep" && has_fixed_faults(&root.join("system").join("faults")) {
+            return Err(format!("“{name}” has fixed faults to re-ask; the native regression/agent slice is not ported yet"));
         }
         let cmd = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
-        if cmd.is_empty() { return Err(format!("“{name}” has no command")); }
-        plan.push((id, name, severity, cmd));
+        if kind == "shellCommand" && cmd.is_empty() { return Err(format!("“{name}” has no command")); }
+        plan.push((id, name, severity, kind.to_string(), cmd));
     }
     if plan.is_empty() { return Err("this loop has no enabled stages".into()); }
     let mut results = Vec::new();
     let mut passed = true;
-    for (id, name, severity, _cmd) in plan {
-        let run = run_stage(root, &id, timeout_secs)?;
+    for (id, name, severity, kind, _cmd) in plan {
+        let run = if kind == "regressionSweep" { run_regression(root)? } else { run_stage(root, &id, timeout_secs)? };
         let ok = !run.timed_out && run.exit_code == Some(0);
         results.push(LoopStageResult { stage_id: id, stage_name: name, severity: severity.clone(), run });
         if !ok {
@@ -187,7 +228,7 @@ pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Resu
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        run_stage(&root, &stage_id, timeout_secs)
+        if stage_kind(&root, &stage_id)? == "regressionSweep" { run_regression(&root) } else { run_stage(&root, &stage_id, timeout_secs) }
     }).await.map_err(|e| format!("Loop stage task failed: {e}"))?
 }
 
@@ -257,6 +298,21 @@ mod tests {
         assert_eq!(work_root(&root), root.join("code/repo"));
         std::fs::create_dir_all(root.join(".git")).unwrap();
         assert_eq!(work_root(&root), root);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn regression_stage_with_no_fixed_faults_is_a_honest_noop() {
+        let root = project("regression-empty", "printf test");
+        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l","name":"R","config":{"stages":[{"id":"s1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Test","kind":"shellCommand","command":"printf ok","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        let r = run_loop(&root, "l", Some(10)).unwrap();
+        assert!(r.passed);
+        assert_eq!(r.stages.len(), 2);
+        assert_eq!(r.stages[0].run.exit_code, Some(0));
+        assert_eq!(r.stages[1].run.stdout, "ok");
+        std::fs::create_dir_all(root.join("system/faults")).unwrap();
+        std::fs::write(root.join("system/faults/f.md"), "---\nstatus: fixed\n---\n").unwrap();
+        assert!(run_loop(&root, "l", Some(10)).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

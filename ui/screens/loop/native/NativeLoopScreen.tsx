@@ -218,10 +218,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runSelectedStage = async () => {
     if (!stage || dirty || runningStage) return;
-    if (stage.kind !== "shellCommand" || !stage.command) { setNotice("Only a saved shell-command stage can run in this slice."); return; }
-    if (!window.confirm(`Run this stage?\n\n${stage.command}`)) return;
+    if (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep") { setNotice("Only a shell-command stage or an empty Regression stage can run in this slice."); return; }
+    if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
+    const label = stage.command ?? "Regression sweep (only runs when there are no fixed faults to re-ask)";
+    if (!window.confirm(`Run this stage?\n\n${label}`)) return;
     setRunningStage(true);
-    setRunLog((l) => [...l, `$ ${stage.command}`, ""]);
+    setRunLog((l) => [...l, `$ ${label}`, ""]);
     try {
       const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }>("loop_run_stage", { stageId: stage.id, timeoutSecs: stage.timeoutSeconds });
       setRunLog((l) => [...l, r.stdout, r.stderr, `${r.timedOut ? "TIMED OUT" : `exit ${r.exitCode ?? "?"}`} · ${r.durationMs} ms`].filter(Boolean));
@@ -323,7 +325,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()} disabled={!stage || dirty || runningStage}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()} disabled={!stage || dirty || runningStage || (stage.kind !== "shellCommand" && stage.kind !== "regressionSweep")}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
@@ -342,7 +344,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty || runningStage} title={dirty ? "Save the Loop first" : "Runs the enabled shell-command stages once"} onClick={() => void runLoop()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" /><button type="button" className="loop-btn loop-run-btn" disabled={dirty || runningStage} title={dirty ? "Save the Loop first" : "Runs enabled shell stages and empty Regression stages once"} onClick={() => void runLoop()}>{runningStage ? "Running…" : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
