@@ -64,11 +64,26 @@ export interface NoteListProps {
   bulk?: BulkSelect | null;
   /** Initial viewport height when not measured (server rendering and tests). */
   initialHeight?: number;
+  /** The Library section is showing: ⌘F may focus the search box. */
+  active?: boolean;
 }
 
-export function NoteList({ store, state, bulk = null, initialHeight = 600 }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
+  useEffect(() => {
+    if (!active) return undefined;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active]);
   const rows = store.rows();
   const offsets = useMemo(() => rowOffsets(rows), [rows]);
   const total = offsets[rows.length] ?? 0;
@@ -211,9 +226,10 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600 }: Not
         <div className="lib-search" role="search">
           <SearchIcon />
           <input
+            ref={searchRef}
             type="search"
             className="lib-search-input"
-            placeholder={store.searchAvailable ? "Filter and search notes" : "Filter notes"}
+            placeholder={store.searchAvailable ? "Search notes…" : "Filter notes"}
             aria-label="Filter and search notes"
             value={f.query}
             onChange={(e) => {

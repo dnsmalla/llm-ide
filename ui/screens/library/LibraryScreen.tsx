@@ -223,7 +223,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 onChanged={() => setSelection((sel) => prune(sel, (rel) => store.record(rel) !== undefined))}
               />
             )}
-            <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} />
+            <NoteList store={store} state={state} bulk={bulk} initialHeight={initialHeight} active={active} />
           </div>
         ) : null}
         <LibraryNav
