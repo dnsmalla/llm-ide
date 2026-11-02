@@ -74,3 +74,9 @@
 .gnt-filters { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .gnt-filters .gnt-grow { min-width: 240px; }
 .gnt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.gnt-months { display: flex; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface-2); }
+.gnt-month { flex: none; display: flex; align-items: center; padding-left: 8px; border-right: 1px solid var(--tok-color-border); color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.gnt-labels-head { height: 52px; }
+.gnt-month-pad { flex: none; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface-2); }
+.gnt-head .gnt-field:has(> .gnt-sr) select { min-width: 160px; }
+.gnt-empty-dates { display: none; }

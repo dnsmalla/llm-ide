@@ -15,7 +15,6 @@ import {
   decodeSchedules,
   isWeekend,
   timelineRange,
-  undatedRows,
   issueLabel,
   issueTitleBody,
   type GanttRow,
@@ -94,7 +93,6 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const baseRows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
   const rows = useMemo(() => baseRows.filter((r) => !hideUndated || r.start !== null || r.end !== null).filter((r) => dateFilter === "any" || (dateFilter === "scheduled" ? r.start !== null || r.end !== null : r.start === null && r.end === null)), [baseRows, dateFilter, hideUndated]);
   const dated = useMemo(() => datedRows(rows), [rows]);
-  const undated = useMemo(() => undatedRows(rows), [rows]);
   const range = useMemo<TimelineRange>(() => timelineRange(rows), [rows]);
   const repos = useMemo(() => [...new Set(issues.filter((i) => !i.isPR).map((i) => i.repo).filter(Boolean))].sort(), [issues]);
   const dayWidth = ZOOM_WIDTH[zoom];
@@ -120,14 +118,14 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
     <div className="gnt-root" data-active={active}>
       <header className="gnt-head">
         <label className="gnt-field">
-          <span>Repository</span>
+          <span className="gnt-sr">Repository</span>
           <select value={repo} onChange={(e) => setRepo(e.target.value)}>
             <option value="">All repositories</option>
             {repos.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </label>
         <label className="gnt-field">
-          <span>Provider</span>
+          <span className="gnt-sr">Provider</span>
           <select value={provider} onChange={(e) => { setProvider(e.target.value as "github" | "gitlab"); setRepo(""); }}>
             <option value="github">GitHub</option>
             <option value="gitlab">GitLab</option>
@@ -169,14 +167,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         </div>
       ) : (
         <>
-          {dated.length === 0 && undated.length > 0 ? (
-            <p className="gnt-hint gnt-empty-dates" role="status">
-              These issues have no start or due date yet. Choose <strong>Set dates</strong> below to put one on the timeline.
-            </p>
-          ) : null}
           <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
             <div className="gnt-labels">
               <div className="gnt-labels-head"><span>ISSUES</span><span className="gnt-count">{rows.length} / {baseRows.length}</span></div>
+              <div className="gnt-month-pad" aria-hidden="true" />
               {rows.map((r) => (
                 <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => setSelected(r)} title={r.issue.title}>
                   <span className="gnt-status" data-state={r.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{r.issue.state === "closed" ? "✓" : "○"}</span>
@@ -187,7 +181,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             <div className="gnt-scroll">
               <div className="gnt-timeline" style={{ width: timelineWidth }}>
                 {todayLeft >= 0 && todayLeft <= timelineWidth ? <div className="gnt-today" style={{ left: todayLeft }} aria-hidden="true" /> : null}
-                <div className="gnt-header">
+                <div className="gnt-months" aria-hidden="true">
+                {monthSpans(range, dayWidth).map((m) => <span key={m.label} className="gnt-month" style={{ width: m.width }}>{m.label}</span>)}
+              </div>
+              <div className="gnt-header">
                   {Array.from({ length: range.days }, (_, k) => {
                     const day = range.start + k;
                     const dt = new Date(day * 86_400_000);
@@ -234,9 +231,20 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         />
       ) : null}
 
-      <p className="gnt-hint gnt-foot">The timeline reads cached issues and the scheduling overlay. Only the overlay is written here; the issue itself is unchanged.</p>
     </div>
   );
+}
+
+function monthSpans(range: TimelineRange, dayWidth: number): { label: string; width: number }[] {
+  const out: { label: string; width: number }[] = [];
+  const fmt = new Intl.DateTimeFormat("en", { month: "short", year: "numeric" });
+  for (let i = 0; i < range.days; i++) {
+    const d = new Date((range.start + i) * 86_400_000);
+    const label = fmt.format(d);
+    const last = out[out.length - 1];
+    if (last?.label === label) last.width += dayWidth; else out.push({ label, width: dayWidth });
+  }
+  return out;
 }
 
 function ScheduleEditor({ row, deps, onClose, onSaved, onOpenIssue }: {
