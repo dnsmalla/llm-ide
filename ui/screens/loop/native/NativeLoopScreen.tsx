@@ -9,7 +9,7 @@ import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -20,10 +20,11 @@ import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
 import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
-import { protectedPaths } from "./protected.ts";
+import { outOfScopePaths, protectedPaths, wasDirtyBefore } from "./protected.ts";
+import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
-import { appendRunRecord, iterationRecords, loadRunRecord, readRecentRuns, runTrigger, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, iterationRecords, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -51,6 +52,29 @@ function loopConfigTemplate() {
   };
 }
 
+/** The run's budgets as the run used them (the record's config snapshot), in the Mac inspector's wording. */
+function budgetsLine(config: unknown): string {
+  const c = (config ?? {}) as Partial<Record<string, unknown>>;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const wall = num(c.wallClockBudgetSeconds);
+  const pause = num(c.pauseTimeoutSeconds);
+  return `Budgets: ${num(c.maxIterations) ?? "?"} iter · stop after ${num(c.consecutiveFailureStop) ?? "?"} non-improving · ${wall === null ? "no limit" : `${Math.round(wall / 60)} min`} · ${num(c.maxRepairsPerStage) ?? "?"} repairs/stage · pause timeout: ${pause === null ? "unknown" : pause === 0 ? "none" : `${Math.round(pause / 60)} min`} · protected: ${typeof c.protectedPathPolicy === "string" ? c.protectedPathPolicy : "unknown"}`;
+}
+
+/** What each protected-path policy does when an agent edit hits a protected or out-of-scope path (the Mac's copy). */
+function protectedPolicyCopy(policy: string): string {
+  switch (policy) {
+    case "revert": return "The edit is undone and the run stops as blocked. A stage that only passed because of such an edit is never reported as fixed.";
+    case "stop": return "The edit is left in place for you to inspect and the run stops as blocked.";
+    case "warn": return "The edit is logged and the run keeps going, so the stage may then pass because of it.";
+    case "off": return "No check at all. A repair can delete the failing test and the run will report success.";
+    default: return "";
+  }
+}
+
+/** Padlock glyph for built-in loops (inline SVG, no emoji). */
+const LOCK_ICON = <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 7V5a4 4 0 1 1 8 0v2h1v8H3V7h1zm2 0h4V5a2 2 0 1 0-4 0v2z" /></svg>;
+
 function cloneStore(store: LoopProjectStore): LoopProjectStore {
   return structuredClone(store);
 }
@@ -73,6 +97,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runningStage, setRunningStage] = useState(false);
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
+  const haltRef = useRef<string | null>(null);
+  const pausedRef = useRef(false);
+  const [paused, setPaused] = useState(false);
+  const [loopRunning, setLoopRunning] = useState(false);
   const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
   const queueRestored = useRef(false);
   const persistQueue = () => {
@@ -86,7 +114,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [workRoot, setWorkRoot] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
-  const [customTemplates, setCustomTemplates] = useState(() => loadCustomTemplates());
+  const [runRecordLoaded, setRunRecordLoaded] = useState(false);
+  const openSeq = useRef(0);
+  const [customLoad, setCustomLoad] = useState(() => loadCustomTemplatesState());
+  const customTemplates = customLoad.templates;
+  const refreshTemplates = () => setCustomLoad(loadCustomTemplatesState());
 
   useEffect(() => {
     let live = true;
@@ -160,8 +192,27 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   }, [fs, projectRoot, notice]);
 
   const openRun = async (entry: LoopRunIndexEntry) => {
+    const seq = ++openSeq.current;
     setSelectedRun(entry);
-    setRunRecord(await loadRunRecord(fs, entry.id, entry.startedAt));
+    setRunRecord(null);
+    setRunRecordLoaded(false);
+    const record = await loadRunRecord(fs, entry.id, entry.startedAt);
+    if (seq !== openSeq.current) return;
+    setRunRecord(record);
+    setRunRecordLoaded(true);
+  };
+
+  /** Back to the live log. Nothing about the run is discarded; the journal still has it. */
+  const closeRun = () => {
+    openSeq.current += 1;
+    setSelectedRun(null);
+    setRunRecord(null);
+    setRunRecordLoaded(false);
+  };
+
+  const revealRunRecord = (entry: LoopRunIndexEntry) => {
+    void invokeHost("reveal_in_os", { relPath: runRecordPath(entry.id, entry.startedAt) })
+      .catch(() => setNotice("Could not show the run record in the file manager."));
   };
 
   const checkToolchain = async () => {
@@ -185,6 +236,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     void checkEnvironment();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fs, projectRoot]);
+
+  // Output rows (the Mac's OUTPUT section): a row is "not yet" until its path exists. Re-checked after each run.
+  const [outputExists, setOutputExists] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!projectRoot) return;
+    let live = true;
+    const exists = async (path: string, list: boolean): Promise<boolean> => {
+      try { if (list) await fs.list(path); else await fs.read(path, 1); return true; } catch { return false; }
+    };
+    void Promise.all([exists("system/loop-runs", true), exists("system/faults.csv", false), exists("llm-doc/loop", true)])
+      .then(([journal, faults, summaries]) => { if (live) setOutputExists({ journal, faults, summaries }); });
+    return () => { live = false; };
+  }, [fs, projectRoot, runs, workRoot]);
+  /** The working tree as a project-relative path, for reveal_in_os (which resolves inside the project root). */
+  const workRelative = workRoot && projectRoot && workRoot.startsWith(`${projectRoot}/`) ? workRoot.slice(projectRoot.length + 1) : "";
+  const revealRel = (rel: string) => { void invokeHost("reveal_in_os", { relPath: rel }).catch(() => setNotice("Could not show that in the file manager.")); };
 
   const store = load?.kind === "ok" ? load.store : null;
   const loop = store?.loops.find((l) => l.id === selectedLoopId) ?? store?.loops[0] ?? null;
@@ -307,17 +374,48 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
-  const guardProtected = async (paths: readonly string[], target: LoopDefinition): Promise<string | null> => {
-    if (target.config.protectedPathPolicy === "off") return null;
-    const bad = protectedPaths(paths, target.config.extraProtectedGlobs);
+  /** Paths with uncommitted changes before an agent call. `null` = the snapshot failed, so nothing may be reverted. */
+  const dirtyBefore = async (): Promise<Set<string> | null> => {
+    try { return new Set(await invokeHost<string[]>("loop_changed_paths")); } catch { return null; }
+  };
+
+  /**
+   * Protected-path and scope guard for one agent call (the Mac's checkScope + policy). A "revert" only undoes paths that
+   * were clean before the call; any other violation stops the run and is left in place, so the user's own uncommitted
+   * edits are never discarded. A violation under stop or revert ends the run (halt), as the policy copy says.
+   */
+  const guardProtected = async (paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> => {
+    const policy = target.config.protectedPathPolicy;
+    if (policy === "off") return null;
+    const protectedHits = protectedPaths(paths, target.config.extraProtectedGlobs);
+    const scopeHits = outOfScopePaths(paths, target.scopeGlobs).filter((p) => !protectedHits.includes(p));
+    const bad = [...protectedHits, ...scopeHits];
     if (bad.length === 0) return null;
-    if (target.config.protectedPathPolicy === "warn") return null;
-    if (target.config.protectedPathPolicy === "stop") return `agent touched protected path(s) and they were left in place: ${bad.join(", ")}`;
+    const what = [protectedHits.length ? "protected path(s)" : "", scopeHits.length ? "out-of-scope path(s)" : ""].filter(Boolean).join(" and ");
+    if (policy === "warn") {
+      setRunLog((l) => [...l, `warning: agent touched ${what}; the policy is warn, so the run continues: ${bad.join(", ")}`]);
+      return null;
+    }
+    if (policy === "stop") {
+      const msg = `agent touched ${what} and they were left in place: ${bad.join(", ")}`;
+      haltRef.current = `${msg}; the run stopped`;
+      return msg;
+    }
+    if (!before || bad.some((p) => wasDirtyBefore(p, before))) {
+      const msg = `agent touched ${what} that had uncommitted changes before the run, so nothing was reverted and they were left in place: ${bad.join(", ")}`;
+      haltRef.current = `${msg}; the run stopped`;
+      return msg;
+    }
     try {
-      await invokeHost("loop_revert_paths", { paths: bad });
-      return `agent touched protected path(s) and they were reverted: ${bad.join(", ")}`;
+      // Only files the agent's Write created may be deleted; the host refuses any other untracked path.
+      await invokeHost("loop_revert_paths", { paths: bad, created: created.filter((p) => bad.includes(p)) });
+      const msg = `agent touched ${what} and they were reverted: ${bad.join(", ")}`;
+      haltRef.current = `${msg}; the run stopped`;
+      return msg;
     } catch (e) {
-      return `agent touched protected path(s) and the revert failed: ${bad.join(", ")} (${e instanceof Error ? e.message : String(e)})`;
+      const msg = `agent touched ${what} and the revert failed: ${bad.join(", ")} (${e instanceof Error ? e.message : String(e)})`;
+      haltRef.current = `${msg}; the run stopped`;
+      return msg;
     }
   };
 
@@ -358,12 +456,15 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
       if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
       if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
-      const r = await core.request<{ reply?: string; changedPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+      const before = await dirtyBefore();
+      const r = await core.request<{ reply?: string; ran?: boolean; changedPaths?: string[]; createdPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string | null }>("/kb/loop/agent-run", {
         method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
       });
-      const guard = await guardProtected(r.changedPaths ?? [], target);
+      const guard = await guardProtected(r.changedPaths ?? [], target, before, r.createdPaths ?? []);
       if (guard) return { ok: false, output: guard };
-      return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: [r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
+      const ok = agentRunSucceeded(r);
+      const why = ok ? [] : r.unresolvedSkills?.length ? ["the skill could not be found, so it did not run"] : r.ran === false ? ["the skill did not run"] : [`the agent run did not finish (${r.resultSubtype ?? "no result"})`];
+      return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
     }
     if (s.kind === "testMap" && s.testOp === "ledger") {
       const lastTest = [...prior].reverse().find((o) => o.stage.kind === "shellCommand" && /test/i.test(o.stage.name));
@@ -423,6 +524,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
+  const approvalRoot = workRoot ?? projectRoot ?? "";
+  /** Shell commands in a loop that this machine has not approved yet. Read-only: approving stays an explicit confirm. */
+  const unapprovedCommands = (target: LoopDefinition): string[] =>
+    target.config.stages.flatMap((s) => (s.enabled && s.kind === "shellCommand" && s.command && !isApproved(approvalRoot, s.command) ? [s.command] : []));
+
   const ensureApprovals = (target: LoopDefinition, prompt = true): string | null => {
     const root = workRoot ?? projectRoot ?? "";
     for (const s of target.config.stages) {
@@ -437,8 +543,34 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const stopRun = () => {
     cancelledRef.current = true;
+    pausedRef.current = false;
+    setPaused(false);
     void invokeHost("loop_cancel").catch(() => undefined);
     setNotice("Stopping the current stage; the loop will end after it returns.");
+  };
+
+  // Pause holds the loop at the next stage boundary (the Mac's between-stages hold, not a mid-stage suspend).
+  const pauseRun = () => {
+    if (!loopRunning || pausedRef.current) return;
+    pausedRef.current = true;
+    setPaused(true);
+    setNotice("Pausing: the loop holds once the current stage finishes. Resume to continue.");
+  };
+  const resumeRun = () => {
+    if (!pausedRef.current) return;
+    pausedRef.current = false;
+    setPaused(false);
+    setNotice("Resumed.");
+  };
+  /** Waits while paused; returns "timedOut" when the pause outlasted the limit (0 = none) without a resume. */
+  const holdWhilePaused = async (timeoutSeconds: number): Promise<"ok" | "timedOut"> => {
+    if (!pausedRef.current) return "ok";
+    const since = Date.now();
+    while (pausedRef.current && !cancelledRef.current) {
+      if (timeoutSeconds > 0 && Date.now() - since >= timeoutSeconds * 1000) return "timedOut";
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+    }
+    return "ok";
   };
 
   const executeLoop = async (target: LoopDefinition, scheduled = false) => {
@@ -453,6 +585,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (approval) { setNotice(approval); return; }
     runningRef.current = true;
     cancelledRef.current = false;
+    haltRef.current = null;
+    pausedRef.current = false;
+    setPaused(false);
+    setLoopRunning(true);
+    setSelectedRun(null);
+    setRunRecord(null);
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ""]);
     const started = Date.now();
@@ -469,20 +607,23 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
           if (target.goal) message.push(`Loop goal: ${target.goal}`);
           if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
-          const r = await core.request<{ reply?: string; changedPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
+          const before = await dirtyBefore();
+          const r = await core.request<{ reply?: string; ran?: boolean; changedPaths?: string[]; createdPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string | null }>("/kb/loop/agent-run", {
             method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
           });
           setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ""]);
-          const guard = await guardProtected(r.changedPaths ?? [], target);
+          const guard = await guardProtected(r.changedPaths ?? [], target, before, r.createdPaths ?? []);
           if (guard) return { ok: false, output: guard };
-          return { ok: r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string"), output: r.reply ?? "" };
+          return { ok: agentRunSucceeded(r), output: r.reply ?? "" };
         },
         log(line) { setRunLog((l) => [...l, line]); },
+        halt() { return haltRef.current; },
+        holdWhilePaused,
       });
       let changedPaths: string[] = [];
       try { changedPaths = await invokeHost<string[]>("loop_changed_paths"); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
-      setRunLog((l) => [...l, outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
+      setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
         const faultPaths = [...new Set(Array.from(failedRun?.output.matchAll(/^([^\n:]+\\.md):/gm) ?? [], (m) => m[1].trim()))];
@@ -494,16 +635,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         try { summaryPath = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${summaryPath}`]); }
         catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
       }
-      setNotice(outcome.cancelled ? "The loop was cancelled." : outcome.passed ? "The loop passed." : outcome.statusSummary);
+      setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.cancelled ? "cancelled" : outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, stages: recordStages, iterations: iterationRecords(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecords(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
     } finally {
       runningRef.current = false;
+      pausedRef.current = false;
+      setPaused(false);
+      setLoopRunning(false);
       setRunningStage(false);
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
@@ -514,6 +658,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
+    if (!runningRef.current && !scheduled) {
+      const pending = unapprovedCommands(target).length;
+      if (pending > 0) setNotice(`${pending} shell command${pending === 1 ? "" : "s"} in “${target.name}” ${pending === 1 ? "needs" : "need"} approval on this machine; you will be asked before ${pending === 1 ? "it runs" : "each one runs"}.`);
+    }
     if (runningRef.current) {
       if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
       setQueued(queueRef.current.length);
@@ -563,6 +711,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!projectRoot) return;
     setScheduleCron(cron);
     try { localStorage.setItem(`llmide.loopSchedule.v1.${projectRoot}`, JSON.stringify({ cron: cron.trim(), last: "" })); } catch { /* session only */ }
+  };
+
+  /** Removes only this loop's queued run; the others keep their place. */
+  const leaveQueue = () => {
+    if (!loop) return;
+    const before = queueRef.current.length;
+    queueRef.current = queueRef.current.filter((x) => x.loop.id !== loop.id);
+    setQueued(queueRef.current.length);
+    persistQueue();
+    setNotice(queueRef.current.length < before ? `Left the queue: “${loop.name}”.` : `“${loop.name}” is not queued.`);
   };
 
   const clearQueued = () => {
@@ -645,8 +803,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-pane-head"><span>LOOPS</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { if (e.target.value === "__blank") addLoop(); else { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); } }}>
           <option value="">＋ New loop…</option>
           <option value="__blank">Blank loop</option>
-          {BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          {customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <optgroup label="Built-in">{BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+          {customTemplates.length > 0 ? <optgroup label="My templates">{customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup> : null}
         </select></div>
         <div className="loop-actions">
           <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
@@ -659,7 +817,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <li key={l.id}>
               <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
                 <span className="loop-row-name">{l.name}</span>
-                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}</span>
+                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
                 <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
             </li>
@@ -689,6 +847,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <li key={s.id}>
               <button type="button" className="loop-stage-row" data-on={s.id === stage?.id || undefined} onClick={() => setSelectedStageId(s.id)}>
                 <span className="loop-stage-name">{s.name}</span>
+                {s.enabled && s.kind === "shellCommand" && s.command && !isApproved(approvalRoot, s.command) ? <span className="loop-unapproved" title="Command not yet approved on this machine">needs approval</span> : null}
                 {s.isDefault ? <span className="loop-lock" title="Default stage">🔒</span> : null}
                 <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
@@ -699,7 +858,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
@@ -723,12 +882,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-field"><span>Time budget (minutes, empty = none)</span><input type="number" min={0} step={15} value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Pause timeout (not enforced in this build)</span><input type="number" min={0} step={15} disabled value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={() => undefined} /></label>
+            <label className="loop-field"><span>Pause timeout (minutes, 0 = none)</span><input type="number" min={0} step={15} value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
           </div>
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
             <label className="loop-field"><span>Repair model (empty = app default)</span><input value={loop.config.repairModel ?? ""} placeholder="model id" onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
             <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "stop" | "warn" | "off"; })}><option value="revert">Revert &amp; stop</option><option value="stop">Leave edits &amp; stop</option><option value="warn">Warn and continue</option><option value="off">Do not check</option></select></label>
+            <p className={loop.config.protectedPathPolicy === "off" ? "loop-warn" : "loop-native-hint"}>{protectedPolicyCopy(loop.config.protectedPathPolicy)}</p>
+            {loop.config.protectedPathPolicy === "off" && loop.scopeGlobs.length > 0 ? <p className="loop-warn">Not enforced: the policy above is Off, which disables the scope check too.</p> : null}
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <button type="button" className="loop-btn" onClick={() => { revokeAll(); setNotice("Revoked every approved Loop shell command on this machine."); }}>Revoke command approvals</button>
@@ -738,7 +899,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
@@ -759,12 +920,23 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <button type="button" className="loop-btn" onClick={runScheduledNow}>Run scheduled loops now</button>
         </section>
 
+        <section className="loop-card" aria-label="Output">
+          <h2>OUTPUT</h2>
+          <dl className="loop-meta">
+            <dt>Run journal</dt><dd><span>system/loop-runs/ · one JSON record per run, plus an index</span>{outputExists.journal ? <button type="button" className="loop-btn" onClick={() => revealRel("system/loop-runs")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
+            <dt>Fault state</dt><dd><span>system/faults.csv · refreshed by the Regression stage</span>{outputExists.faults ? <button type="button" className="loop-btn" onClick={() => revealRel("system/faults.csv")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
+            <dt>Working tree</dt><dd><span>{workRoot ? "repair edits land here and stay; review with git before committing" : "not resolved yet"}</span>{workRoot ? <button type="button" className="loop-btn" onClick={() => revealRel(workRelative)}>Reveal</button> : null}</dd>
+            <dt>Run log</dt><dd><span>live, in the panel to the right</span></dd>
+            {loop.config.writeSummaryNote ? <><dt>Summary notes</dt><dd><span>llm-doc/loop/ · one readable note per run</span>{outputExists.summaries ? <button type="button" className="loop-btn" onClick={() => revealRel("llm-doc/loop")}>Reveal</button> : <span className="loop-native-hint">none written yet</span>}</dd></> : null}
+          </dl>
+        </section>
+
         <section className="loop-card">
           <h2>TEMPLATE</h2>
           <div className="loop-inline">
             <select aria-label="Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-              {BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              {customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <optgroup label="Built-in">{BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+              {customTemplates.length > 0 ? <optgroup label="My templates">{customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup> : null}
             </select>
             <button type="button" className="loop-btn" onClick={() => {
               const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId);
@@ -773,21 +945,45 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
               patchLoop((l) => { l.config = config; });
               setSelectedStageId(config.stages[0]?.id ?? null);
-              setNotice(`Applied ${t.name}.`);
+              setNotice(`Applied ${t.name}. Save to keep it.`);
             }}>Apply</button>
           </div>
           <div className="loop-inline">
             <button type="button" className="loop-btn" onClick={() => {
               const name = window.prompt("Save the current stages and budgets as a template named:", `${loop.name} Recipe`);
               if (!name) return;
-              const t = saveCustomTemplate(name, "", loop.config);
-              setCustomTemplates(loadCustomTemplates());
-              setTemplateId(t.id);
-              setNotice(`Saved template “${t.name}”.`);
+              const summary = window.prompt("What does this loop do? (optional)", "");
+              if (summary === null) return;
+              try {
+                const t = saveCustomTemplate(name, summary, loop.config);
+                refreshTemplates();
+                setTemplateId(t.id);
+                setNotice(`Saved template “${t.name}”.`);
+              } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be saved."); }
             }}>Save as…</button>
-            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => { if (!window.confirm("Delete this saved template?")) return; deleteCustomTemplate(templateId); setCustomTemplates(loadCustomTemplates()); setTemplateId(BUILT_IN_TEMPLATES[0].id); }}>Delete template</button> : null}
+            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => {
+              if (!window.confirm("Delete this saved template?")) return;
+              try {
+                deleteCustomTemplate(templateId);
+                refreshTemplates();
+                setTemplateId(BUILT_IN_TEMPLATES[0].id);
+              } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be deleted."); }
+            }}>Delete template</button> : null}
           </div>
+          {customLoad.problem ? (
+            <div className="loop-inline">
+              <StatusBanner severity="error" message="Saved Loop recipes could not be read in full, so saving and deleting are refused to keep them. The old data is kept as a backup." />
+              <button type="button" className="loop-btn" onClick={() => {
+                if (!window.confirm("Reset custom templates? The stored recipes are kept as a backup in this app's storage, and the list starts empty.")) return;
+                resetCustomTemplates();
+                refreshTemplates();
+                setTemplateId(BUILT_IN_TEMPLATES[0].id);
+                setNotice("Custom templates reset. The old data is kept as a backup.");
+              }}>Reset custom templates</button>
+            </div>
+          ) : null}
           <p className="loop-native-hint">{[...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId)?.summary}</p>
+          <p className="loop-warn">Applying replaces this loop&apos;s stages and budgets. Nothing is saved until you press Save, and shell stages need approving again.</p>
         </section>
 
         {stage ? (
@@ -821,19 +1017,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-pane-head"><span>RUN LOG</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
         {selectedRun ? (
           <div className="loop-past-run">
-            <h3>{selectedRun.loopName}</h3>
+            <div className="loop-inline"><h3>{selectedRun.loopName}</h3><span className="loop-spacer" />{runRecord ? <button type="button" className="loop-btn" onClick={() => revealRunRecord(selectedRun)}>Reveal JSON</button> : null}<button type="button" className="loop-btn" onClick={closeRun}>Back</button></div>
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
-            {runRecord && Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
-            {runRecord && typeof runRecord.summaryPath === "string" ? <button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: runRecord.summaryPath as string })}>Open summary note</button> : null}
-            {runRecord && Array.isArray(runRecord.stages) ? (
-              <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; const output = String(run.stdout ?? ""); return <li key={i}><details><summary>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</summary>{output ? <pre className="loop-run-log">{output}</pre> : <p className="loop-native-hint">No captured output.</p>}</details></li>; })}</ul>
-            ) : null}
-            {runRecord && Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? (
-              <div className="loop-past-iterations">
-                {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <details key={j}><summary>{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</summary><pre className="loop-run-log">{String(x.output ?? "")}</pre></details>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
-              </div>
-            ) : null}
+            {!runRecordLoaded ? <p className="loop-native-hint" role="status">Loading the run record…</p> : runRecord === null ? <p className="loop-native-hint">Could not load this run&apos;s record. It may have been removed or edited by hand.</p> : <>
+              <p className="loop-native-hint">{budgetsLine(runRecord.config)}</p>
+              {Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
+              {typeof runRecord.summaryPath === "string" && runRecord.summaryPath ? <button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: runRecord.summaryPath as string })}>Open summary note</button> : null}
+              {Array.isArray(runRecord.stages) && runRecord.stages.length > 0 ? (
+                <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; const output = String(run.stdout ?? ""); return <li key={i}><details><summary>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</summary>{output ? <pre className="loop-run-log">{output}</pre> : <p className="loop-native-hint">No captured output.</p>}</details></li>; })}</ul>
+              ) : <p className="loop-native-hint">No stages executed.</p>}
+              {Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? (
+                <div className="loop-past-iterations">
+                  {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <details key={j}><summary>{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</summary><pre className="loop-run-log">{String(x.output ?? "")}</pre></details>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
+                </div>
+              ) : null}
+            </>}
           </div>
         ) : runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
       </aside>

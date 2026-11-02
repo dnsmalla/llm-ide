@@ -38,3 +38,36 @@ export function isProtectedPath(path: string, extra: readonly string[] = []): bo
 export function protectedPaths(paths: readonly string[], extra: readonly string[] = []): string[] {
   return [...new Set(paths.filter((p) => isProtectedPath(p, extra)))];
 }
+
+/**
+ * Scope check (the Mac's `outOfScopePaths`): when the loop has scope globs, a changed path that matches none of them
+ * is out of scope. Blank globs are ignored and an empty list means unrestricted. The caller applies the protected-path
+ * policy to the result; this function only reports.
+ */
+export function outOfScopePaths(paths: readonly string[], scopeGlobs: readonly string[]): string[] {
+  const globs = scopeGlobs.map((g) => g.trim()).filter(Boolean);
+  if (globs.length === 0) return [];
+  return [...new Set(paths.filter((p) => !globs.some((g) => scopeMatches(p, g))))];
+}
+
+/**
+ * The Mac's `GlobMatch.matches`: a pattern with no glob character (`*`, `?`, `[`), or one ending in "/", is a directory
+ * prefix ("src" and "src/" both cover src/a.ts); anything else is a glob.
+ */
+export function scopeMatches(path: string, pattern: string): boolean {
+  if (!/[*?[]/.test(pattern)) {
+    const dir = pattern.endsWith("/") ? pattern : `${pattern}/`;
+    return path === pattern || path.startsWith(dir);
+  }
+  return globRe(pattern).test(path);
+}
+
+/**
+ * True when `path` had uncommitted changes in the pre-edit snapshot (`loop_changed_paths`), so a revert would discard
+ * them. git reports an untracked directory as "dir/", so anything under one counts as dirty too.
+ */
+export function wasDirtyBefore(path: string, before: ReadonlySet<string>): boolean {
+  if (before.has(path)) return true;
+  for (const b of before) if (b.endsWith("/") && path.startsWith(b)) return true;
+  return false;
+}

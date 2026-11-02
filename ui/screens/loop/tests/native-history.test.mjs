@@ -36,3 +36,8 @@ test("a run record is read from its month bucket", async () => {
   assert.equal(r.statusCode, "success");
   assert.equal(await h.loadRunRecord({ async read() { throw new Error("no"); } }, "r9", "2026-09-30T01:02:03Z"), null);
 });
+
+test("a run record path is the month bucket its index entry names", async () => {
+  const { runRecordPath } = await import("../native/history.ts");
+  assert.equal(runRecordPath("abc", "2026-03-15T12:00:00Z"), "system/loop-runs/2026-03/abc.json");
+});

@@ -59,3 +59,5 @@
 .loop-advanced summary { cursor: pointer; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .loop-btn-primary { background: var(--tok-color-accent); color: var(--tok-color-on-accent, #fff); border: 0; }
 .loop-add-stage { background: transparent; border: 1px solid var(--tok-color-border); border-radius: 5px; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); padding: 2px 4px; }
+.loop-warn { color: var(--tok-color-accent-4, #b45309); font-size: 11px; margin: 4px 0; }
+.loop-unapproved { font-size: 9px; color: var(--tok-color-accent-4, #b45309); }

@@ -58,3 +58,44 @@ test("all twelve Mac built-in recipes are present", () => {
   const names = t.BUILT_IN_TEMPLATES.map((x) => x.name);
   for (const n of ["Test & Fix", "Full Verify", "Regression", "Test", "Skill Loop", "Docs Refresh", "Operation App Diagnosis", "System Check", "Plan Director", "Refactoring", "Doc Optimization", "Test Growth"]) assert.ok(names.includes(n), `${n} missing`);
 });
+
+function memStorage(initial = {}) {
+  const map = new Map(Object.entries(initial));
+  return { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, String(v)), removeItem: (k) => map.delete(k), map };
+}
+
+test("an unreadable recipe store is never overwritten: save and delete refuse, the bytes are backed up, nothing is lost", () => {
+  const corrupt = "{not json";
+  const storage = memStorage({ "llmide.loopTemplates.v1": corrupt });
+  const cfg = t.BUILT_IN_TEMPLATES[0].config;
+  assert.equal(t.loadCustomTemplatesState(storage).problem, "unreadable");
+  assert.throws(() => t.saveCustomTemplate("Mine", "", cfg, storage), /nothing was saved/);
+  assert.throws(() => t.deleteCustomTemplate("x", storage), /nothing was saved/);
+  assert.equal(storage.map.get("llmide.loopTemplates.v1"), corrupt);
+  assert.equal(storage.map.get(t.CUSTOM_BACKUP_KEY), corrupt);
+});
+
+test("entries that fail the shape check are kept as a problem, not silently dropped on the next save", () => {
+  const good = { id: "a", name: "Kept", summary: "", config: {} };
+  const bad = { id: 7, name: "bad", config: {} };
+  const storage = memStorage({ "llmide.loopTemplates.v1": JSON.stringify([good, bad]) });
+  const state = t.loadCustomTemplatesState(storage);
+  assert.equal(state.problem, "incomplete");
+  assert.deepEqual(state.templates.map((x) => x.name), ["Kept"]);
+  assert.throws(() => t.saveCustomTemplate("New", "", t.BUILT_IN_TEMPLATES[0].config, storage), /nothing was saved/);
+  assert.equal(storage.map.get(t.CUSTOM_BACKUP_KEY), JSON.stringify([good, bad]));
+});
+
+test("reset keeps a backup and lets saving work again", () => {
+  const storage = memStorage({ "llmide.loopTemplates.v1": "{broken" });
+  t.resetCustomTemplates(storage);
+  assert.equal(t.loadCustomTemplatesState(storage).problem, null);
+  assert.equal(storage.map.get(t.CUSTOM_BACKUP_KEY), "{broken");
+  t.saveCustomTemplate("Fresh", "", t.BUILT_IN_TEMPLATES[0].config, storage);
+  assert.deepEqual(t.loadCustomTemplates(storage).map((x) => x.name), ["Fresh"]);
+});
+
+test("a write that does not reach storage throws instead of reading as saved", () => {
+  const storage = { getItem: () => null, setItem: () => { throw new Error("quota"); }, removeItem() {} };
+  assert.throws(() => t.saveCustomTemplate("Mine", "", t.BUILT_IN_TEMPLATES[0].config, storage), /quota/);
+});

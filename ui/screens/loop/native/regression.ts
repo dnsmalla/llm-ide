@@ -1,6 +1,7 @@
 // Native Regression sweep: re-verifies `status: fixed` fault reports. A fault with a saved verify command is checked
 // by running that command; a legacy fault is re-asked through the loop-agent and compared to its saved response.
-// The Mac's semantic judge and repair path are not ported yet; a textual mismatch is reported, never silently passed.
+// The semantic judge is injected by the screen (deps.judge), and a failed sweep is repaired by the generic runner repair;
+// without a judge a textual mismatch is reported, never silently passed.
 import type { FsApi } from "../../explorer/fs";
 
 export interface FaultReport { rel: string; prompt: string; response: string; verify: string | null }

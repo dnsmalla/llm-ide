@@ -12,6 +12,13 @@ export interface RunnerDeps {
   log(line: string): void;
   /** Asked between stages so Stop can end the run without starting the next stage. */
   isCancelled?(): boolean;
+  /** A reason the run must end now, not cancelled: a violation that could not be reverted safely. Null = carry on. */
+  halt?(): string | null;
+  /**
+   * Holds at a stage boundary while the user has paused the run. Resolves "ok" when resumed (or cancelled, which the
+   * next check reports) and "timedOut" when the pause outlasted `timeoutSeconds` (0 = no limit) without a resume.
+   */
+  holdWhilePaused?(timeoutSeconds: number): Promise<"ok" | "timedOut">;
 }
 export interface StageOutcome { stage: LoopStage; ok: boolean; output: string }
 export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
@@ -37,24 +44,49 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const iterations: LoopIterationOutcome[] = [];
   const started = Date.now();
   const budgetMs = config.wallClockBudgetSeconds === null ? null : Math.max(0, config.wallClockBudgetSeconds) * 1000;
-  const expired = () => budgetMs !== null && Date.now() - started >= budgetMs;
+  // Paused time does not count toward the wall-clock budget (the Mac's pausedSeconds).
+  let pausedMs = 0;
+  const expired = () => budgetMs !== null && Date.now() - started - pausedMs >= budgetMs;
+  const haltedOutcome = (): LoopRunOutcome | null => {
+    const reason = deps.halt?.();
+    return reason ? { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: reason } : null;
+  };
+  const heldOutcome = async (): Promise<LoopRunOutcome | null> => {
+    if (!deps.holdWhilePaused) return null;
+    const since = Date.now();
+    const result = await deps.holdWhilePaused(config.pauseTimeoutSeconds);
+    pausedMs += Date.now() - since;
+    if (result !== "timedOut") return null;
+    deps.log("pause timed out without a resume; the run is aborted to release the loop");
+    return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "pause timed out without a resume; the run was aborted", cancelled: true };
+  };
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
+    const heldAtStart = await heldOutcome();
+    if (heldAtStart) return heldAtStart;
     if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+    const haltAtStart = haltedOutcome();
+    if (haltAtStart) return haltAtStart;
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
+      const heldAtStage = await heldOutcome();
+      if (heldAtStage) return heldAtStage;
       if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
       if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+      const haltAtStage = haltedOutcome();
+      if (haltAtStage) return haltAtStage;
       const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output };
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
+      const haltAfterStage = haltedOutcome();
+      if (haltAfterStage) return haltAfterStage;
     }
     if (!failed) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
@@ -74,6 +106,8 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
     repairs.set(failed.stage.id, used + 1);
     iterations.push({ index: iteration, stages: iterationOutcomes, repair: { stageId: failed.stage.id, attempt: used + 1, ok: repair.ok } });
+    const haltAfterRepair = haltedOutcome();
+    if (haltAfterRepair) return haltAfterRepair;
     if (!repair.ok) {
       return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
     }

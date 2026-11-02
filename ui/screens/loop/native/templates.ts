@@ -84,17 +84,64 @@ export function applyTemplate(t: LoopTemplate, detected: string | null): LoopEng
 // User recipes are app-wide like the Mac's LoopTemplateStore, not project state. Stored locally; built-ins are
 // constants so a later improvement reaches every project.
 const CUSTOM_KEY = "llmide.loopTemplates.v1";
+/** Raw bytes copied aside when the stored recipes cannot be read in full (the Mac's `loopTemplateStore.undecodable`). */
+export const CUSTOM_BACKUP_KEY = "llmide.loopTemplates.v1.undecodable";
+const MAX_CUSTOM = 100;
+
+export interface CustomTemplateLoad {
+  templates: LoopTemplate[];
+  /** Null when every stored recipe was read. Otherwise saving or deleting is refused so the stored data is not lost. */
+  problem: "unreadable" | "incomplete" | null;
+}
+
+function isTemplate(t: unknown): t is LoopTemplate {
+  return typeof t === "object" && t !== null && typeof (t as LoopTemplate).id === "string" && typeof (t as LoopTemplate).name === "string" && typeof (t as LoopTemplate).config === "object" && (t as LoopTemplate).config !== null;
+}
+
+export function loadCustomTemplatesState(storage: Storage | undefined = globalThis.localStorage): CustomTemplateLoad {
+  let raw: string | null = null;
+  try { raw = storage?.getItem(CUSTOM_KEY) ?? null; } catch { return { templates: [], problem: "unreadable" }; }
+  if (!raw) return { templates: [], problem: null };
+  let arr: unknown;
+  try { arr = JSON.parse(raw) as unknown; } catch { arr = undefined; }
+  if (!Array.isArray(arr)) return { templates: [], problem: "unreadable" };
+  const kept = arr.filter(isTemplate);
+  const templates = kept.slice(0, MAX_CUSTOM);
+  return { templates, problem: kept.length === arr.length && arr.length <= MAX_CUSTOM ? null : "incomplete" };
+}
+
+/** The readable recipes only. Use `loadCustomTemplatesState` to learn whether anything was left out. */
 export function loadCustomTemplates(storage: Storage | undefined = globalThis.localStorage): LoopTemplate[] {
+  return loadCustomTemplatesState(storage).templates;
+}
+
+/** Keeps a copy of the stored bytes (once) before anything is refused or reset. */
+function backUpStored(storage: Storage | undefined): void {
   try {
     const raw = storage?.getItem(CUSTOM_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr)) return [];
-    return arr.filter((t): t is LoopTemplate => typeof t === "object" && t !== null && typeof (t as LoopTemplate).id === "string" && typeof (t as LoopTemplate).name === "string" && typeof (t as LoopTemplate).config === "object").slice(0, 100);
-  } catch { return []; }
+    if (raw && storage?.getItem(CUSTOM_BACKUP_KEY) == null) storage?.setItem(CUSTOM_BACKUP_KEY, raw);
+  } catch { /* the caller refuses the write either way */ }
 }
+
 function persist(list: LoopTemplate[], storage: Storage | undefined): void {
-  try { storage?.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* session only */ }
+  // Throws: a write that did not reach storage must not look saved.
+  storage?.setItem(CUSTOM_KEY, JSON.stringify(list));
+}
+
+/** Refuses to write over recipes that could not be read in full. Keeps the bytes and throws a message for the user. */
+function assertWritable(storage: Storage | undefined): CustomTemplateLoad {
+  const state = loadCustomTemplatesState(storage);
+  if (state.problem !== null) {
+    backUpStored(storage);
+    throw new Error("Saved Loop recipes could not be read, so nothing was saved over them. Reset custom templates to start fresh; the old data is kept as a backup.");
+  }
+  return state;
+}
+
+/** Drops unreadable stored recipes so saving works again. The raw bytes stay under CUSTOM_BACKUP_KEY. */
+export function resetCustomTemplates(storage: Storage | undefined = globalThis.localStorage): void {
+  backUpStored(storage);
+  try { storage?.removeItem(CUSTOM_KEY); } catch { /* session only */ }
 }
 export function uniqueTemplateName(name: string, taken: readonly LoopTemplate[]): string {
   const base = name.trim() || "Untitled loop";
@@ -105,13 +152,13 @@ export function uniqueTemplateName(name: string, taken: readonly LoopTemplate[])
   return `${base} ${n}`;
 }
 export function saveCustomTemplate(name: string, summary: string, config: LoopEngineConfig, storage: Storage | undefined = globalThis.localStorage): LoopTemplate {
-  const list = loadCustomTemplates(storage);
+  const list = assertWritable(storage).templates;
   const t: LoopTemplate = { id: crypto.randomUUID(), name: uniqueTemplateName(name, [...BUILT_IN_TEMPLATES, ...list]), summary: summary.trim(), config: structuredClone(config) };
   persist([...list, t], storage);
   return t;
 }
 export function deleteCustomTemplate(id: string, storage: Storage | undefined = globalThis.localStorage): void {
-  persist(loadCustomTemplates(storage).filter((t) => t.id !== id), storage);
+  persist(assertWritable(storage).templates.filter((t) => t.id !== id), storage);
 }
 
 /** Initial loops for a project that has no `system/loop.json`: the Mac's six starter loops, with fresh stage ids and

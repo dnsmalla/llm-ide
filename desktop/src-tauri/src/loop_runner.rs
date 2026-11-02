@@ -4,6 +4,7 @@
 //!
 //! Output is captured with bounded buffers; the process is killed on timeout or when the caller cancels by dropping
 //! the task (the async command is blocking, so cancellation is bounded by the timeout).
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -321,30 +322,89 @@ fn version_of(program: &str, args: &[&str]) -> Option<String> {
 /// `total: N` line. Absent/too-slow script returns None; the report is informational.
 /// Changed paths in the run's worktree, from a fixed `git status --porcelain`. Used by the Loop run record.
 /// Reverts a bounded set of repo-relative paths in the resolved worktree. The page supplies paths only; the host
-/// rejects absolute/parent traversal and never accepts a command. Used by the protected-path guard.
-#[tauri::command]
-pub async fn loop_revert_paths(paths: Vec<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
-        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        if paths.len() > 100 { return Err("too many paths to revert".into()); }
-        let work = work_root(&root);
-        for p in &paths {
-            let rel = std::path::Path::new(p);
-            if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir)) {
-                return Err(format!("unsafe path: {p}"));
-            }
+/// rejects absolute/parent traversal and never accepts a command. Used by the protected-path and scope guard.
+/// Tracked paths are restored from the index (`git checkout --`). An untracked path is removed only when it is in
+/// `created` (the agent run's own `createdPaths`: absent before its Write), as the Mac's `revertUnlisted` does. Any
+/// other untracked path (a user's file, an ignored file the agent overwrote) or an untracked directory refuses the whole
+/// call before anything changes. Paths are literal pathspecs; a removal never follows a symlink out of `work`.
+pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Result<(), String> {
+    if paths.len() > 100 { return Err("too many paths to revert".into()); }
+    for p in paths {
+        let rel = std::path::Path::new(p);
+        if p.is_empty() || rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+            return Err(format!("unsafe path: {p}"));
         }
+    }
+    let listed = Command::new("git").arg("--literal-pathspecs").arg("-C").arg(work).args(["ls-files", "-z", "--"]).args(paths).output()
+        .map_err(|e| format!("cannot run git ls-files: {e}"))?;
+    if !listed.status.success() { return Err("git ls-files failed; nothing was reverted".into()); }
+    let tracked: HashSet<String> = String::from_utf8_lossy(&listed.stdout).split('\0').map(|s| s.to_string()).collect();
+    let (tracked_paths, untracked): (Vec<&String>, Vec<&String>) = paths.iter().partition(|p| tracked.contains(p.as_str()));
+    let created: HashSet<&str> = created.iter().map(|s| s.as_str()).collect();
+    let canon_work = work.canonicalize().map_err(|e| format!("cannot resolve the worktree: {e}"))?;
+    for p in &untracked {
+        let full = work.join(p.as_str());
+        if full.is_dir() { return Err(format!("cannot revert untracked directory {p}; nothing was reverted")); }
+        if !created.contains(p.as_str()) {
+            return Err(format!("{p} is not tracked and the agent did not create it, so it may be your own file; nothing was reverted"));
+        }
+        let parent_ok = full.parent().and_then(|d| d.canonicalize().ok()).is_some_and(|d| d.starts_with(&canon_work));
+        if !parent_ok { return Err(format!("{p} is not inside the worktree; nothing was reverted")); }
+    }
+    if !tracked_paths.is_empty() {
         let mut cmd = Command::new("git");
-        cmd.arg("-C").arg(&work).arg("checkout").arg("--");
-        for p in &paths { cmd.arg(p); }
+        cmd.arg("--literal-pathspecs").arg("-C").arg(work).arg("checkout").arg("--");
+        for p in &tracked_paths { cmd.arg(p.as_str()); }
         let out = cmd.output().map_err(|e| format!("cannot run git checkout: {e}"))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
             return Err(format!("git checkout failed: {}", err.lines().next().unwrap_or("unknown error")));
         }
-        Ok(())
+    }
+    for p in &untracked {
+        let full = work.join(p.as_str());
+        if full.is_file() || full.is_symlink() {
+            std::fs::remove_file(&full).map_err(|e| format!("cannot remove {p}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+        revert_paths_in(&work_root(&root), &paths, &created.unwrap_or_default())
     }).await.map_err(|e| format!("revert task failed: {e}"))?
+}
+
+/// Most paths the snapshot reads. Over this it errors rather than truncating: a cut-off list would make a dirty path
+/// look clean, and the revert would then discard its uncommitted edits.
+const MAX_CHANGED_PATHS: usize = 20_000;
+
+/// Paths `git status --porcelain -z` reports in `work`, raw (no C-quoting, so spaces, " -> " and non-ASCII names come
+/// back exactly as the agent run reports them). Both sides of a rename/copy are listed. Errors when git cannot answer
+/// or the list is too long, so a caller never reads "unknown" as "clean" (the revert snapshot depends on that).
+pub fn changed_paths_in(work: &Path) -> Result<Vec<String>, String> {
+    let out = Command::new("git").arg("-C").arg(work).args(["status", "--porcelain", "-z"]).output()
+        .map_err(|e| format!("cannot run git status: {e}"))?;
+    if !out.status.success() { return Err("git status failed; the changed paths are unknown".into()); }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut paths: Vec<String> = Vec::new();
+    let mut fields = text.split('\0');
+    while let Some(entry) = fields.next() {
+        if entry.len() < 4 { continue; }
+        let (status, path) = entry.split_at(3);
+        if !path.is_empty() { paths.push(path.to_string()); }
+        // `-z` puts a rename/copy source in the next field, with no status of its own.
+        if status.starts_with('R') || status.starts_with('C') || status[1..].starts_with('R') || status[1..].starts_with('C') {
+            if let Some(src) = fields.next() { if !src.is_empty() { paths.push(src.to_string()); } }
+        }
+        if paths.len() > MAX_CHANGED_PATHS { return Err(format!("more than {MAX_CHANGED_PATHS} changed paths; the list is incomplete")); }
+    }
+    paths.sort(); paths.dedup();
+    Ok(paths)
 }
 
 #[tauri::command]
@@ -352,16 +412,7 @@ pub async fn loop_changed_paths() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        let run = run_command(&root, "git status --porcelain", Some(60))?;
-        if run.exit_code != Some(0) { return Ok(Vec::new()); }
-        let mut out: Vec<String> = run.stdout.lines().filter_map(|line| {
-            let p = line.get(3..)?.trim();
-            if p.is_empty() { return None; }
-            let p = p.rsplit(" -> ").next().unwrap_or(p);
-            Some(p.trim_matches('"').to_string())
-        }).take(500).collect();
-        out.sort(); out.dedup();
-        Ok(out)
+        changed_paths_in(&work_root(&root))
     }).await.map_err(|e| format!("changed paths task failed: {e}"))?
 }
 
@@ -482,6 +533,130 @@ mod tests {
         let r = run_fault_verify(&root, "system/faults/f.md", Some(5)).unwrap();
         assert_eq!(r.stdout, "verified");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = Command::new("git").arg("-C").arg(dir).args(args)
+            .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+            .output().map(|o| o.status.success()).unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    }
+
+    fn repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("llmide-loop-repo-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "committed\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "committed\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+        dir
+    }
+
+    #[test]
+    fn revert_restores_tracked_files_and_removes_new_untracked_files() {
+        let dir = repo("revert");
+        std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
+        std::fs::write(dir.join("new.txt"), "agent new\n").unwrap();
+        revert_paths_in(&dir, &["a.txt".to_string(), "new.txt".to_string()], &["new.txt".to_string()]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "committed\n");
+        assert!(!dir.join("new.txt").exists());
+        assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "committed\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn revert_refuses_unsafe_paths_and_untracked_directories_without_changing_anything() {
+        let dir = repo("refuse");
+        std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
+        std::fs::create_dir_all(dir.join("newdir")).unwrap();
+        std::fs::write(dir.join("newdir/x.txt"), "x\n").unwrap();
+        assert!(revert_paths_in(&dir, &["../etc/passwd".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &["/abs".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "newdir".to_string()], &["newdir".to_string()]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "agent edit\n");
+        assert!(dir.join("newdir/x.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn revert_never_removes_an_untracked_or_ignored_file_the_agent_did_not_create() {
+        let dir = repo("keep-untracked");
+        std::fs::write(dir.join(".gitignore"), ".env\n").unwrap();
+        std::fs::write(dir.join("user notes.txt"), "mine\n").unwrap();
+        std::fs::write(dir.join(".env"), "SECRET=1\n").unwrap();
+        std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
+        // The agent overwrote these, but they existed before (not in createdPaths): refused, nothing changed.
+        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "user notes.txt".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &[".env".to_string()], &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("user notes.txt")).unwrap(), "mine\n");
+        assert_eq!(std::fs::read_to_string(dir.join(".env")).unwrap(), "SECRET=1\n");
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "agent edit\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn revert_handles_names_with_spaces_and_glob_characters_literally() {
+        let dir = repo("spaces");
+        std::fs::write(dir.join("my file.txt"), "committed\n").unwrap();
+        std::fs::write(dir.join("x[1].txt"), "committed\n").unwrap();
+        std::fs::write(dir.join("x1.txt"), "committed\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "more"]);
+        std::fs::write(dir.join("my file.txt"), "agent\n").unwrap();
+        std::fs::write(dir.join("x1.txt"), "user edit\n").unwrap();
+        std::fs::write(dir.join("agent new.txt"), "agent\n").unwrap();
+        revert_paths_in(&dir, &["my file.txt".to_string(), "x[1].txt".to_string(), "agent new.txt".to_string()], &["agent new.txt".to_string()]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("my file.txt")).unwrap(), "committed\n");
+        assert!(!dir.join("agent new.txt").exists());
+        // "x[1].txt" is a literal name, never a pattern that also matches x1.txt.
+        assert_eq!(std::fs::read_to_string(dir.join("x1.txt")).unwrap(), "user edit\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revert_never_removes_through_a_symlinked_directory() {
+        let dir = repo("symlink");
+        let outside = std::env::temp_dir().join(format!("llmide-loop-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("victim.txt"), "keep\n").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("link")).unwrap();
+        assert!(revert_paths_in(&dir, &["link/victim.txt".to_string()], &["link/victim.txt".to_string()]).is_err());
+        assert!(outside.join("victim.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn changed_paths_reads_raw_names_for_spaces_arrows_unicode_and_renames() {
+        let dir = repo("names");
+        for n in ["my file.txt", "a -> b.txt", "日本.txt", "old.txt"] { std::fs::write(dir.join(n), "c\n").unwrap(); }
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "names"]);
+        for n in ["my file.txt", "a -> b.txt", "日本.txt"] { std::fs::write(dir.join(n), "user edit\n").unwrap(); }
+        git(&dir, &["mv", "old.txt", "new.txt"]);
+        let got = changed_paths_in(&dir).unwrap();
+        for want in ["my file.txt", "a -> b.txt", "日本.txt", "new.txt", "old.txt"] {
+            assert!(got.iter().any(|p| p == want), "{want} missing from {got:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changed_paths_lists_dirty_files_and_errors_outside_a_repo() {
+        let dir = repo("changed");
+        std::fs::write(dir.join("a.txt"), "edit\n").unwrap();
+        std::fs::write(dir.join("new.txt"), "new\n").unwrap();
+        assert_eq!(changed_paths_in(&dir).unwrap(), vec!["a.txt".to_string(), "new.txt".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let plain = std::env::temp_dir().join(format!("llmide-loop-plain-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&plain);
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(changed_paths_in(&plain).is_err(), "a non-repo must not read as clean");
+        let _ = std::fs::remove_dir_all(&plain);
     }
 
     #[test]

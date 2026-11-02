@@ -56,3 +56,52 @@ test("native runner records cancellation instead of throwing", async () => {
   assert.equal(out.cancelled, true);
   assert.equal(out.passed, false);
 });
+
+test("a halt ends the run as a failure that is not a cancel, and no further stage runs", async () => {
+  let ran = 0;
+  let halted = false;
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")]), {
+    async runStage() { ran += 1; halted = true; return { ok: true, output: "edited" }; },
+    async repair() { throw new Error("no repair after a halt"); }, log() {},
+    halt() { return halted ? "agent edit left in place; the run stopped" : null; },
+  });
+  assert.equal(out.passed, false);
+  assert.equal(out.cancelled, undefined);
+  assert.equal(out.statusSummary, "agent edit left in place; the run stopped");
+  assert.equal(ran, 1);
+});
+
+test("a pause that outlasts its timeout aborts the run as cancelled and no further stage runs", async () => {
+  let ran = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { pauseTimeoutSeconds: 60 }), {
+    async runStage() { ran += 1; return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+    async holdWhilePaused(timeoutSeconds) { assert.equal(timeoutSeconds, 60); return "timedOut"; },
+  });
+  assert.equal(out.cancelled, true);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /pause timed out/);
+  assert.equal(ran, 0);
+});
+
+test("paused time does not count toward the wall-clock budget", async (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, "now", () => now);
+  let ran = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { wallClockBudgetSeconds: 2 }), {
+    async runStage() { ran += 1; return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+    async holdWhilePaused() { now += 5_000; return "ok"; },
+  });
+  assert.equal(out.passed, true);
+  assert.equal(ran, 2);
+});
+
+test("time outside a pause still ends the run at the budget", async (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, "now", () => now);
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { wallClockBudgetSeconds: 2 }), {
+    async runStage() { now += 3_000; return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+    async holdWhilePaused() { return "ok"; },
+  });
+  assert.equal(out.passed, false);
+  assert.equal(out.statusSummary, "wall-clock budget reached");
+});
