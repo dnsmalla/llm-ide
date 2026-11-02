@@ -43,7 +43,7 @@ export interface LoopEngineConfig {
   pauseTimeoutSeconds: number;
   maxRepairsPerStage: number;
   repairModel: string | null;
-  protectedPathPolicy: "revert" | "commit" | "ignore";
+  protectedPathPolicy: "revert" | "stop" | "warn" | "off";
   writeSummaryNote: boolean;
   extraProtectedGlobs: string[];
   useWorktreesForConcurrentRuns: boolean;
@@ -110,7 +110,9 @@ export function decodeStage(v: unknown): LoopStage | null {
 export function decodeConfig(v: unknown): LoopEngineConfig {
   const o = isObj(v) ? v : {};
   const stages = Array.isArray(o.stages) ? o.stages.map(decodeStage).filter((s): s is LoopStage => s !== null) : [];
-  const policy = o.protectedPathPolicy === "commit" || o.protectedPathPolicy === "ignore" ? o.protectedPathPolicy : "revert";
+  const rawPolicy = o.protectedPathPolicy;
+  const policy: LoopEngineConfig["protectedPathPolicy"] = rawPolicy === "stop" || rawPolicy === "warn" || rawPolicy === "off" ? rawPolicy
+    : rawPolicy === "commit" ? "stop" : rawPolicy === "ignore" ? "off" : "revert";
   return {
     stages,
     maxIterations: num(o.maxIterations) ?? 10,

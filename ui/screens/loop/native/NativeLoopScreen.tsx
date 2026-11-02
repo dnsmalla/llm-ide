@@ -296,9 +296,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const guardProtected = async (paths: readonly string[], target: LoopDefinition): Promise<string | null> => {
+    if (target.config.protectedPathPolicy === "off") return null;
     const bad = protectedPaths(paths, target.config.extraProtectedGlobs);
     if (bad.length === 0) return null;
-    if (target.config.protectedPathPolicy !== "revert") return `agent touched protected path(s) (${bad.join(", ")}); policy “${target.config.protectedPathPolicy}” is not ported`;
+    if (target.config.protectedPathPolicy === "warn") return null;
+    if (target.config.protectedPathPolicy === "stop") return `agent touched protected path(s) and they were left in place: ${bad.join(", ")}`;
     try {
       await invokeHost("loop_revert_paths", { paths: bad });
       return `agent touched protected path(s) and they were reverted: ${bad.join(", ")}`;
@@ -711,7 +713,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
             <label className="loop-field"><span>Repair model (empty = app default)</span><input value={loop.config.repairModel ?? ""} placeholder="model id" onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>
-            <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "commit" | "ignore"; })}><option value="revert">Revert offending edits</option><option value="commit">Commit (not ported)</option><option value="ignore">Ignore (not ported)</option></select></label>
+            <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "stop" | "warn" | "off"; })}><option value="revert">Revert &amp; stop</option><option value="stop">Leave edits &amp; stop</option><option value="warn">Warn and continue</option><option value="off">Do not check</option></select></label>
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
@@ -720,7 +722,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, commit/ignore protected-path policies, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping, pause timeout and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
