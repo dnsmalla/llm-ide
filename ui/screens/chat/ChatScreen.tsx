@@ -11,7 +11,10 @@ import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
-import { CapChip, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
+import { CapChip, EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
+import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./effort";
+import { ModelNotices, modelNotices } from "./model-notices";
+import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
 import { SessionList } from "./SessionList";
 import { ModeBanner } from "./approvals/ModeBanner";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
@@ -20,7 +23,7 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute,
+  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -107,9 +110,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const { setActiveId, setPrefs, setPermission } = ui;
   const skipRev = useRef<number | null>(null);
   const bumpSessions = useCallback(() => { ui.bumpSessions(); skipRev.current = ui.getSnapshot().sessionsRev; }, [ui]);
-  const [groups, setGroups] = useState<ModelGroup[]>([]);
+  const [listedGroups, setListedGroups] = useState<ModelGroup[]>([]);
+  // The ids the user added ("Add model…"), kept per connection in this browser and joined onto the listed groups.
+  const [userModels, setUserModels] = useState<UserModels>(loadUserModels);
+  const groups = useMemo(() => withUserModels(listedGroups, userModels), [listedGroups, userModels]);
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState(false);
+  // The effort pick is one app-wide choice (the Mac's chat.effort), remembered across launches.
+  const effortPick = useSyncExternalStore(effortStore.subscribe, effortStore.get, effortStore.get);
   const [route, setRoute] = useState<RouteView | null>(null);
   const loadingMore = useRef(false);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
@@ -144,7 +153,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // Model list once per screen.
   useEffect(() => {
     const ac = new AbortController();
-    loadModelGroups(core, ac.signal).then((r) => { setGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
+    loadModelGroups(core, ac.signal).then((r) => { setListedGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
     return () => ac.abort();
   }, [core]);
 
@@ -180,6 +189,44 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.resolvedMode, activeId]);
 
+  // The route's PUT, with a refused id dropped from the user's list and the core's own message shown (the pick itself is
+  // put back by the caller's catch). The other route writes go through it unchanged.
+  // Only a model write gets the notice: the cap chip shows its own errors.
+  const putRoute = (c: CoreTransport, id: string, patch: RoutePatch) => putRouteWire(c, id, patch).catch((e: unknown) => {
+    if (patch.model === undefined) throw e;
+    const next = afterRefusedPin(listedGroups, userModels, patch, e);
+    if (next !== userModels) { setUserModels(next); saveUserModels(next); }
+    setModelNotice(describeError(e).message);
+    throw e;
+  });
+  // A pick sets the composer's model and pins the route; "Default" only unpins a pinned route (modelPickPlan).
+  function pickModel(provider: string, model: string) {
+    const chat = activeId;
+    if (!chat) return;
+    const plan = modelPickPlan(route, provider, model);
+    setModelNotice(null);
+    if (plan.composer) setCurrent({ provider: plan.composer.provider || null, model: plan.composer.model || null });
+    // A refused pin puts the picker back to the previous choice, so it never shows a model the route does not hold.
+    const prev = { provider: current.provider, model: current.model };
+    const restore = () => setPrefs((p) => restoreFailedPick(p, chat, { provider, model }, prev));
+    if (plan.route === "pin") putRoute(core, chat, { provider, model }).then(setRoute).catch(restore);
+    else if (plan.route === "unpin") putRoute(core, chat, { provider: "", model: "" }).then(setRoute).catch(() => undefined);
+  }
+  function addModel(groupId: string, id: string) {
+    const next = addUserModel(userModels, groupId, id);
+    setUserModels(next);
+    saveUserModels(next);
+    setModelNotice(null);
+    const g = groups.find((x) => x.id === groupId);
+    if (g?.provider) pickModel(g.provider, id);
+  }
+  function removeModel(groupId: string, id: string) {
+    const next = forgetUserModel(userModels, groupId, id);
+    setUserModels(next);
+    saveUserModels(next);
+    if (current.model === id) setCurrent({ provider: null, model: null });
+  }
+
   const newChat = useCallback(async () => {
     try {
       const s = await store.createSession({});
@@ -207,6 +254,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
   const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, state]);
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);
+  const effortLevels = effortLevelsFor(groups, current.provider, current.model);
   const remoteBusy = activeId ? controller.isRemoteBusy(activeId) : false;
 
   const onLoadOlder = useCallback(() => (activeId ? controller.loadOlder(activeId) : Promise.resolve(0)), [activeId, controller]);
@@ -347,7 +395,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               onExecute={(turn) => {
                 setCurrent({ mode: "execute" });
                 setPlanRunChat(activeId);
-                controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission });
+                controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) });
                 touchSession(activeId);
               }}
             />
@@ -356,17 +404,11 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             <div className="chat-controls">
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
               <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
-                onChange={(provider, model) => {
-                  // A pick sets the composer's model and pins the route; "Default" only unpins a pinned route (modelPickPlan).
-                  const plan = modelPickPlan(route, provider, model);
-                  const chat = activeId;
-                  if (plan.composer) setCurrent({ provider: plan.composer.provider || null, model: plan.composer.model || null });
-                  // A refused pin puts the picker back to the previous choice, so it never shows a model the route does not hold.
-                  const prev = { provider: current.provider, model: current.model };
-                  const restore = () => setPrefs((p) => restoreFailedPick(p, chat, { provider, model }, prev));
-                  if (plan.route === "pin") putRoute(core, chat, { provider, model }).then(setRoute).catch(restore);
-                  else if (plan.route === "unpin") putRoute(core, chat, { provider: "", model: "" }).then(setRoute).catch(() => undefined);
-                }} />
+                onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
+                userModels={userModels} onRemove={removeModel} />
+              <EffortPicker levels={effortLevels} value={effectiveEffort(effortPick, effortLevels)} onChange={effortStore.set} />
+              {modelNotice && <p className="chat-error" role="alert">{modelNotice}</p>}
+              <ModelNotices kinds={modelNotices({ plainChat: plain, routerOn: route?.enabled, groups })} />
               <PendingSwitchNote pending={route?.pending} />
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
@@ -375,7 +417,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments }); touchSession(activeId); }}
+              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null}
             />
           </>

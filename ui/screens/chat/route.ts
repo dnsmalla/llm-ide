@@ -43,8 +43,10 @@ export interface ModelChoice {
   label: string;
   /** Catalog models only: tool support from the catalog. */
   toolsSupported?: boolean;
+  /** Claude models only: the SDK's effort levels for this model (`[]` = none). */
+  effortLevels?: string[];
 }
-export interface ModelGroup { id: string; label: string; catalog: boolean; models: ModelChoice[]; note?: string }
+export interface ModelGroup { id: string; label: string; catalog: boolean; models: ModelChoice[]; note?: string; /** The provider a model id of this group runs on (the connection's; Claude's is "anthropic"). */ provider?: string }
 
 export const toolsBadge = (toolsSupported: boolean): string => (toolsSupported ? "tools" : "no tools");
 
@@ -235,7 +237,7 @@ export async function cancelTurn(core: CoreTransport, chatSessionId: string): Pr
   return r?.cancelled === true;
 }
 
-interface SdkModelEntry { id: string; displayName?: string; name?: string }
+interface SdkModelEntry { id: string; displayName?: string; name?: string; effortLevels?: string[] }
 interface CatalogProvider { id: string; name: string; connections: Array<{ id: string; provider: string; name: string; enabled: boolean; hasKey: boolean }> }
 
 /** Claude models (the SDK's live list) plus one group per enabled, keyed catalog connection. */
@@ -245,12 +247,12 @@ export async function loadModelGroups(core: CoreTransport, signal?: AbortSignal)
     const r = await core.json<{ models?: string[]; entries?: SdkModelEntry[] }>("POST", "/kb/providers/models", { provider: "anthropic" }, signal);
     const entries: SdkModelEntry[] = r.entries ?? (r.models ?? []).map((id) => ({ id }));
     groups.push({
-      id: "anthropic", label: "Claude", catalog: false,
-      models: entries.map((e) => ({ provider: "anthropic", model: e.id, label: e.displayName ?? e.name ?? e.id })),
+      id: "anthropic", label: "Claude", catalog: false, provider: "anthropic",
+      models: entries.map((e) => ({ provider: "anthropic", model: e.id, label: e.displayName ?? e.name ?? e.id, effortLevels: Array.isArray(e.effortLevels) ? e.effortLevels.filter((l): l is string => typeof l === "string" && l.length > 0) : [] })),
     });
   } catch (e) {
     if (signal?.aborted) throw e;
-    groups.push({ id: "anthropic", label: "Claude", catalog: false, models: [], note: "The model list is unavailable." });
+    groups.push({ id: "anthropic", label: "Claude", catalog: false, provider: "anthropic", models: [], note: "The model list is unavailable." });
   }
   let toolsEnabled = false;
   try {
@@ -261,12 +263,12 @@ export async function loadModelGroups(core: CoreTransport, signal?: AbortSignal)
         try {
           const m = await core.json<{ models?: Array<{ id: string; toolsSupported?: boolean }> }>("POST", "/kb/providers/catalog/models", { id: c.id }, signal);
           groups.push({
-            id: c.id, label: c.name || p.name, catalog: true,
+            id: c.id, label: c.name || p.name, catalog: true, provider: c.provider,
             models: (m.models ?? []).map((x) => ({ provider: c.provider, model: x.id, label: x.id, toolsSupported: x.toolsSupported === true })),
           });
         } catch (e) {
           if (signal?.aborted) throw e;
-          groups.push({ id: c.id, label: c.name || p.name, catalog: true, models: [], note: "Could not list models." });
+          groups.push({ id: c.id, label: c.name || p.name, catalog: true, provider: c.provider, models: [], note: "Could not list models." });
         }
       }
     }

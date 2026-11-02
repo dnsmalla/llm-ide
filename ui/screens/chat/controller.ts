@@ -29,6 +29,8 @@ export interface SendOptions {
   planExecute?: boolean;
   /** Resend from a fresh SDK session (after SESSION_UNRESUMABLE). */
   fresh?: boolean;
+  /** A reasoning-effort level the model offers (effort.ts turnEffort); absent = the core chooses. */
+  effort?: string;
 }
 
 export interface ControllerDeps {
@@ -393,6 +395,7 @@ export class ChatController {
         body: {
           message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
           ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.effort ? { effort: opts.effort } : {}),
           ...(p.permissionMode ? { permissionMode: p.permissionMode } : {}),
           ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
           agentContext: { chatSessionId: id, workspaceRoot, surface: "desktop" },

@@ -1,6 +1,8 @@
 // Mode picker, model picker, permission chip and the cap chip popover. Native selects keep them keyboard
 // and screen-reader complete; the cap popover is a labelled dialog region.
 import { useState } from "react";
+import { EFFORT_AUTO, effortLabel } from "./effort";
+import { validateModelId, type UserModels } from "./custom-models";
 import {
   CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
   meterText, modelDefaultLabel, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
@@ -19,14 +21,19 @@ export function ModePicker({ value, resolved, onChange, disabled }: { value: str
   );
 }
 
-export function ModelPicker({ groups, provider, model, onChange, plainChat, loading, route }: {
+export function ModelPicker({ groups, provider, model, onChange, plainChat, loading, route, addGroup, onAdd, userModels, onRemove }: {
   groups: readonly ModelGroup[]; provider: string | null; model: string | null;
   onChange: (provider: string, model: string) => void; plainChat?: PlainChatReason | null; loading?: boolean;
   /** The chat's route: with the router on, an unpinned chat shows "Not pinned (the composer's model)". */
   route?: ModelPickerRoute | null;
+  /** "Add model…": the connection the id joins (none for a custom provider = no button), and what happens with the id. */
+  addGroup?: ModelGroup | null; onAdd?: (groupId: string, id: string) => void;
+  /** The user's added ids; the selected one can be removed (a refused id is dropped this way). */
+  userModels?: UserModels; onRemove?: (groupId: string, id: string) => void;
 }) {
   const value = modelPickerValue(route, provider, model);
   const listed = groups.flatMap((g) => g.models);
+  const removable = groups.find((g) => g.provider === provider && (userModels?.[g.id] ?? []).includes(model ?? ""));
   const composerLabel = provider && model ? (listed.find((m) => m.provider === provider && m.model === model)?.label ?? model) : null;
   // A pinned model that is not in the lists (a retired id) still shows as chosen, as the Mac's "Current" group does.
   const unlisted = value !== "" && !listed.some((m) => `${m.provider}|${m.model}` === value) ? value : null;
@@ -50,6 +57,37 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
       </label>
       {groups.filter((g) => g.note).map((g) => <span key={g.id} className="chat-muted">{g.label}: {g.note}</span>)}
       {plainChat && <span className="chat-note" role="note" title={plainChatDetail(plainChat)}>{PLAIN_CHAT_TITLE}</span>}
+      {addGroup && onAdd && <AddModelControl groupLabel={addGroup.label} onAdd={(id) => onAdd(addGroup.id, id)} />}
+      {removable && onRemove && model && <button type="button" className="chat-link-btn" onClick={() => onRemove(removable.id, model)}>Remove {model}</button>}
+    </div>
+  );
+}
+
+/** "Add model…" and its dialog. Its own state, so the picker itself stays a plain function of its props. */
+export function AddModelControl({ groupLabel, onAdd }: { groupLabel: string; onAdd: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="chat-link-btn" aria-expanded={open} onClick={() => setOpen(!open)}>Add model…</button>
+      {open && <AddModelDialog groupLabel={groupLabel} onCancel={() => setOpen(false)} onAdd={(id) => { setOpen(false); onAdd(id); }} />}
+    </>
+  );
+}
+
+/** The Mac's "Add a model" alert as an inline dialog: one model id for the connection; the id is checked here, the core decides the rest. */
+export function AddModelDialog({ groupLabel, onAdd, onCancel }: { groupLabel: string; onAdd: (id: string) => void; onCancel: () => void }) {
+  const [text, setText] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <div role="dialog" aria-label="Add a model" className="chat-popover">
+      <form onSubmit={(e) => { e.preventDefault(); const v = validateModelId(text); if (v.ok) onAdd(v.id); else setErr(v.message); }}>
+        <p className="chat-muted">Adds a model id under {groupLabel}. It is sent to the core as typed; the core or the provider decides whether it runs.</p>
+        <input className="chat-input" aria-label="Model id" value={text} onChange={(e) => { setText(e.target.value); setErr(null); }}
+          placeholder="model id, e.g. gpt-5 / claude-opus-4-9 / gemini-2.5-pro" autoFocus />
+        <button type="submit" className="chat-btn">Add</button>
+        <button type="button" className="chat-btn" onClick={onCancel}>Cancel</button>
+      </form>
+      {err && <p role="alert" className="chat-error">{err}</p>}
     </div>
   );
 }
@@ -126,5 +164,18 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
         </div>
       )}
     </div>
+  );
+}
+
+/** The Mac's "Effort" section as its own chip. Hidden when the model offers no levels; a level the model lacks is shown as Auto. */
+export function EffortPicker({ levels, value, onChange, disabled }: { levels: readonly string[]; value: string; onChange: (level: string) => void; disabled?: boolean }) {
+  if (levels.length === 0) return null;
+  return (
+    <label className="chat-pick">
+      <span className="chat-pick-label">Effort</span>
+      <select aria-label="Effort" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+        {[EFFORT_AUTO, ...levels].map((l) => <option key={l} value={l}>{effortLabel(l)}</option>)}
+      </select>
+    </label>
   );
 }
