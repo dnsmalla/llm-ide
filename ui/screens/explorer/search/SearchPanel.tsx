@@ -14,8 +14,8 @@ export interface SearchPanelProps {
   focusSignal?: number;
   /** Initial viewport height before the first measurement (tests, first paint). */
   initialViewport?: number;
-  /** Replace all matches in the listed files; absent = read-only search. */
-  onReplaceAll?: (query: string, opts: SearchOptions, paths: string[], replacement: string) => Promise<{ files: number; replacements: number; failed: string[] }>;
+  /** Replace all matches in the listed files (preserveCase matches each match's case); absent = read-only search. */
+  onReplaceAll?: (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean) => Promise<{ files: number; replacements: number; failed: string[] }>;
 }
 
 function HitText({ hit }: { hit: Hit }) {
@@ -28,6 +28,20 @@ function HitText({ hit }: { hit: Hit }) {
       <span>{preview.slice(me)}</span>
     </>
   );
+}
+
+/**
+ * Whether "Replace all" may run on this snapshot, as on the Mac (`replaceAllDisabled`): only on a finished, complete
+ * search. A search still running or truncated in any way ("matches", "files", "time") lists only part of the matches,
+ * so "all" would silently skip the rest.
+ */
+export function canReplaceAll(snap: { phase: string; query: string; files: { hits: unknown[] }[]; done: { truncated: string | null } | null }): boolean {
+  return snap.phase === "done" && snap.query !== "" && snap.done !== null && snap.done.truncated === null && snap.files.some((f) => f.hits.length > 0);
+}
+
+/** The files a Replace All rewrites: exactly the listed files with at least one hit. */
+export function replaceTargets(snap: { files: { path: string; hits: unknown[] }[] }): string[] {
+  return snap.files.filter((f) => f.hits.length > 0).map((f) => f.path);
 }
 
 function baseOf(p: string): string {
@@ -48,6 +62,9 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
   const [replacement, setReplacement] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
+  const [preserveCase, setPreserveCase] = useState(false);
+  /** Replace All asks first, as on the Mac: it rewrites every listed file. */
+  const [confirmAll, setConfirmAll] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const uid = useId();
 
@@ -128,6 +145,23 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
     </button>
   );
 
+  /** Replaces in `paths` and reports the outcome in the replace note. */
+  const runReplace = (paths: string[]) => {
+    if (!onReplaceAll) return;
+    setReplacing(true);
+    setConfirmAll(false);
+    setReplaceNotice(null);
+    void onReplaceAll(snap.query, snap.opts, paths, replacement, preserveCase).then(
+      (r) => setReplaceNotice(`Replaced ${r.replacements.toLocaleString()} match${r.replacements === 1 ? "" : "es"} in ${r.files.toLocaleString()} file${r.files === 1 ? "" : "s"}${r.failed.length ? `; ${r.failed.length} could not be written` : ""}.`),
+      () => setReplaceNotice("Replace all failed."),
+    ).finally(() => setReplacing(false));
+  };
+  const canReplace = !!onReplaceAll && !replacing && canReplaceAll(snap);
+  // Per-file replace rewrites one listed file the user picked; the Mac allows it on a truncated search too.
+  const canReplaceFile = !!onReplaceAll && !replacing && snap.phase === "done" && snap.query !== "";
+  // The confirm names a file count: a new search (or new results) invalidates it, so it closes.
+  useEffect(() => setConfirmAll(false), [snap.query, snap.opts, snap.files, snap.phase]);
+
   const trunc = truncationNotice(snap.done);
   const skipped = snap.phase === "done" ? skippedNotice(snap.done) : null;
 
@@ -140,6 +174,9 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
           <span className="sx-fname">{baseOf(r.path)}</span>
           <span className="sx-fdir">{dirOf(r.path)}</span>
           <span className="sx-count">{r.count}{r.more ? "+" : ""}</span>
+          {canReplaceFile ? (
+            <button type="button" className="sx-toggle" aria-label={`Replace all in ${baseOf(r.path)}`} title="Replace all matches in this file" onClick={(e) => { e.stopPropagation(); runReplace([r.path]); }}>⇄</button>
+          ) : null}
         </div>
       );
     }
@@ -184,23 +221,24 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
               value={replacement}
               onChange={(e) => setReplacement(e.target.value)}
             />
+            {toggle("AB", "Preserve case", preserveCase, () => setPreserveCase(!preserveCase))}
             <button
               type="button"
               className="sx-toggle"
-              disabled={replacing || snap.query === "" || snap.files.length === 0 || snap.done?.truncated === "matches" || snap.done?.truncated === "time"}
+              disabled={!canReplace}
               title={snap.done?.truncated ? "Replace all is disabled when the search was truncated; narrow the search first." : "Replace all matches in the listed text files"}
-              onClick={() => {
-                setReplacing(true);
-                setReplaceNotice(null);
-                const paths = snap.files.filter((f) => f.hits.length > 0).map((f) => f.path);
-                void onReplaceAll(snap.query, snap.opts, paths, replacement).then(
-                  (r) => setReplaceNotice(`Replaced ${r.replacements.toLocaleString()} match${r.replacements === 1 ? "" : "es"} in ${r.files.toLocaleString()} file${r.files === 1 ? "" : "s"}${r.failed.length ? `; ${r.failed.length} could not be written` : ""}.`),
-                  () => setReplaceNotice("Replace all failed."),
-                ).finally(() => setReplacing(false));
-              }}
+              onClick={() => setConfirmAll(true)}
             >
               {replacing ? "Replacing…" : "Replace all"}
             </button>
+          </div>
+        ) : null}
+        {confirmAll && canReplace ? (
+          <div className="sx-note" role="alertdialog" aria-label="Confirm replace all" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setConfirmAll(false); } }}>
+            <span>{`Replace all matches in ${replaceTargets(snap).length.toLocaleString()} file${replaceTargets(snap).length === 1 ? "" : "s"}?`}</span>{" "}
+            <button type="button" className="ex-link" onClick={() => { if (canReplace) runReplace(replaceTargets(snap)); }}>Replace all</button>{" "}
+            {/* Focus lands on Cancel (the safe default), so Escape reaches the handler above and Enter does not replace. */}
+            <button type="button" className="ex-link" autoFocus onClick={() => setConfirmAll(false)}>Cancel</button>
           </div>
         ) : null}
         {replaceNotice ? <p className="sx-note" role="status">{replaceNotice}</p> : null}

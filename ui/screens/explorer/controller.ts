@@ -64,6 +64,8 @@ export interface ControllerDeps {
 }
 
 const MAX_WATCH_REFRESH_PAGES = 20;
+/** Any line break (CR, LF, VT, FF, NEL, LS, PS): a name holding one tears across the records this app writes one per line. */
+const LINE_BREAK = /[\r\n\v\f\u0085\u2028\u2029]/;
 const RANGE_BYTES = 1024 * 1024;
 
 export function gitDecoFor(index: string, worktree: string, kind: string): GitDeco {
@@ -619,14 +621,19 @@ export class ExplorerController {
 
   private validName(name: string): string | null {
     const n = name.trim();
-    if (!n || n === "." || n === ".." || /[\\/\0]/.test(n)) return null;
+    if (!n || n === "." || n === ".." || /[\\/\0]/.test(n) || LINE_BREAK.test(n)) return null;
     return n;
+  }
+
+  /** The message for a name `validName` refused. A line break gets its own sentence, as on the Mac: a pasted wrapped line is invisible in a one-line field. */
+  private nameProblem(name: string): string {
+    return LINE_BREAK.test(name.trim()) ? "Names can't contain line breaks." : "A name cannot be empty or contain slashes.";
   }
 
   async createEntry(dir: string, name: string, kind: "file" | "dir"): Promise<string | null> {
     const n = this.validName(name);
     if (!n) {
-      this.notify("warning", "A name cannot be empty or contain slashes.");
+      this.notify("warning", this.nameProblem(name));
       return null;
     }
     try {
@@ -645,9 +652,11 @@ export class ExplorerController {
   async renameEntry(path: string, newName: string): Promise<string | null> {
     const n = this.validName(newName);
     if (!n) {
-      this.notify("warning", "A name cannot be empty or contain slashes.");
+      this.notify("warning", this.nameProblem(newName));
       return null;
     }
+    // The same name is nothing to do: no host call, no error (the Mac closes the editor the same way).
+    if (n === baseName(path)) return path;
     return this.moveOne(path, joinPath(parentOf(path), n));
   }
 
@@ -712,29 +721,92 @@ export class ExplorerController {
     this.set({ notice: this.clipboard ? { severity: "info", message: `${this.clipboard.paths.length} item${this.clipboard.paths.length === 1 ? "" : "s"} ${mode === "copy" ? "copied" : "cut"}.` } : null });
   }
 
-  /** Paste the internal clipboard into `destDir` ("" = project root). Never overwrites; skips conflicts with a notice. */
+  /**
+   * Copy `src` into `destDir` under a free name, Finder-style (`a.txt` (if free) -> `a copy.txt` -> `a copy 2.txt`). The host
+   * never overwrites, so a collision is detected by its `exists` answer rather than a racy pre-check.
+   */
+  private async copyToFreeName(src: string, destDir: string): Promise<string> {
+    const base = baseName(src);
+    const dot = base.lastIndexOf(".");
+    const hasExt = dot > 0;
+    const stem = hasExt ? base.slice(0, dot) : base;
+    const ext = hasExt ? base.slice(dot) : "";
+    // The Mac's `uniqueDestination`: the plain name first (pasting into another folder keeps it), then the copies.
+    for (let n = -1; n < 1000; n++) {
+      const name = n === -1 ? base : n === 0 ? `${stem} copy${ext}` : `${stem} copy ${n + 1}${ext}`;
+      const to = joinPath(destDir, name);
+      try {
+        await this.fs.copy(src, to);
+        return to;
+      } catch (e) {
+        if (toFsError(e).code !== "exists") throw e;
+      }
+    }
+    throw new FsError("exists", "no free name for the copy");
+  }
+
+  /** Copy (not move) `paths` into `destDir` ("" = project root), Finder-style names on collision. Alt-drag uses this. */
+  async copyInto(paths: string[], destDir: string): Promise<void> {
+    const failures: string[] = [];
+    let copied = 0;
+    for (const p of topLevel(paths)) {
+      if (p === destDir || destDir.startsWith(`${p}/`)) { failures.push(baseName(p)); continue; }
+      try {
+        await this.copyToFreeName(p, destDir);
+        copied++;
+      } catch (e) {
+        failures.push(`${baseName(p)} (${this.describe(e)})`);
+      }
+    }
+    await this.refreshDir(destDir);
+    this.set({
+      notice: failures.length
+        ? { severity: "warning", message: `${copied} copied; ${failures.length} could not be copied: ${failures.slice(0, 3).join(", ")}` }
+        : copied ? { severity: "info", message: `${copied} item${copied === 1 ? "" : "s"} copied.` } : null,
+    });
+    this.queueGit();
+  }
+
+  /**
+   * Paste the internal clipboard into `destDir` ("" = project root). A copy never overwrites: it takes a free
+   * Finder-style name. A cut is a move: pasting into the folder it already lives in is a no-op, and a cut is consumed
+   * only when every item landed. An item that vanished since the cut is reported, not retried; a real collision or
+   * write error keeps the cut armed so the user can fix it and paste again.
+   */
   async paste(destDir: string): Promise<void> {
     const clip = this.clipboard;
     if (!clip?.paths.length) return;
     const moved: string[] = [];
     const conflicts: string[] = [];
+    const missing: string[] = [];
     for (const src of clip.paths) {
-      const base = src.split("/").pop() ?? src;
-      const to = destDir === "" ? base : `${destDir}/${base}`;
-      if (to === src) { conflicts.push(base); continue; }
+      const base = baseName(src);
+      const to = joinPath(destDir, base);
       try {
-        if (clip.mode === "copy") await this.fs.copy(src, to);
-        else await this.fs.rename(src, to);
-        moved.push(to);
-      } catch { conflicts.push(base); }
+        if (clip.mode === "copy") {
+          moved.push(await this.copyToFreeName(src, destDir));
+        } else if (to === src) {
+          // Cut into the folder it already lives in: nothing to do, and nothing to report.
+          continue;
+        } else {
+          await this.fs.rename(src, to);
+          moved.push(to);
+        }
+      } catch (e) {
+        const code = toFsError(e).code;
+        if (clip.mode === "cut" && code === "not_found") missing.push(base);
+        else conflicts.push(base);
+      }
     }
-    if (clip.mode === "cut") this.clipboard = null;
+    if (clip.mode === "cut" && conflicts.length === 0) this.clipboard = null;
     await this.refreshDir(destDir);
-    for (const p of clip.paths) await this.refreshDir(p.split("/").slice(0, -1).join("/"));
+    for (const p of clip.paths) await this.refreshDir(parentOf(p));
+    const parts: string[] = [];
+    if (moved.length) parts.push(`${moved.length} item${moved.length === 1 ? "" : "s"} pasted`);
+    if (conflicts.length) parts.push(`${conflicts.length} skipped because the destination exists or could not be written: ${conflicts.slice(0, 3).join(", ")}`);
+    if (missing.length) parts.push(`${missing.length} no longer exist${missing.length === 1 ? "s" : ""}`);
     this.set({
-      notice: conflicts.length
-        ? { severity: "warning", message: `${moved.length} pasted; ${conflicts.length} skipped because the destination exists or could not be written: ${conflicts.slice(0, 3).join(", ")}` }
-        : moved.length ? { severity: "info", message: `${moved.length} item${moved.length === 1 ? "" : "s"} pasted.` } : null,
+      notice: parts.length === 0 ? null : { severity: conflicts.length || missing.length ? "warning" : "info", message: parts.join("; ") + "." },
     });
   }
 

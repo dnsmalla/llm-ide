@@ -1,6 +1,8 @@
 // Changes tab: virtualised grouped list (10,000+ files render a fixed window) and the commit box.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { ContextMenu, type MenuItem } from "../ContextMenu";
+import { invokeHost } from "../../shell/host";
 import type { ScmController, ScmSnapshot } from "./controller";
 import {
   GROUP_LABEL, HOOKS_NOTE, MAX_MESSAGE_BYTES, ROW_HEIGHT, TOO_MANY_NOTICE, displayLine, letterWord, rowKey, scrollToReveal, splitPath, windowRows,
@@ -24,6 +26,8 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
   const scroller = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(initialViewport);
+  /** Right-click on a file row: the Mac's per-file menu (stage, discard, copy path, reveal). */
+  const [menu, setMenu] = useState<{ x: number; y: number; item: FileItem } | null>(null);
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -104,13 +108,41 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
         {snap.phase === "ready" && rows.length === 0 && <div className="scm-empty">Working tree clean.</div>}
         <div style={{ height: win.padTop }} data-pad="top" aria-hidden="true" />
         {rows.slice(win.start, win.end).map((r, k) => (
-          <ScmRow key={rowKey(r)} row={r} index={win.start + k} size={rows.length} snap={snap} controller={controller} busy={busy} onOpen={open} onOpenFile={onOpenFile} />
+          <ScmRow key={rowKey(r)} row={r} index={win.start + k} size={rows.length} snap={snap} controller={controller} busy={busy} onOpen={open} onOpenFile={onOpenFile} onMenu={(item, x, y) => setMenu({ x, y, item })} />
         ))}
         <div style={{ height: win.padBottom }} data-pad="bottom" aria-hidden="true" />
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label="Change actions"
+          items={changeMenu(menu.item)}
+          onPick={(id) => {
+            const item = menu.item;
+            setMenu(null);
+            if (id === "stage") void controller.stageItem(item);
+            else if (id === "unstage") void controller.unstageItem(item);
+            else if (id === "discard") void controller.discard([item]);
+            else if (id === "copy") void navigator.clipboard?.writeText(item.entry.path).catch(() => undefined);
+            else if (id === "reveal") void invokeHost("reveal_in_os", { relPath: item.entry.path }).catch(() => undefined);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
       <CommitBox controller={controller} snap={snap} check={check} busy={busy} />
     </div>
   );
+}
+
+/** The per-file menu. Discard is offered only where the Mac offers it (working-tree and untracked files). */
+export function changeMenu(item: FileItem): MenuItem[] {
+  const { group, entry } = item;
+  const staging: MenuItem = group === "staged"
+    ? { id: "unstage", label: "Unstage" }
+    : { id: "stage", label: group === "conflicts" ? "Mark resolved (stage)" : "Stage" };
+  const discard = (group === "changes" || group === "untracked") && !entry.submodule ? [{ id: "discard", label: "Discard Changes", danger: true }] : [];
+  return [staging, ...discard, { id: "copy", label: "Copy Path", separator: true }, { id: "reveal", label: "Reveal in Finder" }];
 }
 
 interface RowProps {
@@ -122,9 +154,10 @@ interface RowProps {
   busy: boolean;
   onOpen: (item: FileItem) => void;
   onOpenFile: (path: string) => void;
+  onMenu: (item: FileItem, x: number, y: number) => void;
 }
 
-function ScmRow({ row, index, size, snap, controller, busy, onOpen, onOpenFile }: RowProps) {
+function ScmRow({ row, index, size, snap, controller, busy, onOpen, onOpenFile, onMenu }: RowProps) {
   const focused = snap.focusKey === rowKey(row);
   if (row.type === "header") {
     return (
@@ -173,6 +206,10 @@ function ScmRow({ row, index, size, snap, controller, busy, onOpen, onOpenFile }
       onClick={(e) => {
         controller.select(item.key, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey });
         if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(item);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(item, e.clientX, e.clientY);
       }}
     >
       <span className="scm-name">{displayLine(name)}</span>

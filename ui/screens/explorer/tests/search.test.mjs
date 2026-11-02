@@ -5,7 +5,8 @@ import { load, React, renderToStaticMarkup } from "./helpers.mjs";
 const h = React.createElement;
 const model = await load("search/model.ts");
 const { SearchController } = await load("search/controller.ts");
-const { SearchPanel } = await load("search/SearchPanel.tsx");
+const SearchPanelMod = await load("search/SearchPanel.tsx");
+const { SearchPanel } = SearchPanelMod;
 const panels = await load("panels.ts");
 const { PanelTabs } = await load("PanelTabs.tsx");
 
@@ -229,4 +230,52 @@ test("panel: idle state has no result rows and no banners", () => {
   const out = renderToStaticMarkup(h(SearchPanel, { controller: c }));
   assert.equal((out.match(/role="option"/g) ?? []).length, 0);
   assert.doesNotMatch(out, /ui-banner/);
+});
+
+test("find in folder: the include glob covers the folder's files; the root needs none; names match literally", () => {
+  assert.equal(model.folderIncludeGlob("src/lib"), "src/lib/**");
+  assert.equal(model.folderIncludeGlob(""), "");
+  assert.equal(model.folderIncludeGlob("a[b]*"), "a[[]b[]][*]/**");
+});
+
+test("replace: preserve-case, per-file replace and Replace All render only when a replace host is wired", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  const st = api.starts[0];
+  st.onEvent({ type: "chunk", id: st.id, files: [file("a.ts", 2)] });
+  st.onEvent(done(st.id));
+  const plain = renderToStaticMarkup(h(SearchPanel, { controller: c }));
+  assert.doesNotMatch(plain, /Preserve case/);
+  assert.doesNotMatch(plain, /Replace all in a\.ts/);
+  const out = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.match(out, /aria-label="Preserve case"[^>]*title="Preserve case"|title="Preserve case"[^>]*aria-label="Preserve case"/);
+  assert.match(out, /aria-label="Replace all in a\.ts"/);
+  assert.match(out, /aria-label="Replace with"/);
+});
+
+test("replace all guard: only a finished, untruncated search; targets are exactly the listed files with hits", () => {
+  const { canReplaceAll, replaceTargets } = SearchPanelMod;
+  const files = [file("a.ts", 2), { path: "b.ts", hits: [], more: false }];
+  const base = { phase: "done", query: "needle", files, done: { truncated: null } };
+  assert.equal(canReplaceAll(base), true);
+  assert.equal(canReplaceAll({ ...base, phase: "searching", done: null }), false, "a running search lists only part of the matches");
+  for (const t of ["matches", "files", "time"]) assert.equal(canReplaceAll({ ...base, done: { truncated: t } }), false, `truncated: ${t}`);
+  assert.equal(canReplaceAll({ ...base, query: "" }), false);
+  assert.equal(canReplaceAll({ ...base, files: [files[1]] }), false);
+  assert.deepEqual(replaceTargets(base), ["a.ts"]);
+});
+
+test("panel: Replace all is disabled while the search is still running", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  api.starts[0].onEvent({ type: "chunk", id: api.starts[0].id, files: [file("a.ts", 2)] });
+  const out = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Replace all<\/button>/);
+  assert.doesNotMatch(out, /aria-label="Replace all in a\.ts"/);
+});
+
+test("find in folder: '!' is never bracketed (a '[!]' class does not parse); a leading '!' or '#' is backslash-escaped", () => {
+  assert.equal(model.folderIncludeGlob("a!b"), "a!b/**");
+  assert.equal(model.folderIncludeGlob("!x"), "\\!x/**", "a leading ! would turn the include into an exclude");
+  assert.equal(model.folderIncludeGlob("#notes"), "\\#notes/**", "a leading # would make the line a comment");
 });

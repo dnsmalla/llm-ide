@@ -992,7 +992,12 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "symlinks are not copied"));
     }
     if meta.is_file() {
-        std::fs::copy(src, dst)?;
+        // create_new (O_EXCL) fails on ANY existing entry, including a dangling symlink, so the copy can
+        // neither overwrite nor be redirected through a link to outside the root.
+        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dst)?;
+        let mut input = std::fs::File::open(src)?;
+        std::io::copy(&mut input, &mut out)?;
+        out.set_permissions(meta.permissions())?; // fs::copy kept the mode bits; io::copy does not
         return Ok(());
     }
     if !meta.is_dir() {
@@ -1014,7 +1019,8 @@ pub fn copy(root: &Path, req: &CopyReq) -> R<String> {
     let (to_dir, to_name) = resolve_new(root, &req.to)?;
     let to = to_dir.join(&to_name);
     deny_git_abs(root, &to)?;
-    if to.exists() {
+    // symlink_metadata, not exists(): exists() follows a dangling link and reports the slot as free.
+    if std::fs::symlink_metadata(&to).is_ok() {
         return err("exists", "the destination already exists");
     }
     if to.starts_with(&from) {
@@ -1181,6 +1187,23 @@ mod tests {
         assert!(copy(&root, &CopyReq { from: "dir".into(), to: "dir/inner/x".into() }).is_err(), "no self nesting");
         assert!(copy(&root, &CopyReq { from: "../outside".into(), to: "x".into() }).is_err());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A dangling symlink at the destination looks "free" to `exists()` (it follows the link) and a plain
+    /// `fs::copy` then writes THROUGH it, outside the project root. The destination must be created exclusively.
+    #[cfg(unix)]
+    #[test]
+    fn copy_never_writes_through_a_dangling_symlink_at_the_destination() {
+        let root = scratch("copy-symlink");
+        let outside = scratch("copy-symlink-outside");
+        fs::write(root.join("a.txt"), "secret").unwrap();
+        let target = outside.join("planted.txt");
+        std::os::unix::fs::symlink(&target, root.join("link.txt")).unwrap();
+        let r = copy(&root, &CopyReq { from: "a.txt".into(), to: "link.txt".into() });
+        assert!(r.is_err(), "a symlink at the destination is refused");
+        assert!(!target.exists(), "nothing was written outside the root");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     fn lr(path: &str) -> ListReq {

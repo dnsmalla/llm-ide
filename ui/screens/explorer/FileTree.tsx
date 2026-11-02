@@ -10,8 +10,8 @@ import {
 
 export interface TreeCallbacks {
   onContextMenu(path: string | null, x: number, y: number): void;
-  /** The user dropped these paths on `destDir`; the screen confirms and then moves. */
-  onDropMove(paths: string[], destDir: string): void;
+  /** The user dropped these paths on `destDir`; the screen confirms and then moves (or, with Alt/Option held, copies). */
+  onDropMove(paths: string[], destDir: string, copy: boolean): void;
   /** F2 (rename) and Delete / Cmd+Backspace (move to trash) on the focused row. */
   onKeyCommand(cmd: "rename" | "delete", path: string): void;
 }
@@ -154,7 +154,7 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove, 
   const onDragStart = (e: DragEvent, path: string) => {
     const paths = dragPaths(path);
     e.dataTransfer.setData(DND_TYPE, JSON.stringify(paths));
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.effectAllowed = "copyMove";
   };
 
   const readDrag = (e: DragEvent): string[] | null => {
@@ -172,7 +172,8 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove, 
     if (!e.dataTransfer.types.includes(DND_TYPE)) return;
     // The payload is unreadable during dragover; the drop re-checks every path.
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+    // Alt/Option held while dragging copies, as on the Mac (ExplorerTreeList: `NSEvent.modifierFlags.contains(.option)`).
+    e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
     if (dropTarget !== dir) setDropTarget(dir);
   };
 
@@ -180,7 +181,7 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove, 
     e.preventDefault();
     setDropTarget(null);
     const paths = readDrag(e)?.filter((p) => canDrop(p, dir));
-    if (paths && paths.length > 0) onDropMove(paths, dir);
+    if (paths && paths.length > 0) onDropMove(paths, dir, e.altKey);
   };
 
   const activeIndex = snap.focusPath ? indexOfPath(layout, snap.focusPath) : -1;

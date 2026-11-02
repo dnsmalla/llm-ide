@@ -382,3 +382,77 @@ test("reloadFromDisk never overwrites keystrokes typed during the read (M5)", as
   assert.equal(editor.models.get("a.txt").text, "mine!!");
   assert.equal(c.getSnapshot().docs.get("a.txt").state.external, "changed");
 });
+
+test("rename to the same name is a no-op; a name with a line break is refused before the host", async () => {
+  const { c, fs } = await setup({ "a.txt": "a" });
+  assert.equal(await c.renameEntry("a.txt", "a.txt"), "a.txt");
+  assert.equal(fs.calls.some((x) => x[0] === "rename"), false);
+  assert.equal(await c.renameEntry("a.txt", "x\ny.txt"), null);
+  assert.equal(await c.createEntry("", "p\r\nq", "file"), null);
+  assert.match(c.getSnapshot().notice.message, /line breaks/);
+  assert.equal(fs.calls.some((x) => x[0] === "create" || x[0] === "rename"), false);
+});
+
+test("paste copy takes a Finder-style free name, also when pasting into the same folder", async () => {
+  const { c, fs } = await setup({ "a.txt": "a", "src/b.ts": "b", "src/b copy.ts": "old" });
+  c.select("a.txt", { shift: false, toggle: false });
+  c.setClipboard("copy");
+  await c.paste("");
+  assert.equal(fs.files.get("a copy.txt"), "a");
+  c.select("src/b.ts", { shift: false, toggle: false });
+  c.setClipboard("copy");
+  await c.paste("src");
+  assert.equal(fs.files.get("src/b copy 2.ts"), "b");
+  assert.equal(fs.files.get("src/b copy.ts"), "old", "an existing copy is never overwritten");
+  assert.ok(c.getClipboard(), "a copy stays on the clipboard for another paste");
+});
+
+test("cut pasted into the folder it already lives in is a no-op and is consumed", async () => {
+  const { c, fs } = await setup({ "src/a.txt": "a" });
+  c.select("src/a.txt", { shift: false, toggle: false });
+  c.setClipboard("cut");
+  await c.paste("src");
+  assert.equal(fs.calls.some((x) => x[0] === "rename"), false);
+  assert.equal(fs.files.get("src/a.txt"), "a");
+  assert.equal(c.getClipboard(), null);
+});
+
+test("a cut blocked by a collision stays armed; a source that vanished is reported and not kept armed", async () => {
+  const { c, fs } = await setup({ "a.txt": "a", "b.txt": "b", "d/a.txt": "other" });
+  c.select("a.txt", { shift: false, toggle: false });
+  c.select("b.txt", { shift: false, toggle: true });
+  c.setClipboard("cut");
+  fs.files.delete("b.txt");
+  await c.paste("d");
+  assert.equal(fs.files.get("d/a.txt"), "other", "the collision is never overwritten");
+  assert.ok(fs.files.has("a.txt"));
+  assert.ok(c.getClipboard(), "a real collision keeps the cut armed for a retry");
+  assert.equal(c.getSnapshot().notice.severity, "warning");
+  assert.match(c.getSnapshot().notice.message, /no longer exist/);
+});
+
+test("copyInto (alt-drag) copies files and folders beside the originals under free names", async () => {
+  const { c, fs } = await setup({ "a.txt": "a", "d/x.txt": "x" });
+  await c.copyInto(["a.txt", "d"], "");
+  assert.equal(fs.files.get("a copy.txt"), "a");
+  assert.ok(fs.calls.some((x) => x[0] === "copy" && x[2] === "d copy"));
+  assert.ok(fs.files.has("a.txt") && fs.files.has("d/x.txt"), "the originals stay put");
+});
+
+test("paste copy into another folder keeps the plain name when it is free (Mac uniqueDestination)", async () => {
+  const { c, fs } = await setup({ "a.txt": "a", "d/keep.txt": "k" });
+  c.select("a.txt", { shift: false, toggle: false });
+  c.setClipboard("copy");
+  await c.paste("d");
+  assert.equal(fs.files.get("d/a.txt"), "a");
+  assert.equal(fs.files.has("d/a copy.txt"), false);
+});
+
+test("copyInto (alt-drag) never copies a folder into itself or its own descendant", async () => {
+  const { c, fs } = await setup({ "d/sub/x.txt": "x" });
+  await c.copyInto(["d"], "d");
+  await c.copyInto(["d"], "d/sub");
+  assert.equal(fs.calls.some((x) => x[0] === "copy"), false, "refused before the host");
+  assert.equal(c.getSnapshot().notice.severity, "warning");
+  assert.deepEqual([...fs.files.keys()].sort(), ["d/sub/x.txt"]);
+});

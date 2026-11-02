@@ -76,6 +76,18 @@ export function makeFs(initial = {}) {
       } else throw new FsErr("not_found");
       return to;
     },
+    async copy(from, to) {
+      calls.push(["copy", from, to]);
+      if (files.has(to) || dirs.has(to)) throw new FsErr("exists");
+      if (!dirs.has(parent(to))) throw new FsErr("not_found");
+      if (files.has(from)) files.set(to, files.get(from));
+      else if (dirs.has(from)) {
+        dirs.add(to);
+        for (const d of [...dirs]) if (d.startsWith(from + "/")) dirs.add(to + d.slice(from.length));
+        for (const f of [...files.keys()]) if (f.startsWith(from + "/")) files.set(to + f.slice(from.length), files.get(f));
+      } else throw new FsErr("not_found");
+      return to;
+    },
     async remove(path) {
       calls.push(["remove", path]);
       if (state.trashFails) throw new FsErr("trash_unavailable", "no trash");

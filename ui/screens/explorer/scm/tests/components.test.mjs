@@ -164,3 +164,17 @@ test("panel: tabs, fatal states, empty project", async () => {
   assert.match(fatal, /filter driver/);
   assert.doesNotMatch(fatal, /role="tablist"/);
 });
+
+test("changes menu: stage or unstage for every row; discard only for working-tree and untracked files; copy and reveal always", async () => {
+  const { changeMenu } = await load("scm/ChangesView.tsx");
+  const item = (group, entry) => ({ key: `${group}:${entry.path}`, group, entry, letter: "M" });
+  const e = (path, extra = {}) => ({ path, orig_path: null, index: "M", worktree: "M", kind: "changed", ...extra });
+  const labels = (it) => changeMenu(it).map((m) => m.id);
+  assert.deepEqual(labels(item("changes", e("a.ts"))), ["stage", "discard", "copy", "reveal"]);
+  assert.deepEqual(labels(item("untracked", e("n.ts", { kind: "untracked" }))), ["stage", "discard", "copy", "reveal"]);
+  assert.deepEqual(labels(item("staged", e("s.ts"))), ["unstage", "copy", "reveal"]);
+  assert.deepEqual(labels(item("conflicts", e("c.ts", { kind: "unmerged" }))), ["stage", "copy", "reveal"]);
+  assert.equal(changeMenu(item("changes", e("a.ts")))[0].label, "Stage");
+  assert.equal(changeMenu(item("conflicts", e("c.ts", { kind: "unmerged" })))[0].label, "Mark resolved (stage)");
+  assert.deepEqual(labels(item("changes", e("sub", { submodule: true }))), ["stage", "copy", "reveal"], "a submodule cannot be discarded from here");
+});

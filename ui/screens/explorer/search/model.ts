@@ -90,6 +90,24 @@ function clampInt(v: unknown, lo: number, hi: number): number {
   return Math.min(Math.max(n, lo), hi);
 }
 
+/**
+ * Escapes glob metacharacters so a folder name matches literally inside an include glob (gitignore syntax, as the
+ * host's `ignore::overrides` reads it). `!` is NOT bracketed: `[!]` opens a negated class and the pattern fails to
+ * parse. Only a LEADING `!` (negation, i.e. an exclude) or `#` (a comment, i.e. no filter) is special; both take a
+ * backslash, which gitignore strips.
+ */
+export function globEscape(p: string): string {
+  return p.replace(/[*?[\]{}]/g, (c) => `[${c}]`).replace(/^[!#]/, (c) => `\\${c}`);
+}
+
+/**
+ * The include glob for the Mac's "Find in Folder": every file under `folder` (project-relative). The project root
+ * (`""`) needs no glob. `dir/` alone would whitelist only the folder entry, so the glob is `dir/**`.
+ */
+export function folderIncludeGlob(folder: string): string {
+  return folder === "" ? "" : `${globEscape(folder)}/**`;
+}
+
 /** `src/**, *.ts` -> ["src/**", "*.ts"]; empty entries dropped. */
 export function splitGlobs(s: string): string[] {
   return s.split(",").map((g) => g.trim()).filter((g) => g.length > 0).slice(0, 50);

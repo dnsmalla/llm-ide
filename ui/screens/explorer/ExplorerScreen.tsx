@@ -24,7 +24,7 @@ import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
 import { buildReplacer, replaceAll } from "./search/replace";
-import type { SearchOptions } from "./search/model";
+import { folderIncludeGlob, type SearchOptions } from "./search/model";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
 import { TERMINAL_BUILT as SHARED_TERMINAL_BUILT, loadTerminalRuntime as sharedLoadRuntime, sharedTerminalManager } from "./terminal/shared";
@@ -49,7 +49,7 @@ type Dialog =
   | { type: "prompt"; kind: "new-file" | "new-dir"; dir: string }
   | { type: "prompt"; kind: "rename"; path: string }
   | { type: "delete"; paths: string[] }
-  | { type: "move"; paths: string[]; dest: string }
+  | { type: "move"; paths: string[]; dest: string; copy: boolean }
   | { type: "unsaved"; id: string };
 
 type MenuState = { x: number; y: number; target: { kind: "tree"; path: string | null } | { kind: "tab"; id: string } };
@@ -70,6 +70,9 @@ const copy = (text: string) => {
     /* clipboard unavailable */
   }
 };
+
+/** Line breaks cannot be in a name (the Mac refuses them too: a wrapped line pasted into a name is invisible). */
+const LINE_BREAK = /[\r\n\v\f\u0085\u2028\u2029]/;
 
 export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { deps?: ExplorerDeps }) {
   const editorRef = useRef<EditorHost | null>(null);
@@ -221,9 +224,10 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       { id: "new-dir", label: "New Folder…" },
       { id: "rename", label: "Rename…", disabled: !single, separator: true },
       { id: "delete", label: sel.length > 1 ? `Move ${sel.length} Items to Trash` : "Move to Trash", disabled: sel.length === 0, danger: true },
-      { id: "copy-path", label: "Copy Relative Path", disabled: !single },
-      { id: "copy-abs", label: "Copy Absolute Path", disabled: !single || !projectRoot, separator: true },
-      { id: "reveal", label: "Reveal in Finder", disabled: !single || !projectRoot },
+      { id: "copy-path", label: "Copy Relative Path", disabled: sel.length === 0 },
+      { id: "copy-abs", label: "Copy Absolute Path", disabled: sel.length === 0 || !projectRoot, separator: true },
+      { id: "reveal", label: "Reveal in Finder", disabled: sel.length === 0 || !projectRoot },
+      ...(path !== null && single && findEntry(snap, path)?.kind === "dir" ? [{ id: "find-in", label: "Find in Folder", separator: true }] : []),
       { id: "refresh", label: "Refresh" },
     ];
   };
@@ -262,9 +266,17 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     else if (id === "new-dir") setDialog({ type: "prompt", kind: "new-dir", dir: targetDir(path) });
     else if (id === "rename" && path) setDialog({ type: "prompt", kind: "rename", path });
     else if (id === "delete" && sel.length) setDialog({ type: "delete", paths: sel });
-    else if (id === "copy-path" && path) copy(path);
-    else if (id === "copy-abs" && path && projectRoot) copy(`${projectRoot.replace(/\/+$/, "")}/${path}`);
-    else if (id === "reveal" && path) void invokeHost("reveal_in_os", { relPath: path }).catch(() => undefined);
+    else if (id === "copy-path" && sel.length) copy(sel.join("\n"));
+    else if (id === "copy-abs" && sel.length && projectRoot) copy(sel.map((p) => `${projectRoot.replace(/\/+$/, "")}/${p}`).join("\n"));
+    // One reveal only: the host rate-limits reveal_in_os (300 ms gap), so a loop would open the first item and
+    // silently drop the rest. Revealing several items in one Finder window needs a host command that takes a list.
+    else if (id === "reveal" && sel.length) void invokeHost("reveal_in_os", { relPath: path && sel.includes(path) ? path : sel[0] }).catch(() => undefined);
+    else if (id === "find-in" && path) {
+      // The Mac's "Find in Folder": scope the project search to the folder and show the Search panel.
+      search.setOptions({ include: folderIncludeGlob(path) });
+      setPanel("search");
+      setFocusSearch((n) => n + 1);
+    }
     else if (id === "refresh") void refreshAll();
   };
 
@@ -279,7 +291,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   };
   useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
 
-  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string) => {
+  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean) => {
     const re = buildReplacer(query, opts);
     if (!re) return { files: 0, replacements: 0, failed: ["The query is not a valid regular expression."] };
     let files = 0;
@@ -289,7 +301,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       try {
         const read = await fs.read(path, 4_000_000);
         if (read.status !== "ok" || read.text === null || read.hash === null) { failed.push(path); continue; }
-        const result = replaceAll(read.text, re, replacement);
+        const result = replaceAll(read.text, re, replacement, { regex: opts.regex, preserveCase });
         if (result.count === 0) continue;
         await fs.write(path, result.text, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
         files++;
@@ -413,7 +425,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           snap={snap}
           active={active}
           onContextMenu={(path, x, y) => setMenu({ x, y, target: { kind: "tree", path } })}
-          onDropMove={(paths, dest) => setDialog({ type: "move", paths, dest })}
+          onDropMove={(paths, dest, copy) => setDialog({ type: "move", paths, dest, copy })}
           onKeyCommand={(cmd, path) => {
             if (cmd === "rename") setDialog({ type: "prompt", kind: "rename", path });
             else setDialog({ type: "delete", paths: snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : [path] });
@@ -534,7 +546,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           label={dialog.kind === "new-dir" ? "Folder name" : dialog.kind === "new-file" ? "File name" : "New name"}
           initial={dialog.kind === "rename" ? baseName(dialog.path) : ""}
           confirmLabel={dialog.kind === "rename" ? "Rename" : "Create"}
-          validate={(v) => (v.trim() === "" ? "Enter a name." : /[\\/\0]/.test(v) ? "A name cannot contain slashes." : v.trim() === "." || v.trim() === ".." ? "That name is not allowed." : null)}
+          validate={(v) => (v.trim() === "" ? "Enter a name." : LINE_BREAK.test(v) ? "Names can't contain line breaks." : /[\\/\0]/.test(v) ? "A name cannot contain slashes." : v.trim() === "." || v.trim() === ".." ? "That name is not allowed." : null)}
           onCancel={() => setDialog(null)}
           onSubmit={(v) => {
             const d = dialog;
@@ -561,15 +573,16 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       )}
       {dialog?.type === "move" && (
         <ConfirmDialog
-          title="Move"
-          message={`Move ${dialog.paths.length === 1 ? "this item" : `these ${dialog.paths.length} items`} into ${dialog.dest === "" ? "the project root" : `"${dialog.dest}"`}?`}
+          title={dialog.copy ? "Copy" : "Move"}
+          message={`${dialog.copy ? "Copy" : "Move"} ${dialog.paths.length === 1 ? "this item" : `these ${dialog.paths.length} items`} into ${dialog.dest === "" ? "the project root" : `"${dialog.dest}"`}?`}
           items={dialog.paths}
-          confirmLabel="Move"
+          confirmLabel={dialog.copy ? "Copy" : "Move"}
           onCancel={() => setDialog(null)}
           onConfirm={() => {
             const d = dialog;
             setDialog(null);
-            void controller.moveInto(d.paths, d.dest);
+            if (d.copy) void controller.copyInto(d.paths, d.dest);
+            else void controller.moveInto(d.paths, d.dest);
           }}
         />
       )}
