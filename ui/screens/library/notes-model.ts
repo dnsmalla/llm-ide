@@ -256,7 +256,30 @@ export function matchesFilters(r: NoteRecord, f: Filters, now: number): boolean 
 }
 
 export type SortKey = "date-desc" | "date-asc" | "title" | "path";
-export type GroupKey = "month" | "folder" | "none";
+/** "relative" = the Mac's fixed date buckets (Today, Yesterday, This Week, This Month, Earlier). */
+export type GroupKey = "relative" | "month" | "folder" | "none";
+
+/** Mac LibraryViewModel.DateGroup labels, in display order. */
+export const RELATIVE_GROUPS = ["Today", "Yesterday", "This Week", "This Month", "Earlier"] as const;
+export type RelativeGroup = (typeof RELATIVE_GROUPS)[number];
+
+/** The Mac's bucket for a note date: local calendar today / yesterday, then 7 days, then 1 month. */
+export function relativeGroup(ms: number, now: number): RelativeGroup {
+  const d = new Date(ms);
+  const n = new Date(now);
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(d, n)) return "Today";
+  const y = new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1);
+  if (sameDay(d, y)) return "Yesterday";
+  // Calendar arithmetic like Foundation's `date(byAdding:)`: same wall-clock time (DST-safe), and
+  // a month back clamps the day to the target month's length (Mar 31 -> Feb 28/29, not Mar 3).
+  const weekAgo = new Date(n.getFullYear(), n.getMonth(), n.getDate() - 7, n.getHours(), n.getMinutes(), n.getSeconds(), n.getMilliseconds());
+  if (ms > weekAgo.getTime()) return "This Week";
+  const lastDayPrevMonth = new Date(n.getFullYear(), n.getMonth(), 0).getDate();
+  const monthAgo = new Date(n.getFullYear(), n.getMonth() - 1, Math.min(n.getDate(), lastDayPrevMonth), n.getHours(), n.getMinutes(), n.getSeconds(), n.getMilliseconds());
+  if (ms > monthAgo.getTime()) return "This Month";
+  return "Earlier";
+}
 
 export function compareRecords(sort: SortKey): (a: NoteRecord, b: NoteRecord) => number {
   switch (sort) {
@@ -290,6 +313,24 @@ export function buildRows(records: readonly NoteRecord[], opts: { sectionId: str
   const picked = records.filter((r) => (opts.sectionId === null || r.sourceId === opts.sectionId) && matchesFilters(r, opts.filters, opts.now));
   picked.sort(compareRecords(opts.sort));
   if (opts.group === "none") return picked.map((rec) => ({ kind: "note", rec }));
+  if (opts.group === "relative") {
+    // Fixed bucket order whatever the sort, as the Mac lists them; empty buckets are not shown.
+    const buckets = new Map<RelativeGroup, NoteRecord[]>();
+    for (const rec of picked) {
+      const g = relativeGroup(rec.dateMs, opts.now);
+      const list = buckets.get(g);
+      if (list) list.push(rec);
+      else buckets.set(g, [rec]);
+    }
+    const out: Row[] = [];
+    for (const g of RELATIVE_GROUPS) {
+      const list = buckets.get(g);
+      if (!list) continue;
+      out.push({ kind: "header", key: g, label: g, count: list.length });
+      for (const rec of list) out.push({ kind: "note", rec });
+    }
+    return out;
+  }
   const keyOf = opts.group === "month" ? (r: NoteRecord) => monthKey(r.dateMs) : folderKey;
   const rows: Row[] = [];
   let cur: string | null = null;

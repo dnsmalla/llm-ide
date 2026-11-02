@@ -98,7 +98,7 @@ export class LibraryStore {
       selectedRel: null,
       filters: { ...NO_FILTERS, ...(prefs.filters ?? {}) },
       sort: prefs.sort ?? "date-desc",
-      group: prefs.group ?? "month",
+      group: prefs.group ?? "relative",
       search: IDLE_SEARCH,
     };
   }

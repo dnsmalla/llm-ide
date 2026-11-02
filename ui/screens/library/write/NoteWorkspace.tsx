@@ -33,10 +33,13 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   onChanged: () => void;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
+  /** False while the Library section is hidden (the shell keeps it mounted): shortcuts are off. */
+  active?: boolean;
 }
 
 export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
   const { store, write, queue, rel } = p;
+  const active = p.active !== false;
   const [editing, setEditing] = useState(p.startEditing === true);
   const [dialog, setDialog] = useState<"rename" | "delete" | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -137,12 +140,21 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
   const summarising = sum.phase !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isMeeting || summarising || editing) return;
+      if (!active || !isMeeting || summarising || editing) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void doSummarize(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doSummarize, editing, isMeeting, summarising]);
+  }, [active, doSummarize, editing, isMeeting, summarising]);
+  // Mac: ⌘E exports the open note as Markdown (MeetingDetailView "Export").
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!active || editing || exporting) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); void doExport(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, doExport, editing, exporting]);
 
   if (editing) {
     return (

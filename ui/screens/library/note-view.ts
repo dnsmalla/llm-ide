@@ -105,7 +105,7 @@ export function describeNote(rec: NoteRecord | undefined, note: LoadedNote): Not
   if (model && model !== "failed") meta.push({ label: "Summarised by", value: model });
   const notices: string[] = [];
   if (note.truncated) notices.push(`This file is ${(note.size / (1024 * 1024)).toFixed(1)} MB. Only the first ${(VIEW_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB is shown.`);
-  if (model === "failed") notices.push("The summary failed when this meeting was processed. Re-summarising is not available in this version.");
+  if (model === "failed") notices.push("The summary failed when this meeting was processed. Use Re-summarise to try again.");
   return {
     kind: isText ? "text" : meetingish ? "meeting" : "markdown",
     title,
