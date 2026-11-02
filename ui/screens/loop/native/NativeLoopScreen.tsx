@@ -436,7 +436,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     const approval = ensureApprovals(target, !scheduled);
     if (approval) { setNotice(approval); return; }
-    if (!scheduled && !window.confirm(`Run “${target.name}”?\n\nIt will iterate up to ${target.config.maxIterations} time(s), repair blocking failures up to ${target.config.maxRepairsPerStage} per stage, and stop after ${target.config.consecutiveFailureStop} non-improving failures.`)) return;
     runningRef.current = true;
     cancelledRef.current = false;
     setRunningStage(true);
@@ -575,8 +574,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!window.confirm(`Approve this command?\n\n${stage.command}`)) return;
       approve(workRoot ?? projectRoot ?? "", stage.command);
     }
-    const label = stage.command ?? (stage.kind === "skill" ? `skill ${stage.skillId}` : stage.kind === "artifactCheck" ? "artifact check" : "Regression sweep");
-    if (!window.confirm(`Run this stage?\n\n${stage.name}: ${label}`)) return;
     setRunningStage(true);
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {

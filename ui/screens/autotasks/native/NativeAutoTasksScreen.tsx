@@ -60,7 +60,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
         persisted[key] = minute;
         firedRef.current[key] = minute;
         try { localStorage.setItem("llmide.autoTaskFired.v1", JSON.stringify(Object.fromEntries(Object.entries(persisted).slice(-200)))); } catch { /* session */ }
-        void runTask(t.id, true);
+        void runTask(t.id);
         return;
       }
     };
@@ -69,12 +69,11 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
     return () => window.clearInterval(timer);
   }, [state, running, hasRepo]);
 
-  const runTask = async (id: AutoTaskId = selected, scheduled = false) => {
+  const runTask = async (id: AutoTaskId = selected) => {
     if (running) return;
     const t = TASK_BY_ID[id]; const c = state.configs[id];
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
     if (!hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
-    if (!scheduled && !window.confirm(`Run “${t.label}” now?\n\n${c.prompt.slice(0, 500)}`)) return;
     setRunning(true);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
