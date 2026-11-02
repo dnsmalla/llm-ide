@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
@@ -48,7 +48,7 @@ export async function load(entryRel) {
       "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts"),
     },
   });
-  return import(`${outfile}?t=${Date.now()}`);
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
 /** Desktop's single React copy: tests must render with the same instance the bundles import. */

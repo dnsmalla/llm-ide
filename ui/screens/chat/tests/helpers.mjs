@@ -3,7 +3,7 @@
 import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
@@ -23,7 +23,7 @@ export async function loadChat(name = "chat") {
     entryPoints: [join(HERE, "entry.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent",
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
   });
-  return import(`${outfile}?t=${Date.now()}`);
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
 export const FIXTURE_DIR = join(REPO, "schema/agent-v2/fixtures");

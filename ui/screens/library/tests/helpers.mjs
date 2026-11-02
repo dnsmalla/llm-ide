@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
@@ -29,7 +29,7 @@ export async function loadEntry() {
     jsx: "automatic",
     logLevel: "silent",
   });
-  return import(`${outfile}?t=${Date.now()}`);
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
 export const react = () => requireFromDesktop("react");
