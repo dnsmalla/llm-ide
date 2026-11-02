@@ -72,11 +72,9 @@ struct HistoryForRequestTests {
     @Test("Oversized anchor is per-turn clipped and kept, never dropped")
     func anchorTooBig() {
         // Reality check: the anchor is clipped to maxHistoryTurnChars + marker
-        // BEFORE the anchor reservation, so the total fits the 400k budget and
-        // both turns survive. The brief expected ["small"] only (anchor
-        // dropped) — that branch is unreachable while per-turn clipping runs
-        // first, since a clipped turn (24,016 chars) always fits the 400k
-        // reservation budget.
+        // BEFORE the anchor reservation, so both turns survive: per-turn
+        // clipping always runs first, and a clipped turn (20,014 chars) fits
+        // the 64k reservation budget.
         let anchor = turn(.user, String(repeating: "a", count: ChatEngine.maxHistoryChars + 1))
         let out = engine.historyForRequest([anchor, turn(.user, "small")])
         #expect(out.count == 2)
@@ -89,18 +87,18 @@ struct HistoryForRequestTests {
     @Test("No user turn: no anchor, newest-first packing within full budget")
     func noUserTurn() {
         // The only reachable anchor==nil path: there is no user turn to
-        // reserve, so the whole 400k budget packs the tail newest-first.
+        // reserve, so the whole 64k budget packs the tail newest-first.
         var turns: [ChatMessage] = []
-        for _ in 0..<20 { turns.append(turn(.assistant, String(repeating: "b", count: 24_000))) }
+        for _ in 0..<20 { turns.append(turn(.assistant, String(repeating: "b", count: ChatEngine.maxHistoryTurnChars))) }
         turns.append(turn(.assistant, "final answer"))
         let out = engine.historyForRequest(turns)
         #expect(out.last?.content == "final answer")
         let total = out.reduce(0) { $0 + $1.content.count }
         #expect(total <= ChatEngine.maxHistoryChars)
-        // Newest-first packing: with 20×24k + tail, the oldest turns are the
-        // ones dropped (400k admits 16 of the 24k turns plus the tail).
-        #expect(out.count == 17)
-        #expect(out.first?.content == String(repeating: "b", count: 24_000))
+        // Newest-first packing: with 20×20k + tail, the oldest turns are the
+        // ones dropped (64k admits three whole turns plus the tail).
+        #expect(out.count == 4)
+        #expect(out.first?.content == String(repeating: "b", count: ChatEngine.maxHistoryTurnChars))
     }
 
     @Test("A tool-result message is packed by its reconstructed wire text")
