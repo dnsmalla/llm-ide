@@ -183,8 +183,9 @@ test("DocGenScreen server render: no project, ready states; landmarks and headin
   assert.match(none, /Open or create a project to use Doc Gen/);
   await store.setProject("/proj");
   const ready = html(h(E.DocGenScreen, { store, env, active: true, projectRoot: "/proj", onOpenFile: noop, onOpenExternal: noop, onOpenSettings: noop, initialViewport: 200 }));
-  assert.match(ready, /<section class="dg-setup" aria-label="Setup"/);
+  assert.match(ready, /<section class="dg-side-section dg-template" aria-label="Template and command"/);
   assert.match(ready, /<section class="dg-sources" aria-label="Sources"/);
+  assert.match(ready, /<section class="dg-prompt" aria-label="Prompt"/);
   assert.match(ready, /role="tablist"[^>]*aria-label="Output"/);
   assert.match(ready, /No templates for this project yet/);
   const hist = html(h(E.DocGenScreen, { store, env, active: true, projectRoot: "/proj", onOpenFile: noop, onOpenExternal: noop, onOpenSettings: noop, initialView: "history" }));
