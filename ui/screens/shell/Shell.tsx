@@ -2,6 +2,7 @@ import { Suspense, memo, useCallback, useEffect, useMemo, useReducer, useRef, us
 import { HomeIcon, StatusBanner, type ThemeId } from "@llmide/ui-kit";
 import { AccountMenu, type AccountActions } from "./AccountMenu";
 import { forgetLocalSettings } from "./forget-device";
+import { disconnectAll, readDisconnectPlan } from "./disconnect-all";
 import { GuideDialog } from "../welcome/WelcomeScreen";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
@@ -196,6 +197,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       openPermissions: () => setPermissionsOpen(true),
       signOut: () => core.logout(),
       signOutAndForget: async () => { forgetLocalSettings(); await core.logout(); },
+      disconnectPlan: () => readDisconnectPlan(core),
+      disconnectAll: (plan, onStep) => disconnectAll(core, plan, () => core.logout(), { onStep }),
     }),
     [],
   );

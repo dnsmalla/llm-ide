@@ -8,6 +8,7 @@ import { filterBy } from "../virtual.ts";
 import type { ModelList } from "../decoders.ts";
 import { Button, ErrorText, Field, SecretInput, Switch, VirtualList } from "../ui.tsx";
 import { BuiltinProviders } from "./BuiltinProviders.tsx";
+import { BuiltinKeys } from "./BuiltinKeys.tsx";
 import { MIGRATION_TEXT } from "../routing-model.ts";
 
 export default function ProvidersSection() {
@@ -26,6 +27,7 @@ export default function ProvidersSection() {
   return (
     <div className="st-stack">
       <BuiltinProviders />
+      <BuiltinKeys />
       <div className="st-row">
         <input className="st-input st-grow" type="search" aria-label="Filter connections" placeholder="Filter connections" value={query} onChange={(e) => setQuery(e.target.value)} />
         <Button label="Reload connections" onClick={() => void model.load()} disabled={s.phase === "loading"}><RefreshIcon /> Reload</Button>

@@ -109,6 +109,14 @@ export function decodeRepoConfig(raw: unknown): RepoConfig {
   };
 }
 
+/** Empties both saved-repository lists (the Mac's gitLabSavedProjects / gitHubSavedRepos reset). Returns how many were dropped. */
+export function clearSavedRepos(storage: Storage | undefined = globalThis.localStorage): number {
+  const c = readRepoConfig(storage);
+  const dropped = c.saved.gitlab.length + c.saved.github.length;
+  if (dropped > 0) writeRepoConfig({ ...c, saved: { gitlab: [], github: [] } }, storage);
+  return dropped;
+}
+
 /** localStorage is optional (SSR/tests); a write failure leaves the in-memory value to the caller. */
 export function readRepoConfig(storage: Storage | undefined = globalThis.localStorage): RepoConfig {
   try {
