@@ -42,16 +42,21 @@ function CommitDetailView({ controller, snap }: { controller: ScmController; sna
       {o.detail && (
         <>
           <pre className="scm-message-text" aria-label="Commit message">{displayText(o.detail.message)}</pre>
-          <ul className="scm-files" aria-label="Changed files">
-            {o.detail.files.map((f) => (
-              <li key={f.path}>
-                <button type="button" className="scm-file-item" aria-pressed={o.file === f.path} onClick={() => void controller.openCommitFile(f.path)}>
-                  <span className="ex-git-letter" aria-hidden="true">{f.status}</span>
-                  <span className="scm-name">{displayLine(f.path)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="scm-files-head scm-meta">{`Files (${o.detail.files.length})`}</div>
+          {o.detail.files.length === 0 ? (
+            <div className="scm-empty">No files in this commit</div>
+          ) : (
+            <ul className="scm-files" aria-label="Changed files">
+              {o.detail.files.map((f) => (
+                <li key={f.path}>
+                  <button type="button" className="scm-file-item" aria-pressed={o.file === f.path} onClick={() => void controller.openCommitFile(f.path)}>
+                    <span className="ex-git-letter" aria-hidden="true">{f.status}</span>
+                    <span className="scm-name">{displayLine(f.path)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {o.detail.truncated && <StatusBanner severity="warning" message="Only the first changed files are listed." />}
         </>
       )}

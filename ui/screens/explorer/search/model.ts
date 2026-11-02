@@ -132,10 +132,28 @@ export interface SearchState {
   error: string | null;
   /** Index into `rows` of the keyboard-selected row, or -1. */
   selected: number;
+  /** Matches the user dismissed (x), keyed by `hitKey`. View-only: hidden here and skipped by Replace All. */
+  dismissed: ReadonlySet<string>;
+}
+
+/** Identity of one match in the current results: the path plus its 1-based line and UTF-16 column. */
+export function hitKey(path: string, line: number, col: number): string {
+  return `${path}:${line}:${col}`;
+}
+
+/** The files and hits still shown: dismissed matches are dropped, and a file left with no hits disappears. */
+export function visibleFiles(files: readonly FileHits[], dismissed: ReadonlySet<string>): FileHits[] {
+  if (dismissed.size === 0) return files as FileHits[];
+  const out: FileHits[] = [];
+  for (const f of files) {
+    const hits = f.hits.filter((h) => !dismissed.has(hitKey(f.path, h.line, h.col)));
+    if (hits.length) out.push({ ...f, hits });
+  }
+  return out;
 }
 
 export function initialSearch(): SearchState {
-  return { query: "", opts: DEFAULT_OPTIONS, phase: "idle", files: [], matchCount: 0, collapsed: new Set(), done: null, error: null, selected: -1 };
+  return { query: "", opts: DEFAULT_OPTIONS, phase: "idle", files: [], matchCount: 0, collapsed: new Set(), done: null, error: null, selected: -1, dismissed: new Set() };
 }
 
 export type Row = { kind: "file"; path: string; count: number; collapsed: boolean; more: boolean } | { kind: "hit"; path: string; hit: Hit; key: string };

@@ -3,8 +3,8 @@
 import { toFsError } from "../fs";
 import type { SearchApi, SearchRequest } from "./host";
 import {
-  DEFAULT_OPTIONS, decodeDone, decodeFiles, flattenRows, initialSearch, moveSelection, normalizedQuery, splitGlobs,
-  type Row, type SearchOptions, type SearchState, type WireEvent,
+  DEFAULT_OPTIONS, decodeDone, decodeFiles, flattenRows, hitKey, initialSearch, moveSelection, normalizedQuery, splitGlobs,
+  visibleFiles, type Hit, type Row, type SearchOptions, type SearchState, type WireEvent,
 } from "./model";
 
 export interface SearchDeps {
@@ -23,7 +23,7 @@ const MAX_UI_MATCHES = 6000;
 
 export class SearchController {
   private snap: SearchState = initialSearch();
-  private rowsCache: { files: unknown; collapsed: unknown; rows: Row[] } | null = null;
+  private rowsCache: { files: unknown; collapsed: unknown; dismissed: unknown; rows: Row[] } | null = null;
   private listeners = new Set<() => void>();
   private timer: unknown = null;
   /** Local run counter: guards async completions of superseded runs. */
@@ -56,9 +56,9 @@ export class SearchController {
 
   rows(): Row[] {
     const c = this.rowsCache;
-    if (c && c.files === this.snap.files && c.collapsed === this.snap.collapsed) return c.rows;
-    const rows = flattenRows(this.snap.files, this.snap.collapsed);
-    this.rowsCache = { files: this.snap.files, collapsed: this.snap.collapsed, rows };
+    if (c && c.files === this.snap.files && c.collapsed === this.snap.collapsed && c.dismissed === this.snap.dismissed) return c.rows;
+    const rows = flattenRows(visibleFiles(this.snap.files, this.snap.dismissed), this.snap.collapsed);
+    this.rowsCache = { files: this.snap.files, collapsed: this.snap.collapsed, dismissed: this.snap.dismissed, rows };
     return rows;
   }
 
@@ -102,13 +102,13 @@ export class SearchController {
     const gen = ++this.gen;
     this.abortActive();
     if (q === null) {
-      this.set({ phase: "idle", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set() });
+      this.set({ phase: "idle", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set(), dismissed: new Set() });
       return;
     }
     const o = this.snap.opts;
     const only = o.openFilesOnly ? (this.deps.openPaths?.() ?? []) : null;
     if (only !== null && only.length === 0) {
-      this.set({ phase: "done", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set() });
+      this.set({ phase: "done", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set(), dismissed: new Set() });
       return;
     }
     const req: SearchRequest = {
@@ -122,7 +122,7 @@ export class SearchController {
       include_hidden: true,
       use_ignore: o.useIgnore,
     };
-    this.set({ phase: "searching", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set() });
+    this.set({ phase: "searching", files: [], matchCount: 0, done: null, error: null, selected: -1, collapsed: new Set(), dismissed: new Set() });
     this.activeId = null;
     this.early = [];
     this.starting = true;
@@ -211,6 +211,15 @@ export class SearchController {
 
   collapseAll(collapse: boolean): void {
     this.set({ collapsed: collapse ? new Set(this.snap.files.map((f) => f.path)) : new Set() });
+  }
+
+  /** The x on a match: hide it, and keep it out of Replace All. Dismissals last until the next search. */
+  dismiss(path: string, hit: Hit): void {
+    const key = hitKey(path, hit.line, hit.col);
+    if (this.snap.dismissed.has(key)) return;
+    const next = new Set(this.snap.dismissed);
+    next.add(key);
+    this.set({ dismissed: next, selected: -1 });
   }
 
   select(index: number): void {

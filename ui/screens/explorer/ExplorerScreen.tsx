@@ -10,7 +10,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
-import { createHostFs, baseName, parentOf, type FsApi, type WatchBatch } from "./fs";
+import { createHostFs, baseName, parentOf, toFsError, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { host as shellHost, invokeHost } from "../shell/host";
@@ -23,8 +23,8 @@ import { PanelTabs } from "./PanelTabs";
 import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
-import { buildReplacer, replaceAll } from "./search/replace";
-import { folderIncludeGlob, type SearchOptions } from "./search/model";
+import { bomShift, buildReplacer, replaceAll, replaceOneAt } from "./search/replace";
+import { folderIncludeGlob, hitKey, type SearchOptions } from "./search/model";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
 import { TERMINAL_BUILT as SHARED_TERMINAL_BUILT, loadTerminalRuntime as sharedLoadRuntime, sharedTerminalManager } from "./terminal/shared";
@@ -291,7 +291,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   };
   useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
 
-  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean) => {
+  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean, dismissed: ReadonlySet<string>) => {
     const re = buildReplacer(query, opts);
     if (!re) return { files: 0, replacements: 0, failed: ["The query is not a valid regular expression."] };
     let files = 0;
@@ -301,7 +301,11 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       try {
         const read = await fs.read(path, 4_000_000);
         if (read.status !== "ok" || read.text === null || read.hash === null) { failed.push(path); continue; }
-        const result = replaceAll(read.text, re, replacement, { regex: opts.regex, preserveCase });
+        // Dismissed matches are left as they are (they are matched by line and column, as the search listed them).
+        // The host's columns count a UTF-8 BOM on line 1 (fs.read strips it), so the keys are compared in host columns.
+        const bom = read.bom && read.encoding === "utf-8";
+        const skip = dismissed.size > 0 ? (line: number, col: number) => dismissed.has(hitKey(path, line, bomShift(line, col, bom, true))) : undefined;
+        const result = replaceAll(read.text, re, replacement, { regex: opts.regex, preserveCase }, skip);
         if (result.count === 0) continue;
         await fs.write(path, result.text, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
         files++;
@@ -312,6 +316,25 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     }
     void refreshAll();
     return { files, replacements, failed };
+  }, [fs]);
+
+  /** Replaces the one match at `line`/`col`. The file is read fresh and the match re-checked at that exact spot; the write is compare-and-swap on the hash read, so a file changed since is never overwritten. */
+  const replaceOneInSearch = useCallback(async (path: string, line: number, col: number, query: string, opts: SearchOptions, replacement: string, preserveCase: boolean) => {
+    const re = buildReplacer(query, opts);
+    if (!re) return { ok: false, message: "The query is not a valid regular expression." };
+    try {
+      const read = await fs.read(path, 4_000_000);
+      if (read.status !== "ok" || read.text === null || read.hash === null) return { ok: false, message: "Could not read that file." };
+      const textCol = bomShift(line, col, read.bom && read.encoding === "utf-8");
+      const next = replaceOneAt(read.text, re, line, textCol, replacement, { regex: opts.regex, preserveCase });
+      if (next === null) return { ok: false, message: "That match is no longer there. Search again." };
+      await fs.write(path, next, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
+      void refreshAll();
+      return { ok: true, message: "Replaced 1 match." };
+    } catch (e) {
+      const err = toFsError(e);
+      return { ok: false, message: err.code === "conflict" ? "The file changed on disk since the search. Search again." : `Could not replace: ${err.message}` };
+    }
   }, [fs]);
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!active) return;
@@ -433,7 +456,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
         />
         </div>
         <div className="ex-panel" role="tabpanel" id="ex-panel-search" aria-labelledby="ex-ptab-search" hidden={panel !== "search"}>
-          <SearchPanel controller={search} focusSignal={focusSearch} onReplaceAll={replaceAllInSearch} />
+          <SearchPanel controller={search} focusSignal={focusSearch} onReplaceAll={replaceAllInSearch} onReplaceOne={replaceOneInSearch} />
         </div>
         {scmSeen && (
           <div className="ex-panel" role="tabpanel" id="ex-panel-scm" aria-labelledby="ex-ptab-scm" hidden={panel !== "scm"}>

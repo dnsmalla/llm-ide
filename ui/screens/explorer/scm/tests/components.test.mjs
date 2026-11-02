@@ -131,6 +131,34 @@ test("history list and commit detail", async () => {
   assert.match(out, /Back/);
 });
 
+test("commit detail: Files (N) header counts the changed files", async () => {
+  const log = [{ hash: "b".repeat(40), short: "bbbbbbb", author: "Ada", time: 1_700_000_000, subject: "two files", parents: 1 }];
+  const { c, api } = await ctl({ entries: [], log });
+  c.setTab("history");
+  await new Promise((r) => setTimeout(r, 0));
+  const orig = api.commitFiles;
+  api.commitFiles = async (hash) => ({ ...(await orig(hash)), files: [{ status: "M", path: "a.txt" }, { status: "A", path: "b.txt" }] });
+  await c.openCommit(log[0].hash);
+  const out = html(h(HistoryView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /Files \(2\)/);
+  assert.match(out, /aria-label="Changed files"/);
+  assert.ok(!out.includes("No files in this commit"));
+});
+
+test("commit detail: a commit with no changed files shows the empty state", async () => {
+  const log = [{ hash: "c".repeat(40), short: "ccccccc", author: "Ada", time: 1_700_000_000, subject: "empty", parents: 1 }];
+  const { c, api } = await ctl({ entries: [], log });
+  c.setTab("history");
+  await new Promise((r) => setTimeout(r, 0));
+  const orig = api.commitFiles;
+  api.commitFiles = async (hash) => ({ ...(await orig(hash)), files: [] });
+  await c.openCommit(log[0].hash);
+  const out = html(h(HistoryView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /Files \(0\)/);
+  assert.match(out, /No files in this commit/);
+  assert.ok(!out.includes('aria-label="Changed files"'));
+});
+
 test("branches: current is marked and disabled, create form validates", async () => {
   const { c } = await ctl({ entries: [], branches: [{ name: "main", current: true, hash: "abc1234", upstream: "origin/main" }, { name: "dev", current: false, hash: "def5678", upstream: null }] });
   await c.loadBranches();

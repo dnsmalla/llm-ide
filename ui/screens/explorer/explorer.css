@@ -94,3 +94,15 @@
 .ex-image-canvas { width: min(100%, 1200px); height: calc(100vh - 240px); background-repeat: no-repeat; background-position: center; background-size: contain; background-color: var(--tok-color-surface); }
 .ex-files-show { position: absolute; z-index: 3; top: 6px; left: 8px; border: 1px solid var(--tok-color-border); background: var(--tok-color-surface); color: var(--tok-color-text); border-radius: var(--tok-radius-sm); padding: 2px 7px; cursor: pointer; }
 .ex-root { position: relative; }
+
+/* Memory viewer (read only). */
+.mem-root { display: flex; flex-direction: column; gap: var(--tok-space-sm); padding: var(--tok-space-md); color: var(--tok-color-text); }
+.mem-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tok-space-sm); }
+.mem-title { margin: 0; font-size: var(--tok-type-caption-size); font-weight: 600; }
+.mem-sub { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.mem-empty { padding: var(--tok-space-md); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.mem-sections { display: flex; flex-direction: column; gap: var(--tok-space-md); }
+.mem-heading { margin: 0; font-size: var(--tok-type-caption-size); text-transform: uppercase; color: var(--tok-color-text-muted); }
+.mem-list { margin: 0; padding: 0; list-style: none; }
+.mem-fact { display: flex; flex-direction: column; gap: 2px; padding: var(--tok-space-sm) 0; border-bottom: 1px solid var(--tok-color-border); overflow-wrap: anywhere; }
+.mem-learned { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }

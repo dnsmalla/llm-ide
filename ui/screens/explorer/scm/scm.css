@@ -73,3 +73,5 @@
 .scm-newbranch { display: flex; flex-direction: column; gap: var(--tok-space-xs); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .scm-detail-head { display: flex; align-items: center; gap: var(--tok-space-sm); padding: 4px var(--tok-space-sm); }
 .scm-message-text { margin: 0; padding: 0 var(--tok-space-sm) var(--tok-space-sm); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
+
+.scm-files-head { padding: var(--tok-space-sm) var(--tok-space-md) 0; }

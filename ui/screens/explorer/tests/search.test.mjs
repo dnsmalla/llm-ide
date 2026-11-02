@@ -279,3 +279,64 @@ test("find in folder: '!' is never bracketed (a '[!]' class does not parse); a l
   assert.equal(model.folderIncludeGlob("!x"), "\\!x/**", "a leading ! would turn the include into an exclude");
   assert.equal(model.folderIncludeGlob("#notes"), "\\#notes/**", "a leading # would make the line a comment");
 });
+
+test("dismiss: a dismissed match leaves the rows, an emptied file disappears, and a new search clears dismissals", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  const st = api.starts[0];
+  st.onEvent({ type: "chunk", id: st.id, files: [file("a.ts", 2), file("b.ts", 1)] });
+  st.onEvent(done(st.id));
+  const hits = () => c.rows().filter((r) => r.kind === "hit").length;
+  assert.equal(hits(), 3);
+  c.dismiss("b.ts", hit(1));
+  assert.equal(hits(), 2);
+  assert.ok(!c.rows().some((r) => r.kind === "file" && r.path === "b.ts"), "b.ts has no hits left, so its file row goes");
+  assert.equal(c.getSnapshot().files.length, 2, "the raw results keep the match (only the view hides it)");
+  c.dismiss("a.ts", hit(1));
+  c.dismiss("a.ts", hit(2));
+  assert.equal(hits(), 0);
+  c.dismiss("a.ts", hit(2));
+  assert.equal(c.getSnapshot().dismissed.size, 3, "dismissing twice is one entry");
+  c.setQuery("needle2"); tm.fire(); await tick();
+  assert.equal(c.getSnapshot().dismissed.size, 0);
+  const second = api.starts[1];
+  second.onEvent({ type: "chunk", id: second.id, files: [file("a.ts", 1)] });
+  assert.equal(c.rows().filter((r) => r.kind === "hit").length, 1);
+});
+
+test("panel: per-match Dismiss always, Replace only with the per-match host; Replace all is off once every match is dismissed", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  const st = api.starts[0];
+  st.onEvent({ type: "chunk", id: st.id, files: [file("a.ts", 2)] });
+  st.onEvent(done(st.id));
+  const plain = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.match(plain, /aria-label="Dismiss match at line 1 in a\.ts"/);
+  assert.doesNotMatch(plain, /aria-label="Replace match at line 1/);
+  const noText = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceOne: async () => ({ ok: true, message: "" }) }));
+  assert.doesNotMatch(noText, /aria-label="Replace match at line 1/, "as on the Mac, per-match Replace needs a replacement text");
+  const wired = renderToStaticMarkup(h(SearchPanel, { controller: c, initialReplacement: "x", onReplaceOne: async () => ({ ok: true, message: "" }) }));
+  assert.match(wired, /aria-label="Replace match at line 1 in a\.ts"/);
+  c.dismiss("a.ts", hit(1));
+  c.dismiss("a.ts", hit(2));
+  const all = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.match(all, /<button[^>]*disabled=""[^>]*>Replace all<\/button>/, "no visible match is left to replace");
+  assert.doesNotMatch(all, /aria-label="Dismiss match/);
+});
+
+test("review: Replace All after dismissals sends the dismissed keys and only the files still listed, with the Mac's prompt", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  const st = api.starts[0];
+  st.onEvent({ type: "chunk", id: st.id, files: [file("a.ts", 2), file("b.ts", 1)] });
+  st.onEvent(done(st.id));
+  const none = SearchPanelMod.replaceAllRequest(c.getSnapshot());
+  assert.deepEqual(none.paths, ["a.ts", "b.ts"]);
+  assert.equal(none.prompt, "Replace all matches in 2 files?");
+  c.dismiss("b.ts", hit(1));
+  c.dismiss("a.ts", hit(2));
+  const r = SearchPanelMod.replaceAllRequest(c.getSnapshot());
+  assert.deepEqual(r.paths, ["a.ts"], "b.ts has nothing left to replace");
+  assert.deepEqual([...r.dismissed].sort(), [model.hitKey("a.ts", hit(2).line, hit(2).col), model.hitKey("b.ts", hit(1).line, hit(1).col)].sort());
+  assert.equal(r.prompt, "Replace all matches except the 2 you dismissed?");
+});
