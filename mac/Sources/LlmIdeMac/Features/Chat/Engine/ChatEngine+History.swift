@@ -11,10 +11,10 @@ extension ChatEngine {
     /// its own (smaller, prompt-aware) budget — see `config.history` and
     /// `selectHistoryTurns` in `llm_agent/runtime/loop.mjs` — so this only has
     /// to keep the POST body clear of the server's 8 MB request-body limit.
-    static let maxHistoryChars = 400_000
+    static let maxHistoryChars = 64_000
     /// Per-turn clip. One runaway turn (a big command output, a whole file)
     /// must not be able to consume the entire budget by itself.
-    static let maxHistoryTurnChars = 24_000
+    static let maxHistoryTurnChars = 20_000
 
     /// The wire history for the turn whose streaming placeholder is
     /// `streamingID`: the transcript as it stood BEFORE this turn, packed.
