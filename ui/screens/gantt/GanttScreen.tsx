@@ -168,6 +168,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
       ) : (
         <>
           <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
+            {dated.length === 0 ? <div className="gnt-no-bars" style={{ left: LABEL_WIDTH }}><strong>No scheduled issues</strong><span>Select an issue and choose Set dates to place it on the timeline.</span></div> : null}
             <div className="gnt-labels">
               <div className="gnt-labels-head"><span>ISSUES</span><span className="gnt-count">{rows.length} / {baseRows.length}</span></div>
               <div className="gnt-month-pad" aria-hidden="true" />
@@ -188,7 +189,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                   {Array.from({ length: range.days }, (_, k) => {
                     const day = range.start + k;
                     const dt = new Date(day * 86_400_000);
-                    const label = zoom === "day" ? dayString(day).slice(5) : zoom === "week" ? (dt.getUTCDay() === 1 ? dayString(day).slice(5) : "") : (dt.getUTCDate() === 1 ? dayString(day).slice(0, 7) : "");
+                    const label = zoom === "day" ? String(dt.getUTCDate()) : zoom === "week" ? (dt.getUTCDay() === 1 ? String(dt.getUTCDate()) : "") : "";
                     return <div key={day} className="gnt-day" data-weekend={isWeekend(day) || undefined} data-today={day === Math.floor(Date.now() / 86_400_000) || undefined} style={{ width: dayWidth }}>{label}</div>;
                   })}
                 </div>
