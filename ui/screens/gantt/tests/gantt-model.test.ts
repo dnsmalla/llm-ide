@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, GANTT_ROW_ACTIONS, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -19,14 +19,62 @@ test("day numbers round-trip and malformed input is rejected", () => {
 
 test("span: dates win; one date + estimate fills the other; one date alone spans the Mac's 7 days", () => {
   assert.deepEqual(span(null), { start: null, end: null });
-  assert.deepEqual(span(sched({ startDate: "2026-01-05", dueDate: "2026-01-07" })), { start: 20458, end: 20460 });
+  // Mac GanttView.swift:801-802: lenD = days(startOfDay(s), startOfDay(e)) = 2, so Jan 5 and Jan 6 are drawn, not Jan 7.
+  assert.deepEqual(span(sched({ startDate: "2026-01-05", dueDate: "2026-01-07" })), { start: 20458, end: 20459 });
   assert.deepEqual(span(sched({ startDate: "2026-01-05", estimateDays: 3 })), { start: 20458, end: 20460 });
-  assert.deepEqual(span(sched({ dueDate: "2026-01-07", estimateDays: 2 })), { start: 20459, end: 20460 });
-  // GanttViewModel.defaultSpanDays = 7: the bar is 7 inclusive days, not 1.
-  assert.deepEqual(span(sched({ dueDate: "2026-01-07" })), { start: 20454, end: 20460 });
+  // GanttViewModel.swift:202-203 startDate = due - 2 days (Jan 5); GanttView.swift:801-802 draws 2 days, Jan 5 and Jan 6.
+  assert.deepEqual(span(sched({ dueDate: "2026-01-07", estimateDays: 2 })), { start: 20458, end: 20459 });
+  // GanttViewModel.defaultSpanDays = 7: the bar is 7 days, not 1. Due-only: startDate = due - 7 (Dec 31,
+  // GanttViewModel.swift:202-203), drawn to the day before the due day (Jan 6, GanttView.swift:801-802).
+  assert.deepEqual(span(sched({ dueDate: "2026-01-07" })), { start: 20453, end: 20459 });
   assert.deepEqual(span(sched({ startDate: "2026-01-05" })), { start: 20458, end: 20464 });
   assert.equal(DEFAULT_SPAN_DAYS, 7);
-  assert.deepEqual(span(sched({ startDate: "2026-01-09", dueDate: "2026-01-07" })), { start: 20460, end: 20462 }, "reverse dates swap");
+  // Reversed dates (written by something other than the editor) draw as the Mac does: a one-day bar at the start.
+  assert.deepEqual(span(sched({ startDate: "2026-01-09", dueDate: "2026-01-07" })), { start: 20462, end: 20462 }, "reversed dates are not swapped");
+});
+
+test("estimates: the Mac truncates a start-anchored estimate and rounds a due-anchored one up, never below one day", () => {
+  const d = (over: Record<string, unknown>) => span(sched(over));
+  // Start-anchored (Mac: startOfDay(start + est)): 0.5 -> 1 day, 1.9 -> 1, 2.5 -> 2, 364.9 -> 364.
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: 0.5 }), { start: 20458, end: 20458 });
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: 1.9 }), { start: 20458, end: 20458 });
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: 2.5 }), { start: 20458, end: 20459 });
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: 364.9 }), { start: 20458, end: 20458 + 363 });
+  // Due-anchored (Mac: startOfDay(due - est)): 1.9 -> 2 days, 2.5 -> 3 days, ending the day before the due day
+  // (GanttView.swift:801-802 does not draw the end day).
+  assert.deepEqual(d({ dueDate: "2026-01-07", estimateDays: 1.9 }), { start: 20458, end: 20459 });
+  assert.deepEqual(d({ dueDate: "2026-01-07", estimateDays: 2.5 }), { start: 20457, end: 20459 });
+  // 0 is "no estimate" in the editor; a stored 0 still draws the Mac's one day, not the 7-day default.
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: 0 }), { start: 20458, end: 20458 });
+  assert.equal(estimateSpanDays(0.2, "due"), 1);
+  // Negative and NaN estimates are never stored (decode drops them) so they fall back to the default span.
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: Number.NaN }), { start: 20458, end: 20464 });
+  assert.deepEqual(d({ startDate: "2026-01-05", estimateDays: -1 }), { start: 20458, end: 20464 });
+});
+
+test("estimate input: 0..365 in halves or finer, 0 saved as none; out of range, negative and NaN rejected", () => {
+  const key = { provider: "github", repo: "o/r", issueNumber: 7 };
+  const draft = (estimate: string) => ({ start: "2026-01-05", due: "", estimate, depends: "" });
+  const kept = (estimate: string) => {
+    const r = scheduleSaveBody(draft(estimate), key);
+    return r.ok ? r.body.estimateDays : r.error;
+  };
+  assert.equal(kept("0.5"), 0.5);
+  assert.equal(kept("1.9"), 1.9, "the input is kept as typed; the bar truncates it (Mac)");
+  assert.equal(kept("364.9"), 364.9);
+  assert.equal(kept("365"), 365);
+  assert.equal(kept("0"), null);
+  assert.equal(kept(""), null);
+  assert.equal(kept("365.1"), "Estimate must be between 0 and 365 days.");
+  assert.equal(kept("-0.5"), "Estimate must be between 0 and 365 days.");
+  assert.equal(kept("NaN"), "Estimate must be between 0 and 365 days.");
+  assert.equal(kept("Infinity"), "Estimate must be between 0 and 365 days.");
+});
+
+test("a GitLab schedule is an overlay row like a GitHub one (the core accepts provider gitlab)", () => {
+  const rows = decodeSchedules({ schedules: [{ provider: "gitlab", repo: "acme/web", issueNumber: 3, startDate: "2026-01-05", dueDate: null, estimateDays: null, dependsOn: [] }] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.provider, "gitlab");
 });
 
 test("decode drops rows without a repo/number and keeps null dates", () => {
@@ -64,7 +112,8 @@ test("bar geometry clamps to the range and never goes negative", () => {
   const row = rows[0]!;
   const g = barGeometry(row, { start: row.start!, days: 10 }, 10)!;
   assert.equal(g.left, 0);
-  assert.equal(g.width, 30);
+  // Jan 5 to Jan 7 is 2 days wide on the Mac (GanttView.swift:801-806: width = lenD * dayWidth, lenD = 2).
+  assert.equal(g.width, 20);
   assert.equal(barGeometry(row, { start: row.start! + 20, days: 10 }, 10), null);
   assert.equal(isWeekend(dayNumber("2026-01-03")!), true, "2026-01-03 is a Saturday");
 });
@@ -151,7 +200,7 @@ test("project picker: saved repos and cached repos, de-duplicated, searched, cur
 test("schedule editor save rules: due before start is rejected, bad dates/deps/estimate are rejected, valid input is the PUT body", () => {
   const key = { provider: "github", repo: "o/r", issueNumber: 7 };
   const draft = (over: Partial<{ start: string; due: string; estimate: string; depends: string }> = {}) => ({ start: "", due: "", estimate: "", depends: "", ...over });
-  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-09", due: "2026-01-07" }), key), { ok: false, error: "Due cannot be before start." });
+  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-09", due: "2026-01-07" }), key), { ok: false, error: "Due date must be on or after the start date." });
   assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-07", due: "2026-01-07" }), key).ok, true, "same-day is allowed");
   assert.deepEqual(scheduleSaveBody(draft({ start: "2026-13-01" }), key), { ok: false, error: "Dates are YYYY-MM-DD or empty." });
   assert.deepEqual(scheduleSaveBody(draft({ depends: "3, x" }), key), { ok: false, error: "Dependencies must be issue numbers, separated by commas." });
@@ -215,4 +264,112 @@ test("dependency arrows paint over the grid but under the bars, and never take c
   assert.ok(deps !== null && deps > 0, "arrows above the grid tracks");
   assert.ok(bar !== null && bar > deps!, "bars above the arrows");
   assert.match(css, /\.gnt-deps\s*\{[^}]*pointer-events:\s*none/);
+});
+
+test("GitLab rows get the Dates section and the Gantt bar; nested-group and PR-less numberless rows do not (the core keys owner/name)", () => {
+  assert.equal(canSchedule({ provider: "github", repo: "acme/web", number: 4 }), true);
+  assert.equal(canSchedule({ provider: "gitlab", repo: "acme/web", number: 4 }), true, "the core's overlay accepts provider gitlab");
+  assert.equal(canSchedule({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), false, "a nested path is a 400 in the core");
+  assert.equal(canSchedule({ provider: "github", repo: "acme/web", number: null }), false);
+  assert.equal(canSchedule({ provider: "bitbucket", repo: "acme/web", number: 4 }), false);
+});
+
+test("reversed dates: drawn as a one-day bar at the start, but overdue and the range filter read the due date (Mac endDate)", () => {
+  const rows = buildRows([issue({ number: 1 })], [{ provider: "github", repo: "o/r", issueNumber: 1, startDate: "2026-01-09", dueDate: "2026-01-07", estimateDays: null, dependsOn: [], updatedAt: null }], "github", "o/r");
+  assert.deepEqual({ start: rows[0]!.start, end: rows[0]!.end }, { start: 20462, end: 20462 });
+  assert.deepEqual(macBounds(rows[0]!), { start: 20462, end: 20460 });
+  const jan8 = 20461;
+  assert.equal(rowCategory(rows[0]!, jan8), "overdue", "due Jan 7 is past on Jan 8, as on the Mac");
+  assert.equal(filterRows(rows, { label: "", categories: ["open", "closed", "overdue"], from: jan8, until: null, today: jan8 }).length, 0, "Mac: due before the range start drops the row");
+});
+
+test("bar placement follows the Mac's end-exclusive rule; arrows stay on the drawn bar ends (review F5)", () => {
+  // GanttView.swift:797-811: x = offD(startOfDay(s)), width = max(1, days(startOfDay(s), startOfDay(e))) days.
+  const d = (over: Record<string, unknown>) => span(sched(over));
+  assert.deepEqual(d({ startDate: "2026-01-07", dueDate: "2026-01-07" }), { start: 20460, end: 20460 }, "same day: max(1, 0) = one day");
+  assert.deepEqual(d({ startDate: "2026-01-05", dueDate: "2026-01-06" }), { start: 20458, end: 20458 }, "one day apart: one day");
+  assert.deepEqual(d({ dueDate: "2026-01-07", estimateDays: 0 }), { start: 20460, end: 20460 }, "a stored 0: startDate = due, one day on the due day");
+  assert.deepEqual(d({ dueDate: "2026-01-07", estimateDays: 0.2 }), { start: 20459, end: 20459 }, "startOfDay(due - 0.2) is the day before");
+  // The Mac's endDate (overdue, range filter) is still the due date even though the bar stops the day before.
+  const rows = buildRows(
+    [issue({ number: 1 }), issue({ number: 2 })],
+    [sched({ issueNumber: 1, startDate: "2026-01-05", dueDate: "2026-01-07" }), sched({ issueNumber: 2, dueDate: "2026-01-14", dependsOn: [1] })],
+    "github", "o/r",
+  );
+  assert.deepEqual(rows.map((r) => [r.start, r.end]), [[20458, 20459], [20460, 20466]]);
+  assert.deepEqual(macBounds(rows[0]!), { start: 20458, end: 20460 });
+  assert.equal(rowCategory(rows[0]!, 20460), "open", "due Jan 7 is open on Jan 7");
+  assert.equal(rowCategory(rows[0]!, 20461), "overdue");
+  assert.equal(barDates(rows[0]!), "2026-01-05 → 2026-01-07", "the tooltip shows the schedule's dates, not the drawn days");
+  assert.equal(barDates(rows[1]!), "2026-01-07 → 2026-01-14");
+  const range = { start: 20458, days: 21 };
+  const [line] = dependencyLines(rows, range, 10, (i) => i);
+  // Blocker trailing anchor = x + width (Jan 7's left edge); dependent leading anchor = its x (Jan 7, due - 7).
+  assert.deepEqual(line, { blocker: 1, dependent: 2, x1: 20, y1: 0, x2: 20, y2: 1 });
+  const g = barGeometry(rows[1]!, range, 10)!;
+  assert.deepEqual([g.left, g.width], [20, 70], "due-only default: 7 days from due - 7");
+});
+
+test("GitLab dates are labelled as kept on this computer in the editor and the Dates section; GitHub dates are not (review F4)", () => {
+  // Mac: GitLabClient+RepoBackend.swift:14 usesScheduleOverlay = false; RepoIssueDetailSheet.swift:463 edits GitLab's own due date.
+  assert.equal(localDatesNote({ provider: "gitlab" }), "Saved on this computer only. It is not sent to GitLab.");
+  assert.equal(GITLAB_LOCAL_DATES_NOTE, "Saved on this computer only. It is not sent to GitLab.");
+  assert.equal(localDatesNote({ provider: "github" }), null);
+  // Both places that show or edit a row's dates render the note from the row's provider.
+  for (const file of ["../ScheduleEditor.tsx", "../../issues/IssueDetail.tsx"]) {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.match(src, /\{localDatesNote\(issue\) \? <p className="(gnt|iss)-hint" role="note">\{localDatesNote\(issue\)\}<\/p> : null\}/, file);
+  }
+  // In IssueDetail the note sits inside the Dates section, right under its heading.
+  const detail = readFileSync(new URL("../../issues/IssueDetail.tsx", import.meta.url), "utf8");
+  assert.match(detail, /<h3 className="iss-col-title">Dates<\/h3>\s*\{localDatesNote\(issue\)/);
+});
+
+test("Gantt load: a nested project skips the overlay GET and shows the hint; a failed load or a retry never keeps it (review F7)", async () => {
+  const calls: string[] = [];
+  const ok = (body: unknown) => ({ status: 200, body });
+  const fake = (mode: "ok" | "throw" | "500") => async (_m: "GET", path: string) => {
+    calls.push(path);
+    if (mode === "throw") throw new Error("offline");
+    if (mode === "500") return { status: 500, body: null };
+    return path.startsWith("/kb/issues") ? ok({ issues: [issue({ provider: "gitlab", repo: "acme/platform/web" })] }) : ok({ schedules: [] });
+  };
+  const nested = await loadTimeline(fake("ok"), "gitlab", "acme/platform/web");
+  assert.equal(nested.ok, true);
+  assert.equal(nested.nestedHint, true);
+  assert.equal(calls.some((c) => c.startsWith("/kb/issue-schedule")), false, "no overlay GET for a nested path (the core answers 400)");
+  calls.length = 0;
+  const flat = await loadTimeline(fake("ok"), "gitlab", "acme/web");
+  assert.equal(flat.nestedHint, false);
+  assert.deepEqual(calls, ["/kb/issues?provider=gitlab&state=all&limit=100", "/kb/issue-schedule?provider=gitlab&repo=acme%2Fweb"]);
+  const all = await loadTimeline(fake("ok"), "gitlab", "");
+  assert.equal(all.nestedHint, false, "All repositories reads the whole provider overlay");
+  // A network error or a failed status on a nested project never carries the hint, so the retry starts clean.
+  const offline = await loadTimeline(fake("throw"), "gitlab", "acme/platform/web");
+  assert.deepEqual(offline, { ok: false, nestedHint: false, error: "The core is not reachable right now." });
+  const failed = await loadTimeline(fake("500"), "gitlab", "acme/platform/web");
+  assert.equal(failed.nestedHint, false);
+  // The screen clears the hint before each load and sets it only from the result.
+  const screen = readFileSync(new URL("../GanttScreen.tsx", import.meta.url), "utf8");
+  assert.match(screen, /setNestedNote\(false\);\s*const r = await loadTimeline\(/);
+  assert.match(screen, /setNestedNote\(r\.nestedHint\);/);
+  assert.equal((screen.match(/setNestedNote\(/g) ?? []).length, 2, "no other write can leave a stale hint");
+});
+
+test("Issue detail: a nested project path gets the hint and no schedule request; owner/name rows read their schedule (review F7)", async () => {
+  assert.deepEqual(issueDatesView({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), { schedulable: false, nestedHint: DETAIL_NESTED_HINT });
+  assert.deepEqual(issueDatesView({ provider: "gitlab", repo: "acme/web", number: 4 }), { schedulable: true, nestedHint: null });
+  assert.deepEqual(issueDatesView({ provider: "github", repo: "o/r", number: null }), { schedulable: false, nestedHint: null });
+  let calls = 0;
+  const req = async (_m: "GET", _p: string) => {
+    calls += 1;
+    return { status: 200, body: { schedules: [sched({ provider: "gitlab", repo: "acme/web", issueNumber: 4, startDate: "2026-01-05" })] } };
+  };
+  assert.deepEqual(await readIssueSchedule(req, { provider: "gitlab", repo: "acme/platform/web", number: 4 }), { kind: "skipped" });
+  assert.equal(calls, 0);
+  const read = await readIssueSchedule(req, { provider: "gitlab", repo: "acme/web", number: 4 });
+  assert.equal(read.kind === "ok" && read.schedule?.startDate, "2026-01-05");
+  assert.deepEqual(await readIssueSchedule(async () => { throw new Error("x"); }, { provider: "github", repo: "o/r", number: 1 }), { kind: "error", error: "The core is not reachable right now." });
+  const detail = readFileSync(new URL("../../issues/IssueDetail.tsx", import.meta.url), "utf8");
+  assert.match(detail, /\{nestedHint \? <p className="iss-hint">\{nestedHint\}<\/p> : null\}/);
 });

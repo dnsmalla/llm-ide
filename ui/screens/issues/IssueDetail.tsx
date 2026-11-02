@@ -3,7 +3,7 @@
 // the Gantt's ScheduleEditor. Writes (comment, close) stay Mac-only until the core has provider write routes.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { issueNumber, openedAgo, type Issue } from "./issues-model.ts";
-import { decodeSchedules, type Schedule } from "../gantt/gantt-model.ts";
+import { issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
 import "./issues.css";
 
@@ -12,36 +12,28 @@ export interface IssueDetailDeps {
   openExternal: (url: string) => Promise<void>;
 }
 
-export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged, onEditSchedule }: {
+export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged }: {
   issue: Issue;
   deps: IssueDetailDeps;
   onClose: () => void;
   onNotice: (message: string) => void;
   onScheduleChanged?: () => void;
-  /** The host's own schedule editor (the Gantt's), offered when this dialog has no Dates section (GitLab rows). */
-  onEditSchedule?: (() => void) | null;
 }): ReactNode {
-  // The overlay exists for GitHub issues only; GitLab's native due date is not in the desktop yet.
-  const canSchedule = issue.provider === "github" && issue.number !== null;
+  // The schedule overlay takes GitHub and GitLab rows keyed by owner/name; a nested GitLab path has no overlay key.
+  const { schedulable, nestedHint } = issueDatesView(issue);
   // undefined = not read yet; null = read and no schedule row for this issue.
   const [schedule, setSchedule] = useState<Schedule | null | undefined>(undefined);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
   const loadSchedule = useCallback(async () => {
-    if (!canSchedule) return;
-    try {
-      const r = await deps.request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider: issue.provider, repo: issue.repo }).toString()}`);
-      if (r.status !== 200) {
-        setScheduleError(`The schedule could not be read (${r.status}).`);
-        return;
-      }
-      setSchedule(decodeSchedules(r.body).find((s) => s.provider === issue.provider && s.repo === issue.repo && s.issueNumber === issue.number) ?? null);
+    const r = await readIssueSchedule(deps.request, { provider: issue.provider, repo: issue.repo, number: issue.number });
+    if (r.kind === "error") setScheduleError(r.error);
+    else if (r.kind === "ok") {
+      setSchedule(r.schedule);
       setScheduleError(null);
-    } catch {
-      setScheduleError("The core is not reachable right now.");
     }
-  }, [deps, canSchedule, issue.provider, issue.repo, issue.number]);
+  }, [deps, issue.provider, issue.repo, issue.number]);
 
   useEffect(() => { void loadSchedule(); }, [loadSchedule]);
 
@@ -73,9 +65,10 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
         {issue.labels.length ? <div className="iss-labels">{issue.labels.map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
         <pre className="iss-body">{issue.body || "No description."}</pre>
 
-        {canSchedule ? (
+        {schedulable ? (
           <section className="iss-dates" aria-label="Dates">
             <h3 className="iss-col-title">Dates</h3>
+            {localDatesNote(issue) ? <p className="iss-hint" role="note">{localDatesNote(issue)}</p> : null}
             {scheduleError ? <p className="iss-hint">{scheduleError}</p> : schedule === undefined ? <p className="iss-hint">Loading dates…</p> : (
               <p className="iss-dates-line">
                 Start {schedule?.startDate ?? "None"} · Due {schedule?.dueDate ?? "None"}
@@ -103,10 +96,10 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
 
         <div className="iss-detail-actions">
           <button type="button" className="iss-btn iss-primary" disabled={!issue.url} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
-          {!canSchedule && onEditSchedule && issue.number !== null ? <button type="button" className="iss-btn" onClick={onEditSchedule}>Edit schedule…</button> : null}
           <button type="button" className="iss-btn" disabled title="Creating, commenting and closing are Mac-only until the core has provider write routes">Comment</button>
           <button type="button" className="iss-btn" disabled title="Closing is Mac-only until the core has provider write routes">Close issue</button>
         </div>
+        {nestedHint ? <p className="iss-hint">{nestedHint}</p> : null}
         <p className="iss-hint">Read-only detail from the cached issue. Comments, edits and state changes stay in the Mac app until the core gains provider write routes.</p>
       </section>
     </div>

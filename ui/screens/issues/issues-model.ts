@@ -23,6 +23,12 @@ export interface IssueFilters {
   provider: "github" | "gitlab";
   state: "open" | "closed" | "all";
   repo: string;
+  /**
+   * True when `repo` came from the saved-repository select: the row's repo must then equal it exactly and
+   * case-sensitively, as the core stores and matches it (and as the Gantt's buildRows compares), so `acme/web`
+   * never also lists `acme/web-api` or `acme/web/sub`. False or absent: the free-text box's substring match.
+   */
+  repoExact?: boolean;
   label: string;
   query: string;
 }
@@ -165,11 +171,16 @@ export function filterIssues(issues: readonly Issue[], f: IssueFilters): Issue[]
     if (i.isPR) return false;
     if (i.provider !== f.provider) return false;
     if (f.state !== "all" && i.state !== f.state) return false;
-    if (f.repo && !i.repo.toLowerCase().includes(f.repo.trim().toLowerCase())) return false;
+    if (f.repo && !repoMatches(i.repo, f.repo, f.repoExact === true)) return false;
     if (f.label && !i.labels.some((l) => l.toLowerCase() === f.label.trim().toLowerCase())) return false;
     if (q && !`${i.title} ${i.body} ${i.labels.join(" ")} #${i.number ?? ""} ${i.repo}`.toLowerCase().includes(q)) return false;
     return true;
   });
+}
+
+/** The repo filter: exact (case-sensitive) for a chosen saved repository, else a case-insensitive substring. */
+export function repoMatches(repo: string, filter: string, exact: boolean): boolean {
+  return exact ? repo === filter : repo.toLowerCase().includes(filter.trim().toLowerCase());
 }
 
 /** Distinct labels of the loaded rows, for the label filter. */
@@ -192,10 +203,32 @@ export function rawIssueCount(body: unknown): number {
   return isRecord(body) && Array.isArray(body.issues) ? body.issues.length : 0;
 }
 
-/** `owner/name` from a repository URL (https, ssh-less, optional .git); the input itself when it does not parse. */
+const PAGE_SEGMENTS = new Set(["-", "tree", "blob", "issues", "merge_requests", "pulls", "pull", "commits", "wiki"]);
+
+/**
+ * The project path from a repository URL (https, optional .git and trailing slash), at any depth: `owner/name`, or a
+ * GitLab nested group `group/subgroup/project`. The input itself when it has fewer than two path segments.
+ */
 export function repoSlug(url: string): string {
-  const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(url.trim());
-  return m ? `${m[1]}/${m[2]}` : url;
+  const raw = url.trim();
+  // https/ssh URLs (credentials dropped) and the scp form `git@host:group/project`, as the Mac's remoteKey reads them.
+  const m = /^[a-z][a-z0-9+.-]*:\/\/[^/]+\/(.*)$/i.exec(raw) ?? /^(?:[^@/:\s]+@)?[^/:\s]+:(?!\/)(.*)$/.exec(raw);
+  const segs = (m ? m[1]! : raw).split(/[?#]/)[0]!.split("/").filter((s) => s !== "");
+  // A pasted web-page URL carries a page suffix (`/-/tree/main`, `/issues`, ...): cut at the first marker segment
+  // after group/project, whole segments only (Mac ChangeShipping.remoteKey), so it is not read as a nested group.
+  const cut = segs.findIndex((s, i) => i >= 2 && PAGE_SEGMENTS.has(s.toLowerCase()));
+  if (cut >= 0) segs.length = cut;
+  if (segs.length) segs[segs.length - 1] = segs[segs.length - 1]!.replace(/\.git$/i, "");
+  if (segs.length < 2 || segs.some((s) => s === "" || s === "." || s === "..")) return raw;
+  return segs.join("/");
+}
+
+/**
+ * True when the core's schedule overlay (`/kb/issue-schedule`) can key this repository. The core accepts exactly
+ * `owner/name` (kb/issue-schedule.mjs assertKey), so a nested GitLab path is rejected with a 400 and has no dates.
+ */
+export function overlayRepoSupported(repo: string): boolean {
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo) && !/(^|\/)\.\.?(\/|$)/.test(repo);
 }
 
 /**

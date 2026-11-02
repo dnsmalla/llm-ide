@@ -3,7 +3,7 @@
 // (due before start is rejected) and Cmd/Ctrl+Enter to save.
 import { useState, type ReactNode } from "react";
 import type { Issue } from "../issues/issues-model.ts";
-import { isSaveShortcut, issueLabel, scheduleSaveBody, type Schedule } from "./gantt-model.ts";
+import { isSaveShortcut, issueLabel, localDatesNote, scheduleSaveBody, type Schedule } from "./gantt-model.ts";
 import "./gantt.css";
 
 export interface ScheduleDeps {
@@ -65,6 +65,7 @@ export function ScheduleEditor({ issue, schedule, deps, onClose, onSaved, onOpen
         {onOpenIssue ? <button type="button" className="gnt-link" onClick={onOpenIssue}>Open issue</button> : null}
         <button type="button" className="gnt-btn" onClick={onClose}>Close</button>
       </div>
+      {localDatesNote(issue) ? <p className="gnt-hint" role="note">{localDatesNote(issue)}</p> : null}
       <div className="gnt-editor-grid">
         <label className="gnt-field"><span>Start</span><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
         <label className="gnt-field"><span>Due</span><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CORE_LIST_CAP, columnsFor, decodeIssues, filterIssues, isCapped, labelNamespace, openedAgo, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
+import { CORE_LIST_CAP, columnsFor, repoMatches, decodeIssues, filterIssues, isCapped, labelNamespace, openedAgo, overlayRepoSupported, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: "1", title: "T", body: "b", url: "https://github.com/o/r/issues/1", provider: "github",
@@ -96,4 +96,58 @@ test("opened date reads as a relative age, '' when the timestamp is missing or m
   assert.equal(openedAgo("2026-11-04T12:00:00Z", now), "in 2 days", "a future timestamp (clock skew) reads forward");
   assert.equal(openedAgo("2026-10-30T12:00:00Z", now), "3 days ago");
   assert.equal(openedAgo("2026-11-02T10:00:00Z", now), "2 hr. ago");
+});
+
+test("nested GitLab groups keep their full path: 2-, 3- and 4-part repositories all slug and match issues", () => {
+  assert.equal(repoSlug("https://gitlab.com/acme/web.git"), "acme/web");
+  assert.equal(repoSlug("https://gitlab.com/acme/platform/web"), "acme/platform/web");
+  assert.equal(repoSlug("https://gitlab.com/acme/platform/tools/web/"), "acme/platform/tools/web");
+  assert.equal(repoSlug("https://gitlab.com/acme/platform/web.git?tab=issues#top"), "acme/platform/web");
+  assert.equal(repoSlug("acme/platform/web"), "acme/platform/web");
+  assert.equal(repoSlug("https://gitlab.com/acme"), "https://gitlab.com/acme", "one segment is not a project: the input itself");
+  assert.equal(repoSlug("https://gitlab.com/acme/../web"), "https://gitlab.com/acme/../web");
+  // The saved project's slug selects the same rows the core stored under its full path.
+  const rows = decodeIssues({ issues: [
+    issue({ id: "n", provider: "gitlab", repo: "acme/platform/web" }),
+    issue({ id: "o", provider: "gitlab", repo: "acme/web" }),
+  ] });
+  const f = { provider: "gitlab" as const, state: "all" as const, repo: repoSlug("https://gitlab.com/acme/platform/web.git"), label: "", query: "" };
+  assert.deepEqual(filterIssues(rows, f).map((i) => i.id), ["n"]);
+});
+
+test("the schedule overlay keys owner/name only: nested paths and dot segments are not overlay-able", () => {
+  assert.equal(overlayRepoSupported("acme/web"), true);
+  assert.equal(overlayRepoSupported("acme/platform/web"), false, "the core answers 400 repo must be owner/name");
+  assert.equal(overlayRepoSupported("acme/.."), false);
+  assert.equal(overlayRepoSupported("acme web/x"), false);
+  assert.equal(overlayRepoSupported(""), false);
+});
+
+test("repoSlug reads pasted page URLs, ssh and scp remotes without mistaking the page suffix for a nested group (review)", () => {
+  assert.equal(repoSlug("https://gitlab.com/acme/web/-/issues"), "acme/web");
+  assert.equal(repoSlug("https://gitlab.com/acme/platform/web/-/tree/main"), "acme/platform/web");
+  assert.equal(repoSlug("https://github.com/o/r/issues/12"), "o/r");
+  assert.equal(repoSlug("https://github.com/o/r/pulls"), "o/r");
+  assert.equal(repoSlug("https://github.com/o/issues-tracker"), "o/issues-tracker", "whole segments only");
+  assert.equal(repoSlug("git@gitlab.com:acme/platform/web.git"), "acme/platform/web");
+  assert.equal(repoSlug("ssh://git@gitlab.com:2222/acme/web.git"), "acme/web");
+  assert.equal(repoSlug("https://user:tok@gitlab.com/acme/web.git/"), "acme/web");
+  assert.equal(repoSlug("HTTPS://GitHub.com/Owner/Repo.GIT"), "Owner/Repo", "case kept: the core stores the repo as typed");
+  assert.notEqual(repoSlug("https://gitlab.com/a/b/c"), repoSlug("https://github.com/a/b"));
+});
+
+test("a chosen saved repository filters exactly and case-sensitively; the free-text box still matches substrings (review F6)", () => {
+  const rows = decodeIssues({ issues: [
+    issue({ id: "w", provider: "gitlab", repo: "acme/web" }),
+    issue({ id: "api", provider: "gitlab", repo: "acme/web-api" }),
+    issue({ id: "sub", provider: "gitlab", repo: "acme/web/sub" }),
+    issue({ id: "up", provider: "gitlab", repo: "Acme/Web" }),
+  ] });
+  const f = { provider: "gitlab" as const, state: "all" as const, repo: "acme/web", label: "", query: "" };
+  assert.deepEqual(filterIssues(rows, { ...f, repoExact: true }).map((i) => i.id), ["w"], "the select picks one repository, as the core and the Gantt match it");
+  assert.deepEqual(filterIssues(rows, { ...f, repo: "acme/web/sub", repoExact: true }).map((i) => i.id), ["sub"]);
+  assert.deepEqual(filterIssues(rows, { ...f, repoExact: false }).map((i) => i.id), ["w", "api", "sub", "up"], "typed text is a search");
+  assert.equal(repoMatches("acme/web", "acme/web", true), true);
+  assert.equal(repoMatches("acme/web-api", "acme/web", true), false);
+  assert.equal(repoMatches("Acme/Web", "acme/web", true), false);
 });

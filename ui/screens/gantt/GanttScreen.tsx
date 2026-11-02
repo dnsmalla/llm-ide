@@ -5,18 +5,19 @@ import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
-import { CORE_LIST_CAP, decodeIssues, isCapped, labelOptions, rawIssueCount, repoSlug, type Issue } from "../issues/issues-model.ts";
+import { CORE_LIST_CAP, isCapped, labelOptions, repoSlug, type Issue } from "../issues/issues-model.ts";
 import { IssueDetail } from "../issues/IssueDetail.tsx";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import {
   GANTT_CATEGORIES,
+  GANTT_NESTED_HINT,
+  loadTimeline,
+  barDates,
   barGeometry,
   buildRows,
   countCategories,
   datedRows,
   dayNumber,
-  dayString,
-  decodeSchedules,
   dependencyLines,
   filterRows,
   isWeekend,
@@ -77,29 +78,24 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [notice, setNotice] = useState<string | null>(null);
   const [rawCount, setRawCount] = useState(0);
   const [detail, setDetail] = useState<Issue | null>(null);
+  const [nestedNote, setNestedNote] = useState(false);
 
   const load = useCallback(async () => {
     setPhase("loading");
     setError(null);
-    try {
-      const qs = new URLSearchParams({ provider, state: "all", limit: String(CORE_LIST_CAP) });
-      const [i, s] = await Promise.all([
-        deps.request("GET", `/kb/issues?${qs.toString()}`),
-        deps.request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider, repo }).toString()}`),
-      ]);
-      if (i.status !== 200 || s.status !== 200) {
-        setPhase("error");
-        setError(i.status === 401 || s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule.");
-        return;
-      }
-      setIssues(decodeIssues(i.body));
-      setRawCount(rawIssueCount(i.body));
-      setSchedules(decodeSchedules(s.body));
-      setPhase("ready");
-    } catch {
+    // Cleared first so a failed load or a retry never shows the previous project's hint.
+    setNestedNote(false);
+    const r = await loadTimeline(deps.request, provider, repo);
+    setNestedNote(r.nestedHint);
+    if (!r.ok) {
       setPhase("error");
-      setError("The core is not reachable right now.");
+      setError(r.error);
+      return;
     }
+    setIssues(r.issues);
+    setRawCount(r.rawCount);
+    setSchedules(r.schedules);
+    setPhase("ready");
   }, [deps, provider, repo]);
 
   useEffect(() => {
@@ -211,6 +207,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         <label className="gnt-field"><span>Until</span><input type="date" value={until} onChange={(e) => setUntil(e.target.value)} /></label>
         <label className="gnt-check"><input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} /><span>Hide undated</span></label>
       </div>
+      {nestedNote ? <p className="gnt-hint">{GANTT_NESTED_HINT}</p> : null}
       {isCapped(rawCount) ? <p className="gnt-hint">Showing the first {CORE_LIST_CAP} issues; the core returns at most that many per list.</p> : null}
 
       {error ? <StatusBanner severity="error" message={error} /> : null}
@@ -277,7 +274,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                           className="gnt-bar"
                           style={{ left: g.left, width: g.width }}
                           data-selected={selected?.issue.id === r.issue.id || undefined}
-                          title={`${r.issue.title}\n${r.start !== null ? dayString(r.start) : ""} → ${r.end !== null ? dayString(r.end) : ""}\nEdit schedule`}
+                          title={`${r.issue.title}\n${barDates(r)}\nEdit schedule`}
                           onClick={() => rowAction(r, "bar")}
                         >
                           {r.dependsOn.length ? <span className="gnt-dep" title={`Depends on #${r.dependsOn.join(", #")}`}>⤷</span> : null}
@@ -314,11 +311,6 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           onClose={() => setDetail(null)}
           onNotice={setNotice}
           onScheduleChanged={() => void load()}
-          onEditSchedule={() => {
-            // The Mac's row "Edit Schedule…": reachable for undated rows too (they have no bar to click).
-            const row = baseRows.find((r) => r.issue.id === detail.id);
-            if (row) { setDetail(null); setSelected(row); }
-          }}
         />
       ) : null}
 

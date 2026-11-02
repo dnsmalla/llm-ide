@@ -2,7 +2,7 @@
 // math the timeline needs. GitHub issues have no dates; the overlay supplies start/due/estimate/dependency, and
 // this model decides each bar's span exactly as the Mac's GanttViewModel does (dates win, estimate fills a missing
 // end or start). Undated issues are kept in a separate list, never given a made-up span.
-import type { Issue } from "../issues/issues-model.ts";
+import { CORE_LIST_CAP, decodeIssues, overlayRepoSupported, rawIssueCount, type Issue } from "../issues/issues-model.ts";
 
 
 /** GitHub titles imported by the local importer may already start with "#<number>"; don't render it twice. */
@@ -89,6 +89,25 @@ export function decodeSchedules(body: unknown): Schedule[] {
   return out;
 }
 
+/**
+ * Whether an issue can carry a schedule overlay: the core's `/kb/issue-schedule` takes both providers
+ * (kb/issue-schedule.mjs ALLOWED_PROVIDERS), keyed by owner/name and the issue number.
+ */
+export function canSchedule(issue: Pick<Issue, "provider" | "repo" | "number">): boolean {
+  return (issue.provider === "github" || issue.provider === "gitlab") && issue.number !== null && overlayRepoSupported(issue.repo);
+}
+
+/**
+ * The note shown wherever a GitLab row's dates are shown or edited (the schedule editor, the issue's Dates section).
+ * The Mac never uses this overlay for GitLab (GitLabClient+RepoBackend.swift usesScheduleOverlay = false) and edits
+ * GitLab's own due date instead (RepoIssueDetailSheet.swift); the desktop keeps its dates in the local overlay,
+ * so it says plainly that they stay on this computer. Null for GitHub, whose overlay dates are the Mac's too.
+ */
+export const GITLAB_LOCAL_DATES_NOTE = "Saved on this computer only. It is not sent to GitLab.";
+export function localDatesNote(issue: Pick<Issue, "provider">): string | null {
+  return issue.provider === "gitlab" ? GITLAB_LOCAL_DATES_NOTE : null;
+}
+
 /** The schedule key for an issue. */
 export function scheduleKey(provider: string, repo: string, number: number): string {
   return `${provider}\u0000${repo}\u0000${number}`;
@@ -120,16 +139,36 @@ export function buildRows(issues: readonly Issue[], schedules: readonly Schedule
 export const DEFAULT_SPAN_DAYS = 7;
 
 /**
- * A bar's inclusive day span: explicit dates win; one date + estimate (or the Mac's 7-day default) fills the other.
+ * Whole days the Mac draws for an estimate. The Mac measures calendar days between startOfDay of its two instants:
+ * a start-anchored bar ends at startOfDay(start + est), which truncates (2.5 -> 2); a due-anchored bar starts at
+ * startOfDay(due - est), which rounds up (2.5 -> 3). Never less than one day.
+ */
+export function estimateSpanDays(est: number, anchor: "start" | "due"): number {
+  return Math.max(1, anchor === "start" ? Math.floor(est) : Math.ceil(est));
+}
+
+/**
+ * A bar's drawn days, as inclusive day numbers, by the Mac's exact rule (GanttView.swift barGeometry): the bar
+ * starts on startOfDay(startDate) and is max(1, days from startOfDay(startDate) to startOfDay(endDate)) long, so
+ * its end day is NOT drawn. Explicit Jan 5 to Jan 7 covers Jan 5 and Jan 6; a due-only bar with the 7-day default
+ * covers due - 7 to due - 1; a start-only bar covers start to start + estimate - 1. startDate/endDate are the
+ * GanttViewModel's (GanttViewModel.swift startDate/endDate): dates win, an estimate (or the 7-day default) fills
+ * the missing side. Reversed explicit dates draw a one-day bar at the start date (the editor refuses to save them).
  */
 export function span(s: Schedule | null): { start: number | null; end: number | null } {
   if (!s) return { start: null, end: null };
   const start = s.startDate ? dayNumber(s.startDate) : null;
-  const end = s.dueDate ? dayNumber(s.dueDate) : null;
-  const est = s.estimateDays !== null && s.estimateDays >= 0 ? Math.max(1, Math.round(s.estimateDays)) : DEFAULT_SPAN_DAYS;
-  if (start !== null && end !== null) return start <= end ? { start, end } : { start: end, end: start };
-  if (start !== null) return { start, end: start + est - 1 };
-  if (end !== null) return { start: end - est + 1, end };
+  const due = s.dueDate ? dayNumber(s.dueDate) : null;
+  const hasEst = s.estimateDays !== null && s.estimateDays >= 0;
+  const drawn = (from: number, len: number) => ({ start: from, end: from + Math.max(1, len) - 1 });
+  if (start !== null && due !== null) return drawn(start, due - start);
+  // startOfDay(start + est) - start truncates the estimate.
+  if (start !== null) return drawn(start, hasEst ? Math.floor(s.estimateDays!) : DEFAULT_SPAN_DAYS);
+  if (due !== null) {
+    // startOfDay(due - est) rounds the estimate up; a stored 0 starts (and draws one day) on the due day itself.
+    const len = hasEst ? Math.ceil(s.estimateDays!) : DEFAULT_SPAN_DAYS;
+    return drawn(due - len, len);
+  }
   return { start: null, end: null };
 }
 
@@ -192,10 +231,22 @@ export function macBounds(row: Pick<GanttRow, "start" | "end"> & { schedule?: Sc
     const start = s.startDate ? dayNumber(s.startDate) : null;
     const due = s.dueDate ? dayNumber(s.dueDate) : null;
     const est = s.estimateDays !== null && s.estimateDays >= 0 ? s.estimateDays : DEFAULT_SPAN_DAYS;
+    // Both dates: the Mac's endDate is the due date even when it precedes the start (the bar is drawn at the start).
+    if (start !== null && due !== null) return { start, end: due };
     if (start !== null && due === null) return { start, end: start + est };
     if (due !== null && start === null) return { start: due - est, end: due };
   }
   return { start: row.start, end: row.end };
+}
+
+/**
+ * The bar tooltip's dates: the Mac's startDate and endDate days (the schedule's own dates when set), not the drawn
+ * days, since the drawn bar stops the day before its end date.
+ */
+export function barDates(row: Pick<GanttRow, "start" | "end"> & { schedule?: Schedule | null }): string {
+  const b = macBounds(row);
+  const fmt = (d: number | null) => (d === null ? "" : dayString(Math.floor(d)));
+  return `${fmt(b.start)} → ${fmt(b.end)}`;
 }
 
 export function rowCategory(row: Pick<GanttRow, "issue" | "end"> & { start?: number | null; schedule?: Schedule | null }, today: number): GanttCategory {
@@ -332,7 +383,7 @@ export function scheduleSaveBody(draft: ScheduleDraft, key: ScheduleKey): Schedu
     return { ok: false, error: "Dates are YYYY-MM-DD or empty." };
   }
   if (draft.start && draft.due && dayNumber(draft.due)! < dayNumber(draft.start)!) {
-    return { ok: false, error: "Due cannot be before start." };
+    return { ok: false, error: "Due date must be on or after the start date." };
   }
   const est = draft.estimate.trim() === "" ? null : Number(draft.estimate);
   // The Mac's stepper is 0..365 days and saves 0 as "no estimate" (nil), which keeps the 7-day default bar.
@@ -347,3 +398,59 @@ export function scheduleSaveBody(draft: ScheduleDraft, key: ScheduleKey): Schedu
  * "Edit Schedule…" (context menu / the detail's Dates Edit), reached here from the bar and from the details.
  */
 export const GANTT_ROW_ACTIONS = { label: "details", bar: "schedule" } as const;
+
+type Request = (method: "GET", path: string) => Promise<{ status: number; body: unknown }>;
+
+/** The hint shown when the chosen project is a nested GitLab path the overlay cannot key. */
+export const GANTT_NESTED_HINT = "Dates are kept per owner/name project; this nested project path has none yet.";
+export const DETAIL_NESTED_HINT = "Dates are kept per owner/name project; this nested project path cannot store them yet.";
+
+export type TimelineLoad =
+  | { ok: true; issues: Issue[]; rawCount: number; schedules: Schedule[]; nestedHint: boolean }
+  | { ok: false; error: string; nestedHint: false };
+
+/**
+ * One Gantt load: the cached issues plus the overlay. A nested-group project is never sent to the overlay (the core
+ * answers 400); its schedule reads as empty and `nestedHint` says why. A failed load never carries the hint, so a
+ * network error or a retry cannot leave a stale one on screen.
+ */
+export async function loadTimeline(request: Request, provider: string, repo: string): Promise<TimelineLoad> {
+  const overlayOk = repo === "" || overlayRepoSupported(repo);
+  try {
+    const qs = new URLSearchParams({ provider, state: "all", limit: String(CORE_LIST_CAP) });
+    const [i, s] = await Promise.all([
+      request("GET", `/kb/issues?${qs.toString()}`),
+      overlayOk
+        ? request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider, repo }).toString()}`)
+        : Promise.resolve({ status: 200, body: { schedules: [] } as unknown }),
+    ]);
+    if (i.status !== 200 || s.status !== 200) {
+      return { ok: false, nestedHint: false, error: i.status === 401 || s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule." };
+    }
+    return { ok: true, issues: decodeIssues(i.body), rawCount: rawIssueCount(i.body), schedules: decodeSchedules(s.body), nestedHint: !overlayOk };
+  } catch {
+    return { ok: false, nestedHint: false, error: "The core is not reachable right now." };
+  }
+}
+
+/**
+ * The issue detail's Dates section: shown (and read) only for an overlay-keyable row; a numbered row on a nested
+ * project path gets the hint instead and never sends a schedule request.
+ */
+export function issueDatesView(issue: Pick<Issue, "provider" | "repo" | "number">): { schedulable: boolean; nestedHint: string | null } {
+  return { schedulable: canSchedule(issue), nestedHint: issue.number !== null && !overlayRepoSupported(issue.repo) ? DETAIL_NESTED_HINT : null };
+}
+
+export type IssueScheduleRead = { kind: "skipped" } | { kind: "ok"; schedule: Schedule | null } | { kind: "error"; error: string };
+
+/** The detail's schedule read; a row that cannot be scheduled (nested path, no number) is skipped without a request. */
+export async function readIssueSchedule(request: Request, issue: Pick<Issue, "provider" | "repo" | "number">): Promise<IssueScheduleRead> {
+  if (!canSchedule(issue)) return { kind: "skipped" };
+  try {
+    const r = await request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider: issue.provider, repo: issue.repo }).toString()}`);
+    if (r.status !== 200) return { kind: "error", error: `The schedule could not be read (${r.status}).` };
+    return { kind: "ok", schedule: decodeSchedules(r.body).find((s) => s.provider === issue.provider && s.repo === issue.repo && s.issueNumber === issue.number) ?? null };
+  } catch {
+    return { kind: "error", error: "The core is not reachable right now." };
+  }
+}

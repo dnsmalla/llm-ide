@@ -156,14 +156,14 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       <div className="iss-sub">
         <label className="iss-field">
           <span>Saved repository</span>
-          <select value={configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo) ? filters.repo : ""} onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value }))}>
+          <select value={configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo) ? filters.repo : ""} onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value, repoExact: true }))}>
             <option value="">All repositories</option>
             {configuredRepos.filter((r) => r.provider === filters.provider).map((r) => <option key={r.id} value={r.slug}>{r.displayName || r.slug}</option>)}
           </select>
         </label>
         <label className="iss-field iss-grow">
           <span>Repository filter</span>
-          <input list="iss-repos" value={filters.repo} placeholder="owner/name" onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value }))} />
+          <input list="iss-repos" value={filters.repo} placeholder="owner/name" onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value, repoExact: false }))} />
           <datalist id="iss-repos">{repos.map((r) => <option key={r} value={r} />)}</datalist>
         </label>
         <label className="iss-field">
