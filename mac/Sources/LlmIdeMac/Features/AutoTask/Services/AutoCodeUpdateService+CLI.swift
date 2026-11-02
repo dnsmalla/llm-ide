@@ -596,13 +596,26 @@ extension AutoCodeUpdateService {
             .joined(separator: "-")
     }
 
+    /// Review tasks are the one unattended path where a stalled provider/CLI
+    /// call can otherwise wait forever. Thirty minutes is deliberately well
+    /// above a normal review, but short enough that a hung run is visible.
+    static let reviewWallClock: TimeInterval = 30 * 60
+
+    struct ProcessExitOutcome: Sendable {
+        let ok: Bool
+        let timedOut: Bool
+        let cancelled: Bool
+    }
+
     /// Launch `process` and wait for it to exit. Stop (task cancellation) and
     /// the resource guard both tear down the WHOLE process tree via
     /// `terminateWithKillFallback`; the continuation is resumed only by the
     /// process's own termination, so callers never remove a worktree while
-    /// descendants are still writing into it.
-    func awaitProcessExit(_ process: Process, guardLabel: String) async -> Bool {
+    /// descendants are still writing into it. `timeout` is opt-in; prompt
+    /// review runs pass it so a hung CLI cannot run for hours.
+    func awaitProcessExit(_ process: Process, guardLabel: String, timeout: TimeInterval? = nil) async -> ProcessExitOutcome {
         var guardToken: ResourceGuardService.Registration?
+        let timeoutHit = OSAllocatedUnfairLock(initialState: false)
         let result = await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
                 let resumed = OSAllocatedUnfairLock(initialState: false)
@@ -626,6 +639,13 @@ extension AutoCodeUpdateService {
                 if Task.isCancelled {
                     Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
                 }
+                if let timeout {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                        guard process.isRunning else { return }
+                        timeoutHit.withLock { $0 = true }
+                        Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
+                    }
+                }
                 // Resource guard (replaces the old timeout watchdog): triggered
                 // by machine risk, not a clock. Same tree-wide teardown as Stop;
                 // the terminationHandler above resumes once the process is gone.
@@ -639,7 +659,7 @@ extension AutoCodeUpdateService {
             Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
         }
         guardToken?.cancel()
-        return result
+        return ProcessExitOutcome(ok: result, timedOut: timeoutHit.withLock { $0 }, cancelled: Task.isCancelled)
     }
 
     /// What one issue run produced. `committed` is the ground truth the caller
@@ -859,7 +879,7 @@ extension AutoCodeUpdateService {
         // below is exposed precisely so cancel() can terminate it), or
         // ResourceGuardService stops it under sustained critical memory pressure.
         activeProcess = process
-        let processOK = await awaitProcessExit(process, guardLabel: "auto task CLI")
+        let processOK = (await awaitProcessExit(process, guardLabel: "auto task CLI")).ok
         let wasCancelled = Task.isCancelled
         let wasAborted = wasCancelled || process.terminationReason == .uncaughtSignal
         activeProcess = nil
@@ -1181,7 +1201,16 @@ extension AutoCodeUpdateService {
         // No wall clock — same reasoning as the run above. Cancellation goes
         // through activeProcess; the machine is protected by ResourceGuardService.
         activeProcess = process
-        let processOK = await awaitProcessExit(process, guardLabel: "auto task CLI (stream)")
+        let exit = await awaitProcessExit(process, guardLabel: "auto task CLI (stream)",
+                                          timeout: purposeMode == "review" ? Self.reviewWallClock : nil)
+        let processOK = exit.ok
+        if exit.timedOut {
+            let message = "Timed out after \(Int(Self.reviewWallClock / 60)) minutes."
+            try? logFileHandle?.write(contentsOf: Data((message + "\n").utf8))
+            logStore.append(logStoreId, message, level: .error)
+            lastError = message
+            taskErrors[logStoreId] = message
+        }
         let wasCancelled = Task.isCancelled
         let wasAborted = wasCancelled || process.terminationReason == .uncaughtSignal
         let claudeResult = meteredOut.map { ClaudeCLI.parseRunResult($0.finish()) }
