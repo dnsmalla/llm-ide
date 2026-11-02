@@ -7,6 +7,7 @@ import {
   decodeClearResult,
   decodeCompactResult,
   decodeStorageReport,
+  type AgentHistoryHealth,
   type AgentHistorySettings,
   type ClearResult,
   type ClearScope,
@@ -40,7 +41,26 @@ export function rowLabel(key: string): string {
 export function scopeSentence(scope: ClearScope, age: ClearAge): string {
   const what = scope === "raw" ? "raw history (runs and tool events); the daily summaries are kept" : "all agent history, including the daily summaries";
   const when = age === "all" ? "" : ` older than ${beforeDaysOf(age)} days`;
-  return `This deletes ${what}${when}. It cannot be undone.`;
+  return `This deletes ${what}${when}. It cannot be undone. Runs still in progress are kept.`;
+}
+
+/** A stored ISO time as the user's locale, or the raw text when it does not parse. */
+export function whenText(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * The store-health lines under Storage, worded as the Mac's AgentHistorySettingsCard does. Raw counts come from
+ * the core's `agentHistory`; when there is none and the store reports down, the restart advice is shown instead.
+ */
+export function healthLines(h: AgentHistoryHealth | null, storeHealth: string | null): { text: string; warn: boolean }[] {
+  if (!h) return storeHealth === "down" ? [{ text: "The agent history store is down. Restart the backend to reopen it.", warn: true }] : [];
+  const out: { text: string; warn: boolean }[] = [];
+  if (h.rawFromDay) out.push({ text: `Raw rows from ${h.rawFromDay}: ${h.rawRows}. Rolled-up days: ${h.rolledDays}${h.oldestDay ? `, oldest ${h.oldestDay}` : ""}.`, warn: false });
+  if (h.droppedRows > 0) out.push({ text: `${h.droppedRows} rows were dropped by the write queue since the store was created.`, warn: false });
+  if (h.quarantinedAt) out.push({ text: `The store was reset after damage on ${whenText(h.quarantinedAt)}.`, warn: true });
+  return out;
 }
 
 export function formatBytes(n: number): string {

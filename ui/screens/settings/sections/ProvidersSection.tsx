@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { SettingsSectionCard, RefreshIcon, PlusIcon, StatusBanner } from "@llmide/ui-kit";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
-import { CLAUDE_COMPATIBLE_ID, CLAUDE_COMPATIBLE_LIMITS, CLAUDE_COMPATIBLE_PROVIDER, ProvidersApi, ProvidersModel, addChoices, contextText, newConnectForm, rowDetail, sortModels, toolsBadge, overrideKey, type ConnectForm, type ProviderRow } from "../providers-model.ts";
+import { CLAUDE_COMPATIBLE_ID, CLAUDE_COMPATIBLE_LIMITS, CLAUDE_COMPATIBLE_PROVIDER, ProvidersApi, ProvidersModel, addChoices, contextText, hasLegacyKeyNote, newConnectForm, rowDetail, sortModels, toolsBadge, overrideKey, type ConnectForm, type ProviderRow } from "../providers-model.ts";
 import { keyStatusLabel } from "../secret-field.ts";
 import { describeError } from "../errors.ts";
 import { filterBy } from "../virtual.ts";
 import type { ModelList } from "../decoders.ts";
 import { Button, ErrorText, Field, SecretInput, Switch, VirtualList } from "../ui.tsx";
 import { BuiltinProviders } from "./BuiltinProviders.tsx";
+import { MIGRATION_TEXT } from "../routing-model.ts";
 
 export default function ProvidersSection() {
   const { client } = useEnv();
@@ -31,6 +32,12 @@ export default function ProvidersSection() {
         <Button tone="primary" onClick={() => setAdding(!adding)}><PlusIcon /> Add from catalog</Button>
       </div>
       <ErrorText text={s.error} />
+      {s.catalog?.migration && (s.catalog.migration.created.length > 0 || s.catalog.migration.needsReview.length > 0) ? (
+        <div className="st-stack" role="group" aria-label="Provider upgrade">
+          {s.catalog.migration.created.length > 0 ? <p className="st-hint">{MIGRATION_TEXT.created(s.catalog.migration.created.map((c) => c.name))}</p> : null}
+          {s.catalog.migration.needsReview.map((r) => <StatusBanner key={r.provider} severity="warning" message={MIGRATION_TEXT.reviewHere(r.name, r.reason)} />)}
+        </div>
+      ) : null}
       {adding && s.catalog ? <AddPanel model={model} onDone={() => setAdding(false)} /> : null}
       {s.pendingRemove ? (
         <div className="st-dialog" role="alertdialog" aria-label={`Remove ${s.pendingRemove.name}`}>
@@ -62,6 +69,7 @@ export default function ProvidersSection() {
                 <div className="st-item-text">
                   <strong>{r.name}</strong>
                   <span className="st-hint">{r.kindLabel} · {rowDetail(r)}</span>
+                  {hasLegacyKeyNote(r, s.storedKeyNames) ? <span className="st-hint">An older key for this provider is also stored. It is kept, not deleted.</span> : null}
                   {t ? <span className={t.ok ? "st-ok" : "st-error"} title={t.detail || undefined}>{t.summary}</span> : null}
                 </div>
                 <span className="st-status" data-tone={r.hasKey || !r.keyRequired ? "ok" : "warning"}>{keyStatusLabel(r.hasKey, r.keyRequired)}</span>

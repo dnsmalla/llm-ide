@@ -47,7 +47,11 @@ export const LOG_TEXT = {
   clear: "Clear log",
   clearConfirm: "Clear this log?",
   cleared: "Log cleared.",
+  autoScroll: "Auto-scroll",
 } as const;
+
+/** How often the open Backend log group re-reads the core's log tail (the host caps the file it reads). */
+export const LOG_POLL_MS = 2000;
 
 /** The most the page accepts from the host, even though the host caps the file it reads. */
 export const MAX_LOG_CHARS = 64 * 1024;

@@ -9,6 +9,7 @@ import {
   decodeModelList,
   decodeProviderSettings,
   decodeRemoved,
+  decodeSecretNames,
   decodeTestResult,
   type Catalog,
   type CatalogProvider,
@@ -22,6 +23,7 @@ import {
 import { describeError } from "./errors.ts";
 import { SecretField, scrubSecrets } from "./secret-field.ts";
 import { Store } from "./store.ts";
+import { connectBaseUrlIssue } from "./base-url-rule.ts";
 
 export const OPENAI_KIND_LABEL = "OpenAI-compatible (adapter)";
 export const CLAUDE_KIND_LABEL = "Claude-compatible (Claude engine)";
@@ -180,6 +182,11 @@ function parseUrl(raw: string): URL | null {
   }
 }
 
+/** The base-URL refusal for a connect (the core's rule, ported in base-url-rule.ts), or null when the core accepts it. */
+export function baseUrlIssue(entry: CatalogProvider, baseURL: string, allowPrivate: boolean): string | null {
+  return connectBaseUrlIssue(entry, baseURL.trim(), allowPrivate);
+}
+
 /** Client-side checks that mirror the server's, so most mistakes never leave the page. The server stays authoritative. */
 export function validateConnect(p: CatalogProvider, f: ConnectForm): FormIssue[] {
   const issues: FormIssue[] = [];
@@ -192,10 +199,11 @@ export function validateConnect(p: CatalogProvider, f: ConnectForm): FormIssue[]
     const u = parseUrl(f.baseURL);
     if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
       issues.push({ field: "baseURL", message: "Enter the full address, starting with https://" });
-    } else if (u.protocol === "http:" && !f.allowPrivate) {
-      issues.push({ field: "baseURL", message: "http:// is only allowed for a private-network address you opted into. Use https://, or tick the private-network box." });
     } else if (u.username || u.password) {
       issues.push({ field: "baseURL", message: "Do not put a user name or password in the address. Use the key field." });
+    } else {
+      const why = baseUrlIssue(p, f.baseURL, f.allowPrivate);
+      if (why) issues.push({ field: "baseURL", message: why });
     }
   }
   if (f.slug.trim() && !SLUG.test(f.slug.trim())) {
@@ -296,6 +304,10 @@ export class ProvidersApi {
   async custom(signal?: AbortSignal): Promise<CustomEndpoint[]> {
     return decodeCustomEndpoints(await call(this.#c, "GET", "/kb/providers/custom", undefined, signal));
   }
+  /** Vault key NAMES only (GET /auth/me/secrets). Used for the "older key also stored" note, never a value. */
+  async storedKeyNames(signal?: AbortSignal): Promise<string[]> {
+    return decodeSecretNames(await call(this.#c, "GET", "/auth/me/secrets", undefined, signal));
+  }
   async catalog(signal?: AbortSignal): Promise<Catalog> {
     return decodeCatalog(await call(this.#c, "GET", "/kb/providers/catalog", undefined, signal));
   }
@@ -316,8 +328,15 @@ export class ProvidersApi {
   }
 }
 
+/** The one-time carry-over left the older built-in key (`openai.apiKey` ...) in the vault beside the connection. */
+export function hasLegacyKeyNote(row: ProviderRow, storedKeyNames: readonly string[]): boolean {
+  return COPYABLE_LEGACY_KEYS.includes(row.catalogId) && storedKeyNames.includes(`${row.catalogId}.apiKey`);
+}
+
 export interface ProvidersState {
   phase: "idle" | "loading" | "ready" | "failed";
+  /** Key names the user has stored (never values). */
+  storedKeyNames: string[];
   catalog: Catalog | null;
   rows: ProviderRow[];
   /** Claude-compatible endpoints (managed and Mac-synced). */
@@ -339,7 +358,7 @@ export class ProvidersModel extends Store<ProvidersState> {
   #abort: AbortController | null = null;
 
   constructor(api: ProvidersApi) {
-    super({ phase: "idle", catalog: null, rows: [], custom: [], customRoute: "unknown", error: null, busy: new Set(), testResults: {}, pendingRemove: null, adding: false });
+    super({ phase: "idle", catalog: null, rows: [], custom: [], customRoute: "unknown", storedKeyNames: [], error: null, busy: new Set(), testResults: {}, pendingRemove: null, adding: false });
     this.#api = api;
   }
 
@@ -351,6 +370,7 @@ export class ProvidersModel extends Store<ProvidersState> {
     const gen = ++this.#generation;
     this.set({ phase: this.getState().catalog ? "ready" : "loading", error: null });
     // The Claude-compatible list is optional: a core without the route (404) or a failure there never blocks the catalog.
+    const namesP = this.#api.storedKeyNames(ac.signal).then((names) => names, () => null);
     const customP = this.#api.custom(ac.signal).then(
       (custom) => ({ custom, route: "ok" as const }),
       (e: unknown) => ({ custom: null, route: e instanceof ApiError && e.status === 404 ? ("unsupported" as const) : ("failed" as const) }),
@@ -358,9 +378,10 @@ export class ProvidersModel extends Store<ProvidersState> {
     try {
       const catalog = await this.#api.catalog(ac.signal);
       const c = await customP;
+      const names = await namesP;
       if (gen !== this.#generation) return;
       const keep = c.custom ?? (c.route === "failed" ? this.getState().custom : []);
-      this.set({ phase: "ready", catalog, custom: keep, customRoute: c.route, rows: [...rowsFromCatalog(catalog), ...rowsFromCustom(keep)] });
+      this.set({ phase: "ready", catalog, custom: keep, customRoute: c.route, rows: [...rowsFromCatalog(catalog), ...rowsFromCustom(keep)], storedKeyNames: names ?? this.getState().storedKeyNames });
     } catch (e) {
       if (gen !== this.#generation) return;
       this.set({ phase: this.getState().catalog ? "ready" : "failed", error: describeError(e) });
@@ -406,11 +427,19 @@ export class ProvidersModel extends Store<ProvidersState> {
   /** Re-sends the connection with an edited name/address; no key is sent, so the stored key is kept. */
   async update(row: ProviderRow, patch: { name?: string; baseURL?: string; allowPrivate?: boolean }): Promise<boolean> {
     if (this.getState().busy.has(row.id) || row.readOnly) return false;
+    const allowPrivate = patch.allowPrivate ?? row.allowPrivate;
+    const baseURL = (patch.baseURL ?? row.baseURL).trim();
+    // Same rule as Add, with the row's catalog entry; an entry this page cannot see is left to the core.
+    const entry = row.catalogId === CLAUDE_COMPATIBLE_CATALOG_ID ? CLAUDE_COMPATIBLE_PROVIDER : this.getState().catalog?.providers.find((p) => p.id === row.catalogId);
+    const httpIssue = baseURL && entry ? baseUrlIssue(entry, baseURL, allowPrivate) : null;
+    if (httpIssue) {
+      this.set({ error: httpIssue });
+      return false;
+    }
     this.#mark(row.id, true);
     this.#generation++;
     try {
-      const body: ConnectBody & { enabled: boolean } = { catalogId: row.catalogId, enabled: row.enabled, name: (patch.name ?? row.name).trim(), allowPrivate: patch.allowPrivate ?? row.allowPrivate };
-      const baseURL = (patch.baseURL ?? row.baseURL).trim();
+      const body: ConnectBody & { enabled: boolean } = { catalogId: row.catalogId, enabled: row.enabled, name: (patch.name ?? row.name).trim(), allowPrivate };
       if (baseURL) body.baseURL = baseURL;
       const slug = slugOfRow(row);
       if (slug !== null) body.slug = slug;

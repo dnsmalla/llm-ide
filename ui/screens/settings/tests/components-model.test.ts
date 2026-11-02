@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  LOG_POLL_MS,
+  LOG_TEXT,
   MAX_LOG_CHARS,
   componentError,
   componentStateLabel,
@@ -82,4 +84,9 @@ test("component errors: host codes become plain sentences; a raw string is kept 
   assert.equal(componentError("x".repeat(500)).length, 200);
   assert.equal(componentError(new Error("boom")), "boom");
   assert.equal(componentError({}), "The action failed.");
+});
+
+test("Backend log: the auto-scroll label and the poll interval", () => {
+  assert.equal(LOG_TEXT.autoScroll, "Auto-scroll");
+  assert.equal(LOG_POLL_MS, 2000);
 });

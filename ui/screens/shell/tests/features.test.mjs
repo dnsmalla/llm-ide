@@ -9,6 +9,7 @@ import {
   PRESETS,
   compiledFeatures,
   dependentsOf,
+  disabledSectionText,
   featuresFromPrefs,
   isSectionEnabled,
   presetFor,
@@ -74,4 +75,12 @@ test("the screen loader no longer globs every screen, so a disabled feature's ch
   for (const flag of ["__FEATURE_FILE_EXPLORER__", "__FEATURE_CODE_GRAPH_3D__", "__FEATURE_DOC_GEN__"]) {
     assert.ok(src.includes(flag), `${flag} must guard its loader`);
   }
+});
+
+test("a section that is switched off says so and where to turn it on; a compiled-out one says it is not in the build", () => {
+  const usable = new Set(["file_explorer"]);
+  assert.equal(isSectionEnabled("issues", usable), false);
+  assert.equal(disabledSectionText("issues", "Issues", new Set(["gantt_issues"])), "Issues is currently disabled. You can re-enable this feature in Settings → Workspace.");
+  assert.equal(disabledSectionText("issues", "Issues", new Set()), "Issues is not included in this build.");
+  assert.equal(disabledSectionText("library", "Library", new Set()), "Library is currently disabled. You can re-enable this feature in Settings → Workspace.");
 });

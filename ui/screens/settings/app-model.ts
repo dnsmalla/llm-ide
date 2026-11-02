@@ -99,8 +99,10 @@ export const SDK_TEXT = {
   hint: "The chat engine runs on Anthropic's Claude Agent SDK. Updating installs the newest release in the backend's folder; a release that fails to load is rolled back.",
   remoteOff: "Updates are disabled while the backend accepts remote connections.",
   confirmWord: "UPDATE",
-  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, restart the app to run the new version.",
-  restartNote: "Restart the app to run the installed version.",
+  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, restart the backend to run the new version.",
+  restartNote: "Restart the backend to run the installed version.",
+  restartTitle: "Restart the backend?",
+  restartBody: "Any chat reply or Loop run still in progress is stopped and has to be started again.",
 } as const;
 
 /** The update log as plain text: credential-scrubbed and bounded (it is npm output, shown only as text). */
@@ -172,7 +174,7 @@ export const isLanguage = (v: unknown): v is string => typeof v === "string" && 
 export const PREFS_TEXT = {
   languageHint: "Language drives every LLM output (notes, plans, agent questions) and applies on this app and the Chrome extension once signed in.",
   nativeTitle: "Let plugins load natively",
-  nativeHint: "Claude-format plugins are loaded by the agent engine itself, which then runs their hooks (and background monitors, language servers and bin/ commands) as their author wrote them.",
+  nativeHint: "Claude-format plugins are loaded by the agent engine itself, which then runs their hooks (and background monitors, language servers and bin/ commands) as their author wrote them. Their skills, commands and agents are offered through LLM-IDE's own paths either way. Turn this off to fall back to LLM-IDE's own hook handling. Either way, those parts only run once you trust the plugin, and its MCP servers still need your consent.",
 } as const;
 
 export interface PrefsState {

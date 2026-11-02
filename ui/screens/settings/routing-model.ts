@@ -20,6 +20,18 @@ export const ROLES: readonly { id: string; label: string }[] = [
 
 /** Notes next to switches that only apply when the backend next starts (a restart would end a running turn). */
 export const NEXT_START_NOTE = "Applies the next time the backend starts.";
+/** The upgrade-path words, as the Mac's ProviderMigrationText says them (Core/Platform/ProviderMigrationText.swift). */
+export const MIGRATION_TEXT = {
+  created: (names: string[]) => `Your existing ${names.join(", ")} ${names.length === 1 ? "key was" : "keys were"} added as catalog connections. The old keys are kept.`,
+  review: (name: string, reason: string) => `${name} needs review: it was not carried over (${reason}). Connect it in Providers once the address is fixed.`,
+  /** The Providers list's own wording (ProviderMigrationText.reviewLine): the connect form is right there. */
+  reviewHere: (name: string, reason: string) => `${name} needs review: it was not carried over (${reason}). Connect it below once the address is fixed.`,
+  routerNeeded: "Chat on these models runs through the session router. Turning it on applies the next time the backend starts.",
+  routerPending: "The session router is on; it applies the next time the backend starts.",
+  tools: "Tool turns can read files and run commands, subject to your approvals. Without this, these models still answer in ask and document modes.",
+  routerButton: "Turn on the session router",
+};
+
 export const SWITCH_TEXT = {
   tools: "Lets a model with the tools badge read files, search and run commands in a chat turn, under the same approvals as Claude; off, these providers answer without tools.",
   egress: "Off by default: fetch-url and web-search ask first on these providers, because a hostile page can steer a model into sending what it has read.",

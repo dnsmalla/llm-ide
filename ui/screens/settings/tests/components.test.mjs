@@ -52,6 +52,7 @@ before(async () => {
       registryDefault: join(SETTINGS, "registry-default.ts"),
       historyModel: join(SETTINGS, "agent-history-model.ts"),
       secret: join(SETTINGS, "secret-field.ts"),
+      routing: join(SETTINGS, "sections/RoutingSection.tsx"),
     },
     outdir,
     bundle: true,
@@ -69,7 +70,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -373,4 +374,42 @@ test("General: synced prefs say Saving… during a save and offer Retry after a 
   const idle = html(h(m.general.PrefsBlock, { m: model, s: { ...loaded, saving: false, saved: true } }));
   assert.ok(!idle.includes("Saving…"));
   assert.match(idle, />Saved\.</);
+});
+
+test("Routing: a failed provider-settings load shows the error with Retry, not 'Connect a provider'", async () => {
+  const client = { async request(method, path) { if (path === "/kb/providers/catalog") throw new Error("core down"); return { status: 404, body: {} }; } };
+  const providers = m.context.sharedProvidersModel(client);
+  await providers.load();
+  const out = html(h(m.context.SettingsEnvProvider, { env: env(client) }, h(m.routing.default)));
+  assert.match(out, /Couldn&#x27;t load the provider settings|Couldn't load the provider settings/);
+  assert.match(out, /<button[^>]*>Retry<\/button>/);
+  assert.ok(!out.includes("Connect a provider in Providers"), "a failed load is not reported as having no connections");
+});
+
+test("Routing: the one-time key carry-over names what was added and what needs review, without keys", async () => {
+  const cat = fx("provider-catalog/get-kb-providers-catalog-200.json").response;
+  const catalog = { providers: cat.providers, settings: fx("provider-catalog/get-kb-providers-settings-200.json").response, migration: cat.migration };
+  const client = { async request(method, path) { return path === "/kb/providers/catalog" ? { status: 200, body: catalog } : { status: 404, body: {} }; } };
+  const providers = m.context.sharedProvidersModel(client);
+  await providers.load();
+  const out = html(h(m.context.SettingsEnvProvider, { env: env(client) }, h(m.routing.default)));
+  assert.match(out, /Your existing DeepSeek key was added as catalog connections/);
+  assert.match(out, /Lab box needs review/);
+  assert.match(out, /SSRF guard/);
+  assert.ok(!/sk-|api_key/i.test(out));
+});
+
+test("Server & Backend: the log has an Auto-scroll checkbox that starts on, and the group re-reads the log while open", () => {
+  const e = {
+    client: { request: async () => ({ status: 200, body: {} }) },
+    host: {
+      diagnostics: async () => ({ appVersion: "0.0.0", coreTrust: "spawned", coreLogPath: "/d/core.log", platform: "macOS", coreUrl: "http://127.0.0.1:3457", coreState: "ready" }),
+      copyText: async () => {},
+      coreLog: async () => ({ path: "/d/core/server.log", text: "line", exists: true }),
+      clearCoreLog: async () => {},
+    },
+  };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.server.default)));
+  assert.match(out, /<button[^>]*role="checkbox"[^>]*aria-checked="true"[^>]*>Auto-scroll<\/button>/, "Auto-scroll is a labelled checkbox, on by default");
+  assert.ok(m.componentsModel.LOG_POLL_MS >= 1000 && m.componentsModel.LOG_POLL_MS <= 5000, "the open log is re-read every few seconds");
 });

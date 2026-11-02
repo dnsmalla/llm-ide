@@ -25,7 +25,9 @@ import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } fro
 import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
 import { featureStore } from "./feature-store";
-import { isSectionEnabled } from "./features";
+import { disabledSectionText, isSectionEnabled } from "./features";
+import { quickSwitchRows } from "./menu-model";
+import { coreApiWarning } from "./core-api-floor";
 
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
@@ -73,6 +75,18 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const main = useRef<HTMLElement>(null);
 
   const bypass = nav.active === "spike";
+  const [sectionNotice, setSectionNotice] = useState<string | null>(null);
+  const [apiWarning, setApiWarning] = useState<string | null>(null);
+  // Checked each time the core comes up (the public /health route; no token needed).
+  useEffect(() => {
+    if (view.down) return;
+    let live = true;
+    core.request<{ apiVersion?: unknown }>("/health", { auth: false }).then(
+      (h) => { if (live) setApiWarning(coreApiWarning(h?.apiVersion)); },
+      () => { if (live) setApiWarning(null); },
+    );
+    return () => { live = false; };
+  }, [view.down]);
   const gate = computeGate({ view, signedIn: session.signedIn, everUsable: everUsable.current, bypass });
   if (gate === "open" && !bypass) everUsable.current = true;
   const mount = shouldMountSections(gate, everUsable.current) && (projectLoaded || bypass);
@@ -116,6 +130,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => {
     if (!features.ready) return;
     if (nav.active !== "welcome" && !isSectionEnabled(nav.active, features.usable)) {
+      const label = SECTIONS.find((s) => s.id === nav.active)?.label ?? "This section";
+      setSectionNotice(disabledSectionText(nav.active, label, features.compiled));
       dispatch({ type: "select", id: usableHome() });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -210,6 +226,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
+          {apiWarning && <StatusBanner severity="warning" message={apiWarning} />}
+          {sectionNotice && (
+            <div className="sh-notice" role="status" data-testid="section-notice">
+              <p>{safeText(sectionNotice, 300)}</p>
+              <button type="button" className="sh-button" onClick={() => setSectionNotice(null)}>Dismiss</button>
+            </div>
+          )}
           {notice && gate === "open" && (
             <div className="sh-notice" role="status" data-testid="project-notice">
               <p>{safeText(notice, 400)}</p>
@@ -252,7 +275,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       /> : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
-      {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
+      {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} activeRoot={project?.root ?? null} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
     </div>
   );
 }
@@ -269,11 +292,11 @@ function ApprovalBadge({ onReveal }: { onReveal: () => void }) {
 }
 
 
-function QuickSwitchDialog({ recent, onOpen, onClose }: { recent: readonly import("./host").RecentEntry[]; onOpen: (index: number) => void; onClose: () => void }): ReactNode {
+function QuickSwitchDialog({ recent, activeRoot, onOpen, onClose }: { recent: readonly import("./host").RecentEntry[]; activeRoot: string | null; onOpen: (index: number) => void; onClose: () => void }): ReactNode {
   const [q, setQ] = useState("");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
-  const shown = recent.map((r, index) => ({ r, index })).filter(({ r }) => !q || `${r.name} ${r.root}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = quickSwitchRows(recent, activeRoot, q).map(({ entry, index }) => ({ r: entry, index }));
   return (
     <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-quick-title">
       <div className="sh-modal-card">

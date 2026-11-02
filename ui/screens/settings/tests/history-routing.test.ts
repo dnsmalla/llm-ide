@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AgentHistoryModel, CLEAR_CONFIRM_WORD, clearConfirmed, compactSuccess, formatBytes, scopeSentence } from "../agent-history-model.ts";
+import { AgentHistoryModel, CLEAR_CONFIRM_WORD, clearConfirmed, compactSuccess, formatBytes, healthLines, scopeSentence, whenText } from "../agent-history-model.ts";
 import { RoutingModel, TIERS, dropReasonText, isDirty, tierStatusText, validateDraft } from "../routing-model.ts";
 import { decodeCompactResult, decodeRoutingTiers } from "../decoders.ts";
 import { deferred, fakeClient, fixture, reply } from "./helpers.ts";
@@ -193,4 +193,38 @@ test("routing: status sentences explain skipped and non-agent tiers", () => {
   assert.equal(tierStatusText(undefined), "Not checked yet.");
   assert.equal(TIERS.length, 3);
   assert.match(dropReasonText("unknown_feature"), /role/);
+});
+
+test("history health: the store's raw, rolled and dropped counts and a reset after damage are said in plain words (Mac parity)", async () => {
+  const m = new AgentHistoryModel(fakeClient(baseRoutes()));
+  await m.load();
+  const report = m.getState().report!;
+  assert.deepEqual(healthLines(report.agentHistory, report.agentStoreHealth), [
+    { text: "Raw rows from 2026-10-20: 5. Rolled-up days: 3, oldest 2026-09-01.", warn: false },
+  ]);
+  assert.equal(report.agentStoreHealth, "ok");
+  const damaged = healthLines({ rawFromDay: null, rawRows: 0, rolledDays: 0, oldestDay: null, quarantinedAt: "2026-10-30T10:00:00Z", droppedRows: 2 }, "ok");
+  assert.equal(damaged[0]!.text, "2 rows were dropped by the write queue since the store was created.");
+  assert.equal(damaged[1]!.warn, true);
+  assert.match(damaged[1]!.text, /reset after damage on /);
+  assert.deepEqual(healthLines(null, "down"), [{ text: "The agent history store is down. Restart the backend to reopen it.", warn: true }]);
+  assert.deepEqual(healthLines(null, "ok"), []);
+  assert.equal(whenText("not a date"), "not a date");
+});
+
+test("clear: the sentence says runs in progress are kept (the core deletes only non-running runs)", () => {
+  assert.match(scopeSentence("raw", "all"), /Runs still in progress are kept\.$/);
+});
+
+test("the provider upgrade lines are the Mac's ProviderMigrationText words", async () => {
+  const { MIGRATION_TEXT } = await import("../routing-model.ts");
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { REPO } = await import("./helpers.ts");
+  const swift = readFileSync(join(REPO, "mac/Sources/LlmIdeMac/Core/Platform/ProviderMigrationText.swift"), "utf8");
+  assert.equal(MIGRATION_TEXT.created(["DeepSeek"]), "Your existing DeepSeek key was added as catalog connections. The old keys are kept.");
+  assert.equal(MIGRATION_TEXT.reviewHere("LAN", "http to a public host"), "LAN needs review: it was not carried over (http to a public host). Connect it below once the address is fixed.");
+  assert.ok(swift.includes("added as catalog connections. The old keys are kept."));
+  assert.ok(swift.includes("needs review: it was not carried over (\\(reason)). Connect it below once the address is fixed."));
+  for (const s of [MIGRATION_TEXT.routerNeeded, MIGRATION_TEXT.routerPending, MIGRATION_TEXT.tools]) assert.ok(swift.includes(s), s);
 });

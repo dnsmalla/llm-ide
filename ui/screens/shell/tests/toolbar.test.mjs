@@ -210,3 +210,12 @@ test("Settings > General developer-tools switch: the adapter exposes it only whe
   assert.equal(nav.devToolsEnabled(), false);
   assert.equal(tb.toolbarSections(nav.devToolsEnabled()).some((d) => d.id === "spike"), false);
 });
+
+test("sign-out copy says what forget removes and what stays (no claim that keys or repos stay unless forgotten)", () => {
+  assert.match(SIGN_OUT_BODY, /saved repository list/);
+  assert.match(SIGN_OUT_BODY, /Git tokens and provider keys stay saved on the server/);
+  assert.doesNotMatch(SIGN_OUT_BODY, /saved repositories stay/);
+  // forgetLocalSettings removes every llmide.* key: Auto Tasks and Loop templates are data, not just settings.
+  assert.match(SIGN_OUT_BODY, /Auto Tasks/);
+  assert.match(SIGN_OUT_BODY, /Loop templates/);
+});

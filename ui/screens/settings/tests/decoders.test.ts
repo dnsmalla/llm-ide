@@ -50,6 +50,10 @@ test("agent history fixtures decode", () => {
   assert.equal(s.groups[0]!.key, "agent_history");
   assert.deepEqual(s.groups[0]!.actions, ["clear", "compact"]);
   assert.equal(s.agentStoreState, "ok");
+  assert.equal(s.agentStoreHealth, "ok");
+  assert.equal(s.agentHistory?.droppedRows, 0);
+  assert.equal(s.agentHistory?.rolledDays, 3);
+  assert.equal(s.groups[0]!.lastCleanedAt, null);
   const dry = decodeClearResult(r("agent-history/post-kb-agent-history-clear-200-dry-run.json"));
   assert.equal(dry.dryRun, true);
   assert.equal(dry.total, 5);

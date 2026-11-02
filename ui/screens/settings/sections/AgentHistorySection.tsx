@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
-import { AgentHistoryModel, CLEAR_AGES, CLEAR_CONFIRM_WORD, clearSuccess, formatBytes, rowLabel, scopeSentence, type ClearAge } from "../agent-history-model.ts";
-import { LTA_MODES, LTA_TEXT, isLtaMode, ltaNeedsRestart, needsOffConfirm, type LtaMode } from "../misc-model.ts";
+import { AgentHistoryModel, CLEAR_AGES, CLEAR_CONFIRM_WORD, clearSuccess, formatBytes, healthLines, rowLabel, scopeSentence, whenText, type ClearAge } from "../agent-history-model.ts";
+import { LTA_MODES, LTA_TEXT, isLtaMode, ltaRestartText, needsOffConfirm, type LtaMode } from "../misc-model.ts";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { ClearScope } from "../decoders.ts";
 import { Button, ErrorText, Field, NeedsHost, TypedConfirm } from "../ui.tsx";
@@ -26,7 +26,10 @@ export default function AgentHistorySection() {
           <tbody>
             {s.report.groups.map((g) => (
               <tr key={g.key}>
-                <th scope="row">{g.label}</th>
+                <th scope="row">
+                  {g.label}
+                  {g.actions.includes("clear") && g.lastCleanedAt ? <div className="st-hint">Last cleaned {whenText(g.lastCleanedAt)}</div> : null}
+                </th>
                 <td>{g.rows.toLocaleString()}</td>
                 <td>{g.bytes === null ? "n/a" : `${g.bytesApprox ? "about " : ""}${formatBytes(g.bytes)}`}</td>
               </tr>
@@ -35,6 +38,9 @@ export default function AgentHistorySection() {
         </table>
       ) : <p className="st-hint" role="status">Loading storage numbers...</p>}
       {s.report?.agentStoreState && s.report.agentStoreState !== "ok" ? <StatusBanner severity="warning" message={`The agent history store reports: ${s.report.agentStoreState}.`} /> : null}
+      {s.report ? healthLines(s.report.agentHistory, s.report.agentStoreHealth).map((l) => (
+        <p key={l.text} className={l.warn ? "st-error" : "st-hint"}>{l.text}</p>
+      )) : null}
 
       <Field label={`Keep raw history for (days, ${range.min} to ${range.max})`}>
         <div className="st-row">
@@ -124,7 +130,7 @@ function LtaControl() {
         ))}
       </div>
       <p className="st-hint">{LTA_TEXT.explanation(selected)}</p>
-      {ltaNeedsRestart(selected, launch) ? <p className="st-hint">{LTA_TEXT.restartNote}</p> : null}
+      <p className="st-hint">{ltaRestartText(selected, launch)}</p>
       {pendingOff ? (
         <div className="st-dialog" role="alertdialog" aria-label={LTA_TEXT.offConfirmTitle}>
           <strong>{LTA_TEXT.offConfirmTitle}</strong>

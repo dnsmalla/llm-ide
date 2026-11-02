@@ -148,6 +148,16 @@ export function isSectionEnabled(section: string, usable: ReadonlySet<AppFeature
   return f === null || usable.has(f);
 }
 
+/**
+ * What the shell says when it leaves a section that is not usable (the Mac's placeholder names the same two cases).
+ * A section whose feature is compiled out gets the build sentence; a section that is off gets the Settings path.
+ */
+export function disabledSectionText(section: string, label: string, compiled: ReadonlySet<AppFeature>): string {
+  const f = featureForSection(section);
+  if (f !== null && !compiled.has(f)) return `${label} is not included in this build.`;
+  return `${label} is currently disabled. You can re-enable this feature in Settings → Workspace.`;
+}
+
 /** The dependency sentence shown under a switch that other features require. */
 export function dependentsOf(f: AppFeature): AppFeature[] {
   return FEATURES.filter((x) => x.requires.includes(f)).map((x) => x.id);

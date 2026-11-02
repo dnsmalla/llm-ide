@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeHealth, type Health } from "../decoders.ts";
 import type { BackendConfig, CoreLogText, DiagnosticsInfo, SettingsHost } from "../host.ts";
 import { describeError } from "../errors.ts";
-import { LOG_TEXT, componentError, shortPath } from "../components-model.ts";
+import { LOG_POLL_MS, LOG_TEXT, componentError, shortPath } from "../components-model.ts";
 import { parseBackendUrl } from "../project-model.ts";
 import { serverRows } from "../notices.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -12,7 +12,7 @@ import { PartialNote } from "./NoticeSections.tsx";
 
 /**
  * The Mac's "Server & Backend" group: the core's status, version, identity and log file, plus the log itself
- * (the Mac's live log viewer). Starting/stopping the backend by hand is not offered: the app owns the core.
+ * (the Mac's live log viewer). Start, Stop and Kill & Restart are offered when the host can run them; the app owns the core.
  */
 export default function ServerSection() {
   const { client, host } = useEnv();
@@ -25,6 +25,8 @@ export default function ServerSection() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [coreBusy, setCoreBusy] = useState<string | null>(null);
+  const [follow, setFollow] = useState(true);
+  const logRef = useRef<HTMLPreElement | null>(null);
 
   const loadLog = useCallback(() => {
     if (!host.coreLog) return;
@@ -37,6 +39,16 @@ export default function ServerSection() {
     loadLog();
   };
   useRefreshOnFocus(load);
+  // The group mounts only while it is open, so the log follows exactly while the user can see it.
+  useEffect(() => {
+    if (!host.coreLog) return;
+    const id = window.setInterval(loadLog, LOG_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [host, loadLog]);
+  useEffect(() => {
+    const el = logRef.current;
+    if (follow && el) el.scrollTop = el.scrollHeight;
+  }, [log, follow]);
   const rows = serverRows(info, health);
 
   const coreAction = async (what: "start" | "stop" | "restart") => {
@@ -124,8 +136,9 @@ export default function ServerSection() {
           <span className="st-label">{LOG_TEXT.title}</span>
           <p className="st-hint">{LOG_TEXT.hint}</p>
           {log?.path ? <p className="st-hint">{shortPath(log.path)}</p> : null}
-          <pre className="st-log" aria-label="Backend log" tabIndex={0}>{log && log.text.length > 0 ? log.text : LOG_TEXT.empty}</pre>
+          <pre ref={logRef} className="st-log" aria-label="Backend log" tabIndex={0}>{log && log.text.length > 0 ? log.text : LOG_TEXT.empty}</pre>
           <div className="st-row">
+            <button type="button" role="checkbox" aria-checked={follow} className="st-btn" onClick={() => setFollow((f) => !f)}>{LOG_TEXT.autoScroll}</button>
             <Button onClick={loadLog}>Refresh log</Button>
             <Button onClick={() => void copyLog()} disabled={!log || log.text.length === 0}>Copy</Button>
             {host.clearCoreLog ? (

@@ -74,6 +74,30 @@ export interface ProviderSettings {
 export interface Catalog {
   providers: CatalogProvider[];
   settings: ProviderSettings;
+  /** The one-time key carry-over the core reports on the first catalog read. Absent once it has nothing to say. */
+  migration?: CatalogMigration;
+}
+
+/** What the core carried over into the catalog (GET /kb/providers/catalog `migration`). Names only, never keys. */
+export interface CatalogMigration {
+  created: { provider: string; name: string }[];
+  needsReview: { provider: string; name: string; reason: string }[];
+  toolsSuggested: boolean;
+}
+
+export function decodeCatalogMigration(v: unknown, at = "catalog.migration"): CatalogMigration {
+  const r = rec(v, at);
+  return {
+    created: arr(r.created, `${at}.created`).map((c, i) => {
+      const x = rec(c, `${at}.created[${i}]`);
+      return { provider: str(x.provider, "provider"), name: str(x.name, "name") };
+    }),
+    needsReview: arr(r.needsReview, `${at}.needsReview`).map((c, i) => {
+      const x = rec(c, `${at}.needsReview[${i}]`);
+      return { provider: str(x.provider, "provider"), name: str(x.name, "name"), reason: str(x.reason, "reason") };
+    }),
+    toolsSuggested: bool(r.toolsSuggested, `${at}.toolsSuggested`),
+  };
 }
 
 export function decodeConnection(v: unknown, at = "connection"): Connection {
@@ -126,6 +150,7 @@ export function decodeCatalog(v: unknown): Catalog {
       };
     }),
     settings: decodeProviderSettings(r.settings, "catalog.settings"),
+    ...(r.migration == null ? {} : { migration: decodeCatalogMigration(r.migration) }),
   };
 }
 
@@ -309,10 +334,34 @@ export interface StorageGroup {
   retentionDays: number | null;
   actions: string[];
 }
+/** The store's own account of the agent history rows (GET /kb/storage `agentHistory`). Null when there is no store. */
+export interface AgentHistoryHealth {
+  rawFromDay: string | null;
+  rawRows: number;
+  rolledDays: number;
+  oldestDay: string | null;
+  quarantinedAt: string | null;
+  droppedRows: number;
+}
 export interface StorageReport {
   generatedAt: string;
   groups: StorageGroup[];
   agentStoreState: string | null;
+  /** `agentStore.health`: "ok", "down" or another word the core reports. */
+  agentStoreHealth: string | null;
+  agentHistory: AgentHistoryHealth | null;
+}
+const optStrOrNull = (v: unknown, at: string): string | null => (v == null ? null : str(v, at));
+function decodeAgentHistoryHealth(v: unknown): AgentHistoryHealth | null {
+  if (!isRec(v)) return null;
+  return {
+    rawFromDay: optStrOrNull(v.rawFromDay, "agentHistory.rawFromDay"),
+    rawRows: num(v.rawRows, "agentHistory.rawRows"),
+    rolledDays: num(v.rolledDays, "agentHistory.rolledDays"),
+    oldestDay: optStrOrNull(v.oldestDay, "agentHistory.oldestDay"),
+    quarantinedAt: optStrOrNull(v.quarantinedAt, "agentHistory.quarantinedAt"),
+    droppedRows: num(v.droppedRows, "agentHistory.droppedRows"),
+  };
 }
 export function decodeStorageReport(v: unknown): StorageReport {
   const r = rec(v, "storage");
@@ -333,6 +382,8 @@ export function decodeStorageReport(v: unknown): StorageReport {
       };
     }),
     agentStoreState: store && typeof store.state === "string" ? store.state : null,
+    agentStoreHealth: store && typeof store.health === "string" ? store.health : null,
+    agentHistory: decodeAgentHistoryHealth(r.agentHistory),
   };
 }
 

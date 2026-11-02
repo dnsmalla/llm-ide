@@ -63,6 +63,11 @@ export function ltaNeedsRestart(selected: LtaMode, launch: LtaMode): boolean {
   return selected !== launch;
 }
 
+/** The restart line under the archive mode: a pending change names the mode this session still runs with (Mac parity). */
+export function ltaRestartText(selected: LtaMode, launch: LtaMode): string {
+  return ltaNeedsRestart(selected, launch) ? `${LTA_TEXT.restartNote} This session is still running with ${LTA_TEXT.title(launch)}.` : LTA_TEXT.restartNote;
+}
+
 export function isLtaMode(v: unknown): v is LtaMode {
   return v === "off" || v === "shadow" || v === "on";
 }

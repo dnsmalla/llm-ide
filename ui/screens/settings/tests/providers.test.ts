@@ -4,7 +4,7 @@ import { inspect } from "node:util";
 import { SecretField, keyStatusLabel, scrubSecrets } from "../secret-field.ts";
 import {
   CLAUDE_COMPATIBLE_ID, CLAUDE_COMPATIBLE_CATALOG_ID, CLAUDE_COMPATIBLE_LIMITS, CLAUDE_COMPATIBLE_PROVIDER, CLAUDE_KIND_LABEL, OPENAI_KIND_LABEL, describeClaudeConnectError, rowsFromCustom, slugOfRow, ProvidersApi, ProvidersModel, addChoices, buildConnectBody, cleanFallback, describeTest,
-  newConnectForm, rowsFromCatalog, sortModels, toolsBadge, validateConnect,
+  newConnectForm, rowsFromCatalog, sortModels, toolsBadge, validateConnect, baseUrlIssue, hasLegacyKeyNote,
 } from "../providers-model.ts";
 import { ApiError } from "../core-api.ts";
 import { decodeCatalog, decodeConnectResult, decodeCustomEndpoints, decodeModelList, decodeTestResult, type Catalog, type CatalogProvider } from "../decoders.ts";
@@ -364,4 +364,80 @@ test("the plain-language limits name each real restriction", () => {
   assert.match(text, /model tier roles/);
   assert.match(text, /connects to the address itself/);
   assert.match(text, /operator setting/);
+});
+
+// The client plain-http rule mirrors extension/server/base-url-guard.mjs (assertProviderBaseUrl): http only with the
+// private-network opt-in AND a loopback / RFC 1918 / CGNAT / ULA / localhost / .local host. The rows below are the
+// same verdicts the core gives, so a drift shows here first.
+test("plain http is allowed only to a private host with the opt-in, on both Add and Edit", async () => {
+  const cases: Array<[string, boolean, boolean]> = [ // [url, allowPrivate, allowed]
+    ["http://localhost:11434", false, false],
+    ["http://localhost:11434", true, true],
+    ["http://ollama.local:11434", true, true],
+    ["http://192.168.1.20:3001", true, true],
+    ["http://10.0.0.5", true, true],
+    ["http://172.20.1.1", true, true],
+    ["http://100.64.0.9", true, true],
+    ["http://127.0.0.1:8080", true, true],
+    ["http://[::1]:8080", true, true],
+    ["http://[fd12:3456::1]", true, true],
+    ["http://api.example.com", true, false],
+    ["http://8.8.8.8", true, false],
+    ["http://169.254.169.254", true, false],
+    ["http://172.32.0.1", true, false],
+    ["https://api.example.com", true, true],
+  ];
+  for (const [url, allow, allowed] of cases) {
+    assert.equal(baseUrlIssue(prov("openai-compatible"), url, allow) === null, allowed, `${url} allowPrivate=${allow}`);
+  }
+  assert.match(baseUrlIssue(prov("openai-compatible"), "http://api.example.com", true)!, /your API key would be sent unencrypted/);
+  assert.match(baseUrlIssue(prov("openai-compatible"), "http://192.168.1.20", false)!, /private-network/);
+
+  // Add path: the issue is raised before any request.
+  const gw = prov("openai-compatible");
+  const g = newConnectForm("openai-compatible");
+  g.apiKey.set("k");
+  g.baseURL = "http://api.example.com/v1";
+  g.allowPrivate = true;
+  assert.match(validateConnect(gw, g)[0]!.message, /unencrypted/);
+
+  // Edit path: refused before any request, with the same sentence.
+  const calls: string[] = [];
+  const client = fakeClient({
+    "GET /kb/providers/catalog": () => ({ status: 200, body: catalogBody() }),
+    "POST /kb/providers/catalog/connect": () => { calls.push("connect"); return { status: 200, body: {} }; },
+  });
+  const model = new ProvidersModel(new ProvidersApi(client));
+  await model.load();
+  const row = { id: "cat-openai-compatible-gw", provider: "custom:cat-openai-compatible-gw", catalogId: "openai-compatible", name: "gw", baseURL: "https://gw.example.com/v1", kindLabel: OPENAI_KIND_LABEL, hasKey: true, keyRequired: true, enabled: true, allowPrivate: false };
+  const ok = await model.update(row, { baseURL: "http://api.example.com/v1", allowPrivate: true });
+  assert.equal(ok, false);
+  assert.match(model.getState().error ?? "", /unencrypted/);
+  assert.deepEqual(calls, []);
+});
+
+test("the catalog decoder keeps the migration report when present and omits the key when absent", () => {
+  const body = fixture("provider-catalog/get-kb-providers-catalog-200.json").response as Record<string, unknown>;
+  const c = decodeCatalog(body);
+  assert.deepEqual(c.migration?.created, [{ provider: "deepseek", name: "DeepSeek" }]);
+  assert.equal(c.migration?.needsReview[0]?.provider, "custom:lan1");
+  assert.equal(c.migration?.toolsSuggested, true);
+  const { migration: _gone, ...rest } = body;
+  assert.ok(!("migration" in decodeCatalog(rest)));
+});
+
+test("an older built-in key that is still stored is noted on its connection row, by key name only", async () => {
+  const openaiRow = { id: "cat-openai-main", provider: "openai", catalogId: "openai", name: "OpenAI", baseURL: "", kindLabel: OPENAI_KIND_LABEL, hasKey: true, keyRequired: true, enabled: true, allowPrivate: false };
+  assert.equal(hasLegacyKeyNote(openaiRow, ["openai.apiKey", "claude.apiKey"]), true);
+  assert.equal(hasLegacyKeyNote(openaiRow, ["claude.apiKey"]), false);
+  assert.equal(hasLegacyKeyNote({ ...openaiRow, catalogId: "groq" }, ["groq.apiKey"]), false);
+  // The model reads the names from GET /auth/me/secrets and keeps no values.
+  const client = fakeClient({
+    "GET /kb/providers/catalog": () => ({ status: 200, body: catalogBody() }),
+    "GET /auth/me/secrets": () => ({ status: 200, body: { secrets: [{ key: "deepseek.apiKey" }] } }),
+  });
+  const m = new ProvidersModel(new ProvidersApi(client));
+  await m.load();
+  assert.deepEqual(m.getState().storedKeyNames, ["deepseek.apiKey"]);
+  assert.ok(!JSON.stringify(m.getState()).includes("sk-"));
 });

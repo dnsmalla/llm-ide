@@ -13,6 +13,7 @@ export default function AgentSdkSection() {
   const [confirming, setConfirming] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [restartNotice, setRestartNotice] = useState<string | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   useRefreshOnFocus(() => void m.load(false));
   const st = s.status;
   const log = sdkLogText(s.result?.log ?? null);
@@ -33,20 +34,28 @@ export default function AgentSdkSection() {
         <div className="st-row">
           <p className="st-hint" role="status">{SDK_TEXT.restartNote}</p>
           {host.coreRestart ? (
-            <Button
-              disabled={restarting}
-              onClick={() => {
-                setRestarting(true);
-                setRestartNotice(null);
-                void host.coreRestart!().then(
-                  () => setRestartNotice("Backend restart requested; the app will reconnect."),
-                  () => setRestartNotice("The backend could not be restarted."),
-                ).finally(() => setRestarting(false));
-              }}
-            >
+            <Button disabled={restarting} onClick={() => setConfirmRestart(true)}>
               {restarting ? "Restarting…" : "Restart backend"}
             </Button>
           ) : null}
+        </div>
+      ) : null}
+      {confirmRestart ? (
+        <div className="st-dialog" role="alertdialog" aria-label={SDK_TEXT.restartTitle}>
+          <strong>{SDK_TEXT.restartTitle}</strong>
+          <p>{SDK_TEXT.restartBody}</p>
+          <div className="st-row">
+            <Button tone="danger" onClick={() => {
+              setConfirmRestart(false);
+              setRestarting(true);
+              setRestartNotice(null);
+              void host.coreRestart!().then(
+                () => setRestartNotice("Backend restart requested; the app will reconnect."),
+                () => setRestartNotice("The backend could not be restarted."),
+              ).finally(() => setRestarting(false));
+            }}>Restart backend</Button>
+            <Button onClick={() => setConfirmRestart(false)}>Cancel</Button>
+          </div>
         </div>
       ) : null}
       {restartNotice ? <p className="st-hint" role="status">{restartNotice}</p> : null}

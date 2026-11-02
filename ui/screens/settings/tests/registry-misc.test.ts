@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SettingsRegistry } from "../registry.ts";
 import {
-  LTA_MODES, LTA_TEXT, buildDiagnostics, coreTrustLabel, coreTrustTone, featureRows, isLtaMode, ltaNeedsRestart, needsOffConfirm,
+  LTA_MODES, LTA_TEXT, buildDiagnostics, coreTrustLabel, coreTrustTone, featureRows, isLtaMode, ltaNeedsRestart, ltaRestartText, needsOffConfirm,
 } from "../misc-model.ts";
 import { decodeHealth, decodeMe } from "../decoders.ts";
+import { PREFS_TEXT, SDK_TEXT } from "../app-model.ts";
 import { fixture } from "./helpers.ts";
 
 const load = (name: string) => async () => ({ default: name });
@@ -84,4 +85,19 @@ test("diagnostics carry versions and states but no secrets, even if a path or fi
   assert.ok(!text.includes("abcd1234efgh"));
   assert.ok(!text.includes("capture-user@example.com"), "no e-mail address in diagnostics");
   assert.ok(!/accessToken|refreshToken|password/i.test(text));
+});
+
+test("chat archive: a pending change says which mode this session still runs with", () => {
+  assert.equal(ltaRestartText("on", "shadow"), `${LTA_TEXT.restartNote} This session is still running with Shadow.`);
+  assert.equal(ltaRestartText("off", "off"), LTA_TEXT.restartNote);
+});
+
+test("native plugins hint names the trust and MCP-consent conditions (Mac parity)", () => {
+  assert.match(PREFS_TEXT.nativeHint, /only run once you trust the plugin, and its MCP servers still need your consent/);
+});
+
+test("Agent SDK restart copy names the backend, not the app, and the restart confirmation is wired", () => {
+  assert.doesNotMatch(SDK_TEXT.restartNote, /restart the app/i);
+  assert.doesNotMatch(SDK_TEXT.confirmBody, /restart the app/i);
+  assert.match(SDK_TEXT.restartBody, /Loop run still in progress is stopped/);
 });

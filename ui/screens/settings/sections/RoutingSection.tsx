@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
-import { RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
+import { MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
-import type { ProviderSettings } from "../decoders.ts";
+import type { CatalogMigration, ProviderSettings } from "../decoders.ts";
 import type { SettingsHost } from "../host.ts";
 import { Button, ErrorText, NeedsHost, Switch } from "../ui.tsx";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -80,7 +80,14 @@ export default function RoutingSection() {
       ) : null}
 
       <h3 className="st-label">Fallback and limits</h3>
-      {rows.length === 0 || !settings ? (
+      {!p.catalog && p.error ? (
+        <div className="st-row">
+          <ErrorText text={`Couldn't load the provider settings: ${p.error}`} />
+          <Button onClick={() => void providers.load()}>Retry</Button>
+        </div>
+      ) : !p.catalog ? (
+        <p className="st-hint" role="status">Loading provider settings...</p>
+      ) : rows.length === 0 || !settings ? (
         <p className="st-hint">{SWITCH_TEXT.noConnections}</p>
       ) : (
         <>
@@ -90,7 +97,7 @@ export default function RoutingSection() {
           {settings.fallbackEnabled ? <FallbackOrder settings={settings} onSave={(order) => void providers.saveSettings({ fallbackOrder: order })} rows={rows.map((x) => ({ provider: x.provider, name: x.name }))} /> : null}
         </>
       )}
-      <RoutePrefs getPrefs={host.getRoutePrefs?.bind(host)} setPrefs={host.setRoutePrefs?.bind(host)} />
+      <RoutePrefs getPrefs={host.getRoutePrefs?.bind(host)} setPrefs={host.setRoutePrefs?.bind(host)} migration={p.catalog?.migration} toolsOn={settings?.toolsEnabled} />
       <ExtraPrefs host={host} />
     </div>
   );
@@ -128,21 +135,50 @@ function FallbackOrder({ settings, rows, onSave }: { settings: ProviderSettings;
   );
 }
 
-function RoutePrefs({ getPrefs, setPrefs }: { getPrefs: (() => Promise<{ router: boolean; cap: boolean }>) | undefined; setPrefs: ((p: { router: boolean; cap: boolean }) => Promise<void>) | undefined }) {
+function RoutePrefs({ getPrefs, setPrefs, migration, toolsOn }: { getPrefs: (() => Promise<{ router: boolean; cap: boolean }>) | undefined; setPrefs: ((p: { router: boolean; cap: boolean }) => Promise<void>) | undefined; migration: CatalogMigration | undefined; toolsOn: boolean | undefined }) {
   const [prefs, setLocal] = useState<{ router: boolean; cap: boolean } | null>(null);
   useEffect(() => {
     let live = true;
     void getPrefs?.().then((p) => { if (live) setLocal(p); });
     return () => { live = false; };
   }, [getPrefs]);
-  if (!getPrefs || !setPrefs) return <NeedsHost what="The per-chat model and token limit switches" />;
-  if (!prefs) return null;
-  const save = (next: { router: boolean; cap: boolean }) => { setLocal(next); void setPrefs(next); };
+  const save = (next: { router: boolean; cap: boolean }) => { setLocal(next); void setPrefs?.(next); };
+  const notice = (
+    <MigrationNotice
+      migration={migration}
+      toolsOn={toolsOn}
+      routerState={prefs ? (prefs.router ? "on" : "off") : "unknown"}
+      onTurnOnRouter={setPrefs && prefs ? () => save({ router: true, cap: prefs.cap }) : undefined}
+    />
+  );
+  if (!getPrefs || !setPrefs) return <>{notice}<NeedsHost what="The per-chat model and token limit switches" /></>;
+  if (!prefs) return notice;
   return (
     <>
+      {notice}
       <Switch label="Per-chat model and token limit (beta)" checked={prefs.router} hint={SWITCH_TEXT.router} onChange={(v) => save({ router: v, cap: v ? prefs.cap : false })} />
       {prefs.router ? <Switch label="Enforce the token limit" checked={prefs.cap} hint={SWITCH_TEXT.cap} onChange={(v) => save({ ...prefs, cap: v })} /> : null}
     </>
+  );
+}
+
+/** The one-time key carry-over: what was added, what needs review, and the session router the catalog chat needs. */
+function MigrationNotice({ migration, toolsOn, routerState, onTurnOnRouter }: { migration: CatalogMigration | undefined; toolsOn: boolean | undefined; routerState: "on" | "off" | "unknown"; onTurnOnRouter: (() => void) | undefined }) {
+  if (!migration || (migration.created.length === 0 && migration.needsReview.length === 0)) return null;
+  const created = migration.created.map((c) => c.name);
+  return (
+    <div className="st-stack" role="group" aria-label="Provider upgrade">
+      {created.length > 0 ? <p className="st-hint">{MIGRATION_TEXT.created(created)}</p> : null}
+      {migration.needsReview.map((r) => <StatusBanner key={r.provider} severity="warning" message={MIGRATION_TEXT.review(r.name, r.reason)} />)}
+      {created.length > 0 && migration.toolsSuggested && toolsOn === false ? <p className="st-hint">{MIGRATION_TEXT.tools}</p> : null}
+      {created.length > 0 && routerState === "on" ? <p className="st-hint">{MIGRATION_TEXT.routerPending}</p> : null}
+      {created.length > 0 && routerState === "off" ? (
+        <div className="st-row">
+          <p className="st-hint st-grow">{MIGRATION_TEXT.routerNeeded}</p>
+          {onTurnOnRouter ? <Button tone="primary" onClick={onTurnOnRouter}>{MIGRATION_TEXT.routerButton}</Button> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
