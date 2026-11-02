@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundleDir } from "../../../../../desktop/scripts/test-outdir.mjs";
 import { startCore } from "./core-server.mjs";
 import { createFakeChatHost } from "./fake-host.mjs";
@@ -28,7 +28,7 @@ before(async () => {
     entryPoints: [join(HERE, "entry.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent",
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
   });
-  m = await import(`${outfile}?t=${Date.now()}`);
+  m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
   core = await startCore();
 });
 after(async () => { await core?.stop(); });

@@ -6,6 +6,7 @@ import { build } from "esbuild";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KIT, read } from "./helpers.mjs";
+import { pathToFileURL } from "node:url";
 
 let kit;
 before(async () => {
@@ -14,7 +15,7 @@ before(async () => {
   mkdirSync(dir, { recursive: true });
   const outfile = join(dir, "index.mjs");
   await build({ entryPoints: [join(KIT, "src/index.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent" });
-  kit = await import(`${outfile}?t=${Date.now()}`);
+  kit = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 });
 
 const html = (el) => renderToStaticMarkup(el);

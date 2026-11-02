@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadChat, h, renderToStaticMarkup as html, fakeCore, CHAT, REPO } from "./helpers.mjs";
+import { pathToFileURL } from "node:url";
 
 let c, ext;
 before(async () => {
   c = await loadChat("slash");
-  ext = await import(join(REPO, "scripts/extract-chat-slash-builtins.mjs"));
+  ext = await import(pathToFileURL(join(REPO, "scripts/extract-chat-slash-builtins.mjs")).href);
 });
 
 const asJson = (b) => ({ label: b.label, aliases: [...b.aliases], description: b.description, insert: b.insert, action: b.action.kind === "openSection" ? { kind: "openSection", section: b.action.section } : { kind: b.action.kind } });

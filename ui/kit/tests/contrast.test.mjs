@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { REPO } from "./helpers.mjs";
+import { pathToFileURL } from "node:url";
 
-const { loadSource } = await import(join(REPO, "scripts/gen-design-tokens.mjs"));
+const { loadSource } = await import(pathToFileURL(join(REPO, "scripts/gen-design-tokens.mjs")).href);
 const src = loadSource();
 
 // sRGB swatch composited over `bg` (opaque), then WCAG relative luminance.

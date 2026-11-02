@@ -2,7 +2,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 import { bundleDir } from "../../../../../desktop/scripts/test-outdir.mjs";
 
@@ -18,7 +18,7 @@ before(async () => {
   const { build } = requireFromDesktop("esbuild");
   const outfile = join(bundleDir("extensions"), "entry.mjs");
   await build({ entryPoints: [join(HERE, "entry.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") }, jsx: "automatic", logLevel: "silent" });
-  X = await import(`${outfile}?t=${Date.now()}`);
+  X = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
   h = requireFromDesktop("react").createElement;
   html = (el) => requireFromDesktop("react-dom/server").renderToStaticMarkup(el);
 });

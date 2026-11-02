@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundleDir } from "../../../../../desktop/scripts/test-outdir.mjs";
 import { startCore } from "./core-server.mjs";
 
@@ -29,7 +29,7 @@ before(async () => {
     entryPoints: [join(HERE, "first-run-entry.ts")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent",
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
   });
-  m = await import(`${outfile}?t=${Date.now()}`);
+  m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
   core = await startCore({ register: false });
   parent = mkdtempSync(join(tmpdir(), "llmide-firstrun-"));
 });

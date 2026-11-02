@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETTINGS = resolve(HERE, "..");
@@ -67,7 +67,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });

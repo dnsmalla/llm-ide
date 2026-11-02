@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SHELL } from "./helpers.mjs";
+import { pathToFileURL } from "node:url";
 
-const m = await import(join(SHELL, "menu-model.ts"));
+const m = await import(pathToFileURL(join(SHELL, "menu-model.ts")).href);
 
 test("native menu commands map only to section navigation", () => {
   assert.deepEqual(m.menuAction("menu_chat"), { type: "goto-section", section: "chat" });

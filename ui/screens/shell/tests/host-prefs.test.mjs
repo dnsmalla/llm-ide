@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,7 @@ before(async () => {
   const entry = join(bundleDir("host-prefs"), "entry-src.ts");
   (await import("node:fs")).writeFileSync(entry, `export * from ${JSON.stringify(join(HERE, "../host-prefs.ts"))};\nexport { createSettingsEnv } from ${JSON.stringify(join(HERE, "../settings-adapter.ts"))};\nexport { seedThemeFromHost, hasStoredTheme, getTheme } from ${JSON.stringify(join(HERE, "../theme.ts"))};\nexport { normalizeCoreStatus } from ${JSON.stringify(join(HERE, "../host.ts"))};\n`);
   await build({ entryPoints: [entry], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent", alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") } });
-  m = await import(`${outfile}?t=${Date.now()}`);
+  m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 });
 
 const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true };

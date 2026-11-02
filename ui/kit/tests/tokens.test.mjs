@@ -4,8 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { REPO, lf, read, parseBlocks, kebab } from "./helpers.mjs";
+import { pathToFileURL } from "node:url";
 
-const gen = await import(join(REPO, "scripts/gen-design-tokens.mjs"));
+const gen = await import(pathToFileURL(join(REPO, "scripts/gen-design-tokens.mjs")).href);
 const src = gen.loadSource();
 const css = gen.generateCss(src, { web: true });
 const blocks = parseBlocks(css);
