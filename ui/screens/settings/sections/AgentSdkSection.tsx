@@ -20,11 +20,11 @@ export default function AgentSdkSection() {
   const busy = st?.busy ?? null;
   // The Restart click re-reads busy (checkBusy), so the dialog names the work running at that moment.
   const restartBody = busy && busy.total > 0 ? `${SDK_TEXT.restartBody} ${busyCounts(busy)} still running.` : SDK_TEXT.restartBody;
-  // Restarts the backend the way the Restart button always has; `lead` is the extra status line (auto path only).
-  const restartNow = (lead: string | null) => {
+  // Restarts only after the user confirms; the busy count is re-read before this dialog opens.
+  const restartNow = () => {
     setConfirmRestart(false);
     setRestarting(true);
-    setRestartNotice(lead ? [lead] : []);
+    setRestartNotice([]);
     void host.coreRestart!().then(
       () => setRestartNotice((n) => [...n, "Backend restart requested; the app will reconnect."]),
       () => setRestartNotice((n) => [...n, "The backend could not be restarted."]),
@@ -58,7 +58,7 @@ export default function AgentSdkSection() {
           <strong>{SDK_TEXT.restartTitle}</strong>
           <p>{restartBody}</p>
           <div className="st-row">
-            <Button tone="danger" onClick={() => restartNow(null)}>Restart backend</Button>
+            <Button tone="danger" onClick={() => restartNow()}>Restart backend</Button>
             <Button onClick={() => setConfirmRestart(false)}>Cancel</Button>
           </div>
         </div>
@@ -81,8 +81,8 @@ export default function AgentSdkSection() {
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             setConfirming(false);
-            // Auto-restart only after an installed update with no work running (busy 0); otherwise the note holds.
-            void m.update(host.coreRestart ? () => restartNow("Restarted so the new SDK is used.") : undefined);
+            // Never restart from here: the busy count is a snapshot and a restart can stop a turn that just started.
+            void m.update();
           }}
         />
       ) : null}

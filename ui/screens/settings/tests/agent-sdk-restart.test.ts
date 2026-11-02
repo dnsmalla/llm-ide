@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AgentSdkModel, busyCounts, busyNote } from "../app-model.ts";
+import { AgentSdkModel, SDK_TEXT, busyCounts, busyNote } from "../app-model.ts";
 import { decodeAgentSdk } from "../decoders.ts";
 import { deferred, fakeClient, reply } from "./helpers.ts";
 
@@ -10,35 +10,30 @@ const status = (busy?: unknown) => ({
 });
 const installed = { status: 200, body: { ok: true, from: "1.0.0", to: "1.1.0", rolledBack: false, restartNeeded: true, log: null } };
 
-test("update installed and busy 0: the restart callback runs once", async () => {
+test("an installed update refreshes busy but never restarts the backend by itself", async () => {
   const c = fakeClient({ "GET /kb/agent-sdk": () => status({ chatTurns: 0, loopRuns: 0, total: 0 }), "POST /kb/agent-sdk/update": () => installed });
   const m = new AgentSdkModel(c);
   await m.load(false);
-  let restarts = 0;
-  await m.update(() => { restarts += 1; });
-  assert.equal(restarts, 1);
+  await m.update();
   assert.equal(m.getState().result?.ok, true);
+  assert.deepEqual(m.getState().status?.busy, { chatTurns: 0, loopRuns: 0, total: 0 });
   assert.equal(c.calls.filter((x) => x.method === "POST").length, 1);
 });
 
-test("update installed but busy 2: no restart, the counts are kept for the note", async () => {
+test("an installed update keeps the busy counts for the restart note", async () => {
   const c = fakeClient({ "GET /kb/agent-sdk": () => status({ chatTurns: 2, loopRuns: 0, total: 2 }), "POST /kb/agent-sdk/update": () => installed });
   const m = new AgentSdkModel(c);
   await m.load(false);
-  let restarts = 0;
-  await m.update(() => { restarts += 1; });
-  assert.equal(restarts, 0);
+  await m.update();
   assert.deepEqual(m.getState().status?.busy, { chatTurns: 2, loopRuns: 0, total: 2 });
   assert.equal(busyNote(m.getState().status!.busy!), "2 chats are still running; restart after they finish.");
 });
 
-test("update installed but busy absent (older core): unknown, so no restart", async () => {
+test("an unknown busy count stays null, not zero", async () => {
   const c = fakeClient({ "GET /kb/agent-sdk": () => status(), "POST /kb/agent-sdk/update": () => installed });
   const m = new AgentSdkModel(c);
   await m.load(false);
-  let restarts = 0;
-  await m.update(() => { restarts += 1; });
-  assert.equal(restarts, 0);
+  await m.update();
   assert.equal(m.getState().status?.busy, null);
   assert.equal(m.getState().result?.ok, true);
 });
@@ -49,7 +44,7 @@ test("a malformed busy is unknown, not zero", () => {
   assert.equal(decodeAgentSdk({ busy: null }).busy, null);
 });
 
-test("a refused update (409, 503, or the server's ok:false answer) never restarts", async () => {
+test("a refused update (409, 503, or the server's ok:false answer) stays unapplied", async () => {
   for (const refusal of [
     { status: 409, body: { error: { code: "SDK_BUSY", message: "busy" } } },
     { status: 503, body: { error: { code: "UNAVAILABLE", message: "down" } } },
@@ -58,26 +53,21 @@ test("a refused update (409, 503, or the server's ok:false answer) never restart
     const c = fakeClient({ "GET /kb/agent-sdk": () => status({ chatTurns: 0, loopRuns: 0, total: 0 }), "POST /kb/agent-sdk/update": () => refusal });
     const m = new AgentSdkModel(c);
     await m.load(false);
-    let restarts = 0;
-    await m.update(() => { restarts += 1; });
-    assert.equal(restarts, 0, `refusal ${refusal.status} must not restart`);
+    await m.update();
     assert.notEqual(m.getState().result?.ok, true);
   }
 });
 
-test("a double click on update runs one install and at most one restart", async () => {
+test("a double click on update runs one install", async () => {
   const gate = deferred<{ status: number; body: unknown }>();
   const c = fakeClient({ "GET /kb/agent-sdk": () => status({ chatTurns: 0, loopRuns: 0, total: 0 }), "POST /kb/agent-sdk/update": () => gate.promise });
   const m = new AgentSdkModel(c);
   await m.load(false);
-  let restarts = 0;
-  const cb = () => { restarts += 1; };
-  const first = m.update(cb);
-  void m.update(cb);
+  const first = m.update();
+  void m.update();
   gate.resolve(installed);
   await first;
   assert.equal(c.calls.filter((x) => x.method === "POST").length, 1);
-  assert.equal(restarts, 1);
 });
 
 test("the Restart click re-reads busy; a failed read reports unknown counts", async () => {
@@ -99,21 +89,7 @@ test("counts wording is singular and plural", () => {
   assert.equal(busyCounts({ chatTurns: 0, loopRuns: 0, total: 0 }), "");
 });
 
-test("the update confirm says the restart is automatic only when nothing runs (review)", async () => {
-  const { SDK_TEXT } = await import("../app-model.ts");
-  assert.match(SDK_TEXT.confirmBody, /restarts by itself when no chat or Loop run is going; otherwise it waits and asks you/);
-  assert.doesNotMatch(SDK_TEXT.confirmBody, /After it installs, restart the backend/);
-});
-
-test("an update that is already current (ok, restartNeeded false) never restarts, even with busy 0 (review)", async () => {
-  const current = { status: 200, body: { ok: true, from: "1.1.0", to: "1.1.0", rolledBack: false, restartNeeded: false, log: "Already on 1.1.0 (latest 1.1.0)." } };
-  const odd = { status: 200, body: { ok: false, from: "1.0.0", to: "1.1.0", rolledBack: true, restartNeeded: true, log: null } };
-  for (const answer of [current, odd]) {
-    const c = fakeClient({ "GET /kb/agent-sdk": () => status({ chatTurns: 0, loopRuns: 0, total: 0 }), "POST /kb/agent-sdk/update": () => answer });
-    const m = new AgentSdkModel(c);
-    await m.load(false);
-    let restarts = 0;
-    await m.update(() => { restarts += 1; });
-    assert.equal(restarts, 0, JSON.stringify(answer.body));
-  }
+test("the update confirm asks for a manual restart", () => {
+  assert.match(SDK_TEXT.confirmBody, /After it installs, restart the backend/);
+  assert.doesNotMatch(SDK_TEXT.confirmBody, /restarts by itself/);
 });

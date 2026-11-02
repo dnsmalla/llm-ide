@@ -100,7 +100,7 @@ export const SDK_TEXT = {
   hint: "The chat engine runs on Anthropic's Claude Agent SDK. Updating installs the newest release in the backend's folder; a release that fails to load is rolled back.",
   remoteOff: "Updates are disabled while the backend accepts remote connections.",
   confirmWord: "UPDATE",
-  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, the backend restarts by itself when no chat or Loop run is going; otherwise it waits and asks you to restart it.",
+  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, restart the backend to run the new version.",
   restartNote: "Restart the backend to run the installed version.",
   restartTitle: "Restart the backend?",
   restartBody: "Any chat reply or Loop run still in progress is stopped and has to be started again.",
@@ -170,10 +170,11 @@ export class AgentSdkModel extends Store<AgentSdkState> {
   }
 
   /**
-   * `onInstalled` runs at most once per call, and only when the update installed and the core reports no work
-   * running. A refused or failed update, or an unknown busy count (older core), never calls it.
+   * Installs the update and refreshes the status. It never restarts the backend itself: the core's busy count is
+   * a snapshot, so a turn starting between the read and a host restart would be stopped. The card asks the user
+   * to restart; the Restart click re-reads busy and confirms.
    */
-  async update(onInstalled?: () => void): Promise<void> {
+  async update(): Promise<void> {
     const s = this.getState();
     if (s.updating || !s.status?.canUpdate) return;
     this.set({ updating: true, result: null });
@@ -189,7 +190,6 @@ export class AgentSdkModel extends Store<AgentSdkState> {
       if (result) {
         const status = decodeAgentSdk(await call(this.#c, "GET", "/kb/agent-sdk"));
         this.set({ status, error: null });
-        if (result.ok && result.restartNeeded && status.busy?.total === 0) onInstalled?.();
       }
     } catch (e) {
       this.set({ error: describeError(e) });
