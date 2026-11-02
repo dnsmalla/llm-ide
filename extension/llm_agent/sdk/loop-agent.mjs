@@ -35,6 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { query, tool, createSdkMcpServer, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
+import { requireClaudeExecutable } from '../../providers/claude-path.mjs';
 import { z } from 'zod';
 import { handleFindCode, STALE_HINT } from '../tools/handlers/find-code.mjs';
 import { resolveRepoScope } from '../../kb/db.mjs';
@@ -476,7 +477,16 @@ function observeToolBlocks(accounting, msg) {
 
 // The injectable factory contract (prompt, options) — same shape as the chat
 // engine's, so tests drive this runner with the same kind of fake.
-const sdkQueryFactory = (prompt, options) => query({ prompt, options });
+const sdkQueryFactory = (prompt, options) => {
+  // The packaged desktop core removes the SDK's platform binary; point the SDK
+  // at the user's installed Claude Code, exactly as the chat engine does.
+  let opts = options;
+  if (!options?.pathToClaudeCodeExecutable) {
+    const exe = requireClaudeExecutable({ purpose: 'sdk' });
+    if (exe.source !== 'bundled') opts = { ...options, pathToClaudeCodeExecutable: exe.path };
+  }
+  return query({ prompt, options: opts });
+};
 
 /**
  * Run one headless, confined agent step.

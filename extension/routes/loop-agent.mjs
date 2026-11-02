@@ -139,7 +139,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     // Same answer as a run that failed inside the engine (see the catch below).
     process.stderr.write(`[loop-agent] engine import failed: ${err?.message || err}\n`);
     sendJSON(res, 502, {
-      error: { code: 'INTERNAL_ERROR', message: 'The Loop agent run failed. Please try again.' },
+      error: { code: 'INTERNAL_ERROR', message: `The Loop agent run failed: ${err?.message || err}` },
     });
     return true;
   }
@@ -228,7 +228,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     } else {
       process.stderr.write(`[loop-agent] run failed: ${err?.message || err}\n`);
       sendJSON(res, 502, {
-        error: { code: 'INTERNAL_ERROR', message: 'The Loop agent run failed. Please try again.' },
+        error: { code: 'INTERNAL_ERROR', message: `The Loop agent run failed: ${err?.message || err}` },
       });
     }
   } finally {
