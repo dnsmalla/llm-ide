@@ -33,9 +33,13 @@ final class BackendChildEnvironmentTests: XCTestCase {
         XCTAssertEqual(replaced["LLMIDE_FEATURES"], "agent_chat")
     }
 
-    func testExecuteTurnsGetTheCompactPromptByDefault() {
+    func testCompactPromptIsOffByDefaultAndOptInPassesThrough() {
         let env = BackendManager.childEnvironment(base: base, featureKeys: ["agent_chat"])
-        XCTAssertEqual(env["LLMIDE_V2_COMPACT_PROMPT_MODES"], "execute")
+        XCTAssertNil(env["LLMIDE_V2_COMPACT_PROMPT_MODES"], "token-affecting default stays off until the bench")
+        var optIn = base
+        optIn["LLMIDE_V2_COMPACT_PROMPT_MODES"] = "execute"
+        let opted = BackendManager.childEnvironment(base: optIn, featureKeys: ["agent_chat"])
+        XCTAssertEqual(opted["LLMIDE_V2_COMPACT_PROMPT_MODES"], "execute")
     }
 
     func testBenchFakeSwitchesAreNeverPassedThrough() {

@@ -535,13 +535,9 @@ final class BackendManager {
         if let featureKeys {
             env[featuresEnvKey] = featureKeys.sorted().joined(separator: ",")
         }
-        // Execute turns use the compact base prompt by default: measured on edit
-        // tasks it cut total tokens ~16%, while read-only modes keep the preset
-        // (the compact prompt made exploration take 2–3x the hops there). An
-        // inherited value or LLMIDE_V2_COMPACT_PROMPT=0 still overrides it.
-        if env["LLMIDE_V2_COMPACT_PROMPT_MODES"] == nil {
-            env["LLMIDE_V2_COMPACT_PROMPT_MODES"] = "execute"
-        }
+        // The compact base prompt (LLMIDE_V2_COMPACT_PROMPT_MODES=execute) is NOT set here:
+        // token-affecting defaults ship off until the bench go-ahead. Set it in the
+        // launching environment to opt in; the LLMIDE_ prefix passes it through.
         // Data locations: an inherited value would move the DB or agent.db out
         // of the app's system dir (or into a checkout). Only the app's own
         // `dataDir` is ever written.

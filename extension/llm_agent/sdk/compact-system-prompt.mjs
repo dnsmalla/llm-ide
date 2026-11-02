@@ -80,10 +80,10 @@ export function compactEnvironmentBlock({
  * Whether the compact prompt replaces the preset.
  *
  * `LLMIDE_V2_COMPACT_PROMPT=1`/`=0` forces it on/off everywhere. Without that
- * override, only modes named in `LLMIDE_V2_COMPACT_PROMPT_MODES` use it. The
- * Mac app sets that list to `execute`: measured on edit tasks the compact
- * prompt cut total tokens ~16%, while read-only search took 2–3x the hops and
- * ~55% more total tokens.
+ * override, only modes named in `LLMIDE_V2_COMPACT_PROMPT_MODES` use it; unset
+ * means none (off by default until the bench go-ahead; the Mac app does not set
+ * it). `execute` is the candidate: measured on edit tasks the compact prompt cut
+ * total tokens ~16%, while read-only search took 2–3x the hops and ~55% more.
  */
 export function compactPromptEnabled(
   raw = process.env.LLMIDE_V2_COMPACT_PROMPT,
