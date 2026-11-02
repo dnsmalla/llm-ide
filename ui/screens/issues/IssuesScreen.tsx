@@ -6,9 +6,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import {
+  CORE_LIST_CAP,
   columnsFor,
   decodeIssues,
   filterIssues,
+  isCapped,
   issueNumber,
   labelOptions,
   repoOptions,
@@ -58,7 +60,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     setPhase("loading");
     setError(null);
     try {
-      const qs = new URLSearchParams({ provider: filters.provider, state: filters.state, limit: "200" });
+      const qs = new URLSearchParams({ provider: filters.provider, state: filters.state, limit: String(CORE_LIST_CAP) });
       const r = await deps.request("GET", `/kb/issues?${qs.toString()}`);
       if (r.status !== 200) {
         setPhase("error");
@@ -175,6 +177,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           </select>
         </label>
         <span className="iss-count" role="status">{visible.length.toLocaleString("en")} issue{visible.length === 1 ? "" : "s"}</span>
+        {isCapped(rows.length) ? <span className="iss-hint" title="The core returns at most this many issues per list">First {CORE_LIST_CAP} only</span> : null}
       </div>
 
       {importOpen ? (

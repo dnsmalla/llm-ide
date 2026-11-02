@@ -28,6 +28,10 @@ export interface IssueFilters {
 }
 
 export const MAX_ISSUES = 500;
+/** The core caps `GET /kb/issues` at this many rows whatever `limit` asks for (routes/router.mjs). */
+export const CORE_LIST_CAP = 100;
+/** True when a list read came back at the core's cap, so the screen can say the list may be incomplete. */
+export const isCapped = (count: number): boolean => count >= CORE_LIST_CAP;
 const MAX_LABELS = 20;
 const MAX_TEXT = 2000;
 

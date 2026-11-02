@@ -54,3 +54,35 @@ export const REVIEW_EMPTY = {
   title: "Select a file to view",
   hint: "Import code or LLM Doc, then ask the assistant to compare them and flag conflicts or undecided items.",
 } as const;
+
+/** The Mac's EditorTabBar rule: after closing the active tab, the tab that slides into its slot, else the last. */
+export function closeReviewTab(tabs: readonly string[], active: string | null, closing: string): { tabs: string[]; active: string | null } {
+  const i = tabs.indexOf(closing);
+  if (i < 0) return { tabs: [...tabs], active };
+  const next = tabs.filter((t) => t !== closing);
+  if (active !== closing) return { tabs: next, active };
+  return { tabs: next, active: next[i] ?? next[i - 1] ?? null };
+}
+
+/** A folder's rows, or none when its listing fails. Used for first opens and for re-listing open folders on refresh. */
+export async function readChildren(list: (path: string) => Promise<unknown>, path: string): Promise<ReviewEntry[]> {
+  try {
+    return decodeEntries(await list(path));
+  } catch {
+    return [];
+  }
+}
+
+export interface SavedRepoLike {
+  displayName: string;
+  url: string;
+  clonePath: string;
+  active: boolean;
+}
+
+/** The linked repo as the Mac picks it: the active, cloned GitLab repo first, then GitHub. Null when none is linked. */
+export function pickLinkedRepo(saved: { github: readonly SavedRepoLike[]; gitlab: readonly SavedRepoLike[] }): { label: string; path: string } | null {
+  const pick = (rows: readonly SavedRepoLike[]) => rows.find((r) => r.active && r.clonePath.trim() !== "");
+  const r = pick(saved.gitlab) ?? pick(saved.github);
+  return r ? { label: r.displayName || r.url, path: r.clonePath } : null;
+}

@@ -56,6 +56,15 @@ export function dayNumber(date: string): number | null {
   return Math.floor(dt.getTime() / DAY_MS);
 }
 
+/**
+ * Today's day number on the user's local calendar, as the Mac's `Calendar.current` sees it. Schedule dates are
+ * local calendar days, so `Date.now() / DAY_MS` (a UTC day) is a day early for the first hours of a UTC+ day
+ * (00:00–08:59 in Japan): the today line sat on yesterday and an issue due yesterday was not yet overdue.
+ */
+export function localToday(now: Date = new Date()): number {
+  return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / DAY_MS);
+}
+
 /** `YYYY-MM-DD` for a day number. */
 export function dayString(day: number): string {
   return new Date(day * DAY_MS).toISOString().slice(0, 10);
@@ -125,7 +134,7 @@ export interface TimelineRange {
 }
 
 /** The visible range: every dated bar, padded, at least three weeks; today-centred when nothing is dated. */
-export function timelineRange(rows: readonly GanttRow[], today = Math.floor(Date.now() / DAY_MS)): TimelineRange {
+export function timelineRange(rows: readonly GanttRow[], today = localToday()): TimelineRange {
   let min = Infinity;
   let max = -Infinity;
   for (const r of rows) {
@@ -160,4 +169,92 @@ export function datedRows(rows: readonly GanttRow[]): GanttRow[] {
 
 export function undatedRows(rows: readonly GanttRow[]): GanttRow[] {
   return rows.filter((r) => r.start === null || r.end === null);
+}
+
+/** The Mac's legend categories: closed wins, then overdue (end before today), else open. */
+export type GanttCategory = "open" | "closed" | "overdue";
+export const GANTT_CATEGORIES: readonly GanttCategory[] = ["open", "closed", "overdue"];
+
+export function rowCategory(row: Pick<GanttRow, "issue" | "end">, today: number): GanttCategory {
+  if (row.issue.state === "closed") return "closed";
+  if (row.end !== null && row.end < today) return "overdue";
+  return "open";
+}
+
+/** Legend counts over rows, for the chips. */
+export function countCategories(rows: readonly GanttRow[], today: number): Record<GanttCategory, number> {
+  const out: Record<GanttCategory, number> = { open: 0, closed: 0, overdue: 0 };
+  for (const r of rows) out[rowCategory(r, today)] += 1;
+  return out;
+}
+
+export interface GanttRowFilter {
+  label: string;
+  categories: readonly GanttCategory[];
+  /** Inclusive day-number range bounds; null means open-ended. */
+  from: number | null;
+  until: number | null;
+  today: number;
+}
+
+/**
+ * The Mac's date-range and legend filters over rows. An undated issue is placed by its creation day, as the
+ * Mac's startDate fallback does; with no date at all it is kept, since there is nothing to compare.
+ */
+export function filterRows(rows: readonly GanttRow[], f: GanttRowFilter): GanttRow[] {
+  return rows.filter((r) => {
+    if (f.label && !r.issue.labels.includes(f.label)) return false;
+    if (!f.categories.includes(rowCategory(r, f.today))) return false;
+    const created = r.issue.createdAt ? dayNumber(r.issue.createdAt.slice(0, 10)) : null;
+    const s = r.start ?? created;
+    const e = r.end ?? s;
+    if (s === null || e === null) return true;
+    if (f.from !== null && e < f.from) return false;
+    if (f.until !== null && s > f.until) return false;
+    return true;
+  });
+}
+
+export interface DependencyLine {
+  blocker: number;
+  dependent: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
+ * Finish-to-start arrows between visible dated rows: from the blocker bar's end to the dependent bar's start.
+ * `rowY` gives each row's vertical centre. A dependency on a row that is not visible, or on an undated row, has
+ * no geometry and is skipped (the Mac does the same).
+ */
+export function dependencyLines(rows: readonly GanttRow[], range: TimelineRange, dayWidth: number, rowY: (index: number) => number): DependencyLine[] {
+  const indexByNumber = new Map<number, number>();
+  rows.forEach((r, i) => {
+    if (r.issue.number !== null && !indexByNumber.has(r.issue.number)) indexByNumber.set(r.issue.number, i);
+  });
+  const out: DependencyLine[] = [];
+  rows.forEach((dep, j) => {
+    const dg = barGeometry(dep, range, dayWidth);
+    if (!dg || dep.issue.number === null) return;
+    for (const b of dep.dependsOn) {
+      const i = indexByNumber.get(b);
+      if (i === undefined) continue;
+      const bg = barGeometry(rows[i]!, range, dayWidth);
+      if (!bg) continue;
+      out.push({ blocker: b, dependent: dep.issue.number, x1: bg.left + bg.width, y1: rowY(i), x2: dg.left, y2: rowY(j) });
+    }
+  });
+  return out;
+}
+
+/** The scrollLeft that puts today about a third in from the left of the viewport. */
+export function todayScrollLeft(todayLeft: number, viewportWidth: number): number {
+  return Math.max(0, todayLeft - viewportWidth / 3);
+}
+
+/** Cmd/Ctrl+Enter saves the schedule editor, as the Mac's sheet does. */
+export function isSaveShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean }): boolean {
+  return e.key === "Enter" && (e.metaKey || e.ctrlKey);
 }

@@ -1,13 +1,13 @@
 // Review Conflicts: the Mac's tree + viewer + Code Assistant layout over the project's code and llm-doc folders.
 // It is deliberately read-only — reviewing is a conversation with the assistant; editing belongs in Explorer.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { shellBus } from "../shell/bus";
 import { Markdown } from "../chat/MarkdownView";
 import { readRepoConfig } from "../settings/repo-config.ts";
-import { REVIEW_EMPTY, REVIEW_ROOTS, decodeEntries, decodeFile, type ReviewEntry } from "./review-model.ts";
+import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, pickLinkedRepo, readChildren, type ReviewEntry } from "./review-model.ts";
 import "./review.css";
 
 export interface ReviewDeps {
@@ -29,11 +29,9 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
     try { const n = Number(localStorage.getItem("llmide.review.chatWidth")); return Number.isFinite(n) && n >= 240 && n <= 640 ? n : 320; } catch { return 320; }
   });
   const [tabs, setTabs] = useState<string[]>([]);
-  const linked = useMemo(() => {
-    const c = readRepoConfig();
-    const repo = [...c.saved.github, ...c.saved.gitlab].find((r) => r.active) ?? [...c.saved.github, ...c.saved.gitlab][0];
-    return repo ? { label: repo.displayName || repo.url, path: repo.clonePath } : null;
-  }, []);
+  const linked = useMemo(() => pickLinkedRepo(readRepoConfig().saved), []);
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
 
   const loadRoots = useCallback(async () => {
     setBusy(true);
@@ -46,7 +44,9 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
       }
     }
     setRoots(next);
-    setChildren(new Map());
+    // Folders that stay open are re-listed, so a refresh does not leave them open and empty.
+    const kept = await Promise.all([...expandedRef.current].map(async (p) => [p, await readChildren(deps.list, p)] as const));
+    setChildren(new Map(kept));
     setBusy(false);
   }, [deps]);
 
@@ -76,11 +76,18 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
     }
     setExpanded((s) => new Set(s).add(path));
     if (children.has(path)) return;
-    try {
-      const entries = decodeEntries(await deps.list(path));
-      setChildren((m) => new Map(m).set(path, entries));
-    } catch {
-      setChildren((m) => new Map(m).set(path, []));
+    const entries = await readChildren(deps.list, path);
+    setChildren((m) => new Map(m).set(path, entries));
+  };
+
+  const closeTab = (t: string) => {
+    const next = closeReviewTab(tabs, selected?.path ?? null, t);
+    setTabs(next.tabs);
+    if (next.active === null) {
+      setSelected(null);
+      setFileError(null);
+    } else if (next.active !== selected?.path) {
+      void openFile(next.active);
     }
   };
 
@@ -125,7 +132,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
           {tabs.map((t) => (
             <span key={t} className="rv-tab" data-on={selected?.path === t || undefined}>
               <button type="button" role="tab" aria-selected={selected?.path === t} onClick={() => void openFile(t)}>{t.split("/").pop()}</button>
-              <button type="button" className="rv-tab-x" aria-label={`Close ${t.split("/").pop()}`} onClick={() => setTabs((all) => all.filter((x) => x !== t))}>×</button>
+              <button type="button" className="rv-tab-x" aria-label={`Close ${t.split("/").pop()}`} onClick={() => closeTab(t)}>×</button>
             </span>
           ))}
         </div>
@@ -189,7 +196,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
               }}
             />
             <aside className="rv-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
-              <ChatDockSlot active={active} projectRoot={projectRoot} onCollapse={() => setShowChat(false)} />
+              <ChatDockSlot active={active} projectRoot={projectRoot} initialPath={selected?.path ?? null} onCollapse={() => setShowChat(false)} />
             </aside>
           </>
         ) : null}

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { columnsFor, decodeIssues, filterIssues, labelNamespace, repoOptions } from "../issues-model.ts";
+import { CORE_LIST_CAP, columnsFor, decodeIssues, filterIssues, isCapped, labelNamespace, repoOptions } from "../issues-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: "1", title: "T", body: "b", url: "https://github.com/o/r/issues/1", provider: "github",
@@ -57,4 +57,10 @@ test("decodeIssues strips a duplicated #number prefix from old cached titles", (
   const [row] = decodeIssues({ issues: [issue({ title: "#24 InboxStore: no concurrency protection", number: 24 })] });
   assert.equal(row.title, "InboxStore: no concurrency protection");
   assert.equal(row.number, 24);
+});
+
+test("the core's list cap is reported, not hidden", () => {
+  assert.equal(CORE_LIST_CAP, 100);
+  assert.equal(isCapped(99), false);
+  assert.equal(isCapped(100), true);
 });

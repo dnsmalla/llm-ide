@@ -85,3 +85,11 @@
 .gnt-no-bars { position: absolute; z-index: 2; top: 72px; right: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; color: var(--tok-color-text-muted); pointer-events: none; }
 .gnt-no-bars strong { color: var(--tok-color-text); font-size: 13px; font-weight: 600; }
 .gnt-no-bars span { font-size: 11px; }
+
+/* Legend chips toggle a category (Mac legend); a hidden chip stays visible but faded. */
+.gnt-chip { padding: 2px 8px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: none; font: inherit; font-size: var(--tok-type-caption-size); cursor: pointer; }
+.gnt-chip[aria-pressed="false"] { opacity: .45; }
+/* Finish-to-start arrows drawn over the rows (Mac dependency edges); pointer-events off so bars stay clickable. */
+.gnt-deps { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; overflow: visible; }
+.gnt-deps path { fill: none; stroke: var(--tok-color-text-muted); stroke-width: 1.5; }
+.gnt-deps marker path { fill: var(--tok-color-text-muted); stroke: none; }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { barGeometry, buildRows, dayNumber, dayString, decodeSchedules, isWeekend, span, timelineRange, undatedRows } from "../gantt-model.ts";
+import { barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -71,4 +71,66 @@ test("issue labels do not duplicate a title's existing #number", () => {
   assert.equal(issueTitleBody({ number: 24, title: "#24 InboxStore: no concurrency protection" }), "InboxStore: no concurrency protection");
   assert.equal(issueLabel({ number: 24, title: "#24 InboxStore: no concurrency protection" }), "#24 InboxStore: no concurrency protection");
   assert.equal(issueLabel({ number: 30, title: "After creating an issue" }), "#30 After creating an issue");
+});
+
+test("legend category: closed wins, then overdue by end day, else open", () => {
+  const today = dayNumber("2026-11-02")!;
+  const mk = (state: string, end: string | null) => ({ issue: issue({ state }), end: end ? dayNumber(end) : null }) as never;
+  assert.equal(rowCategory(mk("closed", "2026-01-01"), today), "closed");
+  assert.equal(rowCategory(mk("open", "2026-11-01"), today), "overdue");
+  assert.equal(rowCategory(mk("open", "2026-11-02"), today), "open");
+  assert.equal(rowCategory(mk("open", null), today), "open");
+  assert.deepEqual(countCategories([mk("closed", null), mk("open", "2026-10-01"), mk("open", null)] as never, today), { open: 1, closed: 1, overdue: 1 });
+});
+
+test("filterRows applies label, legend and date-range filters like the Mac", () => {
+  const today = dayNumber("2026-11-02")!;
+  const r = (number: number, labels: string[], s: string | null, e: string | null, createdAt: string | null = null) =>
+    ({ issue: issue({ number, labels, createdAt }), schedule: null, start: s ? dayNumber(s) : null, end: e ? dayNumber(e) : null, dependsOn: [] });
+  const rows = [
+    r(1, ["bug"], "2026-11-01", "2026-11-05"),
+    r(2, ["feat"], "2026-12-01", "2026-12-05"),
+    r(3, ["bug"], null, null, "2026-10-20T00:00:00Z"),
+    r(4, [], "2026-10-01", "2026-10-03"),
+  ];
+  const all = ["open", "closed", "overdue"] as const;
+  const base = { label: "", categories: all, from: null, until: null, today };
+  assert.deepEqual(filterRows(rows, base).map((x) => x.issue.number), [1, 2, 3, 4]);
+  assert.deepEqual(filterRows(rows, { ...base, label: "bug" }).map((x) => x.issue.number), [1, 3]);
+  assert.deepEqual(filterRows(rows, { ...base, categories: ["overdue"] }).map((x) => x.issue.number), [4]);
+  // Range Nov 1..Nov 30: #4 (ends Oct 3) drops, #2 (starts Dec 1) drops, #3 is placed by its creation day (Oct 20) and drops.
+  assert.deepEqual(filterRows(rows, { ...base, from: dayNumber("2026-11-01")!, until: dayNumber("2026-11-30")! }).map((x) => x.issue.number), [1]);
+});
+
+test("dependency arrows run from the blocker's end to the dependent's start, skipping hidden or undated blockers", () => {
+  const range = { start: dayNumber("2026-11-01")!, days: 21 };
+  const row = (number: number, s: string | null, e: string | null, dependsOn: number[] = []) =>
+    ({ issue: issue({ number }), schedule: null, start: s ? dayNumber(s) : null, end: e ? dayNumber(e) : null, dependsOn });
+  const rows = [row(1, "2026-11-01", "2026-11-03"), row(2, "2026-11-05", "2026-11-08", [1, 9]), row(3, null, null, [1]), row(4, "2026-11-10", "2026-11-12", [2])];
+  const lines = dependencyLines(rows, range, 10, (i) => 100 + i * 44);
+  assert.deepEqual(lines, [
+    { blocker: 1, dependent: 2, x1: 3 * 10, y1: 100, x2: 4 * 10, y2: 144 },
+    { blocker: 2, dependent: 4, x1: 8 * 10, y1: 144, x2: 9 * 10, y2: 232 },
+  ]);
+});
+
+test("today scroll keeps today a third into the viewport, never negative", () => {
+  assert.equal(todayScrollLeft(300, 300), 200);
+  assert.equal(todayScrollLeft(20, 900), 0);
+});
+
+test("the save shortcut is Cmd/Ctrl+Enter only", () => {
+  assert.equal(isSaveShortcut({ key: "Enter", metaKey: true, ctrlKey: false }), true);
+  assert.equal(isSaveShortcut({ key: "Enter", metaKey: false, ctrlKey: true }), true);
+  assert.equal(isSaveShortcut({ key: "Enter", metaKey: false, ctrlKey: false }), false);
+  assert.equal(isSaveShortcut({ key: "a", metaKey: true, ctrlKey: false }), false);
+});
+
+test("today is the local calendar day, not the UTC day (Mac Calendar.current)", () => {
+  // 00:30 local is the previous UTC day east of UTC (Japan); 23:30 local is the next UTC day west of it.
+  // The UTC formula fails one of these in any non-UTC zone; run with TZ=Asia/Tokyo to see the first.
+  assert.equal(localToday(new Date(2026, 10, 2, 0, 30)), dayNumber("2026-11-02"));
+  assert.equal(localToday(new Date(2026, 10, 2, 23, 30)), dayNumber("2026-11-02"));
+  // DST change days still map to one calendar day.
+  assert.equal(localToday(new Date(2026, 2, 8, 12, 0)), dayNumber("2026-03-08"));
 });
