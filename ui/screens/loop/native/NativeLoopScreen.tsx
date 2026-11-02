@@ -13,7 +13,7 @@ import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProject
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { evaluateArtifact } from "./artifact.ts";
-import { approve, isApproved } from "./approvals.ts";
+import { approve, isApproved, revokeAll } from "./approvals.ts";
 import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
@@ -716,6 +716,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-field"><span>Protected path policy</span><select value={loop.config.protectedPathPolicy} onChange={(e) => patchLoop((l) => { l.config.protectedPathPolicy = e.target.value as "revert" | "stop" | "warn" | "off"; })}><option value="revert">Revert &amp; stop</option><option value="stop">Leave edits &amp; stop</option><option value="warn">Warn and continue</option><option value="off">Do not check</option></select></label>
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
+            <button type="button" className="loop-btn" onClick={() => { revokeAll(); setNotice("Revoked every approved Loop shell command on this machine."); }}>Revoke command approvals</button>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.alwaysUseWorktree} onChange={() => undefined} /> Always run in an isolated worktree (not ported)</label>
