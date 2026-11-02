@@ -21,6 +21,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [cronDraft, setCronDraft] = useState("");
   const [scheduleError, setScheduleError] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleActiveDraft, setScheduleActiveDraft] = useState(false);
   const firedRef = useRef<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
@@ -150,7 +151,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <button type="button" className="atn-btn atn-primary" disabled={running} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
-        <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${describeCron(config.cron)}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
+        <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${describeCron(config.cron)}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
         {notice ? <p className="atn-notice" role="status">{notice}</p> : null}
 
         <section className="atn-card">
@@ -172,10 +173,10 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
         <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-schedule-title">
           <div className="atn-modal-card">
             <header><h2 id="atn-schedule-title">Schedule · {task.label}</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close schedule" onClick={() => setScheduleOpen(false)}>×</button></header>
-            <label className="atn-inline"><input type="checkbox" checked={config.scheduleActive} onChange={(e) => update({ scheduleActive: e.target.checked })} /> Run on schedule</label>
+            <label className="atn-inline"><input type="checkbox" checked={scheduleActiveDraft} onChange={(e) => setScheduleActiveDraft(e.target.checked)} /> Run on schedule</label>
             <label className="atn-field"><span>Cron expression</span><input className="atn-cron" value={cronDraft} spellCheck={false} placeholder="0 * * * *" onChange={(e) => { setCronDraft(e.target.value); setScheduleError(!validateCron(e.target.value)); }} /><em>{scheduleError ? "Invalid five-field cron expression." : describeCron(cronDraft)}</em></label>
             <p className="atn-hint">The schedule runs while the Auto Tasks page is open; background scheduling is not ported yet.</p>
-            <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setScheduleOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-primary" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim() }); setScheduleOpen(false); setNotice(config.scheduleActive ? "Schedule saved and active while this page is open." : "Schedule saved; turn on Run on schedule to arm it."); }}>Save</button></div>
+            <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setScheduleOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-primary" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim(), scheduleActive: scheduleActiveDraft }); setScheduleOpen(false); setNotice(scheduleActiveDraft ? "Schedule saved and active while this page is open." : "Schedule saved; turn on Run on schedule to arm it."); }}>Save</button></div>
           </div>
         </div>
       ) : null}
