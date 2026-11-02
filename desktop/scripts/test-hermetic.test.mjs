@@ -25,7 +25,7 @@ const files = [
     try { return walk(d); } catch { return []; }
   }),
   ...readdirSync(join(REPO, "desktop/scripts")).filter((n) => /\.test\.mjs$/.test(n)).map((n) => join(REPO, "desktop/scripts", n)),
-].filter((f) => /\.(mjs|ts|tsx)$/.test(f) && relative(REPO, f) !== SELF);
+].filter((f) => /\.(mjs|ts|tsx)$/.test(f) && relative(REPO, f).replaceAll("\\", "/") !== SELF);
 
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 

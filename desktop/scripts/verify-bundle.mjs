@@ -43,7 +43,8 @@ export function checkLayout(app) {
   ];
   for (const [label, path] of need) if (!existsSync(path)) p.push(`missing: ${label} (${path})`);
   const node = join(core, 'node', 'node');
-  if (existsSync(node) && (statSync(node).mode & 0o111) === 0) p.push('bundled node is not executable');
+  // Windows has no executable bit; this checks a macOS .app, which only builds on macOS.
+  if (process.platform !== 'win32' && existsSync(node) && (statSync(node).mode & 0o111) === 0) p.push('bundled node is not executable');
   if (existsSync(core)) {
     p.push(...verifyNoSdkBinary(core));
     p.push(...verifyStagedCore(core).map((x) => `staged-tree verifier: ${x}`));

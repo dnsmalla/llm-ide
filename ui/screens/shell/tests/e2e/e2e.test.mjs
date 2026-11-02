@@ -21,7 +21,7 @@ const skip = process.env.LLMIDE_E2E === "0" ? "LLMIDE_E2E=0" : false;
 let m;
 let core;
 before(async () => {
-  if (skip) return;
+  // The module is always built: the bus test below is pure and runs without the core (and so on Windows).
   const { build } = require("esbuild");
   const outfile = join(bundleDir("shell-e2e"), "entry.mjs");
   await build({
@@ -29,6 +29,7 @@ before(async () => {
     alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") },
   });
   m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+  if (skip) return;
   core = await startCore();
 });
 after(async () => { await core?.stop(); });
