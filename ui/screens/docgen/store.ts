@@ -223,6 +223,16 @@ export class DocGenStore {
     }
     this.set({ templateBusy: true, templateError: null });
     try {
+      // A new template must not write into a folder that already holds one: that would overwrite it (the core's PUT
+      // replaces the template). Editing passes its own folder and skips this check.
+      if (input.folder === null) {
+        const existing = await this.requireApi().templates();
+        // Case-insensitive: the core writes into an existing folder that differs only by case (canonicalFolder).
+        if (existing.items.some((t) => t.folderName?.toLowerCase() === folder)) {
+          this.set({ templateBusy: false, templateError: { message: `A template already uses templates/${folder}. Choose another name, or edit that template.`, retryable: false, action: "none" } });
+          return null;
+        }
+      }
       const saved = await this.requireApi().putTemplate(folder, { name: input.name.trim(), sections: input.sections, surface: this.surface });
       const others = this.state.templates.filter((t) => t.folderName !== saved.folderName);
       this.set({ templateBusy: false, templates: [...others, saved].sort((a, b) => a.name.localeCompare(b.name)), templateId: saved.id });

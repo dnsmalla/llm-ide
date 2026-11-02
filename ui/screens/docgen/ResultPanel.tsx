@@ -21,6 +21,8 @@ export interface ResultPanelProps {
   onSave: () => void;
   onSaveAsNew: () => void;
   onOpenSaved: (path: string) => void;
+  /** Shows the saved file in the OS file manager. Absent outside the desktop app: no Reveal button. */
+  onReveal?: (path: string) => void;
   onDiscard: () => void;
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
@@ -133,6 +135,11 @@ function Done(p: ResultPanelProps): ReactNode {
         {r.saved && (
           <button type="button" className="dg-btn" onClick={() => p.onOpenSaved(r.saved!.path)}>
             Open in Explorer
+          </button>
+        )}
+        {r.saved && p.onReveal && (
+          <button type="button" className="dg-btn" title="Show the saved file in the file manager" onClick={() => p.onReveal!(r.saved!.path)}>
+            Reveal
           </button>
         )}
         <button type="button" className="dg-btn" aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>

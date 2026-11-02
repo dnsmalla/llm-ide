@@ -16,6 +16,8 @@ export interface SourceEnv {
   fs: Pick<FsApi, "list"> | null;
   /** Visual image preview through the host's root-confined image reader. */
   readImage?: (path: string) => Promise<string | null>;
+  /** Shows a project-relative path in the OS file manager (the host's reveal_in_os). Absent outside the desktop app. */
+  reveal?: (path: string) => void;
 }
 
 export interface SourcePanelProps {
@@ -32,6 +34,8 @@ export interface SourcePanelProps {
   /** When set, the selected source kind is remembered under this localStorage key. */
   sourceTabKey?: string;
   initialViewport?: number;
+  /** Names that could not be read as text in the last run (the Mac's unreadableSourceNames): their rows get a warning. */
+  unreadable?: readonly string[];
 }
 
 type Tab = "notes" | "files" | "paste";
@@ -96,7 +100,7 @@ interface DirEntryRow {
   size: number;
 }
 
-function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }: SourcePanelProps): ReactNode {
+function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, unreadable }: SourcePanelProps): ReactNode {
   const roots = SOURCE_ROOTS[surface];
   const [dir, setDir] = useState(roots[0]!.path);
   const [rows, setRows] = useState<DirEntryRow[]>([]);
@@ -212,7 +216,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
       {preview ? (
         <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`}>
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
-          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" /><button type="button" className="dg-btn" onClick={() => setPreview(null)}>Close</button></div>
+          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => setPreview(null)}>Close</button></div>
         </div>
       ) : null}
       <VirtualList
@@ -238,6 +242,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
             <label className="dg-check">
               <input type="checkbox" checked={checked} disabled={reason !== null} onChange={() => (checked ? onRemove([key]) : onAdd([fileItem(r.path, r.size)]))} />
               <span className="dg-name">{r.name}</span>
+              <UnreadMark name={r.name} unreadable={unreadable} />
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
               {image && reason === null && env.readImage ? (
                 <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && setPreview({ path: r.path, url })); }}>View</button>
@@ -261,9 +266,15 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport }:
   );
 }
 
+/** Warning on a source row the last run could not read. The name is the source item's name, as the run reports it. */
+export function UnreadMark({ name, unreadable }: { name: string; unreadable: readonly string[] | undefined }): ReactNode {
+  if (!unreadable || !unreadable.includes(name)) return null;
+  return <span className="dg-warn" role="img" aria-label="Could not read this file" title="Could not read this file">!</span>;
+}
+
 // ---- library notes ----------------------------------------------------------------------------
 
-function NotesTab({ env, selection, onAdd, onRemove, initialViewport }: SourcePanelProps): ReactNode {
+function NotesTab({ env, selection, onAdd, onRemove, initialViewport, unreadable }: SourcePanelProps): ReactNode {
   const [idx, setIdx] = useState<NotesIndexState>({ phase: "idle", records: [], capped: false, errorCode: null });
   const [q, setQ] = useState("");
   const host = env.notes;
@@ -316,6 +327,7 @@ function NotesTab({ env, selection, onAdd, onRemove, initialViewport }: SourcePa
             <label className="dg-check">
               <input type="checkbox" checked={checked} onChange={() => (checked ? onRemove([`note:${r.rel}`]) : onAdd([noteItem(r.rel, r.size, r.title)]))} />
               <span className="dg-name">{r.title}</span>
+              <UnreadMark name={(r.title && r.title.trim()) || r.rel.slice(r.rel.lastIndexOf("/") + 1)} unreadable={unreadable} />
               <span className="dg-muted">{formatBytes(r.size)}</span>
             </label>
           );

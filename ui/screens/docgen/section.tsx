@@ -18,6 +18,7 @@ import { imageReader } from "./image-reader.ts";
 import { DocGenStore } from "./store.ts";
 import type { Surface } from "./model.ts";
 import { safeRelativePath } from "../shell/bus";
+import { pickTemplateFile } from "./template-file.ts";
 
 const stores = new Map<Surface, DocGenStore>();
 
@@ -50,8 +51,13 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     const notes = createNotesHost((cmd, args) => invokeHost(cmd, args));
     return { fs, notes, store: storeFor(surface, fs, notes) };
   }, [surface]);
+  const onReveal = useCallback((path: string) => {
+    const rel = safeRelativePath(path);
+    if (rel && available) void invokeHost("reveal_in_os", { relPath: rel }).catch(() => undefined);
+  }, [available]);
   const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
   const env = useMemo(() => ({
+    reveal: available ? onReveal : undefined,
     fs: available ? deps.fs : null,
     notes: available ? deps.notes : null,
     readImage: available ? async (path: string) => {
@@ -59,11 +65,11 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
       const o = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
       return typeof o.dataUrl === "string" ? o.dataUrl : null;
     } : undefined,
-  }), [available, deps]);
+  }), [available, deps, onReveal]);
   const onOpenFile = useCallback((path: string) => {
     const rel = safeRelativePath(path);
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
 }

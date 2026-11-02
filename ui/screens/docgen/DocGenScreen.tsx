@@ -17,6 +17,7 @@ import { MAX_COMMAND, MAX_PROMPT, formatBytes } from "./model.ts";
 import { estimateChars, sendOrder } from "./sources.ts";
 import type { DocGenStore } from "./store.ts";
 import { TemplateManager } from "./TemplateManager";
+import type { PickedTemplateFile } from "./template-file.ts";
 import { CommandManager } from "./CommandManager";
 import type { FsApi } from "../explorer/fs";
 import { chatOutputStore } from "../shell/chat-output";
@@ -28,6 +29,10 @@ export interface DocGenScreenProps {
   active: boolean;
   projectRoot: string | null;
   onOpenFile: (path: string) => void;
+  /** Reveal a project-relative path in the OS file manager (desktop only). */
+  onReveal?: (path: string) => void;
+  /** The host's picker for a Markdown template file (desktop only). */
+  pickTemplateFile?: () => Promise<PickedTemplateFile>;
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
   /** The diagram renderer binding (host builds only). */
@@ -143,7 +148,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               onManage={() => setManage(true)}
               onManageCommands={() => setManageCommands(true)}
             /></details>
-            <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} sourceTabKey={pref("sourceKind")} /></details>
+            <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} unreadable={run.skipped} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} sourceTabKey={pref("sourceKind")} /></details>
             </fieldset>
           </aside>
         ) : null}
@@ -167,7 +172,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onOpenSaved={p.onOpenFile} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
               <HistoryPanel fs={p.env.fs} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}
@@ -223,6 +228,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           error={s.templateError}
           onSave={(i) => store.saveTemplate(i)}
           onDelete={(t) => store.deleteTemplate(t)}
+          pickFile={p.pickTemplateFile}
           onClose={() => setManage(false)}
         />
       )}

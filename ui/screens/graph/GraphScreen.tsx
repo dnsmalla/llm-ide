@@ -1,6 +1,6 @@
 // The Code Graph screen: toolbar, search, filters, canvas or node list, details. Everything here reads a
 // `GraphStore`; the section entry (index.tsx) wires the real host, worker and shell bus, tests wire fakes.
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../shell/host";
 import { Controls } from "./Controls.tsx";
@@ -9,6 +9,7 @@ import { GraphCanvas } from "./GraphCanvas.tsx";
 import { GraphFileTree } from "./FileTree.tsx";
 import { NodeList } from "./NodeList.tsx";
 import { EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
+import { FullPageGraph } from "./FullPage.tsx";
 import { buildAdjacency, communitySummary, countOnes, docSplit, isDocKind, nodeMask, setSymbolsShown, symbolKinds, symbolsShown } from "./filters.ts";
 import { DOC_LEGEND, kindColor } from "./colors.ts";
 import { searchNodes } from "./search.ts";
@@ -39,6 +40,16 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const [showLabels, setShowLabels] = useState(true);
   const [repos, setRepos] = useState<string[]>([]);
   const [target, setTarget] = useState("");
+  // Full page shows the canvas alone over the window (the Mac's expanded overlay). It is a view state, not a graph state.
+  const [fullPage, setFullPage] = useState(false);
+  const closeFullPage = useCallback(() => setFullPage(false), []);
+  // Leaving full page gives focus back to the button that opened it (it remounts with the normal view).
+  const expandBtn = useRef<HTMLButtonElement>(null);
+  const wasFull = useRef(false);
+  useEffect(() => {
+    if (wasFull.current && !fullPage) expandBtn.current?.focus();
+    wasFull.current = fullPage;
+  }, [fullPage]);
 
   // Load lazily on first show, and again when the project changes; never while another section is shown.
   useEffect(() => {
@@ -155,6 +166,28 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const docGraph = model.nodeKinds.some(isDocKind);
   const legend = DOC_LEGEND.filter((l) => kindSet.has(l.kind));
 
+  if (fullPage) {
+    return wrap(
+      <FullPageGraph onClose={closeFullPage} active={active}>
+        <GraphCanvas
+          model={model}
+          layout={layout}
+          adj={adj}
+          filters={s.filters}
+          selected={sel}
+          focused={s.focus}
+          active={active}
+          camera={camera}
+          showLabels={showLabels}
+          onSelect={(i) => store.select(i)}
+          onFocus={(i) => store.setFocus(i < 0 || i === store.getSnapshot().focus ? -1 : i)}
+          onFatal={setFatal}
+          createView={createView}
+        />
+      </FullPageGraph>,
+    );
+  }
+
   return (
     <div className="gr-root" data-active={active}>
       <header className="gr-top">
@@ -174,7 +207,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           {focusedName !== null ? (
             <button type="button" className="gr-btn" title="Clear focus (or double-click empty space)" onClick={() => store.setFocus(-1)}>Focus: {focusedName} ✕</button>
           ) : null}
-          <button type="button" className="gr-btn" title="Toggle full screen" onClick={() => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()).catch(() => undefined); }}>⛶</button>
+          <button ref={expandBtn} type="button" className="gr-btn" aria-label="Expand graph to full page" title="Expand graph to full page" onClick={() => setFullPage(true)}>⛶</button>
         </div>
         <div role="tablist" aria-label="Graph views" className="gr-seg">
           <button type="button" role="tab" id="gr-tab-graph" aria-selected={s.tab === "graph"} aria-controls="gr-panel-graph" className="gr-seg-btn" data-on={s.tab === "graph"} onClick={() => store.setTab("graph")}>Graph</button>

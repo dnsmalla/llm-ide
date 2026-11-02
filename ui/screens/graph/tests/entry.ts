@@ -10,3 +10,4 @@ export { buildAdjacency, communitySummary, defaultFilters, docSplit, initialFilt
 export { decodeGraph } from "../decode.ts";
 export { synthKitGraph } from "../bench/synth.ts";
 export { loadWasmBytes } from "./wasm-helper.ts";
+export { FullPageGraph, escapeIsOurs } from "../FullPage.tsx";

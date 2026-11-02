@@ -3,6 +3,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { Failure } from "./errors.ts";
+import type { PickedTemplateFile } from "./template-file.ts";
 import { MAX_SECTIONS, type DocTemplate } from "./model.ts";
 
 export interface TemplateManagerProps {
@@ -12,6 +13,8 @@ export interface TemplateManagerProps {
   onSave: (input: { folder: string | null; name: string; sections: string[] }) => Promise<DocTemplate | null>;
   onDelete: (t: DocTemplate) => Promise<boolean>;
   onClose: () => void;
+  /** Opens the host's file picker for a Markdown template (desktop only). Absent: no file import. */
+  pickFile?: () => Promise<PickedTemplateFile>;
   /** Test hook. */
   initialEditing?: string | "new" | null;
 }
@@ -24,7 +27,7 @@ export function parseSections(text: string): string[] {
     .slice(0, MAX_SECTIONS * 3);
 }
 
-export function TemplateManager({ templates, busy, error, onSave, onDelete, onClose, initialEditing = null }: TemplateManagerProps): ReactNode {
+export function TemplateManager({ templates, busy, error, onSave, onDelete, onClose, pickFile, initialEditing = null }: TemplateManagerProps): ReactNode {
   const titleId = useId();
   const [editing, setEditing] = useState<string | "new" | null>(initialEditing);
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -42,6 +45,17 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
   const parsed = parseSections(sections);
   const valid = name.trim() !== "" && parsed.length > 0 && parsed.length <= MAX_SECTIONS;
   const imported = parseMarkdownTemplate(importText);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const importFile = async () => {
+    if (!pickFile) return;
+    setFileError(null);
+    const r = await pickFile();
+    if (r.kind === "cancelled") return;
+    if (r.kind === "error") { setFileError(r.message); return; }
+    const t = parseMarkdownTemplate(r.text);
+    if (!t) { setFileError("That file has no sections. Use # for the name and ## for each section."); return; }
+    await onSave({ folder: null, name: t.name, sections: t.sections });
+  };
   return (
     <div className="dg-dialog-wrap">
       <div className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
@@ -54,6 +68,7 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
           </button>
         </div>
         {error && <StatusBanner severity="error" message={<>{error.message}</>} />}
+        {fileError && <StatusBanner severity="error" message={<>{fileError}</>} />}
         {editing === null ? (
           <>
             {importing ? (
@@ -63,7 +78,10 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
                 <div className="dg-actions"><button type="submit" className="dg-btn dg-primary" disabled={!imported || busy}>Import template</button><button type="button" className="dg-btn" onClick={() => setImporting(false)}>Cancel</button></div>
               </form>
             ) : (
-              <button type="button" className="dg-btn" onClick={() => setImporting(true)}>Import Markdown</button>
+              <div className="dg-actions">
+                <button type="button" className="dg-btn" onClick={() => setImporting(true)}>Import Markdown</button>
+                {pickFile && <button type="button" className="dg-btn" disabled={busy} onClick={() => void importFile()}>Import .md file</button>}
+              </div>
             )}
             <ul className="dg-tlist" aria-label="Templates">
               {templates.map((t) => (
@@ -121,6 +139,11 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
             <p className="dg-muted">
               {parsed.length} of {MAX_SECTIONS} sections. A template needs at least one.
             </p>
+            {current?.isProjectTemplate && current.folderName && (
+              <p className="dg-muted">
+                Saved as <code>templates/{current.folderName}/template.md</code>
+              </p>
+            )}
             <div className="dg-actions">
               <button type="submit" className="dg-btn dg-primary" disabled={!valid || busy}>
                 {current ? "Save changes" : "Create template"}

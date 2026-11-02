@@ -109,3 +109,4 @@
 .dg-sidebar-use p { margin: 4px 0 0; }
 .dg-sidebar details:last-of-type { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dg-sidebar details:last-of-type .dg-sources { flex: 1; min-height: 0; }
+.dg-warn { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--tok-color-warning); color: var(--tok-color-body); font-size: 11px; font-weight: 700; flex: none; }
