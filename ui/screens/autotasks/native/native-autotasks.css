@@ -45,3 +45,8 @@
 .atn-task-icon { width: 14px; text-align: center; color: var(--tok-color-accent); font-size: 11px; }
 .atn-stars { color: var(--tok-color-text-muted); letter-spacing: 3px; font-size: 11px; margin-top: 4px; }
 .atn-log-pre { margin: 0; white-space: pre-wrap; font-family: var(--tok-type-mono-family, ui-monospace, monospace); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.atn-modal { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: color-mix(in srgb, #000 45%, transparent); }
+.atn-modal-card { width: min(520px, 92vw); display: flex; flex-direction: column; gap: var(--tok-space-sm); padding: var(--tok-space-md); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 10px; }
+.atn-modal-card header { display: flex; align-items: center; gap: var(--tok-space-sm); }
+.atn-modal-card h2 { margin: 0; font-size: var(--tok-type-heading-size, 1.1em); }
+.atn-modal-actions { display: flex; justify-content: flex-end; gap: var(--tok-space-sm); }

@@ -1,14 +1,14 @@
 // Native Auto Tasks screen. Independent of Mobile Control: the task catalog and per-task settings are local. The
 // runner/scheduler is the next port phase; while it is absent, Run controls are explicitly disabled rather than
 // pretending to execute.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { GROUPS, TASKS, TASK_BY_ID, loadState, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
-import { describeCron, validateCron } from "./cron.ts";
+import { cronMatches, describeCron, validateCron } from "./cron.ts";
 import "./native-autotasks.css";
 
 interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summary: string; durationSeconds: number }
@@ -20,6 +20,8 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [notice, setNotice] = useState<string | null>(null);
   const [cronDraft, setCronDraft] = useState("");
   const [scheduleError, setScheduleError] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const firedRef = useRef<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [runs, setRuns] = useState<AutoTaskRun[]>(() => {
@@ -40,12 +42,39 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
       return next;
     });
   };
-  const runTask = async (id: AutoTaskId = selected) => {
+  useEffect(() => {
+    if (!state.masterEnabled || !hasRepo) return;
+    const tick = () => {
+      if (running) return;
+      const now = new Date();
+      const minute = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+      for (const t of TASKS) {
+        const c = state.configs[t.id];
+        if (!c?.enabled || !c.scheduleActive || !validateCron(c.cron)) continue;
+        if (!cronMatches(c.cron, now)) continue;
+        const key = `${t.id}:${minute}`;
+        if (firedRef.current[key]) continue;
+        let persisted: Record<string, string> = {};
+        try { persisted = JSON.parse(localStorage.getItem("llmide.autoTaskFired.v1") ?? "{}") as Record<string, string>; } catch { persisted = {}; }
+        if (persisted[key]) { firedRef.current[key] = minute; continue; }
+        persisted[key] = minute;
+        firedRef.current[key] = minute;
+        try { localStorage.setItem("llmide.autoTaskFired.v1", JSON.stringify(Object.fromEntries(Object.entries(persisted).slice(-200)))); } catch { /* session */ }
+        void runTask(t.id, true);
+        return;
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(timer);
+  }, [state, running, hasRepo]);
+
+  const runTask = async (id: AutoTaskId = selected, scheduled = false) => {
     if (running) return;
     const t = TASK_BY_ID[id]; const c = state.configs[id];
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
     if (!hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
-    if (!window.confirm(`Run “${t.label}” now?\n\n${c.prompt.slice(0, 500)}`)) return;
+    if (!scheduled && !window.confirm(`Run “${t.label}” now?\n\n${c.prompt.slice(0, 500)}`)) return;
     setRunning(true);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
@@ -122,7 +151,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <button type="button" className="atn-btn atn-primary" disabled={running} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
-        <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${config.cron}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => document.getElementById("atn-schedule")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Edit</button></div>
+        <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${describeCron(config.cron)}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
         {notice ? <p className="atn-notice" role="status">{notice}</p> : null}
 
         <section className="atn-card">
@@ -138,18 +167,19 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <textarea aria-label="Prompt" rows={7} value={config.prompt} onChange={(e) => update({ prompt: e.target.value, template: "custom" })} />
         </section>
 
-        <section className="atn-card" id="atn-schedule">
-          <header><span aria-hidden="true">◷</span><h2>SCHEDULE</h2><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.scheduleActive} onChange={(e) => update({ scheduleActive: e.target.checked })} /> Run on schedule</label></header>
-          <div className="atn-inline atn-schedule-row">
-            <input className="atn-cron" aria-label="Cron expression" value={cronDraft} spellCheck={false} placeholder="0 * * * *" onChange={(e) => { setCronDraft(e.target.value); setScheduleError(!validateCron(e.target.value)); }} />
-            <button type="button" className="atn-btn" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim(), scheduleActive: config.scheduleActive }); setNotice(null); }}>Save</button>
-          </div>
-          <p className={scheduleError ? "atn-error" : "atn-hint"}>{scheduleError ? "Invalid five-field cron expression." : describeCron(cronDraft)}</p>
-          <p className="atn-hint">{config.scheduleActive ? "Saved schedule; firing in the background is not ported yet." : "Manual only — Run Now will run it; the schedule is off."}</p>
-        </section>
-
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>
       </main>
+      {scheduleOpen ? (
+        <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-schedule-title">
+          <div className="atn-modal-card">
+            <header><h2 id="atn-schedule-title">Schedule · {task.label}</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close schedule" onClick={() => setScheduleOpen(false)}>×</button></header>
+            <label className="atn-inline"><input type="checkbox" checked={config.scheduleActive} onChange={(e) => update({ scheduleActive: e.target.checked })} /> Run on schedule</label>
+            <label className="atn-field"><span>Cron expression</span><input className="atn-cron" value={cronDraft} spellCheck={false} placeholder="0 * * * *" onChange={(e) => { setCronDraft(e.target.value); setScheduleError(!validateCron(e.target.value)); }} /><em>{scheduleError ? "Invalid five-field cron expression." : describeCron(cronDraft)}</em></label>
+            <p className="atn-hint">The schedule runs while the Auto Tasks page is open; background scheduling is not ported yet.</p>
+            <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setScheduleOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-primary" disabled={!validateCron(cronDraft)} onClick={() => { if (!validateCron(cronDraft)) { setScheduleError(true); return; } update({ cron: cronDraft.trim() }); setScheduleOpen(false); setNotice(config.scheduleActive ? "Schedule saved and active while this page is open." : "Schedule saved; turn on Run on schedule to arm it."); }}>Save</button></div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
