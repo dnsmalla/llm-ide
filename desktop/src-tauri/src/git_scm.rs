@@ -1187,8 +1187,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // sets the hook's executable bit through the unix-only PermissionsExt
     fn hooks_do_not_run_and_signing_is_off() {
-        if !have_git() || cfg!(windows) {
+        if !have_git() {
             return;
         }
         let r = repo("hooks");
