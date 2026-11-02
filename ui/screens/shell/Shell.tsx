@@ -1,7 +1,8 @@
-import { Suspense, memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ComponentType } from "react";
+import { Suspense, memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { HomeIcon, StatusBanner, type ThemeId } from "@llmide/ui-kit";
 import { AccountMenu, type AccountActions } from "./AccountMenu";
 import { forgetLocalSettings } from "./forget-device";
+import { GuideDialog } from "../welcome/WelcomeScreen";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
 import { host as shellHost, invokeHost } from "./host";
@@ -64,7 +65,10 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const view = useCoreStatusView();
   const session = useCoreSession();
   const features = useFeatures();
-  const { project, loaded: projectLoaded, notice, dismissNotice } = useActiveProject();
+  const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent } = useActiveProject();
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const everUsable = useRef(false);
   const main = useRef<HTMLElement>(null);
 
@@ -128,7 +132,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "," || e.key === "/")) {
         e.preventDefault();
         if (e.key === ",") dispatch({ type: "select", id: "settings" });
-        else shellBus.publish({ type: "goto-section", section: "welcome", anchor: "guide" });
+        else setGuideOpen(true);
         return;
       }
       const id = sectionForShortcut(e);
@@ -156,8 +160,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const account = useMemo<AccountActions>(
     () => ({
       openSettings: () => dispatch({ type: "select", id: "settings" }),
-      openHelp: () => shellBus.publish({ type: "goto-section", section: "welcome", anchor: "guide" }),
-      openPermissions: () => shellBus.publish({ type: "goto-section", section: "settings", anchor: "tool-permissions" }),
+      openHelp: () => setGuideOpen(true),
+      openPermissions: () => setPermissionsOpen(true),
       signOut: () => core.logout(),
       signOutAndForget: async () => { forgetLocalSettings(); await core.logout(); },
     }),
@@ -172,6 +176,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     let off: (() => void) | undefined;
     let gone = false;
     void import("@tauri-apps/api/event").then(({ listen }) => listen<string>("app-menu", (ev) => {
+      if (ev.payload === "menu_help") { setGuideOpen(true); return; }
+      if (ev.payload === "menu_quick_switch") { setQuickOpen(true); return; }
       const action = menuAction(ev.payload);
       if (action) shellBus.publish(action);
     })).then((un) => { if (gone) un(); else off = un; }).catch(() => undefined);
@@ -238,12 +244,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         />
         </div>
       </div>
-      <StatusBar
+      {gate === "open" ? <StatusBar
         theme={theme}
         onTheme={onTheme}
         chatActive={nav.active === "chat"}
         terminalItem={<ShellTerminalItem activeSection={nav.active} built={TERMINAL_BUILT} onToggle={() => { const next = !terminalOpen; setTerminalOpen(next); writeTerminalPrefs({ open: next, height: readTerminalPrefs().height }); }} />}
-      />
+      /> : null}
+      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} /> : null}
+      {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
+      {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
     </div>
   );
 }
@@ -256,5 +265,26 @@ function ApprovalBadge({ onReveal }: { onReveal: () => void }) {
     <button type="button" className="sh-approval-badge" aria-label={`${count} pending approval${count === 1 ? "" : "s"}. Open chat`} title="A tool is waiting for your approval in Chat" onClick={onReveal}>
       {count} approval{count === 1 ? "" : "s"}
     </button>
+  );
+}
+
+
+function QuickSwitchDialog({ recent, onOpen, onClose }: { recent: readonly import("./host").RecentEntry[]; onOpen: (index: number) => void; onClose: () => void }): ReactNode {
+  const [q, setQ] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
+  const shown = recent.map((r, index) => ({ r, index })).filter(({ r }) => !q || `${r.name} ${r.root}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-quick-title">
+      <div className="sh-modal-card">
+        <h2 id="sh-quick-title" className="sh-panel-title">Quick Switch Project</h2>
+        <input ref={input} className="sh-input" value={q} placeholder="Search projects…" onChange={(e) => setQ(e.target.value)} />
+        <ul className="sh-quick-list">
+          {shown.map(({ r }) => <li key={r.root}><button type="button" className="sh-button sh-quick-row" disabled={r.status !== "ok" || r.openIndex === null} onClick={() => { if (r.openIndex !== null) onOpen(r.openIndex); }}><span>{safeText(r.name, 80)}</span><span className="sh-muted">{safeText(r.root, 240)}</span></button></li>)}
+          {shown.length === 0 ? <li className="sh-muted">No matching projects.</li> : null}
+        </ul>
+        <div className="sh-form-actions"><button type="button" className="sh-button" onClick={onClose}>Cancel</button></div>
+      </div>
+    </div>
   );
 }

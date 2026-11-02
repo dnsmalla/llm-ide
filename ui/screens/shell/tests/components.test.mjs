@@ -25,7 +25,7 @@ test("Shell renders landmarks, skip link, top toolbar and a visible starting sta
   assert.match(out, /<div[^>]*class="sh-toolbar"[^>]*role="toolbar"[^>]*aria-label="Sections"/, "the Mac's top toolbar replaces the left nav");
   assert.doesNotMatch(out, /class="sh-nav"|Hide sidebar/, "no sidebar");
   assert.match(out, /<main id="shell-main"[^>]*tabindex="-1"/);
-  assert.match(out, /<footer class="sh-statusbar"/);
+  assert.doesNotMatch(out, /<footer class="sh-statusbar"/, "the Mac hides status-bar chrome before sign-in");
   assert.match(out, /role="status"[^>]*>[\s\S]*Starting core/);
   assert.match(out, /aria-label="Home"/, "Home button");
   for (const l of ["Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]) assert.match(out, new RegExp(`>${l}<`));

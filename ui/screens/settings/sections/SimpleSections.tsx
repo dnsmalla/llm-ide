@@ -66,7 +66,7 @@ export function WorkspaceSection() {
             <option key={s.id} value={s.id}>{s.label}</option>
           ))}
         </select>
-        <span className="st-hint">Where the app lands once a project is open (the Home button always returns to Welcome). Applies at once.</span>
+        <span className="st-hint">Where the app lands once a project is open. The Home button returns here; with no project it returns to Welcome. Applies at once.</span>
       </label>
     </div>
   );

@@ -684,7 +684,10 @@ export class ExplorerController {
       if (p === from || p.startsWith(`${from}/`)) tree = withExpanded(withExpanded(tree, p, false), to + p.slice(from.length), true);
     }
     for (const k of [...tree.dirs.keys()]) if (k === from || k.startsWith(`${from}/`)) tree = invalidate(tree, k);
-    this.set({ docs, tree });
+    const remap = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+    const selection = this.snap.selection;
+    const focusPath = this.snap.focusPath === null ? null : remap(this.snap.focusPath);
+    this.set({ docs, tree, selection: { anchor: selection.anchor === null ? null : remap(selection.anchor), paths: new Set([...selection.paths].map(remap)) }, focusPath });
     this.syncWatch();
     this.queueSession();
   }

@@ -194,7 +194,7 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove, 
       aria-multiselectable="true"
       aria-activedescendant={activeIndex >= 0 ? `ex-row-${activeIndex}` : undefined}
       tabIndex={0}
-      data-drop={dropTarget === "" ? "true" : undefined}
+      data-drop={dropTarget === (snap.treeBase || "") ? "true" : undefined}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       onKeyDown={onKeyDown}
       onFocus={() => {
@@ -206,9 +206,9 @@ export function FileTree({ controller, snap, active, onContextMenu, onDropMove, 
           onContextMenu(null, e.clientX, e.clientY);
         }
       }}
-      onDragOver={(e) => overDir(e, "")}
+      onDragOver={(e) => overDir(e, snap.treeBase || "")}
       onDragLeave={() => setDropTarget(null)}
-      onDrop={(e) => dropOn(e, "")}
+      onDrop={(e) => dropOn(e, snap.treeBase || "")}
     >
       <div style={{ height: win.padTop }} data-pad="top" aria-hidden="true" />
       {rows.map((row, i) => {

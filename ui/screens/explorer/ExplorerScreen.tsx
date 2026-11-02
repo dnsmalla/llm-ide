@@ -85,6 +85,8 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [width, setWidth] = useState(280);
+  const [showFiles, setShowFiles] = useState(() => { try { return localStorage.getItem("llmide.explorer.files") !== "0"; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem("llmide.explorer.files", showFiles ? "1" : "0"); } catch { /* session */ } }, [showFiles]);
   const [panel, setPanel] = useState<PanelId>(DEFAULT_PANEL);
   const [scmSeen, setScmSeen] = useState(false);
   useEffect(() => {
@@ -262,7 +264,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     else if (id === "delete" && sel.length) setDialog({ type: "delete", paths: sel });
     else if (id === "copy-path" && path) copy(path);
     else if (id === "copy-abs" && path && projectRoot) copy(`${projectRoot.replace(/\/+$/, "")}/${path}`);
-    else if (id === "reveal" && path) void invokeHost("reveal_in_os", { rel_path: path }).catch(() => undefined);
+    else if (id === "reveal" && path) void invokeHost("reveal_in_os", { relPath: path }).catch(() => undefined);
     else if (id === "refresh") void refreshAll();
   };
 
@@ -380,7 +382,8 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
 
   return (
     <div className="ex-root" data-active={active} onKeyDown={onKeyDown}>
-      <aside className="ex-side" style={{ width }} aria-label="Side panel">
+      {!showFiles ? <button type="button" className="ex-files-show" aria-label="Show files" title="Show files" onClick={() => setShowFiles(true)}>☰</button> : null}
+      {showFiles ? <aside className="ex-side" style={{ width }} aria-label="Side panel">
         <PanelTabs active={panel} onChange={(id) => { setPanel(id); if (id === "search") setFocusSearch((n) => n + 1); }} />
         <div className="ex-panel" role="tabpanel" id="ex-panel-explorer" aria-labelledby="ex-ptab-explorer" hidden={panel !== "explorer"}>
         <div className="ex-side-head">
@@ -397,6 +400,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           </button>
           <button type="button" className="ui-icon-button" aria-label="New file" title="New file" onClick={() => setDialog({ type: "prompt", kind: "new-file", dir: targetDir(snap.focusPath) })}>+</button>
           <button type="button" className="ui-icon-button" aria-label="New folder" title="New folder" onClick={() => setDialog({ type: "prompt", kind: "new-dir", dir: targetDir(snap.focusPath) })}>▣</button>
+          <button type="button" className="ui-icon-button" aria-label="Hide files" title="Hide files" onClick={() => setShowFiles(false)}>◧</button>
           <button type="button" className="ui-icon-button" aria-label="Refresh" title="Refresh" onClick={() => void refreshAll()}>↻</button>
           <button type="button" className="ui-icon-button" aria-label="Show hidden files" aria-pressed={snap.showHidden} title="Show hidden files" onClick={() => controller.setShowHidden(!snap.showHidden)}>.*</button>
           <button type="button" className="ui-icon-button" aria-label="Hide ignored files" aria-pressed={snap.hideIgnored} title="Hide files ignored by .gitignore" onClick={() => controller.setHideIgnored(!snap.hideIgnored)}>⊘</button>
@@ -431,8 +435,8 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
             </Suspense>
           </div>
         )}
-      </aside>
-      <ResizableDivider
+      </aside> : null}
+      {showFiles ? <ResizableDivider
         width={width}
         min={160}
         max={640}
@@ -441,7 +445,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           setWidth(w);
           controller.setTreeWidth(w);
         }}
-      />
+      /> : null}
       <div className="ex-main">
         <ExplorerTabBar
           tabs={snap.tabs}

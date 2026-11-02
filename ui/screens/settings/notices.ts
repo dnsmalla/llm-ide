@@ -54,7 +54,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   paths:
     "The project folder layout is owned by the project on both apps; this group lists the folders (present or missing), reveals them in Finder and re-creates missing ones. Changing the layout itself is not offered on either side.",
   workspace:
-    "On the Mac this group also holds per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the full feature profile (presets and switches); toolbar visibility is not offered.",
+    "On the Mac this group also holds per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the full feature profile (presets, switches and per-section toolbar visibility).",
   build:
     "Apply & Rebuild needs a source checkout and the Rust/Node toolchains; a distributed build has no source tree, so the button is absent there. It rebuilds the app and restarts it when ready.",
   "doc-gen":

@@ -105,6 +105,6 @@ export default function Library({ active, projectRoot }: SectionProps) {
     hostAvailable={available}
     projectOpen={projectRoot !== null}
     onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
-    onRevealPath={async (path) => { await invokeHost("reveal_in_os", { rel_path: path }); }}
+    onRevealPath={async (path) => { await invokeHost("reveal_in_os", { relPath: path }); }}
   />;
 }

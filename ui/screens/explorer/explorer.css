@@ -92,3 +92,5 @@
 .ex-markdown { flex: 1; min-height: 0; overflow-y: auto; padding: var(--tok-space-lg); background: var(--tok-color-editor-background, var(--tok-color-body)); }
 .ex-image { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--tok-space-sm); padding: var(--tok-space-lg); }
 .ex-image-canvas { width: min(100%, 1200px); height: calc(100vh - 240px); background-repeat: no-repeat; background-position: center; background-size: contain; background-color: var(--tok-color-surface); }
+.ex-files-show { position: absolute; z-index: 3; top: 6px; left: 8px; border: 1px solid var(--tok-color-border); background: var(--tok-color-surface); color: var(--tok-color-text); border-radius: var(--tok-radius-sm); padding: 2px 7px; cursor: pointer; }
+.ex-root { position: relative; }

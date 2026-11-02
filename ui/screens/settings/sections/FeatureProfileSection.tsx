@@ -145,7 +145,7 @@ export function FeatureProfileSection() {
 
       <div className="st-stack">
         <span className="st-label">Toolbar items</span>
-        <p className="st-hint">Hide a section from the top toolbar. It stays reachable from the status bar and shortcuts.</p>
+        <p className="st-hint">Hide a section from the top toolbar. It stays reachable from deep links and keyboard shortcuts.</p>
         {TOOLBAR_IDS.map((id) => {
           const label = SECTIONS.find((x) => x.id === id)?.label ?? id;
           return (

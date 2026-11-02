@@ -96,7 +96,7 @@ export function TerminalDock({ manager, runtime, projectRoot, projectName, open,
                 {t.title}
                 {t.state === "exited" ? " (exited)" : ""}
               </button>
-              <button type="button" className="tm-tab-close" aria-label={`Close ${t.title}`} title="Close terminal (kills the shell)" onClick={() => void manager.closeTab(t.id)}>×</button>
+              <button type="button" className="tm-tab-close" aria-label={`Close ${t.title}`} title="Close terminal (kills the shell)" onClick={() => { const last = snap.tabs.length === 1; void manager.closeTab(t.id).then(() => { if (last) onClose(); }); }}>×</button>
             </div>
           ))}
         </div>

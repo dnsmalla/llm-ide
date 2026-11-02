@@ -27,7 +27,7 @@ export function accountMenuItems(user: SessionUser, a: Pick<AccountActions, "ope
     { id: "email", kind: "label", label: safeText(user.email, 120), muted: true },
     { id: "sep1", kind: "separator" },
     { id: "settings", label: "Settings…", hint: `${mod},`, onSelect: a.openSettings },
-    { id: "help", label: "Help & Guide", onSelect: a.openHelp },
+    { id: "help", label: "Help & Guide", hint: `${mod}/`, onSelect: a.openHelp },
     { id: "permissions", label: "Permissions…", onSelect: a.openPermissions },
     { id: "sep2", kind: "separator" },
     { id: "signout", label: "Sign out", onSelect: a.askSignOut },
