@@ -20,9 +20,11 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute,
-  type ModelGroup, type PermissionMode, type RouteView,
+  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute,
+  restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
+import { memoryClient } from "./memory-client";
+import { ProjectMemoryView } from "../explorer/memory/ProjectMemoryView";
 import type { ChatState } from "./state";
 import { createChatUiStore, type ChatPrefs, type ChatUiStore } from "./ui-state";
 import { DockHeader } from "./DockHeader";
@@ -84,6 +86,11 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [notice, setNotice] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [projectMemoryOpen, setProjectMemoryOpen] = useState(false);
+  const memoryCore = useMemo(() => memoryClient(core), [core]);
+  const memoryChip = useRef<HTMLButtonElement>(null);
+  // Closing the viewer hands focus back to the chip that opened it.
+  const closeProjectMemory = useCallback(() => { setProjectMemoryOpen(false); memoryChip.current?.focus(); }, []);
   const [unreadable, setUnreadable] = useState<string | null>(null);
   // Errors the user caused or can ignore are not alarms: a declined confirm is silent, bookkeeping is an info notice.
   const reportStoreError = useCallback((e: unknown) => {
@@ -188,13 +195,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // A turn ended: re-read the route so a pending model switch (and the meter) reflect what the core applied.
   const wasBusy = useRef(false);
   useEffect(() => {
-    if (wasBusy.current && !busy && activeId && route?.enabled) {
-      const ac = new AbortController();
-      getRoute(core, activeId, ac.signal).then(setRoute).catch(() => undefined);
-      wasBusy.current = busy;
-      return () => ac.abort();
-    }
+    const due = routeRereadDue(wasBusy.current, busy, activeId, route?.enabled);
     wasBusy.current = busy;
+    if (!due || !activeId) return undefined;
+    const ac = new AbortController();
+    getRoute(core, activeId, ac.signal).then(setRoute).catch(() => undefined);
+    return () => ac.abort();
   }, [busy, activeId, core, route?.enabled]);
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
   // This chat's total, summed from the loaded replies' own counts (the Mac header's "N tokens").
@@ -295,18 +301,18 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                   ) : null}
                 </div>
               )}
-              {state.memory ? (
-                <div className="chat-context">
-                  <button type="button" className="chat-chip-btn" aria-label={`Session memory ${state.memory.approxTokens} tokens`} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
-                    Memory {state.memory.sessionFacts}
-                  </button>
-                  {memoryOpen ? (
-                    <div role="dialog" aria-label="Session memory" className="chat-popover">
-                      <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              {/* Always shown, as the Mac's memory button: the project memory viewer is reachable before the first turn too. */}
+              <div className="chat-context">
+                <button ref={memoryChip} type="button" className="chat-chip-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
+                  {state.memory ? `Memory ${state.memory.sessionFacts}` : "Memory"}
+                </button>
+                {memoryOpen ? (
+                  <div role="dialog" aria-label="Session memory" className="chat-popover">
+                    {state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}
+                    <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button>
+                  </div>
+                ) : null}
+              </div>
               {state.usage ? <span className="chat-muted" title="Input and output tokens for this turn">↑ {state.usage.inputTokens.toLocaleString()} ↓ {state.usage.outputTokens.toLocaleString()}</span> : null}
               {sessionTotal ? <span className="chat-muted" title={sessionTotal.title} aria-label={sessionTotal.ariaLabel}>{sessionTotal.text}</span> : null}
               {state.model && <span className="chat-muted">{state.model}</span>}
@@ -314,6 +320,11 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               <span className="chat-spacer" />
               {!dock && <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />}
             </header>
+            {projectMemoryOpen && (
+              <div role="dialog" aria-label="Project memory" className="chat-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeProjectMemory(); } }}>
+                <ProjectMemoryView client={memoryCore} repos={[]} workspaceRoot={host.projectRoot?.() ?? null} sessionId={activeId} onClose={closeProjectMemory} />
+              </div>
+            )}
             {remoteBusy && <StatusBanner severity="info" message="A turn is running for this chat on the core. Its live output cannot be shown here yet." />}
             {state.phase === "error" && state.error && (
               <StatusBanner severity="error" message={<>{state.error.message}{state.error.retryable && <> <button type="button" className="chat-link-btn" onClick={() => controller.retry(activeId)}>Retry</button></>}</>} onDismiss={() => controller.clearError(activeId)} />
@@ -344,17 +355,17 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
             <div className="chat-controls">
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
-              <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain}
+              <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
                 onChange={(provider, model) => {
-                  const prev = { provider: current.provider, model: current.model };
-                  setCurrent({ provider: provider || null, model: model || null });
-                  if (!route?.enabled) return;
-                  // "Default" unpins the chat's route (provider and model both empty, as the Mac's "Not pinned"); a pick pins it.
-                  // A refused PUT puts the picker back, so it never shows a model the route does not hold.
+                  // A pick sets the composer's model and pins the route; "Default" only unpins a pinned route (modelPickPlan).
+                  const plan = modelPickPlan(route, provider, model);
                   const chat = activeId;
-                  const restore = () => setPrefs((p) => (p[chat] ? { ...p, [chat]: { ...p[chat]!, ...prev } } : p));
-                  if (provider) putRoute(core, chat, { provider, model }).then(setRoute).catch(restore);
-                  else if (route.pinned) putRoute(core, chat, { provider: "", model: "" }).then(setRoute).catch(restore);
+                  if (plan.composer) setCurrent({ provider: plan.composer.provider || null, model: plan.composer.model || null });
+                  // A refused pin puts the picker back to the previous choice, so it never shows a model the route does not hold.
+                  const prev = { provider: current.provider, model: current.model };
+                  const restore = () => setPrefs((p) => restoreFailedPick(p, chat, { provider, model }, prev));
+                  if (plan.route === "pin") putRoute(core, chat, { provider, model }).then(setRoute).catch(restore);
+                  else if (plan.route === "unpin") putRoute(core, chat, { provider: "", model: "" }).then(setRoute).catch(() => undefined);
                 }} />
               <PendingSwitchNote pending={route?.pending} />
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />

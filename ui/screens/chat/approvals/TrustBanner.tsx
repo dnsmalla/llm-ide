@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { WorkspaceTrustState } from "../state";
 import { describeError, httpLike, type CoreTransport } from "../transport";
 import { nextFocusIndex } from "./machine";
-import { bannerText, confirmationText, failureMessage, kindText, withheld } from "./trust";
+import { bannerText, confirmationText, failureMessage, kindText, shownTrustNotice, withheld } from "./trust";
 import { sanitizeText } from "./sanitize";
 
 export interface TrustBannerProps {
@@ -31,7 +31,7 @@ export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBann
   // The notice moved to another folder while the dialog was open: what the user read no longer applies.
   useEffect(() => { if (dialogPath !== null && trust?.path !== dialogPath) { setDialogPath(null); setError(null); } }, [trust?.path, dialogPath]);
   useEffect(() => { if (dialogPath !== null) cancel.current?.focus(); else opener.current?.focus(); }, [dialogPath]);
-  if (!trust || dismissed === trust) return null;
+  if (!trust || shownTrustNotice(trust, dismissed) === null) return null;
   const held = withheld(trust);
   const conf = confirmationText(trust);
 

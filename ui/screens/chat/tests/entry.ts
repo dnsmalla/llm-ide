@@ -15,6 +15,7 @@ export * from "../SessionList";
 export * from "../Composer";
 export * from "../Pickers";
 export * from "../ChatScreen";
+export * from "../memory-client";
 export * as approvals from "../approvals";
 export * from "../slash/sanitize";
 export * from "../ime";

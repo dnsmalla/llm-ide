@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
-  meterText, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type PermissionMode, type PlainChatReason, type RouteView,
+  meterText, modelDefaultLabel, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
 export function ModePicker({ value, resolved, onChange, disabled }: { value: string; resolved?: string | null; onChange: (m: string) => void; disabled?: boolean }) {
@@ -19,17 +19,24 @@ export function ModePicker({ value, resolved, onChange, disabled }: { value: str
   );
 }
 
-export function ModelPicker({ groups, provider, model, onChange, plainChat, loading }: {
+export function ModelPicker({ groups, provider, model, onChange, plainChat, loading, route }: {
   groups: readonly ModelGroup[]; provider: string | null; model: string | null;
   onChange: (provider: string, model: string) => void; plainChat?: PlainChatReason | null; loading?: boolean;
+  /** The chat's route: with the router on, an unpinned chat shows "Not pinned (the composer's model)". */
+  route?: ModelPickerRoute | null;
 }) {
-  const value = provider && model ? `${provider}|${model}` : "";
+  const value = modelPickerValue(route, provider, model);
+  const listed = groups.flatMap((g) => g.models);
+  const composerLabel = provider && model ? (listed.find((m) => m.provider === provider && m.model === model)?.label ?? model) : null;
+  // A pinned model that is not in the lists (a retired id) still shows as chosen, as the Mac's "Current" group does.
+  const unlisted = value !== "" && !listed.some((m) => `${m.provider}|${m.model}` === value) ? value : null;
   return (
     <div className="chat-pick">
       <label>
         <span className="chat-pick-label">Model</span>
         <select aria-label="Model" value={value} disabled={loading} onChange={(e) => { const [p, ...m] = e.target.value.split("|"); if (p) onChange(p, m.join("|")); else onChange("", ""); }}>
-          <option value="">Default</option>
+          <option value="">{modelDefaultLabel(route, composerLabel)}</option>
+          {unlisted && <optgroup label="Current"><option value={unlisted}>{unlisted.split("|").slice(1).join("|")}</option></optgroup>}
           {groups.map((g) => (
             <optgroup key={g.id} label={g.label}>
               {g.models.map((m) => (

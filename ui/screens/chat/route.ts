@@ -141,6 +141,66 @@ export function providerCannotChat(provider: string | null | undefined, groups: 
 export const DELETE_CHAT_TITLE = "Delete this chat?";
 export const DELETE_CHAT_DETAIL = "The conversation and its memory are removed. This cannot be undone.";
 
+/**
+ * What a model-picker choice does. A model is chosen for the composer (its own model, what the next send uses), and
+ * with the route on it also pins the chat. "Default" is the Mac's "Not pinned (the composer's model)": it only unpins a
+ * pinned route and leaves the composer's model alone. Pure.
+ */
+export interface ModelPickPlan {
+  /** The composer's new model, or null when the composer keeps its own. */
+  composer: { provider: string; model: string } | null;
+  /** "pin" saves the choice on the route, "unpin" clears a pinned route, null sends nothing. */
+  route: "pin" | "unpin" | null;
+}
+export function modelPickPlan(route: Pick<RouteView, "enabled" | "pinned"> | null, provider: string, model: string): ModelPickPlan {
+  const on = route?.enabled === true;
+  if (provider) return { composer: { provider, model }, route: on ? "pin" : null };
+  // Router off: there is no route to unpin, so "Default" is the core's default model for the composer (never a dead option).
+  if (!on) return { composer: { provider: "", model: "" }, route: null };
+  return { composer: null, route: route?.pinned === true ? "unpin" : null };
+}
+
+/**
+ * What the model select shows. With the router on and the chat not pinned it shows the "Not pinned" option (the Mac's
+ * route picker), so an unpin is visible; otherwise the composer's own choice. Pure.
+ */
+export function modelPickerValue(route: ModelPickerRoute | null | undefined, provider: string | null, model: string | null): string {
+  if (route?.enabled === true) {
+    // A switch saved during a turn is what the chat will run next, so it is what the picker shows.
+    const held = route.pending ?? (route.pinned === true ? route : null);
+    return held && held.provider && held.model ? `${held.provider}|${held.model}` : "";
+  }
+  return provider && model ? `${provider}|${model}` : "";
+}
+export type ModelPickerRoute = Pick<RouteView, "enabled" | "pinned"> & Partial<Pick<RouteView, "provider" | "model" | "pending">>;
+
+/** The select's empty option: "Default" with the router off, the Mac's "Not pinned (the composer's model)" with it on. */
+export function modelDefaultLabel(route: Pick<RouteView, "enabled"> | null | undefined, composerModelLabel: string | null): string {
+  if (route?.enabled !== true) return "Default";
+  return composerModelLabel ? `Not pinned (the composer's model: ${composerModelLabel})` : "Not pinned (the composer's model)";
+}
+
+/**
+ * A refused pin puts the previous choice back, but only while the picker still shows the pick that failed: a later
+ * pick made while the save was in flight is not overwritten. Pure.
+ */
+export function restoreFailedPick<P extends { mode: string; provider: string | null; model: string | null }>(prefs: Readonly<Record<string, P>>, chatId: string, failed: { provider: string; model: string }, prev: { provider: string | null; model: string | null }): Readonly<Record<string, P>> {
+  const cur = prefs[chatId];
+  if (!cur || (cur.provider ?? "") !== failed.provider || (cur.model ?? "") !== failed.model) return prefs;
+  return patchChatPrefs(prefs, chatId, prev as Partial<P>);
+}
+
+/** Sets some fields of one chat's remembered picker choices; a chat with none remembered is left as it is. Pure. */
+export function patchChatPrefs<P extends { mode: string; provider: string | null; model: string | null }>(prefs: Readonly<Record<string, P>>, chatId: string, patch: Partial<P>): Readonly<Record<string, P>> {
+  const cur = prefs[chatId];
+  return cur ? { ...prefs, [chatId]: { ...cur, ...patch } } : prefs;
+}
+
+/** A turn just ended on a chat whose route is on: re-read the route so a pending switch and the meter show what the core applied. */
+export function routeRereadDue(wasBusy: boolean, busy: boolean, chatId: string | null, routeEnabled: boolean | undefined): boolean {
+  return wasBusy && !busy && !!chatId && routeEnabled === true;
+}
+
 // --- HTTP wrappers --------------------------------------------------------------------------
 
 export interface RouteView {

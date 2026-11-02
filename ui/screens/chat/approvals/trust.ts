@@ -43,6 +43,15 @@ export function bannerText(n: WorkspaceTrustState): string {
 
 const TAIL = "Hooks and plugins inside a project folder are not loaded either way. Only trust folders whose contents you wrote or have read. You can turn this off again in Settings.";
 
+/**
+ * The notice the banner shows. A dismissed notice stays hidden only while it is the very same object: a later notice
+ * (a new turn's, or another folder's) is a new object and shows again. Pure.
+ */
+export function shownTrustNotice(trust: WorkspaceTrustState | null, dismissed: WorkspaceTrustState | null): WorkspaceTrustState | null {
+  if (!trust || trust === dismissed) return null;
+  return trust;
+}
+
 /** Shown before the explicit trust: names what will run. The path is the notice's own path, never re-typed. */
 export function confirmationText(n: WorkspaceTrustState): { title: string; body: string[] } {
   const held = withheld(n);
