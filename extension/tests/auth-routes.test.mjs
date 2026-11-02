@@ -17,7 +17,11 @@ process.env.NODE_ENV = 'test';
 process.env.LLMIDE_CLAUDE_BIN_DISABLED = '1';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const tmpDb = path.join(__dirname, '_auth-routes-test.db');
+// Every fixture lives in a private temp dir per run: fixed paths under tests/ were shared by any two
+// concurrent runs (a pre-push gate and another session), which wiped and installed into each other's dirs.
+const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), 'llmide-auth-routes-'));
+process.on('exit', () => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+const tmpDb = path.join(fixtureRoot, '_auth-routes-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
@@ -27,16 +31,16 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 // registry in llm_agent/skills/registry.mjs caches its directory listing at
 // first load and only re-scans on an explicit reload, so a fixture swapped
 // in later would be invisible to it.
-const claudePluginsFixture = path.join(__dirname, '_claude-plugins-fixture');
+const claudePluginsFixture = path.join(fixtureRoot, '_claude-plugins-fixture');
 process.env.CLAUDE_PLUGINS_DIR = claudePluginsFixture;
-const codexHomeFixture = path.join(__dirname, '_codex-home-fixture');
+const codexHomeFixture = path.join(fixtureRoot, '_codex-home-fixture');
 process.env.CODEX_HOME_DIR = codexHomeFixture;
 // llm-sources registry state lives at dirname(LLMIDE_PLUGIN_DIR)/llm-sources.json.
 // With a flat fixture dir that lands in extension/tests/ itself — a PERSISTED
 // (gitignored) file carrying machine-specific source paths, so CI (no file)
 // and local (stale file) would exercise different registry states. Nesting
 // the fixture one level puts the registry inside the wiped-per-run directory.
-const llmidePluginFixture = path.join(__dirname, '_llmide-plugins-fixture', 'plugins');
+const llmidePluginFixture = path.join(fixtureRoot, '_llmide-plugins-fixture', 'plugins');
 process.env.LLMIDE_PLUGIN_DIR = llmidePluginFixture;
 // resolveCentralSkillsRepo() prefers SKILLS_REPO, then the repo's .skills
 // submodule, then well-known home-dir locations. CI checks out neither the
@@ -45,7 +49,7 @@ process.env.LLMIDE_PLUGIN_DIR = llmidePluginFixture;
 // resolvable identically in every environment — it's the only always-on
 // source now (no fallback copy), so tests below that list/toggle it need it
 // to actually resolve.
-const skillsRepoFixture = path.join(__dirname, '_skills-repo-fixture');
+const skillsRepoFixture = path.join(fixtureRoot, '_skills-repo-fixture');
 process.env.SKILLS_REPO = skillsRepoFixture;
 // The llm-sources "update" route calls syncBuiltin() for a builtin-origin
 // source (registry.mjs), which runs a REAL `git submodule update --init
@@ -57,7 +61,7 @@ process.env.SKILLS_REPO = skillsRepoFixture;
 // its HEAD to whatever the parent repo's index currently pins, discarding any
 // local commit made there. Point it at a fixture dir instead (no .gitmodules
 // needed — the git command just fails harmlessly and is caught).
-const repoRootFixture = path.join(__dirname, '_auth-routes-repo-root-fixture');
+const repoRootFixture = path.join(fixtureRoot, '_auth-routes-repo-root-fixture');
 process.env.LLMIDE_REPO_ROOT = repoRootFixture;
 for (const dir of [claudePluginsFixture, codexHomeFixture, llmidePluginFixture, repoRootFixture]) {
   fs.rmSync(dir, { recursive: true, force: true });
