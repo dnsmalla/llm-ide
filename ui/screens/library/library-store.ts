@@ -25,6 +25,24 @@ function readPrefs(): LibraryPrefs {
   try { return JSON.parse(globalThis.localStorage?.getItem(PREFS_KEY) ?? "{}") as LibraryPrefs; } catch { return {}; }
 }
 
+/**
+ * Old builds saved group "month" on every filter or sort change, and no control here can change it back.
+ * That saved value shows the date buckets (the default); every other saved value is kept.
+ */
+export function groupFromPrefs(saved: GroupKey | undefined): GroupKey {
+  if (saved === undefined || saved === "month") return "relative";
+  return saved;
+}
+
+/**
+ * Like the Mac, the list has only the search field, so only the saved search text is restored. Platform,
+ * has-summary and date-range filters saved by older builds (which had controls for them) would otherwise hide
+ * notes with nothing on screen to clear them.
+ */
+export function filtersFromPrefs(saved: Partial<Filters> | undefined): Filters {
+  return { ...NO_FILTERS, query: typeof saved?.query === "string" ? saved.query : "" };
+}
+
 export interface LibraryState {
   rootStatus: RootStatus;
   root: NotesRoot | null;
@@ -96,9 +114,9 @@ export class LibraryStore {
       sections: sectionsFor(new Map()),
       sectionId: prefs.sectionId === undefined ? "meeting" : prefs.sectionId,
       selectedRel: null,
-      filters: { ...NO_FILTERS, ...(prefs.filters ?? {}) },
+      filters: filtersFromPrefs(prefs.filters),
       sort: prefs.sort ?? "date-desc",
-      group: prefs.group ?? "relative",
+      group: groupFromPrefs(prefs.group),
       search: IDLE_SEARCH,
     };
   }

@@ -18,7 +18,7 @@ import {
   type CatalogEntry, type RepoEntry,
 } from "./source-actions.ts";
 import {
-  browserStorage, DEFAULT_BOX, DEFAULT_EMAIL, DEFAULT_GITHUB, DEFAULT_SLACK, loadConfigs, saveConfigs, secretProblem, validateBox, validateEmail, validateGithub, validateSlack, validateSlackChannelId,
+  browserStorage, DEFAULT_BOX, DEFAULT_EMAIL, DEFAULT_GITHUB, DEFAULT_SLACK, loadConfigs, saveConfigs, secretProblem, selectAllChannels, SLACK_MAX_CHANNELS, validateBox, validateEmail, validateGithub, validateSlack, validateSlackChannelId,
   type BoxConfig, type EmailConfig, type GithubIssuesConfig, type KeyValueStorage, type SecretKind, type SlackChannel, type SlackConfig, type SourceConfigs,
 } from "./source-config.ts";
 import { linkState, linkStateText, listSecretKeys, mapThrown, saveSecret, SourceError, sourceErrorText, type LinkState, type SourceSecretKey, type SourcesCore } from "./source-core.ts";
@@ -501,6 +501,21 @@ export function SlackPane({ env }: { env: PaneEnv }): ReactNode {
     setCfg((x) => ({ ...x, channels: chosen.has(c.id) ? x.channels.filter((y) => y.id !== c.id) : [...x.channels, c].slice(0, 100) }));
     setSaved(false);
   };
+  // Mac SlackSourceSheet: Select All adds every loaded channel, Select None clears the pending selection
+  // (channels missing from the list too). Only the pending selection changes; Save settings stores it.
+  const selectAll = (): void => {
+    const r = selectAllChannels(cfg.channels, available ?? []);
+    setCfg((x) => ({ ...x, channels: r.channels }));
+    setSaved(false);
+    setInfo(r.left > 0 ? `At most ${SLACK_MAX_CHANNELS} channels can be chosen: ${r.left} loaded channel${r.left === 1 ? " was" : "s were"} not chosen.` : null);
+  };
+  const selectNone = (): void => {
+    setCfg((x) => ({ ...x, channels: [] }));
+    setSaved(false);
+  };
+  // Chosen channels the loaded list does not return (a narrower Slack permission, or added by id): kept and removable.
+  const loadedIds = new Set((available ?? []).map((c) => c.id));
+  const orphans = cfg.channels.filter((c) => !loadedIds.has(c.id));
   const connect = (): void => {
     void task.run(async (signal) => {
       const s = await slackStart(env.core, signal);
@@ -582,6 +597,12 @@ export function SlackPane({ env }: { env: PaneEnv }): ReactNode {
           >
             Load my channels
           </button>
+          <button type="button" className="lib-link-btn" disabled={!available || available.length === 0} onClick={selectAll}>
+            Select All
+          </button>
+          <button type="button" className="lib-link-btn" disabled={cfg.channels.length === 0} onClick={selectNone}>
+            Select None
+          </button>
         </div>
         {!complete && <StatusBanner severity="warning" message="The channel list is incomplete (Slack rate-limited the request). Load it again, or add a channel by its id." />}
         {available && (
@@ -591,6 +612,18 @@ export function SlackPane({ env }: { env: PaneEnv }): ReactNode {
                 <label className="lib-check">
                   <input type="checkbox" checked={chosen.has(c.id)} onChange={() => toggle(c)} /> #{c.name || c.id}
                 </label>
+              </li>
+            ))}
+          </ul>
+        )}
+        {orphans.length > 0 && (
+          <ul className="lib-items" aria-label="Chosen channels not in the current list" style={{ maxHeight: 240, overflow: "auto" }}>
+            {orphans.map((c) => (
+              <li key={c.id}>
+                <label className="lib-check lib-muted">
+                  <input type="checkbox" checked onChange={() => toggle(c)} /> #{c.name || c.id}
+                </label>{" "}
+                <span className="lib-muted">Previously selected, not in the current channel list (may need a broader Slack permission).</span>
               </li>
             ))}
           </ul>
@@ -675,6 +708,9 @@ export function SlackPane({ env }: { env: PaneEnv }): ReactNode {
 
 // ---- Box -------------------------------------------------------------------------------------
 
+/** Mac BoxSourceSheet "Open Box Developer Console…": where the Custom App's client id and secret come from. */
+export const BOX_CONSOLE_URL = "https://app.box.com/developers/console";
+
 export function BoxPane({ env }: { env: PaneEnv }): ReactNode {
   const { configs, update, persisted } = usePersisted(env);
   const vault = useVaultKeys(env);
@@ -718,6 +754,12 @@ export function BoxPane({ env }: { env: PaneEnv }): ReactNode {
         <Field label="Folder ID" error={problems.folderId}>
           <input type="text" inputMode="numeric" value={cfg.folderId} onChange={(e) => set("folderId", e.target.value)} />
         </Field>
+        <p className="lib-muted">
+          Client ID and secret come from your Custom App.{" "}
+          <button type="button" className="lib-link-btn" onClick={() => void env.openExternal(BOX_CONSOLE_URL).catch(() => setInfo("Opening links is not available yet."))}>
+            Open Box Developer Console
+          </button>
+        </p>
         <div className="lib-editor-bar">
           <button type="button" className="lib-btn lib-btn-primary" disabled={!valid || saved} onClick={() => { update({ box: cfg }); setSaved(true); setInfo("Settings saved."); }}>
             Save settings

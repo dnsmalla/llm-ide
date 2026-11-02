@@ -37,6 +37,8 @@ export interface LibraryNavProps {
   onRefresh: () => void;
   /** Null when the project's Paths layout owns the folders (no separate notes-folder chooser). */
   onChangeFolder: (() => void) | null;
+  /** Reveals the meetings folder in the OS file manager (Mac "Reveal Folder in Finder"); absent when the host cannot. */
+  onRevealMeetings?: () => void;
   rebuild: RebuildProgress | null;
   onRebuild: (() => void) | null;
   onCancelRebuild: () => void;
@@ -154,6 +156,11 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
         {p.onChangeFolder ? (
           <button type="button" className="lib-btn" onClick={p.onChangeFolder}>
             Change notes folder
+          </button>
+        ) : null}
+        {p.onRevealMeetings ? (
+          <button type="button" className="lib-btn" onClick={p.onRevealMeetings}>
+            Reveal meetings folder
           </button>
         ) : null}
         {p.onRebuild && (

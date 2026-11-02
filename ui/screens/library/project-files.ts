@@ -45,3 +45,23 @@ export function decodeProjectFile(body: unknown): { text: string; bytes: number 
   if (!isRecord(body) || body.status !== "ok" || typeof body.text !== "string") return null;
   return { text: body.text, bytes: typeof body.size === "number" ? body.size : body.text.length };
 }
+
+/**
+ * Mac Meetings "+" menu, "Reveal Folder in Finder". The host's reveal_in_os resolves against the PROJECT root,
+ * so the paths keep the llm-doc/ prefix; it refuses a path that does not exist, so the meetings folder (absent
+ * before the first save) falls back to its parent. Fixed names only: nothing here comes from the webview.
+ */
+export const MEETINGS_REVEAL_PATHS = ["llm-doc/source/meetings", "llm-doc/source"] as const;
+
+/** Reveals the first path the host accepts; false when every one failed (the caller shows a plain message). */
+export async function revealFirst(paths: readonly string[], reveal: (projectRelative: string) => Promise<void> | void): Promise<boolean> {
+  for (const path of paths) {
+    try {
+      await reveal(path);
+      return true;
+    } catch {
+      /* missing or refused: try the next (parent) folder */
+    }
+  }
+  return false;
+}

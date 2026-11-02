@@ -21,7 +21,7 @@ export interface NoteViewerProps extends LinkHandlers {
 }
 
 /** State of one note load, cancelled on change or unmount. */
-export function useNoteLoad(host: NotesHost, rel: string, reloadKey: number | undefined): Load {
+export function useNoteLoad(host: NotesHost, rel: string, reloadKey: number | undefined, retry = 0): Load {
   const [load, setLoad] = useState<Load>({ phase: "loading" });
   useAbortable(
     (signal) => {
@@ -35,13 +35,15 @@ export function useNoteLoad(host: NotesHost, rel: string, reloadKey: number | un
         },
       );
     },
-    [host, rel, reloadKey],
+    [host, rel, reloadKey, retry],
   );
   return load;
 }
 
 export function NoteViewer({ host, rel, record, reloadKey, onOpenExternal, onOpenNote }: NoteViewerProps): ReactNode {
-  const load = useNoteLoad(host, rel, reloadKey);
+  // Retry (Mac MeetingDetailView "Retry" in the error state): re-reads this note only.
+  const [retry, setRetry] = useState(0);
+  const load = useNoteLoad(host, rel, reloadKey, retry);
   const handlers = useMemo<LinkHandlers>(() => ({ onOpenExternal, onOpenNote }), [onOpenExternal, onOpenNote]);
   const view = useMemo(() => (load.phase === "ready" ? describeNote(record, load.note) : null), [load, record]);
   const [showFm, setShowFm] = useState(false);
@@ -60,6 +62,11 @@ export function NoteViewer({ host, rel, record, reloadKey, onOpenExternal, onOpe
     return (
       <article className="lib-viewer">
         <StatusBanner severity={code === "not_downloaded" ? "warning" : "error"} message={notesErrorText(code)} />
+        {load.phase === "error" && (
+          <button type="button" className="lib-btn" onClick={() => setRetry((n) => n + 1)}>
+            Retry
+          </button>
+        )}
         <p className="lib-muted lib-path">{rel}</p>
       </article>
     );

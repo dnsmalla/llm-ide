@@ -79,6 +79,19 @@ export function validateSlackChannelId(id: string): boolean {
   return /^[CGD][A-Z0-9]{8,14}$/.test(id.trim());
 }
 
+export const SLACK_MAX_CHANNELS = 100;
+
+/**
+ * Select All (Mac SlackSourceSheet): adds every loaded channel to the pending choice, kept channels first.
+ * The desktop keeps at most SLACK_MAX_CHANNELS (the Mac has no cap), so `left` counts the loaded channels that
+ * did not fit; the pane must tell the user rather than look like "all" were chosen.
+ */
+export function selectAllChannels(chosen: readonly SlackChannel[], loaded: readonly SlackChannel[]): { channels: SlackChannel[]; left: number } {
+  const have = new Set(chosen.map((c) => c.id));
+  const all = [...chosen, ...loaded.filter((c) => !have.has(c.id))];
+  return { channels: all.slice(0, SLACK_MAX_CHANNELS), left: Math.max(0, all.length - SLACK_MAX_CHANNELS) };
+}
+
 export function validateSlack(c: SlackConfig): Problems<SlackConfig> {
   const p: Problems<SlackConfig> = {};
   if (c.channels.length === 0) p.channels = "Pick at least one channel.";

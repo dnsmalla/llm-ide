@@ -10,6 +10,7 @@ import type { NoteRecord } from "./notes-model.ts";
 import { EXTENSION_PLACEHOLDERS, LibraryNav, type LibraryExtension } from "./LibraryNav";
 import { NoteList } from "./NoteList";
 import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./ProjectFiles.tsx";
+import { MEETINGS_REVEAL_PATHS, revealFirst } from "./project-files.ts";
 import { NoteViewer } from "./NoteViewer";
 import { DiscardDialog, NewNoteDialog } from "./write/WriteDialogs";
 import { NoteWorkspace } from "./write/NoteWorkspace";
@@ -131,6 +132,14 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
     [onOpenExternal],
   );
 
+  // Mac Meetings "+" menu, Reveal Folder in Finder: the meetings folder, else its parent (see revealFirst).
+  const revealMeetings = useCallback(async () => {
+    if (!onRevealPath) return;
+    if (!(await revealFirst(MEETINGS_REVEAL_PATHS, onRevealPath))) {
+      setLinkNotice("The meetings folder could not be revealed. It may not exist yet.");
+    }
+  }, [onRevealPath]);
+
   const ext = extensionId === null ? undefined : [...extensions, ...(connections ?? [])].find((x) => x.id === extensionId);
 
   const createNote = useCallback(
@@ -209,6 +218,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 }}
                 onRefresh={refresh}
                 onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
+                onRevealMeetings={onRevealPath ? () => void revealMeetings() : undefined}
                 rebuild={rebuild}
                 onRebuild={runRebuild ? startRebuild : null}
                 onCancelRebuild={cancelRebuild}
