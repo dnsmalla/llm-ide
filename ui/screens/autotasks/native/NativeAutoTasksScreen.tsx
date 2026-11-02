@@ -11,6 +11,8 @@ import { GROUPS, TASKS, TASK_BY_ID, loadState, saveState, type AutoTaskConfig, t
 import { describeCron, validateCron } from "./cron.ts";
 import "./native-autotasks.css";
 
+interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summary: string; durationSeconds: number }
+
 export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [state, setState] = useState<AutoTaskLocalState>(() => loadState());
   const [selected, setSelected] = useState<AutoTaskId>("reviewCode");
@@ -20,7 +22,10 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   const [scheduleError, setScheduleError] = useState(false);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [runs, setRuns] = useState<Array<{ id: string; task: string; at: string; ok: boolean; summary: string }>>([]);
+  const [runs, setRuns] = useState<AutoTaskRun[]>(() => {
+    try { const raw = localStorage.getItem("llmide.autoTaskRuns.v1"); const v = raw ? JSON.parse(raw) as unknown : []; return Array.isArray(v) ? v.slice(0, 50) as AutoTaskRun[] : []; } catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem("llmide.autoTaskRuns.v1", JSON.stringify(runs.slice(0, 50))); } catch { /* session only */ } }, [runs]);
   const task = TASK_BY_ID[selected];
   const config = state.configs[selected];
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
@@ -59,11 +64,11 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
       }
       const ok = r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
       setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : [])]);
-      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed") }, ...xs].slice(0, 20));
+      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed"), durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);
     } catch (e) {
       setLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
-      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed" }, ...xs].slice(0, 20));
+      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(e instanceof Error ? e.message : "The task could not run.");
     } finally { setRunning(false); }
   };
@@ -104,7 +109,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           {grouped.length === 0 ? <p className="atn-hint">No tasks match this filter.</p> : null}
         </div>
         <button type="button" className="atn-model" onClick={() => setNotice("Model & Limits is part of the runner/settings port.")}>Model &amp; Limits</button>
-        <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 5).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{new Date(r.at).toLocaleTimeString()}</span></li>)}</ul>}</section>
+        <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
         <button type="button" className="atn-run-now" disabled={running} title={running ? "A task is running" : "Run the selected task now"} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run Now"}</button>
       </aside>
