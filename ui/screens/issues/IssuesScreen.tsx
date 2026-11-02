@@ -88,7 +88,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     setError(null);
     setNotice(null);
     try {
-      const r = await deps.request("POST", "/kb/connect-github-issues", { repo, state: filters.state === "all" ? "open" : filters.state });
+      const r = await deps.request("POST", "/kb/connect-github-issues", { repo, state: filters.state });
       if (r.status !== 200) {
         setError(r.status === 401 ? "Sign in again to import issues." : `The GitHub import failed (${r.status}).`);
         return;

@@ -91,7 +91,7 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all' }) 
         kind: 'ticket',
         ref: issue.html_url,
         chunkIdx: 0,
-        title: `#${issue.number} ${issue.title || ''}`.slice(0, 500),
+        title: String(issue.title || '').slice(0, 500),
         body: String(issue.body || '').slice(0, 50_000),
         meta: {
           provider: 'github',
