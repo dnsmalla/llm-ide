@@ -626,7 +626,7 @@
             },
             "repo": {
               "type": "string",
-              "description": "\"owner/name\""
+              "description": "\"owner/name\" for GitHub; a nested \"group/.../name\" (2 to 20 segments, 255 characters at most) for GitLab (API 106)"
             },
             "issueNumber": {
               "type": "integer"

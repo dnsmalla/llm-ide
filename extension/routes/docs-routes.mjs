@@ -11,9 +11,9 @@
 //   POST   /kb/projects/register                 { id, root }
 //   GET    /kb/docs/templates?project=<id>       { templates, count }
 //   GET    /kb/docs/commands?project=<id>        { commands, count }
-//   PUT    /kb/docs/templates/:folder?project=   { name, sections?, surface?, rawContent?, rewrite? } -> { template }
+//   PUT    /kb/docs/templates/:folder?project=   { name, sections?, surface?, rawContent?, rewrite?, createOnly? } -> { template }
 //   DELETE /kb/docs/templates/:folder?project=   -> { deleted }
-//   PUT    /kb/docs/commands/:folder?project=    { name, instruction?, surface?, rawContent? } -> { command }
+//   PUT    /kb/docs/commands/:folder?project=    { name, instruction?, surface?, rawContent?, createOnly? } -> { command }
 //   DELETE /kb/docs/commands/:folder?project=    -> { deleted }
 //   POST   /kb/docs/seed?project=                kit defaults, write-if-absent -> { written, count }
 //
@@ -96,6 +96,9 @@ function checkWriteFields(body, { allowSections }) {
   }
   if (body.instruction !== undefined && (typeof body.instruction !== 'string' || body.instruction.length > MAX_INSTRUCTION)) {
     return `instruction must be a string of at most ${MAX_INSTRUCTION} characters`;
+  }
+  if (body.createOnly !== undefined && typeof body.createOnly !== 'boolean') {
+    return 'createOnly must be a boolean';
   }
   return null;
 }
@@ -192,12 +195,13 @@ export async function handleDocsRoutes(req, res, ctx) {
       if (isTemplate) {
         const template = writeTemplate(root, folder, {
           name, sections: body.sections, surface: body.surface,
-          rawContent: body.rawContent, rewrite: body.rewrite === true,
+          rawContent: body.rawContent, rewrite: body.rewrite === true, createOnly: body.createOnly === true,
         });
         sendJSON(res, 200, { template });
       } else {
         const command = writeCommand(root, folder, {
           name, instruction: body.instruction, surface: body.surface, rawContent: body.rawContent,
+          createOnly: body.createOnly === true,
         });
         sendJSON(res, 200, { command });
       }

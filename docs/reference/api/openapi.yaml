@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 105
+  x-api-version: 106
 servers:
   - url: "https://{host}"
     variables:
@@ -5533,6 +5533,7 @@ paths:
                   - "updating"
                   - "canUpdate"
                   - "error"
+                  - "busy"
                 properties:
                   package:
                     type: "string"
@@ -5565,6 +5566,23 @@ paths:
                       - "string"
                       - "null"
                     description: "Why the registry could not be checked"
+                  busy:
+                    type: "object"
+                    required:
+                      - "chatTurns"
+                      - "loopRuns"
+                      - "total"
+                    description: "Agent runs in progress across ALL users, counts only (no ids, no user): chat turns in the turn lock, and Loop agent runs (POST /kb/loop/agent-run). The SDK update (POST /kb/agent-sdk/update) is refused while chatTurns or loopRuns is above zero (API 106)."
+                    properties:
+                      chatTurns:
+                        type: "integer"
+                        description: "Chat turns in progress (the turn lock)."
+                      loopRuns:
+                        type: "integer"
+                        description: "Loop agent runs in progress."
+                      total:
+                        type: "integer"
+                        description: "chatTurns plus loopRuns."
         "401":
           description: "Unauthorized"
           content:
@@ -8313,6 +8331,12 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
     delete:
       tags:
         - "docs"
@@ -10064,7 +10088,7 @@ paths:
                   type: "string"
                 repo:
                   type: "string"
-                  description: "\"owner/name\""
+                  description: "\"owner/name\" for GitHub; a nested \"group/.../name\" (2 to 20 segments, 255 characters at most) for GitLab (API 106)"
                 issueNumber:
                   type: "integer"
                 startDate:
@@ -16326,6 +16350,9 @@ components:
         rawContent:
           type: "string"
           description: "The whole file text. When present it is written as-is."
+        createOnly:
+          type: "boolean"
+          description: "true creates the folder only when no folder of that name exists (any case). An existing folder answers 409 COMMAND_EXISTS and nothing is written. Absent or false keeps the write-or-rewrite behaviour."
     Connection:
       type: "object"
       required:
@@ -19766,6 +19793,9 @@ components:
         rewrite:
           type: "boolean"
           description: "Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored."
+        createOnly:
+          type: "boolean"
+          description: "true creates the folder only when no folder of that name exists (any case, whatever its template.md holds). An existing folder answers 409 TEMPLATE_EXISTS and nothing is written; creation is an exclusive mkdir, so two concurrent creates cannot both succeed. Absent or false keeps the write-or-rewrite behaviour."
     TicketIndex:
       type: "object"
       required:

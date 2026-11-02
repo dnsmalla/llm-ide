@@ -540,6 +540,8 @@ export type TemplateWrite = {
   rawContent?: string;
   /** Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored. */
   rewrite?: boolean;
+  /** true creates the folder only when no folder of that name exists (any case, whatever its template.md holds). An existing folder answers 409 TEMPLATE_EXISTS and nothing is written; creation is an exclusive mkdir, so two concurrent creates cannot both succeed. Absent or false keeps the write-or-rewrite behaviour. */
+  createOnly?: boolean;
 };
 
 export type CommandWrite = {
@@ -551,6 +553,8 @@ export type CommandWrite = {
   surface?: string;
   /** The whole file text. When present it is written as-is. */
   rawContent?: string;
+  /** true creates the folder only when no folder of that name exists (any case). An existing folder answers 409 COMMAND_EXISTS and nothing is written. Absent or false keeps the write-or-rewrite behaviour. */
+  createOnly?: boolean;
 };
 
 export type DeleteResult = {
@@ -3214,7 +3218,7 @@ export type PutKbDocsTemplatesFolderResponse400 = CommonError;
 
 export type PutKbDocsTemplatesFolderResponse404 = CommonError;
 
-/** RESERVED_FOLDER: the folder holds an ingest layout. */
+/** RESERVED_FOLDER: the folder holds an ingest layout. TEMPLATE_EXISTS: createOnly is true and a folder of that name (any case) exists; nothing is written. */
 export type PutKbDocsTemplatesFolderResponse409 = CommonError;
 
 /** Request parts for `DELETE /kb/docs/templates/:folder` (schema/http/docs.schema.json). */
@@ -3252,6 +3256,9 @@ export type PutKbDocsCommandsFolderResponse200 = {
 export type PutKbDocsCommandsFolderResponse400 = CommonError;
 
 export type PutKbDocsCommandsFolderResponse404 = CommonError;
+
+/** COMMAND_EXISTS: createOnly is true and a folder of that name (any case) exists; nothing is written. */
+export type PutKbDocsCommandsFolderResponse409 = CommonError;
 
 /** Request parts for `DELETE /kb/docs/commands/:folder` (schema/http/docs.schema.json). */
 export type DeleteKbDocsCommandsFolderRequest = {
@@ -5869,7 +5876,7 @@ export type GetKbIssueScheduleResponse404 = FeatureDisabled;
 export type PutKbIssueScheduleRequest = {
   body: {
     provider?: string;
-    /** "owner/name" */
+    /** "owner/name" for GitHub; a nested "group/.../name" (2 to 20 segments, 255 characters at most) for GitLab (API 106) */
     repo?: string;
     issueNumber?: number;
     /** YYYY-MM-DD or null to clear */
@@ -7339,6 +7346,15 @@ export type GetKbAgentSdkResponse200 = {
   canUpdate: boolean;
   /** Why the registry could not be checked */
   error: string | null;
+  /** Agent runs in progress across ALL users, counts only (no ids, no user): chat turns in the turn lock, and Loop agent runs (POST /kb/loop/agent-run). The SDK update (POST /kb/agent-sdk/update) is refused while chatTurns or loopRuns is above zero (API 106). */
+  busy: {
+    /** Chat turns in progress (the turn lock). */
+    chatTurns: number;
+    /** Loop agent runs in progress. */
+    loopRuns: number;
+    /** chatTurns plus loopRuns. */
+    total: number;
+  };
 };
 
 export type GetKbAgentSdkResponse401 = CommonError;
@@ -8321,6 +8337,7 @@ export interface ApiEndpoints {
       200: PutKbDocsCommandsFolderResponse200;
       400: PutKbDocsCommandsFolderResponse400;
       404: PutKbDocsCommandsFolderResponse404;
+      409: PutKbDocsCommandsFolderResponse409;
     };
   };
   "DELETE /kb/docs/commands/:folder": {

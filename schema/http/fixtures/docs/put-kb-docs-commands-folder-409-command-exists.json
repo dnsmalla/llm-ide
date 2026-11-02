@@ -1,0 +1,24 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 409,
+  "description": "Captured by calling the real handler in-process (createOnly: true, project alpha, tests/docs-routes.test.mjs covers the rule). The folder already exists, so nothing is written (COMMAND_EXISTS).",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "summarize-notes"
+    },
+    "body": {
+      "name": "Summarize notes",
+      "instruction": "Again.",
+      "createOnly": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "COMMAND_EXISTS",
+      "message": "a command named \"summarize-notes\" already exists"
+    }
+  }
+}

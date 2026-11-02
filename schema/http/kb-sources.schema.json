@@ -1190,7 +1190,7 @@
       },
       "responses": {
         "200": {
-          "x-unspecified": "fetches the repo's issues from api.github.com; the success needs the network, so it is not captured"
+          "x-unspecified": "fetches the repo's issues from api.github.com; the success needs the network, so it is not captured. It answers ok, the repo, count, chunks, pages, truncated and retryAfter (seconds to wait after a GitHub secondary limit that stopped the run early, else null). A truncated or stopped run deletes no stored rows (API 106)."
         },
         "400": {
           "$ref": "_common#/$defs/Error"

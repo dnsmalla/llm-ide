@@ -430,3 +430,110 @@ test('delete: other .md files beside template.md are kept; the folder then lists
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('createOnly: a free name is created; an existing name, a case variant and an oversize template answer 409 and write nothing', async () => {
+  reset();
+  const u = mkUser('create');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    const url = (f) => `/kb/docs/templates/${f}?project=${id}`;
+    const made = await call(u, 'PUT', url('weekly'), { name: 'Weekly', sections: ['A'], createOnly: true });
+    assert.equal(made.statusCode, 200, made._body);
+    assert.equal(made.json().template.folderName, 'weekly');
+    const before = fs.readFileSync(path.join(root, 'templates', 'weekly', 'template.md'), 'utf8');
+
+    const dup = await call(u, 'PUT', url('weekly'), { name: 'Other', sections: ['B'], createOnly: true });
+    assert.equal(dup.statusCode, 409);
+    assert.equal(dup.json().error.code, 'TEMPLATE_EXISTS');
+    const variant = await call(u, 'PUT', url('WEEKLY'), { name: 'Other', sections: ['B'], createOnly: true });
+    assert.equal(variant.statusCode, 409);
+    assert.equal(variant.json().error.code, 'TEMPLATE_EXISTS');
+    assert.equal(fs.readFileSync(path.join(root, 'templates', 'weekly', 'template.md'), 'utf8'), before, 'the existing template was rewritten');
+    assert.deepEqual(fs.readdirSync(path.join(root, 'templates')).sort(), ['weekly'], 'a refused create left a folder behind');
+
+    // An oversize template.md is skipped by the list scan, but the folder still exists.
+    fs.mkdirSync(path.join(root, 'templates', 'huge'));
+    fs.writeFileSync(path.join(root, 'templates', 'huge', 'template.md'), 'x'.repeat(300 * 1024));
+    const huge = await call(u, 'PUT', url('huge'), { name: 'Huge', sections: ['A'], createOnly: true });
+    assert.equal(huge.statusCode, 409);
+    assert.equal(huge.json().error.code, 'TEMPLATE_EXISTS');
+    assert.equal(fs.statSync(path.join(root, 'templates', 'huge', 'template.md')).size, 300 * 1024, 'the oversize file was touched');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createOnly: two concurrent creates of one name produce exactly one success', async () => {
+  reset();
+  const u = mkUser('race');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    const url = `/kb/docs/templates/race-name?project=${id}`;
+    const [a, b] = await Promise.all([
+      call(u, 'PUT', url, { name: 'A', sections: ['A'], createOnly: true }),
+      call(u, 'PUT', url, { name: 'B', sections: ['B'], createOnly: true }),
+    ]);
+    const codes = [a.statusCode, b.statusCode].sort();
+    assert.deepEqual(codes, [200, 409]);
+    const loser = a.statusCode === 409 ? a : b;
+    assert.equal(loser.json().error.code, 'TEMPLATE_EXISTS');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createOnly: commands answer COMMAND_EXISTS; without the flag a PUT still overwrites; a non-boolean flag is 400', async () => {
+  reset();
+  const u = mkUser('cmdonly');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    assert.equal((await call(u, 'PUT', `/kb/docs/commands/fix?project=${id}`, { name: 'Fix', instruction: 'one', createOnly: true })).statusCode, 200);
+    const dup = await call(u, 'PUT', `/kb/docs/commands/fix?project=${id}`, { name: 'Fix', instruction: 'two', createOnly: true });
+    assert.equal(dup.statusCode, 409);
+    assert.equal(dup.json().error.code, 'COMMAND_EXISTS');
+    const plain = await call(u, 'PUT', `/kb/docs/commands/fix?project=${id}`, { name: 'Fix', instruction: 'three' });
+    assert.equal(plain.statusCode, 200, 'the default path still rewrites an existing folder');
+    const bad = await call(u, 'PUT', `/kb/docs/templates/x?project=${id}`, { name: 'X', sections: ['A'], createOnly: 'yes' });
+    assert.equal(bad.statusCode, 400);
+    assert.equal(bad.json().error.code, 'VALIDATION_FAILED');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createOnly: an unreadable template, a plain file and a symlink at the name are taken (409); a failed write leaves no folder behind', async () => {
+  reset();
+  const u = mkUser('takenkinds');
+  const root = makeProject();
+  const tdir = path.join(root, 'templates');
+  try {
+    const id = await registered(u, root);
+    const put = (f, body = {}) => call(u, 'PUT', `/kb/docs/templates/${f}?project=${id}`, { name: f, sections: ['A'], createOnly: true, ...body });
+    fs.mkdirSync(path.join(tdir, 'locked'), { recursive: true });
+    fs.writeFileSync(path.join(tdir, 'locked', 'template.md'), '# Locked\n');
+    fs.chmodSync(path.join(tdir, 'locked', 'template.md'), 0o000);
+    fs.writeFileSync(path.join(tdir, 'afile'), 'not a folder');
+    fs.symlinkSync(os.tmpdir(), path.join(tdir, 'alink'));
+    for (const f of ['locked', 'afile', 'alink', 'ALINK']) {
+      const r = await put(f);
+      assert.equal(r.statusCode, 409, `${f}: ${r._body}`);
+      assert.equal(r.json().error.code, 'TEMPLATE_EXISTS');
+    }
+    fs.chmodSync(path.join(tdir, 'locked', 'template.md'), 0o600);
+    assert.equal(fs.readFileSync(path.join(tdir, 'locked', 'template.md'), 'utf8'), '# Locked\n');
+    assert.equal(fs.readFileSync(path.join(tdir, 'afile'), 'utf8'), 'not a folder');
+
+    // TOO_LARGE is raised after the claim: the claimed folder is released, so the name stays free.
+    const big = await put('bigone', { rawContent: 'x'.repeat(300 * 1024) });
+    assert.equal(big.statusCode, 413, big._body);
+    assert.equal(big.json().error.code, 'TOO_LARGE');
+    assert.equal(fs.existsSync(path.join(tdir, 'bigone')), false, 'a failed create left its folder behind');
+    assert.equal((await put('bigone')).statusCode, 200, 'the name is still free after the failed create');
+  } finally {
+    try { fs.chmodSync(path.join(tdir, 'locked', 'template.md'), 0o600); } catch { /* gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

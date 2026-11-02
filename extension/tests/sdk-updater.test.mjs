@@ -110,6 +110,28 @@ test('an update refuses to start while chat turns are running, without blocking 
   assert.equal(isSdkUpdating(), false, 'a refusal leaves turns free to start');
 });
 
+test('an update refuses to start while Loop runs are in flight, and counts them in the message', async () => {
+  const { isSdkUpdating } = await import('../llm_agent/sdk/updater.mjs');
+  const { beginLoopRun } = await import('../core/agent-busy.mjs');
+  const dir = checkout('0.3.272');
+  const calls = [];
+  const end = beginLoopRun();
+  try {
+    // Default loopRuns reads the real counter (routes/loop-agent.mjs increments it).
+    const r = await updateSdk({ dir, fetchFn: registry('0.3.283'), installFn: fakeInstall(calls), smokeFn: async () => ({ ok: true }) });
+    assert.deepEqual(calls, []);
+    assert.equal(r.ok, false);
+    assert.match(r.log, /1 Loop run is running/);
+    assert.equal(isSdkUpdating(), false);
+    const r2 = await updateSdk({ dir, fetchFn: registry('0.3.283'), installFn: fakeInstall(calls), smokeFn: async () => ({ ok: true }), loopRuns: () => 3 });
+    assert.match(r2.log, /3 Loop runs are running/);
+  } finally {
+    end();
+  }
+  const ok = await updateSdk({ dir, fetchFn: registry('0.3.283'), installFn: fakeInstall(calls), smokeFn: async () => ({ ok: true }) });
+  assert.equal(ok.ok, true, 'with no Loop run in flight the update proceeds');
+});
+
 test('isSdkUpdating is true for exactly the length of an update', async () => {
   const { isSdkUpdating } = await import('../llm_agent/sdk/updater.mjs');
   const dir = checkout('0.3.272');

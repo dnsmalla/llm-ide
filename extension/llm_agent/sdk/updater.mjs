@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scrubbedChildEnv } from '../../core/child-env.mjs';
+import { agentBusySummary } from '../../core/agent-busy.mjs';
 
 const PKG = '@anthropic-ai/claude-agent-sdk';
 // The dist-tags document only: the package's full registry document is
@@ -155,6 +156,7 @@ export function isSdkUpdating() {
  */
 export function updateSdk({
   dir = EXTENSION_DIR, fetchFn, installFn = install, smokeFn = smoke, activeTurns = () => 0,
+  loopRuns = () => agentBusySummary(0).loopRuns,
 } = {}) {
   if (inFlight) return inFlight;
   // Replacing the package under a running turn would swap its CLI mid-turn,
@@ -166,6 +168,15 @@ export function updateSdk({
     return Promise.resolve({
       ok: false, from, to: from, rolledBack: false, restartNeeded: false,
       log: `${running} chat turn${running === 1 ? ' is' : 's are'} running — let ${running === 1 ? 'it' : 'them'} finish (or stop ${running === 1 ? 'it' : 'them'}), then update.`,
+    });
+  }
+  // A Loop agent run (routes/loop-agent.mjs) runs the same SDK outside the chat turn lock.
+  const loops = loopRuns();
+  if (loops > 0) {
+    const from = readInstalledVersion(dir);
+    return Promise.resolve({
+      ok: false, from, to: from, rolledBack: false, restartNeeded: false,
+      log: `${loops} Loop run${loops === 1 ? ' is' : 's are'} running — let ${loops === 1 ? 'it' : 'them'} finish (or stop ${loops === 1 ? 'it' : 'them'}), then update.`,
     });
   }
   inFlight = (async () => {

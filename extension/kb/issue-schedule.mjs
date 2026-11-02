@@ -53,19 +53,31 @@ function normDependsOn(value) {
   return out;
 }
 
+// Repo keys: GitHub is exactly owner/name; GitLab may nest groups (2..20
+// segments, 255 chars max). Each segment is the provider-legal charset
+// (alphanumerics plus . _ -) and never "." or "..", so the key can't shape a
+// path when the client interpolates it into a provider API URL.
+const REPO_SEG_RE = /^[A-Za-z0-9._-]+$/;
+function assertRepo(provider, repo) {
+  const segs = typeof repo === 'string' ? repo.split('/') : [];
+  const maxSegs = provider === 'gitlab' ? 20 : 2;
+  const ok = typeof repo === 'string'
+    && repo.length <= 255
+    && segs.length >= 2 && segs.length <= maxSegs
+    && (provider === 'gitlab' || segs.length === 2)
+    && segs.every((seg) => REPO_SEG_RE.test(seg) && seg !== '.' && seg !== '..');
+  if (!ok) {
+    throw new Error(provider === 'gitlab'
+      ? 'repo must be "owner/name" or a nested "group/.../name" (2 to 20 segments)'
+      : 'repo must be "owner/name"');
+  }
+}
+
 function assertKey(provider, repo, issueNumber) {
   if (!ALLOWED_PROVIDERS.has(provider)) {
     throw new Error(`provider must be one of: ${[...ALLOWED_PROVIDERS].join(', ')}`);
   }
-  // Restrict to the GitHub/GitLab-legal segment charset (alphanumerics plus
-  // . _ -), exactly two segments. Rejects whitespace, control chars, unicode,
-  // and "."/".." path segments so junk/path-shaping values can't be stored
-  // (repo is later interpolated into a provider API path by the client).
-  if (typeof repo !== 'string'
-      || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)
-      || /(^|\/)\.\.?(\/|$)/.test(repo)) {
-    throw new Error('repo must be "owner/name"');
-  }
+  assertRepo(provider, repo);
   const n = Number(issueNumber);
   if (!Number.isInteger(n) || n <= 0) {
     throw new Error('issueNumber must be a positive integer');
@@ -95,7 +107,7 @@ export function listIssueSchedules(userId, { provider, repo } = {}) {
   }
   const db = getDb();
   const allRepos = repo == null || repo === '';
-  if (!allRepos) assertKey(provider, repo, 1); // issueNumber unused here; validates repo
+  if (!allRepos) assertRepo(provider, repo);
   const rows = allRepos
     ? lazyPrepare(db,
         'SELECT * FROM issue_schedule WHERE user_id = ? AND provider = ? ORDER BY repo, issue_number'

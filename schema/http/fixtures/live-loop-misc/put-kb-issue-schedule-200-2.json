@@ -1,0 +1,32 @@
+{
+  "endpoint": "PUT /kb/issue-schedule",
+  "status": 200,
+  "description": "Captured by calling the real handler in-process (routes/issue-schedule.mjs) on a temp DB (API 106). A nested GitLab key (group/subgroup/project) is accepted.",
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "example-group/platform/api",
+      "issueNumber": 12,
+      "startDate": "2026-11-02",
+      "dueDate": "2026-11-06",
+      "estimateDays": 3,
+      "dependsOn": [
+        10,
+        11
+      ]
+    }
+  },
+  "response": {
+    "provider": "gitlab",
+    "repo": "example-group/platform/api",
+    "issueNumber": 12,
+    "startDate": "2026-11-02",
+    "dueDate": "2026-11-06",
+    "estimateDays": 3,
+    "dependsOn": [
+      10,
+      11
+    ],
+    "updatedAt": "2026-11-02 23:56:16"
+  }
+}

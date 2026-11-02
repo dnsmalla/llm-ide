@@ -53,6 +53,7 @@ import { tierRoutingStatusFresh } from '../providers/tier-routing.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
+import { agentBusySummary } from '../core/agent-busy.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
@@ -201,7 +202,8 @@ export async function handleKB(req, res) {
     // restarts anything itself — the Mac restarts the backend afterwards.
     if (req.method === 'GET' && (url === '/kb/agent-sdk' || url.startsWith('/kb/agent-sdk?'))) {
       const force = new URL(url, 'http://127.0.0.1').searchParams.get('force') === '1';
-      sendJSON(res, 200, await sdkStatus({ force }));
+      // busy: counts only (no ids). updateSdk refuses while either count is above 0.
+      sendJSON(res, 200, { ...(await sdkStatus({ force })), busy: agentBusySummary(activeTurnCount()) });
       return true;
     }
     if (req.method === 'POST' && url === '/kb/agent-sdk/update') {

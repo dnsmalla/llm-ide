@@ -250,3 +250,112 @@ test('a rate limit on page 2 stops the run without looping and keeps the stored 
   const { total } = db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 10 });
   assert.equal(total, 3, 'a failed run deletes nothing');
 });
+
+test('a truncated run (2500 issues, 20-page cap) upserts what it fetched and deletes nothing', async () => {
+  const repo = 'example/trunc';
+  serve((page) => (page === 1 ? range(9001, 9003) : []));
+  await run(repo, { token: 't' });
+  assert.equal(db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 10 }).total, 3, 'the older rows are stored first');
+  serve((page) => range((page - 1) * 100 + 1, page * 100));
+  const result = await run(repo, { token: 't' });
+  assert.equal(result.truncated, true);
+  assert.equal(result.count, 2000, 'the run stops at the 20-page cap');
+  const { total, rows } = db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 10000 });
+  assert.equal(total, 2003, 'the 3 older rows the run never saw are kept');
+  assert.ok(rows.some((r) => r.meta.number === 9001), 'an older row survived');
+});
+
+test('a run that finished without truncation replaces the repo: a vanished issue is removed', async () => {
+  const repo = 'example/vanish';
+  serve((page) => (page === 1 ? range(1, 100) : page === 2 ? range(101, 155) : []));
+  await run(repo, { token: 't' });
+  serve((page) => (page === 1 ? range(1, 100) : page === 2 ? range(101, 150) : []));
+  const result = await run(repo, { token: 't' });
+  assert.equal(result.truncated, false);
+  const { total, rows } = db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 10000 });
+  assert.equal(total, 150);
+  assert.ok(!rows.some((r) => r.meta.number === 153), 'issue 153 vanished upstream and is gone');
+});
+
+test('an error on page 2 deletes nothing: the stored rows stay', async () => {
+  const repo = 'example/pageerr';
+  serve((page) => (page === 1 ? range(1, 3) : []));
+  await run(repo, { token: 't' });
+  _setPinnedFetchForTests(async (url) => {
+    const page = Number(new URL(String(url)).searchParams.get('page'));
+    if (page === 1) return new Response(JSON.stringify(range(1, 100)), { status: 200 });
+    return new Response('{}', { status: 500 });
+  });
+  await assert.rejects(() => run(repo, { token: 't' }), /status 500/);
+  const { total } = db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 10 });
+  assert.equal(total, 3, 'a run that errors midway keeps every stored row');
+});
+
+test('a secondary limit with Retry-After stops cleanly: the result reports retryAfter, rows are kept, nothing deleted', async () => {
+  const repo = 'example/secondary';
+  serve((page) => (page === 1 ? range(1, 3) : []));
+  await run(repo, { token: 't' });
+  _setPinnedFetchForTests(async (url) => {
+    const page = Number(new URL(String(url)).searchParams.get('page'));
+    if (page === 1) return new Response(JSON.stringify(range(10, 109)), { status: 200 });
+    return new Response('{}', { status: 429, headers: { 'retry-after': '30' } });
+  });
+  const result = await run(repo, { token: 't' });
+  assert.equal(result.retryAfter, 30);
+  assert.equal(result.truncated, true);
+  assert.equal(result.count, 100);
+  const { total, rows } = db.listTicketSources(userId, { provider: 'github', repo, state: null, limit: 1000 });
+  assert.equal(total, 103, 'the 3 old rows are kept and the 100 fetched rows are upserted');
+  assert.ok(rows.some((r) => r.meta.number === 1));
+});
+
+test('a 403 with Retry-After is a secondary limit too; without it the run still fails as before', async () => {
+  const repo = 'example/secondary403';
+  _setPinnedFetchForTests(async () => new Response('{}', { status: 403, headers: { 'retry-after': '60' } }));
+  const stopped = await run(repo, { token: 't' });
+  assert.equal(stopped.retryAfter, 60);
+  assert.equal(stopped.count, 0);
+  _setPinnedFetchForTests(async () => new Response('{}', { status: 403 }));
+  await assert.rejects(() => run(repo, { token: 't' }), /auth failed \(403\)/);
+});
+
+test('without a limit the result carries retryAfter null', async () => {
+  serve((page) => (page === 1 ? range(1, 2) : []));
+  const result = await run('example/nolimit', { token: 't' });
+  assert.equal(result.retryAfter, null);
+});
+
+test('Retry-After: an HTTP-date is read, and absurd, negative, empty or junk values are held to 1 s .. 1 h (default 60)', async () => {
+  const at = (h) => {
+    _setPinnedFetchForTests(async () => new Response('{}', { status: 429, headers: h == null ? {} : { 'retry-after': h } }));
+    return run('example/retry', { token: 't' });
+  };
+  const date = new Date(Date.now() + 120_000).toUTCString();
+  const r = (await at(date)).retryAfter;
+  assert.ok(r >= 118 && r <= 121, `HTTP-date read as ~120 s, got ${r}`);
+  assert.equal((await at('99999999')).retryAfter, 3600);
+  assert.equal((await at(new Date(Date.now() + 864e5 * 30).toUTCString())).retryAfter, 3600);
+  assert.equal((await at(new Date(Date.now() - 60_000).toUTCString())).retryAfter, 1, 'a past date is not an instant retry');
+  for (const junk of ['-5', '', 'soon', '1.5e3', null]) {
+    assert.equal((await at(junk)).retryAfter, 60, String(junk));
+  }
+});
+
+test('a finished run deletes only this user\'s rows for this repo: a sibling repo and another user keep theirs', async () => {
+  const other = users.registerUser(db.getDb(), {
+    email: `gh-import-other-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'o',
+  }).id;
+  serve(() => []);
+  curRepo = 'example/iso';
+  db.ingestSources(other, [{ kind: 'ticket', ref: 'https://github.com/example/iso/issues/1', title: 'theirs', body: 'b', meta: { provider: 'github', repo: 'example/iso' } }]);
+  serve((page) => (page === 1 ? range(1, 2) : []));
+  await run('example/iso-sibling', { token: 't' });
+  serve((page) => (page === 1 ? range(1, 2) : []));
+  await run('example/iso', { token: 't' });
+  serve(() => []);
+  const result = await run('example/iso', { token: 't' });
+  assert.equal(result.truncated, false);
+  assert.equal(db.listTicketSources(userId, { provider: 'github', repo: 'example/iso', state: null, limit: 10 }).total, 0, 'the empty finished run cleared this repo');
+  assert.equal(db.listTicketSources(userId, { provider: 'github', repo: 'example/iso-sibling', state: null, limit: 10 }).total, 2, 'a sibling repo sharing the prefix is kept');
+  assert.equal(db.getDb().prepare("SELECT COUNT(*) AS n FROM sources WHERE user_id = ? AND kind = 'ticket'").get(other).n, 1, 'another user\'s row is kept');
+});

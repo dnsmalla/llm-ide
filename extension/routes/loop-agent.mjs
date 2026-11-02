@@ -30,6 +30,7 @@ import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { beginLoopRun } from '../core/agent-busy.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -164,6 +165,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeoutMs);
   onClientDisconnect(req, res, () => ac.abort());
+  // Counted for GET /kb/agent-sdk's busy summary: the SDK updater must not run under it.
+  const endBusy = beginLoopRun();
 
   try {
     const out = await runAgent({
@@ -233,6 +236,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     }
   } finally {
     clearTimeout(timer);
+    endBusy();
     agentRun.finish({
       ...runTotals(runOut?.usage),
       status: runStatus,

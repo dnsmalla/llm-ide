@@ -76,7 +76,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/connect-git` | Index a local repo into `sources` |
-| `POST` | `/kb/connect-github-issues` | Pull issues from GitHub into `sources` (up to 20 pages of 100 per run) |
+| `POST` | `/kb/connect-github-issues` | Pull issues from GitHub into `sources` (up to 20 pages of 100 per run; a run that stops early deletes nothing and may answer `retryAfter`) |
 | `GET` | `/kb/issues?repo=…&state=…&offset=…&limit=…` | One page of indexed issues: `issues`, `total`, `hasMore`, `nextOffset` (API 105, `docs/spec/api-server.md` 7j) |
 | `POST` | `/kb/connect-tickets-json` | Bulk import tickets from JSON |
 | `POST` | `/kb/connect-qa` | Index QA pairs |

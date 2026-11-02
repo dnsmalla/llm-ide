@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 105` (`server.mjs:315`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 106` (`server.mjs:316`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -341,6 +341,15 @@ Additive; no new route. `GET /kb/issues` pages in SQL over the caller's own tick
 The GitHub importer (`POST /kb/connect-github-issues`, `extension/connectors/issues.mjs`) follows pages until a short page, at most 20 pages of 100 per run (the Mac app's limit), 2 000 rows, or 60 s. A run that stops early answers `truncated: true` with `pages`. Re-running replaces the repo's rows, keyed by the issue URL (provider, repo and number), so nothing is stored twice. Host pinning, the vault token and the redirect and size rules are unchanged. GitHub's issue object has no due date of its own; the milestone's due date is returned as `milestone.dueOn`.
 
 Not built in this step: the per-issue comments read (`GET /kb/repo/issues/:key/comments`). It needs the repo allowlist, the provider adapters and the GitHub key format, which are part of the issues core slices IC1 to IC3 (`docs/superpowers/plans/2026-10-31-issues-gantt-core-plan.md`).
+
+## 7k. Repo keys, create-only docs, import truncation, SDK busy summary (API 106)
+
+Additive; no new route. Four changes, each with its contract in `schema/http`:
+
+- **Nested GitLab repo keys.** The issue schedule overlay (`/kb/issue-schedule`, `extension/kb/issue-schedule.mjs`) accepts a GitLab repo of 2 to 20 `/`-separated segments (group/sub/project), 255 characters at most. Each segment is `[A-Za-z0-9._-]+` and never `.` or `..`. GitHub stays exactly `owner/name`. Ownership and the list scope are unchanged (per user).
+- **Create-only template and command writes.** `PUT /kb/docs/templates/:folder` and `PUT /kb/docs/commands/:folder` take `createOnly: true`. An existing folder (any case, or one whose `template.md` is oversize or unreadable, which the list skips) answers `409 TEMPLATE_EXISTS` (`COMMAND_EXISTS` for a command) and writes nothing. Creation is an exclusive `mkdir`, so two concurrent creates cannot both succeed. Without the flag the write-or-rewrite behaviour is unchanged. Contract: `schema/http/docs.schema.json`.
+- **GitHub import under truncation.** `POST /kb/connect-github-issues` (`extension/connectors/issues.mjs`) replaces a repo's rows only when the run finished (no cap, budget or limit stopped it). A run that stopped early upserts what it fetched and deletes nothing, and a run that errors midway keeps every stored row. A GitHub secondary limit (429, or 403 with `Retry-After`) stops the run cleanly: the result carries `retryAfter` (seconds, or `null`). A 403 without `Retry-After` is still the primary limit or an auth failure and throws as before.
+- **Busy summary for the SDK updater.** `GET /kb/agent-sdk` adds `busy: { chatTurns, loopRuns, total }`, counts across all users with no ids. `chatTurns` is the turn lock (`activeTurnCount`), `loopRuns` the Loop agent runs in flight (`extension/core/agent-busy.mjs`, counted by `POST /kb/loop/agent-run`). The update (`POST /kb/agent-sdk/update`) is refused while either count is above zero (`updateSdk` in `extension/llm_agent/sdk/updater.mjs`; the refusal log names the running chat turns or Loop runs), so the SDK is never swapped under a running Loop agent. A Loop run that starts while an update is already in progress is not refused (open item).
 
 ## 8. See also
 

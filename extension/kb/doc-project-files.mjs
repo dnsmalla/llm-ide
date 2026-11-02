@@ -432,6 +432,44 @@ function atomicWrite(root, dir, name, content) {
 }
 
 /**
+ * Claim `root/<family>/<folder>` for a create-only write: an exclusive mkdir,
+ * so two concurrent creates cannot both win. A folder that exists in any case,
+ * or that the list scan would skip (oversized or unreadable template.md), is
+ * taken too. Returns the folder path; the caller removes it if the write fails.
+ */
+function claimFolder(root, family, folderName) {
+  const famDir = ensureSegment(root, family);
+  const lower = folderName.toLowerCase();
+  const dir = confinedDir(root, [family]);
+  let names = [];
+  try {
+    names = readdirSync(dir, { withFileTypes: true }).map((e) => e.name);
+  } catch {
+    // No family folder yet: nothing to collide with.
+  }
+  const kind = family === 'templates' ? 'template' : 'command';
+  const taken = new DocFilesError(`${kind.toUpperCase()}_EXISTS`, `a ${kind} named "${folderName}" already exists`, 409);
+  if (names.some((n) => n.toLowerCase() === lower)) throw taken;
+  const p = join(famDir, folderName);
+  try {
+    mkdirSync(p);
+  } catch (err) {
+    if (err?.code === 'EEXIST') throw taken;
+    throw err;
+  }
+  return p;
+}
+
+/** Remove a folder claimed by `claimFolder` when the write after it failed (rmdir: only an empty folder). */
+function releaseClaim(path) {
+  try {
+    rmdirSync(path);
+  } catch {
+    // Not empty, or already gone: leave it.
+  }
+}
+
+/**
  * Write `content` to `dir/name` only when no entry of that name exists. The
  * temp file is hard-linked into place: link() fails with EEXIST when the name
  * is taken, so a concurrent write is never replaced. On a filesystem without
@@ -494,40 +532,52 @@ function assertNotIngestLayout(root, file) {
  */
 export function writeTemplate(root, folderName, input) {
   const requested = assertFolderName(folderName, 'templates');
-  const actual = canonicalFolder(root, 'templates', requested);
-  const dir = ensureFolder(root, 'templates', actual);
-  const file = join(dir, 'template.md');
-  assertNotIngestLayout(root, file);
-  const surface = normalizeSurface(input.surface);
-  const name = String(input.name ?? actual);
-  const sections = Array.isArray(input.sections) ? input.sections.map(String) : [];
-  let content;
-  if (input.rewrite === true && input.rawContent === undefined && existsSync(file)) {
-    const raw = readConfinedText(root, file) ?? '';
-    content = rewriteTemplateMarkdown(raw, name, sections);
-  } else {
-    content = renderTemplateMarkdown({
-      rawContent: input.rawContent, name, sections, surface,
-    });
+  const claimed = input.createOnly === true ? claimFolder(root, 'templates', requested) : null;
+  try {
+    const actual = canonicalFolder(root, 'templates', requested);
+    const dir = ensureFolder(root, 'templates', actual);
+    const file = join(dir, 'template.md');
+    assertNotIngestLayout(root, file);
+    const surface = normalizeSurface(input.surface);
+    const name = String(input.name ?? actual);
+    const sections = Array.isArray(input.sections) ? input.sections.map(String) : [];
+    let content;
+    if (input.rewrite === true && input.rawContent === undefined && existsSync(file)) {
+      const raw = readConfinedText(root, file) ?? '';
+      content = rewriteTemplateMarkdown(raw, name, sections);
+    } else {
+      content = renderTemplateMarkdown({
+        rawContent: input.rawContent, name, sections, surface,
+      });
+    }
+    atomicWrite(root, dir, 'template.md', content);
+    return templateRecord({ folderName: actual, content });
+  } catch (err) {
+    if (claimed) releaseClaim(claimed);
+    throw err;
   }
-  atomicWrite(root, dir, 'template.md', content);
-  return templateRecord({ folderName: actual, content });
 }
 
 /** Write a command. Same rules as `writeTemplate`; `instruction` is the body. */
 export function writeCommand(root, folderName, input) {
   const requested = assertFolderName(folderName, 'commands');
-  const actual = canonicalFolder(root, 'commands', requested);
-  const dir = ensureFolder(root, 'commands', actual);
-  const surface = normalizeSurface(input.surface);
-  const content = renderCommandMarkdown({
-    rawContent: input.rawContent,
-    name: String(input.name ?? actual),
-    instruction: String(input.instruction ?? ''),
-    surface,
-  });
-  atomicWrite(root, dir, 'command.md', content);
-  return commandRecord({ folderName: actual, content });
+  const claimed = input.createOnly === true ? claimFolder(root, 'commands', requested) : null;
+  try {
+    const actual = canonicalFolder(root, 'commands', requested);
+    const dir = ensureFolder(root, 'commands', actual);
+    const surface = normalizeSurface(input.surface);
+    const content = renderCommandMarkdown({
+      rawContent: input.rawContent,
+      name: String(input.name ?? actual),
+      instruction: String(input.instruction ?? ''),
+      surface,
+    });
+    atomicWrite(root, dir, 'command.md', content);
+    return commandRecord({ folderName: actual, content });
+  } catch (err) {
+    if (claimed) releaseClaim(claimed);
+    throw err;
+  }
 }
 
 /**

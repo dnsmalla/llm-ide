@@ -1,0 +1,30 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler in-process (createOnly: true, project alpha, tests/docs-routes.test.mjs covers the rule). A free name is created.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "summarize-notes"
+    },
+    "body": {
+      "name": "Summarize notes",
+      "instruction": "Summarize the notes.",
+      "createOnly": true
+    }
+  },
+  "response": {
+    "command": {
+      "id": "9287EC53-FB40-4654-B673-F4220D14B447",
+      "name": "Summarize notes",
+      "instruction": "Summarize the notes.",
+      "rawContent": "# Summarize notes\n\n<!-- llmide:doc-command -->\n\nSummarize the notes.",
+      "isBuiltin": false,
+      "folderName": "summarize-notes",
+      "isProjectCommand": true,
+      "surface": "doc"
+    }
+  }
+}

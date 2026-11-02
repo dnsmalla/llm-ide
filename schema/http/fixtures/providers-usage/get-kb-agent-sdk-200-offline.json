@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/agent-sdk",
   "status": 200,
-  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. Not a live HTTP exchange: the Agent SDK status is produced by sdkStatus() in llm_agent/sdk/updater.mjs, called in-process with an offline fetch stub, because the route reads the npm registry (external). The body is sdkStatus()'s return value, which the route sends verbatim.",
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. Not a live HTTP exchange: the Agent SDK status is produced by sdkStatus() in llm_agent/sdk/updater.mjs, called in-process with an offline fetch stub, because the route reads the npm registry (external). The body is sdkStatus()'s return value plus busy (agentBusySummary: the chat turns in the turn lock and the Loop runs in flight, counts only), which the route sends; both are 0 in this capture.",
   "request": {
     "query": {}
   },
@@ -15,6 +15,11 @@
     "updateAvailable": false,
     "updating": false,
     "canUpdate": true,
-    "error": "registry not reached (offline capture)"
+    "error": "registry not reached (offline capture)",
+    "busy": {
+      "chatTurns": 0,
+      "loopRuns": 0,
+      "total": 0
+    }
   }
 }

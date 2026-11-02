@@ -433,7 +433,8 @@
             "updateAvailable",
             "updating",
             "canUpdate",
-            "error"
+            "error",
+            "busy"
           ],
           "description": "Claude Agent SDK version status (llm_agent/sdk/updater.mjs sdkStatus). The 200 fixture is produced in-process with an offline registry stub; the route itself reads the npm registry.",
           "properties": {
@@ -482,6 +483,16 @@
                 "null"
               ],
               "description": "Why the registry could not be checked"
+            },
+            "busy": {
+              "type": "object",
+              "required": ["chatTurns", "loopRuns", "total"],
+              "description": "Agent runs in progress across ALL users, counts only (no ids, no user): chat turns in the turn lock, and Loop agent runs (POST /kb/loop/agent-run). The SDK update (POST /kb/agent-sdk/update) is refused while chatTurns or loopRuns is above zero (API 106).",
+              "properties": {
+                "chatTurns": { "type": "integer", "description": "Chat turns in progress (the turn lock)." },
+                "loopRuns": { "type": "integer", "description": "Loop agent runs in progress." },
+                "total": { "type": "integer", "description": "chatTurns plus loopRuns." }
+              }
             }
           }
         },

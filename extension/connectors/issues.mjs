@@ -6,7 +6,7 @@
 // are never persisted server-side and never leave localhost.
 
 import { makeTrackerFetch } from '../server/tracker-fetch.mjs';
-import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
+import { getDb, ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
 
 const GITHUB_API = 'https://api.github.com';
 const PER_PAGE = 100;
@@ -28,6 +28,20 @@ function authHeaders(token) {
   return headers;
 }
 
+// GitHub's secondary limit answers 429, or 403 with Retry-After. A run stops
+// there with the seconds to wait (the caller keeps what it fetched); a 403
+// without Retry-After is the primary limit or an auth failure, as before.
+// Delta-seconds or an HTTP-date; anything else (absent, empty, negative,
+// unparseable) is the 60 s default, and a value is held to 1 s .. 1 h so a
+// hostile or broken header can neither ask for an instant retry nor a day's wait.
+function retryAfterSeconds(v) {
+  const s = String(v ?? '').trim();
+  let secs = 60;
+  if (/^\d+$/.test(s)) secs = Number(s);
+  else if (/[a-z]/i.test(s) && !Number.isNaN(Date.parse(s))) secs = Math.ceil((Date.parse(s) - Date.now()) / 1000);
+  return Math.min(3600, Math.max(1, secs));
+}
+
 async function fetchPage(repo, state, page, token) {
   const url = `${GITHUB_API}/repos/${repo}/issues?state=${encodeURIComponent(state)}&per_page=${PER_PAGE}&page=${page}`;
   // 15s ceiling: a stalled GitHub call would otherwise hold the
@@ -35,6 +49,11 @@ async function fetchPage(repo, state, page, token) {
   // rate-limit slots. Per-page timeout is bounded; the outer
   // pagination loop covers the multi-page case.
   const r = await makeTrackerFetch({ secret: token, followSameHost: true })(url, { headers: authHeaders(token), signal: AbortSignal.timeout(15_000) });
+  if (r.status === 429 || (r.status === 403 && r.headers.get('retry-after') != null)) {
+    const err = new Error('GitHub secondary rate limit reached; the run stopped early.');
+    err.retryAfter = retryAfterSeconds(r.headers.get('retry-after'));
+    throw err;
+  }
   if (r.status === 403) {
     // GitHub returns 403 for both auth failures AND rate-limit exceeded.
     // Distinguish them so the caller gets an actionable message instead
@@ -117,10 +136,11 @@ function toTicketItem(issue, slug) {
 
 /**
  * Import one GitHub repo's issues into the KB index. Pages until a short or
- * empty page (exhausted), or stops early at MAX_PAGES pages, MAX_ROWS rows or
- * the time budget (truncated: true). Re-running replaces the repo's rows, so
- * the same issue is never stored twice (the ref is the issue's html_url, which
- * is unique per provider, repo and number).
+ * empty page (exhausted), or stops early at MAX_PAGES pages, MAX_ROWS rows, the
+ * time budget or a secondary limit (truncated: true; retryAfter in seconds when
+ * a limit stopped it). An exhausted run replaces the repo's rows, so the same
+ * issue is never stored twice (the ref is the issue's html_url, which is unique
+ * per provider, repo and number); a run that stopped early only upserts.
  * @param {string} userId
  * @param {{ repo: string, token?: string, state?: string, budgetMs?: number }} opts
  */
@@ -140,9 +160,17 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all', bu
   const deadline = Date.now() + budgetMs;
   let exhausted = false;
   let pages = 0;
+  let retryAfter = null;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     if (page > 1 && Date.now() > deadline) break;
-    const batch = await fetchPage(slug, allowedState, page, token);
+    let batch;
+    try {
+      batch = await fetchPage(slug, allowedState, page, token);
+    } catch (err) {
+      if (err.retryAfter == null) throw err;
+      retryAfter = err.retryAfter;
+      break;
+    }
     pages = page;
     if (!Array.isArray(batch) || batch.length === 0) { exhausted = true; break; }
     for (const issue of batch) items.push(toTicketItem(issue, slug));
@@ -150,11 +178,16 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all', bu
     if (items.length >= MAX_ROWS) break;
   }
 
-  // Replace existing rows for this repo so closed tickets that vanish
-  // from the API (rare, but possible on transfer/delete) don't linger.
-  deleteSourcesByPrefix(userId, 'ticket', `https://github.com/${slug}/`);
-  const written = ingestSources(userId, items);
-  return { repo: slug, count: items.length, chunks: written, pages, truncated: !exhausted };
+  // A run that finished replaces the repo's rows, so an issue that vanished
+  // upstream goes. A truncated or stopped run saw only part of the repo: it
+  // upserts what it fetched and deletes nothing, or it would drop older rows
+  // it never saw.
+  // One transaction: a failed upsert must not leave the repo's rows deleted.
+  const written = getDb().transaction(() => {
+    if (exhausted) deleteSourcesByPrefix(userId, 'ticket', `https://github.com/${slug}/`);
+    return ingestSources(userId, items);
+  })();
+  return { repo: slug, count: items.length, chunks: written, pages, truncated: !exhausted, retryAfter };
 }
 
 // Generic importer — accepts an array of { id, title, body, url?, meta? }

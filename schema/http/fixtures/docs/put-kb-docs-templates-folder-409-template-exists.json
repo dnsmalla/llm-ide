@@ -1,0 +1,26 @@
+{
+  "endpoint": "PUT /kb/docs/templates/:folder",
+  "status": 409,
+  "description": "Captured by calling the real handler in-process (createOnly: true, project alpha, tests/docs-routes.test.mjs covers the rule). The folder already exists, so nothing is written (TEMPLATE_EXISTS).",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "weekly-report"
+    },
+    "body": {
+      "name": "Weekly Report",
+      "sections": [
+        "Summary"
+      ],
+      "createOnly": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TEMPLATE_EXISTS",
+      "message": "a template named \"weekly-report\" already exists"
+    }
+  }
+}

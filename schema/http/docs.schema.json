@@ -1,5 +1,5 @@
 {
-  "description": "docs-kit K1: Doc Gen's project template and command files, the seed that fills them, and the project id registration the Mac makes first (routes/docs-routes.mjs, kb/doc-project-files.mjs, kb/project-roots.mjs). Roster: all eight paths are in ALL_ENDPOINTS (extension/server.mjs); the handler is reached from routes/doc-gen.mjs through the doc_gen group (routes/feature-routes.mjs), so with doc_gen off every one of these answers 404 feature_disabled. Every route resolves its project through the caller's own registrations (POST /kb/projects/register), so another user's project id answers 404 PROJECT_NOT_REGISTERED. Folders in a path are checked before any disk access. A folder name that is not a plain name (dotted, over-long, or outside letters, digits, _ and -) answers 400 INVALID_FOLDER; a reserved name answers 400 RESERVED_FOLDER: auto_task in any casing for both families, and under templates/ also meeting-note and email-note (the ingest layouts). A write or delete over an existing ingest layout (a template.md carrying llmide:ingest-template, in any folder) answers 409 RESERVED_FOLDER. Malformed input (a bad field, a missing project query) answers 400 VALIDATION_FAILED. Registration: every refused root answers the same 400 INVALID_ROOT with one message (the reason is logged on the server only, so the endpoint is no oracle for what exists); a user may hold at most 200 registered projects, and a new id beyond that answers 409 TOO_MANY_PROJECTS (re-registering an existing id does not count). A scan examines at most 2000 folder entries per family and sets truncated: true beyond that (scannedFolders says how many were examined). DELETE removes only the template.md or command.md, then the folder only if it is empty (folderRemoved says which happened); nothing is removed recursively. The 413 body limit (512 KB) and the malformed-JSON 400 are not declared per route (SCHEMA.md). Rate limits: PUT and DELETE under /kb/docs/ and POST /kb/docs/seed and /kb/projects/register share the kbWrite bucket (429 is not declared: the bucket answers it for every kbWrite route). The Template and Command objects mirror the Swift DocTemplate and DocCommand Codable shapes, so the Mac decodes them with its existing models.",
+  "description": "docs-kit K1: Doc Gen's project template and command files, the seed that fills them, and the project id registration the Mac makes first (routes/docs-routes.mjs, kb/doc-project-files.mjs, kb/project-roots.mjs). Roster: all eight paths are in ALL_ENDPOINTS (extension/server.mjs); the handler is reached from routes/doc-gen.mjs through the doc_gen group (routes/feature-routes.mjs), so with doc_gen off every one of these answers 404 feature_disabled. Every route resolves its project through the caller's own registrations (POST /kb/projects/register), so another user's project id answers 404 PROJECT_NOT_REGISTERED. Folders in a path are checked before any disk access. A folder name that is not a plain name (dotted, over-long, or outside letters, digits, _ and -) answers 400 INVALID_FOLDER; a reserved name answers 400 RESERVED_FOLDER: auto_task in any casing for both families, and under templates/ also meeting-note and email-note (the ingest layouts). A write or delete over an existing ingest layout (a template.md carrying llmide:ingest-template, in any folder) answers 409 RESERVED_FOLDER. Malformed input (a bad field, a missing project query) answers 400 VALIDATION_FAILED. Registration: every refused root answers the same 400 INVALID_ROOT with one message (the reason is logged on the server only, so the endpoint is no oracle for what exists); a user may hold at most 200 registered projects, and a new id beyond that answers 409 TOO_MANY_PROJECTS (re-registering an existing id does not count). A scan examines at most 2000 folder entries per family and sets truncated: true beyond that (scannedFolders says how many were examined). DELETE removes only the template.md or command.md, then the folder only if it is empty (folderRemoved says which happened); nothing is removed recursively. Creation: a PUT with createOnly true answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS when the folder already exists, in any case, and writes nothing (API 106); without the flag a PUT keeps its write-or-rewrite behaviour. The 413 body limit (512 KB) and the malformed-JSON 400 are not declared per route (SCHEMA.md). Rate limits: PUT and DELETE under /kb/docs/ and POST /kb/docs/seed and /kb/projects/register share the kbWrite bucket (429 is not declared: the bucket answers it for every kbWrite route). The Template and Command objects mirror the Swift DocTemplate and DocCommand Codable shapes, so the Mac decodes them with its existing models.",
   "$defs": {
     "Template": {
       "type": "object",
@@ -42,7 +42,8 @@
         "sections": { "type": "array", "items": { "type": "string" }, "description": "Section headings, at most 100 of 200 characters each. Used when rawContent is absent." },
         "surface": { "type": "string", "description": "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED." },
         "rawContent": { "type": "string", "description": "The whole file text. When present it is written as-is (the Swift renderedMarkdown rule), and it wins over rewrite." },
-        "rewrite": { "type": "boolean", "description": "Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored." }
+        "rewrite": { "type": "boolean", "description": "Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored." },
+        "createOnly": { "type": "boolean", "description": "true creates the folder only when no folder of that name exists (any case, whatever its template.md holds). An existing folder answers 409 TEMPLATE_EXISTS and nothing is written; creation is an exclusive mkdir, so two concurrent creates cannot both succeed. Absent or false keeps the write-or-rewrite behaviour." }
       }
     },
     "CommandWrite": {
@@ -51,7 +52,8 @@
         "name": { "type": "string", "description": "Title, at most 200 characters. Defaults to the folder name." },
         "instruction": { "type": "string", "description": "Instruction text, at most 20 000 characters." },
         "surface": { "type": "string", "description": "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED." },
-        "rawContent": { "type": "string", "description": "The whole file text. When present it is written as-is." }
+        "rawContent": { "type": "string", "description": "The whole file text. When present it is written as-is." },
+        "createOnly": { "type": "boolean", "description": "true creates the folder only when no folder of that name exists (any case). An existing folder answers 409 COMMAND_EXISTS and nothing is written. Absent or false keeps the write-or-rewrite behaviour." }
       }
     },
     "DeleteResult": {
@@ -136,7 +138,7 @@
         },
         "400": { "$ref": "_common#/$defs/Error" },
         "404": { "$ref": "_common#/$defs/Error" },
-        "409": { "$ref": "_common#/$defs/Error", "description": "RESERVED_FOLDER: the folder holds an ingest layout." }
+        "409": { "$ref": "_common#/$defs/Error", "description": "RESERVED_FOLDER: the folder holds an ingest layout. TEMPLATE_EXISTS: createOnly is true and a folder of that name (any case) exists; nothing is written." }
       }
     },
     "DELETE /kb/docs/templates/:folder": {
@@ -164,7 +166,8 @@
           "properties": { "command": { "$ref": "#/$defs/Command" } }
         },
         "400": { "$ref": "_common#/$defs/Error" },
-        "404": { "$ref": "_common#/$defs/Error" }
+        "404": { "$ref": "_common#/$defs/Error" },
+        "409": { "$ref": "_common#/$defs/Error", "description": "COMMAND_EXISTS: createOnly is true and a folder of that name (any case) exists; nothing is written." }
       }
     },
     "DELETE /kb/docs/commands/:folder": {

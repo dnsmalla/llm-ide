@@ -124,3 +124,34 @@ test('deleteUserCascade removes the user\'s overlay rows', () => {
   const counts = db.deleteUserCascade(U);
   assert.ok(counts.issue_schedule >= 1, 'cascade reports the deleted overlay rows');
 });
+
+test('gitlab accepts nested group keys (2..20 segments); github stays exactly owner/name', () => {
+  reset();
+  const nested = 'group/sub/project';
+  const deep = 'g/s1/s2/project';
+  db.upsertIssueSchedule(U, { provider: 'gitlab', repo: nested, issueNumber: 3, dueDate: '2026-07-10' });
+  db.upsertIssueSchedule(U, { provider: 'gitlab', repo: deep, issueNumber: 4, dueDate: '2026-07-11' });
+  assert.deepEqual(
+    db.listIssueSchedules(U, { provider: 'gitlab', repo: nested }).map((x) => [x.repo, x.issueNumber]),
+    [[nested, 3]],
+  );
+  assert.equal(db.listIssueSchedules(U, { provider: 'gitlab', repo: '' }).length, 2);
+  assert.equal(db.deleteIssueSchedule(U, { provider: 'gitlab', repo: nested, issueNumber: 3 }), true);
+  assert.equal(db.listIssueSchedules(U, { provider: 'gitlab', repo: nested }).length, 0);
+  assert.throws(() => db.upsertIssueSchedule(U, { provider: 'github', repo: 'a/b/c', issueNumber: 1 }), /owner\/name/);
+  assert.throws(() => db.listIssueSchedules(U, { provider: 'github', repo: 'a/b/c' }), /owner\/name/);
+});
+
+test('nested keys reject dot segments, empty segments, too long and too deep', () => {
+  reset();
+  for (const bad of ['g/../p', 'g/./p', 'g//p', 'g/s/', '/g/p', 'g/s/..', 'g/' + 'x'.repeat(260)]) {
+    assert.throws(() => db.upsertIssueSchedule(U, { provider: 'gitlab', repo: bad, issueNumber: 1 }), /owner\/name/, bad);
+  }
+  const twentyOne = Array.from({ length: 21 }, (_, i) => `s${i}`).join('/');
+  assert.throws(() => db.upsertIssueSchedule(U, { provider: 'gitlab', repo: twentyOne, issueNumber: 1 }), /owner\/name/);
+  const twenty = Array.from({ length: 20 }, (_, i) => `s${i}`).join('/');
+  assert.equal(db.upsertIssueSchedule(U, { provider: 'gitlab', repo: twenty, issueNumber: 1 }).issueNumber, 1);
+  const longButOk = 'g/' + 'x'.repeat(200) + '/p';
+  assert.equal(longButOk.length <= 255, true);
+  assert.equal(db.upsertIssueSchedule(U, { provider: 'gitlab', repo: longButOk, issueNumber: 1 }).issueNumber, 1);
+});
