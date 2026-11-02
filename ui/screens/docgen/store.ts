@@ -5,7 +5,7 @@ import { folderForName, projectIdFor, type DocsApi } from "./docs-api.ts";
 import type { DocCommand, DocTemplate, Surface } from "./model.ts";
 import { GenerationRun, type RunDeps } from "./run.ts";
 import { SourceSelection, type SourceItem } from "./sources.ts";
-import { GENERATED_DIR } from "./naming.ts";
+import { GENERATED_DIR, normalizeDestination } from "./naming.ts";
 
 export type SetupPhase = "no_project" | "loading" | "ready" | "error";
 
@@ -29,6 +29,10 @@ export interface DocGenState {
   templateError: Failure | null;
   /** Project-relative folder new documents are saved in (Mac Setup destination). */
   destination: string;
+  /** The chat reply last written by "Save chat output" and where it went; null before the first save. */
+  chatSaved: { reply: string; path: string } | null;
+  /** A failed "Save chat output" write. */
+  chatSaveError: Failure | null;
 }
 
 export interface StoreDeps {
@@ -54,12 +58,14 @@ const EMPTY: DocGenState = {
   templateBusy: false,
   templateError: null,
   destination: GENERATED_DIR,
+  chatSaved: null,
+  chatSaveError: null,
 };
 
 export class DocGenStore {
   readonly surface: Surface;
   readonly run: GenerationRun;
-  private state: DocGenState = EMPTY;
+  private state: DocGenState;
   private readonly listeners = new Set<() => void>();
   private api: DocsApi | null = null;
   private root: string | null = null;
@@ -73,6 +79,8 @@ export class DocGenStore {
     this.surface = deps.surface;
     this.apiProxy = { generate: (b, s) => this.requireApi().generate(b, s) };
     this.run = new GenerationRun({ ...deps.run, api: this.apiProxy });
+    // The UI shows the same folder the run saves into (the shell passes the remembered Setup folder).
+    this.state = { ...EMPTY, destination: normalizeDestination(deps.run.destination ?? GENERATED_DIR) };
   }
 
   subscribe = (l: () => void): (() => void) => {
@@ -83,9 +91,27 @@ export class DocGenStore {
 
   setDestination(dir: string): void {
     this.run.setDestination(dir);
-    const clean = dir.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
-    this.set({ destination: clean === "" || clean.split("/").some((p) => p === "..") ? GENERATED_DIR : clean });
+    this.set({ destination: normalizeDestination(dir) });
   }
+
+  /**
+   * "Save chat output": writes the chat's latest reply as its own file, never as the document. The same reply is
+   * not written twice (the button stays off until a different reply arrives), as on the Mac.
+   */
+  async saveChatReply(text: string): Promise<void> {
+    // A second press while the first write is still in flight would otherwise write the same reply twice.
+    if (text.trim() === "" || this.state.chatSaved?.reply === text || this.chatSaving === text) return;
+    this.chatSaving = text;
+    try {
+      const saved = await this.run.saveChatReply(text);
+      this.set({ chatSaved: { reply: text, path: saved.path }, chatSaveError: null });
+    } catch (e) {
+      this.set({ chatSaveError: describeFailure(e) });
+    } finally {
+      if (this.chatSaving === text) this.chatSaving = null;
+    }
+  }
+  private chatSaving: string | null = null;
 
   private set(p: Partial<DocGenState>): void {
     this.state = { ...this.state, ...p };
@@ -108,11 +134,13 @@ export class DocGenStore {
     this.run.reset();
     this.root = root;
     this.api = null;
+    // The Setup folder is a preference, not part of the project's work: it survives a project switch.
+    const destination = this.state.destination;
     if (!root) {
-      this.set({ ...EMPTY });
+      this.set({ ...EMPTY, destination });
       return;
     }
-    this.set({ ...EMPTY, setup: "loading" });
+    this.set({ ...EMPTY, destination, setup: "loading" });
     await this.load();
   }
 

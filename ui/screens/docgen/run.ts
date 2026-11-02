@@ -8,7 +8,7 @@
 import { describeFailure, isCancel, type Failure } from "./errors.ts";
 import type { DocsApi } from "./docs-api.ts";
 import { buildGenerateBody, estimateFit, fitNotice, MAX_SOURCE_CONTENT, type Selection } from "./model.ts";
-import { documentStem } from "./naming.ts";
+import { documentStem, normalizeDestination } from "./naming.ts";
 import { saveNewDocument, saveRevision, type SaveFs, type Saved } from "./save.ts";
 import { collectSources, sendOrder, type SourceItem, type SourceReaders } from "./sources.ts";
 
@@ -148,13 +148,13 @@ export class GenerationRun {
   }
 
   /** Prompt-driven revision of the current document through the same route; keeps the template/command shape. */
-  async refine(instruction: string): Promise<void> {
+  async refine(instruction: string): Promise<boolean> {
     const text = instruction.trim();
-    if (this.busy || this.state.phase !== "done" || text === "") return;
+    if (this.busy || this.state.phase !== "done" || text === "") return false;
     const current = this.state.doc;
     if (current.length > MAX_SOURCE_CONTENT) {
       this.set({ editError: `This document is ${current.length.toLocaleString("en")} characters, over the ${MAX_SOURCE_CONTENT.toLocaleString("en")}-character limit for one revision. Save it and start a new document for further changes.` });
-      return;
+      return false;
     }
     const sel = this.lastSelection ?? { template: null, command: "", prompt: "" };
     // The core needs a template or a command for any request; a revision with neither uses a plain editing command.
@@ -162,7 +162,7 @@ export class GenerationRun {
     const built = buildGenerateBody({ template: sel.template, command: hasShape ? sel.command : "Revise the document as instructed.", prompt: revisionPrompt(text) }, [{ name: REVISION_SOURCE_NAME, content: current }]);
     if (!built.ok) {
       this.set({ editError: built.message });
-      return;
+      return false;
     }
     const my = ++this.token;
     const ctl = new AbortController();
@@ -171,19 +171,21 @@ export class GenerationRun {
     this.set({ phase: "generating", revising: true, editError: null, startedAt: (this.deps.now ?? Date.now)() });
     try {
       const r = await this.deps.api.generate(built.body, ctl.signal);
-      if (my !== this.token) return;
+      if (my !== this.token) return false;
       if (r.truncatedCount > 0 || r.omittedCount > 0) {
         this.set({ phase: "done", revising: false, startedAt: null, editError: "The core could only read part of this document, so the revision would have replaced it with a shortened copy. The document is unchanged. Save it and start a new document for further changes." });
-        return;
+        return false;
       }
       this.set({ phase: "done", revising: false, startedAt: null, doc: r.content, notice: null, dirty: true, saveConflict: false, saveError: null });
+      return true;
     } catch (e) {
-      if (my !== this.token) return;
+      if (my !== this.token) return false;
       if (isCancel(e) || ctl.signal.aborted) {
         this.set({ phase: "done", revising: false, startedAt: null, doc: current });
-        return;
+        return false;
       }
       this.set({ phase: "done", revising: false, startedAt: null, doc: current, editError: describeFailure(e).message });
+      return false;
     } finally {
       this.preRevision = null;
       if (this.ctl === ctl) this.ctl = null;
@@ -215,8 +217,12 @@ export class GenerationRun {
 
   /** Project-relative folder for new saves (Mac's Setup destination). Empty/invalid falls back to the default. */
   setDestination(dir: string): void {
-    const clean = dir.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
-    this.destinationDir = clean === "" || clean.split("/").some((p) => p === ".." || p === ".") ? "llm-doc/generated" : clean;
+    this.destinationDir = normalizeDestination(dir);
+  }
+
+  /** Writes a chat reply to `<destination>/chat-output.md` (or `-N`). Never touches the document state. */
+  async saveChatReply(text: string): Promise<Saved> {
+    return saveNewDocument(this.deps.fs, "chat-output", text, this.destinationDir);
   }
 
   /** The user edited the document text by hand (the viewer is read-only; this serves paste-in and tests). */

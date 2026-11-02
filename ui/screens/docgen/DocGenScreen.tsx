@@ -5,9 +5,11 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { HistoryPanel } from "./HistoryPanel";
 import { estimateFit } from "./model.ts";
+import { GENERATED_DIR, normalizeDestination } from "./naming.ts";
 import { ResultPanel } from "./ResultPanel";
 import type { MermaidRuntimeApi } from "./mermaid/renderer.ts";
 import type { DocCommand, DocTemplate, FitReport } from "./model.ts";
+import type { Failure } from "./errors.ts";
 import type { RunState } from "./run.ts";
 import { SourcePanel, type SourceEnv } from "./SourcePanel";
 import { checklistSteps } from "./checklist.ts";
@@ -61,6 +63,15 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
     return next;
   });
   const isOpen = (id: string) => expanded.has(id);
+  // The folder field edits a local draft so a trailing "/" typed on the way to "a/b" is not trimmed away mid-keystroke;
+  // the draft is committed (normalized, remembered) on blur, Enter, or the default button.
+  const [folderDraft, setFolderDraft] = useState<string | null>(null);
+  const commitFolder = (raw: string) => {
+    const clean = normalizeDestination(raw);
+    store.setDestination(clean);
+    setFolderDraft(null);
+    try { localStorage.setItem("llmide.docgen.destination", clean); } catch { /* session */ }
+  };
   useEffect(() => { try { localStorage.setItem(pref("chat"), showChat ? "1" : "0"); } catch { /* session */ } }, [showChat, pref]);
   useEffect(() => { try { localStorage.setItem(pref("sources"), showSources ? "1" : "0"); } catch { /* session */ } }, [showSources, pref]);
   useEffect(() => { try { localStorage.setItem(pref("useChat"), useChat ? "1" : "0"); } catch { /* session */ } }, [useChat, pref]);
@@ -105,9 +116,18 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
       <div className="dg-grid" data-chat={showChat} data-sources={showSources}>
         {showSources ? (
           <aside className="dg-sidebar" aria-label="Sources and template">
+            {/* Mac: the whole left panel is disabled while a run is in flight, so inputs cannot drift from the run. */}
+            <fieldset className="dg-lock" disabled={busy}>
             <div className="dg-sidebar-use"><div><label className="dg-inline"><input type="checkbox" checked={useChat} disabled={chatOutput === null} onChange={(e) => setUseChat(e.target.checked)} /> Use chat</label><p className="dg-muted">{useChat ? "On: generate can use the latest chat reply as a source; template/command is optional." : "Off: pick a template or command and at least one source, then Generate."}</p></div></div>
             <details className="dg-side-collapse" open={isOpen("setup")} onToggle={(e) => setSection("setup", e.currentTarget.open)}><summary>SETUP</summary>
-              <label className="dg-field"><span>Output folder</span><input value={s.destination} placeholder="llm-doc/generated" onChange={(e) => { store.setDestination(e.target.value); try { localStorage.setItem("llmide.docgen.destination", e.target.value); } catch { /* session */ } }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
+              <div className="dg-field" role="radiogroup" aria-label="Where to deliver">
+                <span>Deliver to</span>
+                {OUTPUT_DESTINATIONS.map((d) => (
+                  <label key={d.id} className="dg-inline"><input type="radio" name={`dg-deliver-${store.surface}`} value={d.id} checked={d.id === "local"} disabled={!d.available} onChange={() => undefined} /> {d.label}{d.available ? null : <em className="dg-muted"> Coming soon</em>}</label>
+                ))}
+              </div>
+              <label className="dg-field"><span>Output folder</span><input value={folderDraft ?? s.destination} placeholder={GENERATED_DIR} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => commitFolder(folderDraft ?? s.destination)} onKeyDown={(e) => { if (e.key === "Enter") commitFolder(folderDraft ?? s.destination); }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
+              <div className="dg-bar"><button type="button" className="dg-btn" disabled={s.destination === GENERATED_DIR && folderDraft === null} onClick={() => commitFolder(GENERATED_DIR)}>Use default folder</button></div>
             </details>
             <details className="dg-side-collapse" open={isOpen("template")} onToggle={(e) => setSection("template", e.currentTarget.open)}><summary>TEMPLATE &amp; COMMAND</summary><TemplateCommandPanel
               surface={store.surface}
@@ -124,11 +144,12 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               onManageCommands={() => setManageCommands(true)}
             /></details>
             <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} sourceTabKey={pref("sourceKind")} /></details>
+            </fieldset>
           </aside>
         ) : null}
         <main className="dg-center">
           <p className="dg-breadcrumb">← Choose a template or command from the left panel</p>
-          <SelectedSources items={s.selection.items()} chatItem={chatItem} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} />
+          <SelectedSources items={s.selection.items()} chatItem={chatItem} busy={busy} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} />
           <section className="dg-steps" aria-label="Steps to generate">
             <h2 className="dg-steps-title">Steps to generate</h2>
             <ol className="dg-steps-list">
@@ -146,7 +167,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => void store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onEditDocument={(text) => store.run.setDocument(text)} onOpenSaved={p.onOpenFile} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onOpenSaved={p.onOpenFile} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
               <HistoryPanel fs={p.env.fs} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}
@@ -164,6 +185,11 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             onPrompt={(t) => store.setPrompt(t)}
             onGenerate={() => { setView("result"); void store.generate(chatItem ? [chatItem] : []); }}
             onCancel={() => store.run.cancel()}
+            useChat={useChat}
+            chatReply={chatOutput?.text ?? null}
+            chatSaved={s.chatSaved}
+            chatSaveError={s.chatSaveError}
+            onSaveChat={() => { if (chatOutput) void store.saveChatReply(chatOutput.text); }}
           />
           {showChat ? <div className="dg-chat-dock"><ChatDockSlot active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} /></div> : null}
         </aside>
@@ -233,22 +259,42 @@ function TemplateCommandPanel(p: {
   );
 }
 
-function SelectedSources(p: { items: readonly { key: string; name: string; kind?: string; bytes?: number }[]; chatItem: { key: string; name: string; bytes: number } | null; onRemove: (keys: readonly string[]) => void; onClear: () => void }): ReactNode {
+function SelectedSources(p: { items: readonly { key: string; name: string; kind?: string; bytes?: number }[]; chatItem: { key: string; name: string; bytes: number } | null; busy: boolean; onRemove: (keys: readonly string[]) => void; onClear: () => void }): ReactNode {
   const all = [...p.items, ...(p.chatItem ? [p.chatItem] : [])];
+  // Locked with the left panel while a run is in flight (Mac shows this card only in the idle setup view).
   return (
     <section className="dg-selected" aria-label="Selected sources">
-      <header><h3 className="dg-side-title">SELECTED SOURCES</h3>{all.length > 0 ? <button type="button" className="dg-link" onClick={p.onClear}>Clear</button> : null}</header>
-      {all.length === 0 ? <div className="dg-empty dg-selected-empty"><p>No sources selected</p><p className="dg-muted">Check files from Code, LLM Doc or Data in the left panel.</p></div> : <ul className="dg-selected-list">{all.map((i) => <li key={i.key}><span className="dg-name">{i.name}</span>{typeof i.bytes === "number" ? <span className="dg-muted">{formatBytes(i.bytes)}</span> : null}<button type="button" className="dg-link" onClick={() => p.onRemove([i.key])}>Remove</button></li>)}</ul>}
+      <header><h3 className="dg-side-title">SELECTED SOURCES</h3>{all.length > 0 ? <button type="button" className="dg-link" disabled={p.busy} onClick={p.onClear}>Clear</button> : null}</header>
+      {all.length === 0 ? <div className="dg-empty dg-selected-empty"><p>No sources selected</p><p className="dg-muted">Check files from Code, LLM Doc or Data in the left panel.</p></div> : <ul className="dg-selected-list">{all.map((i) => <li key={i.key}><span className="dg-name">{i.name}</span>{typeof i.bytes === "number" ? <span className="dg-muted">{formatBytes(i.bytes)}</span> : null}<button type="button" className="dg-link" disabled={p.busy} onClick={() => p.onRemove([i.key])}>Remove</button></li>)}</ul>}
     </section>
   );
 }
 
-function PromptBar(p: { surface: "doc" | "visual"; prompt: string; sourceCount: number; hasShape: boolean; missing: string | null; fit: FitReport | null; run: RunState; onPrompt: (text: string) => void; onGenerate: () => void; onCancel: () => void }): ReactNode {
+/** Delivery choices as on the Mac's Setup: only the local folder is wired; the others are shown and disabled. */
+const OUTPUT_DESTINATIONS: readonly { id: string; label: string; available: boolean }[] = [
+  { id: "local", label: "Local folder", available: true },
+  { id: "box", label: "Box", available: false },
+  { id: "slack", label: "Slack", available: false },
+  { id: "email", label: "Email", available: false },
+];
+
+function PromptBar(p: { surface: "doc" | "visual"; prompt: string; sourceCount: number; hasShape: boolean; missing: string | null; fit: FitReport | null; run: RunState; useChat: boolean; chatReply: string | null; chatSaved: { reply: string; path: string } | null; chatSaveError: Failure | null; onSaveChat: () => void; onPrompt: (text: string) => void; onGenerate: () => void; onCancel: () => void }): ReactNode {
   const busy = p.run.phase === "reading" || p.run.phase === "generating";
+  // Mac's "Save chat output" row (Use chat only): the chat's latest reply goes to its own file, never into the document.
+  const chatSavedNow = p.chatReply !== null && p.chatSaved !== null && p.chatSaved.reply === p.chatReply;
   return (
     <section className="dg-prompt" aria-label="Prompt">
       <label className="dg-field"><span className="dg-sr">Prompt</span><textarea rows={2} value={p.prompt} maxLength={MAX_PROMPT} placeholder="Add a short prompt (optional)" onChange={(e) => p.onPrompt(e.target.value)} /></label>
       <div className="dg-prompt-actions"><span className="dg-muted">{p.missing ?? `${p.sourceCount} source${p.sourceCount === 1 ? "" : "s"}${p.fit ? ` · ${p.fit.tokens.toLocaleString("en")} tokens` : ""}`}</span>{busy ? <button type="button" className="dg-btn" onClick={p.onCancel}>Cancel</button> : <button type="button" className="dg-btn dg-primary" disabled={p.missing !== null} aria-describedby={p.missing ? "dg-prompt-missing" : undefined} onClick={p.onGenerate}>Generate</button>}</div>{p.missing ? <p id="dg-prompt-missing" className="dg-muted">{p.missing}</p> : null}
+      {p.useChat ? (
+        <div className="dg-chat-save">
+          <button type="button" className="dg-btn" disabled={p.chatReply === null || chatSavedNow} title={p.chatReply === null ? "No finished assistant reply yet. Send a message in the chat first." : chatSavedNow ? "Already saved this reply. Send another message to save again." : "Save the chat's latest reply to the output folder (does not change the document)."} onClick={p.onSaveChat}>
+            {chatSavedNow ? "Chat output saved" : "Save chat output"}
+          </button>
+          {p.chatSaved && <p className="dg-muted" role="status">Saved to <code>{p.chatSaved.path}</code></p>}
+          {p.chatSaveError && <p className="dg-muted" role="alert">{p.chatSaveError.message}</p>}
+        </div>
+      ) : null}
     </section>
   );
 }

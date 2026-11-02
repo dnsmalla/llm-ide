@@ -53,7 +53,9 @@ export function createDocsApi(client: DocsClient, projectId: string, projectRoot
       return decodeCommands(await client.request(`/kb/docs/commands${q}`, { signal }));
     },
     async putTemplate(folder, t, signal) {
-      return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body: { name: t.name, sections: t.sections, surface: t.surface }, signal }));
+      // rewrite: the core keeps the template.md body (the instructions) and changes only its title and ## sections.
+      // Without it an edit regenerates the file from the section list and drops the body.
+      return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body: { name: t.name, sections: t.sections, surface: t.surface, rewrite: true }, signal }));
     },
     async putCommand(folder, c, signal) {
       return decodeCommandWrite(await client.request(folderPath("commands", folder), { method: "PUT", body: { name: c.name, instruction: c.instruction, surface: c.surface }, signal }));

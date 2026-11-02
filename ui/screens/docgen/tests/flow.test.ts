@@ -68,7 +68,7 @@ test("errors map to wording and keep nothing half-done; unreadable-only selectio
 
 test("refine: sends the document as the only source; failure and cancel keep the document; truncation refuses", async () => {
   const { run, c, items } = setup();
-  let p = run.generate(sel, items);
+  let p: Promise<unknown> = run.generate(sel, items);
   await tick();
   c.calls[0]!.resolve(okResult("DOC1"));
   await p;

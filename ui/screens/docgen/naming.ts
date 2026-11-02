@@ -31,3 +31,9 @@ export function documentStem(opts: { templateName?: string | null; commandName?:
 
 /** Folder (project-relative) generated documents are saved in, for Doc Gen and Visual alike (the Mac default). */
 export const GENERATED_DIR = "llm-doc/generated";
+
+/** A user-typed output folder, project-relative. Empty, absolute-looking or `..`/`.` segments fall back to the default. */
+export function normalizeDestination(dir: string): string {
+  const clean = String(dir ?? "").replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  return clean === "" || clean.split("/").some((p) => p === ".." || p === ".") ? GENERATED_DIR : clean;
+}

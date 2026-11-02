@@ -205,3 +205,33 @@ test("HistoryPanel: needs the host; loading state is announced", () => {
   const loading = html(h(E.HistoryPanel, { fs: { list: async () => ({ entries: [], next_offset: null }) }, version: "", active: true, onOpen: noop }));
   assert.match(loading, /role="status"[^>]*aria-live="polite"[^>]*>Loading history/);
 });
+
+test("DocGenScreen parity: Setup delivery list is honest, no manual edit, and the inputs lock while a run is in flight", async () => {
+  let release;
+  const deps = fakeStoreDeps();
+  const api = { ...deps.makeApi(), generate: () => new Promise((r) => { release = r; }) };
+  const store = new E.DocGenStore({ ...deps, makeApi: () => api });
+  await store.setProject("/proj");
+  store.setCommandText("Summarize");
+  store.addPaste("some pasted text");
+  const env = { fs: null, notes: null };
+  const props = { store, env, active: true, projectRoot: "/proj", onOpenFile: noop, onOpenExternal: noop, onOpenSettings: noop, initialViewport: 200 };
+  const idle = html(h(E.DocGenScreen, props));
+  for (const name of ["Box", "Slack", "Email"]) assert.match(idle, new RegExp(`<input type="radio"[^>]*disabled=""[^>]*/> ${name}<em class="dg-muted"> Coming soon</em>`));
+  assert.match(idle, /<input type="radio"[^>]*checked=""[^>]*value="local"\/> Local folder/);
+  assert.match(idle, /<fieldset class="dg-lock">/, "unlocked when idle");
+  assert.doesNotMatch(idle, /<button[^>]*disabled=""[^>]*>Remove</);
+  const p = store.generate();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(store.run.getSnapshot().phase, "generating");
+  const busy = html(h(E.DocGenScreen, props));
+  assert.match(busy, /<fieldset class="dg-lock" disabled="">/, "left panel locked");
+  assert.match(busy, /<button[^>]*disabled=""[^>]*>Remove</, "selected-source Remove locked");
+  assert.match(busy, /<button[^>]*disabled=""[^>]*>Clear</, "selected-source Clear locked");
+  release({ content: "DOC", truncatedCount: 0, omittedCount: 0, sourceCount: 1 });
+  await p;
+  const done = html(h(E.ResultPanel, { surface: "doc", run: store.run.getSnapshot(), onCancel: noop, onRetry: noop, onRefine: () => false, onSave: noop, onSaveAsNew: noop, onOpenSaved: noop, onDiscard: noop, onOpenExternal: noop, onOpenSettings: noop, onSignIn: noop }));
+  assert.doesNotMatch(done, />Edit</, "the Mac result is read-only: no manual edit");
+  assert.doesNotMatch(done, /aria-label="Document markdown"/);
+  assert.match(done, />Start another</);
+});

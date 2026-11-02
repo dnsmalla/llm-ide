@@ -99,6 +99,10 @@
   .dg-sidebar, .dg-chat { border: 0; }
   .dg-chat { min-height: 360px; }
 }
+/* Left panel lock while a run is in flight (Mac: .disabled(vm.isBusy) on the sources column). */
+.dg-lock { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; border: 0; margin: 0; padding: 0; gap: var(--tok-space-md); }
+.dg-lock:disabled { opacity: .5; }
+.dg-chat-save { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--tok-color-border); padding-top: var(--tok-space-sm); }
 .dg-side-collapse { border-top: 1px solid var(--tok-color-border); padding-top: 6px; }
 .dg-side-collapse > summary { cursor: pointer; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); letter-spacing: .05em; text-transform: uppercase; padding: 3px 0; }
 .dg-breadcrumb { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }

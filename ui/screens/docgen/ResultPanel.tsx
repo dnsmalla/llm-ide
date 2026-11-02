@@ -1,7 +1,7 @@
 // The result: progress while reading and waiting, an error with a next step, or the document (safe markdown, read-only)
 // with notices, refine, save and open actions. Model output is untrusted: it only ever reaches the screen through the
 // Library's markdown renderer (no HTML, no images, links only through the host opener).
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { MarkdownView } from "../library/MarkdownView";
 import { MermaidView } from "./mermaid/MermaidView";
@@ -16,11 +16,10 @@ export interface ResultPanelProps {
   run: RunState;
   onCancel: () => void;
   onRetry: () => void;
-  onRefine: (instruction: string) => void;
+  /** Resolves true when the revision applied (the typed instruction is then cleared), false when it did not. */
+  onRefine: (instruction: string) => Promise<boolean> | boolean;
   onSave: () => void;
   onSaveAsNew: () => void;
-  /** Manual edit (Mac Edit → Apply Edit); absent = read-only. */
-  onEditDocument?: (text: string) => void;
   onOpenSaved: (path: string) => void;
   onDiscard: () => void;
   onOpenExternal: (url: string) => void;
@@ -101,10 +100,20 @@ function Done(p: ResultPanelProps): ReactNode {
   const r = p.run;
   const [instruction, setInstruction] = useState("");
   const [mode, setMode] = useState<"preview" | "raw">("preview");
-  const [editing, setEditing] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const revising = r.revising;
   const runtime = p.mermaid;
   const renderFence = useCallback((lang: string, text: string) => (runtime && isMermaidLang(lang) ? <MermaidView source={text} runtime={runtime} /> : null), [runtime]);
+  // "Saved" means written and unchanged since. Anything else (never saved, or edited since the last save) is work that
+  // "Start another" would throw away, so it asks first, as the Mac does.
+  const saveIsCurrent = r.saved !== null && !r.dirty;
+  const submitRefine = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const text = instruction.trim();
+    if (text === "" || revising) return;
+    // A failed or refused revision keeps the typed instruction so it can be sent again without retyping.
+    if (await p.onRefine(text)) setInstruction("");
+  };
   return (
     <div className="dg-done">
       {r.notice && <StatusBanner severity="warning" message={<>{r.notice}</>} />}
@@ -113,8 +122,8 @@ function Done(p: ResultPanelProps): ReactNode {
       {r.saveError && <StatusBanner severity="error" message={<>{r.saveError.message}</>} />}
       {p.surface === "visual" && !runtime && /```\s*mermaid/i.test(r.doc) && <p className="dg-muted">This output contains a Mermaid diagram. Diagrams are shown as source here until a bundled, sandboxed renderer is added.</p>}
       <div className="dg-bar" role="group" aria-label="Document actions">
-        <button type="button" className="dg-btn dg-primary" disabled={r.saving || revising || (r.saved !== null && !r.dirty)} onClick={p.onSave}>
-          {r.saving ? "Saving…" : r.saved && !r.dirty ? "Saved" : r.saved ? "Save changes" : "Save to llm-doc/generated"}
+        <button type="button" className="dg-btn dg-primary" disabled={r.saving || revising || saveIsCurrent} onClick={p.onSave}>
+          {r.saving ? "Saving…" : saveIsCurrent ? "Saved" : r.saved ? "Save changes" : "Save to llm-doc/generated"}
         </button>
         {r.saveConflict && (
           <button type="button" className="dg-btn" onClick={p.onSaveAsNew}>
@@ -126,17 +135,31 @@ function Done(p: ResultPanelProps): ReactNode {
             Open in Explorer
           </button>
         )}
-        {p.onEditDocument ? (
-          <button type="button" className="dg-btn" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>
-            {editing ? "Done editing" : "Edit"}
-          </button>
-        ) : null}
-        <button type="button" className="dg-btn" aria-pressed={mode === "preview"} onClick={() => { setMode("preview"); setEditing(false); }}>Preview</button>
-        <button type="button" className="dg-btn" aria-pressed={mode === "raw"} onClick={() => { setMode("raw"); setEditing(false); }}>Raw</button>
-        <button type="button" className="dg-btn" disabled={revising} onClick={p.onDiscard}>
-          {r.saved && !r.dirty ? "Start another" : "Discard"}
+        <button type="button" className="dg-btn" aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
+        <button type="button" className="dg-btn" aria-pressed={mode === "raw"} onClick={() => setMode("raw")}>Raw</button>
+        <button
+          type="button"
+          className="dg-btn"
+          disabled={revising}
+          onClick={() => {
+            if (saveIsCurrent) p.onDiscard();
+            else setConfirmDiscard(true);
+          }}
+        >
+          Start another
         </button>
       </div>
+      {confirmDiscard && !saveIsCurrent && (
+        <div className="dg-bar" role="alertdialog" aria-label="Discard this document?">
+          <span>Discard this document? It has not been saved, and starting another discards it.</span>
+          <button type="button" className="dg-btn dg-danger" disabled={revising} onClick={() => { setConfirmDiscard(false); p.onDiscard(); }}>
+            Discard &amp; start another
+          </button>
+          <button type="button" className="dg-btn" onClick={() => setConfirmDiscard(false)}>
+            Keep it
+          </button>
+        </div>
+      )}
       {r.saved && (
         <p className="dg-muted" role="status">
           {r.dirty ? "Unsaved changes. Last saved to" : "Saved to"} <code>{r.saved.path}</code>
@@ -153,24 +176,13 @@ function Done(p: ResultPanelProps): ReactNode {
         </div>
       )}
       <div className="dg-doc">
-        {editing && p.onEditDocument ? (
-          <textarea className="dg-edit" aria-label="Document markdown" value={r.doc} spellCheck={false} onChange={(e) => p.onEditDocument!(e.target.value)} />
-        ) : mode === "raw" ? (
+        {mode === "raw" ? (
           <pre className="dg-raw" aria-label="Document markdown source">{r.doc}</pre>
         ) : (
           <MarkdownView text={r.doc} baseRel={null} onOpenExternal={p.onOpenExternal} renderFence={renderFence} initialSections={p.initialSections} />
         )}
       </div>
-      <form
-        className="dg-refine"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (instruction.trim() && !revising) {
-            p.onRefine(instruction);
-            setInstruction("");
-          }
-        }}
-      >
+      <form className="dg-refine" onSubmit={submitRefine}>
         <label className="dg-field">
           <span>Ask for a change</span>
           <textarea rows={2} value={instruction} maxLength={MAX_PROMPT - 400} disabled={revising} onChange={(e) => setInstruction(e.target.value)} placeholder="Shorten the summary; add a risks section" />

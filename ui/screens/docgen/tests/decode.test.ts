@@ -106,7 +106,8 @@ test("docs api: paths, bodies and validation of what goes into a URL", async () 
     "POST /generate-doc",
   ]);
   assert.deepEqual(seen[0]!.opts.body, { id: "pabc", root: "/Users/me/proj" });
-  assert.deepEqual(seen[3]!.opts.body, { name: "Sprint Review", sections: ["A"], surface: "visual" });
+  // rewrite: the core keeps the template.md body on an edit (see docs-api putTemplate).
+  assert.deepEqual(seen[3]!.opts.body, { name: "Sprint Review", sections: ["A"], surface: "visual", rewrite: true });
   await assert.rejects(() => api.putTemplate("../etc", { name: "x", sections: [], surface: "doc" }), (e: { code: string }) => e.code === "INVALID_FOLDER");
   await assert.rejects(() => api.deleteTemplate("a/b"), (e: { code: string }) => e.code === "INVALID_FOLDER");
   assert.throws(() => createDocsApi(client as never, "bad id/../", "/r"));
