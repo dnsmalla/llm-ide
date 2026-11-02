@@ -24,24 +24,22 @@ function make(existing: DocTemplate[]) {
   return { store, puts };
 }
 
-test("a new template whose folder already exists is refused with a clear message and nothing is written", async () => {
+test("a new template whose name is taken takes the next free folder (name-2) and the existing template is not written", async () => {
   const d = make([t("Retro")]);
   await d.store.setProject("/proj");
   const out = await d.store.saveTemplate({ folder: null, name: "Retro", sections: ["Wins"] });
-  assert.equal(out, null);
-  assert.deepEqual(d.puts, []);
-  const err = d.store.getSnapshot().templateError;
-  assert.ok(err);
-  assert.match(err!.message, /already uses templates\/retro/);
-  assert.match(err!.message, /Choose another name/);
+  assert.ok(out);
+  assert.deepEqual(d.puts, ["retro-2"]);
+  assert.equal(d.store.getSnapshot().templateError, null);
   assert.equal(d.store.getSnapshot().templateBusy, false);
 });
 
-test("an imported Markdown template with a taken name is refused the same way", async () => {
+test("an imported Markdown template with a taken name takes the next free folder too, and never the taken one", async () => {
   const d = make([t("Weekly review", "weekly-review")]);
   await d.store.setProject("/proj");
-  assert.equal(await d.store.saveTemplate({ folder: null, name: "Weekly review", sections: ["One"] }), null);
-  assert.deepEqual(d.puts, []);
+  const out = await d.store.saveTemplate({ folder: null, name: "Weekly review", sections: ["One"] });
+  assert.equal(out?.folderName, "weekly-review-2");
+  assert.deepEqual(d.puts, ["weekly-review-2"]);
 });
 
 test("a new template with a free name is created in its own folder", async () => {
@@ -61,9 +59,30 @@ test("editing keeps its folder: the existing folder is not treated as a clash", 
   assert.deepEqual(d.puts, ["retro"]);
 });
 
-test("a clash that differs only by case is refused too (the core writes into the existing folder case-insensitively)", async () => {
+test("a clash that differs only by case takes the next free folder (the core writes into the existing folder case-insensitively)", async () => {
   const d = make([t("Weekly Report", "Weekly-Report")]);
   await d.store.setProject("/proj");
-  assert.equal(await d.store.saveTemplate({ folder: null, name: "weekly report", sections: ["One"] }), null);
-  assert.deepEqual(d.puts, []);
+  const out = await d.store.saveTemplate({ folder: null, name: "weekly report", sections: ["One"] });
+  assert.ok(out);
+  assert.deepEqual(d.puts, ["weekly-report-2"]);
 });
+
+test("the next free folder skips every taken suffix, compared case-insensitively", async () => {
+  const d = make([t("Retro"), t("Retro 2", "RETRO-2")]);
+  await d.store.setProject("/proj");
+  await d.store.saveTemplate({ folder: null, name: "Retro", sections: ["A"] });
+  assert.deepEqual(d.puts, ["retro-3"]);
+});
+
+test("a long name's suffixed folder stays within the 80-character folder rule", async () => {
+  const long = "a".repeat(79) + "-b";
+  const d = make([t(long, "a".repeat(79))]);
+  await d.store.setProject("/proj");
+  const out = await d.store.saveTemplate({ folder: null, name: long, sections: ["A"] });
+  assert.ok(out);
+  const folder = d.puts[0]!;
+  assert.match(folder, /^[a-z0-9][a-z0-9-]{0,79}$/);
+  assert.match(folder, /-2$/);
+  assert.notEqual(folder, "a".repeat(79));
+});
+

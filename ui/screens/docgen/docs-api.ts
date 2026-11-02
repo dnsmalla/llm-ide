@@ -27,7 +27,7 @@ export interface DocsApi {
   register(signal?: AbortSignal): Promise<void>;
   templates(signal?: AbortSignal): Promise<Page<DocTemplate>>;
   commands(signal?: AbortSignal): Promise<Page<DocCommand>>;
-  putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface }, signal?: AbortSignal): Promise<DocTemplate>;
+  putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface; rawContent?: string }, signal?: AbortSignal): Promise<DocTemplate>;
   putCommand(folder: string, c: { name: string; instruction: string; surface: Surface }, signal?: AbortSignal): Promise<DocCommand>;
   deleteCommand(folder: string, signal?: AbortSignal): Promise<boolean>;
   deleteTemplate(folder: string, signal?: AbortSignal): Promise<boolean>;
@@ -53,9 +53,13 @@ export function createDocsApi(client: DocsClient, projectId: string, projectRoot
       return decodeCommands(await client.request(`/kb/docs/commands${q}`, { signal }));
     },
     async putTemplate(folder, t, signal) {
-      // rewrite: the core keeps the template.md body (the instructions) and changes only its title and ## sections.
+      // rawContent: an import stores the whole file as written (the core keeps it verbatim; rawContent wins over rewrite).
+      // Otherwise rewrite: the core keeps the template.md body (the instructions) and changes only its title and ## sections.
       // Without it an edit regenerates the file from the section list and drops the body.
-      return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body: { name: t.name, sections: t.sections, surface: t.surface, rewrite: true }, signal }));
+      const body = t.rawContent !== undefined
+        ? { name: t.name, surface: t.surface, rawContent: t.rawContent }
+        : { name: t.name, sections: t.sections, surface: t.surface, rewrite: true };
+      return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body, signal }));
     },
     async putCommand(folder, c, signal) {
       return decodeCommandWrite(await client.request(folderPath("commands", folder), { method: "PUT", body: { name: c.name, instruction: c.instruction, surface: c.surface }, signal }));

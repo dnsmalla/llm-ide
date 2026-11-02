@@ -39,18 +39,24 @@ test("reveal: the Visual image preview has a Reveal action wired to the host thr
   assert.match(section, /const rel = safeRelativePath\(path\);/);
 });
 
-test("unreadable source rows: a warning with an accessible name only when the name was in the last run", () => {
-  const warn = html(h(E.UnreadMark, { name: "scan.pdf", unreadable: ["scan.pdf"] }));
+test("unreadable source rows: a warning with an accessible name only when the source's key was in the last run", () => {
+  const warn = html(h(E.UnreadMark, { sourceKey: "file:scan.pdf", unreadable: ["file:scan.pdf"] }));
   assert.match(warn, /role="img" aria-label="Could not read this file" title="Could not read this file"/);
-  assert.equal(html(h(E.UnreadMark, { name: "ok.md", unreadable: ["scan.pdf"] })), "");
-  assert.equal(html(h(E.UnreadMark, { name: "ok.md", unreadable: undefined })), "");
+  assert.equal(html(h(E.UnreadMark, { sourceKey: "file:ok.md", unreadable: ["file:scan.pdf"] })), "");
+  assert.equal(html(h(E.UnreadMark, { sourceKey: "file:ok.md", unreadable: undefined })), "");
+});
+
+test("two sources with the same name: only the one the run could not read gets the warning", () => {
+  const unreadable = ["file:a/notes.md"];
+  assert.notEqual(html(h(E.UnreadMark, { sourceKey: "file:a/notes.md", unreadable })), "");
+  assert.equal(html(h(E.UnreadMark, { sourceKey: "file:b/notes.md", unreadable })), "");
 });
 
 test("unreadable markers are wired to both the Files and Notes rows with the run's names", () => {
   const code = src("SourcePanel.tsx");
-  assert.match(code, /<UnreadMark name=\{r\.name\} unreadable=\{unreadable\} \/>/);
-  assert.match(code, /<UnreadMark name=\{\(r\.title && r\.title\.trim\(\)\) \|\| r\.rel\.slice\(r\.rel\.lastIndexOf\("\/"\) \+ 1\)\} unreadable=\{unreadable\} \/>/);
-  assert.match(src("DocGenScreen.tsx"), /<SourcePanel env=\{p\.env\} unreadable=\{run\.skipped\}/);
+  assert.match(code, /<UnreadMark sourceKey=\{key\} unreadable=\{unreadable\} \/>/);
+  assert.match(code, /<UnreadMark sourceKey=\{`note:\$\{r\.rel\}`\} unreadable=\{unreadable\} \/>/);
+  assert.match(src("DocGenScreen.tsx"), /<SourcePanel env=\{p\.env\} unreadable=\{run\.skippedKeys\}/);
 });
 
 test("template location: an edited project template says where it is saved", () => {
@@ -73,7 +79,7 @@ test("template import: the file button appears only where the host can pick a fi
 test("template import: a file error is announced in the dialog", () => {
   const src2 = src("TemplateManager.tsx");
   assert.match(src2, /\{fileError && <StatusBanner severity="error" message=\{<>\{fileError\}<\/>\} \/>\}/);
-  assert.match(src2, /await onSave\(\{ folder: null, name: t\.name, sections: t\.sections \}\);/);
+  assert.match(src2, /await onSave\(\{ folder: null, name: t\.name, sections: t\.sections, rawContent: r\.text \}\);/);
 });
 
 test("the Doc Gen screen passes the host picker and reveal only on the desktop", () => {

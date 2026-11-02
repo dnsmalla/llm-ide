@@ -31,6 +31,8 @@ export interface DocGenScreenProps {
   onOpenFile: (path: string) => void;
   /** Reveal a project-relative path in the OS file manager (desktop only). */
   onReveal?: (path: string) => void;
+  /** A failed reveal, shown as a banner until the next reveal (null when none). */
+  revealNotice?: string | null;
   /** The host's picker for a Markdown template file (desktop only). */
   pickTemplateFile?: () => Promise<PickedTemplateFile>;
   onOpenExternal: (url: string) => void;
@@ -148,7 +150,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               onManage={() => setManage(true)}
               onManageCommands={() => setManageCommands(true)}
             /></details>
-            <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} unreadable={run.skipped} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} sourceTabKey={pref("sourceKind")} /></details>
+            <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} unreadable={run.skippedKeys} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} sourceTabKey={pref("sourceKind")} /></details>
             </fieldset>
           </aside>
         ) : null}
@@ -204,6 +206,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
 
   return (
     <div className="dg-root" data-active={p.active} data-surface={store.surface} aria-busy={busy}>
+      {p.revealNotice && <StatusBanner severity="error" message={<>{p.revealNotice}</>} />}
       <header className="dg-top">
         <h1 className="dg-title">{title}</h1>
         {s.setup === "ready" && <button type="button" className="dg-btn" aria-pressed={showSources} onClick={() => setShowSources((v) => !v)}>{showSources ? "Hide sources" : "Show sources"}</button>}

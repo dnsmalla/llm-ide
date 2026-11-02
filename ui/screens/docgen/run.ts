@@ -26,6 +26,8 @@ export interface RunState {
   notice: string | null;
   /** Sources that could not be read as text. */
   skipped: string[];
+  /** The same sources by unique key (`file:<rel>` / `note:<rel>`), for the source rows' markers. */
+  skippedKeys: readonly string[];
   /** Sources left unread because the model's input was already full. */
   notRead: number;
   /** Terminal failure of a fresh run. */
@@ -49,6 +51,7 @@ export const INITIAL_RUN: RunState = Object.freeze({
   doc: "",
   notice: null,
   skipped: [],
+  skippedKeys: [],
   notRead: 0,
   error: null,
   editError: null,
@@ -122,7 +125,7 @@ export class GenerationRun {
       });
       if (my !== this.token) return;
       if (read.sources.length === 0) {
-        this.set({ phase: "error", progress: null, startedAt: null, skipped: read.skipped, error: { message: read.skipped.length ? "None of the selected sources could be read as text." : "There is nothing to generate from. Select text files or notes.", retryable: false, action: "none" } });
+        this.set({ phase: "error", progress: null, startedAt: null, skipped: read.skipped, skippedKeys: read.skippedKeys, error: { message: read.skipped.length ? "None of the selected sources could be read as text." : "There is nothing to generate from. Select text files or notes.", retryable: false, action: "none" } });
         return;
       }
       const built = buildGenerateBody(sel, read.sources);
@@ -130,7 +133,7 @@ export class GenerationRun {
         this.set({ phase: "error", progress: null, startedAt: null, error: { message: built.message, retryable: false, action: "none" } });
         return;
       }
-      this.set({ phase: "generating", progress: null, startedAt: now(), skipped: read.skipped, notRead: read.notRead });
+      this.set({ phase: "generating", progress: null, startedAt: now(), skipped: read.skipped, skippedKeys: read.skippedKeys, notRead: read.notRead });
       const r = await this.deps.api.generate(built.body, ctl.signal);
       if (my !== this.token) return;
       const notice = [fitNotice(r, read.sources.length), read.notRead > 0 ? `${read.notRead} more ${read.notRead === 1 ? "source was" : "sources were"} not read because the model's input was already full.` : null].filter(Boolean).join(" ") || null;

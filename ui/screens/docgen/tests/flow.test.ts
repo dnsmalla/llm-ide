@@ -232,6 +232,13 @@ test("collectSources: unreadable and binary are skipped by name; abort stops rea
   assert.ok(reads < 40);
 });
 
+test("collectSources: unreadable sources are also reported by unique key, so two sources with one name are told apart", async () => {
+  const readers = readersFrom({ "a/notes.md": null, "b/notes.md": "fine" }, { "x/notes.md": null });
+  const r = await collectSources([fileItem("a/notes.md", 5), fileItem("b/notes.md", 5), noteItem("x/notes.md", 5)], readers, new AbortController().signal);
+  assert.deepEqual(r.skipped.sort(), ["notes.md", "notes.md"]);
+  assert.deepEqual([...r.skippedKeys].sort(), ["file:a/notes.md", "note:x/notes.md"]);
+});
+
 test("walkFolder: skips hidden/ignored/binary/large/symlinks, honours limits, is cancellable", async () => {
   const fs = new MemFs();
   for (let i = 0; i < 30; i++) fs.addFile(`proj/src/f${i}.ts`, "x");

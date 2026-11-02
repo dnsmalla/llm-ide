@@ -10,7 +10,7 @@ export interface TemplateManagerProps {
   templates: readonly DocTemplate[];
   busy: boolean;
   error: Failure | null;
-  onSave: (input: { folder: string | null; name: string; sections: string[] }) => Promise<DocTemplate | null>;
+  onSave: (input: { folder: string | null; name: string; sections: string[]; rawContent?: string }) => Promise<DocTemplate | null>;
   onDelete: (t: DocTemplate) => Promise<boolean>;
   onClose: () => void;
   /** Opens the host's file picker for a Markdown template (desktop only). Absent: no file import. */
@@ -54,7 +54,8 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
     if (r.kind === "error") { setFileError(r.message); return; }
     const t = parseMarkdownTemplate(r.text);
     if (!t) { setFileError("That file has no sections. Use # for the name and ## for each section."); return; }
-    await onSave({ folder: null, name: t.name, sections: t.sections });
+    // The whole file is stored (its instructions included), not just the title and the ## sections.
+    await onSave({ folder: null, name: t.name, sections: t.sections, rawContent: r.text });
   };
   return (
     <div className="dg-dialog-wrap">

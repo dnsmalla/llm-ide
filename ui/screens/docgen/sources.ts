@@ -132,6 +132,8 @@ export interface CollectResult {
   sources: SourcePayload[];
   /** Names that could not be read as text. */
   skipped: string[];
+  /** The same sources by their unique key (`file:<rel>` / `note:<rel>`): the row markers match on these, not names. */
+  skippedKeys: string[];
   /** Selected sources never read because the core's budget was already full (they would be dropped anyway). */
   notRead: number;
   /** Sources whose text was cut to the per-source cap before sending. */
@@ -148,6 +150,7 @@ export async function collectSources(items: readonly SourceItem[], readers: Sour
   const ordered = sendOrder(items);
   const sources: SourcePayload[] = [];
   const skipped: string[] = [];
+  const skippedKeys: string[] = [];
   let clipped = 0;
   let chars = 0;
   let need = 0;
@@ -184,6 +187,7 @@ export async function collectSources(items: readonly SourceItem[], readers: Sour
       }
       if (r.text === null || r.text.trim() === "") {
         skipped.push(r.it.name);
+        skippedKeys.push(r.it.key);
         continue;
       }
       const step = `### ${r.it.name}\n`.length + Math.min(MIN_SOURCE_CONTENT, r.text.length) + (sources.length > 0 ? 2 : 0);
@@ -203,7 +207,7 @@ export async function collectSources(items: readonly SourceItem[], readers: Sour
       break;
     }
   }
-  return { sources, skipped, notRead, clipped, chars };
+  return { sources, skipped, skippedKeys, notRead, clipped, chars };
 }
 
 function abortError(): Error {

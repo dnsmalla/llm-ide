@@ -34,7 +34,7 @@ export interface SourcePanelProps {
   /** When set, the selected source kind is remembered under this localStorage key. */
   sourceTabKey?: string;
   initialViewport?: number;
-  /** Names that could not be read as text in the last run (the Mac's unreadableSourceNames): their rows get a warning. */
+  /** Source keys (`file:<rel>` / `note:<rel>`) that could not be read as text in the last run: their rows get a warning. Keys, not names, so two sources with one name are told apart. */
   unreadable?: readonly string[];
 }
 
@@ -242,7 +242,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
             <label className="dg-check">
               <input type="checkbox" checked={checked} disabled={reason !== null} onChange={() => (checked ? onRemove([key]) : onAdd([fileItem(r.path, r.size)]))} />
               <span className="dg-name">{r.name}</span>
-              <UnreadMark name={r.name} unreadable={unreadable} />
+              <UnreadMark sourceKey={key} unreadable={unreadable} />
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
               {image && reason === null && env.readImage ? (
                 <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && setPreview({ path: r.path, url })); }}>View</button>
@@ -266,9 +266,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   );
 }
 
-/** Warning on a source row the last run could not read. The name is the source item's name, as the run reports it. */
-export function UnreadMark({ name, unreadable }: { name: string; unreadable: readonly string[] | undefined }): ReactNode {
-  if (!unreadable || !unreadable.includes(name)) return null;
+/** Warning on a source row the last run could not read. Matched by the source's unique key, so two sources with one name are told apart. */
+export function UnreadMark({ sourceKey, unreadable }: { sourceKey: string; unreadable: readonly string[] | undefined }): ReactNode {
+  if (!unreadable || !unreadable.includes(sourceKey)) return null;
   return <span className="dg-warn" role="img" aria-label="Could not read this file" title="Could not read this file">!</span>;
 }
 
@@ -327,7 +327,7 @@ function NotesTab({ env, selection, onAdd, onRemove, initialViewport, unreadable
             <label className="dg-check">
               <input type="checkbox" checked={checked} onChange={() => (checked ? onRemove([`note:${r.rel}`]) : onAdd([noteItem(r.rel, r.size, r.title)]))} />
               <span className="dg-name">{r.title}</span>
-              <UnreadMark name={(r.title && r.title.trim()) || r.rel.slice(r.rel.lastIndexOf("/") + 1)} unreadable={unreadable} />
+              <UnreadMark sourceKey={`note:${r.rel}`} unreadable={unreadable} />
               <span className="dg-muted">{formatBytes(r.size)}</span>
             </label>
           );

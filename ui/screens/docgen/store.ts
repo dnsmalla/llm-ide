@@ -1,7 +1,8 @@
 // Doc Gen / Visual screen state: project registration with the core, templates and commands, the current choice,
 // the source selection, and the generation run. A plain observable store (no React); `useSyncExternalStore` reads it.
 import { describeFailure, isCancel, type Failure } from "./errors.ts";
-import { folderForName, projectIdFor, type DocsApi } from "./docs-api.ts";
+import { FOLDER_RE, folderForName, projectIdFor, type DocsApi } from "./docs-api.ts";
+import { templateImportText } from "./template-file.ts";
 import type { DocCommand, DocTemplate, Surface } from "./model.ts";
 import { GenerationRun, type RunDeps } from "./run.ts";
 import { SourceSelection, type SourceItem } from "./sources.ts";
@@ -214,26 +215,38 @@ export class DocGenStore {
     return r.item !== null;
   }
 
-  /** Create or update a project template through the core. Resolves to the saved template, or null on failure. */
-  async saveTemplate(input: { folder: string | null; name: string; sections: string[] }): Promise<DocTemplate | null> {
-    const folder = input.folder ?? folderForName(input.name);
-    if (!folder) {
+  /**
+   * Create or update a project template through the core. Resolves to the saved template, or null on failure.
+   * A new template (folder null: create or import) takes the first free folder of its name: `name`, `name-2`, `name-3`,
+   * as the Mac does; it never writes into a folder that already holds a template. Editing passes its own folder.
+   * `rawContent` (an import) stores the whole file, with the surface marker stamped in, instead of a rendered body.
+   */
+  async saveTemplate(input: { folder: string | null; name: string; sections: string[]; rawContent?: string }): Promise<DocTemplate | null> {
+    const base = input.folder ?? folderForName(input.name);
+    if (!base) {
       this.set({ templateError: { message: "Use a name with letters or numbers.", retryable: false, action: "none" } });
       return null;
     }
+    let text: string | undefined;
+    if (input.rawContent !== undefined) {
+      const stamped = templateImportText(input.rawContent, this.surface);
+      if (stamped.kind === "error") {
+        this.set({ templateError: { message: stamped.message, retryable: false, action: "none" } });
+        return null;
+      }
+      text = stamped.text;
+    }
     this.set({ templateBusy: true, templateError: null });
     try {
-      // A new template must not write into a folder that already holds one: that would overwrite it (the core's PUT
-      // replaces the template). Editing passes its own folder and skips this check.
-      if (input.folder === null) {
-        const existing = await this.requireApi().templates();
-        // Case-insensitive: the core writes into an existing folder that differs only by case (canonicalFolder).
-        if (existing.items.some((t) => t.folderName?.toLowerCase() === folder)) {
-          this.set({ templateBusy: false, templateError: { message: `A template already uses templates/${folder}. Choose another name, or edit that template.`, retryable: false, action: "none" } });
+      let folder = input.folder;
+      if (folder === null) {
+        folder = await this.freeTemplateFolder(base);
+        if (folder === null) {
+          this.set({ templateBusy: false, templateError: { message: `Too many templates already use the name ${base}. Rename one of them.`, retryable: false, action: "none" } });
           return null;
         }
       }
-      const saved = await this.requireApi().putTemplate(folder, { name: input.name.trim(), sections: input.sections, surface: this.surface });
+      const saved = await this.requireApi().putTemplate(folder, { name: input.name.trim(), sections: input.sections, surface: this.surface, rawContent: text });
       const others = this.state.templates.filter((t) => t.folderName !== saved.folderName);
       this.set({ templateBusy: false, templates: [...others, saved].sort((a, b) => a.name.localeCompare(b.name)), templateId: saved.id });
       return saved;
@@ -241,6 +254,26 @@ export class DocGenStore {
       this.set({ templateBusy: false, templateError: describeFailure(e) });
       return null;
     }
+  }
+
+  /**
+   * The folder a NEW template is written into: `base`, else `base-2`, `base-3`... (the Mac's uniqueFolderSlug). Compared
+   * case-insensitively, because the core writes into an existing folder that differs only by case (canonicalFolder).
+   * Residual gap: the core lists at most 2,000 folders. A folder past that cap is not seen here, so a name taken only by
+   * one of them is treated as free. The same holds for a folder the core's list skips (its template.md is over 256 KB or
+   * unreadable), and for a create racing another create between this list and the PUT. The core's PUT is then the last
+   * line: a create (rewrite) keeps that file's body but replaces its title and sections; an import (rawContent wins over
+   * rewrite) replaces the whole file. Closing it needs a create-only flag on the core PUT (open item O3).
+   */
+  private async freeTemplateFolder(base: string): Promise<string | null> {
+    const existing = await this.requireApi().templates();
+    const taken = new Set(existing.items.map((t) => t.folderName?.toLowerCase()).filter((f): f is string => Boolean(f)));
+    for (let n = 1; n <= 1000; n++) {
+      const suffix = n === 1 ? "" : `-${n}`;
+      const folder = `${base.slice(0, 80 - suffix.length).replace(/-+$/, "")}${suffix}`;
+      if (FOLDER_RE.test(folder) && !taken.has(folder)) return folder;
+    }
+    return null;
   }
 
   async saveCommand(input: { folder: string | null; name: string; instruction: string }): Promise<DocCommand | null> {

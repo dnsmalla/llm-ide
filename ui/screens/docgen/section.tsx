@@ -3,7 +3,7 @@
 import "@llmide/ui-kit/styles.css";
 import "../library/library.css";
 import "./docgen.css";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { core, host as shellHost, invokeHost, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../explorer/fs";
@@ -18,6 +18,7 @@ import { imageReader } from "./image-reader.ts";
 import { DocGenStore } from "./store.ts";
 import type { Surface } from "./model.ts";
 import { safeRelativePath } from "../shell/bus";
+import { REVEAL_FAILED } from "./reveal.ts";
 import { pickTemplateFile } from "./template-file.ts";
 
 const stores = new Map<Surface, DocGenStore>();
@@ -51,9 +52,14 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     const notes = createNotesHost((cmd, args) => invokeHost(cmd, args));
     return { fs, notes, store: storeFor(surface, fs, notes) };
   }, [surface]);
+  const [revealNotice, setRevealNotice] = useState<string | null>(null);
   const onReveal = useCallback((path: string) => {
+    if (!available) return;
+    setRevealNotice(null);
     const rel = safeRelativePath(path);
-    if (rel && available) void invokeHost("reveal_in_os", { relPath: rel }).catch(() => undefined);
+    if (!rel) { setRevealNotice(REVEAL_FAILED); return; }
+    // A failure is shown, not swallowed: the screen's banner says the file could not be shown.
+    void invokeHost("reveal_in_os", { relPath: rel }).then(() => undefined, () => setRevealNotice(REVEAL_FAILED));
   }, [available]);
   const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
   const env = useMemo(() => ({
@@ -71,5 +77,5 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
 }
