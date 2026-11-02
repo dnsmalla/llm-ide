@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -10,6 +11,7 @@ import {
   decodeCoreLog,
   decodeRtkStatus,
   shortPath,
+  singleFlight,
   sizeLabel,
 } from "../components-model.ts";
 
@@ -89,4 +91,78 @@ test("component errors: host codes become plain sentences; a raw string is kept 
 test("Backend log: the auto-scroll label and the poll interval", () => {
   assert.equal(LOG_TEXT.autoScroll, "Auto-scroll");
   assert.equal(LOG_POLL_MS, 2000);
+});
+
+test("Backend log poll: a tick during a slow read is dropped, so reads never overlap", async () => {
+  let reads = 0;
+  let release: () => void = () => undefined;
+  let active = 0;
+  let maxActive = 0;
+  // A fake read that takes longer than the 2 s poll: it settles only when the test releases it.
+  const slowRead = () => {
+    reads += 1;
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    return new Promise<void>((resolve) => {
+      release = () => {
+        active -= 1;
+        resolve();
+      };
+    });
+  };
+  const tick = singleFlight(slowRead);
+  tick(); // poll 1 starts a read
+  tick(); // poll 2 (2 s later, read still running): dropped
+  tick(); // poll 3: dropped
+  assert.equal(reads, 1, "no second read while the first is in flight");
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  tick(); // poll 4 after the read settled: runs again
+  assert.equal(reads, 2, "polling resumes once the read has finished");
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(maxActive, 1, "never more than one read in flight");
+});
+
+test("Backend log poll: a failed read still frees the slot for the next tick", async () => {
+  let reads = 0;
+  const tick = singleFlight(() => {
+    reads += 1;
+    return Promise.reject(new Error("host read failed"));
+  });
+  // The read handles its own errors in ServerSection; this checks the slot is released even if one escapes.
+  tick();
+  await new Promise((r) => setTimeout(r, 0));
+  tick();
+  assert.equal(reads, 2);
+});
+
+test("Backend log poll: a read that never settles frees the slot after the timeout, and its late settle frees nothing", async () => {
+  let reads = 0;
+  const settles: Array<() => void> = [];
+  const tick = singleFlight(() => {
+    reads += 1;
+    return new Promise<void>((r) => settles.push(r));
+  }, 20);
+  tick(); // read 1 hangs
+  tick();
+  assert.equal(reads, 1, "still single-flight before the timeout");
+  await new Promise((r) => setTimeout(r, 40));
+  tick(); // read 2 after the timeout
+  assert.equal(reads, 2, "a stuck read does not stop the poll for good");
+  settles[0](); // read 1 finally lands while read 2 holds the slot
+  await new Promise((r) => setTimeout(r, 0));
+  tick();
+  assert.equal(reads, 2, "the stale read's settle must not free read 2's slot");
+  settles[1]();
+  await new Promise((r) => setTimeout(r, 0));
+  tick();
+  assert.equal(reads, 3);
+});
+
+test("Backend log poll: ServerSection reads the log only through the single-flight poll", () => {
+  const src = readFileSync(new URL("../sections/ServerSection.tsx", import.meta.url), "utf8");
+  assert.match(src, /const loadLog = useMemo\([\s\S]*?singleFlight\(/, "loadLog is wrapped in singleFlight");
+  assert.match(src, /setInterval\(loadLog, LOG_POLL_MS\)/, "the poll drives the guarded reader");
+  assert.match(src, /clearInterval\(id\)/, "the poll stops on unmount");
 });

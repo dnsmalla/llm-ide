@@ -25,7 +25,7 @@ import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } fro
 import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
 import { featureStore } from "./feature-store";
-import { disabledSectionText, isSectionEnabled } from "./features";
+import { disabledSectionText, isSectionEnabled, keepSectionNotice, type SectionNotice } from "./features";
 import { quickSwitchRows } from "./menu-model";
 import { coreApiWarning } from "./core-api-floor";
 
@@ -75,7 +75,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const main = useRef<HTMLElement>(null);
 
   const bypass = nav.active === "spike";
-  const [sectionNotice, setSectionNotice] = useState<string | null>(null);
+  const [sectionNotice, setSectionNotice] = useState<SectionNotice | null>(null);
+  // Shown only on the section it was left on: navigating anywhere else clears it (declared before the effect that sets it).
+  useEffect(() => setSectionNotice((n) => keepSectionNotice(n, nav.active)), [nav.active]);
   const [apiWarning, setApiWarning] = useState<string | null>(null);
   // Checked each time the core comes up (the public /health route; no token needed).
   useEffect(() => {
@@ -131,8 +133,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     if (!features.ready) return;
     if (nav.active !== "welcome" && !isSectionEnabled(nav.active, features.usable)) {
       const label = SECTIONS.find((s) => s.id === nav.active)?.label ?? "This section";
-      setSectionNotice(disabledSectionText(nav.active, label, features.compiled));
-      dispatch({ type: "select", id: usableHome() });
+      const home = usableHome();
+      setSectionNotice({ text: disabledSectionText(nav.active, label, features.compiled), at: home });
+      dispatch({ type: "select", id: home });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [features.ready, features.usable, nav.active]);
@@ -227,9 +230,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
           {apiWarning && <StatusBanner severity="warning" message={apiWarning} />}
-          {sectionNotice && (
+          {keepSectionNotice(sectionNotice, nav.active) && (
             <div className="sh-notice" role="status" data-testid="section-notice">
-              <p>{safeText(sectionNotice, 300)}</p>
+              <p>{safeText(sectionNotice!.text, 300)}</p>
               <button type="button" className="sh-button" onClick={() => setSectionNotice(null)}>Dismiss</button>
             </div>
           )}

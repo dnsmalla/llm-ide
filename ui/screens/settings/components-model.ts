@@ -53,6 +53,33 @@ export const LOG_TEXT = {
 /** How often the open Backend log group re-reads the core's log tail (the host caps the file it reads). */
 export const LOG_POLL_MS = 2000;
 
+/**
+ * Runs `read` one at a time: a call made while the previous read is still in flight is dropped, so a slow host read
+ * cannot pile up behind the poll that asked for it. The next call after it settles runs normally. A read that never
+ * settles gives up its slot after `timeoutMs`, so one stuck host read cannot stop the poll for good.
+ */
+export function singleFlight(read: () => Promise<void>, timeoutMs = LOG_READ_TIMEOUT_MS): () => void {
+  let flight = 0; // id of the read holding the slot; 0 = free
+  let next = 0;
+  return () => {
+    if (flight !== 0) return;
+    const id = ++next;
+    flight = id;
+    const free = () => {
+      if (flight === id) flight = 0; // a late settle never frees a newer read's slot
+    };
+    const timer = setTimeout(free, timeoutMs);
+    // A poll has no caller to report a rejection to: the reader shows its own error, so a throw only frees the slot.
+    void read().catch(() => undefined).finally(() => {
+      clearTimeout(timer);
+      free();
+    });
+  };
+}
+
+/** How long one log read may hold the poll's slot before the next tick is allowed to read again. */
+export const LOG_READ_TIMEOUT_MS = 10_000;
+
 /** The most the page accepts from the host, even though the host caps the file it reads. */
 export const MAX_LOG_CHARS = 64 * 1024;
 

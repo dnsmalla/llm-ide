@@ -163,7 +163,7 @@ function RoutePrefs({ getPrefs, setPrefs, migration, toolsOn }: { getPrefs: (() 
 }
 
 /** The one-time key carry-over: what was added, what needs review, and the session router the catalog chat needs. */
-function MigrationNotice({ migration, toolsOn, routerState, onTurnOnRouter }: { migration: CatalogMigration | undefined; toolsOn: boolean | undefined; routerState: "on" | "off" | "unknown"; onTurnOnRouter: (() => void) | undefined }) {
+export function MigrationNotice({ migration, toolsOn, routerState, onTurnOnRouter }: { migration: CatalogMigration | undefined; toolsOn: boolean | undefined; routerState: "on" | "off" | "unknown"; onTurnOnRouter: (() => void) | undefined }) {
   if (!migration || (migration.created.length === 0 && migration.needsReview.length === 0)) return null;
   const created = migration.created.map((c) => c.name);
   return (

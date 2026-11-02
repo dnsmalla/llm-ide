@@ -8,7 +8,7 @@ import type { SessionUser } from "./core";
 
 /** Mac's confirmation wording, adjusted to what the desktop actually clears. */
 export const SIGN_OUT_TITLE = "Sign out of LLM-IDE?";
-export const SIGN_OUT_BODY = "Signing out clears your session and the chat bindings on this computer. Project files and chat files are not deleted. Git tokens and provider keys stay saved on the server until you clear them in Settings. The Sign out and forget this device option also deletes everything this app keeps in its own storage on this device: the saved repository list, Auto Tasks, custom Loop templates and queued runs, and layout and display settings.";
+export const SIGN_OUT_BODY = "Signing out ends your session and disconnects chat on this computer, so chat stops using your account here. Project files and chat files are not deleted. Git tokens and provider keys stay saved on the server until you clear them in Settings. The Sign out and forget this device option also deletes everything this app keeps in its own storage on this device: the saved repository list, Auto Tasks, custom Loop templates and queued runs, and layout and display settings.";
 
 export interface AccountActions {
   openSettings: () => void;

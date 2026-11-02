@@ -399,6 +399,44 @@ test("Routing: the one-time key carry-over names what was added and what needs r
   assert.ok(!/sk-|api_key/i.test(out));
 });
 
+test("Routing: every upgrade state renders the Mac's words: tools, router needed (with its button), router pending, nothing when unknown", () => {
+  const migration = { created: [{ provider: "deepseek", name: "DeepSeek" }], needsReview: [], toolsSuggested: true };
+  const off = html(h(m.routing.MigrationNotice, { migration, toolsOn: false, routerState: "off", onTurnOnRouter: () => undefined }));
+  assert.match(off, /Tool turns can read files and run commands, subject to your approvals\./, "tools explanation while tools are off");
+  assert.match(off, /Chat on these models runs through the session router\. Turning it on applies the next time the backend starts\./);
+  assert.match(off, /<button[^>]*>Turn on the session router<\/button>/, "the router switch-on button");
+  assert.ok(!off.includes("The session router is on"), "no pending line while the router is off");
+
+  const on = html(h(m.routing.MigrationNotice, { migration, toolsOn: true, routerState: "on", onTurnOnRouter: undefined }));
+  assert.match(on, /The session router is on; it applies the next time the backend starts\./, "router pending once it is on");
+  assert.ok(!on.includes("Tool turns can read files"), "no tools line once tools are on");
+  assert.ok(!on.includes("Turn on the session router"), "no button once the router is on");
+
+  const unknown = html(h(m.routing.MigrationNotice, { migration, toolsOn: undefined, routerState: "unknown", onTurnOnRouter: undefined }));
+  assert.ok(!unknown.includes("session router"), "router state not loaded yet: say nothing rather than claim it is off");
+  assert.ok(!unknown.includes("Tool turns can read files"), "tools state not loaded yet: say nothing");
+  assert.match(unknown, /Your existing DeepSeek key was added as catalog connections\./, "the created line still shows");
+});
+
+test("Routing: the 'Turn on the session router' button calls its handler, and RoutePrefs wires it through the prefs save", () => {
+  const migration = { created: [{ provider: "deepseek", name: "DeepSeek" }], needsReview: [], toolsSuggested: false };
+  let clicked = 0;
+  const tree = m.routing.MigrationNotice({ migration, toolsOn: true, routerState: "off", onTurnOnRouter: () => { clicked += 1; } });
+  const find = (el) => {
+    if (!el || typeof el !== "object") return null;
+    if (Array.isArray(el)) { for (const c of el) { const f = find(c); if (f) return f; } return null; }
+    if (el.props?.children === "Turn on the session router" && typeof el.props.onClick === "function") return el;
+    return find(el.props?.children);
+  };
+  const button = find(tree);
+  assert.ok(button, "the button is rendered");
+  button.props.onClick();
+  assert.equal(clicked, 1);
+  const src = readFileSync(new URL("../sections/RoutingSection.tsx", import.meta.url), "utf8");
+  assert.match(src, /onTurnOnRouter=\{setPrefs && prefs \? \(\) => save\(\{ router: true, cap: prefs\.cap \}\) : undefined\}/, "the button saves router on through the existing prefs path");
+  assert.match(src, /const save = \(next: \{ router: boolean; cap: boolean \}\) => \{ setLocal\(next\); void setPrefs\?\.\(next\); \};/);
+});
+
 test("Server & Backend: the log has an Auto-scroll checkbox that starts on, and the group re-reads the log while open", () => {
   const e = {
     client: { request: async () => ({ status: 200, body: {} }) },

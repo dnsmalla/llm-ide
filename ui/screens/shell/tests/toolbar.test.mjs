@@ -219,3 +219,14 @@ test("sign-out copy says what forget removes and what stays (no claim that keys 
   assert.match(SIGN_OUT_BODY, /Auto Tasks/);
   assert.match(SIGN_OUT_BODY, /Loop templates/);
 });
+
+test("sign-out copy names exactly what sign-out removes, in plain words (no 'chat bindings' jargon)", () => {
+  assert.match(SIGN_OUT_BODY, /^Signing out ends your session and disconnects chat on this computer, so chat stops using your account here\. /);
+  assert.doesNotMatch(SIGN_OUT_BODY, /binding/i);
+  // Nothing else is removed by plain sign-out, so the copy must not claim it: files and stored keys stay.
+  assert.match(SIGN_OUT_BODY, /Project files and chat files are not deleted\./);
+  // Every item forget removes (forgetLocalSettings: every llmide.* key) and every item that stays is named.
+  for (const item of ["saved repository list", "Auto Tasks", "custom Loop templates and queued runs", "layout and display settings", "Git tokens and provider keys stay saved on the server until you clear them in Settings"]) {
+    assert.ok(SIGN_OUT_BODY.includes(item), `names: ${item}`);
+  }
+});

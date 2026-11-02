@@ -12,6 +12,7 @@ import {
   disabledSectionText,
   featuresFromPrefs,
   isSectionEnabled,
+  keepSectionNotice,
   presetFor,
   usableFeatures,
   validateFeatures,
@@ -83,4 +84,19 @@ test("a section that is switched off says so and where to turn it on; a compiled
   assert.equal(disabledSectionText("issues", "Issues", new Set(["gantt_issues"])), "Issues is currently disabled. You can re-enable this feature in Settings → Workspace.");
   assert.equal(disabledSectionText("issues", "Issues", new Set()), "Issues is not included in this build.");
   assert.equal(disabledSectionText("library", "Library", new Set()), "Library is currently disabled. You can re-enable this feature in Settings → Workspace.");
+});
+
+test("the section notice stays only on the section it was left on, and is gone after any other navigation", () => {
+  const n = { text: "Issues is currently disabled.", at: "explorer" };
+  assert.equal(keepSectionNotice(n, "explorer"), n, "still on the landing section: shown");
+  assert.equal(keepSectionNotice(n, "graph"), null, "navigating to another section clears it");
+  assert.equal(keepSectionNotice(n, "issues"), null, "the disabled section itself never shows it");
+  assert.equal(keepSectionNotice(null, "explorer"), null);
+  // Going back to the landing section later must not resurrect a notice that was cleared on the way.
+  let shown = n;
+  shown = keepSectionNotice(shown, "graph");
+  shown = keepSectionNotice(shown, "explorer");
+  assert.equal(shown, null, "a notice cleared by navigation stays cleared");
+  const src = readFileSync(join(HERE, "..", "Shell.tsx"), "utf8");
+  assert.match(src, /useEffect\(\(\) => setSectionNotice\(\(n\) => keepSectionNotice\(n, nav\.active\)\), \[nav\.active\]\)/, "Shell clears the notice whenever the active section changes");
 });

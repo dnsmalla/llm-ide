@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeHealth, type Health } from "../decoders.ts";
 import type { BackendConfig, CoreLogText, DiagnosticsInfo, SettingsHost } from "../host.ts";
 import { describeError } from "../errors.ts";
-import { LOG_POLL_MS, LOG_TEXT, componentError, shortPath } from "../components-model.ts";
+import { LOG_POLL_MS, LOG_TEXT, componentError, shortPath, singleFlight } from "../components-model.ts";
 import { parseBackendUrl } from "../project-model.ts";
 import { serverRows } from "../notices.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -28,10 +28,21 @@ export default function ServerSection() {
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLPreElement | null>(null);
 
-  const loadLog = useCallback(() => {
-    if (!host.coreLog) return;
-    host.coreLog().then((l) => { setLog(l); setLogError(null); }, (e) => setLogError(componentError(e)));
-  }, [host]);
+  // One read at a time: a poll that fires while the last read is still running is dropped (see singleFlight).
+  const loadLog = useMemo(
+    () =>
+      singleFlight(async () => {
+        if (!host.coreLog) return;
+        try {
+          const l = await host.coreLog();
+          setLog(l);
+          setLogError(null);
+        } catch (e) {
+          setLogError(componentError(e));
+        }
+      }),
+    [host],
+  );
 
   const load = () => {
     host.diagnostics().then(setInfo, () => setInfo(null));

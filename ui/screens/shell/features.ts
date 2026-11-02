@@ -158,6 +158,21 @@ export function disabledSectionText(section: string, label: string, compiled: Re
   return `${label} is currently disabled. You can re-enable this feature in Settings → Workspace.`;
 }
 
+/**
+ * The notice left behind when a disabled section sends the user to their home section. It belongs to the section the
+ * user landed on (`at`), so it stops showing as soon as they navigate anywhere else (the Mac's placeholder is the
+ * disabled section's own content, so it is gone on the next navigation too).
+ */
+export interface SectionNotice {
+  text: string;
+  at: string;
+}
+
+/** The notice while the user is still on the section it was shown on; null once they navigate away. */
+export function keepSectionNotice(notice: SectionNotice | null, active: string): SectionNotice | null {
+  return notice && notice.at === active ? notice : null;
+}
+
 /** The dependency sentence shown under a switch that other features require. */
 export function dependentsOf(f: AppFeature): AppFeature[] {
   return FEATURES.filter((x) => x.requires.includes(f)).map((x) => x.id);
