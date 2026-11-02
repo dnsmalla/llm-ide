@@ -1,3 +1,4 @@
+import { fireLabel, nextFireAfter } from "./cron.ts";
 // Native Auto Tasks catalog and local configuration. The Mac's runner/scheduler is being ported separately; this
 // module owns the part the desktop can already be authoritative for: which tasks are enabled, their input/output,
 // skill and prompt, stored per project on this machine. No Mobile Control token is involved.
@@ -64,6 +65,24 @@ export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = 
   try { storage?.setItem(KEY, JSON.stringify(s)); } catch { /* session only */ }
 }
 
+/** The Mac's structural tasks (`AutoTask.isStructural`, minus Loop Engineering, which the desktop does not have). They
+ *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
+ *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
+export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
+  "sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "regression", "generateKnowledge",
+]);
+export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
+
+/** Whether the desktop may run this task at all (through the agent). */
+export function desktopRunnable(id: AutoTaskId): boolean {
+  return !MAC_ONLY_TASK_IDS.has(id);
+}
+
+/** Whether the page scheduler may fire this task now (apart from the cron match itself). */
+export function scheduledRunAllowed(id: AutoTaskId, c: AutoTaskConfig | undefined, hasRepo: boolean): boolean {
+  return desktopRunnable(id) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
+}
+
 /** Mac parity (`AutoTask.requiresLinkedRepo`): only Source Update runs without a linked repository. */
 export function requiresLinkedRepo(id: AutoTaskId): boolean {
   return id !== "sourceUpdate";
@@ -79,9 +98,35 @@ export function normalizeProjectPath(p: string): string | null {
   return t;
 }
 
+/** Title and body of the confirmation before a built-in prompt is overwritten (the Mac's `confirmationDialog`). */
+export function resetTemplateTitle(label: string): string {
+  return `Reset "${label}" template to default?`;
+}
+export const RESET_TEMPLATE_MESSAGE = "Your custom prompt will be permanently replaced.";
+
+/** The message an Auto Task sends to the agent: its prompt, then the resolved input and output folders. */
+export function composeTaskMessage(prompt: string, inputPath: string, outputPath: string): string {
+  const parts = [prompt];
+  if (inputPath) parts.push(`Input: ${inputPath}`);
+  if (outputPath) parts.push(`Output: ${outputPath}`);
+  return parts.join("\n\n");
+}
+
 /** Whether a `/kb/loop/agent-run` answer is a completed run. The engine refuses to run at all when a requested skill
  *  is not in the user's skills library (`ran: false`, empty reply), which must not read as success. */
 export function agentRunSucceeded(r: { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string | null }): boolean {
   if (r.ran === false || (r.unresolvedSkills?.length ?? 0) > 0) return false;
   return r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
+}
+
+/** One-line schedule status, in the Mac's order (CronField.statusLine): schedule off, master switch off, task disabled,
+ *  then the next fire. A Mac-only task never fires on the desktop, so its status says so. */
+export function scheduleStatusLine(masterEnabled: boolean, c: AutoTaskConfig, id: AutoTaskId, now: Date): string {
+  // First: "press Run" or "task disabled" would be wrong for a task the desktop never runs, schedule or not.
+  if (!desktopRunnable(id)) return "Mac app only — the desktop does not run this task";
+  if (!c.scheduleActive) return "Schedule off — runs only when you press Run";
+  if (!masterEnabled) return "Auto Tasks paused — master switch off";
+  if (!c.enabled) return "Task disabled — won't run";
+  const next = nextFireAfter(c.cron, now);
+  return next ? `Scheduled · next ${fireLabel(next)}` : "No upcoming fire";
 }

@@ -64,8 +64,36 @@ export function cronMatches(expr: string, at: Date): boolean {
   const h = field(hour, at.getHours(), 0, 23);
   const domOk = field(dom, at.getDate(), 1, 31);
   const mon = field(month, at.getMonth() + 1, 1, 12);
-  const dowOk = field(dowSpec, at.getDay(), 0, 6);
+  // validateCron accepts 0-7 for day-of-week; 7 is Sunday too (Vixie cron), so a Sunday also matches a 7.
+  const dowOk = field(dowSpec, at.getDay(), 0, 6) || (at.getDay() === 0 && field(dowSpec, 7, 0, 7));
   const domRestricted = dom !== "*"; const dowRestricted = dowSpec !== "*";
   const dayOk = domRestricted && dowRestricted ? (domOk || dowOk) : (domOk && dowOk);
   return m && h && mon && dayOk;
+}
+
+/** The first minute after `from` that the expression matches, searched up to a year ahead; null when none does (for
+ *  example Feb 31) or the expression is invalid. Uses cronMatches itself, but skips a whole day or hour that cannot
+ *  match, so a yearly or never-firing expression costs a few thousand checks, not half a million (it runs on render). */
+export function nextFireAfter(expr: string, from: Date, horizonMinutes = 366 * 24 * 60): Date | null {
+  if (!validateCron(expr)) return null;
+  const [, hour, dom, month, dow] = expr.trim().split(/\s+/);
+  const dayExpr = `* * ${dom} ${month} ${dow}`;
+  const hourExpr = `* ${hour} ${dom} ${month} ${dow}`;
+  const end = from.getTime() + horizonMinutes * 60_000;
+  const t = new Date(from.getTime());
+  t.setSeconds(0, 0);
+  t.setMinutes(t.getMinutes() + 1);
+  while (t.getTime() <= end) {
+    if (!cronMatches(dayExpr, t)) { t.setDate(t.getDate() + 1); t.setHours(0, 0, 0, 0); continue; }
+    if (!cronMatches(hourExpr, t)) { t.setHours(t.getHours() + 1, 0, 0, 0); continue; }
+    if (cronMatches(expr, t)) return new Date(t.getTime());
+    t.setMinutes(t.getMinutes() + 1);
+  }
+  return null;
+}
+
+/** "Mon 09:30" style, as the Mac's fire formatter ("EEE HH:mm"). */
+export function fireLabel(d: Date): string {
+  const day = d.toLocaleDateString(undefined, { weekday: "short" });
+  return `${day} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

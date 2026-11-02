@@ -50,3 +50,12 @@
 .atn-modal-card header { display: flex; align-items: center; gap: var(--tok-space-sm); }
 .atn-modal-card h2 { margin: 0; font-size: var(--tok-type-heading-size, 1.1em); }
 .atn-modal-actions { display: flex; justify-content: flex-end; gap: var(--tok-space-sm); }
+.atn-mac-only { margin-left: auto; font-size: 10px; }
+.atn-danger { border: 0; background: var(--tok-color-danger, #c62828); color: #fff; }
+.atn-preview { max-height: 220px; overflow: auto; margin-top: 6px; }
+.atn-folder-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.atn-folder-list .atn-row { flex-direction: column; align-items: flex-start; gap: 0; }
+.atn-limits { width: min(860px, 94vw); max-height: 88vh; overflow: auto; }
+.atn-limit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--tok-color-border); font-size: var(--tok-type-caption-size); }
+.atn-limit-row input[type="number"] { width: 72px; }
+.atn-rate { margin: 0; padding-left: 16px; font-size: var(--tok-type-caption-size); }

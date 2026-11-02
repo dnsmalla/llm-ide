@@ -60,3 +60,8 @@ export async function scanProjectSkills(fs: SkillFs): Promise<ProjectSkill[]> {
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
+
+/** Picker label for a saved skill: the Mac marks a saved skill that is no longer in the project as "(not installed)". */
+export function skillOptionLabel(name: string, installed: boolean): string {
+  return installed ? name : `${name} (not installed)`;
+}

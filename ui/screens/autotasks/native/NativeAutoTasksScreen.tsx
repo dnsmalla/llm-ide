@@ -8,9 +8,12 @@ import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
-import { GROUPS, TASKS, TASK_BY_ID, agentRunSucceeded, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { cronMatches, describeCron, validateCron } from "./cron.ts";
-import { scanProjectSkills, skillRunId, type ProjectSkill } from "./skills.ts";
+import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
+import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
+import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
+import { decideRun, type Resolve } from "./usage.ts";
 import "./native-autotasks.css";
 
 interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summary: string; durationSeconds: number }
@@ -18,6 +21,8 @@ interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summa
 export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [skills, setSkills] = useState<ProjectSkill[]>([]);
+  /** False until the project's skills have been read, so a saved skill is not marked "not installed" too early. */
+  const [skillsScanned, setSkillsScanned] = useState(false);
   const [state, setState] = useState<AutoTaskLocalState>(() => loadState());
   const [selected, setSelected] = useState<AutoTaskId>("reviewCode");
   const [onlyEnabled, setOnlyEnabled] = useState(false);
@@ -26,6 +31,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [scheduleError, setScheduleError] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleActiveDraft, setScheduleActiveDraft] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [limitsOpen, setLimitsOpen] = useState(false);
+  const [folderPick, setFolderPick] = useState<null | "inputPath" | "outputPath">(null);
+  const [folderList, setFolderList] = useState<LibraryFolder[] | null>(null);
+  const [folderFilter, setFolderFilter] = useState("");
   const firedRef = useRef<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
@@ -35,10 +46,14 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   useEffect(() => { try { localStorage.setItem("llmide.autoTaskRuns.v1", JSON.stringify(runs.slice(0, 50))); } catch { /* session only */ } }, [runs]);
   const task = TASK_BY_ID[selected];
   const config = state.configs[selected];
+  const rescanSkills = () => {
+    setSkillsScanned(false);
+    void scanProjectSkills(fs).then((list) => { setSkills(list); setSkillsScanned(true); });
+  };
   useEffect(() => {
-    if (!projectRoot) { setSkills([]); return; }
+    if (!projectRoot) { setSkills([]); setSkillsScanned(false); return; }
     let live = true;
-    void scanProjectSkills(fs).then((list) => { if (live) setSkills(list); });
+    void scanProjectSkills(fs).then((list) => { if (live) { setSkills(list); setSkillsScanned(true); } });
     return () => { live = false; };
   }, [fs, projectRoot]);
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
@@ -61,9 +76,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       const minute = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
       for (const t of TASKS) {
         const c = state.configs[t.id];
-        if (!c?.enabled || !c.scheduleActive || !validateCron(c.cron)) continue;
+        if (!scheduledRunAllowed(t.id, c, hasRepo) || !validateCron(c.cron)) continue;
         if (!cronMatches(c.cron, now)) continue;
-        if (requiresLinkedRepo(t.id) && !hasRepo) continue;
         const key = `${t.id}:${minute}`;
         if (firedRef.current[key]) continue;
         let persisted: Record<string, string> = {};
@@ -84,6 +98,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const runTask = async (id: AutoTaskId = selected) => {
     if (running) return;
     const t = TASK_BY_ID[id]; const c = state.configs[id];
+    if (!desktopRunnable(id)) { setNotice(MAC_ONLY_MESSAGE); return; }
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
     if (requiresLinkedRepo(id) && !hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
     const inputPath = normalizeProjectPath(c.inputPath);
@@ -96,11 +111,19 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     const started = new Date();
     try {
       const workRoot = await invokeHost<string>("loop_work_root");
-      const parts = [c.prompt];
-      if (inputPath) parts.push(`Input: ${inputPath}`);
-      if (outputPath) parts.push(`Output: ${outputPath}`);
+      // The server's model caps apply here: a paused chain stops the run, and an engaged one picks the model. As on
+      // the Mac, a failed check does not block the run (an older server or a blip would stop every night run); the
+      // log says so.
+      const decision = await decideRun(() => core.request<Resolve>("/kb/usage/resolve?provider=anthropic"));
+      if (decision.proceed && decision.warning) { const w = decision.warning; setLog((l) => [...l, w]); }
+      if (!decision.proceed) {
+        setLog((l) => [...l, decision.notice]);
+        setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: "paused by model limits", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+        setNotice(decision.notice);
+        return;
+      }
       const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; unresolvedSkills?: string[]; ran?: boolean; resultSubtype?: string }>("/kb/loop/agent-run", {
-        method: "POST", body: { message: parts.join("\n\n"), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, timeoutMs: 30 * 60 * 1000 },
+        method: "POST", body: { message: composeTaskMessage(c.prompt, inputPath, outputPath), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, model: decision.proceed ? decision.model : undefined, timeoutMs: 30 * 60 * 1000 },
       });
       let touched = r.changedPaths ?? [];
       if (t.readOnlyOutput && touched.length) {
@@ -118,6 +141,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     } finally { setRunning(false); }
   };
 
+  const openFolderPicker = (field: "inputPath" | "outputPath") => {
+    setFolderPick(field); setFolderFilter(""); setFolderList(null);
+    void scanLibraryFolders(fs).then((list) => setFolderList(list));
+  };
   const setMaster = (v: boolean) => setState((s) => { const n = { ...s, masterEnabled: v }; saveState(n); return n; });
 
   return (
@@ -143,8 +170,9 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
                 {tasks.map((t) => (
                   <li key={t.id}>
                     <button type="button" className="atn-row" data-on={selected === t.id || undefined} onClick={() => setSelected(t.id)}>
-                      <input type="checkbox" checked={state.configs[t.id]?.enabled ?? false} onClick={(e) => e.stopPropagation()} onChange={(e) => update({ enabled: e.target.checked }, t.id)} aria-label={`${t.label} enabled`} />
+                      <input type="checkbox" checked={state.configs[t.id]?.enabled ?? false} disabled={!desktopRunnable(t.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => update({ enabled: e.target.checked }, t.id)} aria-label={`${t.label} enabled`} />
                       <span className="atn-task-icon" aria-hidden="true">{iconFor(t.id)}</span><span>{t.label}</span>
+                      {desktopRunnable(t.id) ? null : <span className="atn-hint atn-mac-only">Mac app</span>}
                     </button>
                   </li>
                 ))}
@@ -153,10 +181,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           ))}
           {grouped.length === 0 ? <p className="atn-hint">No tasks match this filter.</p> : null}
         </div>
-        <button type="button" className="atn-model" onClick={() => setNotice("Model & Limits is part of the runner/settings port.")}>Model &amp; Limits</button>
+        <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
-        <button type="button" className="atn-run-now" disabled={running} title={running ? "A task is running" : "Run the selected task now"} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run Now"}</button>
+        <button type="button" className="atn-run-now" disabled={running || !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : running ? "A task is running" : "Run the selected task now"} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run Now"}</button>
       </aside>
 
       <main className="atn-main">
@@ -164,27 +192,67 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           <span className="atn-title-icon" aria-hidden="true">✓</span>
           <h1>{task.label}</h1>
           <span className="atn-spacer" />
-          <button type="button" className="atn-btn atn-primary" disabled={running} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
+          <button type="button" className="atn-btn atn-primary" disabled={running || !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : undefined} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
-        <div className="atn-subtitle"><span className="atn-hint">◷ {config.scheduleActive ? `Scheduled · ${describeCron(config.cron)}` : "Schedule off — runs only when you press Run"}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
+        <div className="atn-subtitle"><span className="atn-hint" role="status">◷ {scheduleStatusLine(state.masterEnabled, config, selected, new Date())}{desktopRunnable(selected) && config.scheduleActive && config.enabled && state.masterEnabled ? ` (${describeCron(config.cron)})` : ""}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} disabled={!desktopRunnable(selected)} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
         {notice ? <p className="atn-notice" role="status">{notice}</p> : null}
 
+        {!desktopRunnable(selected) ? (
+          <section className="atn-card">
+            <header><span aria-hidden="true">ⓘ</span><h2>ABOUT</h2></header>
+            <p className="atn-notice">{MAC_ONLY_MESSAGE}</p>
+          </section>
+        ) : null}
+        {desktopRunnable(selected) ? (<>
         <section className="atn-card">
           <header><span aria-hidden="true">☰</span><h2>SETTINGS</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Reload task settings" onClick={() => setState(loadState())}>↻</button></header>
-          <label className="atn-field"><span>Input path</span><input value={config.inputPath} placeholder="Whole project" onChange={(e) => update({ inputPath: e.target.value })} /><em>What the task reads. Empty means the whole project.</em></label>
-          <label className="atn-field"><span>Output path</span><input value={config.outputPath} placeholder="Whole project" onChange={(e) => update({ outputPath: e.target.value })} /><em>{task.readOnlyOutput ? "Read-only task — edits are reverted after the run; this is the intended destination." : "Where the task writes its result."}</em></label>
-          <label className="atn-field"><span>Skill</span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option>{[...skills.map((x) => x.name), ...(config.skillName && !skills.some((x) => x.name === config.skillName) ? [config.skillName] : [])].map((name) => <option key={name} value={name}>{name}</option>)}</select><em>Run the prompt under one of the project's agent skills.</em></label>
+          <label className="atn-field"><span>Input path <button type="button" className="atn-link" onClick={() => openFolderPicker("inputPath")}>Choose…</button></span><input value={config.inputPath} placeholder="Whole project" onChange={(e) => update({ inputPath: e.target.value })} /><em>What the task reads. Empty means the whole project.</em></label>
+          <label className="atn-field"><span>Output path <button type="button" className="atn-link" onClick={() => openFolderPicker("outputPath")}>Choose…</button></span><input value={config.outputPath} placeholder="Whole project" onChange={(e) => update({ outputPath: e.target.value })} /><em>{task.readOnlyOutput ? "Read-only task — edits are reverted after the run; this is the intended destination." : "Where the task writes its result."}</em></label>
+          <label className="atn-field"><span>Skill <button type="button" className="atn-link" aria-label="Rescan skills" disabled={!projectRoot} onClick={rescanSkills}>Rescan</button></span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option>{[...skills.map((x) => x.name), ...(config.skillName && !skills.some((x) => x.name === config.skillName) ? [config.skillName] : [])].map((name) => <option key={name} value={name}>{skillOptionLabel(name, skills.some((x) => x.name === name) || !skillsScanned)}</option>)}</select><em>Run the prompt under one of the project's agent skills.</em></label>
         </section>
 
         <section className="atn-card">
-          <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => update({ template: "builtin", prompt: task.prompt })}>Restore Default</button><button type="button" className="atn-link" onClick={() => setNotice("Saving named prompt templates is part of the template-store port.")}>New…</button></header>
+          <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setResetOpen(true)}>Restore Default</button><button type="button" className="atn-link" onClick={() => setNotice("Saving named prompt templates is part of the template-store port.")}>New…</button></header>
           <select aria-label="Template" value={config.template} onChange={(e) => update({ template: e.target.value as "builtin" | "custom" })}><option value="builtin">Built-in prompt</option><option value="custom">Custom prompt</option></select>
           <textarea aria-label="Prompt" rows={7} value={config.prompt} onChange={(e) => update({ prompt: e.target.value, template: "custom" })} />
         </section>
+        <section className="atn-card">
+          <header><span aria-hidden="true">▤</span><h2>EFFECTIVE PROMPT</h2><span className="atn-spacer" /><button type="button" className="atn-link" aria-expanded={showPreview} onClick={() => setShowPreview((v) => !v)}>{showPreview ? "Hide" : "Show"}</button></header>
+          {showPreview ? <EffectivePrompt config={config} task={task} /> : <p className="atn-hint">What this task will send to the agent, with the skill and folders above applied.</p>}
+        </section>
+        </>) : null}
 
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>
       </main>
+      {limitsOpen ? <ModelLimitsPanel onClose={() => setLimitsOpen(false)} /> : null}
+      {folderPick ? (
+        <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-folder-title">
+          <div className="atn-modal-card">
+            <header><h2 id="atn-folder-title">{folderPick === "inputPath" ? "Input folder" : "Output folder"}</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close folder picker" onClick={() => setFolderPick(null)}>×</button></header>
+            {!projectRoot ? <p className="atn-hint">Open a project to choose a folder.</p> : folderList === null ? <p className="atn-hint">Reading the project's folders…</p> : (<>
+              <input aria-label="Filter folders" placeholder="Filter folders" value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)} />
+              <ul className="atn-folder-list">
+                <li><button type="button" className="atn-row" data-on={(folderPick === "inputPath" ? config.inputPath : config.outputPath) === "" || undefined} onClick={() => { update({ [folderPick]: "" }); setFolderPick(null); }}><span>Whole project</span></button></li>
+                {folderList.filter((f) => f.path.toLowerCase().includes(folderFilter.trim().toLowerCase())).map((f) => (
+                  <li key={f.path} style={{ paddingLeft: (f.depth - 1) * 14 }}><button type="button" className="atn-row" data-on={(folderPick === "inputPath" ? config.inputPath : config.outputPath) === f.path || undefined} onClick={() => { update({ [folderPick]: f.path }); setFolderPick(null); }}><span>{f.path.split("/").pop()}</span><span className="atn-hint">{f.path}</span></button></li>
+                ))}
+              </ul>
+              {folderList.length === 0 ? <p className="atn-hint">This project has no Library folders yet.</p> : null}
+            </>)}
+            <div className="atn-modal-actions"><button type="button" className="atn-btn" disabled={!folderPick || (folderPick === "inputPath" ? config.inputPath : config.outputPath) === ""} onClick={() => { if (folderPick) update({ [folderPick]: "" }); setFolderPick(null); }}>Clear</button><button type="button" className="atn-btn" onClick={() => setFolderPick(null)}>Cancel</button></div>
+          </div>
+        </div>
+      ) : null}
+      {resetOpen ? (
+        <div className="atn-modal" role="alertdialog" aria-modal="true" aria-labelledby="atn-reset-title" aria-describedby="atn-reset-body">
+          <div className="atn-modal-card">
+            <header><h2 id="atn-reset-title">{resetTemplateTitle(task.label)}</h2></header>
+            <p id="atn-reset-body" className="atn-hint">{RESET_TEMPLATE_MESSAGE}</p>
+            <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setResetOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-danger" onClick={() => { update({ template: "builtin", prompt: task.prompt }); setResetOpen(false); setNotice(`${task.label} prompt restored to default.`); }}>Reset to Default</button></div>
+          </div>
+        </div>
+      ) : null}
       {scheduleOpen ? (
         <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-schedule-title">
           <div className="atn-modal-card">
@@ -197,6 +265,23 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The exact text a run sends: the same composer `runTask` uses, plus the skill it is run under. */
+function EffectivePrompt({ config, task }: { config: AutoTaskConfig; task: { label: string; readOnlyOutput?: boolean } }): ReactNode {
+  const inputPath = normalizeProjectPath(config.inputPath);
+  const outputPath = normalizeProjectPath(config.outputPath);
+  if (inputPath === null || outputPath === null) {
+    return <p className="atn-notice">Input and output must be folders inside the project (relative, no “..”).</p>;
+  }
+  const skillId = config.skillName ? skillRunId(config.skillName) : null;
+  return (
+    <>
+      <pre className="atn-log-pre atn-preview" aria-label={`Effective prompt for ${task.label}`}>{composeTaskMessage(config.prompt, inputPath, outputPath)}</pre>
+      <p className="atn-hint">{config.skillName ? (skillId ? `Skill: ${skillId}` : `Skill “${config.skillName}” cannot run in an Auto Task.`) : "No skill: the prompt runs on its own."}</p>
+      {task.readOnlyOutput ? <p className="atn-hint">Read-only task: any file it changes is reverted after the run.</p> : null}
+    </>
   );
 }
 
