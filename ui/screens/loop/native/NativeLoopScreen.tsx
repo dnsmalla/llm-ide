@@ -11,7 +11,7 @@ import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, sav
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
-import { runNativeLoop } from "./runner.ts";
+import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
 import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved, revokeAll } from "./approvals.ts";
@@ -20,12 +20,16 @@ import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
 import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
-import { outOfScopePaths, protectedPaths, wasDirtyBefore } from "./protected.ts";
+import { checkWrites } from "./protected.ts";
+import { guardedAgentCall, type AgentWrites } from "./agent-call.ts";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
-import { appendRunRecord, iterationRecords, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
+
+/** The `/kb/loop/agent-run` answer fields the Loop reads. */
+type AgentRunReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string | null };
 
 const stageKindLabel: Record<string, string> = {
   regressionSweep: "Regression sweep", shellCommand: "Shell command", skill: "Skill", artifactCheck: "Artifact check",
@@ -98,6 +102,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
   const haltRef = useRef<string | null>(null);
+  /** The halt is a failed agent call with nothing out of scope (recorded as `error`, as the Mac does), not a block. */
+  const haltErrorRef = useRef(false);
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [loopRunning, setLoopRunning] = useState(false);
@@ -379,44 +385,33 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     try { return new Set(await invokeHost<string[]>("loop_changed_paths")); } catch { return null; }
   };
 
+  /** Paths git reports as changed right now; null when git cannot say (the post-throw check needs this). */
+  const changedPathsNow = async (): Promise<string[] | null> => {
+    try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; }
+  };
+
   /**
-   * Protected-path and scope guard for one agent call (the Mac's checkScope + policy). A "revert" only undoes paths that
-   * were clean before the call; any other violation stops the run and is left in place, so the user's own uncommitted
-   * edits are never discarded. A violation under stop or revert ends the run (halt), as the policy copy says.
+   * Protected-path and scope guard for one agent call (the Mac's checkScope + policy). Shared logic is in
+   * protected.ts `checkWrites`; this only wires the Loop's policy, host revert and run log. A violation returns its
+   * message; the caller ends the run with it.
    */
-  const guardProtected = async (paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> => {
-    const policy = target.config.protectedPathPolicy;
-    if (policy === "off") return null;
-    const protectedHits = protectedPaths(paths, target.config.extraProtectedGlobs);
-    const scopeHits = outOfScopePaths(paths, target.scopeGlobs).filter((p) => !protectedHits.includes(p));
-    const bad = [...protectedHits, ...scopeHits];
-    if (bad.length === 0) return null;
-    const what = [protectedHits.length ? "protected path(s)" : "", scopeHits.length ? "out-of-scope path(s)" : ""].filter(Boolean).join(" and ");
-    if (policy === "warn") {
-      setRunLog((l) => [...l, `warning: agent touched ${what}; the policy is warn, so the run continues: ${bad.join(", ")}`]);
-      return null;
-    }
-    if (policy === "stop") {
-      const msg = `agent touched ${what} and they were left in place: ${bad.join(", ")}`;
-      haltRef.current = `${msg}; the run stopped`;
-      return msg;
-    }
-    if (!before || bad.some((p) => wasDirtyBefore(p, before))) {
-      const msg = `agent touched ${what} that had uncommitted changes before the run, so nothing was reverted and they were left in place: ${bad.join(", ")}`;
-      haltRef.current = `${msg}; the run stopped`;
-      return msg;
-    }
-    try {
-      // Only files the agent's Write created may be deleted; the host refuses any other untracked path.
-      await invokeHost("loop_revert_paths", { paths: bad, created: created.filter((p) => bad.includes(p)) });
-      const msg = `agent touched ${what} and they were reverted: ${bad.join(", ")}`;
-      haltRef.current = `${msg}; the run stopped`;
-      return msg;
-    } catch (e) {
-      const msg = `agent touched ${what} and the revert failed: ${bad.join(", ")} (${e instanceof Error ? e.message : String(e)})`;
-      haltRef.current = `${msg}; the run stopped`;
-      return msg;
-    }
+  const guardProtected = (paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> =>
+    checkWrites(
+      paths,
+      { policy: target.config.protectedPathPolicy, extraProtectedGlobs: target.config.extraProtectedGlobs, scopeGlobs: target.scopeGlobs },
+      before,
+      created,
+      async (p, c) => { await invokeHost("loop_revert_paths", { paths: p, created: c }); },
+      (line) => setRunLog((l) => [...l, line]),
+    );
+
+  /**
+   * Runs one agent call and checks what it wrote, also when the call throws (the Mac re-checks after a throw). Returns
+   * the reason the run must stop, or null when the call's writes were acceptable.
+   */
+  const stopReason = (g: { error: string | null; violation: string | null }): string | null => {
+    if (g.error !== null) return `the agent call failed (${g.error})${g.violation ? `; ${g.violation}` : ""}`;
+    return g.violation;
   };
 
   const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = []): Promise<{ ok: boolean; output: string }> => {
@@ -457,11 +452,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
       if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
       const before = await dirtyBefore();
-      const r = await core.request<{ reply?: string; ran?: boolean; changedPaths?: string[]; createdPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string | null }>("/kb/loop/agent-run", {
-        method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+      const g = await guardedAgentCall<AgentRunReply>({
+        before,
+        call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
+          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+        }),
+        changedNow: changedPathsNow,
+        check: (paths, b, created) => guardProtected(paths, target, b, created),
       });
-      const guard = await guardProtected(r.changedPaths ?? [], target, before, r.createdPaths ?? []);
-      if (guard) return { ok: false, output: guard };
+      const stop = stopReason(g);
+      if (g.result === null || stop !== null) { if (g.violation === null && cancelledRef.current) return { ok: false, output: stop ?? "the agent call failed" }; haltErrorRef.current = g.violation === null; haltRef.current = `${stop ?? "the agent call failed"}; the run stopped`; return { ok: false, output: stop ?? "the agent call failed" }; }
+      const r = g.result;
       const ok = agentRunSucceeded(r);
       const why = ok ? [] : r.unresolvedSkills?.length ? ["the skill could not be found, so it did not run"] : r.ran === false ? ["the skill did not run"] : [`the agent run did not finish (${r.resultSubtype ?? "no result"})`];
       return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
@@ -586,6 +587,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     runningRef.current = true;
     cancelledRef.current = false;
     haltRef.current = null;
+    haltErrorRef.current = false;
     pausedRef.current = false;
     setPaused(false);
     setLoopRunning(true);
@@ -608,16 +610,23 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           if (target.goal) message.push(`Loop goal: ${target.goal}`);
           if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
           const before = await dirtyBefore();
-          const r = await core.request<{ reply?: string; ran?: boolean; changedPaths?: string[]; createdPaths?: string[]; unresolvedSkills?: string[]; resultSubtype?: string | null }>("/kb/loop/agent-run", {
-            method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
+          const g = await guardedAgentCall<AgentRunReply>({
+            before,
+            call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
+              method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
+            }),
+            changedNow: changedPathsNow,
+            check: (paths, b, created) => guardProtected(paths, target, b, created),
           });
-          setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ""]);
-          const guard = await guardProtected(r.changedPaths ?? [], target, before, r.createdPaths ?? []);
-          if (guard) return { ok: false, output: guard };
-          return { ok: agentRunSucceeded(r), output: r.reply ?? "" };
+          const r: AgentRunReply = g.result ?? {};
+          setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]);
+          const stop = stopReason(g);
+          if (g.result === null || stop !== null) { if (g.violation === null && cancelledRef.current) return { ok: false, output: stop ?? "the agent call failed" }; haltErrorRef.current = g.violation === null; haltRef.current = `${stop ?? "the agent call failed"}; the run stopped`; return { ok: false, output: stop ?? "the agent call failed" }; }
+          return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "" };
         },
         log(line) { setRunLog((l) => [...l, line]); },
         halt() { return haltRef.current; },
+        haltIsError() { return haltErrorRef.current; },
         holdWhilePaused,
       });
       let changedPaths: string[] = [];
@@ -637,9 +646,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       }
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.cancelled ? "cancelled" : outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecords(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -1029,7 +1038,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               ) : <p className="loop-native-hint">No stages executed.</p>}
               {Array.isArray(runRecord.iterations) && runRecord.iterations.length > 0 ? (
                 <div className="loop-past-iterations">
-                  {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <details key={j}><summary>{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}</summary><pre className="loop-run-log">{String(x.output ?? "")}</pre></details>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
+                  {runRecord.iterations.map((it, i) => { const o = (it ?? {}) as Record<string, unknown>; const stages = Array.isArray(o.stages) ? o.stages : []; return <div key={i}><h4>Iteration {String(o.index ?? i + 1)}</h4>{stages.map((st, j) => { const x = (st ?? {}) as Record<string, unknown>; return <details key={j}><summary>{x.passed === true ? "✓" : "✗"} {String(x.stageName ?? "Stage")}{typeof x.score === "number" ? ` · ${x.score} failing` : ""}</summary><pre className="loop-run-log">{String(x.output ?? "")}</pre></details>; })}{o.repair ? <p className="loop-native-hint">repair {String((o.repair as Record<string, unknown>).ok) === "true" ? "completed" : "failed"}</p> : null}</div>; })}
                 </div>
               ) : null}
             </>}

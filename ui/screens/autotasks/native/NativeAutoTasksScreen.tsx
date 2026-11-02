@@ -13,8 +13,18 @@ import { cronMatches, describeCron, validateCron } from "./cron.ts";
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
 import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
-import { decideRun, type Resolve } from "./usage.ts";
+import { decideRun, resolvePath, type Resolve } from "./usage.ts";
+import { guardedAgentCall, type AgentWrites } from "../../loop/native/agent-call.ts";
+import { readOnlyCheck } from "./read-only.ts";
 import "./native-autotasks.css";
+
+/** The `/kb/loop/agent-run` answer fields an Auto Task reads. */
+type AgentRunReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string };
+
+/** Paths git reports as changed right now; null when git cannot say. */
+async function changedPathsNow(): Promise<string[] | null> {
+  try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; }
+}
 
 interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summary: string; durationSeconds: number }
 
@@ -114,7 +124,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       // The server's model caps apply here: a paused chain stops the run, and an engaged one picks the model. As on
       // the Mac, a failed check does not block the run (an older server or a blip would stop every night run); the
       // log says so.
-      const decision = await decideRun(() => core.request<Resolve>("/kb/usage/resolve?provider=anthropic"));
+      // The desktop has no saved default model yet, so no `prefer` is sent (the Mac sends its defaultModelId).
+      const decision = await decideRun(() => core.request<Resolve>(resolvePath("anthropic")));
       if (decision.proceed && decision.warning) { const w = decision.warning; setLog((l) => [...l, w]); }
       if (!decision.proceed) {
         setLog((l) => [...l, decision.notice]);
@@ -122,15 +133,27 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         setNotice(decision.notice);
         return;
       }
-      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; unresolvedSkills?: string[]; ran?: boolean; resultSubtype?: string }>("/kb/loop/agent-run", {
-        method: "POST", body: { message: composeTaskMessage(c.prompt, inputPath, outputPath), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, model: decision.proceed ? decision.model : undefined, timeoutMs: 30 * 60 * 1000 },
+      // A read-only task's writes are checked whether the call returns or throws. The pre-run snapshot is what makes the
+      // revert safe: a path that was already dirty before the run is never reverted (its edits would be lost).
+      const snapshot = t.readOnlyOutput ? await changedPathsNow() : null;
+      const g = await guardedAgentCall<AgentRunReply>({
+        before: snapshot === null ? null : new Set(snapshot),
+        call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
+          method: "POST", body: { message: composeTaskMessage(c.prompt, inputPath, outputPath), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, model: decision.proceed ? decision.model : undefined, timeoutMs: 30 * 60 * 1000 },
+        }),
+        changedNow: changedPathsNow,
+        check: t.readOnlyOutput
+          ? readOnlyCheck(async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); })
+          : async () => null,
       });
-      let touched = r.changedPaths ?? [];
-      if (t.readOnlyOutput && touched.length) {
-        try { await invokeHost("loop_revert_paths", { paths: touched }); setLog((l) => [...l, `read-only task reverted: ${touched.join(", ")}`]); touched = []; }
-        catch (e) { setLog((l) => [...l, `read-only revert failed: ${e instanceof Error ? e.message : String(e)}`]); }
+      if (t.readOnlyOutput && g.writes.length) {
+        setLog((l) => [...l, g.violation ? `read-only task not reverted: ${g.violation}` : `read-only task reverted: ${g.writes.join(", ")}`]);
       }
-      const ok = agentRunSucceeded(r);
+      if (g.result === null) throw new Error(`the agent run failed (${g.error ?? "unknown error"})${g.violation ? `; ${g.violation}` : ""}`);
+      const r = g.result;
+      const touched = t.readOnlyOutput && g.violation === null ? [] : g.writes;
+      // A read-only task whose edits could not be reverted did not complete: its writes are left in place and reported.
+      const ok = agentRunSucceeded(r) && g.violation === null;
       setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`did not run: skill not found in your skills library: ${r.unresolvedSkills.join(", ")}`] : [])]);
       setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed"), durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);

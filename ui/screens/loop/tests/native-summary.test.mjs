@@ -12,3 +12,10 @@ test("run summary is a dated markdown note", () => {
   assert.match(md, /iterations: 2/);
   assert.match(md, /✗ \*\*Test\*\*/);
 });
+
+test("the summary note's status is the run record's code (the Mac writes record.statusCode)", () => {
+  const at = new Date("2026-11-02T01:30:00Z");
+  assert.match(renderSummary(loop, { ...outcome, blocked: true }, at), /status: blocked\.repair_out_of_scope/);
+  assert.match(renderSummary(loop, { ...outcome, cancelled: true }, at), /status: aborted/);
+  assert.match(renderSummary(loop, { ...outcome, passed: true }, at), /status: success/);
+});

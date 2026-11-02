@@ -14,6 +14,8 @@ export interface RunnerDeps {
   isCancelled?(): boolean;
   /** A reason the run must end now, not cancelled: a violation that could not be reverted safely. Null = carry on. */
   halt?(): string | null;
+  /** True when the current halt is an agent call that failed with nothing out of scope: the Mac's `.error`, not `blocked`. */
+  haltIsError?(): boolean;
   /**
    * Holds at a stage boundary while the user has paused the run. Resolves "ok" when resumed (or cancelled, which the
    * next check reports) and "timedOut" when the pause outlasted `timeoutSeconds` (0 = no limit) without a resume.
@@ -31,6 +33,10 @@ export interface LoopRunOutcome {
   failedStage: LoopStage | null;
   statusSummary: string;
   cancelled?: boolean;
+  /** Ended by a halt (a violation that could not be reverted safely): the Mac's `blocked` status, not a give-up. */
+  blocked?: boolean;
+  /** Ended by a halt for an agent call that failed (timeout, dropped connection) without a violation: the Mac's `error`. */
+  errored?: boolean;
 }
 
 export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps): Promise<LoopRunOutcome> {
@@ -49,7 +55,9 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const expired = () => budgetMs !== null && Date.now() - started - pausedMs >= budgetMs;
   const haltedOutcome = (): LoopRunOutcome | null => {
     const reason = deps.halt?.();
-    return reason ? { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: reason } : null;
+    if (!reason) return null;
+    const errored = deps.haltIsError?.() === true;
+    return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: reason, ...(errored ? { errored: true } : { blocked: true }) };
   };
   const heldOutcome = async (): Promise<LoopRunOutcome | null> => {
     if (!deps.holdWhilePaused) return null;
@@ -92,6 +100,9 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
       return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
     }
+    // A halt raised by the blocking stage itself (its agent call wrote something it must not) ends the run before any repair.
+    const haltAfterFailure = haltedOutcome();
+    if (haltAfterFailure) { iterations.push({ index: iteration, stages: iterationOutcomes, repair: null }); return haltAfterFailure; }
     if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     const used = repairs.get(failed.stage.id) ?? 0;
     if (!failed.stage.allowsRepair) {
@@ -102,12 +113,17 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
       return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair budget exhausted` };
     }
+    // Pause holds before a repair attempt too, as it does between stages; Stop while paused ends the run here.
+    const heldBeforeRepair = await heldOutcome();
+    if (heldBeforeRepair) return heldBeforeRepair;
+    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     deps.log(`↻ repairing ${failed.stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
     repairs.set(failed.stage.id, used + 1);
     iterations.push({ index: iteration, stages: iterationOutcomes, repair: { stageId: failed.stage.id, attempt: used + 1, ok: repair.ok } });
     const haltAfterRepair = haltedOutcome();
     if (haltAfterRepair) return haltAfterRepair;
+    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     if (!repair.ok) {
       return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
     }
@@ -120,4 +136,16 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   }
   const last = outcomes[outcomes.length - 1] ?? null;
   return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: last?.stage ?? null, statusSummary: `max iterations (${iterationsUsed}) reached` };
+}
+
+/**
+ * The run record's `statusCode`, as the Mac writes it: a halt that blocked the run is `blocked.repair_out_of_scope`; a Stop
+ * or a pause that timed out is `aborted` (the Mac's `LoopEngineStatus.aborted`); an agent call that failed with nothing out
+ * of scope is `error`; otherwise `success` or `failed`.
+ */
+export function runStatusCode(o: Pick<LoopRunOutcome, "passed" | "cancelled" | "blocked" | "errored">): string {
+  if (o.blocked) return "blocked.repair_out_of_scope";
+  if (o.errored) return "error";
+  if (o.cancelled) return "aborted";
+  return o.passed ? "success" : "failed";
 }

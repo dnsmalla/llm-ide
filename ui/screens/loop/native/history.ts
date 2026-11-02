@@ -2,6 +2,7 @@
 // month-rotated (`index-YYYY-MM.jsonl`) with the legacy `index.jsonl` read oldest. A missing journal is normal.
 import type { FsApi } from "../../explorer/fs";
 import type { LoopIterationOutcome } from "./runner.ts";
+import { parseTestResults } from "./testmap.ts";
 
 export interface LoopRunIndexEntry {
   id: string;
@@ -107,11 +108,31 @@ export function runTrigger(scheduled: boolean): "manual" | "autoTask" {
   return scheduled ? "autoTask" : "manual";
 }
 
+/**
+ * The attempt's score (the Mac's `score`): the failing-test count the test runner's output reports. Null when the output
+ * is not a recognised test report, so an unscored attempt is never shown as "0 failing".
+ */
+export function attemptScore(output: string): number | null {
+  const parsed = parseTestResults(output);
+  return parsed.failing.length + parsed.passing.length === 0 ? null : parsed.failing.length;
+}
+
 /** Iteration rows in the shape the run inspector reads: each iteration with its stages and any repair attempt. */
 export function iterationRecords(iterations: readonly LoopIterationOutcome[]): Record<string, unknown>[] {
   return iterations.map((it) => ({
     index: it.index,
     stages: it.stages.map((o) => ({ stageName: o.stage.name, passed: o.ok, severity: o.stage.severity, output: o.output })),
     repair: it.repair ? { stageId: it.repair.stageId, attempt: it.repair.attempt, ok: it.repair.ok } : null,
+  }));
+}
+
+/** `iterationRecords` plus each stage attempt's score (the Mac's per-attempt `score`); only shell stages are scored. */
+export function iterationRecordsWithScores(iterations: readonly LoopIterationOutcome[]): Record<string, unknown>[] {
+  return iterationRecords(iterations).map((row, i) => ({
+    ...row,
+    stages: iterations[i].stages.map((o, j) => ({
+      ...((row.stages as Record<string, unknown>[])[j]),
+      score: o.stage.kind === "shellCommand" ? attemptScore(o.output) : null,
+    })),
   }));
 }

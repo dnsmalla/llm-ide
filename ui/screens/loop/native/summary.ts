@@ -3,7 +3,7 @@
 // changes the run's pass/fail result.
 import type { FsApi } from "../../explorer/fs";
 import type { LoopDefinition } from "./model.ts";
-import type { LoopRunOutcome } from "./runner.ts";
+import { runStatusCode, type LoopRunOutcome } from "./runner.ts";
 
 export type SummaryFs = Pick<FsApi, "create" | "write">;
 
@@ -20,7 +20,7 @@ export function summaryPath(loop: LoopDefinition, at: Date): string {
 export function renderSummary(loop: LoopDefinition, outcome: LoopRunOutcome, at: Date): string {
   const lines = [
     "---", `title: "${loop.name} loop run"`, "loop: " + JSON.stringify(loop.name), `run_at: ${at.toISOString()}`,
-    `status: ${outcome.passed ? "success" : "failed"}`, `iterations: ${outcome.iterationsUsed}`, "---", "",
+    `status: ${runStatusCode(outcome)}`, `iterations: ${outcome.iterationsUsed}`, "---", "",
     `# ${loop.name}`, "", loop.goal ? `**Goal:** ${loop.goal}` : "", loop.acceptanceCriteria ? `**Acceptance:** ${loop.acceptanceCriteria}` : "",
     "", `**Result:** ${outcome.passed ? "passed" : "failed"} — ${outcome.statusSummary}`, "", "## Stages", "",
   ];

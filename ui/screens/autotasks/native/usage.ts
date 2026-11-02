@@ -69,3 +69,11 @@ export function meterText(used: number, limit: number, unit: UsageUnit): string 
 export function providersToSave(rows: Record<string, ChainRow[]>, dirty: ReadonlySet<string>): Array<[string, ChainRow[]]> {
   return Object.entries(rows).filter(([p, list]) => dirty.has(p) && list.length > 0);
 }
+
+/** The resolve request for a provider. `prefer` is the user's model: the chain starts there and only steps down when it
+ *  is constrained (the Mac's `resolveUsageModel(prefer:)`). */
+export function resolvePath(provider: string, prefer?: string | null): string {
+  const q = new URLSearchParams({ provider });
+  if (prefer) q.set("prefer", prefer);
+  return `/kb/usage/resolve?${q.toString()}`;
+}

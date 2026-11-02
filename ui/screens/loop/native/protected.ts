@@ -71,3 +71,60 @@ export function wasDirtyBefore(path: string, before: ReadonlySet<string>): boole
   for (const b of before) if (b.endsWith("/") && path.startsWith(b)) return true;
   return false;
 }
+
+export type RevertPlan =
+  | { revert: true; paths: string[]; created: string[] }
+  | { revert: false; reason: string };
+
+/**
+ * Whether a revert may run for `paths`. Shared by the Loop and Auto Tasks. Nothing is reverted when the pre-run snapshot
+ * failed or any path had uncommitted changes before the run. Otherwise the paths are reverted, and only the files the
+ * agent's own Write created (`created`, the run's createdPaths) may be deleted.
+ */
+export function revertPlan(paths: readonly string[], before: ReadonlySet<string> | null, created: readonly string[]): RevertPlan {
+  if (!before) return { revert: false, reason: "the pre-run snapshot failed, so nothing was reverted" };
+  const dirty = paths.filter((p) => wasDirtyBefore(p, before));
+  if (dirty.length > 0) return { revert: false, reason: `${dirty.join(", ")} had uncommitted changes before the run, so nothing was reverted and they were left in place` };
+  return { revert: true, paths: [...paths], created: created.filter((p) => paths.includes(p)) };
+}
+
+export interface WritePolicy {
+  /** "revert" undoes the violating paths, "stop" leaves them and halts, "warn" only logs, "off" checks nothing. */
+  policy: string;
+  extraProtectedGlobs: readonly string[];
+  scopeGlobs: readonly string[];
+}
+
+/**
+ * Applies the protected-path and scope policy to the paths one agent call wrote. Returns the halt message when the run
+ * must stop (any violation under revert or stop), or null when the writes are acceptable. `revert` is injected so the
+ * decision stays testable; the Loop's host call goes through it.
+ */
+export async function checkWrites(
+  paths: readonly string[],
+  input: WritePolicy,
+  before: ReadonlySet<string> | null,
+  created: readonly string[],
+  revert: (paths: string[], created: string[]) => Promise<void>,
+  log: (line: string) => void = () => undefined,
+): Promise<string | null> {
+  if (input.policy === "off") return null;
+  const protectedHits = protectedPaths(paths, input.extraProtectedGlobs);
+  const scopeHits = outOfScopePaths(paths, input.scopeGlobs).filter((p) => !protectedHits.includes(p));
+  const bad = [...protectedHits, ...scopeHits];
+  if (bad.length === 0) return null;
+  const what = [protectedHits.length ? "protected path(s)" : "", scopeHits.length ? "out-of-scope path(s)" : ""].filter(Boolean).join(" and ");
+  if (input.policy === "warn") {
+    log(`warning: agent touched ${what}; the policy is warn, so the run continues: ${bad.join(", ")}`);
+    return null;
+  }
+  if (input.policy === "stop") return `agent touched ${what} and they were left in place: ${bad.join(", ")}`;
+  const plan = revertPlan(bad, before, created);
+  if (!plan.revert) return `agent touched ${what}; ${plan.reason}: ${bad.join(", ")}`;
+  try {
+    await revert(plan.paths, plan.created);
+    return `agent touched ${what} and they were reverted: ${bad.join(", ")}`;
+  } catch (e) {
+    return `agent touched ${what} and the revert failed: ${bad.join(", ")} (${e instanceof Error ? e.message : String(e)})`;
+  }
+}
