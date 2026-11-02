@@ -244,4 +244,10 @@ export const host = {
     if (!isHostAvailable()) return [];
     return invokeHost<ProjectInfo[]>("project_recent");
   },
+
+  /** Shows the open project's root folder in the OS file manager (Mac: "Reveal in Finder"). The host re-checks the root. */
+  async projectReveal(): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("reveal_in_os", { relPath: "" });
+  },
 };

@@ -3,6 +3,7 @@ import { ChatBubbleIcon, ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@
 import { ActivityBell } from "./ActivityBell";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
+import { host, type ProjectInfo } from "./host";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
 import { HOME_CHOICES, readHome, selectHome, storeHome } from "./landing";
@@ -10,20 +11,45 @@ import { SECTIONS, type SectionId } from "./sections";
 import { isSectionEnabled } from "./features";
 import { safeText } from "./safe-text";
 
-const ProjectSwitcher = memo(function ProjectSwitcher() {
-  const { project, recent, openFolder, openRecent, closeProject, error, refresh } = useActiveProject();
-  const items: MenuItem[] = [
+export interface ProjectMenuActions {
+  openRecent(index: number): Promise<void>;
+  openFolder(): Promise<void>;
+  closeProject(): Promise<void>;
+  reveal(): void;
+}
+
+/**
+ * The project switcher's rows (Mac `ProjectSwitcher`): recent projects, New, Open Folder, then "Reveal in Finder"
+ * only while a project is open (the Mac shows it only for the active project), then Close. Pure, so tests need no DOM.
+ */
+export function projectSwitcherItems(project: ProjectInfo | null, recent: readonly ProjectInfo[], a: ProjectMenuActions): MenuItem[] {
+  return [
     ...recent.map((p, i) => ({
       id: `recent-${i}`,
       label: safeText(p.name, 60),
       title: safeText(p.root, 300),
       checked: project?.root === p.root,
-      onSelect: () => void openRecent(i),
+      onSelect: () => void a.openRecent(i),
     })),
     { id: "new", label: "New project…", onSelect: () => shellBus.publish({ type: "goto-section", section: "welcome", anchor: "new" }) },
-    { id: "open", label: "Open Folder…", onSelect: () => void openFolder() },
-    { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void closeProject() },
+    { id: "open", label: "Open Folder…", onSelect: () => void a.openFolder() },
+    ...(project ? [{ id: "reveal", label: "Reveal in Finder", title: "Show the project folder in the file manager.", onSelect: a.reveal }] : []),
+    { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void a.closeProject() },
   ];
+}
+
+const ProjectSwitcher = memo(function ProjectSwitcher() {
+  const { project, recent, openFolder, openRecent, closeProject, error, refresh } = useActiveProject();
+  const [revealError, setRevealError] = useState<string | null>(null);
+  const items = projectSwitcherItems(project, recent, {
+    openRecent,
+    openFolder,
+    closeProject,
+    reveal: () => {
+      setRevealError(null);
+      host.projectReveal().catch((e: unknown) => setRevealError(safeText(e instanceof Error ? e.message : String(e), 200)));
+    },
+  });
   return (
     <>
       <MenuButton
@@ -42,6 +68,11 @@ const ProjectSwitcher = memo(function ProjectSwitcher() {
       {error && (
         <span className="sh-statusbar-text sh-danger" role="status" title={error}>
           Project error
+        </span>
+      )}
+      {revealError && (
+        <span className="sh-statusbar-text sh-danger" role="status" title={revealError}>
+          Could not reveal the folder
         </span>
       )}
     </>

@@ -44,6 +44,8 @@ before(async () => {
       paths: join(SETTINGS, "sections/PathsSection.tsx"),
       memory: join(SETTINGS, "sections/MemorySection.tsx"),
       token: join(SETTINGS, "sections/TokenSavingSection.tsx"),
+      general: join(SETTINGS, "sections/GeneralSection.tsx"),
+      appModel: join(SETTINGS, "app-model.ts"),
       componentsModel: join(SETTINGS, "components-model.ts"),
       sourcesModel: join(SETTINGS, "sources-model.ts"),
       projectModel: join(SETTINGS, "project-model.ts"),
@@ -67,7 +69,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -353,4 +355,22 @@ test("Agent history ClearSheet: names the rows, requires typing DELETE, shows th
   assert.match(out, /Type DELETE to confirm/);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Delete<\/button>/);
   assert.match(out, /<option[^>]*value="older30"[^>]*selected|selected=""[^>]*value="older30"|value="older30"[^>]*selected=""/);
+});
+
+test("General: synced prefs say Saving… during a save and offer Retry after a failed first load (Mac parity)", async () => {
+  const failing = { request: async () => { throw new Error("core down"); } };
+  const model = new m.appModel.UserPrefsModel(failing);
+  await model.load();
+  const failed = html(h(m.general.PrefsBlock, { m: model, s: model.getState() }));
+  assert.match(failed, /<button[^>]*class="st-btn"[^>]*>Retry<\/button>/, "a failed first load offers Retry, as the Mac does");
+  assert.ok(!failed.includes("Loading..."), "a failed load is not shown as still loading");
+  assert.ok(!/<select/.test(failed), "no language control while the prefs are unloaded");
+
+  const loaded = { prefs: { language: "ja", bilingual: false, nativePlugins: true }, saving: true, saved: false, error: null };
+  const saving = html(h(m.general.PrefsBlock, { m: model, s: loaded }));
+  assert.match(saving, /role="status"[^>]*>Saving…</, "the Mac shows Saving… while a save is in flight");
+  assert.match(saving, /<select[^>]*disabled=""/, "controls are disabled while saving");
+  const idle = html(h(m.general.PrefsBlock, { m: model, s: { ...loaded, saving: false, saved: true } }));
+  assert.ok(!idle.includes("Saving…"));
+  assert.match(idle, />Saved\.</);
 });

@@ -1,11 +1,41 @@
 import { useEffect, useState } from "react";
 import { THEME_CHOICES, TRAY_TEXT } from "../misc-model.ts";
-import { LANGUAGES, PREFS_TEXT, UserPrefsModel, isLanguage } from "../app-model.ts";
+import { LANGUAGES, PREFS_TEXT, UserPrefsModel, isLanguage, type PrefsState } from "../app-model.ts";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { ThemeChoice } from "../host.ts";
 import { ErrorText, Field, NeedsHost, Switch } from "../ui.tsx";
 import AccountSection from "./AccountSection.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
+
+/**
+ * The synced preferences (Mac: "Preferences (synced)"). Controls stay disabled while unloaded or saving. "Saving…"
+ * shows during a save, and a failed first load offers Retry (the Mac's Retry button) instead of a dead error line.
+ */
+export function PrefsBlock({ m, s }: { m: Pick<UserPrefsModel, "load" | "setLanguage" | "setNativePlugins">; s: PrefsState }) {
+  const p = s.prefs;
+  return (
+    <div className="st-stack">
+      <span className="st-label">Preferences (synced)</span>
+      <ErrorText text={s.error} />
+      {p ? (
+        <>
+          <Field label="Language" hint={PREFS_TEXT.languageHint}>
+            <select className="st-select" value={isLanguage(p.language) ? p.language : "en"} disabled={s.saving} onChange={(e) => void m.setLanguage(e.target.value)}>
+              {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+            </select>
+          </Field>
+          <Switch label={PREFS_TEXT.nativeTitle} hint={PREFS_TEXT.nativeHint} checked={p.nativePlugins ?? true} disabled={s.saving} onChange={(v) => void m.setNativePlugins(v)} />
+          {s.saving ? <p className="st-hint" role="status">Saving…</p> : null}
+          {s.saved ? <p className="st-ok" role="status">Saved.</p> : null}
+        </>
+      ) : s.error ? (
+        <button type="button" className="st-btn" onClick={() => void m.load()}>Retry</button>
+      ) : (
+        <p className="st-hint" role="status">Loading...</p>
+      )}
+    </div>
+  );
+}
 
 /** The Mac's "General" group: Appearance, the menu-bar icon, synced preferences (language, native plugins), plus Account. */
 export default function GeneralSection() {
@@ -35,7 +65,6 @@ export default function GeneralSection() {
   const m = useModel(() => new UserPrefsModel(client));
   const s = useStore(m);
   useRefreshOnFocus(() => void m.load());
-  const p = s.prefs;
   return (
     <div className="st-stack">
       <div className="st-stack" role="radiogroup" aria-label="Theme">
@@ -58,21 +87,7 @@ export default function GeneralSection() {
           {trayError ? <ErrorText text={trayError} /> : null}
         </div>
       ) : null}
-      <div className="st-stack">
-        <span className="st-label">Preferences (synced)</span>
-        <ErrorText text={s.error} />
-        {p ? (
-          <>
-            <Field label="Language" hint={PREFS_TEXT.languageHint}>
-              <select className="st-select" value={isLanguage(p.language) ? p.language : "en"} disabled={s.saving} onChange={(e) => void m.setLanguage(e.target.value)}>
-                {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-              </select>
-            </Field>
-            <Switch label={PREFS_TEXT.nativeTitle} hint={PREFS_TEXT.nativeHint} checked={p.nativePlugins ?? true} disabled={s.saving} onChange={(v) => void m.setNativePlugins(v)} />
-            {s.saved ? <p className="st-ok" role="status">Saved.</p> : null}
-          </>
-        ) : s.error ? null : <p className="st-hint" role="status">Loading...</p>}
-      </div>
+      <PrefsBlock m={m} s={s} />
       {host.getDevTools && host.setDevTools ? (
         <div className="st-stack">
           <Switch

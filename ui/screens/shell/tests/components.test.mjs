@@ -147,3 +147,24 @@ test("useStoreSelector is exported and selects without extra renders (static che
   const Probe = () => h("i", null, String(useStoreSelector(store, (s) => s.b)));
   assert.equal(html(h(Probe)), "<i>2</i>");
 });
+
+test("status-bar project menu: Reveal in Finder only with a project open, and it asks the host to reveal the root", async () => {
+  const { projectSwitcherItems } = await load("StatusBar.tsx");
+  const hostMod = await load("host.ts");
+  const demo = { name: "Demo", root: "/p/demo" };
+  const acts = { openRecent: async () => {}, openFolder: async () => {}, closeProject: async () => {}, reveal: () => {} };
+  const withProject = projectSwitcherItems(demo, [demo], acts);
+  assert.deepEqual(withProject.map((i) => i.id), ["recent-0", "new", "open", "reveal", "close"], "the Mac order: Open Folder, Reveal, then Close");
+  assert.equal(withProject.find((i) => i.id === "reveal")?.label, "Reveal in Finder");
+  assert.equal(projectSwitcherItems(null, [], acts).some((i) => i.id === "reveal"), false, "no project, no reveal (the Mac hides it too)");
+
+  const calls = [];
+  hostMod.setHostBridge({ invoke: async (cmd, args) => { calls.push([cmd, args]); return null; } });
+  try {
+    await hostMod.host.projectReveal();
+  } finally {
+    hostMod.setHostBridge(null);
+  }
+  assert.deepEqual(calls, [["reveal_in_os", { relPath: "" }]], "the empty relative path is the project root; the host re-checks it");
+  await hostMod.host.projectReveal(); // no bridge (browser preview): a quiet no-op, not a throw
+});
