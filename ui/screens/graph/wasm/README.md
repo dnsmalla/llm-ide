@@ -7,18 +7,19 @@ Code Graph screen runs it inside a Web Worker (`../worker/graph.worker.ts`) thro
 
 | | |
 |---|---|
-| graph-kit commit | `51ff3721a7ac6621f23d0216064c0d04eaf35e9a` (`git -C mac/LocalPackages/graph-kit rev-parse HEAD`) |
+| graph-kit commit | `6de363ff6789c223da4b0d3cad164c0abad1ff32` (`git -C mac/LocalPackages/graph-kit rev-parse HEAD`) |
 | compiler | rustc 1.99.1 (58cf8f9c3 2026-10-13), target wasm32-unknown-unknown, release |
 | build command | `cd mac/LocalPackages/graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>` |
-| size | 106,429 bytes (40,053 gzip) |
-| sha256 | `0f30028fe33b39c84a41a7c975d118b7402e6c50033bbe7d38358bc600d179a0` |
+| size | 106,575 bytes (40,114 gzip) |
+| sha256 | `b0d7eae260c09eb06daf8b39694bfd6163c958487931c720f464a5d31f9a981e` |
 
 `MANIFEST.json` is the machine-readable form of this table. Two builds with the same compiler gave the same
 bytes (checked when vendoring).
 
-Note: the commit above is graph-kit `main` as checked out locally. The submodule pointer recorded in this
-repository (`c0bcb6e4`) is older and does not contain the `graph-layout` crate yet; moving the pointer is a
-separate step (`make graphkit-bump`, owned by the graph-kit workflow) and was not done here.
+The commit above is the pinned graph-kit commit (submodule pointer, `mac/Package.swift` and
+`mac/Package.resolved` all name it, bumped by `make graphkit-bump` in `263aff4e`) and is on graph-kit's
+`origin/main`, so the file can be rebuilt and checked from public sources. Re-vendor after every bump that
+touches `rust/graph-layout`.
 
 ## Re-vendor and verify
 
