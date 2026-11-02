@@ -72,6 +72,7 @@ const COMMANDS: &[&str] = &[
     "git_tags",
     "crash_report_latest",
     "crash_report_dismiss",
+    "export_note",
     "git_commit_files",
     "git_commit_diff",
     "git_branch_delete",

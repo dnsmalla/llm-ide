@@ -35,6 +35,8 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
   /** False while the Library section is hidden (the shell keeps it mounted): shortcuts are off. */
   active?: boolean;
+  /** Host save panel: returns the chosen path, or null when cancelled. Absent: write a copy into the notes folder. */
+  onExportFile?: (name: string, text: string) => Promise<string | null>;
 }
 
 export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
@@ -117,6 +119,12 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
       const opened = await write.open(rel);
       const base = (p.record?.title ?? rel.split("/").pop() ?? "note").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "note";
       const date = new Date().toISOString().slice(0, 10);
+      if (p.onExportFile) {
+        // Native save panel: the user chooses the destination; Cancel returns null and changes nothing.
+        const path = await p.onExportFile(`${base}-${date}.md`, opened.text);
+        if (path) setExportNotice(`Exported to ${path}.`);
+        return;
+      }
       for (let i = 0; i < 50; i++) {
         const path = `export/${base}-${date}${i === 0 ? "" : `-${i + 1}`}.md`;
         try {
@@ -133,7 +141,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
     } finally {
       setExporting(false);
     }
-  }, [exporting, p.record?.title, rel, write]);
+  }, [exporting, p.onExportFile, p.record?.title, rel, write]);
 
   const titles = useMemo(() => new Map([[rel, p.record?.title ?? rel]]), [rel, p.record?.title]);
   const isMeeting = p.record?.sourceId === "meeting" && p.summarize !== null;

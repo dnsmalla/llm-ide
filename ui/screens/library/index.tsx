@@ -108,5 +108,9 @@ export default function Library({ active, projectRoot }: SectionProps) {
     projectOpen={projectRoot !== null}
     onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
     onRevealPath={async (path) => { await invokeHost("reveal_in_os", { relPath: path }); }}
+    onExportFile={async (name, text) => {
+      const path = await invokeHost<unknown>("export_note", { name, text });
+      return typeof path === "string" ? path : null;
+    }}
   />;
 }

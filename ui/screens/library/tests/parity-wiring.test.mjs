@@ -38,3 +38,14 @@ test("the stale 'not available in this version' notice is gone", () => {
   assert.ok(!at("note-view.ts").includes("not available in this version"));
   assert.ok(at("note-view.ts").includes("Use Re-summarise to try again."));
 });
+
+
+test("Export uses the host save panel when present, and falls back to a notes-folder copy without it", () => {
+  const ws = at("write/NoteWorkspace.tsx");
+  assert.match(ws, /onExportFile\?\.?: \(name: string, text: string\) => Promise<string \| null>/);
+  assert.match(ws, /if \(p\.onExportFile\) \{/);
+  assert.match(ws, /p\.onExportFile\(`\$\{base\}-\$\{date\}\.md`, opened\.text\)/);
+  assert.match(at("LibraryScreen.tsx"), /onExportFile\?: \(name: string, text: string\) => Promise<string \| null>/);
+  assert.match(at("LibraryScreen.tsx"), /onExportFile=\{onExportFile\}/);
+  assert.match(at("index.tsx"), /invokeHost<unknown>\("export_note", \{ name, text \}\)/);
+});

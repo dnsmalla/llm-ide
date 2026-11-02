@@ -7,6 +7,7 @@ mod chat_hash;
 mod chat_store;
 mod confirm;
 mod crash_report;
+mod export_note;
 mod core_env;
 mod core_host;
 mod core_log;
@@ -340,6 +341,7 @@ macro_rules! product_handlers {
                 git_scm::git_tags,
                 crash_report::crash_report_latest,
                 crash_report::crash_report_dismiss,
+                export_note::export_note,
                 git_scm::git_commit_files,
                 git_scm::git_commit_diff,
                 git_scm::git_branch_delete,

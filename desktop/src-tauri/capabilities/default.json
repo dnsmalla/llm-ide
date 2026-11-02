@@ -79,6 +79,7 @@
     "allow-git-tags",
     "allow-crash-report-latest",
     "allow-crash-report-dismiss",
+    "allow-export-note",
     "allow-git-commit-files",
     "allow-git-commit-diff",
     "allow-git-branch-delete",

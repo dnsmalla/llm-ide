@@ -51,10 +51,12 @@ export interface LibraryScreenProps {
   projectOpen?: boolean;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
+  /** Host save panel for Export; absent writes a copy into the notes folder. */
+  onExportFile?: (name: string, text: string) => Promise<string | null>;
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
@@ -264,6 +266,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
               onOpenNote={openNote}
               onCopyPath={onCopyPath}
               onRevealPath={onRevealPath}
+              onExportFile={onExportFile}
               active={active}
             />
           ) : selected ? (
