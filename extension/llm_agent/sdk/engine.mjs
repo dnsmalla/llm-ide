@@ -847,7 +847,7 @@ export function buildEngineOptions(
     // claude_code preset (~5.5k tokens smaller per call; see
     // compact-system-prompt.mjs for the measurement). The static base sits before
     // the SDK's cache boundary; the working directory and the same append follow.
-    systemPrompt: compactPromptEnabled()
+    systemPrompt: compactPromptEnabled(undefined, resolvedMode)
       ? {
         type: 'custom',
         prompt: [

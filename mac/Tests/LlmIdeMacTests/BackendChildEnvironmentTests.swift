@@ -33,6 +33,11 @@ final class BackendChildEnvironmentTests: XCTestCase {
         XCTAssertEqual(replaced["LLMIDE_FEATURES"], "agent_chat")
     }
 
+    func testExecuteTurnsGetTheCompactPromptByDefault() {
+        let env = BackendManager.childEnvironment(base: base, featureKeys: ["agent_chat"])
+        XCTAssertEqual(env["LLMIDE_V2_COMPACT_PROMPT_MODES"], "execute")
+    }
+
     func testBenchFakeSwitchesAreNeverPassedThrough() {
         var inherited = base
         inherited["LLMIDE_BENCH_FAKE"] = "1"

@@ -76,9 +76,24 @@ export function compactEnvironmentBlock({
   ].filter(Boolean).join('\n');
 }
 
-/** Whether the compact prompt replaces the preset (LLMIDE_V2_COMPACT_PROMPT=1). */
-export function compactPromptEnabled(raw = process.env.LLMIDE_V2_COMPACT_PROMPT) {
-  return raw === '1' || raw === 'true';
+/**
+ * Whether the compact prompt replaces the preset.
+ *
+ * `LLMIDE_V2_COMPACT_PROMPT=1`/`=0` forces it on/off everywhere. Without that
+ * override, only modes named in `LLMIDE_V2_COMPACT_PROMPT_MODES` use it. The
+ * Mac app sets that list to `execute`: measured on edit tasks the compact
+ * prompt cut total tokens ~16%, while read-only search took 2–3x the hops and
+ * ~55% more total tokens.
+ */
+export function compactPromptEnabled(
+  raw = process.env.LLMIDE_V2_COMPACT_PROMPT,
+  mode = null,
+  modes = process.env.LLMIDE_V2_COMPACT_PROMPT_MODES,
+) {
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  if (!mode || typeof modes !== 'string') return false;
+  return modes.split(',').map((m) => m.trim()).filter(Boolean).includes(mode);
 }
 
 // The Loop agent's base prompt, used instead of the `claude_code` preset when

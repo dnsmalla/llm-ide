@@ -319,3 +319,20 @@ test('LLMIDE_V2_COMPACT_PROMPT swaps the preset for a compact custom prompt; off
     if (saved === undefined) delete process.env.LLMIDE_V2_COMPACT_PROMPT; else process.env.LLMIDE_V2_COMPACT_PROMPT = saved;
   }
 });
+
+test('LLMIDE_V2_COMPACT_PROMPT_MODES gates the compact prompt by mode', async () => {
+  const opts = (mode, modes) => {
+    const saved = process.env.LLMIDE_V2_COMPACT_PROMPT_MODES;
+    if (modes === undefined) delete process.env.LLMIDE_V2_COMPACT_PROMPT_MODES; else process.env.LLMIDE_V2_COMPACT_PROMPT_MODES = modes;
+    try {
+      return buildEngineOptions({ userId: 'u-cp', mode, message: 'hi', delivered: null,
+        agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-cp' } },
+      { ...deps, renderMemory: () => null }).queryOptions.systemPrompt;
+    } finally {
+      if (saved === undefined) delete process.env.LLMIDE_V2_COMPACT_PROMPT_MODES; else process.env.LLMIDE_V2_COMPACT_PROMPT_MODES = saved;
+    }
+  };
+  assert.equal(opts('execute', 'execute').type, 'custom');
+  assert.equal(opts('review', 'execute').type, 'preset');
+  assert.equal(opts('execute', '').type, 'preset');
+});
