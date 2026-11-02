@@ -252,12 +252,21 @@ export function repoSlug(url: string): string {
   return segs.join("/");
 }
 
+const OVERLAY_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
 /**
- * True when the core's schedule overlay (`/kb/issue-schedule`) can key this repository. The core accepts exactly
- * `owner/name` (kb/issue-schedule.mjs assertKey), so a nested GitLab path is rejected with a 400 and has no dates.
+ * True when the core's schedule overlay (`/kb/issue-schedule`) accepts this repository for this provider. Mirrors
+ * kb/issue-schedule.mjs assertRepo: GitHub is exactly owner/name; GitLab is 2 to 20 segments; every segment is
+ * [A-Za-z0-9._-]+ and never "." or ".."; the whole repo is at most 255 characters. A key the core would 400 is false.
  */
-export function overlayRepoSupported(repo: string): boolean {
-  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo) && !/(^|\/)\.\.?(\/|$)/.test(repo);
+export function overlayRepoSupported(repo: string, provider: string): boolean {
+  if (provider !== "github" && provider !== "gitlab") return false;
+  const segs = repo.split("/");
+  const maxSegs = provider === "gitlab" ? 20 : 2;
+  return repo.length <= 255
+    && segs.length >= 2 && segs.length <= maxSegs
+    && (provider === "gitlab" || segs.length === 2)
+    && segs.every((s) => OVERLAY_SEGMENT.test(s) && s !== "." && s !== "..");
 }
 
 /**

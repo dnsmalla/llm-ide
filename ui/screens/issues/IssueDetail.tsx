@@ -3,7 +3,7 @@
 // the Gantt's ScheduleEditor. Writes (comment, close) stay Mac-only until the core has provider write routes.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDueDate, issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
-import { issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
+import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
 import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
 import "./issues.css";
@@ -30,8 +30,12 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
   onNotice: (message: string) => void;
   onScheduleChanged?: () => void;
 }): ReactNode {
-  // The schedule overlay takes GitHub and GitLab rows keyed by owner/name; a nested GitLab path has no overlay key.
-  const { schedulable, nestedHint } = issueDatesView(issue);
+  // The overlay keys GitHub owner/name and GitLab paths up to the core's limits; a key it refuses gets the hint, no dates.
+  const view = issueDatesView(issue);
+  // An older core answered 400 for this nested key: the Dates section goes and the hint says why.
+  const [refused, setRefused] = useState(false);
+  const schedulable = view.schedulable && !refused;
+  const nestedHint = view.nestedHint ?? (refused ? DETAIL_NESTED_HINT : null);
   // undefined = not read yet; null = read and no schedule row for this issue.
   const [schedule, setSchedule] = useState<Schedule | null | undefined>(undefined);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -39,7 +43,8 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
 
   const loadSchedule = useCallback(async () => {
     const r = await readIssueSchedule(deps.request, { provider: issue.provider, repo: issue.repo, number: issue.number });
-    if (r.kind === "error") setScheduleError(r.error);
+    if (r.kind === "unsupported") setRefused(true);
+    else if (r.kind === "error") setScheduleError(r.error);
     else if (r.kind === "ok") {
       setSchedule(r.schedule);
       setScheduleError(null);

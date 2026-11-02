@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -266,10 +266,11 @@ test("dependency arrows paint over the grid but under the bars, and never take c
   assert.match(css, /\.gnt-deps\s*\{[^}]*pointer-events:\s*none/);
 });
 
-test("GitLab rows get the Dates section and the Gantt bar; nested-group and PR-less numberless rows do not (the core keys owner/name)", () => {
+test("GitLab rows get the Dates section and the Gantt bar, nested groups included; PR-less numberless rows and GitHub nested paths do not", () => {
   assert.equal(canSchedule({ provider: "github", repo: "acme/web", number: 4 }), true);
   assert.equal(canSchedule({ provider: "gitlab", repo: "acme/web", number: 4 }), true, "the core's overlay accepts provider gitlab");
-  assert.equal(canSchedule({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), false, "a nested path is a 400 in the core");
+  assert.equal(canSchedule({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), true, "the core keys GitLab paths of 2 to 20 segments");
+  assert.equal(canSchedule({ provider: "github", repo: "acme/platform/web", number: 4 }), false, "GitHub is owner/name only");
   assert.equal(canSchedule({ provider: "github", repo: "acme/web", number: null }), false);
   assert.equal(canSchedule({ provider: "bitbucket", repo: "acme/web", number: 4 }), false);
 });
@@ -325,7 +326,7 @@ test("GitLab dates are labelled as kept on this computer in the editor and the D
   assert.match(detail, /<h3 className="iss-col-title">Dates<\/h3>\s*\{localDatesNote\(issue\)/);
 });
 
-test("Gantt load: a nested project skips the overlay GET and shows the hint; a failed load or a retry never keeps it (review F7)", async () => {
+test("Gantt load: a nested GitLab project reads its overlay; a GitHub nested path skips it with the hint; a failed load or a retry never keeps it (review F7)", async () => {
   const calls: string[] = [];
   const ok = (body: unknown) => ({ status: 200, body });
   const fake = (mode: "ok" | "throw" | "500") => async (_m: "GET", path: string) => {
@@ -336,8 +337,13 @@ test("Gantt load: a nested project skips the overlay GET and shows the hint; a f
   };
   const nested = await loadTimeline(fake("ok"), "gitlab", "acme/platform/web");
   assert.equal(nested.ok, true);
-  assert.equal(nested.nestedHint, true);
-  assert.equal(calls.some((c) => c.startsWith("/kb/issue-schedule")), false, "no overlay GET for a nested path (the core answers 400)");
+  assert.equal(nested.nestedHint, false);
+  assert.equal(calls.includes("/kb/issue-schedule?provider=gitlab&repo=acme%2Fplatform%2Fweb"), true, "a nested GitLab path is keyed by the core");
+  calls.length = 0;
+  const gh = await loadTimeline(fake("ok"), "github", "acme/platform/web");
+  assert.equal(gh.ok, true);
+  assert.equal(gh.nestedHint, true);
+  assert.equal(calls.some((c) => c.startsWith("/kb/issue-schedule")), false, "no overlay GET for a GitHub 3-part path (the core answers 400)");
   calls.length = 0;
   const flat = await loadTimeline(fake("ok"), "gitlab", "acme/web");
   assert.equal(flat.nestedHint, false);
@@ -357,7 +363,8 @@ test("Gantt load: a nested project skips the overlay GET and shows the hint; a f
 });
 
 test("Issue detail: a nested project path gets the hint and no schedule request; owner/name rows read their schedule (review F7)", async () => {
-  assert.deepEqual(issueDatesView({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), { schedulable: false, nestedHint: DETAIL_NESTED_HINT });
+  assert.deepEqual(issueDatesView({ provider: "gitlab", repo: "acme/platform/web", number: 4 }), { schedulable: true, nestedHint: null });
+  assert.deepEqual(issueDatesView({ provider: "github", repo: "acme/platform/web", number: 4 }), { schedulable: false, nestedHint: DETAIL_NESTED_HINT });
   assert.deepEqual(issueDatesView({ provider: "gitlab", repo: "acme/web", number: 4 }), { schedulable: true, nestedHint: null });
   assert.deepEqual(issueDatesView({ provider: "github", repo: "o/r", number: null }), { schedulable: false, nestedHint: null });
   let calls = 0;
@@ -365,7 +372,7 @@ test("Issue detail: a nested project path gets the hint and no schedule request;
     calls += 1;
     return { status: 200, body: { schedules: [sched({ provider: "gitlab", repo: "acme/web", issueNumber: 4, startDate: "2026-01-05" })] } };
   };
-  assert.deepEqual(await readIssueSchedule(req, { provider: "gitlab", repo: "acme/platform/web", number: 4 }), { kind: "skipped" });
+  assert.deepEqual(await readIssueSchedule(req, { provider: "github", repo: "acme/platform/web", number: 4 }), { kind: "skipped" });
   assert.equal(calls, 0);
   const read = await readIssueSchedule(req, { provider: "gitlab", repo: "acme/web", number: 4 });
   assert.equal(read.kind === "ok" && read.schedule?.startDate, "2026-01-05");
@@ -429,4 +436,89 @@ test("Gantt load: a whole read has no warning, and the screen shows the warning 
   const screen = readFileSync(new URL("../GanttScreen.tsx", import.meta.url), "utf8");
   assert.match(screen, /setError\(r\.warning\)/);
   assert.match(screen, /setError\(r\.error\);\s*\/\/[^\n]*\n\s*setPaging\(null\)/);
+});
+
+const ok = (body: unknown) => ({ status: 200, body });
+
+// The core's key rules (kb/issue-schedule.mjs assertRepo), as a fake core answers them. The literal table lives in
+// issues-model.test.ts; this copy is only what the round trip below needs.
+function fakeCoreKeyOk(provider: string, repo: string): boolean {
+  const segs = repo.split("/");
+  const max = provider === "gitlab" ? 20 : 2;
+  return repo.length <= 255 && segs.length >= 2 && segs.length <= max && (provider === "gitlab" || segs.length === 2)
+    && segs.every((x) => /^[A-Za-z0-9._-]+$/.test(x) && x !== "." && x !== "..");
+}
+
+test("nested GitLab keys (3 and 4 parts) read and write through the overlay; the key keeps the repo's case, as the core stores it", async () => {
+  const stored: { provider: string; repo: string; issueNumber: number; startDate: string | null; dueDate: string | null; estimateDays: number | null; dependsOn: number[] }[] = [];
+  const core = async (method: "GET" | "PUT", path: string, body?: unknown) => {
+    if (path.startsWith("/kb/issues")) return ok({ issues: [issue({ provider: "gitlab", repo: "Acme/Platform/Web", number: 4 })] });
+    if (method === "GET") {
+      const q = new URL(path, "http://core").searchParams;
+      if (!fakeCoreKeyOk(q.get("provider")!, q.get("repo")!)) return { status: 400, body: null };
+      return ok({ schedules: stored.filter((r) => r.provider === q.get("provider") && r.repo === q.get("repo")) });
+    }
+    const b = body as typeof stored[number];
+    if (!fakeCoreKeyOk(b.provider, b.repo)) return { status: 400, body: null };
+    stored.push(b);
+    return ok({ schedule: b });
+  };
+  const draft = { start: "2026-01-05", due: "2026-01-07", estimate: "", depends: "" };
+  const save = scheduleSaveBody(draft, { provider: "gitlab", repo: "Acme/Platform/Web", issueNumber: 4 });
+  assert.equal(save.ok, true);
+  assert.equal((await core("PUT", "/kb/issue-schedule", save.ok ? save.body : null)).status, 200);
+  const load = await loadTimeline(core as never, "gitlab", "Acme/Platform/Web");
+  assert.equal(load.ok && load.nestedHint, false);
+  const rows = load.ok ? buildRows(load.issues, load.schedules, "gitlab", "Acme/Platform/Web") : [];
+  assert.equal(rows[0]?.schedule?.startDate, "2026-01-05", "the issue key and the stored key match");
+  // A 4-part path round-trips too; a lower-cased repo is a different key (no dates), so the case must be exact.
+  const deep = await loadTimeline(core as never, "gitlab", "acme/platform/tools/web");
+  assert.equal(deep.ok && deep.nestedHint, false);
+  const lower = await loadTimeline(core as never, "gitlab", "Acme/Platform/Web".toLowerCase());
+  assert.equal(lower.ok && lower.schedules.length, 0);
+});
+
+test("keys the core would 400 are never sent: GitHub nested, dot and odd segments, 21 segments, empty segment, over 255 chars", async () => {
+  const bad: [string, string][] = [
+    ["github", "acme/platform/web"], ["github", "acme/.."], ["gitlab", "acme/platform/../web"], ["gitlab", "acme/pla tform/web"],
+    ["gitlab", "acme//web"], ["gitlab", "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u"], ["gitlab", `a/${"x".repeat(255)}`],
+  ];
+  for (const [provider, repo] of bad) {
+    assert.equal(canSchedule({ provider, repo, number: 1 }), false, `${provider} ${repo}`);
+    assert.equal(issueDatesView({ provider, repo, number: 1 }).nestedHint, DETAIL_NESTED_HINT, `${provider} ${repo}`);
+    const calls: string[] = [];
+    const load = await loadTimeline(async (_m: "GET", p: string) => {
+      calls.push(p);
+      return p.startsWith("/kb/issues") ? ok({ issues: [issue({ provider, repo, number: 1 })] }) : ok({ schedules: [] });
+    }, provider, repo);
+    assert.equal(load.ok && load.nestedHint, true, `${provider} ${repo}`);
+    assert.equal(calls.some((c) => c.startsWith("/kb/issue-schedule")), false, `no overlay request for ${provider} ${repo}`);
+  }
+});
+
+test("an older core (before API 106) answers 400 for a nested key: one request, the hint once, no error and no retry", async () => {
+  let overlayCalls = 0;
+  const old = async (_m: "GET", p: string) => {
+    if (p.startsWith("/kb/issues")) return ok({ issues: [issue({ provider: "gitlab", repo: "acme/platform/web", number: 4 })] });
+    overlayCalls += 1;
+    return { status: 400, body: { error: { code: "VALIDATION_FAILED", message: "repo must be \"owner/name\"" } } };
+  };
+  const load = await loadTimeline(old, "gitlab", "acme/platform/web");
+  assert.equal(load.ok, true);
+  assert.equal(load.ok && load.nestedHint, true);
+  assert.equal(load.ok && load.schedules.length, 0);
+  assert.equal(load.ok && load.issues.length, 1, "the issues still list");
+  assert.equal(overlayCalls, 1, "one overlay request, no retry");
+  assert.equal(GANTT_NESTED_HINT.includes("20 path segments"), true);
+
+  overlayCalls = 0;
+  const detail = await readIssueSchedule(old, { provider: "gitlab", repo: "acme/platform/web", number: 4 });
+  assert.deepEqual(detail, { kind: "unsupported" });
+  assert.equal(overlayCalls, 1);
+  const detailSrc = readFileSync(new URL("../../issues/IssueDetail.tsx", import.meta.url), "utf8");
+  assert.match(detailSrc, /r\.kind === "unsupported"\) setRefused\(true\);/);
+
+  // A 2-part repo is unchanged: a 400 there is still a load error, not the hint.
+  const flat = await loadTimeline(async (_m: "GET", p: string) => (p.startsWith("/kb/issues") ? ok({ issues: [] }) : { status: 400, body: null }), "gitlab", "acme/web");
+  assert.equal(flat.ok, false);
 });

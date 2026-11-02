@@ -112,12 +112,20 @@ test("nested GitLab groups keep their full path: 2-, 3- and 4-part repositories 
   assert.deepEqual(filterIssues(rows, f).map((i) => i.id), ["n"]);
 });
 
-test("the schedule overlay keys owner/name only: nested paths and dot segments are not overlay-able", () => {
-  assert.equal(overlayRepoSupported("acme/web"), true);
-  assert.equal(overlayRepoSupported("acme/platform/web"), false, "the core answers 400 repo must be owner/name");
-  assert.equal(overlayRepoSupported("acme/.."), false);
-  assert.equal(overlayRepoSupported("acme web/x"), false);
-  assert.equal(overlayRepoSupported(""), false);
+test("the schedule overlay keys GitHub owner/name only; GitLab takes 2 to 20 segments (kb/issue-schedule.mjs assertRepo)", () => {
+  assert.equal(overlayRepoSupported("acme/web", "github"), true);
+  assert.equal(overlayRepoSupported("acme/platform/web", "github"), false, "the core answers 400 repo must be owner/name");
+  assert.equal(overlayRepoSupported("acme/..", "github"), false);
+  assert.equal(overlayRepoSupported("acme/web", "gitlab"), true, "2-part GitLab is unchanged");
+  assert.equal(overlayRepoSupported("acme/platform/web", "gitlab"), true, "nested GitLab (3 parts) is keyed");
+  assert.equal(overlayRepoSupported("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t", "gitlab"), true, "20 segments is the core's limit");
+  assert.equal(overlayRepoSupported("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u", "gitlab"), false, "21 segments is a 400 in the core");
+  assert.equal(overlayRepoSupported("acme/platform/../web", "gitlab"), false, "a dot segment is a 400 in the core");
+  assert.equal(overlayRepoSupported("acme//web", "gitlab"), false, "an empty segment is a 400 in the core");
+  assert.equal(overlayRepoSupported("acme/pla tform/web", "gitlab"), false, "a space is outside the segment set");
+  assert.equal(overlayRepoSupported("acme web/x", "github"), false);
+  assert.equal(overlayRepoSupported("", "github"), false);
+  assert.equal(overlayRepoSupported("acme/web", "bitbucket"), false, "only github and gitlab are keyed");
 });
 
 test("repoSlug reads pasted page URLs, ssh and scp remotes without mistaking the page suffix for a nested group (review)", () => {
@@ -208,4 +216,9 @@ test("the card's assignee line lists the first three logins as plain text, then 
   assert.equal(assigneeSummary(["ann"]), "ann");
   assert.equal(assigneeSummary(["ann", "bo", "cy"]), "ann, bo, cy");
   assert.equal(assigneeSummary(["ann", "bo", "cy", "di", "ed"]), "ann, bo, cy +2");
+});
+
+test("the overlay's 255-character limit is inclusive, as in the core (review)", () => {
+  assert.equal(overlayRepoSupported(`a/${"x".repeat(253)}`, "gitlab"), true, "255 characters");
+  assert.equal(overlayRepoSupported(`a/${"x".repeat(254)}`, "gitlab"), false, "256 characters");
 });

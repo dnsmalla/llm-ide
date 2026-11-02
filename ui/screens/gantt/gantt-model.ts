@@ -96,7 +96,7 @@ export function decodeSchedules(body: unknown): Schedule[] {
  * (kb/issue-schedule.mjs ALLOWED_PROVIDERS), keyed by owner/name and the issue number.
  */
 export function canSchedule(issue: Pick<Issue, "provider" | "repo" | "number">): boolean {
-  return (issue.provider === "github" || issue.provider === "gitlab") && issue.number !== null && overlayRepoSupported(issue.repo);
+  return (issue.provider === "github" || issue.provider === "gitlab") && issue.number !== null && overlayRepoSupported(issue.repo, issue.provider);
 }
 
 /**
@@ -424,8 +424,13 @@ export const GANTT_ROW_ACTIONS = { label: "details", bar: "schedule" } as const;
 type Request = (method: "GET", path: string) => Promise<{ status: number; body: unknown }>;
 
 /** The hint shown when the chosen project is a nested GitLab path the overlay cannot key. */
-export const GANTT_NESTED_HINT = "Dates are kept per owner/name project; this nested project path has none yet.";
-export const DETAIL_NESTED_HINT = "Dates are kept per owner/name project; this nested project path cannot store them yet.";
+export const GANTT_NESTED_HINT = "Dates are kept only for projects the core can key (owner/name on GitHub, up to 20 path segments on GitLab); this project has none.";
+export const DETAIL_NESTED_HINT = "Dates are kept only for projects the core can key (owner/name on GitHub, up to 20 path segments on GitLab); this one cannot store them.";
+
+/** More than owner/name: a GitLab nested group path. An older core (before API 106) answers 400 for these keys. */
+export function isNestedPath(repo: string): boolean {
+  return repo.split("/").length > 2;
+}
 
 export type TimelineLoad =
   /** `warning`: a later page failed but the rows read so far are kept (issuesLoadError: a 401 asks to sign in again). */
@@ -443,7 +448,7 @@ export async function loadTimeline(
   repo: string,
   opts: { signal?: AbortSignal; onProgress?: (p: PagingProgress) => void } = {},
 ): Promise<TimelineLoad> {
-  const overlayOk = repo === "" || overlayRepoSupported(repo);
+  const overlayOk = repo === "" || overlayRepoSupported(repo, provider);
   // Both requests start now, the issues first; a failed overlay read is caught below, not left unhandled.
   const pagingP = loadIssuePages(request, { provider, state: "all" }, opts);
   const scheduleP = (overlayOk
@@ -455,6 +460,10 @@ export async function loadTimeline(
   }
   const s = await scheduleP;
   if (!s) return { ok: false, nestedHint: false, error: "The core is not reachable right now." };
+  // A nested key an older core rejects: no dates, the hint once, no error (the request is not retried).
+  if (s.status === 400 && overlayOk && isNestedPath(repo)) {
+    return { ok: true, issues: paging.issues, paging, schedules: [], nestedHint: true, warning: issuesLoadError(paging) };
+  }
   if (s.status !== 200) {
     return { ok: false, nestedHint: false, error: s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule." };
   }
@@ -466,16 +475,18 @@ export async function loadTimeline(
  * project path gets the hint instead and never sends a schedule request.
  */
 export function issueDatesView(issue: Pick<Issue, "provider" | "repo" | "number">): { schedulable: boolean; nestedHint: string | null } {
-  return { schedulable: canSchedule(issue), nestedHint: issue.number !== null && !overlayRepoSupported(issue.repo) ? DETAIL_NESTED_HINT : null };
+  return { schedulable: canSchedule(issue), nestedHint: issue.number !== null && !overlayRepoSupported(issue.repo, issue.provider) ? DETAIL_NESTED_HINT : null };
 }
 
-export type IssueScheduleRead = { kind: "skipped" } | { kind: "ok"; schedule: Schedule | null } | { kind: "error"; error: string };
+/** `unsupported`: an older core answered 400 for a nested key, so the detail shows the hint and no dates. */
+export type IssueScheduleRead = { kind: "skipped" } | { kind: "unsupported" } | { kind: "ok"; schedule: Schedule | null } | { kind: "error"; error: string };
 
 /** The detail's schedule read; a row that cannot be scheduled (nested path, no number) is skipped without a request. */
 export async function readIssueSchedule(request: Request, issue: Pick<Issue, "provider" | "repo" | "number">): Promise<IssueScheduleRead> {
   if (!canSchedule(issue)) return { kind: "skipped" };
   try {
     const r = await request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider: issue.provider, repo: issue.repo }).toString()}`);
+    if (r.status === 400 && isNestedPath(issue.repo)) return { kind: "unsupported" };
     if (r.status !== 200) return { kind: "error", error: `The schedule could not be read (${r.status}).` };
     return { kind: "ok", schedule: decodeSchedules(r.body).find((s) => s.provider === issue.provider && s.repo === issue.repo && s.issueNumber === issue.number) ?? null };
   } catch {
