@@ -153,3 +153,6 @@
 .lib-project-root[data-accent="data"] .lib-project-icon { color: #a78bfa; }
 .lib-project-icon { font-size: 10px; width: 14px; display: inline-block; text-align: center; }
 .lib-empty-icon svg { width: 32px; height: 32px; }
+.lib-row[data-hidden="true"] { opacity: 0.55; }
+.lib-hidden-line { display: flex; gap: 10px; align-items: center; font-size: 12px; padding: 2px 0; }
+.lib-group-action { margin-left: 8px; font-size: 11px; }

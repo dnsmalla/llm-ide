@@ -21,6 +21,7 @@ import { sourcesCoreFrom, summarizeCoreFrom } from "./sources/adapter.ts";
 import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
 import { createWriteHost } from "./write/write-host.ts";
+import { projectMutations } from "./project-ops.ts";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
@@ -88,6 +89,7 @@ export default function Library({ active, projectRoot }: SectionProps) {
       ? {
           list: (path: string) => invokeHost<unknown>("fs_list_dir", { req: { path, offset: 0, limit: 300, show_hidden: false, gitignore: true, hide_ignored: true } }),
           read: (path: string) => invokeHost<unknown>("fs_read_file", { req: { path, max_bytes: 1_000_000 } }),
+          mutate: projectMutations((cmd, args) => invokeHost<unknown>(cmd, args)),
         }
       : undefined),
     [available],

@@ -11,6 +11,7 @@ import { EXTENSION_PLACEHOLDERS, LibraryNav, type LibraryExtension } from "./Lib
 import { NoteList } from "./NoteList";
 import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./ProjectFiles.tsx";
 import { MEETINGS_REVEAL_PATHS, revealFirst } from "./project-files.ts";
+import { refusedMessage } from "./hidden-notes.ts";
 import { NoteViewer } from "./NoteViewer";
 import { DiscardDialog, NewNoteDialog } from "./write/WriteDialogs";
 import { NoteWorkspace } from "./write/NoteWorkspace";
@@ -200,6 +201,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             active={active}
             onRefresh={refresh}
             onContext={(rel, x, y) => setNoteMenu({ rel, x, y })}
+            onNotice={setLinkNotice}
             footer={
               <LibraryNav
                 state={state}
@@ -280,6 +282,12 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
           <button type="button" role="menuitem" onClick={() => { store.select(noteMenu.rel); setNoteMenu(null); }}>Open</button>
           <button type="button" role="menuitem" onClick={() => { void onCopyPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Copy relative path</button>
           <button type="button" role="menuitem" onClick={() => { void onRevealPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Reveal in Finder</button>
+          {/* Hides from this list only: the note file stays where it is. */}
+          {state.hidden.has(noteMenu.rel) ? (
+            <button type="button" role="menuitem" onClick={() => { store.unhideNotes([noteMenu.rel]); setNoteMenu(null); }}>Unhide</button>
+          ) : (
+            <button type="button" role="menuitem" onClick={() => { const msg = refusedMessage(store.hideNotes([noteMenu.rel]).refused); if (msg) setLinkNotice(msg); setNoteMenu(null); }}>Remove from List</button>
+          )}
         </div>
       ) : null}
       {newNote && (

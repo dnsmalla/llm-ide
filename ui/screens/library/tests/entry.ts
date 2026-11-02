@@ -9,3 +9,6 @@ export { LibraryStore } from "../library-store.ts";
 export { describeNote } from "../note-view.ts";
 export { parseMeetingBody } from "../meeting.ts";
 export { FakeHost, meetingText, settle } from "./fake-host.ts";
+export { ProjectFilesNav, RemoveDialog, NewFolderDialog } from "../ProjectFiles";
+export { planRemove } from "../project-ops.ts";
+export { hideRels, refusedMessage } from "../hidden-notes.ts";

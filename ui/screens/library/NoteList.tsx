@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { RefreshIcon, SearchIcon, StatusBanner, WaveIcon, XIcon } from "@llmide/ui-kit";
 import type { LibraryState, LibraryStore } from "./library-store.ts";
+import { isVisible, refusedMessage } from "./hidden-notes.ts";
 import { formatDate, formatDuration, sectionLabel, stepNoteRow, type NoteRecord, type Row } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
 
@@ -65,9 +66,11 @@ export interface NoteListProps {
   footer?: ReactNode;
   /** Refresh every section, like the Mac search bar's refresh button. */
   onRefresh?: () => void;
+  /** A plain notice (for example, the hidden list is full). */
+  onNotice?: (message: string) => void;
 }
 
-export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext, footer, onRefresh }: NoteListProps): ReactNode {
+export function NoteList({ store, state, bulk = null, initialHeight = 600, active = true, onContext, footer, onRefresh, onNotice }: NoteListProps): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { scrollTop, height } = useScroller(scroller, initialHeight);
@@ -116,6 +119,18 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
     if (top < el.scrollTop) el.scrollTop = top;
     else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
   }, [state.selectedRel, selectedIdx, offsets]);
+
+  /** Mac: "Remove All <group> from List" on a date header. Hides only; the files stay. */
+  const removeGroup = (header: number): void => {
+    const rels: string[] = [];
+    for (let j = header + 1; j < rows.length; j++) {
+      const x = rows[j]!;
+      if (x.kind === "header") break;
+      rels.push(x.rec.rel);
+    }
+    const msg = refusedMessage(store.hideNotes(rels).refused);
+    if (msg && onNotice) onNotice(msg);
+  };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     const step = (d: 1 | -1): void => {
@@ -183,6 +198,11 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
       visible.push(
         <div key={`h:${r.key}`} className="lib-group" role="presentation" style={{ top, height: HEADER_HEIGHT }}>
           {r.label} <span className="lib-count">{r.count}</span>
+          {r.count > 0 && !bulk ? (
+            <button type="button" className="lib-link-btn lib-group-action" aria-label={`Remove all ${r.label} from List`} title={`Remove all ${r.label} from List (the files stay)`} onClick={() => removeGroup(i)}>
+              Remove all
+            </button>
+          ) : null}
         </div>,
       );
       continue;
@@ -190,15 +210,17 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
     const rec = r.rec;
     const cursor = rec.rel === state.selectedRel;
     const selected = bulk ? bulk.selected.has(rec.rel) : cursor;
+    const hiddenRow = state.hidden.has(rec.rel);
     visible.push(
       <div
         key={rec.rel}
         id={optionId(rec.rel)}
         role="option"
         aria-selected={selected}
-        aria-label={`${rec.title}, ${formatDate(rec.dateMs)}`}
+        aria-label={`${rec.title}, ${formatDate(rec.dateMs)}${hiddenRow ? ", hidden from the list" : ""}`}
         className="lib-row"
         data-selected={selected}
+        data-hidden={hiddenRow || undefined}
         data-cursor={bulk ? cursor : undefined}
         data-placeholder={rec.placeholder}
         style={{ top, height: ROW_HEIGHT }}
@@ -225,6 +247,17 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
   return (
     <section className="lib-list" aria-label={`${title} list`}>
       <div className="lib-list-head">
+        {state.hiddenCount > 0 && (
+          <div className="lib-hidden-line" role="status">
+            <span>{state.hiddenCount.toLocaleString("en-US")} hidden</span>
+            <button type="button" className="lib-link-btn" aria-pressed={state.showHidden} onClick={() => store.setShowHidden(!state.showHidden)}>
+              {state.showHidden ? "Hide hidden" : "Show hidden"}
+            </button>
+            <button type="button" className="lib-link-btn" onClick={() => store.unhideNotes([...state.hidden])}>
+              Unhide all
+            </button>
+          </div>
+        )}
         <div className="lib-search" role="search">
           <SearchIcon />
           <input
@@ -292,20 +325,21 @@ function hash(s: string): string {
 function SearchResults({ store, state }: { store: LibraryStore; state: LibraryState }): ReactNode {
   const s = state.search;
   if (s.phase === "idle" || s.phase === "unavailable") return null;
+  const hits = s.hits.filter((h) => isVisible(h.rel, state.hidden, state.showHidden));
   return (
     <div className="lib-hits" aria-label="Full-text matches" role="region">
-      {(s.phase === "searching" || s.phase === "debouncing") && s.hits.length === 0 && (
+      {(s.phase === "searching" || s.phase === "debouncing") && hits.length === 0 && (
         <p className="lib-muted" role="status">
           Searching note text…
         </p>
       )}
       {s.phase === "error" && <StatusBanner severity="warning" message={s.error ?? "Search failed."} />}
-      {s.phase === "done" && s.hits.length === 0 && <p className="lib-muted">No matches in note text.</p>}
-      {s.hits.length > 0 && (
+      {s.phase === "done" && hits.length === 0 && <p className="lib-muted">No matches in note text.</p>}
+      {hits.length > 0 && (
         <>
           <h3 className="lib-hits-title">Matches in note text</h3>
           <ul className="lib-hits-list">
-            {s.hits.slice(0, 20).map((h) => (
+            {hits.slice(0, 20).map((h) => (
               <li key={h.rel}>
                 <button type="button" className="lib-hit" onClick={() => store.reveal(h.rel)}>
                   <span className="lib-hit-title">{h.title}</span>

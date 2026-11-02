@@ -1,13 +1,28 @@
 // Library > Project files: the Mac's Code and Data categories as lazy file trees with a read-only viewer. The note
-// sections stay the notes index; these two come from the project folders through the host's read-only fs commands.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+// sections stay the notes index; these two come from the project folders through the host's fs commands.
+// With `mutate` (desktop app) a row can be moved to the Trash, and a category's "+" adds a text file or an empty
+// folder. Every change is confirmed or explicit; the rules live in project-ops.ts.
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { CodeIcon, TableIcon } from "@llmide/ui-kit";
 import { shellBus } from "../shell/bus";
+import { Dialog } from "./write/Dialog";
 import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, type ProjectEntry } from "./project-files.ts";
+import { addFilesToFolder, addSummary, createFolder, pickReason, planRemove, runRemove, validateEntryName, type Mutations, type RemovePlan } from "./project-ops.ts";
 
 export interface ProjectFilesDeps {
   list: (path: string) => Promise<unknown>;
   read: (path: string) => Promise<unknown>;
+  /** Add and remove (trash only). Absent: the tree is read-only and "+" opens Explorer. */
+  mutate?: Mutations;
+}
+
+interface MenuState {
+  /** The row that was right-clicked; null for the category's "+" menu. */
+  entry: ProjectEntry | null;
+  /** The folder new files and folders go into. */
+  target: string;
+  x: number;
+  y: number;
 }
 
 export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { deps: ProjectFilesDeps; selected: string | null; onSelect: (path: string | null) => void; active?: boolean }): ReactNode {
@@ -16,6 +31,14 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
   const [children, setChildren] = useState<Map<string, ProjectEntry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [closedRoots, setClosedRoots] = useState<Set<string>>(new Set());
+  const [selectedDir, setSelectedDir] = useState<string | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [removal, setRemoval] = useState<Extract<RemovePlan, { ok: true }> | null>(null);
+  const [newFolderIn, setNewFolderIn] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const childrenRef = useRef(children);
+  childrenRef.current = children;
+  const mutate = deps.mutate;
 
   const loadRoot = useCallback(async (path: string) => {
     try {
@@ -46,6 +69,18 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     void loadRoot("data");
   }, [loadRoot]);
 
+  /** After a change: re-list the roots and every expanded folder, keeping what is open. */
+  const refreshTree = useCallback(() => {
+    void loadRoot("code");
+    void loadRoot("data");
+    for (const path of [...childrenRef.current.keys()]) {
+      deps.list(path).then(
+        (body) => setChildren((m) => new Map(m).set(path, decodeProjectEntries(body))),
+        () => setChildren((m) => { const n = new Map(m); n.delete(path); return n; }),
+      );
+    }
+  }, [deps, loadRoot]);
+
   useEffect(() => {
     if (active) reload();
   }, [active, reload]);
@@ -66,6 +101,59 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     }
   };
 
+  const pickDir = (path: string) => {
+    setSelectedDir(path);
+    void toggle(path);
+  };
+
+  const targetFor = (rootPath: string): string =>
+    selectedDir !== null && (selectedDir === rootPath || selectedDir.startsWith(`${rootPath}/`)) ? selectedDir : rootPath;
+
+  const askRemove = (entry: ProjectEntry) => {
+    setMenu(null);
+    const count = entry.kind === "dir" && children.has(entry.path) ? children.get(entry.path)!.length : null;
+    const plan = planRemove(entry.path, entry.kind, count);
+    if (plan.ok) setRemoval(plan);
+    else setNotice(plan.message);
+  };
+
+  const confirmRemove = async (plan: Extract<RemovePlan, { ok: true }>) => {
+    setRemoval(null);
+    if (!mutate) return;
+    const r = await runRemove(plan, (p) => mutate.trash(p));
+    if (r.ok) {
+      setNotice(`"${plan.name}" was moved to the Trash.`);
+      if (selected !== null && (selected === plan.path || selected.startsWith(`${plan.path}/`))) onSelect(null);
+      if (selectedDir !== null && (selectedDir === plan.path || selectedDir.startsWith(`${plan.path}/`))) setSelectedDir(null);
+    } else {
+      setNotice(r.message);
+    }
+    refreshTree();
+  };
+
+  const addFiles = async (target: string) => {
+    setMenu(null);
+    if (!mutate) return;
+    try {
+      const picks = await mutate.pick();
+      if (picks.files.length === 0 && picks.rejected.length === 0) return; // the dialog was cancelled
+      const res = await addFilesToFolder(mutate, target, picks.files);
+      setNotice(addSummary(res.added, [...picks.rejected.map((r) => ({ name: r.name, reason: pickReason(r.reason) })), ...res.skipped]));
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "The files could not be added.");
+    }
+    refreshTree();
+  };
+
+  const categoryHead = (rootPath: string, label: string): ReactNode => {
+    if (!mutate) {
+      return <button type="button" className="lib-plus" aria-label={`Open Explorer to add ${label}`} title={`Open Explorer to add ${label}`} onClick={() => shellBus.publish({ type: "goto-section", section: "explorer" })}>＋</button>;
+    }
+    return (
+      <button type="button" className="lib-plus" aria-haspopup="menu" aria-label={`Add to ${label}`} title={`Add to ${label}`} onClick={(e) => setMenu({ entry: null, target: targetFor(rootPath), x: e.clientX, y: e.clientY })}>＋</button>
+    );
+  };
+
   return (
     <section className="lib-project" aria-label="Project files">
       {PROJECT_ROOTS.map((root) => {
@@ -82,7 +170,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
                 <span className="lib-project-caret">{open ? "▾" : "▸"}</span> <span className="lib-project-icon" aria-hidden="true">{root.path === "code" ? <CodeIcon /> : <TableIcon />}</span> {root.label}
               </button>
               {root.path === "code" && counts[root.path] !== undefined ? <span className="lib-count">{counts[root.path]!.toLocaleString()}</span> : null}
-              <button type="button" className="lib-plus" aria-label={`Open Explorer to add ${root.label}`} title={`Open Explorer to add ${root.label}`} onClick={() => shellBus.publish({ type: "goto-section", section: "explorer" })}>＋</button>
+              {categoryHead(root.path, root.label)}
             </div>
             {open ? (
               entries === undefined ? <p className="lib-muted lib-project-note">Loading…</p>
@@ -91,7 +179,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
                 : (
                   <ul className="lib-project-list">
                     {entries.map((e) => (
-                      <ProjectRow key={e.path} entry={e} depth={0} childrenOf={(p) => children.get(p) ?? []} expanded={expanded} onToggle={toggle} onSelect={onSelect} selected={selected} />
+                      <ProjectRow key={e.path} entry={e} depth={0} childrenOf={(p) => children.get(p) ?? []} expanded={expanded} onToggle={pickDir} onSelect={onSelect} selected={selected} onMenu={mutate ? (entry, x, y) => setMenu({ entry, target: entry.path, x, y }) : undefined} />
                     ))}
                   </ul>
                 )
@@ -99,11 +187,86 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
           </div>
         );
       })}
+      {notice ? <p className="lib-muted lib-project-note" role="status">{notice}</p> : null}
+      {menu ? (
+        <div className="lib-context" role="menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)} onKeyDown={(e) => { if (e.key === "Escape") setMenu(null); }}>
+          {menu.entry === null ? (
+            <>
+              <div className="lib-muted lib-context-note" role="none">Adds to {menu.target}</div>
+              <button type="button" role="menuitem" onClick={() => void addFiles(menu.target)}>Add File…</button>
+              <button type="button" role="menuitem" onClick={() => { setMenu(null); setNewFolderIn(menu.target); }}>Add Folder…</button>
+              <button type="button" role="menuitem" onClick={() => { setMenu(null); shellBus.publish({ type: "goto-section", section: "explorer" }); }}>Open Explorer</button>
+            </>
+          ) : (
+            <button type="button" role="menuitem" onClick={() => askRemove(menu.entry!)}>Remove…</button>
+          )}
+        </div>
+      ) : null}
+      {removal ? <RemoveDialog plan={removal} onConfirm={() => void confirmRemove(removal)} onCancel={() => setRemoval(null)} /> : null}
+      {newFolderIn !== null && mutate ? (
+        <NewFolderDialog
+          folder={newFolderIn}
+          onCancel={() => setNewFolderIn(null)}
+          onCreate={async (name) => {
+            await createFolder(mutate.create, newFolderIn, name);
+            setNewFolderIn(null);
+            refreshTree();
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, selected }: {
+/** Cancel is focused and is the only answer a stray Enter reaches: the removal needs the explicit button. */
+export function RemoveDialog({ plan, onConfirm, onCancel }: { plan: Extract<RemovePlan, { ok: true }>; onConfirm: () => void; onCancel: () => void }): ReactNode {
+  return (
+    <Dialog title={plan.title} role="alertdialog" onClose={onCancel}>
+      <p>{plan.message}</p>
+      <div className="lib-modal-actions">
+        <button type="button" className="lib-btn" data-autofocus onClick={onCancel}>Cancel</button>
+        <button type="button" className="lib-btn lib-btn-danger" onClick={onConfirm}>Move to Trash</button>
+      </div>
+    </Dialog>
+  );
+}
+
+export function NewFolderDialog({ folder, onCreate, onCancel }: { folder: string; onCreate: (name: string) => Promise<void>; onCancel: () => void }): ReactNode {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const problem = name === "" ? null : validateEntryName(name);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || validateEntryName(name) !== null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreate(name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The folder could not be created.");
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title="New folder" onClose={onCancel} busy={busy}>
+      <form onSubmit={submit}>
+        <p className="lib-muted">An empty folder is created in {folder}/. Nothing is copied in from outside the project.</p>
+        <label>
+          Name
+          <input data-autofocus value={name} onChange={(e) => setName(e.target.value)} aria-invalid={problem !== null || undefined} />
+        </label>
+        <p className="lib-muted" role="status">{error ?? problem ?? ""}</p>
+        <div className="lib-modal-actions">
+          <button type="button" className="lib-btn" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="lib-btn" disabled={busy || validateEntryName(name) !== null}>Create folder</button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, selected, onMenu }: {
   entry: ProjectEntry;
   depth: number;
   childrenOf: (path: string) => ProjectEntry[];
@@ -111,18 +274,25 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
   selected: string | null;
+  onMenu?: (entry: ProjectEntry, x: number, y: number) => void;
 }): ReactNode {
   const dir = entry.kind === "dir";
   const open = expanded.has(entry.path);
   return (
     <li className="lib-project-row" style={{ paddingLeft: depth * 12 }} role="treeitem" aria-expanded={dir ? open : undefined} aria-selected={!dir && selected === entry.path}>
-      <button type="button" className={dir ? "lib-project-dir" : "lib-project-file"} data-on={!dir && selected === entry.path || undefined} onClick={() => (dir ? onToggle(entry.path) : onSelect(entry.path))}>
+      <button
+        type="button"
+        className={dir ? "lib-project-dir" : "lib-project-file"}
+        data-on={!dir && selected === entry.path || undefined}
+        onClick={() => (dir ? onToggle(entry.path) : onSelect(entry.path))}
+        onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(entry, e.clientX, e.clientY); } : undefined}
+      >
         <span className="lib-project-caret" aria-hidden="true">{dir ? (open ? "▾" : "▸") : "·"}</span>{entry.name}
       </button>
       {dir && open ? (
         <ul className="lib-project-list">
           {childrenOf(entry.path).map((c) => (
-            <ProjectRow key={c.path} entry={c} depth={depth + 1} childrenOf={childrenOf} expanded={expanded} onToggle={onToggle} onSelect={onSelect} selected={selected} />
+            <ProjectRow key={c.path} entry={c} depth={depth + 1} childrenOf={childrenOf} expanded={expanded} onToggle={onToggle} onSelect={onSelect} selected={selected} onMenu={onMenu} />
           ))}
         </ul>
       ) : null}

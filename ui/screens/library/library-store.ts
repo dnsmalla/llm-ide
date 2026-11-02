@@ -11,6 +11,7 @@
 import { applyHead, buildRows, countBySection, NO_FILTERS, recordFromEntry, sectionsFor, type Filters, type GroupKey, type NoteRecord, type Row, type SectionDef, type SortKey } from "./notes-model.ts";
 import { NotesError, toNotesError, type NotesErrorCode, type NotesHost, type NotesRoot } from "./host.ts";
 import { IDLE_SEARCH, SearchController, type SearchRun, type SearchState } from "./search.ts";
+import { hideRels, isVisible, loadHidden, pruneHidden, saveHidden, unhideRels, type KeyValue } from "./hidden-notes.ts";
 
 export const LIST_PAGE = 2000;
 export const HEAD_BATCH = 200;
@@ -18,6 +19,14 @@ export const HEAD_BYTES = 2048;
 export const HEAD_CONCURRENCY = 3;
 
 export type RootStatus = "unknown" | "loading" | "ready" | "none" | "error";
+
+function defaultStorage(): KeyValue | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const PREFS_KEY = "llmide.library.prefs";
 interface LibraryPrefs { sectionId?: string | null; filters?: Partial<Filters>; sort?: SortKey; group?: GroupKey }
@@ -62,10 +71,18 @@ export interface LibraryState {
   sort: SortKey;
   group: GroupKey;
   search: SearchState;
+  /** Notes hidden with "Remove from List" in the current folder (the files are untouched). */
+  hidden: ReadonlySet<string>;
+  /** Hidden notes whose files are still in the folder (the "N hidden" line). */
+  hiddenCount: number;
+  /** The "Show hidden" toggle: hidden notes are listed (with Unhide) and counted. Session only. */
+  showHidden: boolean;
 }
 
 export interface StoreDeps {
   host: NotesHost;
+  /** Where the hidden list is kept. Defaults to the browser's localStorage; null keeps it for the session only. */
+  storage?: KeyValue | null;
   /** Absent: full-text search is not offered (the local filter still works). */
   searchRun?: SearchRun;
   now?: () => number;
@@ -89,10 +106,14 @@ export class LibraryStore {
   private rowsKey = "";
   private rowsCache: Row[] = [];
   private state: LibraryState;
+  private readonly storage: KeyValue | null;
+  /** The folder the hidden list belongs to (its absolute path), or null without a folder. */
+  private hiddenRoot: string | null = null;
 
   constructor(deps: StoreDeps) {
     this.host = deps.host;
     this.now = deps.now ?? (() => Date.now());
+    this.storage = deps.storage === undefined ? defaultStorage() : deps.storage;
     this.search = deps.searchRun
       ? new SearchController({
           run: deps.searchRun,
@@ -118,6 +139,9 @@ export class LibraryStore {
       sort: prefs.sort ?? "date-desc",
       group: groupFromPrefs(prefs.group),
       search: IDLE_SEARCH,
+      hidden: new Set(),
+      hiddenCount: 0,
+      showHidden: false,
     };
   }
 
@@ -152,6 +176,7 @@ export class LibraryStore {
         return;
       }
       this.patch({ rootStatus: "ready", root });
+      this.loadHiddenFor(root.root);
       await this.scan();
     } catch (e) {
       this.fail(toNotesError(e));
@@ -164,6 +189,7 @@ export class LibraryStore {
       if (this.disposed || !root) return; // cancelled in the dialog
       this.resetRecords();
       this.patch({ rootStatus: "ready", root, error: null, selectedRel: null });
+      this.loadHiddenFor(root.root);
       await this.scan();
     } catch (e) {
       this.fail(toNotesError(e));
@@ -179,6 +205,7 @@ export class LibraryStore {
       // The folder setting could not be removed; the screen still shows "no folder" until restart.
     }
     this.resetRecords();
+    this.loadHiddenFor(null);
     this.patch({ rootStatus: "none", root: null, selectedRel: null, error: null, listing: { phase: "idle", loaded: 0 } });
   }
 
@@ -244,6 +271,8 @@ export class LibraryStore {
       this.pending = this.pending.filter((r) => this.byRel.has(r));
       this.pendingSet = new Set(this.pending);
     }
+    const pruned = pruneHidden(this.state.hidden, (rel) => this.byRel.has(rel));
+    if (pruned.size !== this.state.hidden.size) this.commitHidden(pruned);
     const selectedGone = this.state.selectedRel !== null && !this.byRel.has(this.state.selectedRel) && !this.hasUnsaved?.();
     this.publish(loaded, { listingDone: true, selectedGone });
   }
@@ -365,16 +394,54 @@ export class LibraryStore {
 
   private publish(loaded: number, extra?: { listingDone?: boolean; selectedGone?: boolean }): void {
     const records = [...this.byRel.values()];
-    const counts = countBySection(records);
+    const { hidden, showHidden } = this.state;
+    const counts = countBySection(records.filter((r) => isVisible(r.rel, hidden, showHidden)));
+    let hiddenCount = 0;
+    for (const rel of hidden) if (this.byRel.has(rel)) hiddenCount += 1;
     this.patch({
       records,
       counts,
       sections: sectionsFor(counts),
+      hiddenCount,
       version: this.state.version + 1,
       listing: { phase: extra?.listingDone ? "done" : this.state.listing.phase === "idle" ? "listing" : this.state.listing.phase, loaded },
       heads: { done: this.headsDone, total: this.headsTotal },
       ...(extra?.selectedGone ? { selectedRel: null } : null),
     });
+  }
+
+  // ---- remove from list (hidden set; files are never touched) ---------------------------
+
+  private loadHiddenFor(root: string | null): void {
+    this.hiddenRoot = root;
+    this.patch({ hidden: root === null ? new Set() : loadHidden(this.storage, root) });
+  }
+
+  private commitHidden(next: Set<string>): void {
+    this.patch({ hidden: next });
+    if (this.hiddenRoot !== null) saveHidden(this.storage, this.hiddenRoot, next);
+  }
+
+  private republish(): void {
+    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
+  }
+
+  /** Hides notes from the list. Returns how many did not fit under the bound (HIDDEN_LIMIT). */
+  hideNotes(rels: readonly string[]): { refused: number } {
+    const { hidden, refused } = hideRels(this.state.hidden, rels);
+    this.commitHidden(hidden);
+    this.republish();
+    return { refused };
+  }
+
+  unhideNotes(rels: readonly string[]): void {
+    this.commitHidden(unhideRels(this.state.hidden, rels));
+    this.republish();
+  }
+
+  setShowHidden(on: boolean): void {
+    this.patch({ showHidden: on });
+    this.republish();
   }
 
   // ---- view state -----------------------------------------------------------------------
@@ -463,7 +530,7 @@ export class LibraryStore {
     const key = `${s.version}|${s.sectionId}|${JSON.stringify(s.filters)}|${s.sort}|${s.group}`;
     if (key !== this.rowsKey) {
       this.rowsKey = key;
-      this.rowsCache = buildRows(s.records, { sectionId: s.sectionId, filters: s.filters, sort: s.sort, group: s.group, now: this.now() });
+      this.rowsCache = buildRows(s.records.filter((r) => isVisible(r.rel, s.hidden, s.showHidden)), { sectionId: s.sectionId, filters: s.filters, sort: s.sort, group: s.group, now: this.now() });
     }
     return this.rowsCache;
   }
