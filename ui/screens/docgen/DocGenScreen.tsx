@@ -52,6 +52,15 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   }, [store, p.projectRoot]);
   const chatOutput = useSyncExternalStore(chatOutputStore.subscribe, chatOutputStore.get, chatOutputStore.get);
   const [useChat, setUseChat] = useState(() => { try { return localStorage.getItem(pref("useChat")) === "1"; } catch { return false; } });
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try { const raw = localStorage.getItem(pref("sections")); if (raw === null) return new Set(["template", "sources"]); const v = JSON.parse(raw) as unknown; return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : ["template", "sources"]); } catch { return new Set(["template", "sources"]); }
+  });
+  const setSection = (id: string, open: boolean) => setExpanded((cur) => {
+    const next = new Set(cur); if (open) next.add(id); else next.delete(id);
+    try { localStorage.setItem(pref("sections"), JSON.stringify([...next])); } catch { /* session */ }
+    return next;
+  });
+  const isOpen = (id: string) => expanded.has(id);
   useEffect(() => { try { localStorage.setItem(pref("chat"), showChat ? "1" : "0"); } catch { /* session */ } }, [showChat, pref]);
   useEffect(() => { try { localStorage.setItem(pref("sources"), showSources ? "1" : "0"); } catch { /* session */ } }, [showSources, pref]);
   useEffect(() => { try { localStorage.setItem(pref("useChat"), useChat ? "1" : "0"); } catch { /* session */ } }, [useChat, pref]);
@@ -97,10 +106,10 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
         {showSources ? (
           <aside className="dg-sidebar" aria-label="Sources and template">
             <div className="dg-sidebar-use"><div><label className="dg-inline"><input type="checkbox" checked={useChat} disabled={chatOutput === null} onChange={(e) => setUseChat(e.target.checked)} /> Use chat</label><p className="dg-muted">{useChat ? "On: generate can use the latest chat reply as a source; template/command is optional." : "Off: pick a template or command and at least one source, then Generate."}</p></div></div>
-            <details className="dg-side-collapse" open><summary>SETUP</summary>
+            <details className="dg-side-collapse" open={isOpen("setup")} onToggle={(e) => setSection("setup", e.currentTarget.open)}><summary>SETUP</summary>
               <label className="dg-field"><span>Output folder</span><input value={s.destination} placeholder="llm-doc/generated" onChange={(e) => { store.setDestination(e.target.value); try { localStorage.setItem("llmide.docgen.destination", e.target.value); } catch { /* session */ } }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
             </details>
-            <details className="dg-side-collapse" open><summary>TEMPLATE &amp; COMMAND</summary><TemplateCommandPanel
+            <details className="dg-side-collapse" open={isOpen("template")} onToggle={(e) => setSection("template", e.currentTarget.open)}><summary>TEMPLATE &amp; COMMAND</summary><TemplateCommandPanel
               surface={store.surface}
               templates={s.templates}
               commands={s.commands}
@@ -114,7 +123,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               onManage={() => setManage(true)}
               onManageCommands={() => setManageCommands(true)}
             /></details>
-            <details className="dg-side-collapse" open><summary>SOURCES</summary><SourcePanel env={p.env} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} /></details>
+            <details className="dg-side-collapse" open={isOpen("sources")} onToggle={(e) => setSection("sources", e.currentTarget.open)}><summary>SOURCES</summary><SourcePanel env={p.env} selection={s.selection} note={s.selectionNote} surface={store.surface} onAdd={(i) => store.addItems(i)} onRemove={(k) => store.removeKeys(k)} onClear={() => store.clearSelection()} onPaste={(t) => store.addPaste(t)} initialViewport={p.initialViewport} /></details>
           </aside>
         ) : null}
         <main className="dg-center">
@@ -156,7 +165,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             onGenerate={() => { setView("result"); void store.generate(chatItem ? [chatItem] : []); }}
             onCancel={() => store.run.cancel()}
           />
-          {showChat ? <div className="dg-chat-dock"><ChatDockSlot active={p.active && showChat} projectRoot={p.projectRoot} /></div> : null}
+          {showChat ? <div className="dg-chat-dock"><ChatDockSlot active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} /></div> : null}
         </aside>
       </div>
     );
