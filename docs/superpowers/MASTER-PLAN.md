@@ -13,7 +13,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 17 | 32 | 13 | 62 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; Windows/Linux not run |
+| Desktop multi-OS (Tauri) | 17 | 32 | 14 | 63 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; CI green on macOS and Linux, Windows red only in `cargo test` (22) |
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 3 | 7 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -22,7 +22,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 98 | 55 | 72 | 225 |  |
+| Total | 98 | 55 | 73 | 226 |  |
 
 ## How the surfaces connect
 
@@ -129,7 +129,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Host security review fixes: terminal behind a native consent dialog + Terminal toggle read in Rust with a scrubbed shell env; spawned-core identity by per-launch nonce (`x-llmide-nonce` on `/health`, additive), no redirects, adopted `:3456` core flagged `adopted_unverified`; DB in the 0700 app data dir; redacted `core.log` instead of raw tails in `core_status`; graph read via fd (O_NOFOLLOW + F_GETPATH, 32 MB); hardened CSP + navigation guard; `check-capabilities` fail-open fixed (+`--product`, core allowlist); `stage-core` kb allowlist + staged-tree verification; broad-root lists extended (Rust + JS parity); server git/npm children scrubbed (`core/child-env.mjs`); single-instance lock. 58 cargo tests, 29+ node tests; no GUI run, see `desktop/PACKAGING.md` (me)
 - [ ] Live caption capture per OS: macOS AX first, Windows next, Linux best-effort (Tauri plan risks) (me)
 - [ ] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel (me)
-- [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)
+- [~] Windows and Linux builds in CI (`desktop-ci.yml`): **Linux and macOS green** since 2026-11-02 (run 41418300554: node tests, security gates, tokens, frontend build, cargo check, cargo test). Fixes on the way: `@types/node` declared (`d57033be`, it came from a stray `~/node_modules`), test imports by file URL (`a40385fe`, `ebc52ff7`), graph-kit submodule checked out for the System page (`359deb6c`), CRLF fixtures, path separators, exec bit and e2e bus test (`db29d453`), unix-only hook test (`b6dde29d`). **Windows** passes everything up to `cargo test`, which is red (next row). WebKitGTK graph render check not done (me)
+- [ ] Windows `cargo test`: 334 pass, 22 fail (run 41418300554, left red on purpose, user decision 2026-11-02: macOS first). Runner setup, test-only (9): no git identity (4), `HOME` unset (`chat_store` layout), CRLF checkout makes test repos dirty (2 checkout tests), 10k-file status times out, local-path `git submodule add` blocked. Real Windows gaps (9): native Loop shell stages cannot start, `os error 3` (5 `loop_runner` tests: Loop does not work on Windows); `\\?\` verbatim paths break `git worktree` and opens (2 `git` tests); `project_scaffold` accepts `\\?\D:\proj` where a too-broad root is expected to be refused; `graph_file` fd-path root check is not implemented on Windows (security-relevant). Wrong per-OS test expectations (4): `pty` env allowlist (3), `os_open` expects `xdg-open` on Windows. Also `attach` reports a folder as `unreadable` where the test expects another code (me)
 - [x] Parity checklist exists (`plans/2026-10-31-tauri-parity-checklist.md`; rows filled as screens land) (me)
 - [ ] Phase 3: Chat + Explorer + Library + Settings screens on ui/kit, daily use on Mac and Windows (`plans/2026-10-31-tauri-phase3-plan.md`) (me)
 - [~] Phase 3 slice S-C Explorer: root-confined host fs/watch/git commands and virtualised tree, tabs, Monaco screen built and unit-tested; GUI run, Windows and parity rows 3.x pending (`ui/screens/explorer`, `desktop/src-tauri/src/{fs_ops,fs_watch,git}.rs`) (me)

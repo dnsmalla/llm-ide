@@ -97,7 +97,7 @@ Open decisions (only the unanswered ones, each with a recommendation) are sectio
 
 ## 5. Later
 
-- **Windows and Linux** builds, runs and parity (CI exists, not yet seen green on GitHub; WebKitGTK graph check not done).
+- **Windows and Linux** builds, runs and parity. `desktop-ci` is green on Linux and macOS since 2026-11-02; Windows fails only `cargo test` (22 of 356: native Loop shell stages, `\\?\` paths with git, the Windows graph-file root check, runner setup; list in MASTER-PLAN S2), left red on purpose until the macOS app is finished. WebKitGTK graph check not done.
 - **Tauri signing, notarisation, Authenticode, signed updater** and the update channel.
 - **Relay deployment** and external review; **phone PWA** (built last, in sync-kit; Q-WEB-1 answered, hosting later).
 - Meetings: live-then-archive Phase 5 Mac side, 7-day shadow soak, read-path switch, legacy duplicate-row deletion. All wait for you to record meetings.
