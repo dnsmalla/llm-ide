@@ -7,6 +7,7 @@ import {
   decodeAgentSdkUpdate,
   decodeToolPermissions,
   decodeUserPrefs,
+  type AgentBusy,
   type AgentSdkStatus,
   type AgentSdkUpdate,
   type LegacyGrant,
@@ -99,11 +100,25 @@ export const SDK_TEXT = {
   hint: "The chat engine runs on Anthropic's Claude Agent SDK. Updating installs the newest release in the backend's folder; a release that fails to load is rolled back.",
   remoteOff: "Updates are disabled while the backend accepts remote connections.",
   confirmWord: "UPDATE",
-  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, restart the backend to run the new version.",
+  confirmBody: "The update installs the newest SDK release in the backend's folder. It is refused while a chat turn is in progress. After it installs, the backend restarts by itself when no chat or Loop run is going; otherwise it waits and asks you to restart it.",
   restartNote: "Restart the backend to run the installed version.",
   restartTitle: "Restart the backend?",
   restartBody: "Any chat reply or Loop run still in progress is stopped and has to be started again.",
 } as const;
+
+/** "2 chats and 1 Loop run" (counts only; the caller adds the verb). */
+export function busyCounts(b: AgentBusy): string {
+  const parts: string[] = [];
+  if (b.chatTurns > 0) parts.push(`${b.chatTurns} ${b.chatTurns === 1 ? "chat" : "chats"}`);
+  if (b.loopRuns > 0) parts.push(`${b.loopRuns} Loop ${b.loopRuns === 1 ? "run" : "runs"}`);
+  return parts.join(" and ");
+}
+
+/** The restart hold line: "2 chats and 1 Loop run are still running; restart after they finish." */
+export function busyNote(b: AgentBusy): string {
+  const one = b.total === 1;
+  return `${busyCounts(b)} ${one ? "is" : "are"} still running; restart after ${one ? "it finishes" : "they finish"}.`;
+}
 
 /** The update log as plain text: credential-scrubbed and bounded (it is npm output, shown only as text). */
 export function sdkLogText(log: string | null): string | null {
@@ -127,6 +142,19 @@ export class AgentSdkModel extends Store<AgentSdkState> {
     this.#c = client;
   }
 
+  /** Re-reads the status now (busy is live on the core), for the Restart click. Null when the read fails. */
+  async checkBusy(): Promise<AgentBusy | null> {
+    try {
+      const status = decodeAgentSdk(await call(this.#c, "GET", "/kb/agent-sdk"));
+      this.set({ status, error: null });
+      return status.busy;
+    } catch (e) {
+      const st = this.getState().status;
+      this.set({ status: st && { ...st, busy: null }, error: describeError(e) });
+      return null;
+    }
+  }
+
   /** `force` re-asks the npm registry (the server caches); the default read is cheap. */
   async load(force = false): Promise<void> {
     if (this.getState().checking) return;
@@ -141,14 +169,28 @@ export class AgentSdkModel extends Store<AgentSdkState> {
     }
   }
 
-  async update(): Promise<void> {
+  /**
+   * `onInstalled` runs at most once per call, and only when the update installed and the core reports no work
+   * running. A refused or failed update, or an unknown busy count (older core), never calls it.
+   */
+  async update(onInstalled?: () => void): Promise<void> {
     const s = this.getState();
     if (s.updating || !s.status?.canUpdate) return;
     this.set({ updating: true, result: null });
+    let result: AgentSdkUpdate | null = null;
     try {
-      const result = decodeAgentSdkUpdate(await call(this.#c, "POST", "/kb/agent-sdk/update", {}));
+      result = decodeAgentSdkUpdate(await call(this.#c, "POST", "/kb/agent-sdk/update", {}));
       this.set({ result, error: null });
-      await this.load(false);
+    } catch (e) {
+      this.set({ error: describeError(e) });
+    }
+    try {
+      // A direct read, not load(): load() skips while a focus-refresh check is in flight, and busy must be fresh.
+      if (result) {
+        const status = decodeAgentSdk(await call(this.#c, "GET", "/kb/agent-sdk"));
+        this.set({ status, error: null });
+        if (result.ok && result.restartNeeded && status.busy?.total === 0) onInstalled?.();
+      }
     } catch (e) {
       this.set({ error: describeError(e) });
     } finally {

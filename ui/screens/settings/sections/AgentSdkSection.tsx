@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AgentSdkModel, SDK_TEXT, sdkLogText } from "../app-model.ts";
+import { AgentSdkModel, SDK_TEXT, busyCounts, busyNote, sdkLogText } from "../app-model.ts";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import { Button, ErrorText, TypedConfirm } from "../ui.tsx";
 
@@ -12,11 +12,24 @@ export default function AgentSdkSection() {
   const s = useStore(m);
   const [confirming, setConfirming] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [restartNotice, setRestartNotice] = useState<string | null>(null);
+  const [restartNotice, setRestartNotice] = useState<string[]>([]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   useRefreshOnFocus(() => void m.load(false));
   const st = s.status;
   const log = sdkLogText(s.result?.log ?? null);
+  const busy = st?.busy ?? null;
+  // The Restart click re-reads busy (checkBusy), so the dialog names the work running at that moment.
+  const restartBody = busy && busy.total > 0 ? `${SDK_TEXT.restartBody} ${busyCounts(busy)} still running.` : SDK_TEXT.restartBody;
+  // Restarts the backend the way the Restart button always has; `lead` is the extra status line (auto path only).
+  const restartNow = (lead: string | null) => {
+    setConfirmRestart(false);
+    setRestarting(true);
+    setRestartNotice(lead ? [lead] : []);
+    void host.coreRestart!().then(
+      () => setRestartNotice((n) => [...n, "Backend restart requested; the app will reconnect."]),
+      () => setRestartNotice((n) => [...n, "The backend could not be restarted."]),
+    ).finally(() => setRestarting(false));
+  };
   return (
     <div className="st-stack">
       <p className="st-hint">{SDK_TEXT.hint}</p>
@@ -32,9 +45,9 @@ export default function AgentSdkSection() {
       {st && !st.canUpdate ? <p className="st-hint">{SDK_TEXT.remoteOff}</p> : null}
       {st?.restartNeeded || s.result?.restartNeeded ? (
         <div className="st-row">
-          <p className="st-hint" role="status">{SDK_TEXT.restartNote}</p>
+          <p className="st-hint" role="status">{busy && busy.total > 0 ? busyNote(busy) : SDK_TEXT.restartNote}</p>
           {host.coreRestart ? (
-            <Button disabled={restarting} onClick={() => setConfirmRestart(true)}>
+            <Button disabled={restarting} onClick={() => void m.checkBusy().then(() => setConfirmRestart(true))}>
               {restarting ? "Restarting…" : "Restart backend"}
             </Button>
           ) : null}
@@ -43,22 +56,14 @@ export default function AgentSdkSection() {
       {confirmRestart ? (
         <div className="st-dialog" role="alertdialog" aria-label={SDK_TEXT.restartTitle}>
           <strong>{SDK_TEXT.restartTitle}</strong>
-          <p>{SDK_TEXT.restartBody}</p>
+          <p>{restartBody}</p>
           <div className="st-row">
-            <Button tone="danger" onClick={() => {
-              setConfirmRestart(false);
-              setRestarting(true);
-              setRestartNotice(null);
-              void host.coreRestart!().then(
-                () => setRestartNotice("Backend restart requested; the app will reconnect."),
-                () => setRestartNotice("The backend could not be restarted."),
-              ).finally(() => setRestarting(false));
-            }}>Restart backend</Button>
+            <Button tone="danger" onClick={() => restartNow(null)}>Restart backend</Button>
             <Button onClick={() => setConfirmRestart(false)}>Cancel</Button>
           </div>
         </div>
       ) : null}
-      {restartNotice ? <p className="st-hint" role="status">{restartNotice}</p> : null}
+      {restartNotice.map((line) => <p key={line} className="st-hint" role="status">{line}</p>)}
       {s.result ? <p className={s.result.ok ? "st-ok" : "st-error"} role="status">{s.result.ok ? (s.result.rolledBack ? "The update did not load and was rolled back." : `Updated to ${v(s.result.to)}.`) : "The update did not run."}</p> : null}
       {log ? <pre className="st-pre" aria-label="Update log">{log}</pre> : null}
       {s.updating ? <p className="st-hint" role="status">Updating. Downloading can take a few minutes...</p> : null}
@@ -74,7 +79,11 @@ export default function AgentSdkSection() {
           actionLabel="Update"
           busy={s.updating}
           onCancel={() => setConfirming(false)}
-          onConfirm={() => { setConfirming(false); void m.update(); }}
+          onConfirm={() => {
+            setConfirming(false);
+            // Auto-restart only after an installed update with no work running (busy 0); otherwise the note holds.
+            void m.update(host.coreRestart ? () => restartNow("Restarted so the new SDK is used.") : undefined);
+          }}
         />
       ) : null}
     </div>

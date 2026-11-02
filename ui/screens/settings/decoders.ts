@@ -543,6 +543,24 @@ export interface AgentSdkStatus {
   canUpdate: boolean;
   /** Why the registry could not be read (a short status, shown as text). */
   error: string | null;
+  /** Work the core counts as running (counts only). Null = unknown: an older core, or a malformed answer. */
+  busy: AgentBusy | null;
+}
+/** Chat turns in the core plus Loop agent runs in flight, all users. Covers only the core: host shell stages are not counted. */
+export interface AgentBusy {
+  chatTurns: number;
+  loopRuns: number;
+  total: number;
+}
+// Tolerant on purpose: an absent or malformed busy is "unknown", never a claim that nothing runs.
+function decodeBusy(v: unknown): AgentBusy | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const n = (x: unknown): number | null => (typeof x === "number" && Number.isInteger(x) && x >= 0 ? x : null);
+  const chatTurns = n(r.chatTurns);
+  const loopRuns = n(r.loopRuns);
+  const total = n(r.total);
+  return chatTurns === null || loopRuns === null || total === null ? null : { chatTurns, loopRuns, total };
 }
 export function decodeAgentSdk(v: unknown): AgentSdkStatus {
   const r = rec(v, "agent-sdk");
@@ -555,6 +573,7 @@ export function decodeAgentSdk(v: unknown): AgentSdkStatus {
     updating: r.updating === true,
     canUpdate: r.canUpdate !== false,
     error: optStr(r.error, "error") ?? null,
+    busy: decodeBusy(r.busy),
   };
 }
 
