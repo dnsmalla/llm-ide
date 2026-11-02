@@ -99,3 +99,6 @@
 .gr-legend-inline { display: inline-flex; gap: var(--tok-space-sm); flex-wrap: wrap; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gr-legend-inline span { display: inline-flex; align-items: center; gap: 3px; }
 .gr-legend-inline i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.gr-advanced { border-top: 1px solid var(--tok-color-border); padding-top: 6px; }
+.gr-advanced > summary { cursor: pointer; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.gr-advanced .gr-controls { padding-top: 6px; }

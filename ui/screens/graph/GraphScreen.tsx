@@ -81,18 +81,18 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     void onGenerate(modeOverride, targetPath).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
   };
 
+  const quickPick = repos.length > 0 ? (
+    <div className="gr-quick" aria-label="Quick pick repositories">
+      <h3 className="gr-quick-title">Quick Pick</h3>
+      {repos.map((r) => (
+        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setMode("code"); setTarget(r); runGeneration(r, "code"); }}>
+          <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
+        </button>
+      ))}
+    </div>
+  ) : null;
   const runFooter = (
     <div className="gr-run-footer">
-      {repos.length > 0 ? (
-        <div className="gr-quick" aria-label="Quick pick repositories">
-          <h3 className="gr-quick-title">Quick Pick</h3>
-          {repos.map((r) => (
-            <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setMode("code"); setTarget(r); runGeneration(r, "code"); }}>
-              <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div className="gr-run-modes" role="radiogroup" aria-label="Graph mode">
         {([["code", "Code"], ["memory", "InfiniteBrain"], ["all", "All"]] as const).map(([id, label]) => (
           <button key={id} type="button" role="radio" aria-checked={mode === id} className="gr-seg-btn" data-on={mode === id} disabled={generating} onClick={() => { setMode(id); setGenerateError(null); }}>{label}</button>
@@ -117,7 +117,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   if (s.phase === "empty") {
     return wrap(
       <div className="gr-empty-shell">
-        <aside className="gr-run-panel" aria-label="Graph generation">{runFooter}</aside>
+        <aside className="gr-run-panel" aria-label="Graph generation">{quickPick}{runFooter}</aside>
         <main className="gr-empty-main"><EmptyState mode={mode} /></main>
       </div>,
     );
@@ -137,11 +137,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     <div className="gr-root" data-active={active}>
       <header className="gr-top">
         <h2 className="gr-title">Code Graph</h2>
-        <p className="gr-summary" role="status">
-          {num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities
-          {s.cached ? ", from cache" : `, laid out in ${layout.ms < 1000 ? `${Math.round(layout.ms)} ms` : `${(layout.ms / 1000).toFixed(1)} s`}`}
-          {s.sourcePath ? ` · ${s.sourcePath}` : ""}
-        </p>
+        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities</p>
         <div className="gr-canvas-tools" role="group" aria-label="Graph display">
           <button type="button" className="gr-btn" aria-pressed={showSymbols} onClick={() => {
             const next = new Set(s.filters.hiddenKinds);
@@ -154,7 +150,6 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
             <button type="button" role="radio" aria-checked="false" className="gr-seg-btn" disabled title="3D is not available in the desktop renderer">3D</button>
           </div>
           <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
-          <span className="gr-muted">{num(model.n)} nodes</span>
           {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) ?? "transparent" }} aria-hidden="true" />{l.label}</span>)}</span> : null}
           <button type="button" className="gr-btn" title="Toggle full screen" onClick={() => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()).catch(() => undefined); }}>⛶</button>
         </div>
@@ -172,6 +167,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
       {fatal && <StatusBanner severity="error" message={`${fatal} The Nodes tab still works.`} />}
       <div className="gr-body">
         <div className="gr-side">
+          {quickPick}
           <GraphFileTree
             paths={model.paths}
             selected={s.query}
@@ -188,7 +184,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
               <NodeList id="gr-search" label="Search results" model={model} layout={layout} count={results.length} nodeAt={(k) => results[k]} selected={sel} onSelect={(i) => store.select(i)} initialViewport={240} emptyText="No node matches." />
             </div>
           )}
-          <Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} />
+          <details className="gr-advanced"><summary>Filters and communities</summary><Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} /></details>
           {runFooter}
         </div>
         <main className="gr-main">
