@@ -22,26 +22,22 @@ export const NEIGHBOUR_COLOR = "#ffb020";
 export const DIM_COLOR = "#8a8f9855";
 export const EDGE_COLORS = ["#8a8f9833", "#8a8f9855", "#8a8f9888", "#6c727e"] as const;
 
-/** InfiniteBrain node-kind colours (Mac legend): notes are blue, documents purple, and the annotation kinds
- *  keep the Mac's semantic palette. Unknown kinds stay community-coloured. */
+/** Node-kind colours, the Mac's `CGPalette.color(for:)` values (SwiftUI system colours and the custom UA hues).
+ *  Used for the kind legend and the kind dots; nodes themselves are coloured by community, as on the Mac canvas. */
 const KIND_COLORS: Readonly<Record<string, string>> = {
-  note: "#3b82f6",
-  noteNote: "#3b82f6",
-  memoryChunk: "#3b82f6",
-  memoryDoc: "#8b5cf6",
-  docPage: "#8b5cf6",
-  noteConcept: "#14b8a6",
-  noteDecision: "#ef4444",
-  noteFact: "#22c55e",
-  notePlaybook: "#06b6d4",
-  noteQuestion: "#eab308",
-  noteSource: "#d97706",
-  noteTask: "#f97316",
-  noteEvent: "#a855f7",
+  file: "#007aff", symbol: "#af52de", module: "#ff9500", docPage: "#34c759",
+  memoryDoc: "#5856d6", memoryChunk: "#00c7be",
+  noteDecision: "#ff3b30", noteTask: "#ff9500", noteQuestion: "#ffcc00", noteFact: "#34c759",
+  noteConcept: "#32ade6", notePlaybook: "#007aff", noteHypothesis: "#af52de", noteEvent: "#ff2d55", noteSource: "#a2845e",
+  function: "#3399e6", classType: "#9933cc", config: "#808080", service: "#00b380", table: "#cc801a",
+  endpoint: "#e64d4d", pipeline: "#4d80e6", schemaNode: "#b3661a", resource: "#1a804d", domain: "#e6991a",
+  flow: "#66cccc", step: "#99cc66", article: "#669933", entity: "#cc3399", topic: "#3366cc", claim: "#e66633",
+  skill: "#59bfa6", agent: "#d973bf", other: "#8e8e93",
 };
 
-export function kindColor(kind: string): string | null {
-  return KIND_COLORS[kind] ?? null;
+/** Colour for a node kind. Unknown kinds read as `other` (grey), as on the Mac. */
+export function kindColor(kind: string): string {
+  return KIND_COLORS[kind] ?? KIND_COLORS.other;
 }
 
 /** Legend rows shown for a doc graph, in the Mac's order. */

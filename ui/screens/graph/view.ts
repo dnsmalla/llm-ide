@@ -10,8 +10,8 @@ import Sigma from "sigma";
 import type { GraphModel, LayoutResult } from "./model.ts";
 import { buildAdjacency, edgeWeights, type Adjacency, type FilterState } from "./filters.ts";
 import { planLod, weightHistogram, type LodPlan } from "./lod.ts";
-import { edgeShown, labelShown, visibleNodes } from "./visibility.ts";
-import { communityColor, DIM_COLOR, EDGE_COLORS, kindColor, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
+import { edgeFocusDim, edgeShown, labelShown, nodeTone, visibleNodes } from "./visibility.ts";
+import { communityColor, DIM_COLOR, EDGE_COLORS, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
 
 export interface ViewCamera {
   x: number;
@@ -28,9 +28,11 @@ export interface ViewOptions {
   camera: ViewCamera | null;
   /** Draw node labels; the canvas toolbar can turn them off without rebuilding the graph. */
   showLabels?: boolean;
-  /** Colour by InfiniteBrain node kind rather than community (Mac doc-graph legend). */
-  colorByKind?: boolean;
+  /** The focused node (double-click on the Mac), or -1. Nodes outside its neighbourhood are dimmed. */
+  focused?: number;
   onSelect(i: number): void;
+  /** Double-click: a node index, or -1 for the empty stage. */
+  onFocus?(i: number): void;
   onCamera(c: ViewCamera): void;
   /** Called when WebGL is unavailable or the context is lost for good. */
   onFatal(message: string): void;
@@ -50,7 +52,9 @@ export class GraphView {
   private plan: LodPlan;
   private filters: FilterState;
   private selected: number;
+  private focused: number;
   private neighbour: Uint8Array = new Uint8Array(0);
+  private focusNeighbour: Uint8Array = new Uint8Array(0);
   private disposed = false;
   private showLabels = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +69,7 @@ export class GraphView {
     this.showLabels = o.showLabels !== false;
     this.filters = o.filters;
     this.selected = o.selected;
+    this.focused = o.focused ?? -1;
     this.adj = buildAdjacency(o.model);
     this.weights = edgeWeights(o.model);
     this.hist = weightHistogram(this.weights);
@@ -144,6 +149,9 @@ export class GraphView {
     if (this.o.camera) sigma.getCamera().setState({ x: this.o.camera.x, y: this.o.camera.y, ratio: this.o.camera.ratio });
     sigma.on("clickNode", ({ node }) => this.o.onSelect(Number(node)));
     sigma.on("clickStage", () => this.o.onSelect(-1));
+    // The Mac's double-click focuses without zooming: stop sigma's default double-click zoom.
+    sigma.on("doubleClickNode", (ev) => { ev.preventSigmaDefault(); this.o.onFocus?.(Number(ev.node)); });
+    sigma.on("doubleClickStage", (ev) => { ev.preventSigmaDefault(); this.o.onFocus?.(-1); });
     sigma.on("enterNode", ({ node }) => this.showTip(Number(node)));
     sigma.on("leaveNode", () => { this.tip.hidden = true; });
     sigma.on("afterRender", () => this.placeRing());
@@ -168,6 +176,11 @@ export class GraphView {
     if (this.selected >= 0) {
       for (let k = this.adj.start[this.selected]; k < this.adj.start[this.selected + 1]; k++) this.neighbour[this.adj.nbr[k]] = 1;
     }
+    this.focusNeighbour = new Uint8Array(model.n);
+    if (this.focused >= 0) {
+      this.focusNeighbour[this.focused] = 1;
+      for (let k = this.adj.start[this.focused]; k < this.adj.start[this.focused + 1]; k++) this.focusNeighbour[this.adj.nbr[k]] = 1;
+    }
   }
 
   private nodeAttrs(d: Record<string, unknown>): Record<string, unknown> {
@@ -176,15 +189,15 @@ export class GraphView {
     if (this.visible[i] === 0) return { ...d, hidden: true };
     const sel = this.selected;
     const isNb = this.neighbour[i] === 1;
-    const byKind = this.o.colorByKind ? kindColor(model.nodeKinds[model.kindOf[i]]) : null;
-    let color = byKind ?? communityColor(layout.community[i]);
+    let color = communityColor(layout.community[i]);
     let zIndex = 0;
     let size = d.size as number;
-    if (sel >= 0) {
-      if (i === sel) { color = SELECT_COLOR; zIndex = 3; size *= 1.6; }
-      else if (isNb) { color = NEIGHBOUR_COLOR; zIndex = 2; }
-      else color = DIM_COLOR;
-    }
+    // Focus (the Mac's double-click) wins over selection: outside the focused neighbourhood everything is dimmed.
+    const tone = nodeTone(i, sel, isNb, this.focused, this.focusNeighbour[i] === 1);
+    if (tone === "select") { color = SELECT_COLOR; zIndex = 3; size *= 1.6; }
+    else if (tone === "neighbour") { color = NEIGHBOUR_COLOR; zIndex = 2; }
+    else if (tone === "focus") { zIndex = 2; size *= 1.4; }
+    else if (tone === "dim") color = DIM_COLOR;
     return { ...d, color, size, zIndex, label: this.showLabels && labelShown(i, layout, this.plan, sel, isNb) ? model.titles[i] : null };
   }
 
@@ -195,7 +208,9 @@ export class GraphView {
     const w = this.weights[e];
     const touches = this.selected >= 0 && (model.from[e] === this.selected || model.to[e] === this.selected);
     const bucket = w >= 0.85 ? 3 : w >= 0.6 ? 2 : w >= 0.35 ? 1 : 0;
-    return { ...d, color: touches ? SELECT_COLOR : EDGE_COLORS[this.selected >= 0 ? 0 : bucket], size: touches ? 1.6 : 0.4 + w * 0.8, zIndex: touches ? 1 : 0 };
+    const focusDim = edgeFocusDim(model.from[e], model.to[e], this.focused);
+    const hot = touches && !focusDim;
+    return { ...d, color: hot ? SELECT_COLOR : EDGE_COLORS[this.selected >= 0 || focusDim ? 0 : bucket], size: hot ? 1.6 : 0.4 + w * 0.8, zIndex: hot ? 1 : 0 };
   }
 
   private onCameraUpdated(): void {
@@ -226,9 +241,10 @@ export class GraphView {
     this.sigma?.refresh();
   }
 
-  update(filters: FilterState, selected: number): void {
+  update(filters: FilterState, selected: number, focused = -1): void {
     this.filters = filters;
     this.selected = selected;
+    this.focused = focused;
     this.apply();
   }
 

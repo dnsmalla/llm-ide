@@ -1,5 +1,6 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { loadEntry, react, server } from "./helpers.mjs";
 
 let G, h, html;
@@ -146,4 +147,58 @@ test("fallback layout is announced in the screen", async () => {
   const entry = store.getSnapshot().entry;
   entry.layout.engine = "fallback";
   assert.match(html(h(G.GraphScreen, { store, active: true, projectRoot: "/p", openFile: noop })), /simplified layout/);
+});
+
+// Parity with the Mac (CodeGraphView): Symbols defaults off, the toolbar counts shown nodes and the code / doc split,
+// the focus pill appears, and a generate button with no scan target is disabled.
+const fixture = (name) => readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8");
+async function loaded(text) {
+  const engine = { cancel() {}, async load() { const r = await G.runJob(text, { loadWasm: G.loadWasmBytes }); return { kind: "done", entry: { model: r.model, layout: r.layout, notices: r.notices }, cached: false }; } };
+  const store = new G.GraphStore({ invoke: async () => text, engine });
+  await store.load("/proj");
+  return store;
+}
+
+test("parity: a code graph opens with Symbols off, shows shown / total, and disables generate with no scan target", async () => {
+  const store = await loaded(fixture("merge-code"));
+  const screen = () => html(h(G.GraphScreen, { store, active: true, projectRoot: "/proj", openFile: noop, onGenerate: async () => {} }));
+  const out = screen();
+  assert.match(out, /aria-pressed="false"[^>]*>Symbols<\/button>/, "Symbols is off on open, as on the Mac");
+  assert.match(out, /aria-label="Nodes shown">[\d,]+ \/ [\d,]+ shown</);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Generate Code Graph<\/button>/, "no repo in SSR, so generate is disabled");
+  store.setFocus(0);
+  assert.match(screen(), /Focus: [^<]+ ✕<\/button>/, "a focused node shows the focus pill");
+  store.setFocus(-1);
+  assert.doesNotMatch(screen(), /Focus: /);
+});
+
+test("parity: an InfiniteBrain graph has no Symbols toggle and reports its doc count", async () => {
+  const store = await loaded(fixture("memory"));
+  const out = html(h(G.GraphScreen, { store, active: true, projectRoot: "/proj", openFile: noop }));
+  assert.doesNotMatch(out, />Symbols<\/button>/);
+  assert.match(out, /nodes, [\d,]+ edges, \d+ communities · [\d,]+ code · [\d,]+ doc/);
+});
+
+test("parity: the kind legend and kind checkboxes use the Mac's palette", async () => {
+  const store = await loaded(fixture("merge-code"));
+  const { model } = store.getSnapshot().entry;
+  const out = html(h(G.Controls, { model, communities: G.communitySummary(store.getSnapshot().entry.model, store.getSnapshot().entry.layout), filters: store.getSnapshot().filters, onChange: noop }));
+  assert.match(out, /background:#007aff/, "file is the Mac's blue");
+  assert.match(out, /background:#3399e6/, "function is the Mac's code blue");
+});
+
+test("parity: a missing file is named as missing; other read errors are shown as they came", () => {
+  assert.equal(G.isMissingFile("cannot resolve code/x.ts: No such file or directory"), true);
+  assert.equal(G.isMissingFile("file not found"), true);
+  assert.equal(G.isMissingFile("permission denied"), false);
+});
+
+test("review: a Tauri rejection ({ code, message }) is decoded; not_found reads as missing, permission errors do not", () => {
+  assert.equal(G.readFailure({ code: "not_found", message: "cannot resolve path: No such file or directory (os error 2)" }), "not_found");
+  assert.equal(G.isMissingFile(G.readFailure({ code: "not_found", message: "x" })), true);
+  const denied = G.readFailure({ code: "permission_denied", message: "cannot resolve path: Permission denied (os error 13)" });
+  assert.equal(denied, "cannot resolve path: Permission denied (os error 13)");
+  assert.equal(G.isMissingFile(denied), false, "a permission error is not offered as a missing file");
+  assert.equal(G.readFailure(new Error("boom")), "boom");
+  assert.equal(G.readFailure(undefined), "The file could not be read.");
 });

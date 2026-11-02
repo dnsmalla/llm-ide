@@ -3,7 +3,7 @@
 // cache. A new load or `dispose` cancels the one in flight.
 import type { CacheEntry } from "./cache.ts";
 import type { LayoutEngine } from "./engine.ts";
-import { initialFilters, type FilterState } from "./filters.ts";
+import { defaultFilters, initialFilters, type FilterState } from "./filters.ts";
 import { customGraphPath, readProjectGraph, type Invoke } from "./source.ts";
 
 export type Phase = "idle" | "loading" | "ready" | "empty" | "too-large" | "no-project" | "error";
@@ -22,6 +22,8 @@ export interface GraphState {
   /** A preview layout is showing and the full layout is still being computed. */
   refining: boolean;
   selected: number;
+  /** The node the canvas is focused on (double-click), or -1. Dims everything outside its neighbourhood. */
+  focus: number;
   filters: FilterState;
   query: string;
   tab: Tab;
@@ -34,7 +36,7 @@ export interface StoreDeps {
 
 const initial = (): GraphState => ({
   phase: "idle", stage: "", error: null, sourcePath: null, tried: [], entry: null, cached: false, refining: false,
-  selected: -1, filters: initialFilters(), query: "", tab: "graph",
+  selected: -1, focus: -1, filters: initialFilters(), query: "", tab: "graph",
 });
 
 export class GraphStore {
@@ -62,7 +64,7 @@ export class GraphStore {
     const run = ++this.run;
     this.deps.engine.cancel();
     this.root = root;
-    this.set({ phase: "loading", stage: "Reading graph.json", error: null, entry: null, selected: -1, cached: false, refining: false });
+    this.set({ phase: "loading", stage: "Reading graph.json", error: null, entry: null, selected: -1, focus: -1, cached: false, refining: false });
     const read = await readProjectGraph(this.deps.invoke, root, rels);
     if (run !== this.run) return;
     if (!read.ok) {
@@ -80,7 +82,7 @@ export class GraphStore {
       (p) => {
         if (run !== this.run) return;
         // First frame: a fast approximate layout, replaced when the full one arrives.
-        this.set({ phase: p.model.n === 0 ? "empty" : "ready", entry: p, stage: "", refining: true, filters: initialFilters(), query: "", selected: -1 });
+        this.set({ phase: p.model.n === 0 ? "empty" : "ready", entry: p, stage: "", refining: true, filters: defaultFilters(p.model), query: "", selected: -1, focus: -1 });
       },
     );
     if (run !== this.run) return;
@@ -94,7 +96,7 @@ export class GraphStore {
     this.set({
       phase: out.entry.model.n === 0 ? "empty" : "ready",
       entry: out.entry, cached: out.cached, refining: false, stage: "", error: null, tried: [],
-      ...(this.state.refining ? {} : { filters: initialFilters(), query: "", selected: -1 }),
+      ...(this.state.refining ? {} : { filters: defaultFilters(out.entry.model), query: "", selected: -1, focus: -1 }),
     });
   }
 
@@ -119,6 +121,11 @@ export class GraphStore {
   select(i: number): void {
     const n = this.state.entry?.model.n ?? 0;
     this.set({ selected: Number.isInteger(i) && i >= 0 && i < n ? i : -1 });
+  }
+  /** Focus a node (-1 clears). Bounds-checked like `select`. */
+  setFocus(i: number): void {
+    const n = this.state.entry?.model.n ?? 0;
+    this.set({ focus: Number.isInteger(i) && i >= 0 && i < n ? i : -1 });
   }
   setFilters(patch: Partial<FilterState>): void {
     this.set({ filters: { ...this.state.filters, ...patch } });

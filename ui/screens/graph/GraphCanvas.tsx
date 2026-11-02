@@ -12,11 +12,14 @@ export interface GraphCanvasProps {
   adj: Adjacency;
   filters: FilterState;
   selected: number;
+  /** The focused node (double-click), or -1. */
+  focused: number;
   active: boolean;
   camera: { current: ViewCamera | null };
   showLabels?: boolean;
-  colorByKind?: boolean;
   onSelect: (node: number) => void;
+  /** Double-click on a node (its index) or on the empty stage (-1). */
+  onFocus?: (node: number) => void;
   onFatal: (message: string) => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
 }
@@ -24,8 +27,8 @@ export interface GraphCanvasProps {
 export function GraphCanvas(p: GraphCanvasProps) {
   const box = useRef<HTMLDivElement | null>(null);
   const view = useRef<GraphView | null>(null);
-  const latest = useRef({ filters: p.filters, selected: p.selected });
-  latest.current = { filters: p.filters, selected: p.selected };
+  const latest = useRef({ filters: p.filters, selected: p.selected, focused: p.focused });
+  latest.current = { filters: p.filters, selected: p.selected, focused: p.focused };
   const [building, setBuilding] = useState(false);
   const [recover, setRecover] = useState(0);
   const lost = useRef(0);
@@ -47,8 +50,9 @@ export function GraphCanvas(p: GraphCanvasProps) {
       selected: latest.current.selected,
       camera: p.camera.current,
       showLabels: p.showLabels,
-      colorByKind: p.colorByKind,
+      focused: latest.current.focused,
       onSelect: p.onSelect,
+      onFocus: (i) => p.onFocus?.(i),
       onCamera: (c) => { p.camera.current = c; },
       onFatal: p.onFatal,
       onContextLost: () => {
@@ -65,7 +69,7 @@ export function GraphCanvas(p: GraphCanvasProps) {
       if (cancelled) { v?.dispose(); return; }
       view.current = v;
       setBuilding(false);
-      v?.update(latest.current.filters, latest.current.selected);
+      v?.update(latest.current.filters, latest.current.selected, latest.current.focused);
     });
     return () => {
       cancelled = true;
@@ -82,10 +86,10 @@ export function GraphCanvas(p: GraphCanvasProps) {
     view.current?.setLabels(p.showLabels !== false);
   }, [p.showLabels]);
   useEffect(() => {
-    view.current?.update(p.filters, p.selected);
+    view.current?.update(p.filters, p.selected, p.focused);
     if (p.selected >= 0 && p.selected !== prevSel.current) view.current?.focus(p.selected);
     prevSel.current = p.selected;
-  }, [p.filters, p.selected]);
+  }, [p.filters, p.selected, p.focused]);
 
   const onKey = (e: React.KeyboardEvent) => {
     const v = view.current;

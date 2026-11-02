@@ -1,6 +1,6 @@
 // Filters: preset (All / Code / Docs), node kinds, community, edge-weight slider. Filters hide at render;
 // nothing is removed from the graph, and the slider's default is the Mac's 0.30 floor.
-import { communityColor } from "./colors.ts";
+import { communityColor, kindColor } from "./colors.ts";
 import type { CommunityInfo, FilterState, Preset } from "./filters.ts";
 import type { GraphModel } from "./model.ts";
 
@@ -37,7 +37,7 @@ export function Controls({ model, communities, filters, onChange }: ControlsProp
       <fieldset className="gr-fieldset">
         <legend>Node kinds</legend>
         {model.nodeKinds.map((k) => (
-          <label key={k} className="gr-check"><input type="checkbox" checked={!filters.hiddenKinds.has(k)} onChange={() => toggleKind(k)} /> {k}</label>
+          <label key={k} className="gr-check"><input type="checkbox" checked={!filters.hiddenKinds.has(k)} onChange={() => toggleKind(k)} /><i className="gr-dot" style={{ background: kindColor(k) }} aria-hidden="true" /> {k}</label>
         ))}
       </fieldset>
       <label className="gr-field">

@@ -22,6 +22,57 @@ export const DEFAULT_MIN_WEIGHT = 0.3; // the Mac's default floor: associative g
 
 export const initialFilters = (): FilterState => ({ preset: "all", hiddenKinds: new Set(), community: null, minWeight: DEFAULT_MIN_WEIGHT });
 
+/** The Mac's files-only view (`CodeGraphView.filesOnlyKinds`): what stays drawn while "Symbols" is off. */
+export const FILES_ONLY_KINDS: ReadonlySet<string> = new Set([
+  "file", "module", "docPage", "memoryDoc", "memoryChunk",
+  "noteDecision", "noteTask", "noteQuestion", "noteFact", "noteConcept", "notePlaybook", "noteHypothesis", "noteEvent", "noteSource",
+]);
+
+/** Kinds the Symbols toggle switches: every kind in the graph that the files-only view does not keep. */
+export function symbolKinds(model: GraphModel): string[] {
+  return model.nodeKinds.filter((k) => !FILES_ONLY_KINDS.has(k));
+}
+
+/** Filters as the Mac opens a graph: symbols hidden (files-only), everything else on. A graph with no
+ *  files-only kind at all (only symbols, or a plugin graph of entities/topics) opens with everything shown,
+ *  so it never opens as an empty canvas. */
+export function defaultFilters(model: GraphModel): FilterState {
+  const hasFiles = model.nodeKinds.some((k) => FILES_ONLY_KINDS.has(k));
+  return { ...initialFilters(), hiddenKinds: hasFiles ? new Set(symbolKinds(model)) : new Set() };
+}
+
+/** Whether "Symbols" is on: no symbol kind is hidden. Graphs without symbols (InfiniteBrain) have no toggle. */
+export function symbolsShown(model: GraphModel, f: FilterState): boolean {
+  return symbolKinds(model).every((k) => !f.hiddenKinds.has(k));
+}
+
+/** The hidden-kind set with every symbol kind shown or hidden, the other kinds untouched. */
+export function setSymbolsShown(model: GraphModel, f: FilterState, on: boolean): Set<string> {
+  const next = new Set(f.hiddenKinds);
+  for (const k of symbolKinds(model)) {
+    if (on) next.delete(k); else next.add(k);
+  }
+  return next;
+}
+
+/** InfiniteBrain (doc) kinds, the same set the Mac counts as "doc" in its code / doc split. */
+export const isDocKind = (kind: string): boolean => kind.startsWith("note") || kind === "memoryDoc" || kind === "memoryChunk" || kind === "docPage";
+
+/** Node counts split into code and doc, as the Mac's status line reports them. */
+export function docSplit(model: GraphModel): { code: number; doc: number } {
+  let doc = 0;
+  const docKind = model.nodeKinds.map(isDocKind);
+  for (let i = 0; i < model.n; i++) if (docKind[model.kindOf[i]]) doc++;
+  return { code: model.n - doc, doc };
+}
+
+/** How many nodes a mask keeps. */
+export const countOnes = (mask: Uint8Array): number => {
+  let c = 0;
+  for (let i = 0; i < mask.length; i++) c += mask[i];
+  return c;
+};
+
 export function kindAllowed(kind: string, f: FilterState): boolean {
   if (f.hiddenKinds.has(kind)) return false;
   if (f.preset === "code") return CODE.has(kind);

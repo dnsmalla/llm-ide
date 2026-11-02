@@ -9,7 +9,7 @@ import { GraphCanvas } from "./GraphCanvas.tsx";
 import { GraphFileTree } from "./FileTree.tsx";
 import { NodeList } from "./NodeList.tsx";
 import { EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
-import { buildAdjacency, communitySummary } from "./filters.ts";
+import { buildAdjacency, communitySummary, countOnes, docSplit, isDocKind, nodeMask, setSymbolsShown, symbolKinds, symbolsShown } from "./filters.ts";
 import { DOC_LEGEND, kindColor } from "./colors.ts";
 import { searchNodes } from "./search.ts";
 import type { GraphStore } from "./store.ts";
@@ -37,7 +37,6 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
-  const [showSymbols, setShowSymbols] = useState(true);
   const [repos, setRepos] = useState<string[]>([]);
   const [target, setTarget] = useState("");
 
@@ -58,7 +57,8 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
       const o = raw && typeof raw === "object" ? raw as { entries?: Array<{ path?: unknown; kind?: unknown; hidden?: unknown; ignored?: unknown }> } : {};
       const dirs = (o.entries ?? []).filter((e) => e.kind === "dir" && e.hidden !== true && e.ignored !== true && typeof e.path === "string").map((e) => e.path as string);
       setRepos(dirs);
-      setTarget((cur) => cur || dirs[0] || "");
+      // The Mac's scan target: the only repo when there is exactly one, otherwise the one picked in Quick Pick.
+      setTarget((cur) => (dirs.length === 1 ? dirs[0] : dirs.includes(cur) ? cur : ""));
     }).catch(() => { if (live) setRepos([]); });
     return () => { live = false; };
   }, [projectRoot]);
@@ -68,6 +68,8 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const communities = useMemo(() => (entry ? communitySummary(entry.model, entry.layout) : []), [entry]);
   const deferredQuery = useDeferredValue(s.query);
   const results = useMemo(() => (entry ? searchNodes(entry.model, deferredQuery) : new Uint32Array(0)), [entry, deferredQuery]);
+  const split = useMemo(() => (entry ? docSplit(entry.model) : null), [entry]);
+  const shown = useMemo(() => (entry ? countOnes(nodeMask(entry.model, entry.layout, s.filters)) : 0), [entry, s.filters]);
 
   if (s.phase === "loading" || s.phase === "idle") {
     return <div className="gr-root" data-active={active}><LoadingState stage={s.stage} onCancel={() => store.cancel()} /></div>;
@@ -81,11 +83,22 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     void onGenerate(modeOverride, targetPath).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
   };
 
+  // The Mac's scan target. Code scans the picked repo only; InfiniteBrain and All fall back to the first repo.
+  const baseName = (p: string): string => p.split("/").pop() ?? p;
+  const scanTarget = target || repos[0] || "";
+  const generateTarget = mode === "code" ? target : scanTarget;
+  const canGenerate = !generating && !!onGenerate && generateTarget !== "";
+  const runLabel = mode === "code"
+    ? (target ? `Generate Code Graph for ${baseName(target)}` : "Generate Code Graph")
+    : mode === "memory"
+      ? (scanTarget ? `Generate InfiniteBrain for ${baseName(scanTarget)}` : "Generate InfiniteBrain")
+      : (scanTarget ? `Generate Graph for ${baseName(scanTarget)}` : "Generate Graph");
+
   const quickPick = repos.length > 0 ? (
     <div className="gr-quick" aria-label="Quick pick repositories">
       <h3 className="gr-quick-title">Quick Pick</h3>
       {repos.map((r) => (
-        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); }}>
+        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Load graph for ${baseName(r)}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); runGeneration(r, "code"); }}>
           <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
         </button>
       ))}
@@ -95,25 +108,25 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     <div className="gr-run-footer">
       <div className="gr-run-modes" role="radiogroup" aria-label="Graph mode">
         {([["code", "Code"], ["memory", "InfiniteBrain"], ["all", "All"]] as const).map(([id, label]) => (
-          <button key={id} type="button" role="radio" aria-checked={mode === id} className="gr-seg-btn" data-on={mode === id} disabled={generating} onClick={() => { setMode(id); setGenerateError(null); }}>{label}</button>
+          <button key={id} type="button" role="radio" aria-checked={mode === id} className="gr-seg-btn" data-on={mode === id} disabled={generating} onClick={() => { setMode(id); setGenerateError(null); store.select(-1); }}>{label}</button>
         ))}
       </div>
       <p className="gr-muted">
         {repos.length === 0
           ? "Pick a repo in Settings → GitLab/GitHub to generate a graph."
           : mode === "code"
-            ? `Scans code in ${target || "the selected repo"} into a symbol graph.`
+            ? (target ? `Scans code in ${baseName(target)} into a symbol graph.` : "Pick a repo in Quick Pick to scan its code.")
             : mode === "memory"
-              ? `Builds a doc graph from the .md/.txt docs in ${target || "the selected repo"}.`
-              : "Merges code and llm-doc into one graph."}
+              ? `Builds a doc graph from the .md/.txt docs in ${baseName(scanTarget)}.`
+              : `Builds one graph from all code + docs in ${baseName(scanTarget)}, with cross-links.`}
       </p>
       <button
         type="button"
         className="gr-btn gr-btn-primary"
-        disabled={generating || !onGenerate}
-        onClick={() => runGeneration(target)}
+        disabled={!canGenerate}
+        onClick={() => runGeneration(generateTarget)}
       >
-        {generating ? "Generating…" : mode === "code" ? "Generate Code Graph" : mode === "memory" ? "Generate InfiniteBrain" : "Generate Graph"}
+        {generating ? "Generating…" : runLabel}
       </button>
       <button type="button" className="gr-btn" disabled={generating} onClick={() => void store.reload()}>Check again</button>
       {generateError ? <p className="gr-error" role="alert">{generateError}</p> : null}
@@ -133,30 +146,34 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
 
   const { model, layout } = entry;
   const sel = s.selected;
+  const hasSymbols = symbolKinds(model).length > 0;
+  const symbolsOn = symbolsShown(model, s.filters);
+  const focusedName = s.focus >= 0 && s.focus < model.n ? model.titles[s.focus] : null;
   const notices = [...entry.notices];
   if (layout.engine === "fallback") notices.unshift("Showing a simplified layout because the layout engine could not start.");
   const kindSet = new Set(model.nodeKinds);
-  const docGraph = model.nodeKinds.some((k) => k.startsWith("note") || k === "memoryDoc" || k === "memoryChunk" || k === "docPage");
+  const docGraph = model.nodeKinds.some(isDocKind);
   const legend = DOC_LEGEND.filter((l) => kindSet.has(l.kind));
 
   return (
     <div className="gr-root" data-active={active}>
       <header className="gr-top">
         <h2 className="gr-title">Code Graph</h2>
-        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities</p>
+        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities{split && split.doc > 0 ? ` · ${num(split.code)} code · ${num(split.doc)} doc` : ""}</p>
         <div className="gr-canvas-tools" role="group" aria-label="Graph display">
-          <button type="button" className="gr-btn" aria-pressed={showSymbols} onClick={() => {
-            const next = new Set(s.filters.hiddenKinds);
-            if (showSymbols) next.add("symbol"); else next.delete("symbol");
-            setShowSymbols(!showSymbols);
-            store.setFilters({ hiddenKinds: next });
-          }}>Symbols</button>
+          {hasSymbols ? (
+            <button type="button" className="gr-btn" aria-pressed={symbolsOn} onClick={() => store.setFilters({ hiddenKinds: setSymbolsShown(model, s.filters, !symbolsOn) })}>Symbols</button>
+          ) : null}
+          <span className="gr-muted" aria-label="Nodes shown">{num(shown)} / {num(model.n)} shown</span>
           <div className="gr-seg" role="radiogroup" aria-label="Dimensions">
             <button type="button" role="radio" aria-checked="true" className="gr-seg-btn" data-on="true">2D</button>
             <button type="button" role="radio" aria-checked="false" className="gr-seg-btn" disabled title="3D is not available in the desktop renderer">3D</button>
           </div>
           <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
-          {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) ?? "transparent" }} aria-hidden="true" />{l.label}</span>)}</span> : null}
+          {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) }} aria-hidden="true" />{l.label}</span>)}</span> : null}
+          {focusedName !== null ? (
+            <button type="button" className="gr-btn" title="Clear focus (or double-click empty space)" onClick={() => store.setFocus(-1)}>Focus: {focusedName} ✕</button>
+          ) : null}
           <button type="button" className="gr-btn" title="Toggle full screen" onClick={() => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.()).catch(() => undefined); }}>⛶</button>
         </div>
         <div role="tablist" aria-label="Graph views" className="gr-seg">
@@ -195,7 +212,21 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         </div>
         <main className="gr-main">
           <div id="gr-panel-graph" role="tabpanel" aria-labelledby="gr-tab-graph" hidden={s.tab !== "graph"} className="gr-panel">
-            <GraphCanvas model={model} layout={layout} adj={adj} filters={s.filters} selected={sel} active={active && s.tab === "graph"} camera={camera} showLabels={showLabels} colorByKind={docGraph} onSelect={(i) => store.select(i)} onFatal={setFatal} createView={createView} />
+            <GraphCanvas
+              model={model}
+              layout={layout}
+              adj={adj}
+              filters={s.filters}
+              selected={sel}
+              focused={s.focus}
+              active={active && s.tab === "graph"}
+              camera={camera}
+              showLabels={showLabels}
+              onSelect={(i) => store.select(i)}
+              onFocus={(i) => store.setFocus(i < 0 || i === store.getSnapshot().focus ? -1 : i)}
+              onFatal={setFatal}
+              createView={createView}
+            />
           </div>
           <div id="gr-panel-list" role="tabpanel" aria-labelledby="gr-tab-list" hidden={s.tab !== "list"} className="gr-panel">
             {s.tab === "list" && (
@@ -204,7 +235,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           </div>
         </main>
         {sel >= 0 && (
-          <NodeDetails model={model} layout={layout} adj={adj} node={sel} onSelect={(i) => store.select(i)} onOpenFile={model.paths[sel] !== null ? openFile : null} onClose={() => store.select(-1)} />
+          <NodeDetails model={model} layout={layout} adj={adj} node={sel} onSelect={(i) => store.select(i)} onOpenFile={model.paths[sel] !== null ? openFile : null} onRegenerate={canGenerate ? () => runGeneration(generateTarget) : null} onClose={() => store.select(-1)} />
         )}
       </div>
     </div>

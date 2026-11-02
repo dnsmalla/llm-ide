@@ -35,3 +35,20 @@ export function edgeShown(e: number, model: GraphModel, weights: Float32Array, v
 export function labelShown(i: number, layout: LayoutResult, plan: LodPlan, selected: number, neighbour: boolean): boolean {
   return i === selected || neighbour || layout.rank[i] <= plan.labelFraction;
 }
+
+export type NodeTone = "base" | "select" | "neighbour" | "focus" | "dim";
+
+/** How a drawn node is emphasised. Focus (the Mac's double-click) wins over selection, as in the Mac's
+ *  `CodeGraphCanvas.nodeAlpha`: with a focus set, everything outside the focused node's neighbourhood is dimmed
+ *  even when it is selected; inside it, the selection keeps its colours. */
+export function nodeTone(i: number, selected: number, isSelNeighbour: boolean, focused: number, inFocus: boolean): NodeTone {
+  if (focused >= 0 && !inFocus) return "dim";
+  if (selected >= 0) return i === selected ? "select" : isSelNeighbour ? "neighbour" : focused >= 0 ? (i === focused ? "focus" : "base") : "dim";
+  if (focused >= 0) return i === focused ? "focus" : "base";
+  return "base";
+}
+
+/** Edge counterpart of `nodeTone`: with a focus set, an edge not touching the focused node is dimmed. */
+export function edgeFocusDim(a: number, b: number, focused: number): boolean {
+  return focused >= 0 && a !== focused && b !== focused;
+}

@@ -24,10 +24,29 @@ export interface DetailsProps {
   onSelect: (node: number) => void;
   /** Present only when the node has a project-relative path and the shell can open it. */
   onOpenFile: ((path: string) => void) | null;
+  /** Re-generate the graph (the Mac's "Regenerate Graph" on a stale node), when generation is available. */
+  onRegenerate?: (() => void) | null;
   onClose: () => void;
 }
 
-export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, onClose }: DetailsProps) {
+/** The read failure reads as a missing file when the host says so; anything else is shown as it came.
+ *  ("cannot resolve" alone is not enough: the host uses it for permission errors too.) */
+export const isMissingFile = (message: string): boolean => /not found|no such file|does not exist|^not_found$/i.test(message);
+
+/** A host rejection as text. Tauri rejects with the command's serialized error (`{ code, message }`), not an
+ *  `Error`; a `not_found` code is reported as such so the missing-file state can recognise it. */
+export function readFailure(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as { code?: unknown; message?: unknown };
+    if (o.code === "not_found") return "not_found";
+    if (typeof o.message === "string" && o.message !== "") return o.message;
+  }
+  if (typeof e === "string" && e !== "") return e;
+  return "The file could not be read.";
+}
+
+export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, onRegenerate, onClose }: DetailsProps) {
   const path = model.paths[node];
   const meta = model.meta[node];
   const [preview, setPreview] = useState<{ text: string; size: number } | null>(null);
@@ -39,7 +58,7 @@ export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, on
     let live = true;
     void invokeHost<{ text?: string | null; size?: number; status?: string }>("fs_read_file", { req: { path, max_bytes: 256_000 } })
       .then((r) => { if (live && typeof r?.text === "string") setPreview({ text: r.text, size: typeof r.size === "number" ? r.size : 0 }); })
-      .catch((e: unknown) => { if (live) setPreviewError(e instanceof Error ? e.message : "The file could not be read."); });
+      .catch((e: unknown) => { if (live) setPreviewError(readFailure(e)); });
     return () => { live = false; };
   }, [path]);
   const isMarkdown = path !== null && /\.(md|markdown)$/i.test(path);
@@ -69,7 +88,14 @@ export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, on
       </dl>
       {isMarkdown && preview && <div className="gr-file-preview" aria-label="Markdown preview"><MarkdownView text={preview.text} baseRel={path} initialSections={4} /></div>}
       {!isMarkdown && preview && <pre className="gr-file-code" aria-label="File preview">{preview.text.slice(0, 16_000)}</pre>}
-      {isMarkdown && previewError && <p className="gr-error">{previewError}</p>}
+      {previewError && (
+        <div className="gr-stale" role="alert">
+          <p className="gr-error">{isMissingFile(previewError)
+            ? "File not found on disk. The graph indexed this file, but it is no longer there. Re-generate the graph to refresh it."
+            : `The file could not be read: ${previewError}`}</p>
+          {onRegenerate && isMissingFile(previewError) ? <button type="button" className="gr-btn" onClick={onRegenerate}>Regenerate graph</button> : null}
+        </div>
+      )}
       <h4 className="gr-subhead">Neighbours ({items.length.toLocaleString("en-US")})</h4>
       <ul className="gr-nbrs">
         {items.slice(0, MAX_NEIGHBOURS).map((it, k) => (
