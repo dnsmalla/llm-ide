@@ -318,47 +318,58 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    // List GitHub issues (and other tickets) from the KB
+    // List GitHub issues (and other tickets) from the KB. Filtering, ordering and
+    // paging run in SQL (kb.listTicketSources): offset/limit page through the
+    // user's own ticket rows, newest update first. Absent offset is the first page.
     if (req.method === 'GET' && url.startsWith('/kb/issues')) {
       const u = new URL(url, 'http://127.0.0.1');
       const repo = u.searchParams.get('repo') || '';
       const state = u.searchParams.get('state') || 'open';
       const provider = u.searchParams.get('provider') || 'github';
+      // limit: zero, negative, NaN and fractions below 1 give the default 20; above 100 cap at 100.
       const rawLimit = Number(u.searchParams.get('limit'));
-      const limit = Number.isFinite(rawLimit) && rawLimit > 0
-        ? Math.min(rawLimit, 100)
-        : 20;
-      
-      // Search for tickets matching the filter criteria
-      const allTickets = kb.search(userId, { kind: 'ticket', limit: 1000, maxCap: 1000 });
-      
-      // Filter by provider, repo, and state
-      const filtered = allTickets.filter(t => {
-        const meta = t.meta || {};
-        if (meta.provider !== provider) return false;
-        if (repo && meta.repo !== repo) return false;
-        if (state !== 'all' && meta.state !== state) return false;
-        return true;
+      const floored = Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 0;
+      const limit = floored >= 1 ? Math.min(floored, 100) : 20;
+      // offset: absent, empty, NaN or negative is 0. Past the end is an empty page, not an error.
+      const rawOffset = Number(u.searchParams.get('offset') || 0);
+      const offset = Number.isFinite(rawOffset) && rawOffset > 0
+        ? Math.min(Math.floor(rawOffset), Number.MAX_SAFE_INTEGER)
+        : 0;
+
+      const page = kb.listTicketSources(userId, {
+        provider,
+        repo: repo || null,
+        state: state === 'all' ? null : state,
+        limit,
+        offset,
       });
-      
-      // Map to a simpler Issue format
-      const issues = filtered.slice(0, limit).map(t => ({
-        id: t.entityId || t.meetingId,
-        title: t.title,
-        body: t.body,
-        url: t.meta?.ref || '',
-        provider: t.meta?.provider || '',
-        repo: t.meta?.repo,
-        number: t.meta?.number,
-        state: t.meta?.state,
-        labels: t.meta?.labels || [],
-        author: t.meta?.author,
-        createdAt: t.meta?.createdAt,
-        updatedAt: t.meta?.updatedAt,
-        isPR: t.meta?.isPR,
+      const issues = page.rows.map(({ id, ref, title, body, meta: m }) => ({
+        id: String(id),
+        title,
+        body,
+        url: ref || '',
+        provider: m.provider || '',
+        repo: m.repo,
+        number: m.number,
+        state: m.state,
+        labels: m.labels || [],
+        author: m.author,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+        isPR: m.isPR,
+        // Rows from the JSON importer carry caller-supplied meta: emit only the documented shapes.
+        milestone: m.milestone && typeof m.milestone === 'object' && typeof m.milestone.title === 'string'
+          ? { title: m.milestone.title, dueOn: typeof m.milestone.dueOn === 'string' ? m.milestone.dueOn : null }
+          : null,
+        assignees: Array.isArray(m.assignees) ? m.assignees.filter((a) => typeof a === 'string') : [],
       }));
-      
-      sendJSON(res, 200, { issues });
+      const hasMore = offset + issues.length < page.total;
+      sendJSON(res, 200, {
+        issues,
+        total: page.total,
+        hasMore,
+        nextOffset: hasMore ? offset + issues.length : null,
+      });
       return true;
     }
 

@@ -1250,6 +1250,13 @@ export type Issue = {
   createdAt?: string;
   updatedAt?: string;
   isPR?: boolean;
+  /** GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null. */
+  milestone?: {
+    title?: string;
+    dueOn?: string | null;
+  } | null;
+  /** GitHub logins of the assignees (at most 50); empty when unassigned. */
+  assignees?: string[];
 };
 
 export type ProjectExport = {
@@ -4944,13 +4951,21 @@ export type GetKbIssuesRequest = {
     state?: string;
     /** Defaults to github. */
     provider?: string;
-    /** Capped at 100; zero, negative or non-numeric values give the default 20. */
+    /** Rows per page: absent, zero, negative, NaN or a fraction below 1 gives 20; above 100 caps at 100. */
     limit?: string;
+    /** Zero-based index of the first row. Absent, empty, NaN or negative is 0; past the total is an empty page. */
+    offset?: string;
   };
 };
 
 export type GetKbIssuesResponse200 = {
   issues: Issue[];
+  /** Rows matching the provider, repo and state filters, across all pages. */
+  total: number;
+  /** True when a row exists past this page. */
+  hasMore: boolean;
+  /** The offset of the next page, or null when there is none. */
+  nextOffset: number | null;
 };
 
 export type GetKbIssuesResponse401 = CommonError;

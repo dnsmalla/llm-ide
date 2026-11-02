@@ -1,0 +1,45 @@
+{
+  "endpoint": "GET /kb/issues",
+  "status": 200,
+  "description": "A one-row page of two: hasMore is true and nextOffset names the next row.",
+  "request": {
+    "query": {
+      "repo": "example/repo",
+      "state": "open",
+      "limit": "1",
+      "provider": "github",
+      "offset": "0"
+    }
+  },
+  "response": {
+    "issues": [
+      {
+        "id": "1",
+        "title": "Example search bug",
+        "body": "Search returns nothing for short queries.",
+        "url": "https://github.com/example/repo/issues/1",
+        "provider": "github",
+        "repo": "example/repo",
+        "number": 1,
+        "state": "open",
+        "labels": [
+          "bug"
+        ],
+        "author": "example-user",
+        "createdAt": "2026-10-24T00:00:00Z",
+        "updatedAt": "2026-10-25T00:00:00Z",
+        "isPR": false,
+        "milestone": {
+          "title": "v1.0",
+          "dueOn": "2026-11-30T07:00:00Z"
+        },
+        "assignees": [
+          "example-user"
+        ]
+      }
+    ],
+    "total": 2,
+    "hasMore": true,
+    "nextOffset": 1
+  }
+}

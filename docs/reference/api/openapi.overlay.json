@@ -427,11 +427,15 @@
       }
     },
     "GET /kb/issues": {
-      "summary": "List issues from the connected tracker for a repo (read-only)",
+      "summary": "List one page of issues from the local KB index for a repo (read-only; offset paging, newest update first)",
       "responses": {
-        "200": "Issues matching the filter"
+        "200": "One page of issues with total, hasMore and nextOffset"
       },
       "parameterSchemas": {
+        "query.offset": {
+          "type": "integer",
+          "default": 0
+        },
         "query.limit": {
           "type": "integer",
           "default": 20

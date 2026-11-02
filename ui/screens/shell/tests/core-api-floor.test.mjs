@@ -15,10 +15,10 @@ test("the app's API floor is the SERVER_API_VERSION the bundled core is built wi
 });
 
 test("a core older than the app, or one that reports no version, gets a warning; a current or newer one does not", () => {
-  assert.match(coreApiWarning(APP_API_VERSION - 1), /reports API 103, but this app expects API 104/);
+  assert.match(coreApiWarning(APP_API_VERSION - 1), new RegExp(`reports API ${APP_API_VERSION - 1}, but this app expects API ${APP_API_VERSION}`));
   assert.equal(coreApiWarning(APP_API_VERSION), null);
   assert.equal(coreApiWarning(APP_API_VERSION + 5), null);
   assert.match(coreApiWarning(undefined), /does not report its API version/);
-  assert.match(coreApiWarning("104"), /does not report its API version/);
+  assert.match(coreApiWarning(String(APP_API_VERSION)), /does not report its API version/);
   assert.match(coreApiWarning(50, 60), /API 50/);
 });

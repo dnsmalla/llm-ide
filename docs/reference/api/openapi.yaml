@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 104
+  x-api-version: 105
 servers:
   - url: "https://{host}"
     variables:
@@ -10164,7 +10164,7 @@ paths:
                 "$ref": "#/components/schemas/FeatureDisabled"
   /kb/issues:
     get:
-      summary: "List issues from the connected tracker for a repo (read-only)"
+      summary: "List one page of issues from the local KB index for a repo (read-only; offset paging, newest update first)"
       tags:
         - "kb-sources"
       parameters:
@@ -10190,24 +10190,45 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "Capped at 100; zero, negative or non-numeric values give the default 20."
+          description: "Rows per page: absent, zero, negative, NaN or a fraction below 1 gives 20; above 100 caps at 100."
           schema:
             type: "integer"
             default: 20
+        - name: "offset"
+          in: "query"
+          required: false
+          description: "Zero-based index of the first row. Absent, empty, NaN or negative is 0; past the total is an empty page."
+          schema:
+            type: "integer"
+            default: 0
       responses:
         "200":
-          description: "Issues matching the filter"
+          description: "One page of issues with total, hasMore and nextOffset"
           content:
             application/json:
               schema:
                 type: "object"
                 required:
                   - "issues"
+                  - "total"
+                  - "hasMore"
+                  - "nextOffset"
                 properties:
                   issues:
                     type: "array"
                     items:
                       "$ref": "#/components/schemas/Issue"
+                  total:
+                    type: "integer"
+                    description: "Rows matching the provider, repo and state filters, across all pages."
+                  hasMore:
+                    type: "boolean"
+                    description: "True when a row exists past this page."
+                  nextOffset:
+                    type:
+                      - "integer"
+                      - "null"
+                    description: "The offset of the next page, or null when there is none."
         "401":
           description: "Unauthorized"
           content:
@@ -17306,6 +17327,23 @@ components:
           type: "string"
         isPR:
           type: "boolean"
+        milestone:
+          type:
+            - "object"
+            - "null"
+          description: "GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null."
+          properties:
+            title:
+              type: "string"
+            dueOn:
+              type:
+                - "string"
+                - "null"
+        assignees:
+          type: "array"
+          description: "GitHub logins of the assignees (at most 50); empty when unassigned."
+          items:
+            type: "string"
     Item:
       type: "object"
       properties:

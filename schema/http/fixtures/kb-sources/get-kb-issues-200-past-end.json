@@ -1,0 +1,20 @@
+{
+  "endpoint": "GET /kb/issues",
+  "status": 200,
+  "description": "An offset past the total answers an empty page, not an error.",
+  "request": {
+    "query": {
+      "repo": "example/repo",
+      "state": "open",
+      "limit": "5",
+      "provider": "github",
+      "offset": "5"
+    }
+  },
+  "response": {
+    "issues": [],
+    "total": 2,
+    "hasMore": false,
+    "nextOffset": null
+  }
+}

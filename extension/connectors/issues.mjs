@@ -10,7 +10,13 @@ import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
 
 const GITHUB_API = 'https://api.github.com';
 const PER_PAGE = 100;
-const MAX_PAGES = 10;                    // ≈ 1 000 issues; raise if needed
+// The Mac app pages up to 20 pages of 100 per repo (GitHubClient+RepoBackend);
+// the importer matches that and stops at 2 000 rows per run.
+export const MAX_PAGES = 20;
+export const MAX_ROWS = PER_PAGE * MAX_PAGES;
+// Wall-clock ceiling for one import run, checked before each page after the
+// first. A run that hits it keeps what it fetched and reports truncated.
+export const IMPORT_BUDGET_MS = 60_000;
 
 function authHeaders(token) {
   const headers = {
@@ -63,7 +69,62 @@ function repoSlug(repo) {
 const MAX_REPO_LEN  = 200;   // "owner/name" will never legitimately exceed this
 const MAX_TOKEN_LEN = 500;   // GitHub PATs are ~40 chars; hard cap prevents abuse
 
-export async function indexGithubIssues(userId, { repo, token, state = 'all' }) {
+// Control characters out, length capped. Applied to the fields this importer
+// adds (milestone, assignees) and to labels; title and body keep their existing caps.
+function cleanText(v, max) {
+  return String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, max);
+}
+
+function toTicketItem(issue, slug) {
+  // The /issues endpoint returns PRs too; mark them so the planner
+  // can distinguish later, but still index them — PR descriptions
+  // are often where decisions get re-litigated.
+  const isPR = Boolean(issue.pull_request);
+  const labels = Array.isArray(issue.labels)
+    ? issue.labels.map((l) => cleanText(typeof l === 'string' ? l : l?.name, 100)).filter(Boolean).slice(0, 100)
+    : [];
+  // GitHub's issue object has no due date of its own; the only one it
+  // carries is the milestone's due_on, returned as milestone.dueOn.
+  const ms = issue.milestone && typeof issue.milestone === 'object' ? issue.milestone : null;
+  const milestone = ms && (ms.title || ms.due_on)
+    ? { title: cleanText(ms.title, 200), dueOn: typeof ms.due_on === 'string' && !Number.isNaN(Date.parse(ms.due_on)) ? cleanText(ms.due_on, 64) : null }
+    : null;
+  const assignees = Array.isArray(issue.assignees)
+    ? issue.assignees.map((a) => cleanText(a?.login, 100)).filter(Boolean).slice(0, 50)
+    : [];
+  return {
+    kind: 'ticket',
+    ref: issue.html_url,
+    chunkIdx: 0,
+    title: String(issue.title || '').slice(0, 500),
+    body: String(issue.body || '').slice(0, 50_000),
+    meta: {
+      provider: 'github',
+      repo: slug,
+      number: issue.number,
+      state: issue.state,
+      isPR,
+      labels,
+      author: issue.user?.login,
+      createdAt: issue.created_at,
+      updatedAt: issue.updated_at,
+      closedAt: issue.closed_at,
+      milestone,
+      assignees,
+    },
+  };
+}
+
+/**
+ * Import one GitHub repo's issues into the KB index. Pages until a short or
+ * empty page (exhausted), or stops early at MAX_PAGES pages, MAX_ROWS rows or
+ * the time budget (truncated: true). Re-running replaces the repo's rows, so
+ * the same issue is never stored twice (the ref is the issue's html_url, which
+ * is unique per provider, repo and number).
+ * @param {string} userId
+ * @param {{ repo: string, token?: string, state?: string, budgetMs?: number }} opts
+ */
+export async function indexGithubIssues(userId, { repo, token, state = 'all', budgetMs = IMPORT_BUDGET_MS }) {
   // Length validation — guard against oversized inputs being forwarded
   // to the GitHub API or embedded in error messages.
   if (typeof repo === 'string' && repo.length > MAX_REPO_LEN) {
@@ -76,45 +137,24 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all' }) 
   const allowedState = ['open', 'closed', 'all'].includes(state) ? state : 'all';
 
   const items = [];
+  const deadline = Date.now() + budgetMs;
+  let exhausted = false;
+  let pages = 0;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
+    if (page > 1 && Date.now() > deadline) break;
     const batch = await fetchPage(slug, allowedState, page, token);
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    for (const issue of batch) {
-      // The /issues endpoint returns PRs too; mark them so the planner
-      // can distinguish later, but still index them — PR descriptions
-      // are often where decisions get re-litigated.
-      const isPR = Boolean(issue.pull_request);
-      const labels = Array.isArray(issue.labels)
-        ? issue.labels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean)
-        : [];
-      items.push({
-        kind: 'ticket',
-        ref: issue.html_url,
-        chunkIdx: 0,
-        title: String(issue.title || '').slice(0, 500),
-        body: String(issue.body || '').slice(0, 50_000),
-        meta: {
-          provider: 'github',
-          repo: slug,
-          number: issue.number,
-          state: issue.state,
-          isPR,
-          labels,
-          author: issue.user?.login,
-          createdAt: issue.created_at,
-          updatedAt: issue.updated_at,
-          closedAt: issue.closed_at,
-        },
-      });
-    }
-    if (batch.length < PER_PAGE) break;  // last page
+    pages = page;
+    if (!Array.isArray(batch) || batch.length === 0) { exhausted = true; break; }
+    for (const issue of batch) items.push(toTicketItem(issue, slug));
+    if (batch.length < PER_PAGE) { exhausted = true; break; }  // last page
+    if (items.length >= MAX_ROWS) break;
   }
 
   // Replace existing rows for this repo so closed tickets that vanish
   // from the API (rare, but possible on transfer/delete) don't linger.
   deleteSourcesByPrefix(userId, 'ticket', `https://github.com/${slug}/`);
   const written = ingestSources(userId, items);
-  return { repo: slug, count: items.length, chunks: written };
+  return { repo: slug, count: items.length, chunks: written, pages, truncated: !exhausted };
 }
 
 // Generic importer — accepts an array of { id, title, body, url?, meta? }

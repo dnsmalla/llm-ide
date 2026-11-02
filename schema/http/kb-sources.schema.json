@@ -273,6 +273,31 @@
         "isPR": {
           "type": "boolean",
           "x-optional": true
+        },
+        "milestone": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null.",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "dueOn": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "assignees": {
+          "type": "array",
+          "description": "GitHub logins of the assignees (at most 50); empty when unassigned.",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -725,7 +750,11 @@
             },
             "limit": {
               "type": "string",
-              "description": "Capped at 100; zero, negative or non-numeric values give the default 20."
+              "description": "Rows per page: absent, zero, negative, NaN or a fraction below 1 gives 20; above 100 caps at 100."
+            },
+            "offset": {
+              "type": "string",
+              "description": "Zero-based index of the first row. Absent, empty, NaN or negative is 0; past the total is an empty page."
             }
           }
         }
@@ -734,7 +763,10 @@
         "200": {
           "type": "object",
           "required": [
-            "issues"
+            "issues",
+            "total",
+            "hasMore",
+            "nextOffset"
           ],
           "properties": {
             "issues": {
@@ -742,6 +774,21 @@
               "items": {
                 "$ref": "#/$defs/Issue"
               }
+            },
+            "total": {
+              "type": "integer",
+              "description": "Rows matching the provider, repo and state filters, across all pages."
+            },
+            "hasMore": {
+              "type": "boolean",
+              "description": "True when a row exists past this page."
+            },
+            "nextOffset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "The offset of the next page, or null when there is none."
             }
           }
         },

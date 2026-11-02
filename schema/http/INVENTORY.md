@@ -148,35 +148,35 @@ Endpoints with no client caller (67):
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:330` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:153` | `LlmIdeAPIClient+KB.swift` | `App.tsx` | - |
 | `/kb/search` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:290` | `LlmIdeAPIClient+KB.swift` | `App.tsx`, `kb.ts` | - |
-| `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:322` | - | `kb.ts` | - |
-| `/kb/meeting/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:365` | `LlmIdeAPIClient+KB.swift` | - | - |
-| `/kb/entity/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:388` | - | - | tests only |
-| `/kb/project/:id/export` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:406` | `LlmIdeAPIClient+KB.swift` | - | - |
-| `/kb/project/install-skills` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:429` | `LlmIdeAPIClient+KB.swift` | - | - |
-| `/kb/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:456` | `LlmIdeAPIClient+Export.swift` | `kb.ts` | - |
-| `/kb/export-all` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1226` | `LlmIdeAPIClient+Export.swift` | - | - |
-| `/kb/system/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:461` | - | - | tests only |
+| `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:324` | - | `kb.ts` | - |
+| `/kb/meeting/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:376` | `LlmIdeAPIClient+KB.swift` | - | - |
+| `/kb/entity/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:399` | - | - | tests only |
+| `/kb/project/:id/export` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:417` | `LlmIdeAPIClient+KB.swift` | - | - |
+| `/kb/project/install-skills` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:440` | `LlmIdeAPIClient+KB.swift` | - | - |
+| `/kb/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:467` | `LlmIdeAPIClient+Export.swift` | `kb.ts` | - |
+| `/kb/export-all` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1237` | `LlmIdeAPIClient+Export.swift` | - | - |
+| `/kb/system/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:472` | - | - | tests only |
 | `/kb/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/router.mjs:279` | - | - | tests only |
-| `/kb/connect-git` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:493` | `LlmIdeAPIClient+Auth.swift` | `App.tsx`, `kb.ts` | - |
-| `/kb/ingest-scip` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:520` | - | - | tests only |
+| `/kb/connect-git` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:504` | `LlmIdeAPIClient+Auth.swift` | `App.tsx`, `kb.ts` | - |
+| `/kb/ingest-scip` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:531` | - | - | tests only |
 | `/kb/ingest-code-graph` | ALL_ENDPOINTS | POST | token | code_graph_3d | `extension/routes/code-graph.mjs:21` | `LlmIdeAPIClient+CodeGraph.swift` | - | - |
-| `/kb/connect-github-issues` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:547` | - | `kb.ts` | - |
-| `/kb/connect-tickets-json` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:569` | - | - | comments/docs only |
-| `/kb/connect-qa` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1450` | - | `kb.ts` | - |
-| `/kb/email/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:589` | `LlmIdeAPIClient+Email.swift` | - | - |
-| `/kb/email/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:589` | `LlmIdeAPIClient+Email.swift` | - | - |
-| `/kb/email/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:710` | `LlmIdeAPIClient+Email.swift` | - | - |
-| `/kb/email/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1180` | `LlmIdeAPIClient+Email.swift` | - | - |
-| `/kb/slack/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:727` | `LlmIdeAPIClient+Slack.swift` | - | - |
-| `/kb/slack/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:727` | `LlmIdeAPIClient+Slack.swift` | - | - |
-| `/kb/slack/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:801` | `LlmIdeAPIClient+Slack.swift` | - | - |
-| `/kb/slack/conversations` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:787` | `LlmIdeAPIClient+Slack.swift` | - | - |
-| `/kb/box/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:820` | `LlmIdeAPIClient+Box.swift` | - | - |
-| `/kb/connect-box` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:820` | `LlmIdeAPIClient+Box.swift` | - | - |
-| `/kb/mcp-connector/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:876` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
-| `/kb/mcp-connector/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:876` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
-| `/kb/mcp-connector/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:876` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
-| `/kb/mcp-connector/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:876` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
+| `/kb/connect-github-issues` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:558` | - | `kb.ts` | - |
+| `/kb/connect-tickets-json` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:580` | - | - | comments/docs only |
+| `/kb/connect-qa` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1461` | - | `kb.ts` | - |
+| `/kb/email/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:600` | `LlmIdeAPIClient+Email.swift` | - | - |
+| `/kb/email/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:600` | `LlmIdeAPIClient+Email.swift` | - | - |
+| `/kb/email/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:721` | `LlmIdeAPIClient+Email.swift` | - | - |
+| `/kb/email/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1191` | `LlmIdeAPIClient+Email.swift` | - | - |
+| `/kb/slack/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:738` | `LlmIdeAPIClient+Slack.swift` | - | - |
+| `/kb/slack/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:738` | `LlmIdeAPIClient+Slack.swift` | - | - |
+| `/kb/slack/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:812` | `LlmIdeAPIClient+Slack.swift` | - | - |
+| `/kb/slack/conversations` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:798` | `LlmIdeAPIClient+Slack.swift` | - | - |
+| `/kb/box/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:831` | `LlmIdeAPIClient+Box.swift` | - | - |
+| `/kb/connect-box` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:831` | `LlmIdeAPIClient+Box.swift` | - | - |
+| `/kb/mcp-connector/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:887` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
+| `/kb/mcp-connector/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:887` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
+| `/kb/mcp-connector/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:887` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
+| `/kb/mcp-connector/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:887` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
 | `/kb/google/start` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:110` | - | - | tests only |
 | `/kb/google/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:123` | - | - | tests only |
 | `/kb/google/accounts` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:130` | - | - | tests only |
@@ -191,22 +191,22 @@ Endpoints with no client caller (67):
 | `/kb/calendar-ical/sources/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/calendar-ical.mjs:112` | - | - | tests only |
 | `/kb/calendar-ical/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:137` | - | - | tests only |
 | `/kb/calendar-ical/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:125` | - | - | tests only |
-| `/kb/activity` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/router.mjs:983` | `ActivityStore.swift` | - | - |
-| `/kb/activity/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:993` | `ActivityStore.swift` | - | - |
-| `/kb/usage/limits` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/router.mjs:1022` | `LlmIdeAPIClient+Usage.swift` | - | - |
-| `/kb/usage/summary` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1044` | `LlmIdeAPIClient+Usage.swift` | - | - |
-| `/kb/usage/resolve` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1051` | `LlmIdeAPIClient+Usage.swift` | - | - |
-| `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1078` | `LlmIdeAPIClient+Usage.swift` | - | - |
-| `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1063` | `LlmIdeAPIClient+Usage.swift` | - | - |
-| `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1072` | - | - | tests only |
+| `/kb/activity` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/router.mjs:994` | `ActivityStore.swift` | - | - |
+| `/kb/activity/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1004` | `ActivityStore.swift` | - | - |
+| `/kb/usage/limits` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/router.mjs:1033` | `LlmIdeAPIClient+Usage.swift` | - | - |
+| `/kb/usage/summary` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1055` | `LlmIdeAPIClient+Usage.swift` | - | - |
+| `/kb/usage/resolve` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1062` | `LlmIdeAPIClient+Usage.swift` | - | - |
+| `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1089` | `LlmIdeAPIClient+Usage.swift` | - | - |
+| `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1074` | `LlmIdeAPIClient+Usage.swift` | - | - |
+| `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1083` | - | - | tests only |
 | `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
 | `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
 | `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
 | `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
 | `/kb/generate-plan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:34` | - | `App.tsx` | - |
 | `/kb/analyze-risks` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:60` | - | - | tests only |
-| `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1128` | `LlmIdeAPIClient+Export.swift` | - | - |
-| `/kb/conflict-questions` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1469` | - | `kb.ts` | - |
+| `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1139` | `LlmIdeAPIClient+Export.swift` | - | - |
+| `/kb/conflict-questions` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1480` | - | `kb.ts` | - |
 | `/kb/providers/verify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:169` | `LlmIdeAPIClient+Providers.swift` | - | - |
 | `/kb/providers/models` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:219` | `LlmIdeAPIClient+Providers.swift` | - | - |
 | `/kb/providers/catalog` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:87` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
@@ -236,11 +236,11 @@ Endpoints with no client caller (67):
 | `/kb/review/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:129` | - | `App.tsx` | - |
 | `/kb/review/reject` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:110` | - | - | tests only |
 | `/kb/review/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/review.mjs:265` | - | - | tests only |
-| `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1404` | - | `App.tsx` | - |
-| `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1341` | `LlmIdeAPIClient+Export.swift` | `App.tsx` | - |
-| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1390` | - | - | comments/docs only |
-| `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1373` | - | - | comments/docs only |
-| `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1384` | - | - | comments/docs only |
+| `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1415` | - | `App.tsx` | - |
+| `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1352` | `LlmIdeAPIClient+Export.swift` | `App.tsx` | - |
+| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1401` | - | - | comments/docs only |
+| `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1384` | - | - | comments/docs only |
+| `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1395` | - | - | comments/docs only |
 | `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:118` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
 | `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:223` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
 | `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:73` | - | `useLiveSync.ts` | - |
@@ -295,7 +295,7 @@ Endpoints with no client caller (67):
 | `/bus/kinds` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:163` | - | - | tests only |
 | `/bus/kinds/:kind` | ALL_ENDPOINTS | PUT | token | core | `extension/routes/bus/bus-routes.mjs:172` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:785` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:786` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -305,7 +305,7 @@ Endpoints with no client caller (67):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:816` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:817` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |

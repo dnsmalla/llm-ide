@@ -1,21 +1,23 @@
 {
   "endpoint": "GET /kb/issues",
   "status": 200,
+  "description": "Open issues of one repo, first page: two issues, the first with a milestone and an assignee, the second with neither.",
   "request": {
     "query": {
       "repo": "example/repo",
       "state": "open",
       "limit": "5",
-      "provider": "github"
+      "provider": "github",
+      "offset": "0"
     }
   },
   "response": {
     "issues": [
       {
-        "id": "18",
+        "id": "1",
         "title": "Example search bug",
         "body": "Search returns nothing for short queries.",
-        "url": "",
+        "url": "https://github.com/example/repo/issues/1",
         "provider": "github",
         "repo": "example/repo",
         "number": 1,
@@ -24,10 +26,37 @@
           "bug"
         ],
         "author": "example-user",
-        "createdAt": "2026-10-25T00:00:00Z",
+        "createdAt": "2026-10-24T00:00:00Z",
         "updatedAt": "2026-10-25T00:00:00Z",
-        "isPR": false
+        "isPR": false,
+        "milestone": {
+          "title": "v1.0",
+          "dueOn": "2026-11-30T07:00:00Z"
+        },
+        "assignees": [
+          "example-user"
+        ]
+      },
+      {
+        "id": "2",
+        "title": "Example docs typo",
+        "body": "Fix the typo in the install guide.",
+        "url": "https://github.com/example/repo/issues/2",
+        "provider": "github",
+        "repo": "example/repo",
+        "number": 2,
+        "state": "open",
+        "labels": [],
+        "author": "example-user",
+        "createdAt": "2026-10-19T00:00:00Z",
+        "updatedAt": "2026-10-20T00:00:00Z",
+        "isPR": false,
+        "milestone": null,
+        "assignees": []
       }
-    ]
+    ],
+    "total": 2,
+    "hasMore": false,
+    "nextOffset": null
   }
 }
