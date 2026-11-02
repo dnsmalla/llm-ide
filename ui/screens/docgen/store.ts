@@ -44,6 +44,16 @@ export interface StoreDeps {
   idFor?: (root: string) => Promise<string>;
 }
 
+/** PUTs a new template or command folder may take (the first guess plus 409 retries) before the plain error. */
+const CREATE_ATTEMPTS = 50;
+
+/** The folder for suffix index n (1 is the plain name, 2 is `name-2`...); null when it is not a valid folder name. */
+function folderAt(base: string, n: number): string | null {
+  const suffix = n === 1 ? "" : `-${n}`;
+  const folder = `${base.slice(0, 80 - suffix.length).replace(/-+$/, "")}${suffix}`;
+  return FOLDER_RE.test(folder) ? folder : null;
+}
+
 const EMPTY: DocGenState = {
   setup: "no_project",
   setupError: null,
@@ -238,15 +248,17 @@ export class DocGenStore {
     }
     this.set({ templateBusy: true, templateError: null });
     try {
-      let folder = input.folder;
-      if (folder === null) {
-        folder = await this.freeTemplateFolder(base);
-        if (folder === null) {
-          this.set({ templateBusy: false, templateError: { message: `Too many templates already use the name ${base}. Rename one of them.`, retryable: false, action: "none" } });
-          return null;
-        }
+      const api = this.requireApi();
+      const body = { name: input.name.trim(), sections: input.sections, surface: this.surface, rawContent: text };
+      // A new template goes through createOnly: the core's 409 decides, so a folder the list skips is still safe.
+      // Editing writes its own folder and never sends createOnly.
+      const saved = input.folder !== null
+        ? await api.putTemplate(input.folder, body)
+        : await this.createFolder(base, await this.firstFreeTemplateIndex(base), "TEMPLATE_EXISTS", (f) => api.putTemplate(f, { ...body, createOnly: true }));
+      if (saved === null) {
+        this.set({ templateBusy: false, templateError: { message: `Too many templates already use the name ${base}. Rename one of them.`, retryable: false, action: "none" } });
+        return null;
       }
-      const saved = await this.requireApi().putTemplate(folder, { name: input.name.trim(), sections: input.sections, surface: this.surface, rawContent: text });
       const others = this.state.templates.filter((t) => t.folderName !== saved.folderName);
       this.set({ templateBusy: false, templates: [...others, saved].sort((a, b) => a.name.localeCompare(b.name)), templateId: saved.id });
       return saved;
@@ -257,21 +269,35 @@ export class DocGenStore {
   }
 
   /**
-   * The folder a NEW template is written into: `base`, else `base-2`, `base-3`... (the Mac's uniqueFolderSlug). Compared
-   * case-insensitively, because the core writes into an existing folder that differs only by case (canonicalFolder).
-   * Residual gap: the core lists at most 2,000 folders. A folder past that cap is not seen here, so a name taken only by
-   * one of them is treated as free. The same holds for a folder the core's list skips (its template.md is over 256 KB or
-   * unreadable), and for a create racing another create between this list and the PUT. The core's PUT is then the last
-   * line: a create (rewrite) keeps that file's body but replaces its title and sections; an import (rawContent wins over
-   * rewrite) replaces the whole file. Closing it needs a create-only flag on the core PUT (open item O3).
+   * The first guess for a NEW template folder: the index of the first `base`, `base-2`, `base-3`... (the Mac's
+   * uniqueFolderSlug) that the list does not show. Compared case-insensitively, as the core's folder match is.
+   * The list is only a guess: it caps at 2,000 folders and skips unreadable ones, so the core's createOnly 409 is the
+   * authority, and createFolder moves on from here when it clashes.
    */
-  private async freeTemplateFolder(base: string): Promise<string | null> {
+  private async firstFreeTemplateIndex(base: string): Promise<number> {
     const existing = await this.requireApi().templates();
     const taken = new Set(existing.items.map((t) => t.folderName?.toLowerCase()).filter((f): f is string => Boolean(f)));
-    for (let n = 1; n <= 1000; n++) {
-      const suffix = n === 1 ? "" : `-${n}`;
-      const folder = `${base.slice(0, 80 - suffix.length).replace(/-+$/, "")}${suffix}`;
-      if (FOLDER_RE.test(folder) && !taken.has(folder)) return folder;
+    let n = 1;
+    while (taken.has(folderAt(base, n) ?? "")) n++;
+    return n;
+  }
+
+  /**
+   * Creates a NEW folder: `base` (index `start`), then the next suffixes while the core answers 409 with `existsCode`
+   * (the folder exists, in any case). Any other error, and a 409 with another code, is thrown at once. Resolves to null
+   * when CREATE_ATTEMPTS folders in a row are taken. Old cores ignore createOnly and answer 200, which is success here.
+   */
+  private async createFolder<T>(base: string, start: number, existsCode: string, put: (folder: string) => Promise<T>): Promise<T | null> {
+    let n = start;
+    for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt++, n++) {
+      const folder = folderAt(base, n);
+      if (folder === null) return null;
+      try {
+        return await put(folder);
+      } catch (e) {
+        const o = (typeof e === "object" && e !== null ? e : {}) as { status?: unknown; code?: unknown };
+        if (o.status !== 409 || o.code !== existsCode) throw e;
+      }
     }
     return null;
   }
@@ -288,7 +314,16 @@ export class DocGenStore {
     }
     this.set({ templateBusy: true, templateError: null });
     try {
-      const saved = await this.requireApi().putCommand(folder, { name: input.name.trim(), instruction: input.instruction, surface: this.surface });
+      const api = this.requireApi();
+      const body = { name: input.name.trim(), instruction: input.instruction, surface: this.surface };
+      // A new command: `folder` is the first guess and the core's createOnly 409 moves on to the next suffix.
+      const saved = input.folder !== null
+        ? await api.putCommand(input.folder, body)
+        : await this.createFolder(folder, 1, "COMMAND_EXISTS", (f) => api.putCommand(f, { ...body, createOnly: true }));
+      if (saved === null) {
+        this.set({ templateBusy: false, templateError: { message: `Too many commands already use the name ${folder}. Rename one of them.`, retryable: false, action: "none" } });
+        return null;
+      }
       const others = this.state.commands.filter((c) => c.folderName !== saved.folderName);
       this.set({ templateBusy: false, commands: [...others, saved].sort((a, b) => a.name.localeCompare(b.name)), commandId: saved.id, command: saved.instruction });
       return saved;

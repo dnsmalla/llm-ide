@@ -27,8 +27,8 @@ export interface DocsApi {
   register(signal?: AbortSignal): Promise<void>;
   templates(signal?: AbortSignal): Promise<Page<DocTemplate>>;
   commands(signal?: AbortSignal): Promise<Page<DocCommand>>;
-  putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface; rawContent?: string }, signal?: AbortSignal): Promise<DocTemplate>;
-  putCommand(folder: string, c: { name: string; instruction: string; surface: Surface }, signal?: AbortSignal): Promise<DocCommand>;
+  putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface; rawContent?: string; createOnly?: boolean }, signal?: AbortSignal): Promise<DocTemplate>;
+  putCommand(folder: string, c: { name: string; instruction: string; surface: Surface; createOnly?: boolean }, signal?: AbortSignal): Promise<DocCommand>;
   deleteCommand(folder: string, signal?: AbortSignal): Promise<boolean>;
   deleteTemplate(folder: string, signal?: AbortSignal): Promise<boolean>;
   seed(signal?: AbortSignal): Promise<{ written: number }>;
@@ -56,13 +56,16 @@ export function createDocsApi(client: DocsClient, projectId: string, projectRoot
       // rawContent: an import stores the whole file as written (the core keeps it verbatim; rawContent wins over rewrite).
       // Otherwise rewrite: the core keeps the template.md body (the instructions) and changes only its title and ## sections.
       // Without it an edit regenerates the file from the section list and drops the body.
+      // createOnly (API 106): the core answers 409 TEMPLATE_EXISTS for an existing folder. Sent only when set, so an
+      // edit's body is unchanged. An older core ignores the field.
       const body = t.rawContent !== undefined
-        ? { name: t.name, surface: t.surface, rawContent: t.rawContent }
-        : { name: t.name, sections: t.sections, surface: t.surface, rewrite: true };
+        ? { name: t.name, surface: t.surface, rawContent: t.rawContent, ...(t.createOnly ? { createOnly: true } : {}) }
+        : { name: t.name, sections: t.sections, surface: t.surface, rewrite: true, ...(t.createOnly ? { createOnly: true } : {}) };
       return decodeTemplateWrite(await client.request(folderPath("templates", folder), { method: "PUT", body, signal }));
     },
     async putCommand(folder, c, signal) {
-      return decodeCommandWrite(await client.request(folderPath("commands", folder), { method: "PUT", body: { name: c.name, instruction: c.instruction, surface: c.surface }, signal }));
+      const body = { name: c.name, instruction: c.instruction, surface: c.surface, ...(c.createOnly ? { createOnly: true } : {}) };
+      return decodeCommandWrite(await client.request(folderPath("commands", folder), { method: "PUT", body, signal }));
     },
     async deleteCommand(folder, signal) {
       return decodeDeleted(await client.request(folderPath("commands", folder), { method: "DELETE", signal }));

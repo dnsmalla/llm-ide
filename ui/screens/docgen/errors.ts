@@ -43,6 +43,8 @@ const BY_CODE: Readonly<Record<string, Failure>> = {
   TOO_MANY_PROJECTS: { message: "The core has too many registered projects. Remove unused ones and retry.", retryable: false, action: "none" },
   INVALID_FOLDER: { message: "That template name cannot be used as a folder name. Use letters, numbers and dashes.", retryable: false, action: "none" },
   RESERVED_FOLDER: { message: "That name is reserved. Choose another template name.", retryable: false, action: "none" },
+  TEMPLATE_EXISTS: { message: "A template with that name already exists. Choose another name.", retryable: false, action: "none" },
+  COMMAND_EXISTS: { message: "A command with that name already exists. Choose another name.", retryable: false, action: "none" },
   UNSAFE_PATH: { message: "The core refused that path as unsafe.", retryable: false, action: "none" },
   TOO_LARGE: { message: "That template is too large to save.", retryable: false, action: "none" },
   DOCS_FAILED: { message: "The core could not complete the templates request. Try again.", retryable: true, action: "none" },
