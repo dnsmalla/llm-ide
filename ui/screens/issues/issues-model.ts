@@ -51,8 +51,10 @@ export function decodeIssues(body: unknown): Issue[] {
   const out: Issue[] = [];
   for (const row of list) {
     if (!isRecord(row)) continue;
-    const title = text(row.title, 500);
+    let title = text(row.title, 500);
     if (!title) continue;
+    const number = typeof row.number === "number" && Number.isInteger(row.number) ? row.number : null;
+    if (number !== null) title = title.replace(new RegExp(`^#\\s*${number}\\b[\\s:.-]*`), "") || title;
     const labels = Array.isArray(row.labels)
       ? row.labels.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => l.slice(0, 80)).slice(0, MAX_LABELS)
       : [];
@@ -63,7 +65,7 @@ export function decodeIssues(body: unknown): Issue[] {
       url: httpUrl(row.url),
       provider: text(row.provider, 40) || "github",
       repo: text(row.repo, 200),
-      number: typeof row.number === "number" && Number.isInteger(row.number) ? row.number : null,
+      number,
       state: text(row.state, 20) || "open",
       labels,
       author: text(row.author, 120) || null,

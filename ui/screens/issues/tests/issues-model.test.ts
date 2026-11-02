@@ -52,3 +52,9 @@ test("filters: provider, state, repo substring, text; pull requests never appear
   assert.deepEqual(filterIssues(rows, { ...base, repo: "docs" }).map((i) => i.id), ["b"]);
   assert.deepEqual(repoOptions(rows), ["g/p", "o/app", "o/docs"]);
 });
+
+test("decodeIssues strips a duplicated #number prefix from old cached titles", () => {
+  const [row] = decodeIssues({ issues: [issue({ title: "#24 InboxStore: no concurrency protection", number: 24 })] });
+  assert.equal(row.title, "InboxStore: no concurrency protection");
+  assert.equal(row.number, 24);
+});
