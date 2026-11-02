@@ -188,7 +188,7 @@ export function timelineRange(rows: readonly GanttRow[], today = localToday()): 
     min = Math.min(min, r.start);
     max = Math.max(max, r.end);
   }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return { start: today - 7, days: 21 };
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { start: today - 14, days: 45 }; // the Mac's empty range: 14 days back, 30 ahead
   const start = Math.min(min, today) - 3;
   const end = Math.max(max, today) + 3;
   return { start, days: Math.max(21, end - start + 1) };
@@ -357,6 +357,12 @@ export function projectOptions(saved: readonly string[], cached: readonly string
   const all = [...new Set([...saved, ...cached].filter((r) => r.trim() !== ""))].sort((a, b) => a.localeCompare(b, "en"));
   const q = query.trim().toLowerCase();
   return all.filter((r) => r === current || !q || r.toLowerCase().includes(q));
+}
+
+/** The Mac draws at least a viewport of days (GanttView displayDays), so the grid never stops short of the right edge. */
+export function fillRange(range: TimelineRange, viewportWidth: number, dayWidth: number): TimelineRange {
+  const days = Math.max(range.days, Math.ceil(viewportWidth / dayWidth));
+  return days === range.days ? range : { start: range.start, days };
 }
 
 /** The scrollLeft that puts today about a third in from the left of the viewport. */

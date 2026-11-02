@@ -45,7 +45,7 @@ export interface GanttDeps {
 type Zoom = "day" | "week" | "month";
 type Phase = "idle" | "loading" | "ready" | "error";
 
-const ZOOM_WIDTH: Record<Zoom, number> = { day: 26, week: 12, month: 4 };
+const ZOOM_WIDTH: Record<Zoom, number> = { day: 32, week: 14, month: 5 };
 const CATEGORY_LABEL: Record<GanttCategory, string> = { open: "Open", closed: "Closed", overdue: "Overdue" };
 
 export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }): ReactNode {

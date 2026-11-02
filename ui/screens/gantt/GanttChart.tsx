@@ -8,6 +8,7 @@ import {
   barGeometry,
   dependencyLines,
   GANTT_ROW_ACTIONS,
+  fillRange,
   isWeekend,
   issueLabel,
   issueTitleBody,
@@ -131,7 +132,8 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
 });
 
 export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
-  const { rows, range, dayWidth, today, scrollRef, onActivate } = p;
+  const { rows, dayWidth, today, scrollRef, onActivate } = p;
+  const [vp, setVp] = useState({ w: 0, h: 0 });
   const labelsRef = useRef<HTMLDivElement>(null);
   // The focused row is pinned into the window: a Tab from it always lands on a mounted row.
   const pinRef = useRef<number | null>(null);
@@ -169,7 +171,7 @@ export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(() => sync());
+    const ro = new ResizeObserver(() => { sync(); setVp((v) => (v.w === el.clientWidth && v.h === el.clientHeight ? v : { w: el.clientWidth, h: el.clientHeight })); });
     ro.observe(el);
     return () => ro.disconnect();
   }, [scrollRef, sync]);
@@ -186,7 +188,9 @@ export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
     sync();
   }, [scrollRef, sync]);
 
+  const range = useMemo(() => fillRange(p.range, vp.w, dayWidth), [p.range, vp.w, dayWidth]);
   const timelineWidth = range.days * dayWidth;
+  const bodyHeight = Math.max(rows.length * ROW_H, vp.h - HEAD_H);
   const todayLeft = (today - range.start) * dayWidth;
   const depLines = useMemo(() => dependencyLines(rows, range, dayWidth, (i) => HEAD_H + i * ROW_H + ROW_H / 2), [rows, range, dayWidth]);
   // Only the arrows that cross the window: both ends above or below it, with a segment through it, are skipped.
@@ -220,9 +224,9 @@ export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
         </div>
       </div>
       <div className="gnt-scroll" ref={scrollRef} onScroll={sync}>
-        <div className="gnt-timeline" style={{ width: timelineWidth, height: HEAD_H + rows.length * ROW_H }}>
+        <div className="gnt-timeline" style={{ width: timelineWidth, height: HEAD_H + bodyHeight }}>
           {todayLeft >= 0 && todayLeft <= timelineWidth ? <div className="gnt-today" style={{ left: todayLeft }} aria-hidden="true" /> : null}
-          <div className="gnt-gridlayer" style={{ top: HEAD_H, width: timelineWidth, height: rows.length * ROW_H, backgroundImage: grid }} aria-hidden="true" />
+          <div className="gnt-gridlayer" style={{ top: HEAD_H, width: timelineWidth, height: bodyHeight, backgroundImage: grid }} aria-hidden="true" />
           {visibleLines.length ? (
             <svg className="gnt-deps" width={timelineWidth} height={HEAD_H + rows.length * ROW_H} aria-hidden="true">
               <defs>

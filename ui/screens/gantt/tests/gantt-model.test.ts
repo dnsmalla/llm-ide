@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -104,7 +104,9 @@ test("range covers every bar padded and is today-centred when nothing is dated",
   const range = timelineRange(rows, 20450);
   assert.ok(range.start <= 20458 && range.start + range.days - 1 >= 20460);
   assert.ok(range.days >= 21);
-  assert.deepEqual(timelineRange([], 20450), { start: 20443, days: 21 });
+  assert.deepEqual(timelineRange([], 20450), { start: 20436, days: 45 });
+  assert.deepEqual(fillRange({ start: 1, days: 21 }, 1000, 14), { start: 1, days: 72 });
+  assert.deepEqual(fillRange({ start: 1, days: 90 }, 1000, 14), { start: 1, days: 90 });
 });
 
 test("bar geometry clamps to the range and never goes negative", () => {
