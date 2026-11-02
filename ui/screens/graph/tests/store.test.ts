@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GraphStore, type StoreDeps } from "../store.ts";
-import { classifyReadError, customGraphPath, joinRoot, readProjectGraph, GRAPH_CANDIDATES } from "../source.ts";
+import { classifyReadError, customGraphPath, graphCandidates, joinRoot, readProjectGraph, GRAPH_CANDIDATES } from "../source.ts";
 import type { JobOutcome } from "../engine.ts";
 import { runJob } from "../layout-job.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
@@ -38,6 +38,9 @@ test("read errors are classified; custom paths must be project-relative graph.js
   assert.equal(customGraphPath(" system/graph/graph.json "), "system/graph/graph.json");
   for (const bad of ["", "../graph.json", "/abs/graph.json", "x/other.json", "graph.json/x", "a\0/graph.json"]) assert.equal(customGraphPath(bad), null, bad);
   assert.equal(customGraphPath("graph.json"), "graph.json");
+  assert.equal(customGraphPath("system/graph/graph-memory.json"), "system/graph/graph-memory.json");
+  assert.equal(customGraphPath("system/graph/graph-all.json"), "system/graph/graph-all.json");
+  assert.equal(customGraphPath("system/graph/other.json"), null);
   assert.equal(joinRoot("/p/", "a/b"), "/p/a/b");
 });
 
@@ -193,4 +196,11 @@ test("store: the full layout failing after a preview keeps the preview and says 
   await s.load("/p");
   assert.equal(s.getSnapshot().phase, "ready");
   assert.match(s.getSnapshot().error ?? "", /full layout failed \(worker died\)/);
+});
+
+
+test("graphCandidates: each mode has its own file, and code still falls back to the legacy graph.json", () => {
+  assert.deepEqual(graphCandidates("code"), ["system/graph/graph-code.json", ...GRAPH_CANDIDATES]);
+  assert.deepEqual(graphCandidates("memory"), ["system/graph/graph-memory.json"]);
+  assert.deepEqual(graphCandidates("all"), ["system/graph/graph-all.json"]);
 });

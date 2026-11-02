@@ -41,6 +41,7 @@ function CodeGraphPage({ active, projectRoot }: SectionProps) {
       active={active}
       projectRoot={projectRoot}
       onGenerate={async (mode, target) => { await invokeHost("graph_generate", { mode, target: target || null }); }}
+      onCancel={() => { void invokeHost("graph_cancel").catch(() => undefined); }}
       openFile={(path) => shellBus.publish({ type: "open-file", path })}
     />
   );

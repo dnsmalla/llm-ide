@@ -84,14 +84,17 @@ fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, Stri
     Ok(body)
 }
 
-/// `p` must lie inside `root` and be named `graph.json`.
+/// The graph filenames the host may read: the legacy one plus one per generation mode.
+const GRAPH_NAMES: [&str; 4] = ["graph.json", "graph-code.json", "graph-memory.json", "graph-all.json"];
+
+/// `p` must lie inside `root` and be one of the known graph files.
 fn check_location(p: &Path, root: &Path) -> Result<(), String> {
     if !p.starts_with(root) {
         return Err("path is outside the project root".into());
     }
-    let is_graph = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n == "graph.json");
+    let is_graph = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| GRAPH_NAMES.contains(&n));
     if !is_graph {
-        return Err("only files named graph.json can be read".into());
+        return Err("only graph files can be read".into());
     }
     Ok(())
 }
@@ -153,6 +156,17 @@ mod tests {
         let g = root.join("system/graph/graph.json");
         fs::write(&g, "{\"a\":1}").unwrap();
         assert_eq!(read_within(&root, g.to_str().unwrap()).unwrap(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn accepts_each_mode_filename() {
+        let root = scratch("modes");
+        fs::create_dir_all(root.join("system/graph")).unwrap();
+        for name in ["graph-code.json", "graph-memory.json", "graph-all.json"] {
+            let p = root.join("system/graph").join(name);
+            fs::write(&p, "{}").unwrap();
+            assert!(read_within(&root, p.to_str().unwrap()).is_ok(), "{name}");
+        }
     }
 
     #[test]

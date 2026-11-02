@@ -14,6 +14,7 @@ import { buildAdjacency, communitySummary, countOnes, docSplit, isDocKind, nodeM
 import { DOC_LEGEND, kindColor } from "./colors.ts";
 import { searchNodes } from "./search.ts";
 import type { GraphStore } from "./store.ts";
+import { graphCandidates } from "./source.ts";
 import type { ViewCamera, ViewOptions, GraphView } from "./view.ts";
 
 export interface GraphScreenProps {
@@ -24,12 +25,14 @@ export interface GraphScreenProps {
   onGenerate?: (mode: "code" | "memory" | "all", target: string) => Promise<void>;
   /** Ask the shell to open a project-relative file in Explorer. */
   openFile: (path: string) => void;
+  /** Stop the running generator; the screen keeps its previous graph. */
+  onCancel?: () => void;
   createView?: (o: ViewOptions) => Promise<GraphView | null>;
 }
 
 const num = (n: number) => n.toLocaleString("en-US");
 
-export function GraphScreen({ store, active, projectRoot, openFile, createView, onGenerate }: GraphScreenProps) {
+export function GraphScreen({ store, active, projectRoot, openFile, createView, onGenerate, onCancel }: GraphScreenProps) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const loadedFor = useRef<string | null | undefined>(undefined);
   const camera = useRef<ViewCamera | null>(null);
@@ -37,6 +40,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const [mode, setMode] = useState<"code" | "memory" | "all">("code");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const cancelRequested = useRef(false);
   const [showLabels, setShowLabels] = useState(true);
   const [repos, setRepos] = useState<string[]>([]);
   const [target, setTarget] = useState("");
@@ -53,12 +57,13 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
 
   // Load lazily on first show, and again when the project changes; never while another section is shown.
   useEffect(() => {
-    if (!active || loadedFor.current === projectRoot) return;
-    loadedFor.current = projectRoot;
+    const key = `${projectRoot ?? ""}:${mode}`;
+    if (!active || loadedFor.current === key) return;
+    loadedFor.current = key;
     camera.current = null;
     setFatal(null);
-    void store.load(projectRoot);
-  }, [active, projectRoot, store]);
+    void store.load(projectRoot, graphCandidates(mode));
+  }, [active, projectRoot, mode, store]);
   useEffect(() => () => store.cancel(), [store]);
   useEffect(() => {
     if (!projectRoot) { setRepos([]); setTarget(""); return; }
@@ -87,11 +92,16 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   }
   const wrap = (child: React.ReactNode) => <div className="gr-root" data-active={active}>{child}</div>;
   if (s.phase === "no-project") return wrap(<NoProjectState />);
+  const reloadCurrent = () => store.load(projectRoot, graphCandidates(mode));
   const runGeneration = (targetPath: string, modeOverride: "code" | "memory" | "all" = mode) => {
     if (!onGenerate || generating) return;
+    cancelRequested.current = false;
     setGenerating(true);
     setGenerateError(null);
-    void onGenerate(modeOverride, targetPath).then(() => store.reload()).catch((e: unknown) => setGenerateError(e instanceof Error ? e.message : "The graph could not be generated.")).finally(() => setGenerating(false));
+    void onGenerate(modeOverride, targetPath)
+      .then(() => store.load(projectRoot, graphCandidates(modeOverride)))
+      .catch((e: unknown) => setGenerateError(cancelRequested.current ? "Graph generation cancelled." : e instanceof Error ? e.message : "The graph could not be generated."))
+      .finally(() => { cancelRequested.current = false; setGenerating(false); });
   };
 
   // The Mac's scan target. Code scans the picked repo only; InfiniteBrain and All fall back to the first repo.
@@ -139,7 +149,8 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
       >
         {generating ? "Generating…" : runLabel}
       </button>
-      <button type="button" className="gr-btn" disabled={generating} onClick={() => void store.reload()}>Check again</button>
+      {generating && onCancel ? <button type="button" className="gr-btn" onClick={() => { cancelRequested.current = true; onCancel(); }}>Cancel</button> : null}
+      <button type="button" className="gr-btn" disabled={generating} onClick={() => void reloadCurrent()}>Check again</button>
       {generateError ? <p className="gr-error" role="alert">{generateError}</p> : null}
     </div>
   );
@@ -153,7 +164,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     );
   }
   if (s.phase === "too-large") return wrap(<TooLargeState onOpen={(p) => store.openPath(p)} />);
-  if (s.phase === "error" || !entry || !adj) return wrap(<ErrorState message={s.error ?? "Unknown error."} onRetry={() => void store.reload()} />);
+  if (s.phase === "error" || !entry || !adj) return wrap(<ErrorState message={s.error ?? "Unknown error."} onRetry={() => void reloadCurrent()} />);
 
   const { model, layout } = entry;
   const sel = s.selected;
@@ -213,7 +224,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           <button type="button" role="tab" id="gr-tab-graph" aria-selected={s.tab === "graph"} aria-controls="gr-panel-graph" className="gr-seg-btn" data-on={s.tab === "graph"} onClick={() => store.setTab("graph")}>Graph</button>
           <button type="button" role="tab" id="gr-tab-list" aria-selected={s.tab === "list"} aria-controls="gr-panel-list" className="gr-seg-btn" data-on={s.tab === "list"} onClick={() => store.setTab("list")}>Nodes</button>
         </div>
-        <button type="button" className="gr-btn" onClick={() => void store.reload()}>Reload</button>
+        <button type="button" className="gr-btn" onClick={() => void reloadCurrent()}>Reload</button>
       </header>
       {notices.length > 0 && (
         <div className="gr-notices">{notices.slice(0, 4).map((n) => <StatusBanner key={n} severity="info" message={n} />)}</div>

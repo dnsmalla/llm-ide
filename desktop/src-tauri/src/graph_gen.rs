@@ -5,8 +5,9 @@
 //! `all` merges both canonical documents. Runs the bundled CLI with the bundled node; a dev build falls back to
 //! the checkout. The page never chooses a path — the active project root and its llm-doc are host state.
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::Manager;
@@ -14,7 +15,7 @@ use tauri::Manager;
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphGenerated {
-    /// Project-relative, always `system/graph/graph.json`.
+    /// Project-relative mode file: `graph-code.json`, `graph-memory.json` or `graph-all.json`.
     pub path: String,
     pub nodes: usize,
     pub edges: usize,
@@ -42,6 +43,16 @@ fn toolchain(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
 }
 
 static NEXT_COPY: AtomicU64 = AtomicU64::new(0);
+static RUNNING: AtomicBool = AtomicBool::new(false);
+static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+
+fn graph_rel(mode: &str) -> &'static str {
+    match mode {
+        "memory" => "system/graph/graph-memory.json",
+        "all" => "system/graph/graph-all.json",
+        _ => "system/graph/graph-code.json",
+    }
+}
 
 fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     // A bundled CLI sits inside the app bundle. In a checkout build the bundle lives under `desktop/`,
@@ -51,17 +62,39 @@ fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     let n = NEXT_COPY.fetch_add(1, Ordering::Relaxed);
     let temp = std::env::temp_dir().join(format!("llmide-graphkit-{}-{n}.cjs", std::process::id()));
     std::fs::copy(cli, &temp).map_err(|e| format!("cannot prepare the GraphKit CLI: {e}"))?;
-    let output = Command::new(node)
+    let mut child = Command::new(node)
         .arg(&temp)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
+        .spawn()
         .map_err(|e| format!("cannot run the GraphKit generator: {e}"))?;
+    // Publish the child while it runs so graph_cancel can kill exactly this process. A cancel between
+    // spawn and the lock is impossible from the UI's single-threaded command path in practice, but the
+    // lock still makes the hand-off atomic.
+    {
+        let mut slot = CHILD.lock().map_err(|_| "the graph runner is unavailable")?;
+        *slot = Some(child);
+    }
+    let status = loop {
+        let mut slot = CHILD.lock().map_err(|_| "the graph runner is unavailable")?;
+        let Some(running) = slot.as_mut() else {
+            let _ = std::fs::remove_file(&temp);
+            return Err("graph generation cancelled".into());
+        };
+        match running.try_wait().map_err(|e| format!("cannot wait for the GraphKit generator: {e}"))? {
+            Some(status) => {
+                slot.take();
+                break status;
+            }
+            None => {
+                drop(slot);
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+        }
+    };
     let _ = std::fs::remove_file(&temp);
-    if output.status.success() { return Ok(()); }
-    let err = String::from_utf8_lossy(&output.stderr);
-    let msg: String = err.chars().filter(|c| !c.is_control()).take(500).collect();
-    Err(if msg.trim().is_empty() { "the GraphKit generator failed".into() } else { format!("the GraphKit generator failed: {msg}") })
+    if status.success() { return Ok(()); }
+    Err("the GraphKit generator failed".into())
 }
 
 fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<GraphGenerated, String> {
@@ -154,18 +187,35 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     if mode == "memory" && nodes == 0 {
         return Err("This target has no .md/.txt documents to graph yet.".into());
     }
-    let dest = out_dir.join("graph.json");
-    // Write to a sibling temp then rename so a reader never sees half a graph.
-    let partial = out_dir.join("graph.json.partial");
-    std::fs::write(&partial, text.as_bytes()).map_err(|e| format!("cannot write system/graph/graph.json: {e}"))?;
-    std::fs::rename(&partial, &dest).map_err(|e| format!("cannot install system/graph/graph.json: {e}"))?;
-    Ok(GraphGenerated { path: "system/graph/graph.json".into(), nodes, edges })
+    let rel = graph_rel(mode);
+    let dest = out_dir.join(rel.rsplit('/').next().unwrap_or("graph.json"));
+    // One graph per mode: a memory graph never replaces the code graph. Write a sibling then rename so
+    // a reader never sees half a graph.
+    let partial = dest.with_extension("json.partial");
+    std::fs::write(&partial, text.as_bytes()).map_err(|e| format!("cannot write {rel}: {e}"))?;
+    std::fs::rename(&partial, &dest).map_err(|e| format!("cannot install {rel}: {e}"))?;
+    Ok(GraphGenerated { path: rel.into(), nodes, edges })
 }
 
 #[tauri::command]
 pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>) -> Result<GraphGenerated, String> {
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("a graph generation is already running".into());
+    }
     let mode = mode.unwrap_or_else(|| "code".into());
-    tauri::async_runtime::spawn_blocking(move || generate(&app, &mode, target.as_deref())).await.map_err(|e| format!("graph task failed: {e}"))?
+    let result = tauri::async_runtime::spawn_blocking(move || generate(&app, &mode, target.as_deref())).await
+        .map_err(|e| format!("graph task failed: {e}"));
+    RUNNING.store(false, Ordering::SeqCst);
+    result?
+}
+
+/// Stop the running GraphKit child. The generate call returns its cancellation to the screen.
+#[tauri::command]
+pub fn graph_cancel() -> bool {
+    let Ok(mut slot) = CHILD.lock() else { return false };
+    let Some(child) = slot.as_mut() else { return false };
+    let _ = child.kill();
+    true
 }
 
 #[cfg(test)]
@@ -173,7 +223,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_output_path_is_project_relative_and_fixed() {
-        assert!(!Path::new("system/graph/graph.json").is_absolute());
+    fn each_mode_has_its_own_project_relative_graph() {
+        assert_eq!(graph_rel("code"), "system/graph/graph-code.json");
+        assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
+        assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
+        assert!(!Path::new(graph_rel("code")).is_absolute());
     }
 }

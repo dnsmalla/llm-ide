@@ -7,6 +7,12 @@ import { relativePath } from "./decode.ts";
 /** Where graph-kit writes it (ProjectLayout.graphDir = system/graph), then the flat legacy spot. */
 export const GRAPH_CANDIDATES: readonly string[] = ["system/graph/graph.json", "system/graph.json"];
 
+/** One graph per mode. `graph.json` remains the pre-mode code graph and is the code fallback. */
+export function graphCandidates(mode: "code" | "memory" | "all"): readonly string[] {
+  const rel = `system/graph/graph-${mode}.json`;
+  return mode === "code" ? [rel, ...GRAPH_CANDIDATES] : [rel];
+}
+
 export type ReadFailure = "not-found" | "too-large" | "no-project" | "error";
 export type ReadResult = { ok: true; text: string; path: string } | { ok: false; kind: ReadFailure; message: string; tried: string[] };
 
@@ -23,10 +29,10 @@ export function joinRoot(root: string, rel: string): string {
   return `${root.replace(/[\\/]+$/, "")}/${rel}`;
 }
 
-/** A user-typed project-relative path to a graph.json, or null when it is not one. */
+/** A user-typed project-relative path to a known graph file, or null when it is not one. */
 export function customGraphPath(input: string): string | null {
   const p = relativePath(input.trim(), 512);
-  return p !== null && /(^|\/)graph\.json$/.test(p) ? p : null;
+  return p !== null && /(^|\/)(graph|graph-code|graph-memory|graph-all)\.json$/.test(p) ? p : null;
 }
 
 export async function readProjectGraph(invoke: Invoke, root: string | null, rels: readonly string[] = GRAPH_CANDIDATES): Promise<ReadResult> {

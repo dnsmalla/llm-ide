@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "backend_pick_dir",
     "backend_detect",
     "graph_generate",
+    "graph_cancel",
     "loop_run_stage",
     "loop_run_loop",
     "loop_work_root",

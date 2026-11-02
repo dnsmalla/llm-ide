@@ -283,6 +283,7 @@ macro_rules! product_handlers {
                 backend_pick::backend_pick_dir,
                 backend_pick::backend_detect,
                 graph_gen::graph_generate,
+                graph_gen::graph_cancel,
                 loop_runner::loop_run_stage,
                 loop_runner::loop_run_loop,
                 loop_runner::loop_work_root,

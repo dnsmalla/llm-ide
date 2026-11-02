@@ -15,6 +15,7 @@
     "allow-backend-pick-dir",
     "allow-backend-detect",
     "allow-graph-generate",
+    "allow-graph-cancel",
     "allow-loop-run-stage",
     "allow-loop-run-loop",
     "allow-loop-work-root",
