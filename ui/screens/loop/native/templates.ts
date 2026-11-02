@@ -1,6 +1,6 @@
 // Built-in Loop recipes. The full Mac template library is larger; these are the safe starting points the desktop
 // can create without hidden defaults. Test-stage commands are detected at apply time, never hard-coded.
-import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
+import type { LoopDefinition, LoopEngineConfig, LoopProjectStore, LoopStage } from "./model.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
 
@@ -118,19 +118,38 @@ export function deleteCustomTemplate(id: string, storage: Storage | undefined = 
  *  the project's detected test command. A test-command stage is dropped when this project has none; skills remain
  *  editable but still need the core agent/skills to run. */
 export function initialProjectStore(testCommand: string | null) {
-  const loops: LoopDefinition[] = DEFAULT_LOOP_SPECS.map((spec) => {
-    const stages = spec.config.stages.flatMap((s) => {
-      const command = s.command === DETECTED_TEST ? testCommand : s.command;
-      if (s.command === DETECTED_TEST && !command) return [];
-      return [{ ...structuredClone(s), id: crypto.randomUUID(), command, isDefault: true }];
-    }).map((s, i) => ({ ...s, order: i }));
-    const config = structuredClone(spec.config);
-    return {
-      ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary),
-      config: { ...config, stages },
-    };
-  });
+  const loops: LoopDefinition[] = DEFAULT_LOOP_SPECS.map((spec) => starterLoop(spec, testCommand));
   const first = loops.find((l) => l.defaultKey === "regression") ?? loops[0];
   if (first && !loops.some((l) => l.isPrimary)) first.isPrimary = true;
   return { schemaVersion: 2 as const, loops };
+}
+
+function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: string | null): LoopDefinition {
+  const stages = spec.config.stages.flatMap((s) => {
+    const command = s.command === DETECTED_TEST ? testCommand : s.command;
+    if (s.command === DETECTED_TEST && !command) return [];
+    return [{ ...structuredClone(s), id: crypto.randomUUID(), command, isDefault: true }];
+  }).map((s, i) => ({ ...s, order: i }));
+  const config = structuredClone(spec.config);
+  return {
+    ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary),
+    config: { ...config, stages },
+  };
+}
+
+/** The Mac re-ensures its default loops on every load: a starter loop whose defaultKey is missing from the file is
+ *  added back, and nothing that exists is changed. Returns the names added so the caller can ask for a save. */
+export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string | null): { store: LoopProjectStore; added: string[] } {
+  const have = new Set(store.loops.map((l) => l.defaultKey).filter((k): k is string => k !== null));
+  const added: string[] = [];
+  const loops = [...store.loops];
+  for (const spec of DEFAULT_LOOP_SPECS) {
+    if (!spec.defaultKey || have.has(spec.defaultKey)) continue;
+    const loop = starterLoop(spec, testCommand);
+    // A re-added default never takes the primary slot from a loop the user already made primary.
+    if (loops.some((l) => l.isPrimary)) loop.isPrimary = false;
+    loops.push(loop);
+    added.push(spec.name);
+  }
+  return { store: { ...store, loops }, added };
 }

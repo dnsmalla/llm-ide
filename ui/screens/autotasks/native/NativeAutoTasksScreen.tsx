@@ -7,13 +7,17 @@ import { shellBus } from "../../shell/bus";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
-import { GROUPS, TASKS, TASK_BY_ID, loadState, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { createHostFs } from "../../explorer/fs";
+import { GROUPS, TASKS, TASK_BY_ID, agentRunSucceeded, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { cronMatches, describeCron, validateCron } from "./cron.ts";
+import { scanProjectSkills, skillRunId, type ProjectSkill } from "./skills.ts";
 import "./native-autotasks.css";
 
 interface AutoTaskRun { id: string; task: string; at: string; ok: boolean; summary: string; durationSeconds: number }
 
-export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
+export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode {
+  const fs = useMemo(() => createHostFs(), []);
+  const [skills, setSkills] = useState<ProjectSkill[]>([]);
   const [state, setState] = useState<AutoTaskLocalState>(() => loadState());
   const [selected, setSelected] = useState<AutoTaskId>("reviewCode");
   const [onlyEnabled, setOnlyEnabled] = useState(false);
@@ -31,6 +35,12 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
   useEffect(() => { try { localStorage.setItem("llmide.autoTaskRuns.v1", JSON.stringify(runs.slice(0, 50))); } catch { /* session only */ } }, [runs]);
   const task = TASK_BY_ID[selected];
   const config = state.configs[selected];
+  useEffect(() => {
+    if (!projectRoot) { setSkills([]); return; }
+    let live = true;
+    void scanProjectSkills(fs).then((list) => { if (live) setSkills(list); });
+    return () => { live = false; };
+  }, [fs, projectRoot]);
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const iconFor = (id: AutoTaskId): string => ({ sourceUpdate: "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", reviewCode: "✓", reviewDoc: "▤", reviewConflicts: "⚠", updateIssues: "☑", updatePlanStatus: "▥", generateDoc: "▦", regression: "↺", generateKnowledge: "✦" } as Record<string, string>)[id] ?? "•";
@@ -44,7 +54,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
     });
   };
   useEffect(() => {
-    if (!state.masterEnabled || !hasRepo) return;
+    if (!state.masterEnabled) return;
     const tick = () => {
       if (running) return;
       const now = new Date();
@@ -53,6 +63,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
         const c = state.configs[t.id];
         if (!c?.enabled || !c.scheduleActive || !validateCron(c.cron)) continue;
         if (!cronMatches(c.cron, now)) continue;
+        if (requiresLinkedRepo(t.id) && !hasRepo) continue;
         const key = `${t.id}:${minute}`;
         if (firedRef.current[key]) continue;
         let persisted: Record<string, string> = {};
@@ -74,25 +85,30 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
     if (running) return;
     const t = TASK_BY_ID[id]; const c = state.configs[id];
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
-    if (!hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
+    if (requiresLinkedRepo(id) && !hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
+    const inputPath = normalizeProjectPath(c.inputPath);
+    const outputPath = normalizeProjectPath(c.outputPath);
+    if (inputPath === null || outputPath === null) { setNotice("Input and output must be folders inside the project (relative, no “..”)."); return; }
+    const skillId = c.skillName ? skillRunId(c.skillName) : null;
+    if (c.skillName && !skillId) { setNotice(`“${c.skillName}” cannot run in an Auto Task (code-applying or not a plain skill name).`); return; }
     setRunning(true);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
     try {
       const workRoot = await invokeHost<string>("loop_work_root");
       const parts = [c.prompt];
-      if (c.inputPath.trim()) parts.push(`Input: ${c.inputPath.trim()}`);
-      if (c.outputPath.trim()) parts.push(`Output: ${c.outputPath.trim()}`);
-      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; resultSubtype?: string }>("/kb/loop/agent-run", {
-        method: "POST", body: { message: parts.join("\n\n"), repoRoot: workRoot, skills: c.skillName ? [c.skillName] : undefined, timeoutMs: 30 * 60 * 1000 },
+      if (inputPath) parts.push(`Input: ${inputPath}`);
+      if (outputPath) parts.push(`Output: ${outputPath}`);
+      const r = await core.request<{ reply?: string; changedPaths?: string[]; changedExtraPaths?: string[]; unresolvedSkills?: string[]; ran?: boolean; resultSubtype?: string }>("/kb/loop/agent-run", {
+        method: "POST", body: { message: parts.join("\n\n"), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, timeoutMs: 30 * 60 * 1000 },
       });
       let touched = r.changedPaths ?? [];
       if (t.readOnlyOutput && touched.length) {
         try { await invokeHost("loop_revert_paths", { paths: touched }); setLog((l) => [...l, `read-only task reverted: ${touched.join(", ")}`]); touched = []; }
         catch (e) { setLog((l) => [...l, `read-only revert failed: ${e instanceof Error ? e.message : String(e)}`]); }
       }
-      const ok = r.resultSubtype === "success" || (r.resultSubtype == null && typeof r.reply === "string");
-      setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : [])]);
+      const ok = agentRunSucceeded(r);
+      setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`did not run: skill not found in your skills library: ${r.unresolvedSkills.join(", ")}`] : [])]);
       setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed"), durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);
     } catch (e) {
@@ -114,7 +130,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
         </div>
         {!hasRepo ? (
           <div className="atn-warning">
-            <p>No linked repository detected. Auto Tasks need an active GitHub or GitLab project with a local clone path and a matching token.</p>
+            <p>No linked repository detected. Auto Tasks other than Source Update need an active GitHub or GitLab project with a local clone path and a matching token.</p>
             <button type="button" className="atn-link" onClick={() => shellBus.publish({ type: "goto-section", section: "settings" })}>Open Settings</button>
           </div>
         ) : null}
@@ -158,7 +174,7 @@ export function NativeAutoTasksScreen(_props: SectionProps): ReactNode {
           <header><span aria-hidden="true">☰</span><h2>SETTINGS</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Reload task settings" onClick={() => setState(loadState())}>↻</button></header>
           <label className="atn-field"><span>Input path</span><input value={config.inputPath} placeholder="Whole project" onChange={(e) => update({ inputPath: e.target.value })} /><em>What the task reads. Empty means the whole project.</em></label>
           <label className="atn-field"><span>Output path</span><input value={config.outputPath} placeholder="Whole project" onChange={(e) => update({ outputPath: e.target.value })} /><em>{task.readOnlyOutput ? "Read-only task — edits are reverted after the run; this is the intended destination." : "Where the task writes its result."}</em></label>
-          <label className="atn-field"><span>Skill</span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option></select><em>Run the prompt under one of the project's agent skills.</em></label>
+          <label className="atn-field"><span>Skill</span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option>{[...skills.map((x) => x.name), ...(config.skillName && !skills.some((x) => x.name === config.skillName) ? [config.skillName] : [])].map((name) => <option key={name} value={name}>{name}</option>)}</select><em>Run the prompt under one of the project's agent skills.</em></label>
         </section>
 
         <section className="atn-card">

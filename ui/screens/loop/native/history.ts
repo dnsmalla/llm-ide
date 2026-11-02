@@ -1,6 +1,7 @@
 // Read-only view of the Mac's Loop journal under `<root>/system/loop-runs/`. The index is append-only JSONL,
 // month-rotated (`index-YYYY-MM.jsonl`) with the legacy `index.jsonl` read oldest. A missing journal is normal.
 import type { FsApi } from "../../explorer/fs";
+import type { LoopIterationOutcome } from "./runner.ts";
 
 export interface LoopRunIndexEntry {
   id: string;
@@ -94,4 +95,18 @@ export async function loadRunRecord(fs: Pick<FsApi, "read">, id: string, started
     const v = JSON.parse(r.text) as unknown;
     return typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null;
   } catch { return null; }
+}
+
+/** The Mac journal's trigger for a run: a scheduled loop is an unattended `autoTask` sweep, a Run press is `manual`. */
+export function runTrigger(scheduled: boolean): "manual" | "autoTask" {
+  return scheduled ? "autoTask" : "manual";
+}
+
+/** Iteration rows in the shape the run inspector reads: each iteration with its stages and any repair attempt. */
+export function iterationRecords(iterations: readonly LoopIterationOutcome[]): Record<string, unknown>[] {
+  return iterations.map((it) => ({
+    index: it.index,
+    stages: it.stages.map((o) => ({ stageName: o.stage.name, passed: o.ok, severity: o.stage.severity, output: o.output })),
+    repair: it.repair ? { stageId: it.repair.stageId, attempt: it.repair.attempt, ok: it.repair.ok } : null,
+  }));
 }

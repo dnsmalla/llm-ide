@@ -7,9 +7,9 @@ import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
-import { isManualOnly, loadLoops, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
+import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -23,7 +23,7 @@ import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
 import { protectedPaths } from "./protected.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
-import { appendRunRecord, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, iterationRecords, loadRunRecord, readRecentRuns, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -93,14 +93,25 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setLoad(null);
     setOpenError(null);
     if (!projectRoot) return undefined;
-    void loadLoops(fs).then((r) => {
+    void loadLoops(fs).then(async (r) => {
       if (!live) return;
-      setLoad(r);
+      // Mac parity: a missing default loop is re-added in memory and only written when the user saves.
+      let next = r;
+      let added: string[] = [];
       if (r.kind === "ok") {
-        const loop = primaryLoop(r.store);
+        const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
+        if (!live) return;
+        const ensured = ensureDefaultLoops(r.store, env.command);
+        added = ensured.added;
+        if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
+      }
+      setLoad(next);
+      if (next.kind === "ok") {
+        const loop = primaryLoop(next.store);
         setSelectedLoopId(loop?.id ?? null);
         setSelectedStageId(loop?.config.stages[0]?.id ?? null);
-        setDirty(false);
+        setDirty(added.length > 0);
+        if (added.length) setNotice(`Added the missing default loop(s): ${added.join(", ")}. Save to keep them.`);
       }
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
@@ -434,6 +445,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
+    // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
+    if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
+    const batchBlock = macBatchReason(target);
+    if (batchBlock) { setNotice(batchBlock); return; }
     const approval = ensureApprovals(target, !scheduled);
     if (approval) { setNotice(approval); return; }
     runningRef.current = true;
@@ -481,9 +496,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       }
       setNotice(outcome.cancelled ? "The loop was cancelled." : outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.cancelled ? "cancelled" : outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.cancelled ? "cancelled" : outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, stages: recordStages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, stages: recordStages, iterations: iterationRecords(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -570,6 +585,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
+    if (stage.kind === "skill" && isBatchSkill(stage.skillId)) { setNotice("This refactor batch stage needs the Mac app's rollback; run it from the Mac."); return; }
     if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
       if (!window.confirm(`Approve this command?\n\n${stage.command}`)) return;
       approve(workRoot ?? projectRoot ?? "", stage.command);
