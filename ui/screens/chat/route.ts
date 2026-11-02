@@ -9,13 +9,13 @@ export interface ModeOption { id: string; label: string; hint: string }
 
 /** `MODES` of extension/llm_agent/modes/mode-classify.mjs plus the client-side `auto`. */
 export const MODES: readonly ModeOption[] = [
-  { id: "auto", label: "Auto", hint: "Picks a mode for each message" },
-  { id: "ask", label: "Ask", hint: "Answer questions, no changes" },
-  { id: "plan", label: "Plan", hint: "Design a plan, change nothing" },
-  { id: "assist_plan", label: "Assist plan", hint: "Build the plan together over several turns" },
-  { id: "review", label: "Review", hint: "Review code, read only" },
-  { id: "document", label: "Document", hint: "Write documentation" },
-  { id: "execute", label: "Execute", hint: "Make changes and run commands" },
+  { id: "auto", label: "Auto", hint: "Claude classifies your request and picks a mode itself" },
+  { id: "ask", label: "Ask", hint: "Answer a question about this project, read-only (no edit or command tools)" },
+  { id: "plan", label: "Plan", hint: "Work up a design together, then write and save the plan; no file edits or commands except saving it" },
+  { id: "assist_plan", label: "Assist Plan", hint: "Same pipeline, but grills your stated plan in rounds of numbered questions; no file edits or commands except saving it" },
+  { id: "review", label: "Code Review", hint: "Give code-review feedback; no file edits or commands" },
+  { id: "document", label: "Document", hint: "Write documentation in the reply; no file edits or commands" },
+  { id: "execute", label: "Execute", hint: "Today's full agentic behaviour: file edits, commands, tools" },
 ];
 export const KNOWN_MODES: ReadonlySet<string> = new Set(MODES.map((m) => m.id));
 
@@ -29,9 +29,9 @@ export const pickerModeAfterSessionChange = (): string => AUTO_MODE;
 export type PermissionMode = "ask" | "accept-edits" | "bypass";
 export interface PermissionOption { id: PermissionMode; label: string; hint: string }
 export const PERMISSION_MODES: readonly PermissionOption[] = [
-  { id: "ask", label: "Ask", hint: "Confirm each edit and command" },
-  { id: "accept-edits", label: "Accept Edits", hint: "Apply edits, confirm commands" },
-  { id: "bypass", label: "Bypass", hint: "No confirmations" },
+  { id: "ask", label: "Ask", hint: "Ask before each file edit and shell command. \"Always allow\" on a card remembers that command for this project." },
+  { id: "accept-edits", label: "Accept Edits", hint: "Apply file edits in the project without asking; still ask before shell commands." },
+  { id: "bypass", label: "Bypass", hint: "Apply edits and run commands without asking. Blocked commands and writes outside the project are still refused." },
 ];
 // Bypass approval (host-signed token, per-chat grant): see ./bypass.ts.
 
@@ -68,6 +68,9 @@ export const plainChatDetail = (r: PlainChatReason): string => r === "toolsOff"
 export type CapLevel = "none" | "ok" | "warn" | "reached";
 export const CAP_PRESETS: readonly number[] = [50_000, 200_000, 1_000_000, 5_000_000];
 export const CAP_MAX = 1_000_000_000_000;
+
+/** The Mac's tooltip on "Raise the limit" (ChatRouteControl). */
+export const RAISE_LIMIT_HELP = "Raises the limit by half again (at least 50k above what is used)";
 
 export function capLevel(used: number, limit: number | null): CapLevel {
   if (limit === null || limit <= 0) return "none";

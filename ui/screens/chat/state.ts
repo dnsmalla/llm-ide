@@ -7,6 +7,7 @@
 //  * Memory is bounded: tool output kept in state is capped (TOOL_STATE_CAP), the in-memory message
 //    window is capped (MAX_MESSAGES_IN_MEMORY, oldest dropped on append and `hasMoreOlder` set).
 import type { AgentEvent, ApprovalSuggestion, ContextCategory, Question, TaskItem } from "./events";
+import { addUsage, type UsageCounts } from "./usage";
 
 export const TOOL_STATE_CAP = 20_000;
 export const TOOL_ARGS_CAP = 8_000;
@@ -53,6 +54,8 @@ export interface AssistantMessage {
   parts: Part[];
   notices: Notice[];
   status: MessageStatus;
+  /** This reply's token counts once the core reports them (live turns; the Mac labels each reply with them). */
+  usage?: UsageCounts;
 }
 export type Message = UserMessage | AssistantMessage;
 
@@ -408,9 +411,14 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
           }
         }
         break;
-      case "usage":
-        next.usage = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens };
+      case "usage": {
+        const u = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens };
+        next.usage = u;
+        // Summed, as the Mac's AgentV2Transport does: the SDK engine sends one usage per turn, but a provider
+        // (adapter) turn sends one per step, and keeping only the last step under-counts a tool-using reply.
+        if (target) target.usage = target.usage ? addUsage(target.usage, u) : u;
         break;
+      }
       case "context_usage":
         next.context = { totalTokens: ev.totalTokens, maxTokens: ev.maxTokens, percentage: ev.percentage, categories: ev.categories };
         break;

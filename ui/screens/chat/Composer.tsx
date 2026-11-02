@@ -51,6 +51,22 @@ function speechCtor(): SpeechCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** True on macOS (the webview's platform string). */
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform ?? "");
+}
+
+/** The Mac's voice-input key (CodeAssistant+Voice, Cmd+M): Cmd+M on macOS, Ctrl+M elsewhere; no other modifier. Pure.
+ *  On macOS the window menu's Minimize also owns Cmd+M, but WKWebView offers key equivalents to the page first, so
+ *  this handler's preventDefault keeps the window up while the composer has focus (Minimize still works elsewhere). */
+export function isDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac = isMacPlatform()): boolean {
+  const primary = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  return e.key.toLowerCase() === "m" && primary && !e.altKey && !e.shiftKey;
+}
+
+/** The key the Dictate tooltip names. */
+export const dictationShortcutLabel = (mac = isMacPlatform()): string => (mac ? "Cmd+M" : "Ctrl+M");
+
 export function Composer(p: ComposerProps) {
   const speech = useRef<SpeechRecognitionLike | null>(null);
   const [listening, setListening] = useState(false);
@@ -107,6 +123,7 @@ export function Composer(p: ComposerProps) {
         onKeyDown={(e) => {
           // Keys that belong to the input method (commit/cancel a conversion) do nothing here: no send, no menu pick, no Stop.
           if (guard.isIme(e)) return;
+          if (voice && isDictationShortcut(e)) { e.preventDefault(); toggleVoice(); return; }
           if (p.extras?.onKeyDown(e)) return;
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           else if (e.key === "Escape" && p.busy) { e.preventDefault(); p.onStop(); }
@@ -117,7 +134,7 @@ export function Composer(p: ComposerProps) {
         }}
       />
       <div className="chat-composer-bar">
-        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title="Dictate with the system speech recogniser">{listening ? "Listening…" : "Dictate"}</button> : null}
+        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button> : null}
         {p.extras?.toolbar}
         {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}

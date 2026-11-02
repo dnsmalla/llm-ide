@@ -25,6 +25,7 @@ import {
 import type { ChatState } from "./state";
 import { createChatUiStore, type ChatPrefs, type ChatUiStore } from "./ui-state";
 import { DockHeader } from "./DockHeader";
+import { chatTotalLabel } from "./usage";
 import type { ChatStore, SessionSummary } from "./store";
 import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
@@ -181,6 +182,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
+  // This chat's total, summed from the loaded replies' own counts (the Mac header's "N tokens").
+  const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
   const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, state]);
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);
   const remoteBusy = activeId ? controller.isRemoteBusy(activeId) : false;
@@ -290,6 +293,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 </div>
               ) : null}
               {state.usage ? <span className="chat-muted" title="Input and output tokens for this turn">↑ {state.usage.inputTokens.toLocaleString()} ↓ {state.usage.outputTokens.toLocaleString()}</span> : null}
+              {sessionTotal ? <span className="chat-muted" title={sessionTotal.title} aria-label={sessionTotal.ariaLabel}>{sessionTotal.text}</span> : null}
               {state.model && <span className="chat-muted">{state.model}</span>}
               <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
               <span className="chat-spacer" />

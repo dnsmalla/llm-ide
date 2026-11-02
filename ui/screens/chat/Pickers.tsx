@@ -2,7 +2,7 @@
 // and screen-reader complete; the cap popover is a labelled dialog region.
 import { useState } from "react";
 import {
-  CAP_APPROXIMATION_NOTE, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, capLevel, coldSwitchWarning, compactTokens,
+  CAP_APPROXIMATION_NOTE, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
   meterText, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
@@ -48,10 +48,11 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
 }
 
 export function PermissionChip({ value, onChange }: { value: PermissionMode; onChange: (m: PermissionMode) => void }) {
+  const shown = PERMISSION_MODES.find((m) => m.id === value);
   return (
     <label className="chat-pick" data-bypass={value === "bypass"}>
       <span className="chat-pick-label">Permissions</span>
-      <select aria-label="Permission mode" value={value} onChange={(e) => onChange(e.target.value as PermissionMode)}>
+      <select aria-label="Permission mode" value={value} title={shown?.hint} onChange={(e) => onChange(e.target.value as PermissionMode)}>
         {PERMISSION_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select>
     </label>
@@ -94,7 +95,7 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
             <button type="submit" className="chat-btn">Set</button>
           </form>
           {level === "reached" && route.tokenLimit !== null && (
-            <button type="button" className="chat-btn" onClick={() => void apply(raisedLimit(route.tokenLimit!, used))}>Raise to {compactTokens(raisedLimit(route.tokenLimit, used))}</button>
+            <button type="button" className="chat-btn" title={RAISE_LIMIT_HELP} onClick={() => void apply(raisedLimit(route.tokenLimit!, used))}>Raise to {compactTokens(raisedLimit(route.tokenLimit, used))}</button>
           )}
           <p className="chat-muted">{coldSwitchWarning(0)}</p>
           {err && <p role="alert" className="chat-error">{err}</p>}

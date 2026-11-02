@@ -5,6 +5,7 @@ import { memo, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
 import type { AssistantMessage, Message, Notice, TextPart, ToolPart } from "./state";
+import { billableTokens, compactTokenCount, usageTooltip } from "./usage";
 
 export interface FileRefs {
   /** Project-relative path for a path found in a tool's arguments, or null when it is not inside the open project. */
@@ -148,6 +149,7 @@ function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
         {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
         {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
+        {m.usage && !live && <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens</p>}
       </div>
     </article>
   );

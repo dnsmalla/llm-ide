@@ -16,6 +16,7 @@
 .chat-spacer { flex: 1; }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; padding: 0 var(--tok-space-md); }
 .chat-row { padding: var(--tok-space-sm) 0; }
+.chat-jump { position: sticky; bottom: var(--tok-space-sm); display: block; margin: 0 auto; font: inherit; color: inherit; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: 999px; padding: var(--tok-space-xs) var(--tok-space-md); cursor: pointer; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16); }
 .chat-msg { width: 100%; max-width: 720px; margin: 0 auto; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-role { display: block; margin-bottom: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .chat-turn { display: flex; flex-direction: column; align-items: flex-end; max-width: 100%; }

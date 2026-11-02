@@ -48,3 +48,4 @@ export * from "../badges/Badges";
 export * from "../badges/subagents";
 export * from "../ui-state";
 export * from "../DockHeader";
+export * from "../usage";

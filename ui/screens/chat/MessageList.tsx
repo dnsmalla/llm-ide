@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { MessageView, type MessageHost } from "./MessageView";
 import type { Message } from "./state";
-import { isNearBottom, prependScrollAdjust, shouldLoadOlder } from "./virtual";
+import { prependScrollAdjust, shouldLoadOlder, showJumpToLatest } from "./virtual";
 import { useVirtualList } from "./hooks";
 
 export const MESSAGE_ESTIMATE_PX = 120;
@@ -33,6 +33,13 @@ function Row({ index, message, host, measure }: { index: number; message: Messag
   return <div ref={ref} role="listitem" className="chat-row"><MessageView m={message} host={host} /></div>;
 }
 
+/** The Mac's "Jump to latest" (ChatMessageList: `!isPinnedToBottom, engine.busy`): only while a reply is still
+ *  streaming, and only once the reader has scrolled away from the end. Pure. */
+export function jumpPillVisible(messages: readonly Message[], scrollTop: number, viewport: number, total: number): boolean {
+  const tail = messages[messages.length - 1];
+  return tail?.role === "assistant" && tail.status === "streaming" && showJumpToLatest(scrollTop, viewport, total);
+}
+
 export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScrollTop, onScrollState, onOpenLink, onCopy, files, empty }: Props) {
   const keyOf = useCallback((i: number) => messages[i]?.id ?? String(i), [messages]);
   const { scrollRef, range, measure, offsets, scrollTop, viewport } = useVirtualList(messages.length, keyOf, MESSAGE_ESTIMATE_PX);
@@ -44,9 +51,15 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
 
   // Report position upward (per-chat scroll memory) and track "following the stream".
   useEffect(() => {
-    stick.current = isNearBottom(scrollTop, viewport, offsets[messages.length] ?? 0);
+    stick.current = !showJumpToLatest(scrollTop, viewport, offsets[messages.length] ?? 0);
     onScrollState(scrollTop, stick.current);
   }, [scrollTop, viewport, offsets, messages.length, onScrollState]);
+  const away = jumpPillVisible(messages, scrollTop, viewport, offsets[messages.length] ?? 0);
+  const jumpToLatest = () => {
+    const el = scrollRef.current;
+    stick.current = true;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
 
   // Restore on mount.
   useLayoutEffect(() => {
@@ -89,6 +102,7 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
             <Row key={m.id} index={range.start + k} message={m} host={host} measure={measure} />
           ))}
         </div>
+        {away && <button type="button" className="chat-jump" onClick={jumpToLatest}>Jump to latest</button>}
         </>
       )}
     </div>

@@ -57,6 +57,11 @@ export function isNearBottom(scrollTop: number, viewport: number, total: number,
   return total - (scrollTop + viewport) <= slack;
 }
 
+/** The Mac's "Jump to latest" pill: shown once the reader has scrolled away from the end of a non-empty conversation. */
+export function showJumpToLatest(scrollTop: number, viewport: number, total: number): boolean {
+  return total > 0 && !isNearBottom(scrollTop, viewport, total);
+}
+
 /** Near the top: load older items. */
 export function shouldLoadOlder(scrollTop: number, slack = 160): boolean {
   return scrollTop <= slack;
