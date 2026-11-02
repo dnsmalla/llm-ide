@@ -46,6 +46,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [hideUndated, setHideUndated] = useState(false);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("all");
+  const [dateFilter, setDateFilter] = useState<"any" | "scheduled" | "unscheduled">("any");
   const [zoom, setZoom] = useState<Zoom>("week");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -90,7 +91,8 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
       return true;
     });
   }, [issues, query, stateFilter]);
-  const rows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
+  const baseRows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
+  const rows = useMemo(() => baseRows.filter((r) => !hideUndated || r.start !== null || r.end !== null).filter((r) => dateFilter === "any" || (dateFilter === "scheduled" ? r.start !== null || r.end !== null : r.start === null && r.end === null)), [baseRows, dateFilter, hideUndated]);
   const dated = useMemo(() => datedRows(rows), [rows]);
   const undated = useMemo(() => undatedRows(rows), [rows]);
   const range = useMemo<TimelineRange>(() => timelineRange(rows), [rows]);
@@ -117,14 +119,6 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   return (
     <div className="gnt-root" data-active={active}>
       <header className="gnt-head">
-        <h2 className="gnt-title">Gantt</h2>
-        <label className="gnt-field">
-          <span>Provider</span>
-          <select value={provider} onChange={(e) => { setProvider(e.target.value as "github" | "gitlab"); setRepo(""); }}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-          </select>
-        </label>
         <label className="gnt-field">
           <span>Repository</span>
           <select value={repo} onChange={(e) => setRepo(e.target.value)}>
@@ -132,34 +126,35 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             {repos.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </label>
-        <label className="gnt-field gnt-grow">
-          <span>Search</span>
-          <input type="search" value={query} placeholder="Title, label, repo, #number" onChange={(e) => setQuery(e.target.value)} />
-        </label>
         <label className="gnt-field">
-          <span>State</span>
-          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>
-            <option value="all">All</option>
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
+          <span>Provider</span>
+          <select value={provider} onChange={(e) => { setProvider(e.target.value as "github" | "gitlab"); setRepo(""); }}>
+            <option value="github">GitHub</option>
+            <option value="gitlab">GitLab</option>
           </select>
-        </label>
-        <label className="gnt-check">
-          <input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} />
-          <span>Hide undated</span>
         </label>
         <div className="gnt-zoom" role="tablist" aria-label="Zoom">
           {(["day", "week", "month"] as const).map((z) => (
             <button key={z} type="button" role="tab" aria-selected={zoom === z} className="gnt-zbtn" onClick={() => setZoom(z)}>{z[0]!.toUpperCase() + z.slice(1)}</button>
           ))}
         </div>
+        <span className="gnt-spacer" />
+        <div className="gnt-counts" role="status">
+          <span data-tone="open">Open {counts.open}</span><span data-tone="closed">Closed {counts.closed}</span><span data-tone="overdue">Overdue {counts.overdue}</span>
+        </div>
+        <button type="button" className="gnt-btn" onClick={() => setZoom("day")}>Today</button>
         <button type="button" className="gnt-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
       </header>
 
-      <div className="gnt-legend" role="status">
-        <span>{counts.open} open</span><span>{counts.closed} closed</span><span>{counts.overdue} overdue</span>
-        <span className="gnt-hint">{rows.length >= 100 ? "Showing the first 100 cached issues." : ""}</span>
+      <div className="gnt-filters">
+        <label className="gnt-field gnt-grow"><span className="gnt-sr">Search</span><input type="search" value={query} placeholder="Search issues…" onChange={(e) => setQuery(e.target.value)} /></label>
+        <div className="gnt-seg" role="tablist" aria-label="Issue state">
+          {(["all", "open", "closed"] as const).map((v) => <button key={v} type="button" role="tab" aria-selected={stateFilter === v} className="gnt-zbtn" onClick={() => setStateFilter(v)}>{v[0]!.toUpperCase() + v.slice(1)}</button>)}
+        </div>
+        <label className="gnt-field"><span className="gnt-sr">Date</span><select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}><option value="any">Any date</option><option value="scheduled">Scheduled</option><option value="unscheduled">Unscheduled</option></select></label>
+        <label className="gnt-check"><input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} /><span>Hide undated</span></label>
       </div>
+
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
 
@@ -180,11 +175,12 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             </p>
           ) : null}
           <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
-            <div className="gnt-labels" aria-hidden="true">
-              <div className="gnt-labels-head">Issue</div>
-              {dated.map((r) => (
+            <div className="gnt-labels">
+              <div className="gnt-labels-head"><span>ISSUES</span><span className="gnt-count">{rows.length} / {baseRows.length}</span></div>
+              {rows.map((r) => (
                 <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => setSelected(r)} title={r.issue.title}>
-                  <span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {issueTitleBody(r.issue)}
+                  <span className="gnt-status" data-state={r.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{r.issue.state === "closed" ? "✓" : "○"}</span>
+                  <span className="gnt-rowtext"><span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {issueTitleBody(r.issue)}</span>
                 </button>
               ))}
             </div>
@@ -199,10 +195,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                     return <div key={day} className="gnt-day" data-weekend={isWeekend(day) || undefined} data-today={day === Math.floor(Date.now() / 86_400_000) || undefined} style={{ width: dayWidth }}>{label}</div>;
                   })}
                 </div>
-                {dated.map((r) => {
+                {rows.map((r) => {
                   const g = barGeometry(r, range, dayWidth);
                   return (
-                    <div key={r.issue.id} className="gnt-track">
+                    <div key={r.issue.id} className="gnt-track" data-on={selected?.issue.id === r.issue.id || undefined}>
                       {Array.from({ length: range.days }, (_, k) => <div key={k} className="gnt-grid" data-weekend={isWeekend(range.start + k) || undefined} style={{ width: dayWidth }} />)}
                       {g ? (
                         <button
@@ -224,23 +220,6 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             </div>
           </div>
 
-          {!hideUndated && undated.length ? (
-            <section className="gnt-undated" aria-label="Issues without dates">
-              <h3 className="gnt-sub">No dates ({undated.length})</h3>
-              <ul className="gnt-ulist">
-                {undated.map((r) => (
-                  <li key={r.issue.id}>
-                    <button type="button" className="gnt-link" onClick={() => setSelected(r)}>
-                      {issueLabel(r.issue)}
-                    </button>
-                    <span className="gnt-hint"> {r.issue.repo}</span>
-                    <button type="button" className="gnt-btn gnt-schedule" onClick={() => setSelected(r)}>Set dates</button>
-                  </li>
-                ))}
-              </ul>
-              <p className="gnt-hint">Give these a start/due date here; GitHub issues have no dates of their own.</p>
-            </section>
-          ) : null}
         </>
       )}
 
