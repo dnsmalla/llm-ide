@@ -186,3 +186,38 @@ export function repoOptions(issues: readonly Issue[]): string[] {
 export function issueNumber(i: Issue): string {
   return i.number !== null ? `#${i.number}` : "";
 }
+
+/** The number of rows the core returned, before any row is dropped for lacking a title. The "first N only" hint uses this. */
+export function rawIssueCount(body: unknown): number {
+  return isRecord(body) && Array.isArray(body.issues) ? body.issues.length : 0;
+}
+
+/** `owner/name` from a repository URL (https, ssh-less, optional .git); the input itself when it does not parse. */
+export function repoSlug(url: string): string {
+  const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}` : url;
+}
+
+/**
+ * A relative age as the Mac's RelativeDateTimeFormatter (.short, numeric) words it: the largest whole elapsed unit,
+ * truncated — "1 day ago", "2 wk. ago", "3 mo. ago", "in 2 hr."; "" when the timestamp is missing or malformed.
+ */
+export function openedAgo(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const ms = t - now.getTime();
+  const sign = ms < 0 ? -1 : 1;
+  const sec = Math.floor(Math.abs(ms) / 1000);
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "always", style: "short" });
+  const days = Math.floor(sec / 86_400);
+  const [n, unit]: [number, Intl.RelativeTimeFormatUnit] =
+    sec < 60 ? [sec, "second"]
+    : sec < 3_600 ? [Math.floor(sec / 60), "minute"]
+    : sec < 86_400 ? [Math.floor(sec / 3_600), "hour"]
+    : days < 7 ? [days, "day"]
+    : days < 30 ? [Math.floor(days / 7), "week"]
+    : days < 365 ? [Math.floor(days / 30), "month"]
+    : [Math.floor(days / 365), "year"];
+  return rtf.format(sign * n, unit);
+}

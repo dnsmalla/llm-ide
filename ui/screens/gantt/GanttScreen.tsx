@@ -5,7 +5,9 @@ import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
-import { CORE_LIST_CAP, decodeIssues, isCapped, labelOptions, type Issue } from "../issues/issues-model.ts";
+import { CORE_LIST_CAP, decodeIssues, isCapped, labelOptions, rawIssueCount, repoSlug, type Issue } from "../issues/issues-model.ts";
+import { IssueDetail } from "../issues/IssueDetail.tsx";
+import { readRepoConfig } from "../settings/repo-config.ts";
 import {
   GANTT_CATEGORIES,
   barGeometry,
@@ -17,9 +19,10 @@ import {
   decodeSchedules,
   dependencyLines,
   filterRows,
-  isSaveShortcut,
   isWeekend,
   localToday,
+  projectOptions,
+  GANTT_ROW_ACTIONS,
   timelineRange,
   todayScrollLeft,
   issueLabel,
@@ -29,6 +32,7 @@ import {
   type Schedule,
   type TimelineRange,
 } from "./gantt-model.ts";
+import { ScheduleEditor } from "./ScheduleEditor.tsx";
 import "./gantt.css";
 
 export interface GanttReply {
@@ -54,6 +58,7 @@ const CATEGORY_LABEL: Record<GanttCategory, string> = { open: "Open", closed: "C
 export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }): ReactNode {
   const [provider, setProvider] = useState<"github" | "gitlab">("github");
   const [repo, setRepo] = useState("");
+  const [projectQuery, setProjectQuery] = useState("");
   const [hideUndated, setHideUndated] = useState(false);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("all");
@@ -70,6 +75,8 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<GanttRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rawCount, setRawCount] = useState(0);
+  const [detail, setDetail] = useState<Issue | null>(null);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -86,6 +93,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         return;
       }
       setIssues(decodeIssues(i.body));
+      setRawCount(rawIssueCount(i.body));
       setSchedules(decodeSchedules(s.body));
       setPhase("ready");
     } catch {
@@ -118,7 +126,14 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const dated = useMemo(() => datedRows(rows), [rows]);
   const range = useMemo<TimelineRange>(() => timelineRange(rows, today), [rows, today]);
   const labels = useMemo(() => labelOptions(issues), [issues]);
-  const repos = useMemo(() => [...new Set(issues.filter((i) => !i.isPR).map((i) => i.repo).filter(Boolean))].sort(), [issues]);
+  // The Mac's project list is the saved repositories of this provider only (GitHubClient/GitLabClient listProjects):
+  // a repo removed from Settings, or another provider's, never shows. Re-read on load so a Settings edit applies.
+  const savedRepos = useMemo(() => readRepoConfig().saved[provider].map((r) => repoSlug(r.url)), [provider, issues]);
+  const repos = useMemo(() => projectOptions(savedRepos, [], projectQuery, repo), [savedRepos, projectQuery, repo]);
+  const rowAction = (r: GanttRow, target: keyof typeof GANTT_ROW_ACTIONS) => {
+    if (GANTT_ROW_ACTIONS[target] === "details") setDetail(r.issue);
+    else setSelected(r);
+  };
   const dayWidth = ZOOM_WIDTH[zoom];
   const timelineWidth = range.days * dayWidth;
   const todayLeft = (today - range.start) * dayWidth;
@@ -150,6 +165,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   return (
     <div className="gnt-root" data-active={active}>
       <header className="gnt-head">
+        <label className="gnt-field">
+          <span className="gnt-sr">Search projects</span>
+          <input type="search" value={projectQuery} placeholder="Search projects…" onChange={(e) => setProjectQuery(e.target.value)} />
+        </label>
         <label className="gnt-field">
           <span className="gnt-sr">Repository</span>
           <select value={repo} onChange={(e) => setRepo(e.target.value)}>
@@ -192,7 +211,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         <label className="gnt-field"><span>Until</span><input type="date" value={until} onChange={(e) => setUntil(e.target.value)} /></label>
         <label className="gnt-check"><input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} /><span>Hide undated</span></label>
       </div>
-      {isCapped(issues.length) ? <p className="gnt-hint">Showing the first {CORE_LIST_CAP} issues; the core returns at most that many per list.</p> : null}
+      {isCapped(rawCount) ? <p className="gnt-hint">Showing the first {CORE_LIST_CAP} issues; the core returns at most that many per list.</p> : null}
 
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
@@ -209,12 +228,12 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
       ) : (
         <>
           <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
-            {dated.length === 0 ? <div className="gnt-no-bars" style={{ left: LABEL_WIDTH }}><strong>No scheduled issues</strong><span>Select an issue and choose Set dates to place it on the timeline.</span></div> : null}
+            {dated.length === 0 ? <div className="gnt-no-bars" style={{ left: LABEL_WIDTH }}><strong>No scheduled issues</strong><span>Open an issue and choose Edit schedule to place it on the timeline.</span></div> : null}
             <div className="gnt-labels">
               <div className="gnt-labels-head"><span>ISSUES</span><span className="gnt-count">{rows.length} / {baseRows.length}</span></div>
               <div className="gnt-month-pad" aria-hidden="true" />
               {rows.map((r) => (
-                <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => setSelected(r)} title={r.issue.title}>
+                <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => rowAction(r, "label")} title={`${r.issue.title}\nOpen details`}>
                   <span className="gnt-status" data-state={r.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{r.issue.state === "closed" ? "✓" : "○"}</span>
                   <span className="gnt-rowtext"><span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {issueTitleBody(r.issue)}</span>
                 </button>
@@ -258,8 +277,8 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                           className="gnt-bar"
                           style={{ left: g.left, width: g.width }}
                           data-selected={selected?.issue.id === r.issue.id || undefined}
-                          title={`${r.issue.title}\n${r.start !== null ? dayString(r.start) : ""} → ${r.end !== null ? dayString(r.end) : ""}`}
-                          onClick={() => setSelected(r)}
+                          title={`${r.issue.title}\n${r.start !== null ? dayString(r.start) : ""} → ${r.end !== null ? dayString(r.end) : ""}\nEdit schedule`}
+                          onClick={() => rowAction(r, "bar")}
                         >
                           {r.dependsOn.length ? <span className="gnt-dep" title={`Depends on #${r.dependsOn.join(", #")}`}>⤷</span> : null}
                           {issueLabel(r.issue)}
@@ -278,11 +297,28 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
       {selected ? (
         <ScheduleEditor
           key={`${selected.issue.id}:${selected.schedule?.updatedAt ?? ""}`}
-          row={selected}
+          issue={selected.issue}
+          schedule={selected.schedule}
           deps={deps}
           onClose={() => setSelected(null)}
           onSaved={(message) => { setNotice(message); setSelected(null); void load(); }}
           onOpenIssue={selected.issue.url ? () => void deps.openExternal(selected.issue.url).catch(() => setNotice("That issue's link could not be opened.")) : null}
+          onOpenDetails={() => setDetail(selected.issue)}
+        />
+      ) : null}
+
+      {detail ? (
+        <IssueDetail
+          issue={detail}
+          deps={deps}
+          onClose={() => setDetail(null)}
+          onNotice={setNotice}
+          onScheduleChanged={() => void load()}
+          onEditSchedule={() => {
+            // The Mac's row "Edit Schedule…": reachable for undated rows too (they have no bar to click).
+            const row = baseRows.find((r) => r.issue.id === detail.id);
+            if (row) { setDetail(null); setSelected(row); }
+          }}
         />
       ) : null}
 
@@ -300,92 +336,4 @@ function monthSpans(range: TimelineRange, dayWidth: number): { label: string; wi
     if (last?.label === label) last.width += dayWidth; else out.push({ label, width: dayWidth });
   }
   return out;
-}
-
-function ScheduleEditor({ row, deps, onClose, onSaved, onOpenIssue }: {
-  row: GanttRow;
-  deps: GanttDeps;
-  onClose: () => void;
-  onSaved: (message: string) => void;
-  onOpenIssue: (() => void) | null;
-}): ReactNode {
-  const s = row.schedule;
-  const [start, setStart] = useState(s?.startDate ?? "");
-  const [due, setDue] = useState(s?.dueDate ?? "");
-  const [estimate, setEstimate] = useState(s?.estimateDays !== null && s?.estimateDays !== undefined ? String(s.estimateDays) : "");
-  const [depends, setDepends] = useState((s?.dependsOn ?? []).join(", "));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async (clear = false) => {
-    if (row.issue.number === null) return;
-    const parseDeps = (): number[] | null => {
-      const bits = depends.split(",").map((x) => x.trim()).filter(Boolean);
-      const out: number[] = [];
-      for (const b of bits) {
-        const n = Number(b.replace(/^#/, ""));
-        if (!Number.isInteger(n) || n <= 0) return null;
-        if (!out.includes(n)) out.push(n);
-      }
-      return out;
-    };
-    const depsList = parseDeps();
-    if (!clear && depsList === null) {
-      setError("Dependencies must be issue numbers, separated by commas.");
-      return;
-    }
-    if (!clear && ((start && dayNumber(start) === null) || (due && dayNumber(due) === null))) {
-      setError("Dates are YYYY-MM-DD or empty.");
-      return;
-    }
-    if (!clear && start && due && (dayNumber(due)! < dayNumber(start)!)) {
-      setError("Due cannot be before start.");
-      return;
-    }
-    const est = estimate.trim() === "" ? null : Number(estimate);
-    if (!clear && est !== null && (!Number.isFinite(est) || est < 0)) {
-      setError("Estimate must be a non-negative number of days.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const body = clear
-        ? { provider: row.issue.provider, repo: row.issue.repo, issueNumber: row.issue.number }
-        : { provider: row.issue.provider, repo: row.issue.repo, issueNumber: row.issue.number, startDate: start || null, dueDate: due || null, estimateDays: est, dependsOn: depsList };
-      const r = await deps.request(clear ? "DELETE" : "PUT", "/kb/issue-schedule", body);
-      if (r.status !== 200) {
-        setError(`The schedule could not be saved (${r.status}).`);
-        return;
-      }
-      onSaved(clear ? "Dates cleared." : "Schedule saved.");
-    } catch {
-      setError("The core is not reachable right now.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="gnt-editor" role="dialog" aria-modal="false" aria-label="Schedule issue" onKeyDown={(e) => { if (isSaveShortcut(e)) { e.preventDefault(); if (!busy) void save(); } }}>
-      <div className="gnt-editor-head">
-        <strong>{issueLabel(row.issue)}</strong>
-        <span className="gnt-hint">{row.issue.repo}</span>
-        <span className="gnt-spacer" />
-        {onOpenIssue ? <button type="button" className="gnt-link" onClick={onOpenIssue}>Open issue</button> : null}
-        <button type="button" className="gnt-btn" onClick={onClose}>Close</button>
-      </div>
-      <div className="gnt-editor-grid">
-        <label className="gnt-field"><span>Start</span><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-        <label className="gnt-field"><span>Due</span><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
-        <label className="gnt-field"><span>Estimate (days)</span><input type="number" min={0} step={1} value={estimate} onChange={(e) => setEstimate(e.target.value)} /></label>
-        <label className="gnt-field"><span>Depends on (#numbers)</span><input value={depends} placeholder="12, 15" onChange={(e) => setDepends(e.target.value)} /></label>
-      </div>
-      {error ? <p className="gnt-error" role="alert">{error}</p> : null}
-      <div className="gnt-editor-actions">
-        <button type="button" className="gnt-btn gnt-primary" disabled={busy || row.issue.number === null} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" className="gnt-btn" disabled={busy || !row.schedule} onClick={() => void save(true)}>Clear dates</button>
-      </div>
-    </div>
-  );
 }

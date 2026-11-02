@@ -13,21 +13,23 @@ import {
   isCapped,
   issueNumber,
   labelOptions,
+  rawIssueCount,
   repoOptions,
+  repoSlug,
   type Issue,
   type IssueFilters,
 } from "./issues-model.ts";
 import "./issues.css";
 import { readRepoConfig } from "../settings/repo-config.ts";
+import { IssueDetail, type IssueDetailDeps } from "./IssueDetail.tsx";
 
 export interface IssuesReply {
   status: number;
   body: unknown;
 }
 
-export interface IssuesDeps {
-  request: (method: "GET" | "POST", path: string, body?: unknown) => Promise<IssuesReply>;
-  openExternal: (url: string) => Promise<void>;
+export interface IssuesDeps extends IssueDetailDeps {
+  request: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => Promise<IssuesReply>;
 }
 
 type Phase = "idle" | "loading" | "ready" | "error";
@@ -44,15 +46,13 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
+  // The core's row count before any title-less row is dropped; the "First N only" hint is about the core's cap.
+  const [rawCount, setRawCount] = useState(0);
   const configuredRepos = useMemo(() => {
     const c = readRepoConfig();
-    const slug = (url: string) => {
-      const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(url.trim());
-      return m ? `${m[1]}/${m[2]}` : url;
-    };
     return [
-      ...c.saved.github.map((r) => ({ ...r, provider: "github" as const, slug: slug(r.url) })),
-      ...c.saved.gitlab.map((r) => ({ ...r, provider: "gitlab" as const, slug: slug(r.url) })),
+      ...c.saved.github.map((r) => ({ ...r, provider: "github" as const, slug: repoSlug(r.url) })),
+      ...c.saved.gitlab.map((r) => ({ ...r, provider: "gitlab" as const, slug: repoSlug(r.url) })),
     ];
   }, []);
 
@@ -68,6 +68,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
         return;
       }
       setRows(decodeIssues(r.body));
+      setRawCount(rawIssueCount(r.body));
       setPhase("ready");
     } catch {
       setPhase("error");
@@ -112,15 +113,11 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const columns = useMemo(() => columnsFor(visible), [visible]);
   const repos = useMemo(() => repoOptions(rows), [rows]);
   const labels = useMemo(() => labelOptions(rows), [rows]);
-  const open = (i: Issue) => {
-    if (!i.url) return;
-    void deps.openExternal(i.url).catch(() => setNotice("That issue's link could not be opened."));
-  };
+  const closeDetail = useCallback(() => setSelected(null), []);
 
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setSelected(null); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") { e.preventDefault(); void load(); }
     };
     window.addEventListener("keydown", onKey);
@@ -177,7 +174,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           </select>
         </label>
         <span className="iss-count" role="status">{visible.length.toLocaleString("en")} issue{visible.length === 1 ? "" : "s"}</span>
-        {isCapped(rows.length) ? <span className="iss-hint" title="The core returns at most this many issues per list">First {CORE_LIST_CAP} only</span> : null}
+        {isCapped(rawCount) ? <span className="iss-hint" title="The core returns at most this many issues per list">First {CORE_LIST_CAP} only</span> : null}
       </div>
 
       {importOpen ? (
@@ -241,25 +238,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       )}
 
       {selected ? (
-        <div className="iss-detail-backdrop" role="presentation" onClick={() => setSelected(null)}>
-          <section className="iss-detail" role="dialog" aria-modal="true" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
-            <header className="iss-detail-head">
-              <div className="iss-grow">
-                <h2>{issueNumber(selected)} {selected.title}</h2>
-                <p className="iss-hint">{selected.repo} · {selected.state}{selected.author ? ` · ${selected.author}` : ""}</p>
-              </div>
-              <button type="button" className="iss-btn" onClick={() => setSelected(null)}>Close</button>
-            </header>
-            {selected.labels.length ? <div className="iss-labels">{selected.labels.map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
-            <pre className="iss-body">{selected.body || "No description."}</pre>
-            <div className="iss-detail-actions">
-              <button type="button" className="iss-btn iss-primary" disabled={!selected.url} onClick={() => open(selected)}>Open on GitHub</button>
-              <button type="button" className="iss-btn" disabled title="Creating, commenting and closing are Mac-only until the core has provider write routes">Comment</button>
-              <button type="button" className="iss-btn" disabled title="Closing is Mac-only until the core has provider write routes">Close issue</button>
-            </div>
-            <p className="iss-hint">Read-only detail from the cached issue. Comments, edits and state changes stay in the Mac app until the core gains provider write routes.</p>
-          </section>
-        </div>
+        <IssueDetail issue={selected} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} />
       ) : null}
 
       <p className="iss-hint iss-foot">

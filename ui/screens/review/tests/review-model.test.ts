@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, pickLinkedRepo, readChildren, safeReviewPath } from "../review-model.ts";
+import { REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, safeReviewPath, type ReviewEntry } from "../review-model.ts";
 
 test("roots are the Mac's ReviewConfig categories", () => {
   assert.deepEqual(REVIEW_ROOTS.map((r) => r.path), ["code", "llm-doc"]);
@@ -51,4 +51,25 @@ test("the linked repo is the active, cloned GitLab repo first, then GitHub", () 
   // Active but never cloned is not linked, as the Mac's isCloned rule.
   assert.equal(pickLinkedRepo({ github: [row({ active: true, clonePath: "  " })], gitlab: [] }), null);
   assert.equal(pickLinkedRepo({ github: [], gitlab: [] }), null);
+});
+
+test("a refresh keeps open folders' rows: fresh for re-listed, previous for folders opened mid-refresh, none for closed", () => {
+  const e = (name: string): ReviewEntry => ({ name, path: `code/${name}`, kind: "file" });
+  const fresh = new Map([["code/src", [e("a.ts")]]]);
+  const previous = new Map<string, ReviewEntry[]>([["code/src", [e("old.ts")]], ["code/lib", [e("b.ts")]], ["code/closed", [e("c.ts")]]]);
+  // code/lib was opened while the refresh ran (not in the snapshot), code/closed was closed meanwhile.
+  const kept = openFolderChildren(["code/src", "code/lib"], fresh, previous);
+  assert.deepEqual([...kept.keys()], ["code/src", "code/lib"]);
+  assert.deepEqual(kept.get("code/src")!.map((x) => x.name), ["a.ts"], "re-listed folder takes the fresh rows");
+  assert.deepEqual(kept.get("code/lib")!.map((x) => x.name), ["b.ts"], "a folder opened during the refresh is not wiped");
+  assert.equal(kept.has("code/closed"), false);
+  assert.equal(openFolderChildren(["code/none"], fresh, previous).has("code/none"), false, "no rows yet: nothing to show");
+});
+
+test("overlapping refreshes: only the latest may commit", () => {
+  const g = refreshGate();
+  const first = g.begin();
+  const second = g.begin();
+  assert.equal(g.isCurrent(first), false, "the older refresh finishing last must not overwrite the newer one");
+  assert.equal(g.isCurrent(second), true);
 });

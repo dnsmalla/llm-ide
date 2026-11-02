@@ -116,12 +116,17 @@ export function buildRows(issues: readonly Issue[], schedules: readonly Schedule
   });
 }
 
-/** A bar's inclusive day span: explicit dates win; one date + estimate fills the other; one date alone is one day. */
+/** The Mac's GanttViewModel.defaultSpanDays: a single known date without an estimate spans this many days. */
+export const DEFAULT_SPAN_DAYS = 7;
+
+/**
+ * A bar's inclusive day span: explicit dates win; one date + estimate (or the Mac's 7-day default) fills the other.
+ */
 export function span(s: Schedule | null): { start: number | null; end: number | null } {
   if (!s) return { start: null, end: null };
   const start = s.startDate ? dayNumber(s.startDate) : null;
   const end = s.dueDate ? dayNumber(s.dueDate) : null;
-  const est = s.estimateDays !== null && s.estimateDays >= 0 ? Math.max(1, Math.round(s.estimateDays)) : 1;
+  const est = s.estimateDays !== null && s.estimateDays >= 0 ? Math.max(1, Math.round(s.estimateDays)) : DEFAULT_SPAN_DAYS;
   if (start !== null && end !== null) return start <= end ? { start, end } : { start: end, end: start };
   if (start !== null) return { start, end: start + est - 1 };
   if (end !== null) return { start: end - est + 1, end };
@@ -175,9 +180,29 @@ export function undatedRows(rows: readonly GanttRow[]): GanttRow[] {
 export type GanttCategory = "open" | "closed" | "overdue";
 export const GANTT_CATEGORIES: readonly GanttCategory[] = ["open", "closed", "overdue"];
 
-export function rowCategory(row: Pick<GanttRow, "issue" | "end">, today: number): GanttCategory {
+/**
+ * The Mac's GanttViewModel startDate/endDate for a row, in (possibly fractional) day numbers. The drawn span is
+ * inclusive (a 7-day bar from day s ends on s + 6), but the Mac's endDate for a start-only schedule is start +
+ * estimate (default 7) and its startDate for a due-only one is due − estimate: overdue and the date-range filter
+ * compare those, so a start-only bar turns overdue the day after the Mac's end, not a day early.
+ */
+export function macBounds(row: Pick<GanttRow, "start" | "end"> & { schedule?: Schedule | null }): { start: number | null; end: number | null } {
+  const s = row.schedule;
+  if (s) {
+    const start = s.startDate ? dayNumber(s.startDate) : null;
+    const due = s.dueDate ? dayNumber(s.dueDate) : null;
+    const est = s.estimateDays !== null && s.estimateDays >= 0 ? s.estimateDays : DEFAULT_SPAN_DAYS;
+    if (start !== null && due === null) return { start, end: start + est };
+    if (due !== null && start === null) return { start: due - est, end: due };
+  }
+  return { start: row.start, end: row.end };
+}
+
+export function rowCategory(row: Pick<GanttRow, "issue" | "end"> & { start?: number | null; schedule?: Schedule | null }, today: number): GanttCategory {
   if (row.issue.state === "closed") return "closed";
-  if (row.end !== null && row.end < today) return "overdue";
+  const end = macBounds({ start: row.start ?? null, end: row.end, schedule: row.schedule }).end;
+  // The due DAY is inclusive (Mac): an issue due today is not overdue until tomorrow.
+  if (end !== null && end < today) return "overdue";
   return "open";
 }
 
@@ -206,8 +231,9 @@ export function filterRows(rows: readonly GanttRow[], f: GanttRowFilter): GanttR
     if (f.label && !r.issue.labels.includes(f.label)) return false;
     if (!f.categories.includes(rowCategory(r, f.today))) return false;
     const created = r.issue.createdAt ? dayNumber(r.issue.createdAt.slice(0, 10)) : null;
-    const s = r.start ?? created;
-    const e = r.end ?? s;
+    const b = macBounds(r);
+    const s = b.start ?? created;
+    const e = b.end ?? s;
     if (s === null || e === null) return true;
     if (f.from !== null && e < f.from) return false;
     if (f.until !== null && s > f.until) return false;
@@ -249,6 +275,17 @@ export function dependencyLines(rows: readonly GanttRow[], range: TimelineRange,
   return out;
 }
 
+/**
+ * The Gantt's project picker options: the saved repositories of the provider plus any repository the cached issues
+ * name, de-duplicated and sorted, narrowed by the search text. The current choice always stays in the list so the
+ * select can show it.
+ */
+export function projectOptions(saved: readonly string[], cached: readonly string[], query: string, current: string): string[] {
+  const all = [...new Set([...saved, ...cached].filter((r) => r.trim() !== ""))].sort((a, b) => a.localeCompare(b, "en"));
+  const q = query.trim().toLowerCase();
+  return all.filter((r) => r === current || !q || r.toLowerCase().includes(q));
+}
+
 /** The scrollLeft that puts today about a third in from the left of the viewport. */
 export function todayScrollLeft(todayLeft: number, viewportWidth: number): number {
   return Math.max(0, todayLeft - viewportWidth / 3);
@@ -258,3 +295,55 @@ export function todayScrollLeft(todayLeft: number, viewportWidth: number): numbe
 export function isSaveShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean }): boolean {
   return e.key === "Enter" && (e.metaKey || e.ctrlKey);
 }
+
+/** The Mac IssueScheduleEditorSheet stepper's upper bound. */
+export const MAX_ESTIMATE_DAYS = 365;
+
+export interface ScheduleDraft {
+  start: string;
+  due: string;
+  estimate: string;
+  depends: string;
+}
+
+export interface ScheduleKey {
+  provider: string;
+  repo: string;
+  issueNumber: number;
+}
+
+export type ScheduleSave =
+  | { ok: true; body: ScheduleKey & { startDate: string | null; dueDate: string | null; estimateDays: number | null; dependsOn: number[] } }
+  | { ok: false; error: string };
+
+/**
+ * The schedule editor's save rules, as the Mac's IssueScheduleEditorSheet applies them: dates are YYYY-MM-DD or
+ * empty, due cannot be before start, dependencies are issue numbers, and the estimate is a non-negative number.
+ */
+export function scheduleSaveBody(draft: ScheduleDraft, key: ScheduleKey): ScheduleSave {
+  const bits = draft.depends.split(",").map((x) => x.trim()).filter(Boolean);
+  const dependsOn: number[] = [];
+  for (const b of bits) {
+    const n = Number(b.replace(/^#/, ""));
+    if (!Number.isInteger(n) || n <= 0) return { ok: false, error: "Dependencies must be issue numbers, separated by commas." };
+    if (!dependsOn.includes(n)) dependsOn.push(n);
+  }
+  if ((draft.start && dayNumber(draft.start) === null) || (draft.due && dayNumber(draft.due) === null)) {
+    return { ok: false, error: "Dates are YYYY-MM-DD or empty." };
+  }
+  if (draft.start && draft.due && dayNumber(draft.due)! < dayNumber(draft.start)!) {
+    return { ok: false, error: "Due cannot be before start." };
+  }
+  const est = draft.estimate.trim() === "" ? null : Number(draft.estimate);
+  // The Mac's stepper is 0..365 days and saves 0 as "no estimate" (nil), which keeps the 7-day default bar.
+  if (est !== null && (!Number.isFinite(est) || est < 0 || est > MAX_ESTIMATE_DAYS)) {
+    return { ok: false, error: `Estimate must be between 0 and ${MAX_ESTIMATE_DAYS} days.` };
+  }
+  return { ok: true, body: { ...key, startDate: draft.start || null, dueDate: draft.due || null, estimateDays: est ? est : null, dependsOn } };
+}
+
+/**
+ * What a click does (Mac GanttView): tapping a row opens the issue's details; the schedule editor is the Mac's
+ * "Edit Schedule…" (context menu / the detail's Dates Edit), reached here from the bar and from the details.
+ */
+export const GANTT_ROW_ACTIONS = { label: "details", bar: "schedule" } as const;

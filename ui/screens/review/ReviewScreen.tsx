@@ -7,7 +7,7 @@ import { ChatDockSlot } from "../shell/chat-dock";
 import { shellBus } from "../shell/bus";
 import { Markdown } from "../chat/MarkdownView";
 import { readRepoConfig } from "../settings/repo-config.ts";
-import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, pickLinkedRepo, readChildren, type ReviewEntry } from "./review-model.ts";
+import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, type ReviewEntry } from "./review-model.ts";
 import "./review.css";
 
 export interface ReviewDeps {
@@ -33,7 +33,9 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
 
+  const gate = useRef(refreshGate()).current;
   const loadRoots = useCallback(async () => {
+    const token = gate.begin();
     setBusy(true);
     const next: typeof roots = [];
     for (const root of REVIEW_ROOTS) {
@@ -43,12 +45,16 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
         next.push({ root, entries: [], error: true });
       }
     }
+    // A newer refresh (Cmd+R twice, project change) owns the screen now: drop this one's results.
+    if (!gate.isCurrent(token)) return;
     setRoots(next);
     // Folders that stay open are re-listed, so a refresh does not leave them open and empty.
-    const kept = await Promise.all([...expandedRef.current].map(async (p) => [p, await readChildren(deps.list, p)] as const));
-    setChildren(new Map(kept));
+    const fresh = new Map(await Promise.all([...expandedRef.current].map(async (p) => [p, await readChildren(deps.list, p)] as const)));
+    if (!gate.isCurrent(token)) return;
+    // Decided at commit time: a folder opened during the refresh keeps its rows, a closed one is dropped.
+    setChildren((prev) => openFolderChildren(expandedRef.current, fresh, prev));
     setBusy(false);
-  }, [deps]);
+  }, [deps, gate]);
 
   useEffect(() => {
     if (active) void loadRoots();

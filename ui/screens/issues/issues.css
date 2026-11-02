@@ -29,3 +29,5 @@
 .iss-detail-head h2 { margin: 0; font-size: var(--tok-type-title-size); }
 .iss-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); line-height: 1.5; }
 .iss-detail-actions { display: flex; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.iss-dates { display: flex; flex-direction: column; gap: 6px; }
+.iss-dates-line { margin: 0; font-size: 13px; }

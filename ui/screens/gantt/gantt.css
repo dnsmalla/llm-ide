@@ -89,7 +89,11 @@
 /* Legend chips toggle a category (Mac legend); a hidden chip stays visible but faded. */
 .gnt-chip { padding: 2px 8px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: none; font: inherit; font-size: var(--tok-type-caption-size); cursor: pointer; }
 .gnt-chip[aria-pressed="false"] { opacity: .45; }
-/* Finish-to-start arrows drawn over the rows (Mac dependency edges); pointer-events off so bars stay clickable. */
-.gnt-deps { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; overflow: visible; }
+/* Finish-to-start arrows between the grid and the bars, as the Mac's Canvas draws them (grid, edges, bars). The
+   tracks are position:relative with z-index auto, so a z-index 0 svg would sit UNDER their opaque weekend cells and
+   borders; z-index 1 lifts it over the grid, and bars at z-index 2 paint over it. Today's line (3) stays on top.
+   pointer-events off so clicks always reach the bars and rows. */
+.gnt-deps { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.gnt-bar { z-index: 2; }
 .gnt-deps path { fill: none; stroke: var(--tok-color-text-muted); stroke-width: 1.5; }
 .gnt-deps marker path { fill: var(--tok-color-text-muted); stroke: none; }

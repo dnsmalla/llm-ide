@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { readFileSync } from "node:fs";
+import { DEFAULT_SPAN_DAYS, GANTT_ROW_ACTIONS, macBounds, projectOptions, scheduleSaveBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -16,12 +17,15 @@ test("day numbers round-trip and malformed input is rejected", () => {
   assert.equal(dayNumber("yesterday"), null);
 });
 
-test("span: dates win; one date + estimate fills the other; one date alone is one day", () => {
+test("span: dates win; one date + estimate fills the other; one date alone spans the Mac's 7 days", () => {
   assert.deepEqual(span(null), { start: null, end: null });
   assert.deepEqual(span(sched({ startDate: "2026-01-05", dueDate: "2026-01-07" })), { start: 20458, end: 20460 });
   assert.deepEqual(span(sched({ startDate: "2026-01-05", estimateDays: 3 })), { start: 20458, end: 20460 });
   assert.deepEqual(span(sched({ dueDate: "2026-01-07", estimateDays: 2 })), { start: 20459, end: 20460 });
-  assert.deepEqual(span(sched({ dueDate: "2026-01-07" })), { start: 20460, end: 20460 });
+  // GanttViewModel.defaultSpanDays = 7: the bar is 7 inclusive days, not 1.
+  assert.deepEqual(span(sched({ dueDate: "2026-01-07" })), { start: 20454, end: 20460 });
+  assert.deepEqual(span(sched({ startDate: "2026-01-05" })), { start: 20458, end: 20464 });
+  assert.equal(DEFAULT_SPAN_DAYS, 7);
   assert.deepEqual(span(sched({ startDate: "2026-01-09", dueDate: "2026-01-07" })), { start: 20460, end: 20462 }, "reverse dates swap");
 });
 
@@ -133,4 +137,82 @@ test("today is the local calendar day, not the UTC day (Mac Calendar.current)", 
   assert.equal(localToday(new Date(2026, 10, 2, 23, 30)), dayNumber("2026-11-02"));
   // DST change days still map to one calendar day.
   assert.equal(localToday(new Date(2026, 2, 8, 12, 0)), dayNumber("2026-03-08"));
+});
+
+test("project picker: saved repos and cached repos, de-duplicated, searched, current choice kept", () => {
+  const saved = ["acme/web", "acme/api"];
+  const cached = ["acme/api", "other/tool"];
+  assert.deepEqual(projectOptions(saved, cached, "", ""), ["acme/api", "acme/web", "other/tool"]);
+  assert.deepEqual(projectOptions(saved, cached, "  WEB ", ""), ["acme/web"]);
+  assert.deepEqual(projectOptions(saved, cached, "zzz", "other/tool"), ["other/tool"], "the current choice stays visible");
+  assert.deepEqual(projectOptions([], [], "", ""), []);
+});
+
+test("schedule editor save rules: due before start is rejected, bad dates/deps/estimate are rejected, valid input is the PUT body", () => {
+  const key = { provider: "github", repo: "o/r", issueNumber: 7 };
+  const draft = (over: Partial<{ start: string; due: string; estimate: string; depends: string }> = {}) => ({ start: "", due: "", estimate: "", depends: "", ...over });
+  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-09", due: "2026-01-07" }), key), { ok: false, error: "Due cannot be before start." });
+  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-07", due: "2026-01-07" }), key).ok, true, "same-day is allowed");
+  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-13-01" }), key), { ok: false, error: "Dates are YYYY-MM-DD or empty." });
+  assert.deepEqual(scheduleSaveBody(draft({ depends: "3, x" }), key), { ok: false, error: "Dependencies must be issue numbers, separated by commas." });
+  assert.deepEqual(scheduleSaveBody(draft({ depends: "0" }), key), { ok: false, error: "Dependencies must be issue numbers, separated by commas." });
+  assert.deepEqual(scheduleSaveBody(draft({ estimate: "-1" }), key), { ok: false, error: "Estimate must be between 0 and 365 days." });
+  assert.deepEqual(scheduleSaveBody(draft({ estimate: "366" }), key), { ok: false, error: "Estimate must be between 0 and 365 days." });
+  const zero = scheduleSaveBody(draft({ start: "2026-01-05", estimate: "0" }), key);
+  assert.equal(zero.ok && zero.body.estimateDays, null, "0 is saved as no estimate (Mac), so the bar keeps the 7-day default");
+  assert.deepEqual(scheduleSaveBody(draft({ start: "2026-01-05", due: "2026-01-07", estimate: "2.5", depends: "#4, 4, 9" }), key), {
+    ok: true,
+    body: { ...key, startDate: "2026-01-05", dueDate: "2026-01-07", estimateDays: 2.5, dependsOn: [4, 9] },
+  });
+  assert.deepEqual(scheduleSaveBody(draft(), key), { ok: true, body: { ...key, startDate: null, dueDate: null, estimateDays: null, dependsOn: [] } });
+});
+
+test("one-date schedules: overdue and the date-range filter use the Mac's endDate (start + estimate or 7), not the inclusive drawn end", () => {
+  // Mac GanttViewModel: startDate-only → endDate = start + (estimateDays ?? 7) days; overdue when endDate < today's start.
+  const start = "2026-10-20";
+  const row = (over: Record<string, unknown>) => {
+    const schedule = sched(over);
+    const { start: s, end: e } = span(schedule as never);
+    return { issue: issue(), schedule, start: s, end: e, dependsOn: [] } as never;
+  };
+  const startOnly = row({ startDate: start });
+  assert.deepEqual(macBounds(startOnly), { start: dayNumber(start), end: dayNumber("2026-10-27") });
+  // Drawn bar ends Oct 26 (7 inclusive days); on Oct 27 the Mac still says open, on Oct 28 overdue.
+  assert.equal(rowCategory(startOnly, dayNumber("2026-10-27")!), "open");
+  assert.equal(rowCategory(startOnly, dayNumber("2026-10-28")!), "overdue");
+  // Estimate 3 from Oct 20: Mac end Oct 23.
+  assert.equal(rowCategory(row({ startDate: start, estimateDays: 3 }), dayNumber("2026-10-23")!), "open");
+  assert.equal(rowCategory(row({ startDate: start, estimateDays: 3 }), dayNumber("2026-10-24")!), "overdue");
+  // Due-only: Mac end is the due day itself; start is due − 7.
+  const dueOnly = row({ dueDate: "2026-10-27" });
+  assert.deepEqual(macBounds(dueOnly), { start: dayNumber("2026-10-20"), end: dayNumber("2026-10-27") });
+  assert.equal(rowCategory(dueOnly, dayNumber("2026-10-27")!), "open");
+  assert.equal(rowCategory(dueOnly, dayNumber("2026-10-28")!), "overdue");
+  // From filter on Oct 27: the Mac keeps the start-only row (endDate Oct 27 is not before it).
+  const base = { label: "", categories: ["open", "closed", "overdue"] as const, until: null, today: dayNumber("2026-10-01")! };
+  assert.equal(filterRows([startOnly], { ...base, from: dayNumber("2026-10-27")! }).length, 1);
+  assert.equal(filterRows([startOnly], { ...base, from: dayNumber("2026-10-28")! }).length, 0);
+  // Until filter on Oct 20: the Mac keeps the due-only row (startDate Oct 20 is not after it).
+  assert.equal(filterRows([dueOnly], { ...base, from: null, until: dayNumber("2026-10-20")! }).length, 1);
+  assert.equal(filterRows([dueOnly], { ...base, from: null, until: dayNumber("2026-10-19")! }).length, 0);
+});
+
+test("Gantt row click opens the issue details (Mac GanttView row tap); the bar opens the schedule editor", () => {
+  assert.equal(GANTT_ROW_ACTIONS.label, "details");
+  assert.equal(GANTT_ROW_ACTIONS.bar, "schedule");
+});
+
+test("dependency arrows paint over the grid but under the bars, and never take clicks", () => {
+  const css = readFileSync(new URL("../gantt.css", import.meta.url), "utf8");
+  const z = (sel: string) => {
+    const rules = [...css.matchAll(new RegExp(`^\\${sel}\\s*\\{([^}]*)\\}`, "gm"))].map((m) => m[1]!);
+    const hit = rules.map((r) => /z-index:\s*(-?\d+)/.exec(r)).filter(Boolean).pop();
+    return hit ? Number(hit[1]) : null;
+  };
+  const deps = z(".gnt-deps");
+  const bar = z(".gnt-bar");
+  // Tracks are positioned with z-index auto, so the svg must be > 0 to clear their opaque weekend cells.
+  assert.ok(deps !== null && deps > 0, "arrows above the grid tracks");
+  assert.ok(bar !== null && bar > deps!, "bars above the arrows");
+  assert.match(css, /\.gnt-deps\s*\{[^}]*pointer-events:\s*none/);
 });

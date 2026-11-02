@@ -86,3 +86,30 @@ export function pickLinkedRepo(saved: { github: readonly SavedRepoLike[]; gitlab
   const r = pick(saved.gitlab) ?? pick(saved.github);
   return r ? { label: r.displayName || r.url, path: r.clonePath } : null;
 }
+
+/**
+ * The child listings to keep after a refresh: one entry per folder that is open at commit time. A folder re-listed
+ * by the refresh takes the fresh rows; a folder opened while the refresh was running keeps the rows its own open
+ * fetched (`previous`), so it is never shown open and empty. A folder that was closed meanwhile is dropped.
+ */
+export function openFolderChildren(
+  openPaths: Iterable<string>,
+  fresh: ReadonlyMap<string, readonly ReviewEntry[]>,
+  previous: ReadonlyMap<string, readonly ReviewEntry[]>,
+): Map<string, ReviewEntry[]> {
+  const out = new Map<string, ReviewEntry[]>();
+  for (const p of openPaths) {
+    const rows = fresh.get(p) ?? previous.get(p);
+    if (rows) out.set(p, [...rows]);
+  }
+  return out;
+}
+
+/**
+ * Latest-wins guard for overlapping refreshes: `begin()` returns a token, and only the most recent token is
+ * current, so an older refresh that finishes last cannot commit stale roots or folder rows over a newer one.
+ */
+export function refreshGate(): { begin: () => number; isCurrent: (token: number) => boolean } {
+  let latest = 0;
+  return { begin: () => ++latest, isCurrent: (token) => token === latest };
+}
