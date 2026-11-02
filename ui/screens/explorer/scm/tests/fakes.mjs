@@ -22,6 +22,9 @@ export function makeScm(init = {}) {
     log: init.log ?? [],
     branches: init.branches ?? [{ name: "main", current: true, hash: "abc1234", upstream: null }],
     gate: null,
+    tags: init.tags ?? [],
+    tagsTruncated: init.tagsTruncated ?? false,
+    tagsError: init.tagsError ?? null,
   };
   const rec = (name, ...args) => { calls.push([name, ...args]); if (state.failNext) { const e = state.failNext; state.failNext = null; throw e; } };
   const api = {
@@ -36,6 +39,7 @@ export function makeScm(init = {}) {
     async commit(message) { rec("commit", message); return { hash: "deadbee" }; },
     async branchesList() { return null; },
     async branches() { rec("branches"); return { branches: state.branches, truncated: false }; },
+    async tags() { rec("tags"); if (state.tagsError) throw state.tagsError; return { tags: state.tags, truncated: state.tagsTruncated }; },
     async checkout(name) { rec("checkout", name); },
     async createBranch(name) { rec("createBranch", name); },
     async log(skip, limit) { rec("log", skip, limit); return { entries: state.log.slice(skip, skip + limit), has_more: skip + limit < state.log.length }; },

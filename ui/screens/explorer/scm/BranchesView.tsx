@@ -4,6 +4,28 @@ import { StatusBanner } from "@llmide/ui-kit";
 import type { ScmController, ScmSnapshot } from "./controller";
 import { branchNameError, displayLine } from "./model";
 
+/** Read-only list of local tags, newest first (the Mac's "Tags" menu). Creating and pushing tags are not available here. */
+export function TagsList({ snap }: { snap: ScmSnapshot }) {
+  const t = snap.tags;
+  return (
+    <section className="scm-tags" aria-labelledby="scm-tags-title">
+      <h3 id="scm-tags-title" className="scm-subtitle">Tags</h3>
+      {t.error && <StatusBanner severity="error" message={`${t.error.title}. ${t.error.detail}`} />}
+      {t.loading && t.list.length === 0 && <div className="scm-empty" role="status">Loading tags</div>}
+      {!t.loading && !t.error && t.list.length === 0 && <div className="scm-empty">No tags yet.</div>}
+      <ul className="scm-tag-list" aria-label="Local tags">
+        {t.list.map((tag) => (
+          <li key={tag.name} className="scm-tag-item">
+            <span className="scm-name">{displayLine(tag.name)}</span>
+            <span className="scm-meta">{`${tag.target}${tag.annotated ? " · annotated" : " · lightweight"}`}</span>
+          </li>
+        ))}
+      </ul>
+      {t.truncated && <StatusBanner severity="info" message="Showing the 500 newest tags." />}
+    </section>
+  );
+}
+
 export function BranchesView({ controller, snap }: { controller: ScmController; snap: ScmSnapshot }) {
   const b = snap.branches;
   const [name, setName] = useState("");
@@ -46,6 +68,7 @@ export function BranchesView({ controller, snap }: { controller: ScmController; 
         ))}
       </ul>
       {b.truncated && <StatusBanner severity="info" message="Showing the 500 most recently updated branches." />}
+      <TagsList snap={snap} />
     </div>
   );
 }

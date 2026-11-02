@@ -554,6 +554,9 @@ mod tests {
         dir
     }
 
+    // Unix only for now: these use file names Windows cannot create ('>', '*', '?') and the Loop revert belongs to the Windows
+    // port (shell stages cannot start there yet; MASTER-PLAN S2 'Windows cargo test').
+    #[cfg(unix)]
     #[test]
     fn revert_restores_tracked_files_and_removes_new_untracked_files() {
         let dir = repo("revert");
@@ -596,6 +599,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Unix only for now: these use file names Windows cannot create ('>', '*', '?') and the Loop revert belongs to the Windows
+    // port (shell stages cannot start there yet; MASTER-PLAN S2 'Windows cargo test').
+    #[cfg(unix)]
     #[test]
     fn revert_handles_names_with_spaces_and_glob_characters_literally() {
         let dir = repo("spaces");
@@ -630,6 +636,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
+    // Unix only for now: these use file names Windows cannot create ('>', '*', '?') and the Loop revert belongs to the Windows
+    // port (shell stages cannot start there yet; MASTER-PLAN S2 'Windows cargo test').
+    #[cfg(unix)]
     #[test]
     fn changed_paths_reads_raw_names_for_spaces_arrows_unicode_and_renames() {
         let dir = repo("names");

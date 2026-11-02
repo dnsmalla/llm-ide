@@ -124,3 +124,19 @@ test("NoProjectCard: one title, two buttons, text only", () => {
   const evil = html(h(NoProjectCard, { what: "<b>x</b>‮", hint: "<i>h</i>", actions: { newProject() {}, openProject() {} } }));
   assert.doesNotMatch(evil, /<b>|<i>|‮/);
 });
+
+test("Welcome recents: a relative last-opened time shows only when the entry has a valid time", () => {
+  const out = welcome({
+    recent: { reset: false, entries: [entry({ name: "dated", openedAt: "2020-01-01T00:00:00Z", storedIndex: 0 }), entry({ name: "undated", openedAt: null, storedIndex: 1 }), entry({ name: "junk", openedAt: "soon", storedIndex: 2 })] },
+  });
+  assert.equal((out.match(/class="wc-recent-ago"/g) ?? []).length, 1, "only the dated row shows a time");
+  assert.match(out, /class="wc-recent-ago"[^>]*>\d+ yr\. ago</, "numeric short wording, as the Mac and Issues word it");
+  assert.match(welcome({ recent: { reset: false, entries: [entry({ openedAt: null })] } }), /class="wc-recent-open"/);
+  assert.doesNotMatch(welcome({ recent: { reset: false, entries: [entry({ openedAt: null })] } }), /wc-recent-ago/);
+});
+
+test("Welcome is always compiled, so it never imports an excludable screen (issues/ goes with gantt_issues)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../WelcomeScreen.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /from "\.\.\/(issues|gantt|explorer|graph|docgen|autotasks|terminal)\//);
+});

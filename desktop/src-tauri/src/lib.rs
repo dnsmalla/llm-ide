@@ -6,6 +6,7 @@ mod chat_cmds;
 mod chat_hash;
 mod chat_store;
 mod confirm;
+mod crash_report;
 mod core_env;
 mod core_host;
 mod core_log;
@@ -336,6 +337,9 @@ macro_rules! product_handlers {
                 git_scm::git_checkout,
                 git_scm::git_create_branch,
                 git_scm::git_log,
+                git_scm::git_tags,
+                crash_report::crash_report_latest,
+                crash_report::crash_report_dismiss,
                 git_scm::git_commit_files,
                 git_scm::git_commit_diff,
                 tray::notify,
@@ -435,6 +439,8 @@ pub fn run() {
             h.shutdown_from_panic();
         }
         pty::kill_all_from_panic();
+        // Last-launch notice (the Mac's CrashReportBanner): a small redacted record in the app data dir.
+        crash_report::record_panic(info);
         previous_hook(info);
     }));
 

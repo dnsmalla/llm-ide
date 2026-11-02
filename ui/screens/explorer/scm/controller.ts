@@ -3,7 +3,7 @@
 // stale-response guards and wording. `subscribe` / `getSnapshot` fit React's `useSyncExternalStore`.
 import {
   ScmError, toScmError,
-  type Branch, type CommitDetail, type HunkDiff, type Identity, type LogEntry, type ScmApi, type ScmStatus,
+  type Branch, type CommitDetail, type HunkDiff, type Identity, type LogEntry, type ScmApi, type ScmStatus, type Tag,
 } from "./api";
 import {
   GROUP_ORDER, MAX_DISCARD, NO_SELECTION, STAGE_CHUNK, actionsFor, branchNameError, buildGroups, chunk, describeError, displayText,
@@ -49,6 +49,8 @@ export interface ScmSnapshot {
   identity: { state: "unknown" | "ok" | "missing"; value: Identity | null };
   hunks: HunkState | null;
   branches: { list: readonly Branch[]; truncated: boolean; loading: boolean; error: ErrorInfo | null };
+  /** Read-only tag listing shown under the branches (a failure here never blocks the branch list). */
+  tags: { list: readonly Tag[]; truncated: boolean; loading: boolean; error: ErrorInfo | null };
   history: HistoryState;
   counts: { staged: number; changes: number; untracked: number; conflicts: number };
 }
@@ -80,6 +82,7 @@ export class ScmController {
       root: null, tab: "changes", phase: "idle", fatal: null, notice: null, status: null, groups: EMPTY_GROUPS, collapsed: new Set(), rows: [],
       selection: NO_SELECTION, focusKey: null, busy: null, message: "", identity: { state: "unknown", value: null }, hunks: null,
       branches: { list: [], truncated: false, loading: false, error: null },
+      tags: { list: [], truncated: false, loading: false, error: null },
       history: { entries: [], hasMore: false, loading: false, error: null, open: null },
       counts: { staged: 0, changes: 0, untracked: 0, conflicts: 0 },
     };
@@ -162,7 +165,10 @@ export class ScmController {
   setTab(tab: ScmTab) {
     this.set({ tab });
     if (tab === "history" && this.snap.history.entries.length === 0 && !this.snap.history.loading) void this.loadLog(true);
-    if (tab === "branches") void this.loadBranches();
+    if (tab === "branches") {
+      void this.loadBranches();
+      void this.loadTags();
+    }
   }
 
   dismissNotice() {
@@ -339,6 +345,16 @@ export class ScmController {
   }
 
   // ---- branches --------------------------------------------------------------------------------------------
+
+  async loadTags() {
+    this.set({ tags: { ...this.snap.tags, loading: true, error: null } });
+    try {
+      const l = await this.api.tags();
+      this.set({ tags: { list: l.tags, truncated: l.truncated, loading: false, error: null } });
+    } catch (e) {
+      this.set({ tags: { ...this.snap.tags, loading: false, error: this.fail(e) } });
+    }
+  }
 
   async loadBranches() {
     this.set({ branches: { ...this.snap.branches, loading: true, error: null } });

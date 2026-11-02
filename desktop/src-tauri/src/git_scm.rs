@@ -559,6 +559,57 @@ pub fn branches(root: &Path) -> R<BranchList> {
     Ok(BranchList { branches: list, truncated })
 }
 
+// ---- tags (read-only) -----------------------------------------------------------------
+
+const MAX_TAGS: usize = 500;
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Tag {
+    pub name: String,
+    /// Short id of the commit the tag names (an annotated tag's peeled commit).
+    pub target: String,
+    pub annotated: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TagList {
+    pub tags: Vec<Tag>,
+    pub truncated: bool,
+}
+
+/// Local tags, newest first by creator date (the commit date for a lightweight tag). Read-only:
+/// creating, deleting or pushing tags is not in this host.
+pub fn tags(root: &Path) -> R<TagList> {
+    let out = run_git(
+        root,
+        &[
+            "for-each-ref",
+            "--sort=-creatordate",
+            &format!("--count={}", MAX_TAGS + 1),
+            "--format=%(refname:lstrip=2)%1f%(objecttype)%1f%(objectname:short)%1f%(*objectname:short)",
+            "refs/tags/",
+        ],
+        1024 * 1024,
+    )?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut list: Vec<Tag> = text
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\x1f').collect();
+            if f.len() != 4 {
+                return None;
+            }
+            let annotated = f[1] == "tag";
+            let target = if annotated { f[3] } else { f[2] };
+            Some(Tag { name: line(f[0], 200), target: target.to_string(), annotated })
+        })
+        .filter(|t| !t.name.is_empty())
+        .collect();
+    let truncated = list.len() > MAX_TAGS;
+    list.truncate(MAX_TAGS);
+    Ok(TagList { tags: list, truncated })
+}
+
 fn map_checkout_error(e: FsError) -> FsError {
     if e.message.contains("would be overwritten") || e.message.contains("local changes") {
         FsError { code: "dirty_conflict", message: "your uncommitted changes would be overwritten by that checkout; commit or discard them first".into() }
@@ -833,6 +884,11 @@ pub struct LogReq {
 
 fn default_page() -> usize {
     100
+}
+
+#[tauri::command]
+pub async fn git_tags() -> R<TagList> {
+    blocking(|root| tags(&root)).await
 }
 
 #[tauri::command]
@@ -1507,5 +1563,167 @@ mod tests {
         assert_eq!(status(&r).unwrap().entries.iter().filter(|e| e.index == '.' && e.worktree == 'M').count(), 10_000);
         eprintln!("10k files: add-all {t_add:?}, status(10k modified) {t_status:?}, stage-all {t_stage:?}, status(10k staged) {t_status2:?}");
         assert!(t_status < std::time::Duration::from_secs(10), "status too slow: {t_status:?}");
+    }
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn have_git() -> bool {
+        Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("llmide-tags-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::canonicalize(&d).unwrap()
+    }
+
+    /// Runs git with a fixed identity and no global config; `date` pins the committer date.
+    fn g_at(root: &Path, args: &[&str], date: Option<&str>) {
+        let mut c = Command::new("git");
+        c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        if let Some(d) = date {
+            c.env("GIT_COMMITTER_DATE", d).env("GIT_AUTHOR_DATE", d);
+        }
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn g(root: &Path, args: &[&str]) {
+        g_at(root, args, None);
+    }
+
+    fn head(root: &Path) -> String {
+        let out = Command::new("git").args(["rev-parse", "HEAD"]).current_dir(root).output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    fn commit(root: &Path, text: &str, date: &str) {
+        fs::write(root.join("a.txt"), text).unwrap();
+        g_at(root, &["add", "."], None);
+        g_at(root, &["commit", "-q", "-m", text], Some(date));
+    }
+
+    #[test]
+    fn lists_lightweight_and_annotated_tags_with_their_commit() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("kinds");
+        g(&r, &["init", "-q"]);
+        commit(&r, "one", "2020-01-01T00:00:00Z");
+        let c = head(&r);
+        g(&r, &["tag", "light"]);
+        g(&r, &["tag", "-a", "ann", "-m", "release"]);
+        let list = tags(&r).unwrap();
+        assert!(!list.truncated);
+        assert_eq!(list.tags.len(), 2);
+        let light = list.tags.iter().find(|t| t.name == "light").unwrap();
+        let ann = list.tags.iter().find(|t| t.name == "ann").unwrap();
+        assert!(!light.annotated);
+        assert!(ann.annotated, "annotated tag must be flagged");
+        // Both name the commit, the annotated one peeled through its tag object.
+        assert_eq!(light.target, c[..7]);
+        assert_eq!(ann.target, c[..7]);
+    }
+
+    #[test]
+    fn no_tags_is_an_empty_list() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("none");
+        g(&r, &["init", "-q"]);
+        assert!(tags(&r).unwrap().tags.is_empty());
+        commit(&r, "one", "2020-01-01T00:00:00Z");
+        assert!(tags(&r).unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn unusual_names_round_trip() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("names");
+        g(&r, &["init", "-q"]);
+        commit(&r, "one", "2020-01-01T00:00:00Z");
+        g(&r, &["tag", "release/v1.0-rc1"]);
+        g(&r, &["tag", "\u{7248}\u{672C}/\u{00FC}ber"]);
+        let names: Vec<String> = tags(&r).unwrap().tags.into_iter().map(|t| t.name).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"release/v1.0-rc1".to_string()));
+        assert!(names.contains(&"\u{7248}\u{672C}/\u{00FC}ber".to_string()));
+    }
+
+    #[test]
+    fn newest_first_by_creator_date() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("order");
+        g(&r, &["init", "-q"]);
+        commit(&r, "old", "2019-01-01T00:00:00Z");
+        g(&r, &["tag", "old"]);
+        commit(&r, "new", "2024-01-01T00:00:00Z");
+        g(&r, &["tag", "new"]);
+        commit(&r, "mid", "2021-01-01T00:00:00Z");
+        g(&r, &["tag", "mid"]);
+        let names: Vec<String> = tags(&r).unwrap().tags.into_iter().map(|t| t.name).collect();
+        assert_eq!(names, vec!["new", "mid", "old"]);
+    }
+
+    #[test]
+    fn listing_is_capped_at_500_and_says_so() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("cap");
+        g(&r, &["init", "-q"]);
+        commit(&r, "one", "2020-01-01T00:00:00Z");
+        // Loose ref files written directly: 600 tags without 600 git processes.
+        let c = head(&r);
+        let dir = r.join(".git").join("refs").join("tags");
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..600 {
+            fs::write(dir.join(format!("t{i:04}")), format!("{c}\n")).unwrap();
+        }
+        let list = tags(&r).unwrap();
+        assert_eq!(list.tags.len(), MAX_TAGS);
+        assert!(list.truncated);
+    }
+
+    #[test]
+    fn option_shaped_names_are_listed_as_text_never_parsed_as_options() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("dash");
+        g(&r, &["init", "-q"]);
+        commit(&r, "one", "2020-01-01T00:00:00Z");
+        let c = head(&r);
+        // Loose ref files: `git tag` itself refuses these names, a hostile clone need not.
+        let dir = r.join(".git").join("refs").join("tags");
+        fs::create_dir_all(&dir).unwrap();
+        for n in ["-n", "--output=x", "--sort=refname"] {
+            fs::write(dir.join(n), format!("{c}\n")).unwrap();
+        }
+        let mut names: Vec<String> = tags(&r).unwrap().tags.into_iter().map(|t| t.name).collect();
+        names.sort();
+        assert_eq!(names, ["--output=x", "--sort=refname", "-n"]);
+        assert!(!r.join("x").exists(), "no option took effect");
+    }
+
+    #[test]
+    fn refuses_a_root_that_is_not_a_repository() {
+        let d = scratch("not-a-repo");
+        assert!(tags(&d).is_err());
     }
 }

@@ -199,7 +199,17 @@ fn info(root: &Path) -> ProjectInfo {
 
 // ---- recent list --------------------------------------------------------------------------
 
+/// One remembered project. On disk an entry is `{"root": "...", "openedAt": "2026-11-02T10:00:00Z"}`; the
+/// older format (a bare root string) is still read, with no time. `opened_at` is RFC 3339 UTC, written when
+/// the project is opened; it never changes the order (the list is most recent first, as stored).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecentRecord {
+    pub root: String,
+    pub opened_at: Option<String>,
+}
+
 /// Puts `new` first, drops duplicates, keeps at most `max`.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn push_recent(list: &[String], new: &str, max: usize) -> Vec<String> {
     let mut out = vec![new.to_string()];
     out.extend(list.iter().filter(|p| p.as_str() != new).cloned());
@@ -207,34 +217,164 @@ pub fn push_recent(list: &[String], new: &str, max: usize) -> Vec<String> {
     out
 }
 
-/// Parses the stored JSON array, ignoring non-strings, and caps its length.
-pub fn parse_recent(json: &str, max: usize) -> Vec<String> {
+/// Puts `new` first, drops any earlier entry for the same root, keeps at most `max`.
+pub fn push_record(list: &[RecentRecord], new: RecentRecord, max: usize) -> Vec<RecentRecord> {
+    let mut out = vec![new.clone()];
+    out.extend(list.iter().filter(|r| r.root != new.root).cloned());
+    out.truncate(max);
+    out
+}
+
+/// Parses the stored JSON array, ignoring entries that are neither a string nor an object with a string
+/// `root`, ignoring unknown fields, dropping an `openedAt` that is not a strict RFC 3339 UTC time, and caps
+/// the length.
+pub fn parse_recent_records(json: &str, max: usize) -> Vec<RecentRecord> {
     serde_json::from_str::<Vec<serde_json::Value>>(json)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|v| v.as_str().map(str::to_string))
+        .filter_map(|v| match v {
+            serde_json::Value::String(root) => Some(RecentRecord { root, opened_at: None }),
+            serde_json::Value::Object(o) => {
+                let root = o.get("root")?.as_str()?.to_string();
+                let opened_at = o.get("openedAt").and_then(|t| t.as_str()).filter(|t| valid_rfc3339_utc(t)).map(str::to_string);
+                Some(RecentRecord { root, opened_at })
+            }
+            _ => None,
+        })
         .take(max)
         .collect()
+}
+
+/// Root strings only, in stored order (see `parse_recent_records`).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn parse_recent(json: &str, max: usize) -> Vec<String> {
+    parse_recent_records(json, max).into_iter().map(|r| r.root).collect()
+}
+
+/// Current time as RFC 3339 UTC, whole seconds (`2026-11-02T10:00:00Z`).
+pub fn now_rfc3339() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    format_rfc3339_utc(secs)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// `secs` since the epoch as `YYYY-MM-DDTHH:MM:SSZ` (proleptic Gregorian, UTC).
+pub fn format_rfc3339_utc(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // Howard Hinnant's civil-from-days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
+}
+
+/// Strict RFC 3339 UTC: `YYYY-MM-DDTHH:MM:SS`, optional fraction (1 to 9 digits), then `Z`. No offsets.
+pub fn valid_rfc3339_utc(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 20 || b.len() > 30 || b[b.len() - 1] != b'Z' {
+        return false;
+    }
+    let digits = |r: std::ops::Range<usize>| b.get(r.clone()).is_some_and(|x| x.iter().all(u8::is_ascii_digit)).then(|| s[r].parse::<i64>().ok()).flatten();
+    let sep_ok = b[4] == b'-' && b[7] == b'-' && b[10] == b'T' && b[13] == b':' && b[16] == b':';
+    let (Some(y), Some(mo), Some(d), Some(h), Some(mi), Some(se)) = (digits(0..4), digits(5..7), digits(8..10), digits(11..13), digits(14..16), digits(17..19)) else {
+        return false;
+    };
+    let frac_ok = match b.len() {
+        20 => true,
+        // `.` then 1 to 9 digits, then the `Z` (length 21 + digits).
+        _ => b[19] == b'.' && (22..=30).contains(&b.len()) && b[20..b.len() - 1].iter().all(u8::is_ascii_digit),
+    };
+    sep_ok && frac_ok && (1..=12).contains(&mo) && (1..=days_in_month(y, mo)).contains(&d) && h < 24 && mi < 60 && se < 60
 }
 
 fn recent_file(dir: &Path) -> PathBuf {
     dir.join("recent-projects.json")
 }
 
-fn load_recent(dir: &Path) -> Vec<String> {
+/// Where a malformed list is moved (once) before a fresh list is written over the name.
+fn malformed_aside(dir: &Path) -> PathBuf {
+    dir.join("recent-projects.malformed.json")
+}
+
+#[derive(Debug, PartialEq)]
+enum RecentFile {
+    Missing,
+    Readable,
+    /// Unreadable, oversized, not a JSON array.
+    Malformed,
+}
+
+fn recent_file_state(dir: &Path) -> RecentFile {
     let f = recent_file(dir);
     match std::fs::metadata(&f) {
         Ok(m) if m.is_file() && m.len() <= RECENT_FILE_MAX_BYTES => {
-            parse_recent(&std::fs::read_to_string(&f).unwrap_or_default(), MAX_RECENT)
+            match std::fs::read_to_string(&f).ok().map(|t| serde_json::from_str::<Vec<serde_json::Value>>(&t).is_ok()) {
+                Some(true) => RecentFile::Readable,
+                _ => RecentFile::Malformed,
+            }
+        }
+        Ok(_) => RecentFile::Malformed,
+        Err(_) => RecentFile::Missing,
+    }
+}
+
+fn load_recent_records(dir: &Path) -> Vec<RecentRecord> {
+    let f = recent_file(dir);
+    match std::fs::metadata(&f) {
+        Ok(m) if m.is_file() && m.len() <= RECENT_FILE_MAX_BYTES => {
+            parse_recent_records(&std::fs::read_to_string(&f).unwrap_or_default(), MAX_RECENT)
         }
         _ => Vec::new(),
     }
 }
 
-fn save_recent(dir: &Path, list: &[String]) -> Result<(), String> {
+fn load_recent(dir: &Path) -> Vec<String> {
+    load_recent_records(dir).into_iter().map(|r| r.root).collect()
+}
+
+#[derive(Serialize)]
+struct StoredRecent<'a> {
+    root: &'a str,
+    #[serde(rename = "openedAt", skip_serializing_if = "Option::is_none")]
+    opened_at: Option<&'a str>,
+}
+
+/// Writes the list. A malformed file is never overwritten blindly: it is moved to `recent-projects.malformed.json`
+/// first. If that name is already taken, the list is not written (the project still opens; the error is logged).
+fn save_records(dir: &Path, list: &[RecentRecord]) -> Result<(), String> {
     crate::fsutil::private_dir(dir)?;
-    let body = serde_json::to_string(list).map_err(|e| e.to_string())?;
+    if recent_file_state(dir) == RecentFile::Malformed {
+        let aside = malformed_aside(dir);
+        if aside.exists() {
+            return Err("recent-projects.json is malformed and an earlier copy is already set aside; the list was not written".into());
+        }
+        std::fs::rename(recent_file(dir), &aside).map_err(|e| format!("cannot set the malformed list aside: {e}"))?;
+    }
+    let stored: Vec<StoredRecent> = list.iter().map(|r| StoredRecent { root: &r.root, opened_at: r.opened_at.as_deref() }).collect();
+    let body = serde_json::to_string(&stored).map_err(|e| e.to_string())?;
     crate::fsutil::write_private_atomic(&recent_file(dir), body.as_bytes(), RECENT_FILE_MAX_BYTES as usize)
+}
+
+/// Roots-only save, used by the tests (drops any stored times).
+#[cfg(test)]
+fn save_recent(dir: &Path, list: &[String]) -> Result<(), String> {
+    let records: Vec<RecentRecord> = list.iter().map(|r| RecentRecord { root: r.clone(), opened_at: None }).collect();
+    save_records(dir, &records)
 }
 
 /// Recent entries that still validate (exist, are folders, not too broad).
@@ -272,9 +412,9 @@ fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
     if let Err(e) = ensure_scaffold(&root) {
         eprintln!("project: scaffold not written: {e}");
     }
-    let list = push_recent(&load_recent(dir), &root.to_string_lossy(), MAX_RECENT);
+    let next = push_record(&load_recent_records(dir), RecentRecord { root: root.to_string_lossy().into_owned(), opened_at: Some(now_rfc3339()) }, MAX_RECENT);
     // A failed history write must not block opening the project.
-    if let Err(e) = save_recent(dir, &list) {
+    if let Err(e) = save_records(dir, &next) {
         eprintln!("project: recent list not saved: {e}");
     }
     if let Ok(mut g) = ACTIVE.lock() {
@@ -340,6 +480,8 @@ pub struct RecentEntry {
     pub open_index: Option<usize>,
     /// Index in the stored list, for `project_forget_recent`.
     pub stored_index: usize,
+    /// When the project was last opened, RFC 3339 UTC (`2026-11-02T10:00:00Z`); `None` for entries stored before times were kept.
+    pub opened_at: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -351,23 +493,18 @@ pub struct RecentList {
 
 /// Raw list with a status per entry. Pure on a directory so it is testable.
 pub fn recent_with_status(dir: &Path) -> RecentList {
-    let f = recent_file(dir);
-    let reset = match std::fs::metadata(&f) {
-        Ok(m) if m.is_file() && m.len() <= RECENT_FILE_MAX_BYTES => {
-            serde_json::from_str::<Vec<serde_json::Value>>(&std::fs::read_to_string(&f).unwrap_or_default()).is_err()
-        }
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let reset = recent_file_state(dir) == RecentFile::Malformed;
     let mut open_index = 0usize;
-    let entries = load_recent(dir)
+    let entries = load_recent_records(dir)
         .into_iter()
         .enumerate()
-        .map(|(stored_index, p)| {
+        .map(|(stored_index, rec)| {
+            let p = rec.root;
+            let opened_at = rec.opened_at;
             let path = Path::new(&p);
             match validate_root(path) {
                 Ok(real) => {
-                    let e = RecentEntry { name: display_name(&real), root: real.to_string_lossy().into_owned(), status: "ok", reason: None, open_index: Some(open_index), stored_index };
+                    let e = RecentEntry { name: display_name(&real), root: real.to_string_lossy().into_owned(), status: "ok", reason: None, open_index: Some(open_index), stored_index, opened_at };
                     open_index += 1;
                     e
                 }
@@ -381,7 +518,7 @@ pub fn recent_with_status(dir: &Path) -> RecentList {
                         ("missing", "This is no longer a folder.".to_string())
                     };
                     let name: String = path.file_name().and_then(|n| n.to_str()).unwrap_or("project").chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect();
-                    RecentEntry { name, root: p.chars().filter(|c| !c.is_control()).collect(), status, reason: Some(reason), open_index: None, stored_index }
+                    RecentEntry { name, root: p.chars().filter(|c| !c.is_control()).collect(), status, reason: Some(reason), open_index: None, stored_index, opened_at }
                 }
             }
         })
@@ -392,13 +529,13 @@ pub fn recent_with_status(dir: &Path) -> RecentList {
 /// Removes entry `index` from the stored list when it still names `root` (a stale index changes nothing).
 /// Only the list is edited: no file or folder is touched.
 pub fn forget_recent_in(dir: &Path, index: usize, root: &str) -> Result<bool, String> {
-    let list = load_recent(dir);
-    if list.get(index).map(String::as_str) != Some(root) {
+    let list = load_recent_records(dir);
+    if list.get(index).map(|r| r.root.as_str()) != Some(root) {
         return Ok(false);
     }
     let mut next = list;
     next.remove(index);
-    save_recent(dir, &next)?;
+    save_records(dir, &next)?;
     Ok(true)
 }
 
@@ -737,5 +874,154 @@ mod tests {
         deactivate();
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&data);
+    }
+}
+
+#[cfg(test)]
+mod recent_time_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("llmide-recent-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::canonicalize(&d).unwrap()
+    }
+
+    fn rec(root: &str, at: Option<&str>) -> RecentRecord {
+        RecentRecord { root: root.into(), opened_at: at.map(str::to_string) }
+    }
+
+    #[test]
+    fn old_format_loads_with_no_time_and_keeps_its_order() {
+        let dir = scratch("old");
+        fs::write(recent_file(&dir), "[\"/a\",\"/b\",\"/c\"]").unwrap();
+        let recs = load_recent_records(&dir);
+        assert_eq!(recs, vec![rec("/a", None), rec("/b", None), rec("/c", None)]);
+        assert_eq!(load_recent(&dir), vec!["/a", "/b", "/c"]);
+        assert_eq!(recent_file_state(&dir), RecentFile::Readable, "old files are not malformed");
+    }
+
+    #[test]
+    fn new_format_round_trips_with_times() {
+        let dir = scratch("new");
+        let list = vec![rec("/a", Some("2026-11-02T10:00:00Z")), rec("/b", None)];
+        save_records(&dir, &list).unwrap();
+        let body = fs::read_to_string(recent_file(&dir)).unwrap();
+        assert!(body.contains("\"openedAt\":\"2026-11-02T10:00:00Z\""), "{body}");
+        assert!(!body.contains("openedAt\":null"), "a missing time is omitted, not null: {body}");
+        assert_eq!(load_recent_records(&dir), list);
+    }
+
+    #[test]
+    fn mixed_and_hostile_entries_are_read_safely() {
+        let json = r#"[
+            "/old",
+            {"root":"/new","openedAt":"2026-11-02T10:00:00.123Z","futureField":{"x":1}},
+            {"root":"/bad-time","openedAt":"yesterday"},
+            {"root":"/offset","openedAt":"2026-11-02T10:00:00+09:00"},
+            {"noroot":true},
+            {"root":5},
+            42, null, true
+        ]"#;
+        assert_eq!(
+            parse_recent_records(json, 50),
+            vec![
+                rec("/old", None),
+                rec("/new", Some("2026-11-02T10:00:00.123Z")),
+                rec("/bad-time", None),
+                rec("/offset", None),
+            ]
+        );
+        assert_eq!(parse_recent(json, 50), vec!["/old", "/new", "/bad-time", "/offset"]);
+    }
+
+    #[test]
+    fn rfc3339_is_strict_utc_and_formats_known_instants() {
+        assert_eq!(format_rfc3339_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_rfc3339_utc(1_700_000_000), "2023-11-14T22:13:20Z");
+        assert_eq!(format_rfc3339_utc(951_782_400), "2000-02-29T00:00:00Z", "leap day");
+        for ok in ["2023-11-14T22:13:20Z", "2000-02-29T00:00:00Z", "2023-11-14T22:13:20.5Z", "2023-11-14T22:13:20.123456789Z"] {
+            assert!(valid_rfc3339_utc(ok), "{ok}");
+        }
+        for bad in [
+            "2023-13-01T00:00:00Z",
+            "2023-02-29T00:00:00Z",
+            "2023-11-14T24:00:00Z",
+            "2023-11-14T22:13:20+00:00",
+            "2023-11-14 22:13:20Z",
+            "2023-11-14T22:13:20.Z",
+            "2023-11-14T22:13:20.1234567890Z",
+            "",
+            "Z",
+            "2023-11-14T22:13:2\u{e9}Z",
+            "\u{e9}023-11-14T22:13:20.123Z",
+            "2023-11-14T22:13:20.1\u{0663}Z",
+        ] {
+            assert!(!valid_rfc3339_utc(bad), "{bad} must be refused");
+        }
+        assert!(valid_rfc3339_utc(&now_rfc3339()));
+    }
+
+    #[test]
+    fn ordering_is_stored_order_and_reopening_moves_a_project_to_the_front() {
+        let list = vec![rec("/x", None), rec("/y", Some("2026-01-01T00:00:00Z"))];
+        let next = push_record(&list, rec("/y", Some("2026-11-02T10:00:00Z")), MAX_RECENT);
+        assert_eq!(next, vec![rec("/y", Some("2026-11-02T10:00:00Z")), rec("/x", None)]);
+        let again = push_record(&next, rec("/z", Some("2026-11-02T11:00:00Z")), MAX_RECENT);
+        assert_eq!(again.iter().map(|r| r.root.as_str()).collect::<Vec<_>>(), ["/z", "/y", "/x"]);
+    }
+
+    #[test]
+    fn the_list_stays_bounded_on_disk() {
+        let dir = scratch("bounded");
+        let mut list: Vec<RecentRecord> = Vec::new();
+        for i in 0..25 {
+            list = push_record(&list, rec(&format!("/p/{i}"), Some("2026-11-02T10:00:00Z")), MAX_RECENT);
+        }
+        save_records(&dir, &list).unwrap();
+        assert_eq!(load_recent_records(&dir).len(), MAX_RECENT);
+        // A hand-edited file with far too many entries is capped on read too.
+        let many: Vec<String> = (0..50).map(|i| format!("/p/{i}")).collect();
+        fs::write(recent_file(&dir), serde_json::to_string(&many).unwrap()).unwrap();
+        assert_eq!(load_recent_records(&dir).len(), MAX_RECENT);
+    }
+
+    #[test]
+    fn a_malformed_file_is_set_aside_once_and_never_overwritten_blindly() {
+        let dir = scratch("malformed");
+        fs::write(recent_file(&dir), "{broken, but the user's").unwrap();
+        save_records(&dir, &[rec("/a", Some("2026-11-02T10:00:00Z"))]).unwrap();
+        assert_eq!(fs::read_to_string(malformed_aside(&dir)).unwrap(), "{broken, but the user's", "the bad bytes are kept");
+        assert_eq!(load_recent_records(&dir), vec![rec("/a", Some("2026-11-02T10:00:00Z"))]);
+        // A second malformed file while the first copy is still set aside: refused, nothing overwritten.
+        fs::write(recent_file(&dir), "not a list either").unwrap();
+        assert!(save_records(&dir, &[rec("/b", None)]).is_err());
+        assert_eq!(fs::read_to_string(malformed_aside(&dir)).unwrap(), "{broken, but the user's");
+        assert_eq!(fs::read_to_string(recent_file(&dir)).unwrap(), "not a list either");
+    }
+
+    #[test]
+    fn status_list_carries_the_opened_time_for_welcome() {
+        let dir = scratch("status");
+        let proj = scratch("status-proj").join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let root = fs::canonicalize(&proj).unwrap().to_string_lossy().into_owned();
+        save_records(&dir, &[rec(&root, Some("2026-11-02T10:00:00Z")), rec("/p/old", None)]).unwrap();
+        let r = recent_with_status(&dir);
+        assert_eq!(r.entries[0].opened_at.as_deref(), Some("2026-11-02T10:00:00Z"));
+        assert_eq!(r.entries[1].opened_at, None);
+        assert!(!r.reset);
+    }
+
+    #[test]
+    fn forgetting_keeps_the_times_of_the_remaining_entries() {
+        let dir = scratch("forget");
+        let proj = scratch("forget-proj").join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let root = fs::canonicalize(&proj).unwrap().to_string_lossy().into_owned();
+        save_records(&dir, &[rec("/p/other", Some("2026-01-01T00:00:00Z")), rec(&root, Some("2026-11-02T10:00:00Z"))]).unwrap();
+        assert!(forget_recent_in(&dir, 0, "/p/other").unwrap());
+        assert_eq!(load_recent_records(&dir), vec![rec(&root, Some("2026-11-02T10:00:00Z"))]);
     }
 }

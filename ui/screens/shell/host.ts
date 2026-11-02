@@ -63,6 +63,8 @@ export interface RecentEntry {
   openIndex: number | null;
   /** Position in the stored list, for `projectForgetRecent`. */
   storedIndex: number;
+  /** When the project was last opened (RFC 3339 UTC), or null for entries stored before times were kept. */
+  openedAt: string | null;
 }
 
 export interface RecentList {
@@ -86,7 +88,8 @@ export function decodeRecentList(raw: unknown): RecentList {
     const storedIndex = typeof o.stored_index === "number" && Number.isInteger(o.stored_index) && o.stored_index >= 0 ? o.stored_index : -1;
     const openIndex = typeof o.open_index === "number" && Number.isInteger(o.open_index) && o.open_index >= 0 ? o.open_index : null;
     if (storedIndex < 0) continue;
-    entries.push({ name: o.name, root: o.root, status: status === "ok" && openIndex === null ? "missing" : status, reason: asStr(o.reason), openIndex: status === "ok" ? openIndex : null, storedIndex });
+    const openedAt = typeof o.opened_at === "string" && o.opened_at.length <= 40 ? o.opened_at : null;
+    entries.push({ name: o.name, root: o.root, status: status === "ok" && openIndex === null ? "missing" : status, reason: asStr(o.reason), openIndex: status === "ok" ? openIndex : null, storedIndex, openedAt });
   }
   return { entries, reset: r.reset === true };
 }

@@ -30,8 +30,9 @@
 .wc-recent-open:hover:not(:disabled) { background: color-mix(in srgb, var(--tok-color-text) 6%, var(--tok-color-surface)); }
 .wc-recent-open:disabled { opacity: 0.6; cursor: default; }
 .wc-recent-icon { display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 8px; background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); color: var(--tok-color-accent); }
-.wc-recent-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wc-recent-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wc-recent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-recent-ago { margin-left: auto; flex: none; font-size: 11px; color: var(--tok-color-text-muted); white-space: nowrap; }
 .wc-recent-path { font-family: var(--tok-font-mono, monospace); font-size: 10px; color: var(--tok-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .wc-recent-reason { font-size: 12px; color: var(--tok-color-warning); }
 .wc-forget { align-self: center; }

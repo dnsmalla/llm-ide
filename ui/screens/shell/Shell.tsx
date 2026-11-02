@@ -8,6 +8,8 @@ import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from
 import { host as shellHost, invokeHost } from "./host";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
+import { CrashReportBanner } from "./CrashReportBanner";
+import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-report";
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore } from "./chat-approvals";
@@ -65,6 +67,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
+  // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.
+  const [crash, setCrash] = useState<CrashNotice | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadCrashNotice().then((n) => { if (live) setCrash(n); });
+    return () => { live = false; };
+  }, []);
+  const dismissCrash = useCallback(() => {
+    setCrash(null);
+    void dismissCrashNotice().catch(() => undefined);
+  }, []);
   const session = useCoreSession();
   const features = useFeatures();
   const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent } = useActiveProject();
@@ -228,6 +241,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       <div className="sh-body">
         <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
+          {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
           {apiWarning && <StatusBanner severity="warning" message={apiWarning} />}
           {keepSectionNotice(sectionNotice, nav.active) && (

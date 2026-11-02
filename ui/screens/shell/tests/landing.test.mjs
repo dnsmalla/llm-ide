@@ -179,3 +179,12 @@ test("project store: a host without the new commands (older build) still loads",
   assert.equal(await store.createProject("x"), null);
   assert.match(store.getSnapshot().error, /desktop app/);
 });
+
+test("decodeRecentList carries opened_at as openedAt; an old entry without it reads as null", () => {
+  const r = host.decodeRecentList({ entries: [
+    { name: "a", root: "/a", status: "ok", open_index: 0, stored_index: 0, opened_at: "2026-11-02T10:00:00Z" },
+    { name: "b", root: "/b", status: "ok", open_index: 1, stored_index: 1 },
+    { name: "c", root: "/c", status: "ok", open_index: 2, stored_index: 2, opened_at: 42 },
+  ] });
+  assert.deepEqual(r.entries.map((e) => e.openedAt), ["2026-11-02T10:00:00Z", null, null]);
+});

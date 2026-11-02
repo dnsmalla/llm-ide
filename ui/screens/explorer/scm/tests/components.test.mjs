@@ -206,3 +206,22 @@ test("changes menu: stage or unstage for every row; discard only for working-tre
   assert.equal(changeMenu(item("conflicts", e("c.ts", { kind: "unmerged" })))[0].label, "Mark resolved (stage)");
   assert.deepEqual(labels(item("changes", e("sub", { submodule: true }))), ["stage", "copy", "reveal"], "a submodule cannot be discarded from here");
 });
+
+test("tags: read-only list names the commit and the annotated or lightweight kind", async () => {
+  const { c } = await ctl({ entries: [], tags: [{ name: "v1.0/rc", target: "abc1234", annotated: true }, { name: "light", target: "def5678", annotated: false }] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /aria-labelledby="scm-tags-title"[\s\S]*>Tags</);
+  assert.match(out, /aria-label="Local tags"/);
+  assert.match(out, /v1\.0\/rc[\s\S]*abc1234 · annotated/);
+  assert.match(out, /light[\s\S]*def5678 · lightweight/);
+  assert.doesNotMatch(out, /<button[^>]*>[^<]*tag/i, "no tag action is offered");
+});
+
+test("tags: an empty listing says so", async () => {
+  const { c } = await ctl({ entries: [], tags: [] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(html(h(BranchesView, { controller: c, snap: c.getSnapshot() })), /No tags yet\./);
+});

@@ -46,6 +46,9 @@ export interface LogPage { entries: LogEntry[]; has_more: boolean }
 export interface CommitFile { status: string; path: string }
 export interface CommitDetail { hash: string; parents: string[]; message: string; files: CommitFile[]; truncated: boolean }
 export interface CommitDiff { text: string; truncated: boolean }
+/** `annotated` is false for a lightweight tag. `target` is the short id of the commit it names. */
+export interface Tag { name: string; target: string; annotated: boolean }
+export interface TagList { tags: Tag[]; truncated: boolean }
 
 export interface ScmApi {
   status(): Promise<ScmStatus>;
@@ -62,6 +65,7 @@ export interface ScmApi {
   log(skip: number, limit: number): Promise<LogPage>;
   commitFiles(hash: string): Promise<CommitDetail>;
   commitDiff(hash: string, path: string): Promise<CommitDiff>;
+  tags(): Promise<TagList>;
 }
 
 /** What the host rejects with: `{ code, message }`. Anything else is mapped to `io` / `unavailable`. */
@@ -108,5 +112,6 @@ export function createHostScm(): ScmApi {
     log: (skip, limit) => call("git_log", { req: { skip, limit } }),
     commitFiles: (hash) => call("git_commit_files", { hash }),
     commitDiff: (hash, path) => call("git_commit_diff", { req: { hash, path } }),
+    tags: () => call("git_tags"),
   };
 }

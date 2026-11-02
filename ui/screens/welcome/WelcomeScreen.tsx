@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FolderIcon, ChatIcon } from "@llmide/ui-kit";
 import type { ProjectInfo, RecentEntry, RecentList } from "../shell/host";
 import { safeText } from "../shell/safe-text";
+import { openedAgo } from "../shell/relative-time";
 import { GUIDE, NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
 
 /** What the Welcome page needs from the shell. Every function is host- or core-backed in the app and a fake in tests. */
@@ -66,6 +67,8 @@ function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy
   const name = dateless(entry.name, 60) || "project";
   const ok = entry.status === "ok";
   const reason = ok ? null : dateless(entry.reason ?? "This folder cannot be opened.", 160);
+  // "" when the entry has no time (stored before times were kept) or the time does not parse: then nothing shows.
+  const ago = openedAgo(entry.openedAt);
   return (
     <li className="wc-recent" data-status={entry.status}>
       <button type="button" className="wc-recent-open" disabled={!ok || busy} aria-disabled={!ok || busy} onClick={onOpen} title={ok ? `Open ${name}` : (reason ?? undefined)}>
@@ -75,6 +78,7 @@ function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy
           <span className="wc-recent-path" title={dateless(entry.root, 400)}>{dateless(entry.root, 300)}</span>
           {reason && <span className="wc-recent-reason" role="note">{reason}</span>}
         </span>
+        {ago && <span className="wc-recent-ago" title={`Last opened ${ago}`}>{ago}</span>}
       </button>
       <button type="button" className="sh-button wc-forget" disabled={busy} aria-label={`Remove ${name} from the recent list. Your files are not deleted.`} title="Remove from this list. Your files are not deleted." onClick={onForget}>
         Forget

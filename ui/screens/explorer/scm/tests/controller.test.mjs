@@ -220,3 +220,22 @@ test("switching project resets everything", async () => {
   assert.equal(snap().message, "");
   assert.equal(snap().root, "/other");
 });
+
+test("tags: loaded on the branches tab, read-only, and a tag failure never blocks branches", async () => {
+  const { c, api, snap } = await ctl({ entries: [], tags: [{ name: "v1.0", target: "abc1234", annotated: true }, { name: "rc", target: "def5678", annotated: false }], tagsTruncated: true });
+  assert.equal(snap().tags.list.length, 0, "not loaded until the tab is opened");
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(snap().tags.list.map((t) => [t.name, t.annotated]), [["v1.0", true], ["rc", false]]);
+  assert.equal(snap().tags.truncated, true);
+  assert.equal(calls(api, "tags").length, 1);
+  // The only write path is the list call: no tag command beyond `tags`.
+  assert.ok(!api.calls.some((x) => /tag/i.test(x[0]) && x[0] !== "tags"));
+  // A failing tag listing is reported on its own; the branch list still loads.
+  const bad = await ctl({ entries: [], tagsError: new ScmErr("io", "boom") });
+  bad.c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(bad.snap().tags.error.title !== undefined, true);
+  assert.equal(bad.snap().branches.list.length, 1);
+  assert.equal(bad.snap().branches.error, null);
+});
