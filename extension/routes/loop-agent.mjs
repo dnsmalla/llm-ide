@@ -31,6 +31,8 @@ import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { beginLoopRun } from '../core/agent-busy.mjs';
+import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
+import { isPluginUpdating } from '../plugins/claude-update.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -104,6 +106,8 @@ function loadLoopEngine() {
 }
 
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
+  const sdkUpdating = deps.isSdkUpdating ?? isSdkUpdating;
+  const pluginUpdating = deps.isPluginUpdating ?? isPluginUpdating;
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
@@ -165,6 +169,18 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeoutMs);
   onClientDisconnect(req, res, () => ac.abort());
+  // Same guards as /agent/v2/stream: replacing the SDK or plugin tree under a
+  // running Loop step would launch its CLI from a half-installed package. The
+  // updater's own busy check catches a run that is already active; this closes
+  // the opposite race, a run that starts while the update is installing.
+  if (sdkUpdating()) {
+    sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
+    return true;
+  }
+  if (pluginUpdating()) {
+    sendJSON(res, 503, { error: { code: 'PLUGIN_UPDATING', message: 'A plugin is being updated — try again in a moment.' } });
+    return true;
+  }
   // Counted for GET /kb/agent-sdk's busy summary: the SDK updater must not run under it.
   const endBusy = beginLoopRun();
 
