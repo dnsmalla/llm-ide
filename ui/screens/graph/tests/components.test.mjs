@@ -82,11 +82,11 @@ test("details: facts, neighbours with weights, Open in Explorer only when there 
   const out = html(h(G.NodeDetails, { model, layout, adj, node, onSelect: noop, onOpenFile: (p) => opened.push(p), onClose: noop }));
   assert.match(out, /<aside[^>]*aria-label="Details for /);
   assert.match(out, /<dt>Kind<\/dt><dd>file<\/dd>/);
-  assert.match(out, /Open in Explorer/);
+  assert.match(out, />Open<\/button>/);
   assert.match(out, /Neighbours \(/);
   assert.match(out, /weight 0\.\d\d/);
   const noPath = html(h(G.NodeDetails, { model, layout, adj, node, onSelect: noop, onOpenFile: null, onClose: noop }));
-  assert.doesNotMatch(noPath, /Open in Explorer/);
+  assert.doesNotMatch(noPath, />Open<\/button>/);
 });
 
 test("controls: radiogroup for the mode, labelled slider, kind checkboxes, community select", async () => {

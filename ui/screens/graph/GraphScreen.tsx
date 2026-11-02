@@ -85,7 +85,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     <div className="gr-quick" aria-label="Quick pick repositories">
       <h3 className="gr-quick-title">Quick Pick</h3>
       {repos.map((r) => (
-        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setMode("code"); setTarget(r); runGeneration(r, "code"); }}>
+        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Generate from ${r}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); }}>
           <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
         </button>
       ))}
@@ -99,7 +99,13 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         ))}
       </div>
       <p className="gr-muted">
-        {mode === "code" ? "Scans code into a symbol graph." : mode === "memory" ? "Scans the selected repo's .md/.txt docs into an InfiniteBrain graph." : "Merges code and llm-doc into one graph."}
+        {repos.length === 0
+          ? "Pick a repo in Settings → GitLab/GitHub to generate a graph."
+          : mode === "code"
+            ? `Scans code in ${target || "the selected repo"} into a symbol graph.`
+            : mode === "memory"
+              ? `Builds a doc graph from the .md/.txt docs in ${target || "the selected repo"}.`
+              : "Merges code and llm-doc into one graph."}
       </p>
       <button
         type="button"

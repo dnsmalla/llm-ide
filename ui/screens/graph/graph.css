@@ -102,3 +102,6 @@
 .gr-advanced { border-top: 1px solid var(--tok-color-border); padding-top: 6px; }
 .gr-advanced > summary { cursor: pointer; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .gr-advanced .gr-controls { padding-top: 6px; }
+.gr-file-kind { display: inline-flex; padding: 1px 5px; border-radius: 4px; background: var(--tok-color-surface2); color: var(--tok-color-text-muted); font-size: 9px; letter-spacing: .06em; }
+.gr-file-preview { max-height: 42vh; overflow: auto; margin: 8px 0; padding: 10px; border: 1px solid var(--tok-color-border); border-radius: 6px; background: var(--tok-color-body); }
+.gr-file-code { max-height: 36vh; overflow: auto; margin: 8px 0; padding: 10px; border: 1px solid var(--tok-color-border); border-radius: 6px; background: var(--tok-color-body); font-family: var(--tok-type-mono-family); font-size: 11px; line-height: 1.5; }
