@@ -69,7 +69,9 @@ test("pathological input stays bounded", () => {
 // --- hostile input: parse cost is bounded ------------------------------------------------------------------
 
 const timed = (fn) => { const t0 = performance.now(); const r = fn(); return [performance.now() - t0, r]; };
-const BUDGET_MS = 1500; // generous for slow CI; the unbounded versions take tens of seconds to minutes
+// ~220 ms idle, but 1.7 s seen while the pre-push gate runs the Swift suite alongside; the unbounded
+// versions take tens of seconds to minutes, so 5 s still fails on a real regression.
+const BUDGET_MS = 5000;
 
 test("hostile text parses within a time budget: bracket floods, unclosed links, backticks, stars, whitespace lines", () => {
   const MB = 1024 * 1024;
