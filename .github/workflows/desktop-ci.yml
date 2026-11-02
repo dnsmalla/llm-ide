@@ -16,6 +16,7 @@ on:
       - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
       - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
       - 'schema/design/**'
+      - 'mac/LocalPackages/graph-kit'
       - '.github/workflows/desktop-ci.yml'
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
       - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
       - 'schema/design/**'
+      - 'mac/LocalPackages/graph-kit'
       - '.github/workflows/desktop-ci.yml'
 
 concurrency:
@@ -54,6 +56,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # The Graph screen's System page imports graph-kit's web source
+      # (mac/LocalPackages/graph-kit/web), so vite needs the submodule. Only that one:
+      # `.skills` is not used here (same as contract-ci.yml).
+      - name: Check out graph-kit submodule
+        run: git submodule update --init mac/LocalPackages/graph-kit
 
       - uses: actions/setup-node@v6
         with:
@@ -99,6 +107,11 @@ jobs:
 
       - name: Install ui-kit dependencies
         working-directory: ui/kit
+        run: npm ci
+
+      # vite.config.ts resolves `three` from graph-kit's web package (System page).
+      - name: Install graph-kit web dependencies
+        working-directory: mac/LocalPackages/graph-kit/web
         run: npm ci
 
       - name: ui-kit tests and type-check
