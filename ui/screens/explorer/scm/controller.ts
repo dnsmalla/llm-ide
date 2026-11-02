@@ -7,12 +7,15 @@ import {
 } from "./api";
 import {
   GROUP_ORDER, MAX_DISCARD, NO_SELECTION, STAGE_CHUNK, actionsFor, branchNameError, buildGroups, chunk, describeError, displayText,
-  flatten, hunkIndexes, messageError, pruneSelection, rowKey, selectAllHunks, selectRow, selectedItems, tagNameError, toggleHunk, validateCommit,
+  flatten, hunkIndexes, messageError, pruneSelection, rowKey, selectAllHunks, selectRow, selectedItems, displayLine, tagNameError, toggleHunk,
+  validateAmend, validateCommit,
   type ErrorInfo, type FileItem, type GroupId, type Groups, type Row, type Selection,
 } from "./model";
 
 /** A branch the host refused to delete because it has commits no merged branch holds. Nothing was deleted. */
 export interface PendingBranchDelete { name: string; tip: string; unique: number }
+/** An amend the host refused because the commit is already on a remote; the second step (force) sends the same message. */
+export interface PendingAmend { message: string }
 
 export type ScmTab = "changes" | "history" | "branches";
 
@@ -60,6 +63,8 @@ export interface ScmSnapshot {
   pendingBranchDelete: PendingBranchDelete | null;
   /** A stash drop waiting for the in-page confirmation. */
   pendingStashDrop: Stash | null;
+  /** An amend waiting for the in-page "Amend anyway" step (the commit is already published). */
+  pendingAmend: PendingAmend | null;
   counts: { staged: number; changes: number; untracked: number; conflicts: number };
 }
 
@@ -95,6 +100,7 @@ export class ScmController {
       stashes: { list: [], truncated: false, loading: false, error: null },
       pendingBranchDelete: null,
       pendingStashDrop: null,
+      pendingAmend: null,
       counts: { staged: 0, changes: 0, untracked: 0, conflicts: 0 },
     };
   }
@@ -354,6 +360,87 @@ export class ScmController {
     } else if (this.snap.notice?.info?.code === "identity_missing") {
       this.set({ identity: { state: "missing", value: null } });
     }
+  }
+
+  // ---- amend ------------------------------------------------------------------------------------------------
+
+  /** Amends HEAD with the staged changes (and the message, when there is one). The host asks natively. */
+  async amend(message: string): Promise<boolean> {
+    const check = validateAmend(message, this.snap.counts.staged, this.snap.counts.conflicts);
+    if (!check.ok) {
+      this.set({ notice: { kind: "error", info: null, text: check.reason } });
+      return false;
+    }
+    const res = await this.run("Amending", () => this.api.commitAmend(message.trim() ? message : undefined, false));
+    if (res) {
+      this.set({ message: "", pendingAmend: null, notice: { kind: "info", info: null, text: `Amended the last commit. It is now ${res.hash}.` }, history: { ...this.snap.history, entries: [], hasMore: false, open: null } });
+      if (this.snap.tab === "history") void this.loadLog(true);
+      return true;
+    }
+    if (this.snap.notice?.info?.code === "already_pushed") {
+      // Not an error to show red: the page asks once more, in-page, and the host asks natively a second time.
+      this.set({ pendingAmend: { message }, notice: { kind: "info", info: null, text: "This commit is already on a remote branch." } });
+    } else if (this.snap.notice?.info?.code === "identity_missing") {
+      this.set({ identity: { state: "missing", value: null } });
+    }
+    return false;
+  }
+
+  /** The second step after `already_pushed`: amends the published commit (its id changes). */
+  async amendAnyway() {
+    const p = this.snap.pendingAmend;
+    if (!p) return;
+    this.set({ pendingAmend: null });
+    const res = await this.run("Amending", () => this.api.commitAmend(p.message.trim() ? p.message : undefined, true));
+    if (res) {
+      this.set({ message: "", notice: { kind: "info", info: null, text: `Amended the last commit. It is now ${res.hash}. A later push will need a force push.` }, history: { ...this.snap.history, entries: [], hasMore: false, open: null } });
+      if (this.snap.tab === "history") void this.loadLog(true);
+    }
+  }
+
+  cancelAmendAnyway() {
+    this.set({ pendingAmend: null });
+  }
+
+  // ---- merge -----------------------------------------------------------------------------------------------
+
+  /** Merges a local branch into the current one (fast-forward when git can). The host asks natively and names both. */
+  async mergeBranch(name: string): Promise<void> {
+    const bad = branchNameError(name);
+    if (bad) {
+      this.set({ notice: { kind: "error", info: describeError("invalid_ref", bad), text: bad } });
+      return;
+    }
+    const res = await this.run("Merging", () => this.api.merge(name, "ff"));
+    if (!res) return;
+    if (res.status === "merged") {
+      this.set({ notice: { kind: "info", info: null, text: res.fast_forward ? `Merged ${displayLine(name)}. Fast-forwarded to ${res.hash}.` : `Merged ${displayLine(name)}. Merge commit ${res.hash} was made.` } });
+    } else {
+      const listed = res.paths.slice(0, 10).map((p) => displayLine(p)).join(", ");
+      const more = res.paths.length > 10 || res.truncated ? " and more" : "";
+      this.set({ notice: { kind: "info", info: null, text: `The merge stopped with conflicts in ${res.paths.length}${res.truncated ? "+" : ""} file(s): ${listed}${more}. Resolve them in Changes, stage each one, then commit. Or abort the merge.` } });
+    }
+    await this.loadBranches();
+    this.opts.onFilesChanged?.();
+  }
+
+  /** `git merge --abort` (the host asks natively; edits made to resolve conflicts are lost). */
+  async abortMerge() {
+    await this.run("Aborting merge", () => this.api.mergeAbort());
+    await this.loadBranches();
+    this.opts.onFilesChanged?.();
+  }
+
+  // ---- discard all -----------------------------------------------------------------------------------------
+
+  /** Restores every tracked change to HEAD. Untracked files go to the Trash only when `includeUntracked` is set. */
+  async discardAll(includeUntracked: boolean) {
+    const res = await this.run("Discarding all", () => this.api.discardAll(includeUntracked));
+    if (!res) return;
+    const trash = res.trashed ? ` Moved ${res.trashed} untracked item(s) to the Trash.` : "";
+    const kept = res.skipped ? ` ${res.skipped} item(s) were left in place.` : "";
+    this.set({ notice: { kind: "info", info: null, text: `Restored ${res.restored} changed file(s) to HEAD.${trash}${kept}` } });
+    this.opts.onFilesChanged?.();
   }
 
   // ---- branches --------------------------------------------------------------------------------------------

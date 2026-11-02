@@ -17,6 +17,8 @@ export const ROW_HEIGHT = 24;
 export const STAGE_CHUNK = 500;
 export const MAX_DISCARD = 200;
 export const MAX_MESSAGE_BYTES = 20_000;
+/** Amend messages may be longer than a commit message (the host allows 64 KB). */
+export const MAX_AMEND_BYTES = 64 * 1024;
 
 // ---- untrusted text (paths, subjects, author names, diffs) -------------------------------------------------
 
@@ -228,6 +230,17 @@ export function validateCommit(message: string, stagedCount: number, conflictCou
   return { ok: true, reason: "", bytes };
 }
 
+/** Amend: staged changes or a new message is enough (a blank message keeps the old one). Same message rules as commit. */
+export function validateAmend(message: string, stagedCount: number, conflictCount: number): CommitCheck {
+  const text = displayText(message.replace(/\r\n?/g, "\n")).trim();
+  const bytes = utf8Length(text);
+  if (conflictCount > 0) return { ok: false, reason: "Resolve and stage the conflicted files first.", bytes };
+  if (text.startsWith("-")) return { ok: false, reason: "The message must not start with \"-\".", bytes };
+  if (bytes > MAX_AMEND_BYTES) return { ok: false, reason: "The message is longer than 64 KB.", bytes };
+  if (stagedCount === 0 && text === "") return { ok: false, reason: "Stage a change or write a new message to amend.", bytes };
+  return { ok: true, reason: "", bytes };
+}
+
 /** Tag names follow git's ref rules, the same as branch names; the host has the final word. */
 export function tagNameError(name: string): string | null {
   return branchNameError(name)?.replace(/branch name/g, "tag name") ?? null;
@@ -288,7 +301,31 @@ export function describeError(code: string, message: string): ErrorInfo {
     case "git_timeout":
       return { code, title: "git took too long", detail: "The command was stopped after its time limit. Try again, or run it in a terminal for very large changes.", steps: [] };
     case "changed":
-      return { code, title: "The file changed", detail: "It changed since the hunks were listed. They were reloaded; select again.", steps: [] };
+      return { code, title: "Changed while you were deciding", detail: clean || "It changed since it was listed. Nothing was changed; check and try again.", steps: [] };
+    case "changed_since_confirm":
+      return { code, title: "Changed while you were deciding", detail: clean || "The files changed while the dialog was open. Nothing was discarded.", steps: [] };
+    case "dirty":
+      return { code, title: "Commit, stash or discard first", detail: clean, steps: [] };
+    case "in_progress":
+      return { code, title: "Finish the operation in progress", detail: clean, steps: [] };
+    case "already_pushed":
+      return { code, title: "Already on a remote", detail: clean, steps: [] };
+    case "nothing_to_amend":
+      return { code, title: "Nothing to amend", detail: clean, steps: [] };
+    case "no_commits":
+      return { code, title: "No commits yet", detail: clean, steps: [] };
+    case "detached":
+      return { code, title: "Not on a branch", detail: clean, steps: [] };
+    case "up_to_date":
+      return { code, title: "Nothing to merge", detail: clean, steps: [] };
+    case "would_overwrite":
+      return { code, title: "Merge refused", detail: clean, steps: [] };
+    case "too_many":
+      return { code, title: "Too many untracked files", detail: clean, steps: [] };
+    case "not_in_progress":
+      return { code, title: "No merge in progress", detail: clean, steps: [] };
+    case "invalid_mode":
+      return { code, title: "Cannot do that", detail: clean, steps: [] };
     case "dirty_conflict":
       return { code, title: "Switch refused", detail: "Your uncommitted changes would be overwritten by that checkout. Commit or discard them first. Nothing was changed.", steps: [] };
     case "conflict":

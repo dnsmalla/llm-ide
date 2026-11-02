@@ -17,9 +17,9 @@
 //!   size-capped, control characters and bidi/invisible format characters are removed, and the
 //!   UI renders it as plain text.
 //!
-//! Branch delete (safe `-d` first), tag create (never moves a tag) and stash (list, push, apply, pop,
-//! drop) are here too. Not here (deferred, they need credentials or are not v1): push/pull/fetch/remote,
-//! amend, merge, blame, hosted PR/issue actions.
+//! Branch delete (safe `-d` first), tag create (never moves a tag), stash (list, push, apply, pop,
+//! drop), merge (plus abort), amend and discard all are here too. Not here (deferred, they need credentials
+//! or are not v1): push/pull/fetch/remote, blame, hosted PR/issue actions.
 
 use std::path::{Path, PathBuf};
 
@@ -1111,6 +1111,464 @@ pub fn stash_drop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) 
     run_git(root, &["stash", "drop", &spec], 64 * 1024).map(|_| ())
 }
 
+// ---- merge, amend, discard all ---------------------------------------------------------------
+
+const MAX_AMEND_MESSAGE: usize = 64 * 1024;
+/// Untracked items one whole-tree discard may move to the Trash.
+pub const MAX_TRASH_ENTRIES: usize = 2_000;
+const MAX_CONFLICT_PATHS: usize = 200;
+const BULK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// The git operation in progress (merge, cherry-pick, revert, rebase, am), read from git's own state files.
+fn operation_in_progress(root: &Path) -> R<Option<&'static str>> {
+    for (refname, what) in [("MERGE_HEAD", "A merge"), ("CHERRY_PICK_HEAD", "A cherry-pick"), ("REVERT_HEAD", "A revert")] {
+        if git_says(run_git(root, &["rev-parse", "-q", "--verify", refname], 256))? {
+            return Ok(Some(what));
+        }
+    }
+    for (dir, what) in [("rebase-merge", "A rebase"), ("rebase-apply", "A rebase or mail patch")] {
+        let out = run_git(root, &["rev-parse", "--git-path", dir], 4096)?;
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let full = if Path::new(&path).is_absolute() { PathBuf::from(&path) } else { root.join(&path) };
+        if full.exists() {
+            return Ok(Some(what));
+        }
+    }
+    Ok(None)
+}
+
+fn refuse_in_progress<T>(what: &str) -> R<T> {
+    gerr("in_progress", format!("{what} is in progress. Finish it or abort it first."))
+}
+
+/// Full id of the commit `refname` names (`HEAD`, `refs/heads/x`).
+fn full_id(root: &Path, refname: &str) -> R<String> {
+    let out = run_git(root, &["rev-parse", "--verify", "-q", &format!("{refname}^{{commit}}")], 256)?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn short_head(root: &Path) -> R<String> {
+    let out = run_git(root, &["rev-parse", "--short", "HEAD"], 256)?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The branch HEAD names, or `None` when HEAD is detached.
+fn head_branch(root: &Path) -> R<Option<String>> {
+    match run_git(root, &["symbolic-ref", "-q", "HEAD"], 1024) {
+        Ok(o) => Ok(String::from_utf8_lossy(&o.stdout).trim().strip_prefix("refs/heads/").map(str::to_string)),
+        Err(e) if e.code == "git_failed" => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn identity_env(id: &Identity) -> Vec<(&'static str, String)> {
+    vec![
+        ("GIT_AUTHOR_NAME", id.name.clone()),
+        ("GIT_AUTHOR_EMAIL", id.email.clone()),
+        ("GIT_COMMITTER_NAME", id.name.clone()),
+        ("GIT_COMMITTER_EMAIL", id.email.clone()),
+    ]
+}
+
+// ---- merge ------------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeMode {
+    FastForward,
+    NoFastForward,
+}
+
+/// Absent or `ff` fast-forwards when git can (the Mac's plain merge); `no_ff` always records a merge commit.
+pub fn merge_mode(raw: Option<&str>) -> R<MergeMode> {
+    match raw {
+        None | Some("ff") => Ok(MergeMode::FastForward),
+        Some("no_ff") => Ok(MergeMode::NoFastForward),
+        Some(_) => gerr("invalid_mode", "the merge mode must be ff or no_ff"),
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MergeOutcome {
+    /// `hash` is the new short HEAD; `fast_forward` means no merge commit was made.
+    Merged { hash: String, fast_forward: bool },
+    /// Git stopped with conflicts and kept the merge in progress: resolve in Changes, or abort the merge.
+    Conflicts { paths: Vec<String>, truncated: bool },
+}
+
+/// Merges the local branch `name` into the current branch. Refuses any uncommitted change (untracked files
+/// included), an operation already in progress, a detached HEAD and the current branch itself. The dialog
+/// names both branches and whether git will fast-forward or create a merge commit; a branch that moved while it
+/// was open is refused (`changed`).
+pub fn merge(root: &Path, name: &str, mode: MergeMode, home: &Option<PathBuf>, confirm: &dyn Fn(&str) -> bool) -> R<MergeOutcome> {
+    valid_branch_name(name)?;
+    if !branch_exists(root, name) {
+        return gerr("not_found", format!("no local branch named {}", line(name, 80)));
+    }
+    if let Some(what) = operation_in_progress(root)? {
+        return refuse_in_progress(what);
+    }
+    let Some(current) = head_branch(root)? else {
+        return gerr("detached", "HEAD is not on a branch. Switch to a branch, then merge into it");
+    };
+    if current == name {
+        return gerr("current_branch", "you are on this branch. Merge a different branch into it");
+    }
+    if !has_head(root)? {
+        return gerr("no_commits", "there are no commits yet, so there is nothing to merge into");
+    }
+    let st = status(root)?;
+    if st.entries.iter().any(|e| e.kind == "unmerged") {
+        return gerr("conflict", "resolve the conflicted files first");
+    }
+    if !st.entries.is_empty() {
+        let untracked = st.entries.iter().filter(|e| e.kind == "untracked").count();
+        return gerr("dirty", format!("{} uncommitted change(s), {untracked} of them untracked, are in the working tree or index. Untracked files count too, because a merge can overwrite them. Commit, stash or discard them first. Nothing was merged.", st.entries.len()));
+    }
+    let id = identity(root, home)?;
+    let target = format!("refs/heads/{name}");
+    if git_says(run_git(root, &["merge-base", "--is-ancestor", &target, "HEAD"], 256))? {
+        return gerr("up_to_date", format!("{} is already part of {}. Nothing to merge.", line(name, 80), line(&current, 80)));
+    }
+    let fast = git_says(run_git(root, &["merge-base", "--is-ancestor", "HEAD", &target], 256))?;
+    let fast_forward = fast && mode == MergeMode::FastForward;
+    let (head, tip) = (full_id(root, "HEAD")?, full_id(root, &target)?);
+    let (src, dst) = (line(name, 80), line(&current, 80));
+    let prompt = if fast_forward {
+        format!("Merge \u{201C}{src}\u{201D} into \u{201C}{dst}\u{201D}? It fast-forwards \u{201C}{dst}\u{201D} to \u{201C}{src}\u{201D}, so no merge commit is made.")
+    } else {
+        format!("Merge \u{201C}{src}\u{201D} into \u{201C}{dst}\u{201D}? It creates a merge commit on \u{201C}{dst}\u{201D}. If both branches changed the same lines, Git stops with conflicts and keeps the merge in progress for you to resolve.")
+    };
+    if !confirm(&prompt) {
+        return gerr("cancelled", "merge cancelled");
+    }
+    // The dialog named these two tips and this branch: anything that moved meanwhile is not merged.
+    if full_id(root, "HEAD")? != head || full_id(root, &target)? != tip || head_branch(root)?.as_deref() != Some(current.as_str()) {
+        return gerr("changed", "a branch moved while the confirmation was open. Nothing was merged");
+    }
+    let flag = if fast_forward { "--ff" } else { "--no-ff" };
+    // Explicit flag and no hooks: a repo-local `merge.ff` or hook cannot change what the dialog named.
+    let res = run_git_opts(
+        root,
+        &["-c", "commit.gpgsign=false", "merge", flag, "--no-edit", "--no-verify", "--no-gpg-sign", &target],
+        64 * 1024,
+        &Opts { env: identity_env(&id), timeout: Some(BULK_TIMEOUT), ..Opts::default() },
+    );
+    match res {
+        Ok(_) => Ok(MergeOutcome::Merged { hash: short_head(root)?, fast_forward }),
+        Err(e) if e.code == "git_failed" => {
+            let st = status(root)?;
+            let mut paths: Vec<String> = st.entries.iter().filter(|e| e.kind == "unmerged").map(|e| line(&e.path, 300)).collect();
+            if paths.is_empty() {
+                return Err(map_merge_error(e));
+            }
+            let truncated = paths.len() > MAX_CONFLICT_PATHS;
+            paths.truncate(MAX_CONFLICT_PATHS);
+            Ok(MergeOutcome::Conflicts { paths, truncated })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn map_merge_error(e: FsError) -> FsError {
+    if e.message.contains("would be overwritten") {
+        return FsError { code: "would_overwrite", message: "the merge would overwrite local files. Commit, stash or move them first. Nothing was merged.".into() };
+    }
+    e
+}
+
+/// Runs `git merge --abort` when a merge is in progress (MERGE_HEAD exists). Asks first: the files the merge touched go
+/// back to how they were before it, so edits made to resolve conflicts are lost.
+pub fn merge_abort(root: &Path, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+    if !git_says(run_git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], 256))? {
+        return gerr("not_in_progress", "no merge is in progress");
+    }
+    if !confirm("Abort the merge? Git puts the files back to how they were before the merge. Edits you made to resolve conflicts are lost.") {
+        return gerr("cancelled", "abort cancelled");
+    }
+    run_git(root, &["merge", "--abort"], 64 * 1024).map(|_| ())
+}
+
+// ---- amend ------------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct AmendReq {
+    #[serde(default)]
+    pub message: Option<String>,
+    /// Second step after `already_pushed`: amend a commit that is already on a remote branch.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// The new message, validated and ending in one newline, or `None` when blank (the old message stays).
+fn amend_message(raw: Option<&str>) -> R<Option<String>> {
+    let Some(raw) = raw else { return Ok(None) };
+    if raw.len() > MAX_AMEND_MESSAGE {
+        return gerr("too_large", "the commit message is longer than 64 KB");
+    }
+    let clean = sanitize_text(&raw.replace("\r\n", "\n").replace('\r', "\n"));
+    let msg = clean.trim();
+    if msg.is_empty() {
+        return Ok(None);
+    }
+    if msg.starts_with('-') {
+        return gerr("invalid_message", "the commit message must not start with '-'");
+    }
+    Ok(Some(format!("{msg}\n")))
+}
+
+/// The staged entries, as `path<US>index` strings: what the amended commit would hold.
+fn staged_of(st: &GitStatus) -> Vec<String> {
+    st.entries.iter().filter(|e| e.kind != "untracked" && e.index != '.').map(|e| format!("{}\u{1f}{}", e.path, e.index)).collect()
+}
+
+/// True when HEAD's commit is reachable from a remote-tracking branch, so it has been published.
+fn published(root: &Path) -> R<bool> {
+    let out = run_git(root, &["branch", "-r", "--contains", "HEAD", "--format=%(refname)"], 1024 * 1024)?;
+    Ok(!String::from_utf8_lossy(&out.stdout).trim().is_empty())
+}
+
+fn head_message(root: &Path) -> R<String> {
+    let out = run_git(root, &["log", "-1", "--format=%B", "HEAD"], MAX_AMEND_MESSAGE + 4096)?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `abc1234 “subject”` for the last commit, for the dialog.
+fn head_summary(root: &Path) -> R<String> {
+    let out = run_git(root, &["log", "-1", "--format=%h%x1f%s", "HEAD"], 4096)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (hash, subject) = text.trim().split_once('\u{1f}').unwrap_or(("", ""));
+    Ok(format!("{hash} \u{201C}{}\u{201D}", line(subject, 120)))
+}
+
+/// Amends the last commit with the staged changes and an optional new message. The author is kept; the committer is
+/// the user. A published commit is refused (`already_pushed`) unless `force` is set, and then the dialog says so.
+pub fn commit_amend(root: &Path, message: Option<&str>, force: bool, home: &Option<PathBuf>, confirm: &dyn Fn(&str) -> bool) -> R<CommitResult> {
+    let msg = amend_message(message)?;
+    if !has_head(root)? {
+        return gerr("no_commits", "there is no commit to amend yet. Make the first commit instead");
+    }
+    if let Some(what) = operation_in_progress(root)? {
+        return refuse_in_progress(what);
+    }
+    let st = status(root)?;
+    if st.entries.iter().any(|e| e.kind == "unmerged") {
+        return gerr("conflict", "resolve the conflicted files before amending");
+    }
+    let staged = staged_of(&st);
+    if msg.is_none() && staged.is_empty() {
+        return gerr("nothing_to_amend", "nothing is staged and there is no new message, so there is nothing to amend");
+    }
+    if staged.is_empty() && msg.as_deref().map(str::trim_end) == Some(head_message(root)?.trim_end()) {
+        return gerr("nothing_to_amend", "nothing is staged and the message is the same, so there is nothing to amend");
+    }
+    let id = identity(root, home)?;
+    let is_published = published(root)?;
+    if is_published && !force {
+        return gerr("already_pushed", "this commit is already on a remote branch. Amending rewrites it, so a later push needs a force push. Amend anyway only if you are sure.");
+    }
+    let head = full_id(root, "HEAD")?;
+    let mut prompt = format!(
+        "Amend the last commit {}? The {} staged file(s) become its changes. {}The author stays the same and the committer becomes you. The old version can be recovered only from the reflog.",
+        head_summary(root)?,
+        staged.len(),
+        if msg.is_some() { "Its message is replaced. " } else { "Its message stays the same. " },
+    );
+    if is_published {
+        prompt.push_str(" This commit already exists on a remote. Amending it changes its id, so a later push will need a force push.");
+    }
+    if !confirm(&prompt) {
+        return gerr("cancelled", "amend cancelled");
+    }
+    let after = status(root)?;
+    if full_id(root, "HEAD")? != head || staged_of(&after) != staged {
+        return gerr("changed", "the last commit or the staged files changed while the confirmation was open. Nothing was amended");
+    }
+    // Only the committer comes from the identity: `--amend` keeps the original author (no GIT_AUTHOR_* is set).
+    let env = vec![("GIT_COMMITTER_NAME", id.name), ("GIT_COMMITTER_EMAIL", id.email)];
+    let mut args = vec!["-c", "commit.gpgsign=false", "commit", "--amend", "--no-verify", "--no-gpg-sign", "--cleanup=whitespace"];
+    if msg.is_some() {
+        args.extend(["-F", "-"]);
+    } else {
+        args.push("--no-edit");
+    }
+    run_git_opts(root, &args, 64 * 1024, &Opts { stdin: msg.as_deref().map(str::as_bytes), env, ..Opts::default() })?;
+    Ok(CommitResult { hash: short_head(root)? })
+}
+
+// ---- discard all -----------------------------------------------------------------------
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct DiscardAllResult {
+    /// Tracked paths reset to HEAD (staged and unstaged).
+    pub restored: u32,
+    /// Untracked items moved to the Trash.
+    pub trashed: u32,
+    /// Items left in place: symbolic links, nested repositories, or a Trash refusal.
+    pub skipped: u32,
+}
+
+#[derive(Deserialize)]
+pub struct DiscardAllReq {
+    #[serde(default)]
+    pub include_untracked: bool,
+}
+
+#[derive(Debug, PartialEq)]
+struct AllPlan {
+    restore: Vec<String>,
+    trash: Vec<String>,
+    skipped: u32,
+}
+
+/// Why an untracked path stays where it is: a symbolic link (or a path behind one), a nested repository.
+/// `Some("missing")` when it is gone already. `None` when it is a plain file or folder that may be trashed.
+fn keep_reason(root: &Path, rel: &str) -> Option<&'static str> {
+    let mut cur = root.to_path_buf();
+    for part in rel.split('/') {
+        cur.push(part);
+        match std::fs::symlink_metadata(&cur) {
+            Err(_) => return Some("missing"),
+            Ok(m) if m.file_type().is_symlink() => return Some("a symbolic link"),
+            Ok(_) => {}
+        }
+    }
+    if cur.is_dir() && cur.join(".git").exists() {
+        return Some("a nested git repository");
+    }
+    None
+}
+
+/// Classifies every change from a fresh status. Nothing is touched here.
+fn plan_discard_all(root: &Path, include_untracked: bool) -> R<AllPlan> {
+    if !has_head(root)? {
+        return gerr("no_commits", "there are no commits yet, so there is no HEAD to restore to");
+    }
+    if let Some(what) = operation_in_progress(root)? {
+        return refuse_in_progress(what);
+    }
+    let st = status(root)?;
+    if st.entries.iter().any(|e| e.kind == "unmerged") {
+        return gerr("conflict", "resolve the conflicted files first");
+    }
+    if st.truncated {
+        return gerr("too_many", "there are too many changes to list in one step. Nothing was changed.");
+    }
+    let mut plan = AllPlan { restore: Vec::new(), trash: Vec::new(), skipped: 0 };
+    let mut added = Vec::new();
+    for e in &st.entries {
+        if e.submodule {
+            return gerr("submodule", format!("{} is a submodule; discard its changes inside it", line(&e.path, 200)));
+        }
+        if e.kind != "untracked" {
+            plan.restore.push(e.path.clone());
+            // A staged new, renamed or copied file, or an intent-to-add one, is untracked once the index is reset.
+            if matches!(e.index, 'A' | 'R' | 'C') || e.worktree == 'A' {
+                added.push(e.path.clone());
+            }
+        }
+    }
+    if include_untracked {
+        // Files, never folders: status folds an untracked folder into `dir/`, which can hold ignored files and a
+        // nested repository at any depth. `ls-files --others` lists each file and stops at a nested repo (`sub/`).
+        let out = run_git(root, &["ls-files", "-z", "--others", "--exclude-standard"], 8 * 1024 * 1024)?;
+        if out.truncated {
+            return gerr("too_many", "there are too many untracked files to list in one step. Nothing was changed.");
+        }
+        let mut cands: Vec<String> = out.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+        // A force-added ignored file becomes ignored, not untracked, once unstaged: it stays (as on the Mac).
+        // check-ignore rejects literal pathspecs; it only reads, and a magic-looking name at worst fails the plan.
+        if !added.is_empty() {
+            let list: Vec<u8> = added.iter().flat_map(|p| p.bytes().chain([0])).collect();
+            let res = run_git_opts(root, &["check-ignore", "--no-index", "-z", "--stdin"], 1024 * 1024, &Opts { stdin: Some(&list), glob_pathspecs: true, ..Opts::default() });
+            let ignored: Vec<String> = match res {
+                Ok(o) => o.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect(),
+                Err(e) if e.code == "git_failed" && e.message.is_empty() => Vec::new(), // exit 1: none ignored
+                Err(e) => return Err(e),
+            };
+            cands.extend(added.into_iter().filter(|p| !ignored.contains(p)));
+        }
+        for rel in cands {
+            // A nested repository (`sub/`), or a name the Trash step refuses (control characters): counted, left.
+            if rel.ends_with('/') || rel.chars().any(char::is_control) || rel_arg(&rel).is_err() {
+                plan.skipped += 1;
+                continue;
+            }
+            match keep_reason(root, &rel) {
+                None => plan.trash.push(rel),
+                Some("missing") => {}
+                Some(_) => plan.skipped += 1,
+            }
+        }
+    }
+    if plan.trash.len() > MAX_TRASH_ENTRIES {
+        return gerr("too_many", format!("{} untracked items would be moved to the Trash, more than the {MAX_TRASH_ENTRIES} allowed in one step. Move some by hand, then try again. Nothing was changed.", plan.trash.len()));
+    }
+    Ok(plan)
+}
+
+fn discard_all_prompt(plan: &AllPlan, include_untracked: bool) -> String {
+    let mut s = format!("{} file(s) will be reset to HEAD, staged and unstaged. This cannot be undone.\n", plan.restore.len());
+    if include_untracked {
+        s.push_str(&format!("{} untracked item(s) will be moved to the Trash.\n", plan.trash.len()));
+    } else {
+        s.push_str("Untracked files are not touched.\n");
+    }
+    if plan.skipped > 0 {
+        s.push_str(&format!("{} item(s) will be left in place (symbolic links, nested repositories, names with control characters).\n", plan.skipped));
+    }
+    // Only the repository's own ignore rules apply: the runner never reads the user's global excludes file.
+    s.push_str("Files ignored by the repository's .gitignore are never touched. Folders stay; only files move.\n\n");
+    for p in plan.restore.iter().chain(plan.trash.iter()).take(12) {
+        s.push_str(&format!("  {}\n", line(p, 80)));
+    }
+    let total = plan.restore.len() + plan.trash.len();
+    if total > 12 {
+        s.push_str(&format!("  ...and {} more\n", total - 12));
+    }
+    s
+}
+
+/// Restores every tracked change to HEAD (index and worktree) and moves untracked items to the Trash when asked.
+/// Never `git clean`, never a permanent delete, never an ignored file. Asks first; the plan and the file contents are
+/// checked again after the dialog and anything that changed meanwhile aborts with `changed_since_confirm`.
+pub fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash_guard::Trasher) -> R<DiscardAllResult> {
+    let plan = plan_discard_all(root, include_untracked)?;
+    if plan.restore.is_empty() && plan.trash.is_empty() {
+        return gerr("nothing_to_discard", "there are no changes to discard");
+    }
+    let fingerprints_of = |p: &AllPlan| -> Vec<String> { p.restore.iter().chain(p.trash.iter()).map(|rel| fingerprint(root, rel)).collect() };
+    let before = fingerprints_of(&plan);
+    if !confirm(&discard_all_prompt(&plan, include_untracked)) {
+        return gerr("cancelled", "discard cancelled");
+    }
+    let again = plan_discard_all(root, include_untracked)?;
+    if again != plan || fingerprints_of(&again) != before {
+        return gerr("changed_since_confirm", "the files changed while the dialog was open; nothing was discarded");
+    }
+    if !plan.restore.is_empty() {
+        // Two steps, never one: `--staged --worktree` together deleted a staged NEW file from disk. Unstaging first
+        // leaves such a file on disk as an untracked file, and the worktree step then only writes tracked paths.
+        // `.` is literal under the runner's literal-pathspec setting: the whole tree.
+        let opts = Opts { timeout: Some(crate::git::scaled_timeout(plan.restore.len())), ..Opts::default() };
+        run_git_opts(root, &["restore", "--source=HEAD", "--staged", "--", "."], 64 * 1024, &opts)?;
+        run_git_opts(root, &["restore", "--source=HEAD", "--worktree", "--", "."], 64 * 1024, &opts)?;
+    }
+    let (mut trashed, mut skipped) = (0u32, plan.skipped);
+    for rel in &plan.trash {
+        // A refusing Trash leaves the item in place and is counted, never turned into a permanent delete.
+        match crate::fs_ops::delete_with(root, rel, trasher) {
+            Ok(()) => trashed += 1,
+            Err(_) => skipped += 1,
+        }
+    }
+    Ok(DiscardAllResult { restored: plan.restore.len() as u32, trashed, skipped })
+}
+
+pub fn discard_all(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) -> bool) -> R<DiscardAllResult> {
+    discard_all_with(root, include_untracked, confirm, &crate::trash_guard::OsTrash)
+}
+
 // ---- Tauri commands --------------------------------------------------------------------
 
 use crate::git::blocking;
@@ -1266,6 +1724,37 @@ pub async fn git_stash_pop(index: usize, hash: String) -> R<()> {
 #[tauri::command]
 pub async fn git_stash_drop(index: usize, hash: String) -> R<()> {
     blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| stash_drop(&root, index, &hash, &native_ask("Drop stash?", "Drop")))).await
+}
+
+#[derive(Deserialize)]
+pub struct MergeReq {
+    pub name: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+#[tauri::command]
+pub async fn git_merge(req: MergeReq) -> R<MergeOutcome> {
+    blocking(move |root| {
+        let mode = merge_mode(req.mode.as_deref())?;
+        DESTRUCTIVE_DIALOGS.run(|| merge(&root, &req.name, mode, &None, &native_ask("Merge branch?", "Merge")))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_merge_abort() -> R<()> {
+    blocking(|root| DESTRUCTIVE_DIALOGS.run(|| merge_abort(&root, &native_ask("Abort merge?", "Abort merge")))).await
+}
+
+#[tauri::command]
+pub async fn git_commit_amend(req: AmendReq) -> R<CommitResult> {
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| commit_amend(&root, req.message.as_deref(), req.force, &None, &native_ask("Amend last commit?", "Amend")))).await
+}
+
+#[tauri::command]
+pub async fn git_discard_all(req: DiscardAllReq) -> R<DiscardAllResult> {
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| discard_all(&root, req.include_untracked, &native_ask("Discard all changes?", "Discard all")))).await
 }
 
 #[cfg(test)]
@@ -2639,5 +3128,807 @@ mod mutate_tests {
                 assert!(matches!(&res, Ok(()) | Err(FsError { code: "untrusted_repo_config", .. })), "{k}: {res:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod merge_amend_discard_tests {
+    use super::*;
+    use crate::trash_guard::tests::FakeTrash;
+    use std::cell::{Cell, RefCell};
+    use std::fs;
+    use std::process::Command;
+
+    fn have_git() -> bool {
+        Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("llmide-mad-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::canonicalize(&d).unwrap()
+    }
+
+    /// Git with a fixed identity and no global config; an optional author and pinned dates.
+    fn gx(root: &Path, args: &[&str], author: Option<(&str, &str)>) {
+        let mut c = Command::new("git");
+        c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_COMMITTER_DATE", "2021-01-01T00:00:00Z")
+            .env("GIT_AUTHOR_DATE", "2021-01-01T00:00:00Z");
+        if let Some((n, e)) = author {
+            c.env("GIT_AUTHOR_NAME", n).env("GIT_AUTHOR_EMAIL", e);
+        }
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn g(root: &Path, args: &[&str]) {
+        gx(root, args, None);
+    }
+
+    fn out(root: &Path, args: &[&str]) -> String {
+        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        String::from_utf8(o.stdout).unwrap().trim().to_string()
+    }
+
+    fn has_ref(root: &Path, refname: &str) -> bool {
+        Command::new("git").args(["rev-parse", "--verify", "-q", refname]).current_dir(root).output().is_ok_and(|o| o.status.success())
+    }
+
+    /// A repository with one commit on `main`: a.txt = "base".
+    fn repo(name: &str) -> PathBuf {
+        let r = scratch(name);
+        g(&r, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "base\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "base"]);
+        r
+    }
+
+    /// Writes `name`, stages it and commits it.
+    fn commit_file(root: &Path, name: &str, text: &str, subject: &str) {
+        fs::write(root.join(name), text).unwrap();
+        g(root, &["add", "."]);
+        g(root, &["commit", "-q", "-m", subject]);
+    }
+
+    fn code<T>(r: R<T>) -> &'static str {
+        match r {
+            Ok(_) => "ok",
+            Err(e) => e.code,
+        }
+    }
+
+    fn yes(_: &str) -> bool {
+        true
+    }
+    fn no(_: &str) -> bool {
+        false
+    }
+
+    /// A home directory holding the user's git identity (or none).
+    fn home(name: &str, ident: bool) -> Option<PathBuf> {
+        let h = scratch(name);
+        if ident {
+            fs::write(h.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n").unwrap();
+        }
+        Some(h)
+    }
+
+    /// Made once: `scratch` wipes its folder, so parallel tests recreating it raced into `identity_missing`.
+    fn ada() -> Option<PathBuf> {
+        static ADA: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+        ADA.get_or_init(|| home("mad-ada", true)).clone()
+    }
+
+    /// `main` at base plus a `feat` branch with one commit (b.txt), HEAD on main.
+    fn repo_with_feat(name: &str) -> PathBuf {
+        let r = repo(name);
+        g(&r, &["checkout", "-q", "-b", "feat"]);
+        commit_file(&r, "b.txt", "feat\n", "feat work");
+        g(&r, &["checkout", "-q", "main"]);
+        r
+    }
+
+    /// Both branches change a.txt: merging `feat` into `main` conflicts. Leaves the merge in progress.
+    fn conflicted_merge(name: &str) -> PathBuf {
+        let r = repo(name);
+        g(&r, &["checkout", "-q", "-b", "feat"]);
+        commit_file(&r, "a.txt", "feat\n", "feat edit");
+        g(&r, &["checkout", "-q", "main"]);
+        commit_file(&r, "a.txt", "main\n", "main edit");
+        let res = merge(&r, "feat", MergeMode::FastForward, &ada(), &yes).unwrap();
+        assert_eq!(res, MergeOutcome::Conflicts { paths: vec!["a.txt".into()], truncated: false });
+        r
+    }
+
+    // ---- merge ------------------------------------------------------------------------------
+
+    #[test]
+    fn merge_fast_forwards_when_it_can_and_says_so() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-ff");
+        let tip = out(&r, &["rev-parse", "refs/heads/feat"]);
+        let prompts = RefCell::new(Vec::new());
+        let ask = |p: &str| {
+            prompts.borrow_mut().push(p.to_string());
+            true
+        };
+        let res = merge(&r, "feat", MergeMode::FastForward, &ada(), &ask).unwrap();
+        assert_eq!(res, MergeOutcome::Merged { hash: out(&r, &["rev-parse", "--short", "HEAD"]), fast_forward: true });
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), tip, "main moved to feat");
+        assert_eq!(out(&r, &["rev-list", "--count", "--merges", "HEAD"]), "0", "no merge commit");
+        assert!(prompts.borrow().len() == 1 && prompts.borrow()[0].contains("fast-forwards"), "{:?}", prompts.borrow());
+    }
+
+    #[test]
+    fn no_ff_always_records_a_merge_commit() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-noff");
+        let res = merge(&r, "feat", MergeMode::NoFastForward, &ada(), &yes).unwrap();
+        assert_eq!(res, MergeOutcome::Merged { hash: out(&r, &["rev-parse", "--short", "HEAD"]), fast_forward: false });
+        assert_eq!(out(&r, &["rev-list", "--count", "--merges", "HEAD"]), "1");
+        assert_eq!(out(&r, &["rev-parse", "HEAD^2"]), out(&r, &["rev-parse", "refs/heads/feat"]));
+    }
+
+    #[test]
+    fn conflicts_are_reported_then_abort_restores_the_tree() {
+        if !have_git() {
+            return;
+        }
+        let r = conflicted_merge("mg-conflict");
+        assert!(has_ref(&r, "MERGE_HEAD"), "git keeps the merge in progress");
+        assert!(status(&r).unwrap().merging, "status says a merge is in progress");
+        assert_eq!(code(merge_abort(&r, &no)), "cancelled");
+        assert!(has_ref(&r, "MERGE_HEAD"), "a cancelled abort changes nothing");
+        assert_eq!(code(merge_abort(&r, &yes)), "ok");
+        assert!(!has_ref(&r, "MERGE_HEAD"));
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "main\n", "back to the pre-merge file");
+        assert!(!status(&r).unwrap().merging);
+        assert_eq!(code(merge_abort(&r, &yes)), "not_in_progress");
+    }
+
+    #[test]
+    fn a_dirty_tree_is_refused_before_any_question() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-dirty");
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        let asked = Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
+            true
+        };
+        fs::write(r.join("a.txt"), "edit\n").unwrap();
+        let err = merge(&r, "feat", MergeMode::FastForward, &ada(), &ask);
+        assert_eq!(code(err), "dirty");
+        assert!(!asked.get());
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head);
+        g(&r, &["checkout", "--", "a.txt"]);
+        fs::write(r.join("new.txt"), "untracked\n").unwrap();
+        let err = merge(&r, "feat", MergeMode::FastForward, &ada(), &ask);
+        assert!(matches!(&err, Err(e) if e.code == "dirty" && e.message.starts_with("1 uncommitted change(s), 1 of them untracked")), "{err:?}");
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn an_operation_in_progress_is_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = conflicted_merge("mg-busy");
+        assert_eq!(code(merge(&r, "feat", MergeMode::FastForward, &ada(), &yes)), "in_progress");
+        g(&r, &["merge", "--abort"]);
+        fs::create_dir_all(r.join(".git").join("rebase-merge")).unwrap();
+        assert_eq!(code(merge(&r, "feat", MergeMode::FastForward, &ada(), &yes)), "in_progress", "a rebase directory counts");
+    }
+
+    #[test]
+    fn the_current_branch_a_detached_head_and_a_missing_branch_are_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-refuse");
+        assert_eq!(code(merge(&r, "main", MergeMode::FastForward, &ada(), &yes)), "current_branch");
+        assert_eq!(code(merge(&r, "nope", MergeMode::FastForward, &ada(), &yes)), "not_found");
+        g(&r, &["checkout", "-q", "--detach"]);
+        assert_eq!(code(merge(&r, "feat", MergeMode::FastForward, &ada(), &yes)), "detached");
+    }
+
+    #[test]
+    fn option_shaped_and_odd_names_and_modes_are_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-names");
+        for bad in ["-x", "--all", "a..b", "HEAD", "a b", "", "a:b", "feat\u{0}"] {
+            assert_eq!(code(merge(&r, bad, MergeMode::FastForward, &ada(), &yes)), "invalid_ref", "{bad:?}");
+        }
+        assert_eq!(code(merge_mode(Some("squash"))), "invalid_mode");
+        assert_eq!(merge_mode(None).unwrap(), MergeMode::FastForward);
+        assert_eq!(merge_mode(Some("ff")).unwrap(), MergeMode::FastForward);
+        assert_eq!(merge_mode(Some("no_ff")).unwrap(), MergeMode::NoFastForward);
+        assert_eq!(out(&r, &["rev-parse", "--abbrev-ref", "HEAD"]), "main", "nothing moved");
+    }
+
+    #[test]
+    fn a_missing_identity_is_refused_before_the_dialog() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-noid");
+        let asked = Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
+            true
+        };
+        assert_eq!(code(merge(&r, "feat", MergeMode::FastForward, &home("mg-noid-home", false), &ask)), "identity_missing");
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn a_branch_already_in_the_current_one_has_nothing_to_merge() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("mg-uptodate");
+        g(&r, &["branch", "old"]);
+        assert_eq!(code(merge(&r, "old", MergeMode::FastForward, &ada(), &yes)), "up_to_date");
+    }
+
+    #[test]
+    fn a_branch_that_moves_during_the_dialog_is_not_merged() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("mg-moved");
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        let ask = |_: &str| {
+            g(&r, &["update-ref", "refs/heads/feat", "HEAD"]);
+            true
+        };
+        assert_eq!(code(merge(&r, "feat", MergeMode::FastForward, &ada(), &ask)), "changed");
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head);
+        assert!(!r.join("b.txt").exists());
+    }
+
+    // ---- amend ------------------------------------------------------------------------------
+
+    /// A repository with two commits on `main`: a.txt = "second".
+    fn two_commits(name: &str) -> PathBuf {
+        let r = repo(name);
+        commit_file(&r, "a.txt", "second\n", "second");
+        r
+    }
+
+    #[test]
+    fn a_staged_change_is_amended_into_the_last_commit_only() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-staged");
+        fs::write(r.join("a.txt"), "third\n").unwrap();
+        g(&r, &["add", "."]);
+        let prompts = RefCell::new(Vec::new());
+        let ask = |p: &str| {
+            prompts.borrow_mut().push(p.to_string());
+            true
+        };
+        let res = commit_amend(&r, None, false, &ada(), &ask).unwrap();
+        assert_eq!(res.hash, out(&r, &["rev-parse", "--short", "HEAD"]));
+        assert_eq!(out(&r, &["show", "HEAD:a.txt"]), "third");
+        assert_eq!(out(&r, &["show", "HEAD~1:a.txt"]), "base", "the first commit is untouched");
+        assert_eq!(out(&r, &["log", "-1", "--format=%s"]), "second", "the message stays");
+        assert!(prompts.borrow()[0].contains("1 staged file(s)") && prompts.borrow()[0].contains("message stays"), "{:?}", prompts.borrow());
+        assert_eq!(out(&r, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn a_message_only_amend_keeps_the_tree() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-msg");
+        let tree = out(&r, &["rev-parse", "HEAD^{tree}"]);
+        commit_amend(&r, Some("  New subject\n\nbody line\n"), false, &ada(), &yes).unwrap();
+        let msg = out(&r, &["log", "-1", "--format=%B"]);
+        assert!(msg.starts_with("New subject") && msg.contains("body line"), "{msg}");
+        assert_eq!(out(&r, &["rev-parse", "HEAD^{tree}"]), tree, "same tree");
+    }
+
+    #[test]
+    fn nothing_staged_and_no_message_is_nothing_to_amend() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-nothing");
+        assert_eq!(code(commit_amend(&r, None, false, &ada(), &yes)), "nothing_to_amend");
+        assert_eq!(code(commit_amend(&r, Some("   \n"), false, &ada(), &yes)), "nothing_to_amend", "a blank message is no message");
+    }
+
+    #[test]
+    fn a_repository_without_commits_has_nothing_to_amend() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("ca-empty");
+        g(&r, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        g(&r, &["add", "."]);
+        assert_eq!(code(commit_amend(&r, Some("x"), false, &ada(), &yes)), "no_commits");
+    }
+
+    #[test]
+    fn a_published_commit_is_refused_then_amended_only_with_force_and_a_warning() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-pushed");
+        fs::write(r.join("a.txt"), "third\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        let asked = Cell::new(0u32);
+        let prompts = RefCell::new(Vec::new());
+        let ask = |p: &str| {
+            asked.set(asked.get() + 1);
+            prompts.borrow_mut().push(p.to_string());
+            true
+        };
+        assert_eq!(code(commit_amend(&r, None, false, &ada(), &ask)), "already_pushed");
+        assert_eq!(asked.get(), 0, "a refusal asks nothing");
+        assert_eq!(code(commit_amend(&r, None, true, &ada(), &no)), "cancelled");
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head, "a cancelled amend changes nothing");
+        commit_amend(&r, None, true, &ada(), &ask).unwrap();
+        assert_ne!(out(&r, &["rev-parse", "HEAD"]), head);
+        assert_eq!(asked.get(), 1, "the cancelled attempt used another dialog");
+        assert!(prompts.borrow()[0].contains("already exists on a remote") && prompts.borrow()[0].contains("force push"));
+        assert_eq!(out(&r, &["rev-parse", "refs/remotes/origin/main"]), head, "the remote-tracking ref is not touched");
+    }
+
+    #[test]
+    fn the_author_is_kept_and_the_committer_is_the_user() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("ca-author");
+        g(&r, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "base\n").unwrap();
+        g(&r, &["add", "."]);
+        gx(&r, &["commit", "-q", "-m", "base"], Some(("Bob Builder", "bob@example.com")));
+        fs::write(r.join("a.txt"), "two\n").unwrap();
+        g(&r, &["add", "."]);
+        commit_amend(&r, None, false, &ada(), &yes).unwrap();
+        assert_eq!(out(&r, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]), "Bob Builder <bob@example.com>|Ada Lovelace <ada@example.com>");
+    }
+
+    #[test]
+    fn an_amend_during_a_merge_or_without_an_identity_writes_nothing() {
+        if !have_git() {
+            return;
+        }
+        let r = conflicted_merge("ca-merge");
+        assert_eq!(code(commit_amend(&r, Some("x"), false, &ada(), &yes)), "in_progress");
+        g(&r, &["merge", "--abort"]);
+        fs::write(r.join("a.txt"), "staged\n").unwrap();
+        g(&r, &["add", "."]);
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        assert_eq!(code(commit_amend(&r, None, false, &home("ca-noid", false), &yes)), "identity_missing");
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head);
+    }
+
+    #[test]
+    fn the_amend_message_is_bounded_and_not_option_shaped() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-bounds");
+        fs::write(r.join("a.txt"), "third\n").unwrap();
+        g(&r, &["add", "."]);
+        assert_eq!(code(commit_amend(&r, Some(&"m".repeat(65_537)), false, &ada(), &yes)), "too_large");
+        assert_eq!(code(commit_amend(&r, Some("-n"), false, &ada(), &yes)), "invalid_message");
+        assert_eq!(out(&r, &["log", "-1", "--format=%s"]), "second");
+        assert_eq!(code(commit_amend(&r, Some(&"m".repeat(65_536)), false, &ada(), &yes)), "ok", "64 KB is the limit");
+    }
+
+    #[test]
+    fn a_commit_made_during_the_dialog_aborts_the_amend() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("ca-moved");
+        fs::write(r.join("a.txt"), "third\n").unwrap();
+        g(&r, &["add", "."]);
+        let ask = |_: &str| {
+            g(&r, &["commit", "-q", "--allow-empty", "-m", "moved"]);
+            true
+        };
+        assert_eq!(code(commit_amend(&r, None, false, &ada(), &ask)), "changed");
+        assert_eq!(out(&r, &["log", "-1", "--format=%s"]), "moved");
+    }
+
+    // ---- discard all ------------------------------------------------------------------------
+
+    fn porcelain(r: &Path) -> String {
+        out(r, &["status", "--porcelain"])
+    }
+
+    #[test]
+    fn staged_and_unstaged_changes_and_deletions_are_restored_to_head() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-restore");
+        commit_file(&r, "c.txt", "c\n", "add c");
+        fs::write(r.join("a.txt"), "one\n").unwrap();
+        g(&r, &["add", "."]);
+        fs::write(r.join("a.txt"), "two\n").unwrap();
+        fs::remove_file(r.join("c.txt")).unwrap();
+        let res = discard_all_with(&r, false, &yes, &FakeTrash::refusing()).unwrap();
+        assert_eq!(res, DiscardAllResult { restored: 2, trashed: 0, skipped: 0 });
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "base\n");
+        assert_eq!(fs::read_to_string(r.join("c.txt")).unwrap(), "c\n");
+        assert_eq!(porcelain(&r), "", "clean, staged and unstaged alike");
+    }
+
+    #[test]
+    fn untracked_files_are_untouched_without_the_flag_and_trashed_with_it() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-untracked");
+        let trash = scratch("da-untracked-trash");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        fs::write(r.join("new.txt"), "hello\n").unwrap();
+        let res = discard_all_with(&r, false, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res, DiscardAllResult { restored: 1, trashed: 0, skipped: 0 });
+        assert_eq!(fs::read_to_string(r.join("new.txt")).unwrap(), "hello\n", "untouched");
+        assert!(porcelain(&r).contains("?? new.txt"));
+
+        fs::write(r.join("a.txt"), "changed again\n").unwrap();
+        let res = discard_all_with(&r, true, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res, DiscardAllResult { restored: 1, trashed: 1, skipped: 0 });
+        assert!(!r.join("new.txt").exists(), "moved out of the repository");
+        assert_eq!(fs::read_to_string(trash.join("1-new.txt")).unwrap(), "hello\n", "it is in the trash, not deleted");
+        assert_eq!(porcelain(&r), "");
+    }
+
+    #[test]
+    fn a_staged_new_file_follows_the_flag_once_the_index_is_reset() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-added");
+        let trash = scratch("da-added-trash");
+        fs::write(r.join("added.txt"), "new\n").unwrap();
+        g(&r, &["add", "added.txt"]);
+        discard_all_with(&r, false, &yes, &FakeTrash::refusing()).unwrap();
+        assert_eq!(fs::read_to_string(r.join("added.txt")).unwrap(), "new\n", "the file stays, now untracked");
+        assert!(porcelain(&r).contains("?? added.txt"));
+        g(&r, &["add", "added.txt"]);
+        let res = discard_all_with(&r, true, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res.trashed, 1);
+        assert!(!r.join("added.txt").exists());
+    }
+
+    #[test]
+    fn ignored_files_are_never_touched() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-ignored");
+        fs::write(r.join(".gitignore"), "*.log\n").unwrap();
+        g(&r, &["add", ".gitignore"]);
+        g(&r, &["commit", "-q", "-m", "ignore"]);
+        fs::write(r.join("keep.log"), "ignored\n").unwrap();
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let trash = scratch("da-ignored-trash");
+        discard_all_with(&r, true, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(fs::read_to_string(r.join("keep.log")).unwrap(), "ignored\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_left_in_place_and_their_targets_never_trashed() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-links");
+        let outside = scratch("da-links-outside");
+        fs::write(outside.join("target.txt"), "keep\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("target.txt"), r.join("link.txt")).unwrap();
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let trash = scratch("da-links-trash");
+        let res = discard_all_with(&r, true, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res, DiscardAllResult { restored: 1, trashed: 0, skipped: 1 });
+        assert!(fs::symlink_metadata(r.join("link.txt")).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(outside.join("target.txt")).unwrap(), "keep\n");
+    }
+
+    #[test]
+    fn a_nested_repository_is_left_in_place() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-nested");
+        let nested = r.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        g(&nested, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let trash = scratch("da-nested-trash");
+        let res = discard_all_with(&r, true, &yes, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res.skipped, 1);
+        assert!(nested.join(".git").exists());
+    }
+
+    #[test]
+    fn more_than_2000_untracked_items_are_refused_before_anything_moves() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-many");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        for i in 0..2001 {
+            fs::write(r.join(format!("u{i}.txt")), "x").unwrap();
+        }
+        let asked = Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
+            true
+        };
+        let err = discard_all_with(&r, true, &ask, &FakeTrash::refusing());
+        assert!(matches!(&err, Err(e) if e.code == "too_many"), "{err:?}");
+        assert!(!asked.get());
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "changed\n");
+        assert!(r.join("u0.txt").exists());
+    }
+
+    #[test]
+    fn a_refusing_trash_leaves_the_item_and_counts_it() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-refuse");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        fs::write(r.join("new.txt"), "keep\n").unwrap();
+        let res = discard_all_with(&r, true, &yes, &FakeTrash::refusing()).unwrap();
+        assert_eq!(res, DiscardAllResult { restored: 1, trashed: 0, skipped: 1 });
+        assert_eq!(fs::read_to_string(r.join("new.txt")).unwrap(), "keep\n");
+    }
+
+    #[test]
+    fn no_commits_a_clean_tree_a_merge_and_a_cancel_are_refused() {
+        if !have_git() {
+            return;
+        }
+        let empty = scratch("da-empty");
+        g(&empty, &["init", "-q"]);
+        fs::write(empty.join("a.txt"), "x\n").unwrap();
+        assert_eq!(code(discard_all_with(&empty, true, &yes, &FakeTrash::refusing())), "no_commits");
+
+        let clean = repo("da-clean");
+        assert_eq!(code(discard_all_with(&clean, true, &yes, &FakeTrash::refusing())), "nothing_to_discard");
+
+        let merging = conflicted_merge("da-merge");
+        assert_eq!(code(discard_all_with(&merging, true, &yes, &FakeTrash::refusing())), "in_progress");
+
+        let r = repo("da-cancel");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        assert_eq!(code(discard_all_with(&r, false, &no, &FakeTrash::refusing())), "cancelled");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "changed\n", "a cancelled discard changes nothing");
+    }
+
+    #[test]
+    fn a_change_made_during_the_dialog_aborts_the_discard() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-changed");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let ask = |_: &str| {
+            fs::write(r.join("a.txt"), "edited during the dialog\n").unwrap();
+            true
+        };
+        assert_eq!(code(discard_all_with(&r, false, &ask, &FakeTrash::refusing())), "changed_since_confirm");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "edited during the dialog\n");
+    }
+
+    #[test]
+    fn the_dialog_names_the_counts_and_the_trash_choice() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("da-prompt");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        fs::write(r.join("new.txt"), "x\n").unwrap();
+        let seen = RefCell::new(String::new());
+        let ask = |p: &str| {
+            *seen.borrow_mut() = p.to_string();
+            false
+        };
+        let _ = discard_all_with(&r, true, &ask, &FakeTrash::refusing());
+        let text = seen.borrow().clone();
+        assert!(text.contains("1 file(s) will be reset to HEAD"), "{text}");
+        assert!(text.contains("1 untracked item(s) will be moved to the Trash"), "{text}");
+        assert!(text.contains("ignored by the repository's .gitignore are never touched"), "{text}");
+        let _ = discard_all_with(&r, false, &ask, &FakeTrash::refusing());
+        assert!(seen.borrow().contains("Untracked files are not touched"));
+    }
+
+    // ---- review additions -------------------------------------------------------------------
+
+    #[test]
+    fn discard_all_trashes_files_only_never_ignored_files_or_a_deep_nested_repo() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("rv-classes");
+        fs::write(r.join(".gitignore"), "*.env\n").unwrap();
+        commit_file(&r, "c.txt", "c\n", "c");
+        commit_file(&r, "old.txt", "old\n", "old");
+        // An untracked folder holding an ignored file and a nested repository two levels down.
+        fs::create_dir_all(r.join("d/deep/n")).unwrap();
+        g(&r.join("d/deep/n"), &["init", "-q"]);
+        fs::write(r.join("d/deep/n/inner.txt"), "inner\n").unwrap();
+        fs::write(r.join("d/f.txt"), "f\n").unwrap();
+        fs::write(r.join("d/secret.env"), "secret\n").unwrap();
+        // Intent-to-add, a force-added ignored file, a staged deletion, a rename in the index, an odd name.
+        fs::write(r.join("ita.txt"), "ita\n").unwrap();
+        g(&r, &["add", "-N", "ita.txt"]);
+        fs::write(r.join("forced.env"), "forced\n").unwrap();
+        g(&r, &["add", "-f", "forced.env"]);
+        g(&r, &["rm", "-q", "c.txt"]);
+        g(&r, &["mv", "old.txt", "new.txt"]);
+        let odd = "sp ace \u{e9}.txt";
+        fs::write(r.join(odd), "odd\n").unwrap();
+        fs::write(r.join("new\nline.txt"), "kept\n").unwrap();
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let trash = scratch("rv-classes-trash");
+        let seen = RefCell::new(String::new());
+        let ask = |p: &str| {
+            *seen.borrow_mut() = p.to_string();
+            true
+        };
+        let res = discard_all_with(&r, true, &ask, &FakeTrash::into(&trash)).unwrap();
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "base\n");
+        assert_eq!(fs::read_to_string(r.join("c.txt")).unwrap(), "c\n", "staged deletion restored");
+        assert_eq!(fs::read_to_string(r.join("old.txt")).unwrap(), "old\n", "rename undone");
+        for gone in ["new.txt", "ita.txt", odd, "d/f.txt"] {
+            assert!(!r.join(gone).exists(), "{gone:?} still there: {res:?}");
+        }
+        assert_eq!(fs::read_to_string(r.join("d/secret.env")).unwrap(), "secret\n", "an ignored file inside an untracked folder stays");
+        assert_eq!(fs::read_to_string(r.join("forced.env")).unwrap(), "forced\n", "a force-added ignored file stays once unstaged");
+        assert!(r.join("d/deep/n/.git").exists() && r.join("d/deep/n/inner.txt").exists(), "the nested repository stays");
+        assert!(r.join("new\nline.txt").exists(), "a control-character name is left, never deleted");
+        assert_eq!(res.trashed, 4, "{res:?}");
+        assert_eq!(res.skipped, 2, "the nested repository and the control-character name: {res:?}");
+        assert!(seen.borrow().contains("4 untracked item(s)"), "the dialog counted what was then done: {}", seen.borrow());
+    }
+
+    #[test]
+    fn a_file_added_during_the_dialog_aborts_the_discard() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("rv-added");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        let ask = |_: &str| {
+            fs::write(r.join("late.txt"), "late\n").unwrap();
+            true
+        };
+        assert_eq!(code(discard_all_with(&r, true, &ask, &FakeTrash::refusing())), "changed_since_confirm");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "changed\n");
+        assert!(r.join("late.txt").exists());
+    }
+
+    #[cfg(unix)]
+    fn hostile_hooks(r: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let marker = r.parent().unwrap().join(format!("{}-hook-ran", r.file_name().unwrap().to_string_lossy()));
+        let _ = fs::remove_file(&marker);
+        for h in ["pre-commit", "commit-msg", "prepare-commit-msg", "post-commit", "pre-merge-commit", "post-merge", "post-rewrite", "post-checkout", "reference-transaction"] {
+            let p = r.join(".git/hooks").join(h);
+            fs::write(&p, format!("#!/bin/sh\necho {h} >> '{}'\n", marker.display())).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        marker
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hostile_hooks_never_run_for_merge_amend_abort_or_discard_all() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("rv-hooks");
+        let marker = hostile_hooks(&r);
+        merge(&r, "feat", MergeMode::NoFastForward, &ada(), &yes).unwrap();
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        commit_amend(&r, Some("amended"), false, &ada(), &yes).unwrap();
+        fs::write(r.join("a.txt"), "y\n").unwrap();
+        discard_all_with(&r, false, &yes, &FakeTrash::refusing()).unwrap();
+        assert!(!marker.exists(), "a hook ran: {:?}", fs::read_to_string(&marker));
+        let c = conflicted_merge("rv-hooks-abort");
+        let marker = hostile_hooks(&c);
+        merge_abort(&c, &yes).unwrap();
+        assert!(!marker.exists(), "a hook ran on abort");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_merge_driver_never_runs() {
+        if !have_git() {
+            return;
+        }
+        // Configured driver: the repo config is not on the allowlist, so nothing runs at all.
+        let r = repo("rv-driver");
+        g(&r, &["checkout", "-q", "-b", "feat"]);
+        commit_file(&r, "a.txt", "feat\n", "feat edit");
+        g(&r, &["checkout", "-q", "main"]);
+        commit_file(&r, "a.txt", "main\n", "main edit");
+        fs::write(r.join(".gitattributes"), "* merge=evil\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "attrs"]);
+        let marker = r.parent().unwrap().join("rv-driver-ran");
+        let _ = fs::remove_file(&marker);
+        let clean = fs::read_to_string(r.join(".git/config")).unwrap();
+        fs::write(r.join(".git/config"), format!("{clean}[merge \"evil\"]\n\tdriver = touch {} %A\n", marker.display())).unwrap();
+        assert_ne!(code(merge(&r, "feat", MergeMode::FastForward, &ada(), &yes)), "ok");
+        assert_eq!(code(status(&r)), "untrusted_repo_config");
+        assert!(!marker.exists());
+        // Attributes alone name a driver git does not have: a plain text merge, conflicts reported.
+        fs::write(r.join(".git/config"), clean).unwrap();
+        let res = merge(&r, "feat", MergeMode::FastForward, &ada(), &yes).unwrap();
+        assert!(matches!(res, MergeOutcome::Conflicts { .. }), "{res:?}");
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn a_same_message_amend_with_nothing_staged_is_nothing_to_amend() {
+        if !have_git() {
+            return;
+        }
+        let r = two_commits("rv-same");
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        assert_eq!(code(commit_amend(&r, Some("second"), false, &ada(), &yes)), "nothing_to_amend");
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head);
+    }
+
+    #[test]
+    fn a_force_amend_always_asks_natively() {
+        if !have_git() {
+            return;
+        }
+        // The webview may send force: true without the already_pushed step: the host still asks.
+        let r = two_commits("rv-force");
+        let head = out(&r, &["rev-parse", "HEAD"]);
+        assert_eq!(code(commit_amend(&r, Some("new"), true, &ada(), &no)), "cancelled");
+        assert_eq!(out(&r, &["rev-parse", "HEAD"]), head);
+    }
+
+    #[test]
+    fn merging_a_branch_checked_out_in_another_worktree_leaves_it_alone() {
+        if !have_git() {
+            return;
+        }
+        let r = repo_with_feat("rv-wt");
+        let wt = r.parent().unwrap().join(format!("llmide-mad-{}-rv-wt-linked", std::process::id()));
+        let _ = fs::remove_dir_all(&wt);
+        g(&r, &["worktree", "add", "-q", wt.to_str().unwrap(), "feat"]);
+        let tip = out(&r, &["rev-parse", "refs/heads/feat"]);
+        merge(&r, "feat", MergeMode::NoFastForward, &ada(), &yes).unwrap();
+        assert_eq!(out(&r, &["rev-parse", "refs/heads/feat"]), tip);
+        assert_eq!(out(&r, &["rev-parse", "HEAD^2"]), tip);
+        let _ = fs::remove_dir_all(&wt);
     }
 }

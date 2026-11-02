@@ -285,3 +285,36 @@ test("stash: an empty stash list says so, and a pending drop names its message",
   assert.match(out, /Drop the stash “keep me”\?/);
   assert.match(out, /aria-label="Drop stash 0 now"/);
 });
+
+test("changes: discard all, abort merge and the untracked choice are labelled, and abort appears only mid-merge", async () => {
+  const { c } = await ctl({ entries: [entry("a.txt", "M", "M")] });
+  const out = changes(c);
+  assert.ok(out.includes('aria-label="Discard all changes"'));
+  assert.ok(out.includes('aria-label="Include untracked files in Discard all"'));
+  assert.ok(!out.includes('aria-label="Abort merge"'));
+  const merging = await ctl({ entries: [entry("a.txt", "U", "U", "unmerged")], merging: true });
+  const mid = changes(merging.c);
+  assert.ok(mid.includes('aria-label="Abort merge"'));
+  assert.match(mid, /A merge is in progress/);
+});
+
+test("commit box: amend is a checkbox that relabels the button, and the pushed step names the force push", async () => {
+  const { c } = await ctl({ entries: [entry("a.txt", "M", ".")] });
+  const plain = changes(c);
+  assert.ok(plain.includes('aria-label="Amend last commit"'));
+  assert.match(plain, />Commit \(1\)</);
+  const pushed = (await ctl({ entries: [entry("a.txt", "M", ".")], amendPublished: true })).c;
+  pushed.setMessage("x");
+  await pushed.amend("x");
+  const html2 = changes(pushed);
+  assert.match(html2, /already on a remote branch/);
+  assert.ok(html2.includes('aria-label="Amend anyway"') && html2.includes('aria-label="Keep the commit"'));
+});
+
+test("branches: a Merge action is offered on every branch except the current one", async () => {
+  const { c } = await ctl({ branches: [{ name: "main", current: true, hash: "a", upstream: null }, { name: "feat", current: false, hash: "b", upstream: null }] });
+  await c.loadBranches();
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.ok(out.includes('aria-label="Merge feat into current branch"'));
+  assert.ok(!out.includes('aria-label="Merge main into current branch"'));
+});

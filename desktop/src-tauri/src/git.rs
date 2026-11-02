@@ -354,6 +354,8 @@ pub struct GitStatus {
     pub behind: u32,
     pub entries: Vec<StatusEntry>,
     pub truncated: bool,
+    /// A merge is in progress (`MERGE_HEAD` exists): the UI offers Abort merge. Set by `status`, not by `parse_status`.
+    pub merging: bool,
 }
 
 /// Parses `git status --porcelain=v2 -z --branch` output.
@@ -430,6 +432,7 @@ pub fn status(root: &Path) -> R<GitStatus> {
     let out = run_git(root, &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignore-submodules=dirty"], STATUS_CAP)?;
     let mut s = parse_status(&out.stdout);
     s.truncated |= out.truncated;
+    s.merging = run_git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], 256).is_ok();
     Ok(s)
 }
 

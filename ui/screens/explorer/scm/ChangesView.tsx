@@ -5,8 +5,8 @@ import { ContextMenu, type MenuItem } from "../ContextMenu";
 import { invokeHost } from "../../shell/host";
 import type { ScmController, ScmSnapshot } from "./controller";
 import {
-  GROUP_LABEL, HOOKS_NOTE, MAX_MESSAGE_BYTES, ROW_HEIGHT, TOO_MANY_NOTICE, displayLine, letterWord, rowKey, scrollToReveal, splitPath, windowRows,
-  type FileItem, type Row,
+  GROUP_LABEL, HOOKS_NOTE, MAX_MESSAGE_BYTES, ROW_HEIGHT, TOO_MANY_NOTICE, displayLine, letterWord, rowKey, scrollToReveal, splitPath, validateAmend,
+  validateCommit, windowRows, type FileItem, type Row,
 } from "./model";
 
 export interface ChangesProps {
@@ -28,6 +28,8 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
   const [viewport, setViewport] = useState(initialViewport);
   /** Right-click on a file row: the Mac's per-file menu (stage, discard, copy path, reveal). */
   const [menu, setMenu] = useState<{ x: number; y: number; item: FileItem } | null>(null);
+  /** Discard all: untracked files go to the Trash only when this is ticked (the host dialog states the choice). */
+  const [withUntracked, setWithUntracked] = useState(true);
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -75,8 +77,8 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
 
   const c = snap.counts;
   const total = c.staged + c.changes + c.untracked + c.conflicts;
-  const check = controller.commitCheck();
   const busy = snap.busy !== null;
+  const merging = snap.status?.merging === true;
 
   return (
     <div className="scm-changes">
@@ -88,8 +90,27 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
         <button type="button" className="ex-tool" disabled={busy || c.staged === 0} onClick={() => void controller.stageAll(false)}>
           Unstage all
         </button>
+        {merging && (
+          <>
+            <span className="scm-help" role="status">A merge is in progress. Resolve the conflicts, stage the files and commit, or abort.</span>
+            <button type="button" className="ex-tool" aria-label="Abort merge" disabled={busy} onClick={() => void controller.abortMerge()}>Abort merge</button>
+          </>
+        )}
         <span className="ex-spacer" />
         <span className="scm-count" aria-live="polite">{total === 0 ? "No changes" : `${total.toLocaleString()} change${total === 1 ? "" : "s"}`}</span>
+        <label className="scm-help">
+          <input type="checkbox" aria-label="Include untracked files in Discard all" checked={withUntracked} disabled={busy} onChange={(e) => setWithUntracked(e.target.checked)} /> Untracked too
+        </label>
+        <button
+          type="button"
+          className="ex-tool"
+          aria-label="Discard all changes"
+          title="Restores every change to HEAD, staged and unstaged. Untracked files go to the Trash only when ticked."
+          disabled={busy || total === 0 || c.conflicts > 0 || merging}
+          onClick={() => void controller.discardAll(withUntracked)}
+        >
+          Discard all
+        </button>
       </div>
       <div
         ref={scroller}
@@ -130,7 +151,7 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
           onClose={() => setMenu(null)}
         />
       )}
-      <CommitBox controller={controller} snap={snap} check={check} busy={busy} />
+      <CommitBox controller={controller} snap={snap} busy={busy} />
     </div>
   );
 }
@@ -232,13 +253,17 @@ function ScmRow({ row, index, size, snap, controller, busy, onOpen, onOpenFile, 
   );
 }
 
-function CommitBox({ controller, snap, check, busy }: { controller: ScmController; snap: ScmSnapshot; check: ReturnType<ScmController["commitCheck"]>; busy: boolean }) {
+function CommitBox({ controller, snap, busy }: { controller: ScmController; snap: ScmSnapshot; busy: boolean }) {
   const id = snap.identity;
+  const [amend, setAmend] = useState(false);
+  const c = snap.counts;
+  const check = amend ? validateAmend(snap.message, c.staged, c.conflicts) : validateCommit(snap.message, c.staged, c.conflicts);
+  const submit = () => (amend ? controller.amend(snap.message) : controller.commit());
   return (
     <form
       className="scm-commit"
       aria-label="Commit"
-      onSubmit={(e) => { e.preventDefault(); if (check.ok && !busy) void controller.commit(); }}
+      onSubmit={(e) => { e.preventDefault(); if (check.ok && !busy) void submit(); }}
     >
       {id.state === "missing" && (
         <div className="scm-identity" role="alert">
@@ -248,24 +273,45 @@ function CommitBox({ controller, snap, check, busy }: { controller: ScmControlle
         </div>
       )}
       {id.state === "ok" && id.value && <div className="scm-as">{`Committing as ${displayLine(id.value.name)} <${displayLine(id.value.email)}>`}</div>}
+      <label className="scm-help">
+        <input
+          type="checkbox"
+          aria-label="Amend last commit"
+          checked={amend}
+          disabled={busy || !snap.status?.head}
+          onChange={(e) => { setAmend(e.target.checked); controller.cancelAmendAnyway(); }}
+        />{" "}
+        Amend last commit
+      </label>
       <textarea
         className="scm-message"
         aria-label="Commit message"
         aria-describedby="scm-commit-help"
-        placeholder="Commit message"
+        placeholder={amend ? "New message (leave empty to keep the last one)" : "Commit message"}
         rows={3}
         value={snap.message}
         disabled={busy}
         spellCheck
         onChange={(e) => controller.setMessage(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && check.ok && !busy) { e.preventDefault(); void controller.commit(); } }}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && check.ok && !busy) { e.preventDefault(); void submit(); } }}
       />
+      {snap.pendingAmend && (
+        <div className="scm-confirm" role="alert">
+          <p>This commit is already on a remote branch. Amending it rewrites it, so the next push will need a force push.</p>
+          <div className="scm-commit-row">
+            <button type="button" className="ex-btn" aria-label="Amend anyway" disabled={busy} onClick={() => void controller.amendAnyway()}>Amend anyway</button>
+            <button type="button" className="ex-tool" aria-label="Keep the commit" onClick={() => controller.cancelAmendAnyway()}>Keep the commit</button>
+          </div>
+        </div>
+      )}
       <div className="scm-commit-row">
         <button type="submit" className="ex-btn scm-commit-btn" disabled={!check.ok || busy} aria-describedby="scm-commit-help">
-          {`Commit${snap.counts.staged ? ` (${snap.counts.staged.toLocaleString()})` : ""}`}
+          {amend ? "Amend" : `Commit${snap.counts.staged ? ` (${snap.counts.staged.toLocaleString()})` : ""}`}
         </button>
         <span id="scm-commit-help" className="scm-help">
-          {check.ok ? `${HOOKS_NOTE} Cmd or Ctrl+Enter commits.` : `${check.reason} ${HOOKS_NOTE}`}
+          {check.ok
+            ? `${amend ? "Replaces the last commit with your staged changes; the author stays the same. " : ""}${HOOKS_NOTE} Cmd or Ctrl+Enter ${amend ? "amends" : "commits"}.`
+            : `${check.reason} ${HOOKS_NOTE}`}
           {check.bytes > MAX_MESSAGE_BYTES * 0.9 && ` ${check.bytes.toLocaleString()} / ${MAX_MESSAGE_BYTES.toLocaleString()} bytes.`}
         </span>
       </div>

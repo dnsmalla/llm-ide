@@ -145,9 +145,14 @@ export function BranchesView({ controller, snap }: { controller: ScmController; 
               {br.current && <span className="ex-badge">current</span>}
             </button>
             {!br.current && (
-              <button type="button" className="ex-tool scm-delete" aria-label={`Delete ${displayLine(br.name)}`} disabled={busy} onClick={() => void controller.deleteBranch(br.name)}>
-                Delete
-              </button>
+              <>
+                <button type="button" className="ex-tool scm-merge" aria-label={`Merge ${displayLine(br.name)} into current branch`} disabled={busy} onClick={() => void controller.mergeBranch(br.name)}>
+                  Merge into current
+                </button>
+                <button type="button" className="ex-tool scm-delete" aria-label={`Delete ${displayLine(br.name)}`} disabled={busy} onClick={() => void controller.deleteBranch(br.name)}>
+                  Delete
+                </button>
+              </>
             )}
           </li>
         ))}

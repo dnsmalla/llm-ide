@@ -356,3 +356,75 @@ test("stash: apply, pop and drop send the hash the user saw; a list that moved i
   assert.deepEqual(api.state.stashes, ["pushed elsewhere", "seen"], "the other stash was not dropped");
   assert.deepEqual(snap().stashes.list.map((s) => s.message), ["pushed elsewhere", "seen"], "the list reloads");
 });
+
+test("merge: a clean merge asks once with the fast-forward mode and reports the new hash", async () => {
+  const { c, api, snap } = await ctl({ branches: [{ name: "main", current: true, hash: "a", upstream: null }, { name: "feat", current: false, hash: "b", upstream: null }] });
+  await c.mergeBranch("feat");
+  assert.deepEqual(calls(api, "merge")[0], ["merge", "feat", "ff"]);
+  assert.match(snap().notice.text, /Fast-forwarded to abc1234/);
+  assert.equal(snap().busy, null);
+});
+
+test("merge: conflicts are reported by file name, plainly, and the merge stays for abort", async () => {
+  const { c, api, snap } = await ctl({ mergeOutcome: { status: "conflicts", paths: ["a.txt", "src/<b>.ts"], truncated: false } });
+  await c.mergeBranch("feat");
+  assert.match(snap().notice.text, /conflicts in 2 file\(s\): a\.txt, src\/<b>\.ts/);
+  assert.equal(api.state.merging, true);
+  assert.equal(snap().status.merging, true);
+  await c.abortMerge();
+  assert.deepEqual(calls(api, "mergeAbort").length, 1);
+  assert.equal(api.state.merging, false);
+});
+
+test("merge: an invalid branch name never reaches the host", async () => {
+  const { c, api, snap } = await ctl();
+  await c.mergeBranch("-x");
+  assert.equal(calls(api, "merge").length, 0);
+  assert.equal(snap().notice.kind, "error");
+});
+
+test("amend: the staged files and the optional message go to the host; success clears the message", async () => {
+  const { c, api, snap } = await ctl({ entries: [entry("a.txt", "M", ".")] });
+  c.setMessage("New subject");
+  assert.equal(await c.amend("New subject"), true);
+  assert.deepEqual(calls(api, "commitAmend")[0], ["commitAmend", "New subject", false]);
+  assert.equal(snap().message, "");
+  assert.match(snap().notice.text, /now fed9876/);
+});
+
+test("amend: nothing staged and no message is refused before the host", async () => {
+  const { c, api, snap } = await ctl({ entries: [] });
+  assert.equal(await c.amend("   "), false);
+  assert.equal(calls(api, "commitAmend").length, 0);
+  assert.equal(snap().notice.kind, "error");
+});
+
+test("amend: an already-pushed commit waits for the in-page step, and only then sends force", async () => {
+  const { c, api, snap } = await ctl({ entries: [entry("a.txt", "M", ".")], amendPublished: true });
+  assert.equal(await c.amend("msg"), false);
+  assert.deepEqual(snap().pendingAmend, { message: "msg" });
+  assert.equal(calls(api, "commitAmend")[0][2], false, "the first call never forces");
+  await c.amendAnyway();
+  assert.deepEqual(calls(api, "commitAmend")[1], ["commitAmend", "msg", true]);
+  assert.equal(snap().pendingAmend, null);
+});
+
+test("amend: the second step can be cancelled without any host call", async () => {
+  const { c, api, snap } = await ctl({ entries: [entry("a.txt", "M", ".")], amendPublished: true });
+  await c.amend("msg");
+  c.cancelAmendAnyway();
+  assert.equal(snap().pendingAmend, null);
+  assert.equal(calls(api, "commitAmend").length, 1);
+});
+
+test("discard all: the Trash choice goes to the host and the result is reported with what was left", async () => {
+  let changed = 0;
+  const { c, api, snap } = await ctl({ entries: [entry("a.txt", "M", "."), entry("n.txt", ".", "?", "untracked")] });
+  c.opts.onFilesChanged = () => changed++;
+  await c.discardAll(false);
+  assert.deepEqual(calls(api, "discardAll")[0], ["discardAll", false]);
+  assert.match(snap().notice.text, /Restored 1 changed file\(s\) to HEAD\./);
+  await c.discardAll(true);
+  assert.match(snap().notice.text, /Moved 1 untracked item\(s\) to the Trash/);
+  assert.equal(changed, 2);
+});

@@ -1,9 +1,9 @@
 // Typed wrappers over the Rust host's Source Control commands (desktop/src-tauri/src/{git,git_scm}.rs).
 // The webview never sends an absolute path or patch text: paths are relative to the open project root and
 // hunk staging sends hunk indexes plus the diff id the host handed out. Destructive commands (discard,
-// checkout, branch delete, stash pop and drop) ask in a native host dialog the page cannot answer. Local actions
-// only: there is no push, pull, fetch, remote, amend or merge command, by design (they need credentials or are
-// later work; see the parity checklist).
+// checkout, branch delete, merge, amend, discard all, stash pop and drop) ask in a native host dialog the page cannot
+// answer. Local actions only: there is no push, pull, fetch or remote command, by design (they need credentials;
+// see the parity checklist).
 import { invokeHost } from "../../shell/host";
 
 export interface ScmStatusEntry {
@@ -24,6 +24,8 @@ export interface ScmStatus {
   behind: number;
   entries: ScmStatusEntry[];
   truncated: boolean;
+  /** A merge is in progress (MERGE_HEAD exists): the Changes tab offers Abort merge. */
+  merging: boolean;
 }
 
 export interface HunkView {
@@ -56,6 +58,12 @@ export type BranchDelete = { status: "deleted" } | { status: "not_merged"; tip: 
  * apply / pop / drop so the host refuses (`changed`) when the list moved since it was shown. */
 export interface Stash { index: number; hash: string; message: string }
 export interface StashList { stashes: Stash[]; truncated: boolean }
+/** `merged`: `hash` is the new short HEAD and `fast_forward` means no merge commit was made. `conflicts`: git stopped
+ * with conflicts and kept the merge in progress; `paths` are the conflicted files (bounded). */
+export type MergeOutcome = { status: "merged"; hash: string; fast_forward: boolean } | { status: "conflicts"; paths: string[]; truncated: boolean };
+export interface AmendResult { hash: string }
+/** `trashed` untracked items moved to the Trash; `skipped` items left in place (symlinks, nested repositories, a Trash refusal). */
+export interface DiscardAllResult { restored: number; trashed: number; skipped: number }
 
 export interface ScmApi {
   status(): Promise<ScmStatus>;
@@ -80,6 +88,12 @@ export interface ScmApi {
   stashApply(index: number, hash: string): Promise<void>;
   stashPop(index: number, hash: string): Promise<void>;
   stashDrop(index: number, hash: string): Promise<void>;
+  /** `name` is a local branch merged into the current one; `mode` `ff` (default, fast-forward when possible) or `no_ff`. */
+  merge(name: string, mode?: "ff" | "no_ff"): Promise<MergeOutcome>;
+  mergeAbort(): Promise<void>;
+  /** Amends HEAD with the staged changes; `message` omitted or blank keeps the old one. `force` is the second step after already_pushed. */
+  commitAmend(message: string | undefined, force: boolean): Promise<AmendResult>;
+  discardAll(includeUntracked: boolean): Promise<DiscardAllResult>;
 }
 
 /** What the host rejects with: `{ code, message }`. Anything else is mapped to `io` / `unavailable`. */
@@ -134,5 +148,9 @@ export function createHostScm(): ScmApi {
     stashApply: (index, hash) => call("git_stash_apply", { index, hash }),
     stashPop: (index, hash) => call("git_stash_pop", { index, hash }),
     stashDrop: (index, hash) => call("git_stash_drop", { index, hash }),
+    merge: (name, mode) => call("git_merge", { req: { name, mode: mode ?? null } }),
+    mergeAbort: () => call("git_merge_abort"),
+    commitAmend: (message, force) => call("git_commit_amend", { req: { message: message ?? null, force } }),
+    discardAll: (includeUntracked) => call("git_discard_all", { req: { include_untracked: includeUntracked } }),
   };
 }

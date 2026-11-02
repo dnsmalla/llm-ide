@@ -32,6 +32,9 @@ export function makeScm(init = {}) {
     tagsError: init.tagsError ?? null,
     unmerged: init.unmerged ?? [],
     stashes: init.stashes ?? [],
+    merging: init.merging ?? false,
+    mergeOutcome: init.mergeOutcome ?? null,
+    amendPublished: init.amendPublished ?? false,
   };
   // Like the host: the entry must still sit at that index with that hash, else `changed`.
   const stashAt = (index, hash) => {
@@ -41,7 +44,7 @@ export function makeScm(init = {}) {
   const rec = (name, ...args) => { calls.push([name, ...args]); if (state.failNext) { const e = state.failNext; state.failNext = null; throw e; } };
   const api = {
     calls, state,
-    async status() { rec("status"); if (state.gate) await state.gate; return { branch: state.branch, head: "abc", upstream: null, ahead: 0, behind: 0, entries: state.entries, truncated: state.truncated }; },
+    async status() { rec("status"); if (state.gate) await state.gate; return { branch: state.branch, head: "abc", upstream: null, ahead: 0, behind: 0, entries: state.entries, truncated: state.truncated, merging: state.merging }; },
     async stage(paths, stage) { rec("stage", paths, stage); },
     async stageAll(stage) { rec("stageAll", stage); },
     async diffHunks(path, staged) { rec("diffHunks", path, staged); return state.hunkDiff; },
@@ -80,6 +83,25 @@ export function makeScm(init = {}) {
     async stashApply(index, hash) { rec("stashApply", index, hash); stashAt(index, hash); },
     async stashPop(index, hash) { rec("stashPop", index, hash); stashAt(index, hash); state.stashes = state.stashes.filter((_, i) => i !== index); },
     async stashDrop(index, hash) { rec("stashDrop", index, hash); stashAt(index, hash); state.stashes = state.stashes.filter((_, i) => i !== index); },
+    async merge(name, mode) {
+      rec("merge", name, mode);
+      if (state.mergeOutcome) {
+        if (state.mergeOutcome.status === "merged") state.merging = false;
+        else state.merging = true;
+        return state.mergeOutcome;
+      }
+      return { status: "merged", hash: "abc1234", fast_forward: true };
+    },
+    async mergeAbort() { rec("mergeAbort"); state.merging = false; },
+    async commitAmend(message, force) {
+      rec("commitAmend", message, force);
+      if (state.amendPublished && !force) throw new ScmErr("already_pushed", "this commit is already on a remote branch");
+      return { hash: "fed9876" };
+    },
+    async discardAll(includeUntracked) {
+      rec("discardAll", includeUntracked);
+      return { restored: state.entries.filter((e) => e.kind !== "untracked").length, trashed: includeUntracked ? 1 : 0, skipped: 0 };
+    },
     async commitDiff(hash, path) { rec("commitDiff", hash, path); return { text: "@@ -1 +1 @@\n-a\n+b‮\n", truncated: false }; },
   };
   return api;
