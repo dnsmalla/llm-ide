@@ -13,7 +13,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 16 | 32 | 14 | 62 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; Windows/Linux not run |
+| Desktop multi-OS (Tauri) | 17 | 32 | 13 | 62 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; Windows/Linux not run |
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 3 | 7 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -22,7 +22,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 97 | 55 | 73 | 225 |  |
+| Total | 98 | 55 | 72 | 225 |  |
 
 ## How the surfaces connect
 
@@ -160,7 +160,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Phase 5 Auto Tasks native on the desktop (`ui/screens/autotasks/native`, commits `ae203be0` to `86bf3874`): local catalog with Mac layout, per-task cron schedule edit, persisted recent manual runs, task run through the core agent, Mobile Control gate removed; custom tasks and some Mac-local editing still absent; the Auto Tasks usage evidence (UN-003) is still wanted before the six-job-kind collapse (me)
 - [ ] Independent security review of the desktop-class bridge on `:3006` (Swift, `03d1876a`/`9281f19f`; required by the "security-touching needs review" gate, none recorded): a paired client that says `clientClass: "desktop"` from a loopback peer gets every `desktopOnly` type (template/config/toggle edits, the writes the phone-bridge hardening moved off the phone) at `approvalConfirm`. Open points: a phone reaching `:3006` through an SSH tunnel or any local proxy looks like loopback; the loopback test is a string compare (`127.0.0.1`, `::1`, `localhost`), so `::ffff:127.0.0.1` or an interface-scoped address would silently not match; the test covers only the tier table, not the loopback gate (me)
 - [ ] Remove the dead Mobile Control bridge view in `ui/screens/loop/LoopScreen.tsx` (the default export now renders `NativeLoopScreen`; the bridge `Content` and its polling are unused) once the native Loop is GUI-verified (me)
-- [ ] Token-affecting chat changes committed by another session on 2026-11-02, held from the push by your decision: `ce31d950` makes the compact system prompt the default for Execute turns (server engine + Mac `BackendManager`), `dbf4994e` + `7ea6ba4a` change the Mac chat history cap; the bench rule says such defaults ship OFF until your go-ahead (Y1). Decide: approve as is, or put them behind a switch that defaults to off (you)
+- [x] Token-affecting chat changes from another session (2026-11-02) resolved before the push: the compact system prompt for Execute (`ce31d950`) is OFF by default again, the Mac no longer sets `LLMIDE_V2_COMPACT_PROMPT_MODES` (opt-in via that variable; bench Y1 decides the default); the Mac history cap 400k/24k to 64k/20k (`dbf4994e`, `7ea6ba4a`) is token-neutral because the server already clips fresh-turn history to 60k/20k with the same anchor-plus-newest rule (`extension/routes/agent-v2.mjs` `freshTurnHistory`), so it only shrinks the retry POST and stays (me)
 - [x] Push-gate flakes fixed 2026-11-02: stale issue-schedule 400 fixture after the All-repositories change (`e1171f1d`), hostile-markdown time budget under gate load (`87fdb452`), `auth-routes` fixtures shared between concurrent runs moved to a per-run temp dir (`2650bc59`); full `make regression` green (Mac 2662 XCTest + 982 swift-testing, desktop 1420, ui-kit 31) (me)
 - [ ] Native Loop maintainability: `NativeLoopScreen.tsx` is about 800 lines and repeats the list of runnable stage kinds in four places (`runStage`, the run guard, `runSelectedStage`, the Run stage button); one shared constant before more stage kinds land (me)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
