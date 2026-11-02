@@ -1,6 +1,6 @@
 // Replace support for the project search: the SAME query/options semantics as the search host for literal and
 // regex queries. Pure, so the rules are testable without the host.
-import type { SearchOptions } from "./model";
+import { visibleFiles, type FileHits, type Hit, type SearchOptions } from "./model";
 
 export function buildReplacer(query: string, opts: SearchOptions): RegExp | null {
   if (query === "") return null;
@@ -66,7 +66,7 @@ function trailingCount(args: unknown[]): number {
 }
 
 /** The text one match becomes. `args` is String.replace's argument list for that match. */
-function renderMatch(args: unknown[], replacement: string, mode: ReplaceMode): string {
+export function renderMatch(args: unknown[], replacement: string, mode: ReplaceMode): string {
   if (!mode.regex) return mode.preserveCase ? preserveCaseReplacement(String(args[0]), replacement) : replacement;
   const captures = args.length - trailingCount(args) - 1;
   // Expand `$&`, `$1`… like String.replace does for a string replacement.
@@ -82,7 +82,7 @@ function renderMatch(args: unknown[], replacement: string, mode: ReplaceMode): s
  * The lines exactly as the search host scans them (Rust `str::lines`): split on LF, a CR before the LF is not part
  * of the line. `start`/`end` bound the line's text; `next` is where the following line starts (or -1 for the last).
  */
-function* hostLines(text: string): Generator<{ start: number; end: number; next: number }> {
+export function* hostLines(text: string): Generator<{ start: number; end: number; next: number }> {
   let start = 0;
   for (;;) {
     const nl = text.indexOf("\n", start);
@@ -132,6 +132,20 @@ export function replaceAll(
 }
 
 /**
+ * The match that starts at `at` (a UTF-16 index into `lineText`), matched on the line alone as the host matched it.
+ * `args` is String.replace's argument list for that match. Null when no non-empty match starts there.
+ */
+function matchAt(lineText: string, re: RegExp, at: number): { text: string; args: unknown[] } | null {
+  const sticky = new RegExp(re.source, re.flags.replace("g", "") + "y");
+  sticky.lastIndex = at;
+  const m = sticky.exec(lineText);
+  if (!m || m[0] === "") return null;
+  const args: unknown[] = [...m, m.index, lineText];
+  if (m.groups) args.push(m.groups);
+  return { text: m[0], args };
+}
+
+/**
  * Replace the ONE match that starts at 1-based `line` and UTF-16 `col`. The match must still be there: a sticky
  * regex at that exact position OF THAT LINE must match the query (matched within the line, as the host matched it,
  * so it never reaches into the next line). Returns null when it is not (the file changed since the search).
@@ -151,16 +165,146 @@ export function replaceOneAt(
     const lineText = text.slice(l.start, l.end);
     const at = col - 1;
     if (at > lineText.length) return null;
-    const sticky = new RegExp(re.source, re.flags.replace("g", "") + "y");
-    sticky.lastIndex = at;
-    const m = sticky.exec(lineText);
-    if (!m || m[0] === "") return null;
-    const args: unknown[] = [...m, m.index, lineText];
-    if (m.groups) args.push(m.groups);
+    const m = matchAt(lineText, re, at);
+    if (!m) return null;
     const offset = l.start + at;
-    return text.slice(0, offset) + renderMatch(args, replacement, mode) + text.slice(offset + m[0].length);
+    return text.slice(0, offset) + renderMatch(m.args, replacement, mode) + text.slice(offset + m.text.length);
   }
   return null;
+}
+
+/** One match the search LISTED: its host line and column, and the text it matched. `clipped`: the preview ran out. */
+export interface ListedMatch {
+  line: number;
+  col: number;
+  matched: string;
+  clipped: boolean;
+}
+
+/**
+ * The host's preview window (desktop/src-tauri/src/project_search.rs PREVIEW_BYTES). A line up to this many UTF-8
+ * bytes is shown whole; a longer one as a window that, when it cuts a match, ends at the last char boundary at or
+ * below `start + PREVIEW_BYTES`, so a window that cuts a match is always more than PREVIEW_BYTES - 4 bytes long.
+ */
+const PREVIEW_BYTES = 500;
+
+/**
+ * A listed match from a search hit. The preview is the line, or a window of it for a long line. `clipped` only when
+ * the match reaches the end of a full-size WINDOW: a match that merely ends a short line is the whole match, so the
+ * file must still match exactly that text (not a longer one, e.g. `\w+` on a word that grew since the search).
+ */
+export function listedMatch(h: Pick<Hit, "line" | "col" | "preview" | "ms" | "me">): ListedMatch {
+  const windowed = new TextEncoder().encode(h.preview).length > PREVIEW_BYTES - 4;
+  return { line: h.line, col: h.col, matched: h.preview.slice(h.ms, h.me), clipped: windowed && h.me >= h.preview.length };
+}
+
+/** The Replace All targets: each listed file (with at least one hit) and its listed matches, dismissed ones left out. */
+export interface ReplaceTarget {
+  path: string;
+  hits: ListedMatch[];
+}
+
+export function listedTargets(files: readonly FileHits[], dismissed: ReadonlySet<string>): ReplaceTarget[] {
+  return visibleFiles(files, dismissed)
+    .filter((f) => f.hits.length > 0)
+    .map((f) => ({ path: f.path, hits: f.hits.map(listedMatch) }));
+}
+
+/**
+ * Replace exactly the LISTED matches in `text`, at their listed positions. Each one must still read as listed: the
+ * sticky match at its line and column (BOM-shifted on line 1) must be the listed text (a clipped preview only needs
+ * the shown prefix). Any listed match that does not is a refusal, as is an overlap. Matches the search never listed
+ * are left alone, even when the file now has more.
+ */
+export function replaceListed(
+  text: string,
+  re: RegExp,
+  listed: readonly ListedMatch[],
+  replacement: string,
+  mode: ReplaceMode,
+  bom: boolean,
+): { ok: true; text: string; count: number } | { ok: false } {
+  if (listed.length === 0) return { ok: true, text, count: 0 };
+  const lines = [...hostLines(text)];
+  const spans: { start: number; end: number; out: string }[] = [];
+  for (const h of listed) {
+    if (!Number.isInteger(h.line) || !Number.isInteger(h.col) || h.line < 1 || h.col < 1 || h.matched === "") return { ok: false };
+    const l = lines[h.line - 1];
+    if (!l) return { ok: false };
+    const lineText = text.slice(l.start, l.end);
+    const at = bomShift(h.line, h.col, bom) - 1;
+    if (at < 0 || at > lineText.length) return { ok: false };
+    const m = matchAt(lineText, re, at);
+    if (!m) return { ok: false };
+    const same = h.clipped ? m.text.startsWith(h.matched) : m.text === h.matched;
+    if (!same) return { ok: false };
+    const start = l.start + at;
+    spans.push({ start, end: start + m.text.length, out: renderMatch(m.args, replacement, mode) });
+  }
+  spans.sort((a, b) => a.start - b.start);
+  let out = "";
+  let pos = 0;
+  for (const s of spans) {
+    if (s.start < pos) return { ok: false };
+    out += text.slice(pos, s.start) + s.out;
+    pos = s.end;
+  }
+  return { ok: true, text: out + text.slice(pos), count: spans.length };
+}
+
+/** The file access Replace All needs: the same fresh read the positions are checked on, and the CAS write. */
+export interface ReplaceFs<E extends string = string> {
+  read(path: string, maxBytes: number): Promise<{ status: string; text: string | null; hash: string | null; encoding: E; bom: boolean }>;
+  write(path: string, text: string, opts: { encoding: E; bom: boolean; expected_hash: string }): Promise<unknown>;
+}
+
+export interface ReplaceAllSummary {
+  /** Files written. */
+  files: number;
+  /** Matches replaced across the written files. */
+  replacements: number;
+  /** Files that could not be read or written for a reason other than a changed file. */
+  failed: string[];
+  /** Files refused because a listed match no longer reads as listed, or because the file changed on write. */
+  changed: string[];
+}
+
+/**
+ * Replace All over the listed targets. Each file is read fresh, its listed matches are checked and replaced, and the
+ * write is compare-and-swap on that read's hash (never forced). A changed file is refused and reported; the others
+ * still run.
+ */
+export async function replaceListedInFiles<E extends string>(
+  fs: ReplaceFs<E>,
+  re: RegExp,
+  mode: ReplaceMode,
+  targets: readonly ReplaceTarget[],
+  replacement: string,
+): Promise<ReplaceAllSummary> {
+  const summary: ReplaceAllSummary = { files: 0, replacements: 0, failed: [], changed: [] };
+  for (const t of targets) {
+    if (t.hits.length === 0) continue;
+    try {
+      const read = await fs.read(t.path, 4_000_000);
+      if (read.status !== "ok" || read.text === null || read.hash === null) {
+        summary.failed.push(t.path);
+        continue;
+      }
+      const r = replaceListed(read.text, re, t.hits, replacement, mode, read.bom && read.encoding === "utf-8");
+      if (!r.ok) {
+        summary.changed.push(t.path);
+        continue;
+      }
+      await fs.write(t.path, r.text, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
+      summary.files++;
+      summary.replacements += r.count;
+    } catch (e) {
+      const code = typeof e === "object" && e !== null && "code" in e ? (e as { code: unknown }).code : undefined;
+      if (code === "conflict") summary.changed.push(t.path);
+      else summary.failed.push(t.path);
+    }
+  }
+  return summary;
 }
 
 /**

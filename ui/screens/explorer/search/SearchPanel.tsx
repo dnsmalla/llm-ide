@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type Keyboard
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SearchController } from "./controller";
 import { skippedNotice, summaryText, scrollToReveal, truncationNotice, visibleFiles, windowRows, type FileHits, type Hit, type Row, type SearchOptions } from "./model";
+import { listedTargets, type ReplaceAllSummary, type ReplaceTarget } from "./replace";
 
 export const ROW_HEIGHT = 22;
 const DEFAULT_VIEWPORT = 400;
@@ -17,10 +18,11 @@ export interface SearchPanelProps {
   /** Initial Replace text (tests, static renders). */
   initialReplacement?: string;
   /**
-   * Replace all matches in the listed files (preserveCase matches each match's case); absent = read-only search.
-   * `dismissed` (keys from `hitKey`) names the matches to leave untouched.
+   * Replace exactly the LISTED matches in `targets` (dismissed ones already left out), at their listed positions
+   * (preserveCase matches each match's case); absent = read-only search. Files that changed since the search are
+   * refused and reported in the summary.
    */
-  onReplaceAll?: (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean, dismissed: ReadonlySet<string>) => Promise<{ files: number; replacements: number; failed: string[] }>;
+  onReplaceAll?: (query: string, opts: SearchOptions, targets: ReplaceTarget[], replacement: string, preserveCase: boolean) => Promise<ReplaceAllSummary>;
   /** Replace the one match at `path`, `line`, `col` (UTF-16 column). Absent = no per-match replace. */
   onReplaceOne?: (path: string, line: number, col: number, query: string, opts: SearchOptions, replacement: string, preserveCase: boolean) => Promise<{ ok: boolean; message: string }>;
 }
@@ -52,16 +54,17 @@ export function replaceTargets(snap: { files: { path: string; hits: unknown[] }[
 }
 
 /**
- * What a confirmed Replace All asks for, and the question the confirm puts (the Mac's wording): the files still
- * listed once dismissed matches are hidden, and the dismissed keys the replace must leave untouched.
+ * What a confirmed Replace All asks for, and the question the confirm puts (the Mac's wording): the listed matches
+ * still shown (dismissed ones hidden), grouped per file at their listed positions.
  */
-export function replaceAllRequest(snap: { files: readonly FileHits[]; dismissed: ReadonlySet<string> }): { paths: string[]; dismissed: ReadonlySet<string>; prompt: string } {
-  const paths = replaceTargets({ files: visibleFiles(snap.files, snap.dismissed) });
+export function replaceAllRequest(snap: { files: readonly FileHits[]; dismissed: ReadonlySet<string> }): { paths: string[]; targets: ReplaceTarget[]; dismissed: ReadonlySet<string>; prompt: string } {
+  const targets = listedTargets(snap.files, snap.dismissed);
+  const paths = targets.map((t) => t.path);
   const n = snap.dismissed.size;
   const prompt = n === 0
     ? `Replace all matches in ${paths.length.toLocaleString()} file${paths.length === 1 ? "" : "s"}?`
     : `Replace all matches except the ${n.toLocaleString()} you dismissed?`;
-  return { paths, dismissed: snap.dismissed, prompt };
+  return { paths, targets, dismissed: snap.dismissed, prompt };
 }
 
 function baseOf(p: string): string {
@@ -165,17 +168,21 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
     </button>
   );
 
-  /** Replaces in `paths` and reports the outcome in the replace note. */
-  const runReplace = (paths: string[], dismissed: ReadonlySet<string> = new Set()) => {
+  /** Replaces the listed matches in `targets` and reports the outcome (written, refused as changed, failed) in the note. */
+  const runReplace = (targets: ReplaceTarget[]) => {
     if (!onReplaceAll) return;
     setReplacing(true);
     setConfirmAll(false);
     setReplaceNotice(null);
-    void onReplaceAll(snap.query, snap.opts, paths, replacement, preserveCase, dismissed).then(
+    void onReplaceAll(snap.query, snap.opts, targets, replacement, preserveCase).then(
       (r) => {
-        setReplaceNotice(`Replaced ${r.replacements.toLocaleString()} match${r.replacements === 1 ? "" : "es"} in ${r.files.toLocaleString()} file${r.files === 1 ? "" : "s"}${r.failed.length ? `; ${r.failed.length} could not be written` : ""}.`);
+        const parts = [`Replaced ${r.replacements.toLocaleString()} match${r.replacements === 1 ? "" : "es"} in ${r.files.toLocaleString()} file${r.files === 1 ? "" : "s"}`];
+        if (r.changed.length) parts.push(`${r.changed.length.toLocaleString()} skipped as changed since the search: ${r.changed.join(", ")}`);
+        if (r.failed.length) parts.push(`${r.failed.length.toLocaleString()} could not be written: ${r.failed.join(", ")}`);
+        setReplaceNotice(`${parts.join("; ")}.`);
         // As on the Mac, search again: the listed positions are stale now, and a per-match Replace must not act on them.
-        if (r.files > 0) controller.runNow();
+        // Also when every file was refused or failed: the listing is then stale too (a refused file means it changed).
+        if (r.files > 0 || r.changed.length > 0 || r.failed.length > 0) controller.runNow();
       },
       () => setReplaceNotice("Replace all failed."),
     ).finally(() => setReplacing(false));
@@ -221,7 +228,7 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
           <span className="sx-fdir">{dirOf(r.path)}</span>
           <span className="sx-count">{r.count}{r.more ? "+" : ""}</span>
           {canReplaceFile ? (
-            <button type="button" className="sx-toggle" aria-label={`Replace all in ${baseOf(r.path)}`} title="Replace all matches in this file" onClick={(e) => { e.stopPropagation(); runReplace([r.path]); }}>⇄</button>
+            <button type="button" className="sx-toggle" aria-label={`Replace all in ${baseOf(r.path)}`} title="Replace all matches in this file" onClick={(e) => { e.stopPropagation(); runReplace(listedTargets(snap.files.filter((f) => f.path === r.path), snap.dismissed)); }}>⇄</button>
           ) : null}
         </div>
       );
@@ -286,7 +293,7 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
         {confirmAll && canReplace ? (
           <div className="sx-note" role="alertdialog" aria-label="Confirm replace all" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setConfirmAll(false); } }}>
             <span>{allRequest.prompt}</span>{" "}
-            <button type="button" className="ex-link" onClick={() => { if (canReplace) runReplace(allRequest.paths, allRequest.dismissed); }}>Replace all</button>{" "}
+            <button type="button" className="ex-link" onClick={() => { if (canReplace) runReplace(allRequest.targets); }}>Replace all</button>{" "}
             {/* Focus lands on Cancel (the safe default), so Escape reaches the handler above and Enter does not replace. */}
             <button type="button" className="ex-link" autoFocus onClick={() => setConfirmAll(false)}>Cancel</button>
           </div>

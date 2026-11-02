@@ -10,7 +10,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
-import { createHostFs, baseName, parentOf, toFsError, type FsApi, type WatchBatch } from "./fs";
+import { createHostFs, baseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { host as shellHost, invokeHost } from "../shell/host";
@@ -23,8 +23,8 @@ import { PanelTabs } from "./PanelTabs";
 import { SearchController } from "./search/controller";
 import { createHostSearch, type SearchApi } from "./search/host";
 import { SearchPanel } from "./search/SearchPanel";
-import { bomShift, buildReplacer, replaceAll, replaceOneAt } from "./search/replace";
-import { folderIncludeGlob, hitKey, type SearchOptions } from "./search/model";
+import { bomShift, buildReplacer, replaceListedInFiles, replaceOneAt, type ReplaceTarget } from "./search/replace";
+import { folderIncludeGlob, type SearchOptions } from "./search/model";
 import { NoProjectCard } from "../shell/NoProjectCard";
 import { TerminalManager, type TermHost } from "./terminal/manager";
 import { TERMINAL_BUILT as SHARED_TERMINAL_BUILT, loadTerminalRuntime as sharedLoadRuntime, sharedTerminalManager } from "./terminal/shared";
@@ -291,31 +291,13 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   };
   useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
 
-  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, paths: string[], replacement: string, preserveCase: boolean, dismissed: ReadonlySet<string>) => {
+  /** Replace All: only the listed matches, each file checked against its listed positions (see replaceListedInFiles). */
+  const replaceAllInSearch = useCallback(async (query: string, opts: SearchOptions, targets: ReplaceTarget[], replacement: string, preserveCase: boolean) => {
     const re = buildReplacer(query, opts);
-    if (!re) return { files: 0, replacements: 0, failed: ["The query is not a valid regular expression."] };
-    let files = 0;
-    let replacements = 0;
-    const failed: string[] = [];
-    for (const path of paths) {
-      try {
-        const read = await fs.read(path, 4_000_000);
-        if (read.status !== "ok" || read.text === null || read.hash === null) { failed.push(path); continue; }
-        // Dismissed matches are left as they are (they are matched by line and column, as the search listed them).
-        // The host's columns count a UTF-8 BOM on line 1 (fs.read strips it), so the keys are compared in host columns.
-        const bom = read.bom && read.encoding === "utf-8";
-        const skip = dismissed.size > 0 ? (line: number, col: number) => dismissed.has(hitKey(path, line, bomShift(line, col, bom, true))) : undefined;
-        const result = replaceAll(read.text, re, replacement, { regex: opts.regex, preserveCase }, skip);
-        if (result.count === 0) continue;
-        await fs.write(path, result.text, { encoding: read.encoding, bom: read.bom, expected_hash: read.hash });
-        files++;
-        replacements += result.count;
-      } catch {
-        failed.push(path);
-      }
-    }
+    if (!re) return { files: 0, replacements: 0, failed: ["The query is not a valid regular expression."], changed: [] };
+    const result = await replaceListedInFiles<Encoding>(fs, re, { regex: opts.regex, preserveCase }, targets, replacement);
     void refreshAll();
-    return { files, replacements, failed };
+    return result;
   }, [fs]);
 
   /** Replaces the one match at `line`/`col`. The file is read fresh and the match re-checked at that exact spot; the write is compare-and-swap on the hash read, so a file changed since is never overwritten. */
