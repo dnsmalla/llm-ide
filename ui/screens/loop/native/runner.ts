@@ -23,6 +23,7 @@ export interface LoopRunOutcome {
   /** The blocking stage that ended the run, when it failed. */
   failedStage: LoopStage | null;
   statusSummary: string;
+  cancelled?: boolean;
 }
 
 export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps): Promise<LoopRunOutcome> {
@@ -39,14 +40,14 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const expired = () => budgetMs !== null && Date.now() - started >= budgetMs;
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
-    if (deps.isCancelled?.()) throw new Error("Run cancelled.");
+    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
-      if (deps.isCancelled?.()) throw new Error("Run cancelled.");
+      if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
       if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output };
@@ -59,7 +60,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
       return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
     }
-    if (deps.isCancelled?.()) throw new Error("Run cancelled.");
+    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     const used = repairs.get(failed.stage.id) ?? 0;
     if (!failed.stage.allowsRepair) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });

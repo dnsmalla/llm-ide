@@ -468,8 +468,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       let changedPaths: string[] = [];
       try { changedPaths = await invokeHost<string[]>("loop_changed_paths"); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
-      setRunLog((l) => [...l, outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
-      if (!outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
+      setRunLog((l) => [...l, outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
+      if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
         const faultPaths = [...new Set(Array.from(failedRun?.output.matchAll(/^([^\n:]+\\.md):/gm) ?? [], (m) => m[1].trim()))];
         let reopened = 0;
@@ -480,9 +480,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         try { summaryPath = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${summaryPath}`]); }
         catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
       }
-      setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
+      setNotice(outcome.cancelled ? "The loop was cancelled." : outcome.passed ? "The loop passed." : outcome.statusSummary);
       const startedAt = new Date(started).toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
+      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: outcome.cancelled ? "cancelled" : outcome.passed ? "success" : "failed", statusSummary: outcome.statusSummary, trigger: "manual" };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, stages: recordStages }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {

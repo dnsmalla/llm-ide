@@ -47,3 +47,12 @@ test("native runner stops at the wall-clock budget", async () => {
   assert.equal(out.passed, false);
   assert.match(out.statusSummary, /wall-clock/);
 });
+
+test("native runner records cancellation instead of throwing", async () => {
+  const out = await runNativeLoop(cfg([stage("a", "A")]), {
+    async runStage() { throw new Error("should not run"); },
+    async repair() { throw new Error("no"); }, log() {}, isCancelled() { return true; },
+  });
+  assert.equal(out.cancelled, true);
+  assert.equal(out.passed, false);
+});
