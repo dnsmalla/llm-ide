@@ -1,6 +1,7 @@
 // Virtualised, grouped chat list. 1,000+ chats cost the same DOM as 20: only rows near the viewport render.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chip } from "@llmide/ui-kit";
+import { DELETE_CHAT_DETAIL, DELETE_CHAT_TITLE } from "./route";
 import type { SessionSummary } from "./store";
 import { groupRows, rowHeights, ITEM_HEIGHT, type SessionRowModel } from "./virtual";
 import { useVirtualList } from "./hooks";
@@ -86,6 +87,7 @@ export function SessionList(props: SessionListProps) {
                 )}
                 {renaming !== s.id && (confirming === s.id ? (
                   <span className="chat-session-actions">
+                    <span className="chat-muted" role="note">{DELETE_CHAT_TITLE} {DELETE_CHAT_DETAIL}</span>
                     <button type="button" className="chat-btn chat-danger" onClick={() => { setConfirming(null); onDelete(s.id); }}>Delete chat</button>
                     <button type="button" className="chat-btn" onClick={() => setConfirming(null)}>Keep</button>
                   </span>

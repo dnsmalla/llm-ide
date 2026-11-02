@@ -102,3 +102,5 @@
 
 .chat-dock-menu { position: absolute; top: 34px; right: 34px; z-index: 30; min-width: 210px; display: flex; flex-direction: column; gap: var(--tok-space-xs); padding: var(--tok-space-sm); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); box-shadow: none; }
 .chat-dock-menu form, .chat-dock-confirm { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.chat-progress { display: flex; align-items: center; gap: var(--tok-space-xs); flex-wrap: wrap; }
+.chat-progress progress { flex: 1 1 120px; min-width: 80px; }

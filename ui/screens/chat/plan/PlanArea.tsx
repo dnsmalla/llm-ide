@@ -17,6 +17,7 @@ export interface PlanAreaProps {
   onRefine: (title: string) => void;
   onOpenLink?: (href: string) => void;
   onCopy?: (text: string) => void;
+  onOpenFile?: (rel: string) => void;
 }
 
 export function PlanArea(p: PlanAreaProps) {
@@ -29,7 +30,7 @@ export function PlanArea(p: PlanAreaProps) {
   const plan = effectivePlan(card, st.edited);
   return (
     <PlanCardView
-      card={plan} state={st} canSave={p.plans.canSave} onOpenLink={p.onOpenLink} onCopy={p.onCopy}
+      card={plan} state={st} canSave={p.plans.canSave} onOpenLink={p.onOpenLink} onCopy={p.onCopy} onOpenFile={p.onOpenFile}
       onSave={(title, content, replace) => void p.plans.save(p.chatId, card.messageId, title, content, replace === true)}
       onRefine={p.onRefine}
       onExecute={(title, content) => {

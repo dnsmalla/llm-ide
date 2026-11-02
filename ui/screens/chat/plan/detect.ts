@@ -249,3 +249,30 @@ export function planFilePath(title: string, now: Date, existing?: string | null,
   // `-2`, `-3`, ... keep a second plan of the same title and day out of the first one's file.
   return `${PLANS_DIR}/${datePrefix(now)}-${slugify(title)}${attempt > 1 ? `-${attempt}` : ""}.md`;
 }
+
+// A draft that ASKS FOR a plan, while the picker sits in a mode that will not write one (the Mac's `PlanRequestPolicy`).
+// Conservative: only an explicit ask fires it, never the bare word ("execute the plan", "I plan to refactor").
+const ASKS_FOR_PLAN: readonly string[] = [
+  "want a plan", "need a plan", "give me a plan",
+  "make a plan", "make me a plan", "create a plan", "write a plan",
+  "write me a plan", "draft a plan", "prepare a plan", "build a plan",
+  "come up with a plan", "put together a plan", "propose a plan",
+  "plan this out", "let's plan", "lets plan",
+  // Japanese: the object marker is optional in casual typing, so both forms are covered by the stem pairs.
+  "プランを作", "プラン作", "計画を作", "計画作",
+  "計画を立て", "計画立て", "プランを立て", "プラン立て",
+  "プランが欲し", "プランがほし", "計画が欲し", "計画がほし",
+  "プランを書", "計画を書", "プランをお願い", "計画をお願い",
+];
+
+/** Whether a draft asks for a plan to be written (lowercased, whitespace-collapsed match). */
+export function asksForPlan(draft: string): boolean {
+  const text = draft.toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+  return text !== "" && ASKS_FOR_PLAN.some((phrase) => text.includes(phrase));
+}
+
+/** Offer the one-click switch: not in Auto (it re-classifies every turn itself), not already in a plan mode. */
+export function offersPlanSwitch(draft: string, mode: string): boolean {
+  if (mode === "" || mode === "auto" || PLAN_MODES.has(mode)) return false;
+  return asksForPlan(draft);
+}

@@ -31,3 +31,5 @@
 .appr-trust-list { margin: 0 0 var(--tok-space-xs); padding-left: var(--tok-space-lg); font-size: var(--tok-type-caption-size); }
 .appr-scrim { position: fixed; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--tok-color-body) 70%, transparent); z-index: 50; }
 .appr-dialog { max-width: 520px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-md); }
+.appr-trust-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tok-space-xs); }
+.appr-trust-head p { margin: 0; }

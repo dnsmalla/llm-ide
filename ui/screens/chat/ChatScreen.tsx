@@ -10,7 +10,8 @@ import { PlanArea, refineSeed } from "./plan/PlanArea";
 import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
-import { CapChip, ModePicker, ModelPicker, PermissionChip } from "./Pickers";
+import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
+import { CapChip, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
 import { SessionList } from "./SessionList";
 import { ModeBanner } from "./approvals/ModeBanner";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
@@ -19,7 +20,7 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, putRoute,
+  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute,
   type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import type { ChatState } from "./state";
@@ -100,6 +101,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const skipRev = useRef<number | null>(null);
   const bumpSessions = useCallback(() => { ui.bumpSessions(); skipRev.current = ui.getSnapshot().sessionsRev; }, [ui]);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [route, setRoute] = useState<RouteView | null>(null);
   const loadingMore = useRef(false);
@@ -135,7 +137,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // Model list once per screen.
   useEffect(() => {
     const ac = new AbortController();
-    loadModelGroups(core, ac.signal).then((r) => { setGroups(r.groups); setToolsEnabled(r.toolsEnabled); }).catch(() => undefined);
+    loadModelGroups(core, ac.signal).then((r) => { setGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
     return () => ac.abort();
   }, [core]);
 
@@ -181,6 +183,19 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [store, reportStoreError, bumpSessions]);
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
+  // The chat whose plan card started the current plan run (the Mac's PlanExecutionTracker); a new ordinary message ends it.
+  const [planRunChat, setPlanRunChat] = useState<string | null>(null);
+  // A turn ended: re-read the route so a pending model switch (and the meter) reflect what the core applied.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy && activeId && route?.enabled) {
+      const ac = new AbortController();
+      getRoute(core, activeId, ac.signal).then(setRoute).catch(() => undefined);
+      wasBusy.current = busy;
+      return () => ac.abort();
+    }
+    wasBusy.current = busy;
+  }, [busy, activeId, core, route?.enabled]);
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
   // This chat's total, summed from the loaded replies' own counts (the Mac header's "N tokens").
   const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
@@ -309,33 +324,47 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files} onRetry={() => controller.retry(activeId)}
               empty={<p className="chat-muted chat-pad">Ask anything. Mode and model are below.</p>}
             />
+            {showsPlanProgress(planRunChat, activeId, state.tasks) && <PlanProgress tasks={state.tasks} />}
             {state.tasks.length > 0 && (
               <ul className="chat-tasks" aria-label="Tasks">
                 {state.tasks.map((t) => <li key={t.id} data-status={t.status}>{t.title} <span className="chat-muted">{t.status}</span></li>)}
               </ul>
             )}
             <PlanArea
-              chatId={activeId} state={state} mode={current.mode} plans={plans} onOpenLink={host.openLink} onCopy={host.copy}
+              chatId={activeId} state={state} mode={current.mode} plans={plans} onOpenLink={host.openLink} onCopy={host.copy} onOpenFile={host.files?.open}
               onRefine={(title) => { controller.setView(activeId, { draft: refineSeed(title) }); setRefineNonce((n) => n + 1); }}
               onExecute={(turn) => {
                 setCurrent({ mode: "execute" });
+                setPlanRunChat(activeId);
                 controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission });
                 touchSession(activeId);
               }}
             />
             {approvals?.(state)}
+            {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
             <div className="chat-controls">
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
               <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain}
-                onChange={(provider, model) => { setCurrent({ provider: provider || null, model: model || null }); if (route?.enabled && provider) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }} />
+                onChange={(provider, model) => {
+                  const prev = { provider: current.provider, model: current.model };
+                  setCurrent({ provider: provider || null, model: model || null });
+                  if (!route?.enabled) return;
+                  // "Default" unpins the chat's route (provider and model both empty, as the Mac's "Not pinned"); a pick pins it.
+                  // A refused PUT puts the picker back, so it never shows a model the route does not hold.
+                  const chat = activeId;
+                  const restore = () => setPrefs((p) => (p[chat] ? { ...p, [chat]: { ...p[chat]!, ...prev } } : p));
+                  if (provider) putRoute(core, chat, { provider, model }).then(setRoute).catch(restore);
+                  else if (route.pinned) putRoute(core, chat, { provider: "", model: "" }).then(setRoute).catch(restore);
+                }} />
+              <PendingSwitchNote pending={route?.pending} />
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
             <DraftComposer
               key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId}
-              compose={host.compose} models={groups} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
+              compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              onSend={(text, extra) => { controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments }); touchSession(activeId); }}
+              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments }); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null}
             />
           </>
@@ -350,9 +379,21 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 }
 
 /** Owns the draft text locally (typing never re-renders the conversation) and saves it per chat on every change. */
-function DraftComposer({ controller, id, compose, models, setMode, setModel, clearChat, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void } & Omit<ComposerProps, "draft" | "onDraft" | "extras">) {
+function DraftComposer({ controller, id, compose, models, mode, setMode, setModel, clearChat, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; mode: string; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void } & Omit<ComposerProps, "draft" | "onDraft" | "extras">) {
   const [draft, setDraft] = useState(() => controller.getView(id).draft);
   const onDraft = (t: string) => { setDraft(t); controller.setView(id, { draft: t }); };
-  if (!compose) return <Composer {...rest} draft={draft} onDraft={onDraft} />;
-  return <ComposerWithExtras {...rest} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} />;
+  const notice = <PlanSwitchNotice draft={draft} mode={mode} onSwitch={() => setMode("plan")} />;
+  if (!compose) return <>{notice}<Composer {...rest} draft={draft} onDraft={onDraft} /></>;
+  return <>{notice}<ComposerWithExtras {...rest} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
+}
+
+/** The plan run's progress bar and counts, above the task list (the Mac's PlanExecutionCard header). */
+function PlanProgress({ tasks }: { tasks: readonly { status: string }[] }) {
+  const p = planProgress(tasks);
+  return (
+    <div className="chat-progress" role="status" aria-label="Plan progress">
+      <progress value={p.done} max={p.total || 1} aria-label="Steps done" />
+      <span className="chat-muted">Step {Math.max(p.current, 1)} of {p.total} · {p.done} done · {p.percent}%</span>
+    </div>
+  );
 }

@@ -44,6 +44,7 @@ export * from "../plan/controller";
 export * from "../plan/EditPreview";
 export * from "../plan/PlanCard";
 export * from "../plan/PlanArea";
+export * from "../plan/PlanSwitchNotice";
 export * from "../badges/Badges";
 export * from "../badges/subagents";
 export * from "../ui-state";

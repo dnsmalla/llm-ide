@@ -21,6 +21,9 @@ export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBann
   const [dialogPath, setDialogPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The Mac's dismiss (WorkspaceTrustBanner): clears THIS notice. It grants nothing; trust is still only given by the
+  // confirmed PUT. Any later notice (a new turn's, or another folder's) is a new object and shows again.
+  const [dismissed, setDismissed] = useState<WorkspaceTrustState | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
   const cancel = useRef<HTMLButtonElement | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -28,7 +31,7 @@ export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBann
   // The notice moved to another folder while the dialog was open: what the user read no longer applies.
   useEffect(() => { if (dialogPath !== null && trust?.path !== dialogPath) { setDialogPath(null); setError(null); } }, [trust?.path, dialogPath]);
   useEffect(() => { if (dialogPath !== null) cancel.current?.focus(); else opener.current?.focus(); }, [dialogPath]);
-  if (!trust) return null;
+  if (!trust || dismissed === trust) return null;
   const held = withheld(trust);
   const conf = confirmationText(trust);
 
@@ -57,7 +60,10 @@ export function TrustBanner({ trust, core, onTrusted, nativeConfirm }: TrustBann
 
   return (
     <div className="appr-trust" role="status" data-kind={held.length ? "withheld" : "info"}>
-      <p>{bannerText(trust)}</p>
+      <div className="appr-trust-head">
+        <p>{bannerText(trust)}</p>
+        <button type="button" className="chat-link-btn" aria-label="Dismiss folder trust notice" title="Dismiss" onClick={() => { setDialogPath(null); setDismissed(trust); }}>Dismiss</button>
+      </div>
       {trust.skipped.length > 0 && (
         <ul className="appr-trust-list" aria-label="What was not loaded">
           {trust.skipped.slice(0, 8).map((s, i) => <li key={i}>{kindText(s.kind)}: {sanitizeText(s.name, 80).text}</li>)}

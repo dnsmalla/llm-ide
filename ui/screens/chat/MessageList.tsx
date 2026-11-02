@@ -1,7 +1,7 @@
 // Virtualised message list: only the messages near the viewport are in the DOM. Follows a running stream
 // while the user is at the bottom, pages older history in near the top (keeping the scroll position).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { MessageView, type MessageHost } from "./MessageView";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MessageView, type CollapseProps, type MessageHost } from "./MessageView";
 import type { Message } from "./state";
 import { prependScrollAdjust, shouldLoadOlder, showJumpToLatest } from "./virtual";
 import { useVirtualList } from "./hooks";
@@ -19,7 +19,7 @@ interface Props extends MessageHost {
   empty?: React.ReactNode;
 }
 
-function Row({ index, message, host, measure }: { index: number; message: Message; host: MessageHost; measure: (i: number, h: number) => void }) {
+function Row({ index, message, host, measure, collapsed, collapsible, onToggle }: { index: number; message: Message; host: MessageHost; measure: (i: number, h: number) => void } & CollapseProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -30,7 +30,7 @@ function Row({ index, message, host, measure }: { index: number; message: Messag
     ro.observe(el);
     return () => ro.disconnect();
   }, [index, measure]);
-  return <div ref={ref} role="listitem" className="chat-row"><MessageView m={message} host={host} /></div>;
+  return <div ref={ref} role="listitem" className="chat-row"><MessageView m={message} host={host} collapsed={collapsed} collapsible={collapsible} onToggle={onToggle} /></div>;
 }
 
 /** The Mac's "Jump to latest" (ChatMessageList: `!isPinnedToBottom, engine.busy`): only while a reply is still
@@ -48,6 +48,15 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
   const firstId = useRef<string | null>(null);
   const lastCount = useRef(0);
   const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy, files }), [onOpenLink, onCopy, files]);
+  // The Mac folds every assistant reply except the latest into a preview; the reader expands the ones they want.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const lastAssistantId = useMemo(() => { for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === "assistant") return messages[i]!.id; return null; }, [messages]);
+  const setExpandedId = useCallback((id: string, on: boolean) => setExpanded((prev) => {
+    if (prev.has(id) === on) return prev;
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  }), []);
 
   // Report position upward (per-chat scroll memory) and track "following the stream".
   useEffect(() => {
@@ -99,7 +108,9 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
         {hasMoreOlder && <p className="chat-muted chat-older" role="status">Loading earlier messages…</p>}
         <div role="list" className="chat-list" style={{ paddingTop: range.padTop, paddingBottom: range.padBottom }}>
           {messages.slice(range.start, range.end).map((m, k) => (
-            <Row key={m.id} index={range.start + k} message={m} host={host} measure={measure} />
+            <Row key={m.id} index={range.start + k} message={m} host={host} measure={measure}
+              collapsed={m.role === "assistant" && m.id !== lastAssistantId && !expanded.has(m.id)}
+              collapsible={m.role === "assistant" && m.id !== lastAssistantId} onToggle={setExpandedId} />
           ))}
         </div>
         {away && <button type="button" className="chat-jump" onClick={jumpToLatest}>Jump to latest</button>}

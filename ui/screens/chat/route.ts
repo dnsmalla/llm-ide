@@ -120,6 +120,26 @@ export function coldSwitchWarning(estimatedTokens: number): string {
   return `Switching loses the prompt cache: the next turn pays ${n} to catch up. The conversation itself is kept.`;
 }
 export const CAP_APPROXIMATION_NOTE = "The limit is approximate to one reply.";
+/** The Mac's "Counted:" sentence under the meter (ChatRouteControl.meterBlock): what the cap meter counts. */
+export const CAP_COUNTED_NOTE = "Counted: input + output + cache writes. Cached reads are shown, not counted.";
+/** Shown when a limit is saved but the server runs without the cap switch (ChatRouteControl.meterBlock). */
+export const CAP_NOT_ENFORCED = "The limit is saved but not enforced: the server runs without the cap switch.";
+
+/** The Mac's hint bar (ChatComposer.agentV2ProviderHintBar) when the composer's provider can no longer run a chat. */
+export const PROVIDER_BLOCKED_NOTE = "Chat runs on Claude, a custom provider with an Anthropic-compatible URL, or a catalog model through the session router. This provider cannot run a chat any more: pick another model, or connect it in Settings, Providers.";
+
+/**
+ * True when a chosen provider is one this client can no longer chat with: not Claude, and not offered by any loaded
+ * group (a group that failed to list its models counts as offered, so an outage is not reported as a blocked provider).
+ */
+export function providerCannotChat(provider: string | null | undefined, groups: readonly ModelGroup[]): boolean {
+  if (!provider || provider === "anthropic") return false;
+  return !groups.some((g) => g.note !== undefined || g.models.some((m) => m.provider === provider));
+}
+
+/** The Mac's delete-chat confirmation (ChatSessionHeader.swift): the title and the sentence under it. */
+export const DELETE_CHAT_TITLE = "Delete this chat?";
+export const DELETE_CHAT_DETAIL = "The conversation and its memory are removed. This cannot be undone.";
 
 // --- HTTP wrappers --------------------------------------------------------------------------
 
@@ -134,6 +154,8 @@ export interface RouteView {
   used: { in: number; out: number; cacheWrite: number; cacheRead: number; billable: number };
   remaining: number | null;
   switchSeq: number;
+  /** A switch saved while a turn runs; it applies at that turn's end (`appliesAt: "next_turn"`). */
+  pending?: { provider: string; model: string; pinnedBy?: string; requestedAt?: string } | null;
 }
 
 export async function getRoute(core: CoreTransport, chatSessionId: string, signal?: AbortSignal): Promise<RouteView> {
@@ -192,4 +214,24 @@ export async function loadModelGroups(core: CoreTransport, signal?: AbortSignal)
     if (signal?.aborted) throw e; // catalog unavailable: Claude only
   }
   return { groups, toolsEnabled };
+}
+
+/**
+ * Whether the progress header shows: only during a plan run started from this chat's plan card (the Mac's
+ * PlanExecutionCard rides a PlanExecutionTracker), never for an ordinary turn's task list. Pure.
+ */
+export function showsPlanProgress(planRunChatId: string | null, activeId: string | null, tasks: readonly unknown[]): boolean {
+  return planRunChatId !== null && planRunChatId === activeId && tasks.length > 0;
+}
+
+/**
+ * The plan run's progress from its task list (the Mac's PlanExecutionCard): "Step n of N", how many steps are done
+ * (completed or skipped), and the percentage. Pure.
+ */
+export function planProgress(tasks: readonly { status: string }[]): { total: number; done: number; current: number; percent: number } {
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === "completed" || t.status === "skipped").length;
+  const running = tasks.some((t) => t.status === "in_progress") ? 1 : 0;
+  const current = Math.min(done + running, total);
+  return { total, done, current, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
 }

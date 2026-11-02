@@ -18,6 +18,25 @@ export interface PlanCardProps {
   onRefine: (title: string) => void;
   onOpenLink?: (href: string) => void;
   onCopy?: (text: string) => void;
+  /** Opens a project-relative file in Explorer (the saved plan). Absent = no open control. */
+  onOpenFile?: (rel: string) => void;
+}
+
+/** The plan body in the editor: Preview renders it (the Mac's default); Markdown is the editable text that gets saved. */
+export function PlanEditBody({ body, onBody, onOpenLink, onCopy }: { body: string; onBody: (text: string) => void; onOpenLink?: (href: string) => void; onCopy?: (text: string) => void }) {
+  const [preview, setPreview] = useState(true);
+  return (
+    <>
+      <div className="chat-plan-mode" role="group" aria-label="Plan view">
+        <span className="chat-muted">{preview ? "Plan" : "Plan (Markdown, editable)"}</span>
+        <button type="button" className="chat-btn" aria-pressed={preview} onClick={() => setPreview(true)} title="Preview renders the plan; Markdown shows the exact text that gets saved.">Preview</button>
+        <button type="button" className="chat-btn" aria-pressed={!preview} onClick={() => setPreview(false)}>Markdown</button>
+      </div>
+      {preview
+        ? <div className="chat-plan-body" aria-label="Plan preview"><Markdown text={body} onOpenLink={onOpenLink} onCopy={onCopy} /></div>
+        : <textarea id="plan-body" aria-label="Plan (Markdown, editable)" className="chat-textarea" rows={14} value={body} onChange={(e) => onBody(e.target.value)} />}
+    </>
+  );
 }
 
 export function PlanCardView(p: PlanCardProps) {
@@ -37,6 +56,9 @@ export function PlanCardView(p: PlanCardProps) {
         <strong>{heading}</strong>
         <span className="chat-muted">{nSteps > 0 ? `${nSteps} step${nSteps === 1 ? "" : "s"}` : "no numbered steps"}</span>
         {saved && <span className="chat-muted" role="status">Saved to {saved}</span>}
+        {saved && p.onOpenFile && !p.state.executed && (
+          <button type="button" className="chat-link-btn" aria-label="Open the saved plan file" title="Open the saved plan file" onClick={() => p.onOpenFile!(saved)}>Open</button>
+        )}
         {p.state.executed && <span className="chat-muted" role="status">Executing</span>}
       </header>
       {!editing && (
@@ -53,8 +75,7 @@ export function PlanCardView(p: PlanCardProps) {
         <div role="group" aria-label="Edit plan" className="chat-plan-edit">
           <label className="chat-muted" htmlFor="plan-title">Title</label>
           <input id="plan-title" className="chat-input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
-          <label className="chat-muted" htmlFor="plan-body">Plan</label>
-          <textarea id="plan-body" className="chat-textarea" rows={14} value={body} onChange={(e) => setBody(e.target.value)} />
+          <PlanEditBody body={body} onBody={setBody} onOpenLink={p.onOpenLink} onCopy={p.onCopy} />
           <div className="chat-plan-actions">
             <button type="button" className="chat-btn chat-primary" disabled={saving || !p.canSave || body.trim() === ""} onClick={() => { p.onSave(title.trim() || p.card.title, body, true); setEditing(false); }}>Save edits</button>
             <button type="button" className="chat-btn" onClick={() => { setEditing(false); setBody(p.card.content); setTitle(p.card.title); }}>Cancel</button>

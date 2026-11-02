@@ -2,7 +2,7 @@
 // and screen-reader complete; the cap popover is a labelled dialog region.
 import { useState } from "react";
 import {
-  CAP_APPROXIMATION_NOTE, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
+  CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
   meterText, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
@@ -28,7 +28,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
     <div className="chat-pick">
       <label>
         <span className="chat-pick-label">Model</span>
-        <select aria-label="Model" value={value} disabled={loading} onChange={(e) => { const [p, ...m] = e.target.value.split("|"); if (p) onChange(p, m.join("|")); }}>
+        <select aria-label="Model" value={value} disabled={loading} onChange={(e) => { const [p, ...m] = e.target.value.split("|"); if (p) onChange(p, m.join("|")); else onChange("", ""); }}>
           <option value="">Default</option>
           {groups.map((g) => (
             <optgroup key={g.id} label={g.label}>
@@ -47,6 +47,12 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
   );
 }
 
+/** "Applies to your next message: X" under the model picker (the Mac's pending-switch line). */
+export function PendingSwitchNote({ pending }: { pending: { model: string } | null | undefined }) {
+  if (!pending) return null;
+  return <span className="chat-note" role="status">Applies to your next message: {pending.model || "Not pinned"}</span>;
+}
+
 export function PermissionChip({ value, onChange }: { value: PermissionMode; onChange: (m: PermissionMode) => void }) {
   const shown = PERMISSION_MODES.find((m) => m.id === value);
   return (
@@ -56,6 +62,17 @@ export function PermissionChip({ value, onChange }: { value: PermissionMode; onC
         {PERMISSION_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select>
     </label>
+  );
+}
+
+/** What the cap meter counts, and that the limit is approximate. The Mac shows the same sentence in its popover. */
+export function CapNotes({ used, tokenLimit, capEnforced }: { used: number; tokenLimit?: number | null; capEnforced?: boolean }) {
+  return (
+    <>
+      <p className="chat-muted">Billable tokens used: {compactTokens(used)}.</p>
+      <p className="chat-muted">{CAP_COUNTED_NOTE} {CAP_APPROXIMATION_NOTE}</p>
+      {tokenLimit != null && capEnforced === false && <p className="chat-note" role="note">{CAP_NOT_ENFORCED}</p>}
+    </>
   );
 }
 
@@ -85,7 +102,7 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
       </button>
       {open && (
         <div role="dialog" aria-label="Session token limit" className="chat-popover">
-          <p className="chat-muted">{CAP_APPROXIMATION_NOTE} Billable tokens used: {compactTokens(used)}.</p>
+          <CapNotes used={used} tokenLimit={route.tokenLimit} capEnforced={route.capEnforced} />
           <div className="chat-presets" role="group" aria-label="Limit presets">
             {CAP_PRESETS.map((p) => <button key={p} type="button" className="chat-btn" onClick={() => void apply(p)}>{compactTokens(p)}</button>)}
             <button type="button" className="chat-btn" onClick={() => void apply(null)}>No limit</button>

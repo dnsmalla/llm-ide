@@ -25,6 +25,12 @@ export interface ComposerProps {
 /** Longest message the composer accepts (the server caps a turn near 500k characters). */
 export const MAX_MESSAGE_CHARS = 120_000;
 
+/** The Mac's send-key glyph (ChatComposer.keyHint): the tooltip says what Return and Shift+Return do. */
+export const KEY_HINT = "\u21B5 sends \u00B7 \u21E7\u21B5 for a new line";
+export function KeyHint() {
+  return <span className="chat-muted" role="img" aria-label={KEY_HINT} title={KEY_HINT}>{"\u21B5"}</span>;
+}
+
 export function nextRecall(history: readonly string[], cursor: number | null, dir: "up" | "down"): { cursor: number | null; text: string | null } {
   if (history.length === 0) return { cursor, text: null };
   if (dir === "up") {
@@ -141,6 +147,7 @@ export function Composer(p: ComposerProps) {
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
         {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
+        <KeyHint />
         {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>
       </div>

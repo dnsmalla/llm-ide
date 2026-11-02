@@ -4,7 +4,7 @@ import { editPreviewFor } from "./plan/EditPreview";
 import { memo, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
-import type { AssistantMessage, Message, Notice, TextPart, ToolPart } from "./state";
+import { textOf, type AssistantMessage, type Message, type Notice, type TextPart, type ToolPart } from "./state";
 import { billableTokens, compactTokenCount, usageTooltip } from "./usage";
 
 export interface FileRefs {
@@ -133,29 +133,61 @@ function NoticeLine({ n }: { n: Notice }) {
   return <StatusBanner severity={n.level === "error" ? "error" : n.level === "warning" ? "warning" : "info"} message={text} />;
 }
 
-function Assistant({ m, host }: { m: AssistantMessage; host: MessageHost }) {
+/** The Mac's collapsed-reply preview (MarkdownRenderer.plainTextPreview): links to text, structural marks dropped,
+ *  whitespace collapsed, at most 160 characters. Plain text only; React escapes it. */
+export function replyPreview(markdown: string, limit = 160): string {
+  const s = markdown
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`#*_>~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s.length > limit ? `${s.slice(0, limit)}\u2026` : s;
+}
+
+function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: AssistantMessage; host: MessageHost } & CollapseProps) {
   const live = m.status === "streaming";
   const lastIdx = m.parts.length - 1;
-  const text = m.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("").trim();
+  const text = m.parts.map((p) => (p.kind === "text" ? textOf(p) : "")).join("").trim();
+  // The Mac folds only the reply text: tool steps, notices and the stopped/failed status stay visible, and a reply
+  // with no text (or one still streaming) is never folded.
+  const fold = collapsed === true && !live && text !== "";
   return (
-    <article className="chat-msg chat-assistant" aria-label="Assistant message" aria-busy={live}>
+    <article className="chat-msg chat-assistant" aria-label={fold ? "Assistant message (collapsed)" : "Assistant message"} aria-busy={live}>
       <span className="chat-role">llm-agent</span>
       {host.onCopy && text && !live ? <button type="button" className="chat-copy" onClick={() => host.onCopy!(text)} aria-label="Copy the reply">Copy</button> : null}
       <div className="chat-assistant-body">
-        {m.parts.map((p, i) => p.kind === "text"
-          ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
-          : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
+        {fold
+          ? <>
+              {m.parts.map((p, i) => p.kind === "tool" ? <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} /> : null)}
+              <button type="button" className="chat-collapsed" title="Show full reply" aria-label="Show full reply" aria-expanded={false} onClick={() => onToggle?.(m.id, true)}>
+                <span className="chat-muted">{replyPreview(text)}</span>
+                <span aria-hidden="true" className="chat-muted"> {"\u25BE"}</span>
+              </button>
+            </>
+          : m.parts.map((p, i) => p.kind === "text"
+            ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
+            : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
         {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
         {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
         {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
         {m.usage && !live && <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens</p>}
+        {collapsible && onToggle && !fold && !live && <button type="button" className="chat-link-btn" aria-expanded={true} aria-label="Collapse this reply" onClick={() => onToggle(m.id, false)}>Collapse</button>}
       </div>
     </article>
   );
 }
 
-export const MessageView = memo(function MessageView({ m, host }: { m: Message; host: MessageHost }) {
+export interface CollapseProps {
+  /** An older assistant reply the reader has not expanded: shown as a one-line preview. */
+  collapsed?: boolean;
+  /** An older reply (not the latest): an expanded one offers Collapse. */
+  collapsible?: boolean;
+  /** Stable across renders (the row stays memoised while another message streams): expand or fold reply `id`. */
+  onToggle?: (id: string, expand: boolean) => void;
+}
+
+export const MessageView = memo(function MessageView({ m, host, collapsed, collapsible, onToggle }: { m: Message; host: MessageHost } & CollapseProps) {
   if (m.role === "user") {
     // The Mac labels each turn and right-aligns the user's message in a narrow accent bubble.
     return (
@@ -168,5 +200,5 @@ export const MessageView = memo(function MessageView({ m, host }: { m: Message; 
       </article>
     );
   }
-  return <Assistant m={m} host={host} />;
+  return <Assistant m={m} host={host} collapsed={collapsed} collapsible={collapsible} onToggle={onToggle} />;
 });

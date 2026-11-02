@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Icon } from "@llmide/ui-kit";
 import { CapChip } from "./Pickers";
-import type { RouteView } from "./route";
+import { DELETE_CHAT_DETAIL, DELETE_CHAT_TITLE, type RouteView } from "./route";
 import type { SessionSummary } from "./store";
 
 /** The history menu lists at most this many chats (the screen loads 100 at a time; a dock needs the recent ones). */
@@ -68,7 +68,7 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
             </form>
           ) : confirm && onDelete ? (
             <div className="chat-dock-confirm">
-              <span>Delete this chat?</span>
+              <span>{DELETE_CHAT_TITLE} <span className="chat-muted">{DELETE_CHAT_DETAIL}</span></span>
               <button type="button" className="chat-btn chat-danger" onClick={() => { onDelete(); setConfirm(false); setActions(false); }}>Delete chat</button>
               <button type="button" className="chat-btn" onClick={() => setConfirm(false)}>Keep</button>
             </div>
