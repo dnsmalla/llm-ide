@@ -2,10 +2,21 @@
 // RepoIssueDetailSheet, read side). For GitHub issues it also shows the schedule overlay's dates and edits them with
 // the Gantt's ScheduleEditor. Writes (comment, close) stay Mac-only until the core has provider write routes.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { issueNumber, openedAgo, type Issue } from "./issues-model.ts";
+import { formatDueDate, issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
 import { issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
+import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
 import "./issues.css";
+
+/** The saved GitLab base's origin (Settings -> Repositories), the only origin a GitLab issue link may open on. */
+export function gitlabOriginFromConfig(): string | null {
+  try {
+    const u = new URL(normalizeBase(readRepoConfig().gitlabBaseUrl));
+    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface IssueDetailDeps {
   request: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => Promise<{ status: number; body: unknown }>;
@@ -43,9 +54,10 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const openUrl = issueOpenUrl(issue, gitlabOriginFromConfig());
   const openLink = () => {
-    if (!issue.url) return;
-    void deps.openExternal(issue.url).catch(() => onNotice("That issue's link could not be opened."));
+    if (!openUrl) return;
+    void deps.openExternal(openUrl).catch(() => onNotice("That issue's link could not be opened."));
   };
   const ago = openedAgo(issue.createdAt);
 
@@ -63,6 +75,10 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
           <button type="button" className="iss-btn" onClick={onClose}>Close</button>
         </header>
         {issue.labels.length ? <div className="iss-labels">{issue.labels.map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
+        {issue.milestone ? (
+          <p className="iss-hint">Milestone: {issue.milestone.title}{formatDueDate(issue.milestone.dueOn) ? ` · due ${formatDueDate(issue.milestone.dueOn)}` : ""}</p>
+        ) : null}
+        {issue.assignees.length ? <p className="iss-hint">Assigned to {issue.assignees.join(", ")}</p> : null}
         <pre className="iss-body">{issue.body || "No description."}</pre>
 
         {schedulable ? (
@@ -95,7 +111,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
         ) : null}
 
         <div className="iss-detail-actions">
-          <button type="button" className="iss-btn iss-primary" disabled={!issue.url} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
+          <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
           <button type="button" className="iss-btn" disabled title="Creating, commenting and closing are Mac-only until the core has provider write routes">Comment</button>
           <button type="button" className="iss-btn" disabled title="Closing is Mac-only until the core has provider write routes">Close issue</button>
         </div>

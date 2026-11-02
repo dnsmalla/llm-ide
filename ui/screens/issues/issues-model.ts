@@ -3,6 +3,12 @@
 // applied here so the desktop board cannot invent a different shape from the same rows.
 //
 // Pure: decode and group only. No fetch and no DOM, so the model is tested with node.
+export interface IssueMilestone {
+  title: string;
+  /** The milestone's due day as the core sent it (ISO 8601), or null. */
+  dueOn: string | null;
+}
+
 export interface Issue {
   id: string;
   title: string;
@@ -17,6 +23,9 @@ export interface Issue {
   createdAt: string | null;
   updatedAt: string | null;
   isPR: boolean;
+  milestone: IssueMilestone | null;
+  /** Assignee logins, plain text; never a link. */
+  assignees: string[];
 }
 
 export interface IssueFilters {
@@ -33,19 +42,24 @@ export interface IssueFilters {
   query: string;
 }
 
-export const MAX_ISSUES = 500;
-/** The core caps `GET /kb/issues` at this many rows whatever `limit` asks for (routes/router.mjs). */
+/** The core caps `GET /kb/issues` at this many rows a page whatever `limit` asks for (routes/router.mjs). */
 export const CORE_LIST_CAP = 100;
-/** True when a list read came back at the core's cap, so the screen can say the list may be incomplete. */
-export const isCapped = (count: number): boolean => count >= CORE_LIST_CAP;
+/** The Mac's page budget per project (GanttViewModel maxIssuePages). */
+export const MAX_PAGES = 20;
+/** Most issues one list walk keeps: the page budget times the page size. */
+export const MAX_LOADED = MAX_PAGES * CORE_LIST_CAP;
+export const MAX_ISSUES = MAX_LOADED;
 const MAX_LABELS = 20;
+const MAX_ASSIGNEES = 50;
 const MAX_TEXT = 2000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const text = (v: unknown, max = 400): string => (typeof v === "string" ? v.slice(0, max) : "");
 
 function httpUrl(v: unknown): string {
-  const t = text(v, 2048);
+  // An over-long URL is dropped, not cut: a truncated link would open a different page.
+  if (typeof v !== "string" || v.length > 2048) return "";
+  const t = v;
   if (!t) return "";
   try {
     const u = new URL(t);
@@ -55,8 +69,17 @@ function httpUrl(v: unknown): string {
   }
 }
 
-/** `{ issues: [...] }`; malformed rows are dropped, labels bounded, URLs restricted to http(s). */
-export function decodeIssues(body: unknown): Issue[] {
+const validDate = (v: unknown): string | null => {
+  const t = text(v, 40);
+  // ISO 8601 only: Date.parse alone accepts strings like "1" (year 2001).
+  return t && /^\d{4}-\d{2}-\d{2}/.test(t) && Number.isFinite(Date.parse(t)) ? t : null;
+};
+
+/**
+ * `{ issues: [...] }`; malformed rows are dropped, labels and assignees bounded, URLs restricted to http(s). A row
+ * with neither id nor number is keyed by its position in the walk (`base` is the page's offset), so pages never collide.
+ */
+export function decodeIssues(body: unknown, base = 0): Issue[] {
   const list = isRecord(body) && Array.isArray(body.issues) ? body.issues : [];
   const out: Issue[] = [];
   for (const row of list) {
@@ -68,8 +91,12 @@ export function decodeIssues(body: unknown): Issue[] {
     const labels = Array.isArray(row.labels)
       ? row.labels.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => l.slice(0, 80)).slice(0, MAX_LABELS)
       : [];
+    const ms = isRecord(row.milestone) ? text(row.milestone.title, 200) : "";
+    const assignees = Array.isArray(row.assignees)
+      ? row.assignees.filter((a): a is string => typeof a === "string" && a.trim() !== "").map((a) => a.slice(0, 120)).slice(0, MAX_ASSIGNEES)
+      : [];
     out.push({
-      id: text(row.id, 200) || String(row.number ?? out.length),
+      id: text(row.id, 200) || String(row.number ?? `row-${base + out.length}`),
       title,
       body: text(row.body, MAX_TEXT),
       url: httpUrl(row.url),
@@ -82,6 +109,8 @@ export function decodeIssues(body: unknown): Issue[] {
       createdAt: text(row.createdAt, 40) || null,
       updatedAt: text(row.updatedAt, 40) || null,
       isPR: row.isPR === true,
+      milestone: ms ? { title: ms, dueOn: isRecord(row.milestone) ? validDate(row.milestone.dueOn) : null } : null,
+      assignees,
     });
     if (out.length >= MAX_ISSUES) break;
   }
@@ -198,7 +227,7 @@ export function issueNumber(i: Issue): string {
   return i.number !== null ? `#${i.number}` : "";
 }
 
-/** The number of rows the core returned, before any row is dropped for lacking a title. The "first N only" hint uses this. */
+/** The number of rows the core returned, before any row is dropped for lacking a title. Paging advances by this. */
 export function rawIssueCount(body: unknown): number {
   return isRecord(body) && Array.isArray(body.issues) ? body.issues.length : 0;
 }
@@ -253,4 +282,40 @@ export function openedAgo(iso: string | null, now: Date = new Date()): string {
     : days < 365 ? [Math.floor(days / 30), "month"]
     : [Math.floor(days / 365), "year"];
   return rtf.format(sign * n, unit);
+}
+
+/**
+ * The URL behind "Open on GitHub/GitLab": the core's stored issue URL only when its origin (scheme, host, port) is
+ * exactly https://github.com (GitHub; the Mac and the core importer support no other GitHub host) or the saved
+ * GitLab base's origin (the user's own server, which may be http or a private address), with no credentials.
+ * "" otherwise, and the button stays disabled.
+ */
+export function issueOpenUrl(issue: Pick<Issue, "url" | "provider">, gitlabOrigin: string | null): string {
+  if (!issue.url) return "";
+  let u: URL;
+  try {
+    u = new URL(issue.url);
+  } catch {
+    return "";
+  }
+  const expected = issue.provider === "gitlab" ? gitlabOrigin : "https://github.com";
+  if (!expected || u.username || u.password || u.origin !== expected) return "";
+  return u.toString();
+}
+
+/** A milestone's due day in the Mac's short form (`Nov 30, 2026`), local calendar; "" when absent or malformed. */
+export function formatDueDate(iso: string | null): string {
+  if (!iso) return "";
+  // A bare day is a local calendar day (the Mac's parseDateOnly), not UTC midnight, so it never shows a day early.
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(Date.parse(iso));
+  if (!Number.isFinite(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(d);
+}
+
+/** The card's assignee line: the first three logins, then how many more. Plain text. */
+export function assigneeSummary(logins: readonly string[], shown = 3): string {
+  const head = logins.slice(0, shown).join(", ");
+  const more = logins.length - shown;
+  return more > 0 ? `${head} +${more}` : head;
 }

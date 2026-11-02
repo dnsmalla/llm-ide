@@ -2,23 +2,21 @@
 // over the core's cached tickets. Creating, editing and closing issues needs the provider write clients the Mac app
 // has; the desktop core has no such routes yet, and the card says so rather than showing dead buttons.
 import { shellBus } from "../shell/bus";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import {
-  CORE_LIST_CAP,
+  assigneeSummary,
   columnsFor,
-  decodeIssues,
   filterIssues,
-  isCapped,
   issueNumber,
   labelOptions,
-  rawIssueCount,
   repoOptions,
   repoSlug,
   type Issue,
   type IssueFilters,
 } from "./issues-model.ts";
+import { issuesLoadError, loadIssuePages, pagingNote, type PagingProgress, type PagingResult } from "./issue-paging.ts";
 import "./issues.css";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { IssueDetail, type IssueDetailDeps } from "./IssueDetail.tsx";
@@ -46,8 +44,11 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
-  // The core's row count before any title-less row is dropped; the "First N only" hint is about the core's cap.
-  const [rawCount, setRawCount] = useState(0);
+  // The last finished walk (its total and stop reason drive the count note) and the walk in flight.
+  const [paging, setPaging] = useState<PagingResult | null>(null);
+  const [progress, setProgress] = useState<PagingProgress | null>(null);
+  // Each load aborts the one before it: a page of a superseded load is never applied (the sequence guard).
+  const abortRef = useRef<AbortController | null>(null);
   const configuredRepos = useMemo(() => {
     const c = readRepoConfig();
     return [
@@ -57,24 +58,31 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   }, []);
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setPhase("loading");
     setError(null);
-    try {
-      const qs = new URLSearchParams({ provider: filters.provider, state: filters.state, limit: String(CORE_LIST_CAP) });
-      const r = await deps.request("GET", `/kb/issues?${qs.toString()}`);
-      if (r.status !== 200) {
-        setPhase("error");
-        setError(r.status === 401 ? "Sign in again to read issues." : `The core could not list issues (${r.status}).`);
-        return;
-      }
-      setRows(decodeIssues(r.body));
-      setRawCount(rawIssueCount(r.body));
-      setPhase("ready");
-    } catch {
+    setProgress(null);
+    const r = await loadIssuePages(deps.request, { provider: filters.provider, state: filters.state }, {
+      signal: ctrl.signal,
+      onProgress: (p) => { if (!ctrl.signal.aborted) setProgress(p); },
+    });
+    if (ctrl.signal.aborted) return;
+    if (r.stop === "error" && r.issues.length === 0) {
       setPhase("error");
-      setError("The core is not reachable right now.");
+      setError(issuesLoadError(r));
+      // The previous walk's count note must not sit next to this failure.
+      setPaging(null);
+      return;
     }
+    setRows(r.issues);
+    setPaging(r);
+    setError(issuesLoadError(r));
+    setPhase("ready");
   }, [deps, filters.provider, filters.state]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     if (active) void load();
@@ -109,6 +117,9 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     }
   };
 
+  const pageNote = phase === "loading"
+    ? pagingNote({ stop: null, loaded: progress?.loaded ?? 0, total: progress?.total ?? null })
+    : paging ? pagingNote({ stop: paging.stop, loaded: paging.issues.length, total: paging.total }) : "";
   const visible = useMemo(() => filterIssues(rows, filters), [rows, filters]);
   const columns = useMemo(() => columnsFor(visible), [visible]);
   const repos = useMemo(() => repoOptions(rows), [rows]);
@@ -174,7 +185,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           </select>
         </label>
         <span className="iss-count" role="status">{visible.length.toLocaleString("en")} issue{visible.length === 1 ? "" : "s"}</span>
-        {isCapped(rawCount) ? <span className="iss-hint" title="The core returns at most this many issues per list">First {CORE_LIST_CAP} only</span> : null}
+        {pageNote ? <span className="iss-hint" role="status">{pageNote}</span> : null}
       </div>
 
       {importOpen ? (
@@ -229,6 +240,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
                       <span>{i.state}</span>
                     </div>
                     {i.labels.length ? <div className="iss-labels">{i.labels.slice(0, 4).map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
+                    {i.assignees.length ? <div className="iss-meta"><span title="Assignees">{assigneeSummary(i.assignees)}</span></div> : null}
                   </li>
                 ))}
               </ul>

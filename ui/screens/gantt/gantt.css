@@ -6,7 +6,7 @@
 .gnt-check { display: flex; align-items: center; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gnt-zoom { display: flex; gap: 2px; }
 .gnt-zbtn { padding: var(--tok-space-xs) var(--tok-space-sm); border: 1px solid var(--tok-color-border); background: var(--tok-color-surface); color: var(--tok-color-text-muted); font: inherit; cursor: pointer; }
-.gnt-zbtn[aria-selected="true"] { background: var(--tok-color-surface-2); color: var(--tok-color-text); }
+.gnt-zbtn[aria-selected="true"] { background: var(--tok-color-surface2); color: var(--tok-color-text); }
 .gnt-btn { padding: var(--tok-space-xs) var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; cursor: pointer; }
 .gnt-primary { background: var(--tok-color-accent); border-color: var(--tok-color-accent); color: var(--tok-color-body); }
 .gnt-hint { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
@@ -15,16 +15,17 @@
 .gnt-labels { flex: none; width: var(--gnt-label, 240px); border-right: 1px solid var(--tok-color-border); display: flex; flex-direction: column; }
 .gnt-labels-head { height: 28px; flex: none; display: flex; align-items: center; padding: 0 var(--tok-space-sm); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--tok-color-border); }
 .gnt-rowlabel { flex: none; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 var(--tok-space-sm); border: 0; border-bottom: 1px solid var(--tok-color-border); background: none; color: var(--tok-color-text); font: inherit; text-align: left; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.gnt-rowlabel[data-on] { background: var(--tok-color-surface-2); }
+.gnt-rowlabel[data-on] { background: var(--tok-color-surface2); }
 .gnt-num { color: var(--tok-color-text-muted); font-family: var(--tok-type-mono-family); }
 .gnt-scroll { flex: 1; overflow: auto; }
 .gnt-timeline { position: relative; min-width: 100%; }
 .gnt-header { display: flex; height: 28px; border-bottom: 1px solid var(--tok-color-border); }
 .gnt-day { flex: none; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--tok-color-text-muted); border-right: 1px solid var(--tok-color-border); }
-.gnt-day[data-weekend], .gnt-grid[data-weekend] { background: var(--tok-color-surface-2); }
+.gnt-day[data-weekend] { background: var(--tok-color-surface2); }
 .gnt-day[data-today] { color: var(--tok-color-accent); font-weight: 700; }
-.gnt-track { position: relative; height: 30px; border-bottom: 1px solid var(--tok-color-border); display: flex; }
-.gnt-grid { flex: none; height: 100%; border-right: 1px solid var(--tok-color-border); }
+.gnt-track { position: absolute; left: 0; right: 0; height: 30px; border-bottom: 1px solid var(--tok-color-border); display: flex; }
+/* The day grid: one background layer for the whole body (weekend columns and rules, see GanttChart.dayGridBackground). */
+.gnt-gridlayer { position: absolute; left: 0; z-index: 0; pointer-events: none; }
 .gnt-bar { position: absolute; top: 4px; height: 22px; border: 0; border-radius: var(--tok-radius-sm); background: var(--tok-color-accent); color: var(--tok-color-body); font: inherit; font-size: 11px; text-align: left; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
 .gnt-bar[data-selected] { outline: 2px solid var(--tok-color-text); }
 .gnt-dep { margin-right: 4px; }
@@ -44,14 +45,14 @@
 .gnt-empty-dates { margin: 0 0 var(--tok-space-sm); }
 .gnt-grow { flex: 1; min-width: 160px; }
 .gnt-legend { display: flex; gap: var(--tok-space-md); align-items: center; flex-wrap: wrap; padding: var(--tok-space-xs) var(--tok-space-lg); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
-.gnt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tok-color-accent); z-index: 3; pointer-events: none; }
+.gnt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tok-color-accent); z-index: 5; pointer-events: none; }
 .gnt-timeline { position: relative; }
 
 /* Mac-style issues list beside the timeline. */
 .gnt-labels { width: 340px; }
 .gnt-labels-head { justify-content: space-between; height: 32px; }
 .gnt-count { margin-left: auto; }
-.gnt-rowlabel { height: 44px; align-items: flex-start; padding: 5px 10px; }
+.gnt-rowlabel { position: absolute; left: 0; right: 0; height: 44px; align-items: flex-start; padding: 5px 10px; }
 .gnt-rowtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; white-space: normal; font-size: 12px; }
 .gnt-status { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--tok-color-border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px; }
 .gnt-status[data-state="closed"] { background: #2e7d4f; border-color: #2e7d4f; color: #fff; }
@@ -66,6 +67,8 @@
 .gnt-legend [data-tone="open"] { color: #2f9e6e; }
 .gnt-legend [data-tone="closed"] { color: #b07cff; }
 .gnt-legend [data-tone="overdue"] { color: #e5484d; }
+/* The month band and day header stick to the top of the scroller, so rows scroll under them (the labels column is synced to the same scrollTop). */
+.gnt-thead { position: sticky; top: 0; z-index: 4; background: var(--tok-color-surface); }
 .gnt-header { height: 32px; }
 .gnt-counts { display: flex; gap: 14px; align-items: center; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gnt-counts [data-tone="open"] { color: #2f9e6e; }
@@ -74,10 +77,16 @@
 .gnt-filters { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .gnt-filters .gnt-grow { min-width: 240px; }
 .gnt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.gnt-months { display: flex; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface-2); }
+.gnt-months { display: flex; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
 .gnt-month { flex: none; display: flex; align-items: center; padding-left: 8px; border-right: 1px solid var(--tok-color-border); color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.gnt-labels-head { height: 52px; }
-.gnt-month-pad { flex: none; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface-2); }
+.gnt-labels-rows { flex: 1 1 0; min-height: 0; overflow: hidden; position: relative; }
+.gnt-labels-spacer { position: relative; }
+.gnt-rowitem { position: absolute; left: 0; right: 0; height: 44px; }
+/* No global border-box reset: without this the 1px borders make the head 54px and each track 45px, so rows drift off
+   HEAD_H/ROW_H (GanttChart.tsx), labels sit 2px below their bars and the sticky head covers the first row's top; and
+   each day/month cell is 1px wider than dayWidth, so the header drifts a pixel a day off the grid, bars and Today. */
+.gnt-months, .gnt-header, .gnt-labels-head, .gnt-month-pad, .gnt-track, .gnt-rowlabel, .gnt-day, .gnt-month { box-sizing: border-box; }
+.gnt-month-pad { flex: none; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
 .gnt-head .gnt-field:has(> .gnt-sr) select { min-width: 160px; }
 .gnt-empty-dates { display: none; }
 .gnt-day { font-size: 10px; white-space: nowrap; overflow: hidden; }
@@ -91,7 +100,7 @@
 .gnt-chip[aria-pressed="false"] { opacity: .45; }
 /* Finish-to-start arrows between the grid and the bars, as the Mac's Canvas draws them (grid, edges, bars). The
    tracks are position:relative with z-index auto, so a z-index 0 svg would sit UNDER their opaque weekend cells and
-   borders; z-index 1 lifts it over the grid, and bars at z-index 2 paint over it. Today's line (3) stays on top.
+   borders; z-index 1 lifts it over the grid, and bars at z-index 2 paint over it. The sticky head (z 4) sits over the bars; Today's line (5) stays on top.
    pointer-events off so clicks always reach the bars and rows. */
 .gnt-deps { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
 .gnt-bar { z-index: 2; }

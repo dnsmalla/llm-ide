@@ -2,7 +2,8 @@
 // math the timeline needs. GitHub issues have no dates; the overlay supplies start/due/estimate/dependency, and
 // this model decides each bar's span exactly as the Mac's GanttViewModel does (dates win, estimate fills a missing
 // end or start). Undated issues are kept in a separate list, never given a made-up span.
-import { CORE_LIST_CAP, decodeIssues, overlayRepoSupported, rawIssueCount, type Issue } from "../issues/issues-model.ts";
+import { MAX_LOADED, overlayRepoSupported, type Issue } from "../issues/issues-model.ts";
+import { issuesLoadError, loadIssuePages, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
 
 
 /** GitHub titles imported by the local importer may already start with "#<number>"; don't render it twice. */
@@ -37,7 +38,8 @@ export interface GanttRow {
 }
 
 const DAY_MS = 86_400_000;
-const MAX_ROWS = 500;
+/** The most rows a walk can load (2,000): the Gantt draws every one, so the row cap is the load cap. */
+const MAX_ROWS = MAX_LOADED;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
@@ -84,7 +86,7 @@ export function decodeSchedules(body: unknown): Schedule[] {
       ? [...new Set(row.dependsOn.filter((x): x is number => typeof x === "number" && Number.isInteger(x) && x > 0))].slice(0, 50)
       : [];
     out.push({ provider, repo, issueNumber: n, startDate: str(row.startDate), dueDate: str(row.dueDate), estimateDays: num(row.estimateDays), dependsOn, updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : null });
-    if (out.length >= MAX_ROWS) break;
+    if (out.length >= MAX_LOADED) break;
   }
   return out;
 }
@@ -205,6 +207,26 @@ export function barGeometry(row: GanttRow, range: TimelineRange, dayWidth: numbe
   const right = (Math.min(row.end, range.start + range.days - 1) - range.start + 1) * dayWidth;
   if (right <= 0 || left >= range.days * dayWidth) return null;
   return { left, width: Math.max(dayWidth, right - left), clippedStart: row.start < range.start, clippedEnd: row.end > range.start + range.days - 1 };
+}
+
+/** Rows drawn above and below the viewport, so a short scroll never shows an empty band. */
+export const GANTT_WINDOW_BUFFER = 6;
+
+/**
+ * The rendered row range [first, last] (inclusive) for a scrolled timeline: the rows under the viewport (the head
+ * sits over the first `headHeight` px) plus `buffer` rows either side, clamped to the list. A `pinned` row (the focused
+ * one) outside that range comes back as `extra`, drawn on its own (not by stretching the range: a row focused at the
+ * top and then scrolled 1,500 rows away must not mount the 1,500 rows between). count 0 gives an empty range.
+ */
+export function visibleRowWindow(s: { scrollTop: number; viewportHeight: number; headHeight: number; rowHeight: number; count: number; pinned?: number | null; buffer?: number }): { first: number; last: number; extra: number | null } {
+  if (s.count <= 0) return { first: 0, last: -1, extra: null };
+  const buffer = s.buffer ?? GANTT_WINDOW_BUFFER;
+  const clamp = (n: number) => Math.min(s.count - 1, Math.max(0, n));
+  const first = clamp(Math.floor((s.scrollTop - s.headHeight) / s.rowHeight) - buffer);
+  const last = clamp(Math.ceil((s.scrollTop + s.viewportHeight - s.headHeight) / s.rowHeight) + buffer);
+  const p = s.pinned;
+  const extra = p !== undefined && p !== null && Number.isInteger(p) && p >= 0 && p < s.count && (p < first || p > last) ? p : null;
+  return { first, last, extra };
 }
 
 export function datedRows(rows: readonly GanttRow[]): GanttRow[] {
@@ -406,31 +428,37 @@ export const GANTT_NESTED_HINT = "Dates are kept per owner/name project; this ne
 export const DETAIL_NESTED_HINT = "Dates are kept per owner/name project; this nested project path cannot store them yet.";
 
 export type TimelineLoad =
-  | { ok: true; issues: Issue[]; rawCount: number; schedules: Schedule[]; nestedHint: boolean }
+  /** `warning`: a later page failed but the rows read so far are kept (issuesLoadError: a 401 asks to sign in again). */
+  | { ok: true; issues: Issue[]; paging: PagingResult; schedules: Schedule[]; nestedHint: boolean; warning: string | null }
   | { ok: false; error: string; nestedHint: false };
 
 /**
- * One Gantt load: the cached issues plus the overlay. A nested-group project is never sent to the overlay (the core
- * answers 400); its schedule reads as empty and `nestedHint` says why. A failed load never carries the hint, so a
- * network error or a retry cannot leave a stale one on screen.
+ * One Gantt load: the cached issues (paged, see loadIssuePages) plus the overlay, both started together. A
+ * nested-group project is never sent to the overlay (the core answers 400); its schedule reads as empty and
+ * `nestedHint` says why. A failed load never carries the hint, so a network error or a retry cannot leave a stale one.
  */
-export async function loadTimeline(request: Request, provider: string, repo: string): Promise<TimelineLoad> {
+export async function loadTimeline(
+  request: Request,
+  provider: string,
+  repo: string,
+  opts: { signal?: AbortSignal; onProgress?: (p: PagingProgress) => void } = {},
+): Promise<TimelineLoad> {
   const overlayOk = repo === "" || overlayRepoSupported(repo);
-  try {
-    const qs = new URLSearchParams({ provider, state: "all", limit: String(CORE_LIST_CAP) });
-    const [i, s] = await Promise.all([
-      request("GET", `/kb/issues?${qs.toString()}`),
-      overlayOk
-        ? request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider, repo }).toString()}`)
-        : Promise.resolve({ status: 200, body: { schedules: [] } as unknown }),
-    ]);
-    if (i.status !== 200 || s.status !== 200) {
-      return { ok: false, nestedHint: false, error: i.status === 401 || s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule." };
-    }
-    return { ok: true, issues: decodeIssues(i.body), rawCount: rawIssueCount(i.body), schedules: decodeSchedules(s.body), nestedHint: !overlayOk };
-  } catch {
-    return { ok: false, nestedHint: false, error: "The core is not reachable right now." };
+  // Both requests start now, the issues first; a failed overlay read is caught below, not left unhandled.
+  const pagingP = loadIssuePages(request, { provider, state: "all" }, opts);
+  const scheduleP = (overlayOk
+    ? request("GET", `/kb/issue-schedule?${new URLSearchParams({ provider, repo }).toString()}`)
+    : Promise.resolve({ status: 200, body: { schedules: [] } as unknown })).then((r) => r, () => null);
+  const paging = await pagingP;
+  if (paging.stop === "error" && paging.issues.length === 0) {
+    return { ok: false, nestedHint: false, error: paging.status === 401 ? "Sign in again to read the timeline." : paging.status === null ? "The core is not reachable right now." : "The core could not load the issues or their schedule." };
   }
+  const s = await scheduleP;
+  if (!s) return { ok: false, nestedHint: false, error: "The core is not reachable right now." };
+  if (s.status !== 200) {
+    return { ok: false, nestedHint: false, error: s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule." };
+  }
+  return { ok: true, issues: paging.issues, paging, schedules: decodeSchedules(s.body), nestedHint: !overlayOk, warning: issuesLoadError(paging) };
 }
 
 /**

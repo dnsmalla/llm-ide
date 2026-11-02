@@ -5,7 +5,7 @@ import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, issueDatesView, loadTimeline, re
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
-  number: 1, state: "open", labels: [], author: null, createdAt: null, updatedAt: null, isPR: false, ...over,
+  number: 1, state: "open", labels: [], author: null, createdAt: null, updatedAt: null, isPR: false, milestone: null, assignees: [], ...over,
 });
 const sched = (over: Record<string, unknown> = {}) => ({
   provider: "github", repo: "o/r", issueNumber: 1, startDate: null, dueDate: null, estimateDays: null, dependsOn: [], ...over,
@@ -372,4 +372,61 @@ test("Issue detail: a nested project path gets the hint and no schedule request;
   assert.deepEqual(await readIssueSchedule(async () => { throw new Error("x"); }, { provider: "github", repo: "o/r", number: 1 }), { kind: "error", error: "The core is not reachable right now." });
   const detail = readFileSync(new URL("../../issues/IssueDetail.tsx", import.meta.url), "utf8");
   assert.match(detail, /\{nestedHint \? <p className="iss-hint">\{nestedHint\}<\/p> : null\}/);
+});
+
+test("Gantt load pages the issues through the 20-page walk and reports the paging state (2,000 of 4,212)", async () => {
+  const total = 4212;
+  const calls: string[] = [];
+  const core = async (_m: "GET", path: string) => {
+    calls.push(path);
+    if (path.startsWith("/kb/issue-schedule")) return { status: 200, body: { schedules: [] } };
+    const u = new URL(path, "http://127.0.0.1");
+    const offset = Number(u.searchParams.get("offset") ?? 0);
+    const n = Math.max(0, Math.min(100, total - offset));
+    const rows = Array.from({ length: n }, (_, k) => issue({ id: String(offset + k + 1), number: offset + k + 1 }));
+    const hasMore = offset + n < total;
+    return { status: 200, body: { issues: rows, total, hasMore, nextOffset: hasMore ? offset + n : null } };
+  };
+  const progress: string[] = [];
+  const r = await loadTimeline(core, "github", "", { onProgress: (p) => progress.push(`${p.loaded}/${p.total}`) });
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.issues.length, 2000);
+  assert.equal(r.paging.stop, "cap");
+  assert.equal(r.paging.total, total);
+  assert.equal(calls.filter((c) => c.startsWith("/kb/issues")).length, 20);
+  assert.equal(progress.length, 20);
+  assert.equal(progress[0], "100/4212");
+});
+
+test("the Gantt keeps every loaded issue as a row (no 500-row cut): 2,000 issues make 2,000 rows", () => {
+  const rows = buildRows(Array.from({ length: 2000 }, (_, k) => issue({ id: String(k), number: k + 1 })), [], "github", "");
+  assert.equal(rows.length, 2000);
+});
+
+test("Gantt load: a later page answering 401 keeps the rows read so far and warns to sign in again", async () => {
+  const core = async (_m: "GET", path: string) => {
+    if (path.startsWith("/kb/issue-schedule")) return { status: 200, body: { schedules: [] } };
+    const offset = Number(new URL(path, "http://127.0.0.1").searchParams.get("offset") ?? 0);
+    if (offset > 0) return { status: 401, body: {} };
+    const rows = Array.from({ length: 100 }, (_, k) => issue({ id: String(k + 1), number: k + 1 }));
+    return { status: 200, body: { issues: rows, total: 300, hasMore: true, nextOffset: 100 } };
+  };
+  const r = await loadTimeline(core, "github", "");
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.issues.length, 100);
+  assert.equal(r.paging.stop, "error");
+  assert.equal(r.warning, "Sign in again to read issues.");
+});
+
+test("Gantt load: a whole read has no warning, and the screen shows the warning and clears the note on failure", async () => {
+  const core = async (_m: "GET", path: string) => path.startsWith("/kb/issue-schedule")
+    ? { status: 200, body: { schedules: [] } }
+    : { status: 200, body: { issues: [issue()], total: 1, hasMore: false, nextOffset: null } };
+  const r = await loadTimeline(core, "github", "");
+  assert.equal(r.ok && r.warning, null);
+  const screen = readFileSync(new URL("../GanttScreen.tsx", import.meta.url), "utf8");
+  assert.match(screen, /setError\(r\.warning\)/);
+  assert.match(screen, /setError\(r\.error\);\s*\/\/[^\n]*\n\s*setPaging\(null\)/);
 });

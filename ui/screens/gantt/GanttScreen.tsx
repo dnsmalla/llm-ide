@@ -5,34 +5,30 @@ import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
-import { CORE_LIST_CAP, isCapped, labelOptions, repoSlug, type Issue } from "../issues/issues-model.ts";
-import { IssueDetail } from "../issues/IssueDetail.tsx";
+import { issueOpenUrl, labelOptions, repoSlug, type Issue } from "../issues/issues-model.ts";
+import { pagingNote, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
+import { IssueDetail, gitlabOriginFromConfig } from "../issues/IssueDetail.tsx";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import {
   GANTT_CATEGORIES,
   GANTT_NESTED_HINT,
   loadTimeline,
-  barDates,
-  barGeometry,
   buildRows,
   countCategories,
   datedRows,
   dayNumber,
-  dependencyLines,
   filterRows,
-  isWeekend,
+  GANTT_ROW_ACTIONS,
   localToday,
   projectOptions,
-  GANTT_ROW_ACTIONS,
   timelineRange,
   todayScrollLeft,
-  issueLabel,
-  issueTitleBody,
   type GanttCategory,
   type GanttRow,
   type Schedule,
   type TimelineRange,
 } from "./gantt-model.ts";
+import { GanttChart, type RowTarget } from "./GanttChart.tsx";
 import { ScheduleEditor } from "./ScheduleEditor.tsx";
 import "./gantt.css";
 
@@ -50,10 +46,6 @@ type Zoom = "day" | "week" | "month";
 type Phase = "idle" | "loading" | "ready" | "error";
 
 const ZOOM_WIDTH: Record<Zoom, number> = { day: 26, week: 12, month: 4 };
-const LABEL_WIDTH = 240;
-// Mirror gantt.css: the month band (20px) + day header (32px) above the rows, and each track's height.
-const HEAD_H = 52;
-const ROW_H = 44;
 const CATEGORY_LABEL: Record<GanttCategory, string> = { open: "Open", closed: "Closed", overdue: "Overdue" };
 
 export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }): ReactNode {
@@ -76,27 +68,44 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<GanttRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rawCount, setRawCount] = useState(0);
+  // The last finished walk (its total and stop reason drive the count note) and the walk in flight.
+  const [paging, setPaging] = useState<PagingResult | null>(null);
+  const [progress, setProgress] = useState<PagingProgress | null>(null);
+  // Each load aborts the one before it, so a superseded walk never applies its rows.
+  const abortRef = useRef<AbortController | null>(null);
   const [detail, setDetail] = useState<Issue | null>(null);
   const [nestedNote, setNestedNote] = useState(false);
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setPhase("loading");
     setError(null);
+    setProgress(null);
     // Cleared first so a failed load or a retry never shows the previous project's hint.
     setNestedNote(false);
-    const r = await loadTimeline(deps.request, provider, repo);
+    const r = await loadTimeline(deps.request, provider, repo, {
+      signal: ctrl.signal,
+      onProgress: (p) => { if (!ctrl.signal.aborted) setProgress(p); },
+    });
+    if (ctrl.signal.aborted) return;
     setNestedNote(r.nestedHint);
     if (!r.ok) {
       setPhase("error");
       setError(r.error);
+      // The previous walk's count note must not sit next to this failure.
+      setPaging(null);
       return;
     }
     setIssues(r.issues);
-    setRawCount(r.rawCount);
+    setPaging(r.paging);
     setSchedules(r.schedules);
+    setError(r.warning);
     setPhase("ready");
   }, [deps, provider, repo]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     if (active) void load();
@@ -113,6 +122,9 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   }, [issues, query, stateFilter]);
   const baseRows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
   const today = localToday();
+  const pageNote = phase === "loading"
+    ? pagingNote({ stop: null, loaded: progress?.loaded ?? 0, total: progress?.total ?? null })
+    : paging ? pagingNote({ stop: paging.stop, loaded: paging.issues.length, total: paging.total }) : "";
   const scoped = useMemo(() => baseRows.filter((r) => !hideUndated || r.start !== null || r.end !== null).filter((r) => dateFilter === "any" || (dateFilter === "scheduled" ? r.start !== null || r.end !== null : r.start === null && r.end === null)), [baseRows, dateFilter, hideUndated]);
   const fromDay = from ? dayNumber(from) : null;
   const untilDay = until ? dayNumber(until) : null;
@@ -126,14 +138,14 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   // a repo removed from Settings, or another provider's, never shows. Re-read on load so a Settings edit applies.
   const savedRepos = useMemo(() => readRepoConfig().saved[provider].map((r) => repoSlug(r.url)), [provider, issues]);
   const repos = useMemo(() => projectOptions(savedRepos, [], projectQuery, repo), [savedRepos, projectQuery, repo]);
-  const rowAction = (r: GanttRow, target: keyof typeof GANTT_ROW_ACTIONS) => {
+  // Stable (only setters inside), so the memoised chart rows do not re-render when an unrelated field changes.
+  const rowAction = useCallback((r: GanttRow, target: RowTarget) => {
     if (GANTT_ROW_ACTIONS[target] === "details") setDetail(r.issue);
     else setSelected(r);
-  };
+  }, []);
+  const openUrl = selected ? issueOpenUrl(selected.issue, gitlabOriginFromConfig()) : "";
   const dayWidth = ZOOM_WIDTH[zoom];
-  const timelineWidth = range.days * dayWidth;
   const todayLeft = (today - range.start) * dayWidth;
-  const depLines = useMemo(() => dependencyLines(rows, range, dayWidth, (i) => HEAD_H + i * ROW_H + ROW_H / 2), [rows, range, dayWidth]);
 
   // The Mac scrolls the chart to today on appear and on zoom change; Today does the same on demand.
   const scrollToToday = useCallback(() => {
@@ -208,7 +220,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         <label className="gnt-check"><input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} /><span>Hide undated</span></label>
       </div>
       {nestedNote ? <p className="gnt-hint">{GANTT_NESTED_HINT}</p> : null}
-      {isCapped(rawCount) ? <p className="gnt-hint">Showing the first {CORE_LIST_CAP} issues; the core returns at most that many per list.</p> : null}
+      {pageNote ? <p className="gnt-hint" role="status">{pageNote}</p> : null}
 
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
@@ -224,69 +236,19 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         </div>
       ) : (
         <>
-          <div className="gnt-chart" style={{ ["--gnt-label" as string]: `${LABEL_WIDTH}px` }}>
-            {dated.length === 0 ? <div className="gnt-no-bars" style={{ left: LABEL_WIDTH }}><strong>No scheduled issues</strong><span>Open an issue and choose Edit schedule to place it on the timeline.</span></div> : null}
-            <div className="gnt-labels">
-              <div className="gnt-labels-head"><span>ISSUES</span><span className="gnt-count">{rows.length} / {baseRows.length}</span></div>
-              <div className="gnt-month-pad" aria-hidden="true" />
-              {rows.map((r) => (
-                <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => rowAction(r, "label")} title={`${r.issue.title}\nOpen details`}>
-                  <span className="gnt-status" data-state={r.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{r.issue.state === "closed" ? "✓" : "○"}</span>
-                  <span className="gnt-rowtext"><span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {issueTitleBody(r.issue)}</span>
-                </button>
-              ))}
-            </div>
-            <div className="gnt-scroll" ref={scrollRef}>
-              <div className="gnt-timeline" style={{ width: timelineWidth }}>
-                {todayLeft >= 0 && todayLeft <= timelineWidth ? <div className="gnt-today" style={{ left: todayLeft }} aria-hidden="true" /> : null}
-                {depLines.length ? (
-                  <svg className="gnt-deps" width={timelineWidth} height={HEAD_H + rows.length * ROW_H} aria-hidden="true">
-                    <defs>
-                      <marker id="gnt-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto">
-                        <path d="M0 0 L6 3 L0 6 z" />
-                      </marker>
-                    </defs>
-                    {depLines.map((l) => {
-                      const mid = (l.x1 + l.x2) / 2;
-                      return <path key={`${l.blocker}>${l.dependent}`} d={`M${l.x1} ${l.y1} H${mid} V${l.y2} H${l.x2}`} markerEnd="url(#gnt-arrow)" />;
-                    })}
-                  </svg>
-                ) : null}
-                <div className="gnt-months" aria-hidden="true">
-                {monthSpans(range, dayWidth).map((m) => <span key={m.label} className="gnt-month" style={{ width: m.width }}>{m.label}</span>)}
-              </div>
-              <div className="gnt-header">
-                  {Array.from({ length: range.days }, (_, k) => {
-                    const day = range.start + k;
-                    const dt = new Date(day * 86_400_000);
-                    const label = zoom === "day" ? String(dt.getUTCDate()) : zoom === "week" ? (dt.getUTCDay() === 1 ? String(dt.getUTCDate()) : "") : "";
-                    return <div key={day} className="gnt-day" data-weekend={isWeekend(day) || undefined} data-today={day === today || undefined} style={{ width: dayWidth }}>{label}</div>;
-                  })}
-                </div>
-                {rows.map((r) => {
-                  const g = barGeometry(r, range, dayWidth);
-                  return (
-                    <div key={r.issue.id} className="gnt-track" data-on={selected?.issue.id === r.issue.id || undefined}>
-                      {Array.from({ length: range.days }, (_, k) => <div key={k} className="gnt-grid" data-weekend={isWeekend(range.start + k) || undefined} style={{ width: dayWidth }} />)}
-                      {g ? (
-                        <button
-                          type="button"
-                          className="gnt-bar"
-                          style={{ left: g.left, width: g.width }}
-                          data-selected={selected?.issue.id === r.issue.id || undefined}
-                          title={`${r.issue.title}\n${barDates(r)}\nEdit schedule`}
-                          onClick={() => rowAction(r, "bar")}
-                        >
-                          {r.dependsOn.length ? <span className="gnt-dep" title={`Depends on #${r.dependsOn.join(", #")}`}>⤷</span> : null}
-                          {issueLabel(r.issue)}
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <GanttChart
+            rows={rows}
+            shown={rows.length}
+            total={baseRows.length}
+            noBars={dated.length === 0}
+            range={range}
+            dayWidth={dayWidth}
+            zoom={zoom}
+            today={today}
+            selectedId={selected?.issue.id}
+            onActivate={rowAction}
+            scrollRef={scrollRef}
+          />
 
         </>
       )}
@@ -299,7 +261,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           deps={deps}
           onClose={() => setSelected(null)}
           onSaved={(message) => { setNotice(message); setSelected(null); void load(); }}
-          onOpenIssue={selected.issue.url ? () => void deps.openExternal(selected.issue.url).catch(() => setNotice("That issue's link could not be opened.")) : null}
+          onOpenIssue={openUrl ? () => void deps.openExternal(openUrl).catch(() => setNotice("That issue's link could not be opened.")) : null}
           onOpenDetails={() => setDetail(selected.issue)}
         />
       ) : null}
@@ -316,16 +278,4 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
 
     </div>
   );
-}
-
-function monthSpans(range: TimelineRange, dayWidth: number): { label: string; width: number }[] {
-  const out: { label: string; width: number }[] = [];
-  const fmt = new Intl.DateTimeFormat("en", { month: "short", year: "numeric" });
-  for (let i = 0; i < range.days; i++) {
-    const d = new Date((range.start + i) * 86_400_000);
-    const label = fmt.format(d);
-    const last = out[out.length - 1];
-    if (last?.label === label) last.width += dayWidth; else out.push({ label, width: dayWidth });
-  }
-  return out;
 }

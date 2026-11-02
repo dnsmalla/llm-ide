@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CORE_LIST_CAP, columnsFor, repoMatches, decodeIssues, filterIssues, isCapped, labelNamespace, openedAgo, overlayRepoSupported, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
+import { CORE_LIST_CAP, columnsFor, repoMatches, decodeIssues, filterIssues, assigneeSummary, formatDueDate, issueOpenUrl, labelNamespace, openedAgo, overlayRepoSupported, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: "1", title: "T", body: "b", url: "https://github.com/o/r/issues/1", provider: "github",
@@ -59,20 +59,17 @@ test("decodeIssues strips a duplicated #number prefix from old cached titles", (
   assert.equal(row.number, 24);
 });
 
-test("the core's list cap is reported, not hidden", () => {
+test("the core's page size is 100 rows (the request limit); a page cap is reported by issue-paging, not here", () => {
   assert.equal(CORE_LIST_CAP, 100);
-  assert.equal(isCapped(99), false);
-  assert.equal(isCapped(100), true);
 });
 
 test("the 'first N only' hint counts the core's rows before any title-less row is dropped", () => {
-  // 100 rows where one has no title: the screen shows 99, but the core returned the cap, so the hint must show.
+  // 100 rows where one has no title: the screen shows 99, but the core returned a full page.
   const rows = Array.from({ length: CORE_LIST_CAP }, (_, k) => ({ id: String(k), title: k === 0 ? "" : `t${k}`, number: k + 1 }));
   const body = { issues: rows };
   assert.equal(rawIssueCount(body), 100);
   assert.equal(decodeIssues(body).length, 99);
-  assert.equal(isCapped(rawIssueCount(body)), true);
-  assert.equal(isCapped(decodeIssues(body).length), false, "the old count hid the hint: this is the defect");
+  // Paging advances by the raw count, so the title-less row does not shift the next offset (see issue-paging).
   assert.equal(rawIssueCount({}), 0);
   assert.equal(rawIssueCount("nope"), 0);
 });
@@ -150,4 +147,65 @@ test("a chosen saved repository filters exactly and case-sensitively; the free-t
   assert.equal(repoMatches("acme/web", "acme/web", true), true);
   assert.equal(repoMatches("acme/web-api", "acme/web", true), false);
   assert.equal(repoMatches("Acme/Web", "acme/web", true), false);
+});
+
+test("milestone (title and due day) and assignee logins decode as plain values, bounded; absent ones are null and []", () => {
+  const [a, b] = decodeIssues({ issues: [
+    issue({ id: "a", milestone: { title: "v1.0", dueOn: "2026-11-30T07:00:00Z" }, assignees: ["ann", 7, "", "bo"] }),
+    issue({ id: "b", milestone: { title: "", dueOn: null }, assignees: "bo" }),
+  ] });
+  assert.deepEqual(a!.milestone, { title: "v1.0", dueOn: "2026-11-30T07:00:00Z" });
+  assert.deepEqual(a!.assignees, ["ann", "bo"], "non-strings and blanks are dropped");
+  assert.equal(b!.milestone, null, "a milestone with no title is no milestone");
+  assert.deepEqual(b!.assignees, [], "a non-array assignees is empty");
+  const [c] = decodeIssues({ issues: [issue({ milestone: { title: "x", dueOn: "not a date" } })] });
+  assert.deepEqual(c!.milestone, { title: "x", dueOn: null }, "a malformed due date is dropped, the title kept");
+  const [d] = decodeIssues({ issues: [issue({ assignees: Array.from({ length: 80 }, (_, k) => `u${k}`) })] });
+  assert.equal(d!.assignees.length, 50, "at most 50 logins, as the schema says");
+  assert.equal(formatDueDate(null), "");
+  assert.match(formatDueDate("2026-11-30T12:00:00Z"), /^(Nov 30|Dec 1), 2026$/);
+  assert.equal(formatDueDate("2026-11-30"), "Nov 30, 2026", "a bare day is the local day, never a day early");
+  const [e] = decodeIssues({ issues: [issue({ milestone: { title: "x", dueOn: "1" } })] });
+  assert.equal(e!.milestone!.dueOn, null, "a non-ISO date that Date.parse accepts is still dropped");
+});
+
+test("'Open on GitHub/GitLab' uses the core's url only on https://github.com or the saved GitLab origin", () => {
+  const gh = { provider: "github", url: "https://github.com/o/r/issues/1" };
+  assert.equal(issueOpenUrl(gh, "https://gitlab.example.com"), "https://github.com/o/r/issues/1");
+  assert.equal(issueOpenUrl({ ...gh, url: "https://GitHub.COM/o/r/issues/1" }, null), "https://github.com/o/r/issues/1", "case is normalised");
+  for (const bad of [
+    "https://evil.example/o/r/issues/1",
+    "https://github.com.evil.example/x",
+    "https://evil.example/github.com",
+    "https://github.com@evil.example/x",
+    "https://github.com./o/r",
+    "https://gíthub.com/o/r",
+    "//github.com/o/r",
+    "javascript:alert(1)//github.com",
+    "data:text/html,https://github.com",
+    "http://github.com/o/r/issues/1",
+    "https://user:pw@github.com/o/r",
+    "https://github.com:8443/o/r",
+    "https://ghe.example.com/o/r/issues/1",
+    "",
+  ]) assert.equal(issueOpenUrl({ ...gh, url: bad }, null), "", bad);
+  const gl = { provider: "gitlab", url: "https://gitlab.example.com/g/sub/p/-/issues/3" };
+  assert.equal(issueOpenUrl(gl, "https://gitlab.example.com"), gl.url, "the saved GitLab origin");
+  assert.equal(issueOpenUrl(gl, "https://gitlab.com"), "", "a GitLab link is not trusted from another host");
+  assert.equal(issueOpenUrl(gl, null), "", "no saved GitLab origin, no link");
+  assert.equal(issueOpenUrl({ ...gl, url: "http://gitlab.example.com/g/p/-/issues/3" }, "https://gitlab.example.com"), "", "scheme must match");
+  // A self-hosted GitLab the user saved (http, private address, port) opens on that exact origin only.
+  assert.equal(issueOpenUrl({ provider: "gitlab", url: "http://10.0.0.5:8080/g/p/-/issues/1" }, "http://10.0.0.5:8080"), "http://10.0.0.5:8080/g/p/-/issues/1");
+  assert.equal(issueOpenUrl({ provider: "gitlab", url: "http://10.0.0.5/g/p/-/issues/1" }, "http://10.0.0.5:8080"), "", "port must match");
+  assert.equal(issueOpenUrl({ provider: "gitlab", url: "https://u:p@gitlab.example.com/x" }, "https://gitlab.example.com"), "");
+  // An over-long stored URL is dropped at decode, never cut into a different link.
+  const [long] = decodeIssues({ issues: [issue({ url: `https://github.com/o/r/issues/1?${"a".repeat(3000)}` })] });
+  assert.equal(long!.url, "");
+});
+
+test("the card's assignee line lists the first three logins as plain text, then a count", () => {
+  assert.equal(assigneeSummary([]), "");
+  assert.equal(assigneeSummary(["ann"]), "ann");
+  assert.equal(assigneeSummary(["ann", "bo", "cy"]), "ann, bo, cy");
+  assert.equal(assigneeSummary(["ann", "bo", "cy", "di", "ed"]), "ann, bo, cy +2");
 });
