@@ -36,3 +36,7 @@ The desktop currently has only a Mobile Control remote-control screen. This plan
 - Shell commands are machine-approved, never taken from a cloned project file.
 - Default loops are re-ensured; refactor/code-applying loops are manual-only.
 - A run is bounded by iterations, consecutive failures and per-stage repairs, not by a hard default wall clock.
+
+## Status (2026-11-02)
+
+Phases 1 to 7 are built except: incident-triage execution, git worktrees, merge-request shipping, pause timeout and background scheduling with the window closed (all refused or disabled in the UI, not faked). Phase 8 (parity pass, rebuilt app, final matrix) is open and needs a real-window run (UN-001). Code: `ui/screens/loop/native/`, host `desktop/src-tauri/src/loop_runner.rs`.

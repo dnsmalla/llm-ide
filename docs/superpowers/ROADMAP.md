@@ -1,6 +1,6 @@
 # Roadmap: done, running, waiting on you, next, later
 
-Updated 2026-10-31 (written at `e72654c9`; 348 commits since 2026-10-30). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
+Updated 2026-11-02 (written at `86bf3874`; 212 commits since the 2026-10-31 update, almost all Tauri desktop Mac-parity work). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
 
 Current numbers: `SERVER_API_VERSION` 104, migration head 0058 on pushed `main` and 0059 (`google_connectors`) and 0060 (`ical_sources`) in the local commits; the HTTP contract and generated types are in `schema/`.
 
@@ -8,7 +8,7 @@ Current numbers: `SERVER_API_VERSION` 104, migration head 0058 on pushed `main` 
 
 - **Professional quality over speed** (user, 2026-10-29). No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green.
 - **Token-affecting changes ship OFF** until you run the bench and say go (user, 2026-10-30). Paid or subscription bench runs are yours to start.
-- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Local `main` is ahead of `origin/main` by 8 commits (see section 2). No branches: work happens on `main`.
+- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Local `main` is ahead of `origin/main` by 227 commits (see section 2; counted against the last successful fetch). No branches: work happens on `main`.
 - **Delegation applies to the open questions.** You said "do the best, secure, usable for big projects" and I decided. Those answers are marked **delegated, revisit if wrong** below; any of them can be reopened by saying so. They are: relay design choices D1-D5 and D7-D9 (tiered clients, no third-party analytics, upload-only files, per-user accounts); sync-kit S1-S6; ui-kit U1-U6 (provisional); Phase 7 defaults D4-D8 (tree-only to cloud models, stop-only, browser profile, audit retention, first-party mount); Issues token migration into the core vault (W2); Mac Auto Tasks moving to the SDK engine for Claude with multi-engine kept.
 - **macOS first and finished, then Windows and Linux.** The Tauri macOS app must reach parity and daily use before the other two OSes get more than CI.
 - **Swift feature freeze is in force** (inferred from the 2026-10-31 acceptance of ADR 0018 for Phase 3; you have not contradicted it). Allowed: security fixes, parity work needed for the shared core, and build/release work. The one planned exception is the Live capture helper (Phase 5 question 2).
@@ -52,12 +52,19 @@ Pushed state is `origin/main` at `6f51e1e6`.
 
 ## 2. Running or just landed (local, not pushed)
 
-`git rev-list --count origin/main..main` is 8. These are the local commits:
+`git rev-list --count origin/main..main` was 227 at the 2026-11-02 review (the 2026-11-01/02 desktop work, listed at the end of this section, is all local). The older local commits listed here are still unpushed too:
 
 - **Doc Gen and Visual** (Tauri): request model, sources, run state machine, screen with templates and history, hostile-output tests, shell section, parity rows (`9b2fa3f6`, `392a70ed`, `46dae4df`, `885e6fe6`). Built and unit-tested, not GUI-verified.
 - **Google connectors, server side** (another agent, in progress at the time of writing): G1 OAuth core with PKCE and loopback flow (`87c98768`, migration 0059), G2 Gmail over REST with a `historyId` cursor (`43d721ab`), G3 and G4 Calendar and Drive as Pattern A connectors (`e72654c9`). Still open in the plan: G5 routes and sync-state storage, G6 Library screen and setup guide, G7 scheduled sync, G0 (your answers to Q-G1 to Q-G3; the plan's recommendations are being followed meanwhile). I could not verify which of G5-G7 have landed beyond the commits above; check `git log -- extension/connectors/google extension/routes`.
 - `995e0b8f` CI: desktop workflow uses the shared token-drift check.
 - Nothing is running as a background job that I know of. Re-check `ps` for leftover test or server processes before you start the app (section 3).
+
+**Landed 2026-11-01 to 11-02 (Tauri desktop, unit-tested, not GUI-verified; details in MASTER-PLAN S2 "Phase 5 Mac-parity round")**
+- **Loop native**: the desktop now runs Loop itself (committed `system/loop.json`, six starter loops, iteration and repair engine, per-project shell approvals, artifact/test/code-graph stages, queue, journal, cron while open); not ported: incident triage, worktrees, merge-request shipping, background scheduling.
+- **Auto Tasks native**: local catalog, per-task cron, persisted recent runs, run through the core agent; the Mobile Control gate is gone.
+- **Code Graph generation** on the desktop (Code / InfiniteBrain / All, scan target, quick pick); Doc Gen three-column layout with Chat column; Library single-scroll list; native app menu; Explorer, Chat, Terminal, Settings and shell parity items; repository clone into `code/`.
+- Mac app (allowed under the freeze): notes-folder bookmark fallback and entitlements; Mac suite and all 10 feature-matrix rows green.
+- Test state in this review: desktop node 1406 of 1420 pass, the 14 failures are the shell e2e suite blocked by the agent sandbox (`listen EPERM`), not code; run `make test-desktop` outside the sandbox to confirm.
 
 ## 3. Waiting on YOU
 
@@ -73,11 +80,13 @@ Open decisions (only the unanswered ones, each with a recommendation) are sectio
 
 ## 4. Next (ordered)
 
-1. **Issues and Gantt core** [me]: IC0 (needs Q-I answers) then IC1-IC6 in the order given in `plans/2026-10-31-issues-gantt-core-plan.md`; then the Issues and Gantt screens.
+**First: run the desktop app (UN-001) before more screens.** 212 commits of parity work have never been seen in a real window; fix what the first run finds before anything below.
+
+1. **Issues and Gantt core** [me]: IC0 (needs Q-I answers) then IC1-IC6 in the order given in `plans/2026-10-31-issues-gantt-core-plan.md`; the desktop Issues and Gantt screens exist (read-only board, schedule overlay), so this adds the provider writes they lack.
 2. **DOCX and secret-scan routes** [me]: the core routes Doc Gen's export and scan need (parity "blocked-by" items).
 3. **Google slices G5-G7** [me] (routes and sync state, Library screen and setup guide, scheduled sync); then optional MCP adapter G8 only if Workspace MCP leaves preview.
 4. **Live capture macOS helper** [me]: after Phase 7 spike 1; the one allowed Swift addition.
-5. **Loop and Auto Tasks core slices** [me, after Y5 evidence]: six job kinds replace the 13 Auto Tasks (`review`, `sources.update`, `issues.from_notes`, `issues.implement`, `loop.run`, `custom.run`).
+5. **Loop and Auto Tasks core slices** [me, after Y5 evidence]: the desktop screens exist now (native, local); this item is only the move into the core job runner: six job kinds replace the 13 Auto Tasks (`review`, `sources.update`, `issues.from_notes`, `issues.implement`, `loop.run`, `custom.run`).
 6. **Command bus S2, S4, S5** [me]: S2 interim phone fixes and flags, S4 phone client on the job API, S5 remaining kinds; S6 later.
 7. **Mobile TLS with SPKI pinning** [me]: design done; build, then your on-device test (Y2).
 8. **Relay R0-R9** [me]: R0 spec freeze and external review booking (G-EXT), then gated phases; no relay code before R0 and the review gate.
@@ -100,6 +109,7 @@ Open decisions (only the unanswered ones, each with a recommendation) are sectio
 - **Parity checklist "blocked-by" items** (top ten in `plans/2026-10-31-tauri-parity-checklist.md`) include DOCX export, Mermaid runtime, 3D graph, Live capture, Issues/Gantt, Loop/Auto Tasks screens, signing, and the route gaps they need; read the file for the current list.
 - **Flaky-test hygiene**: tests that fail only under full-gate load (`index-routes.http` body test, `loop-contract-lab` probes, `ExplorerTreeStoreWatchTests`) are hardened, not re-run; a clock-shift detector and a no-time-bomb rule now guard against date-dependent tests.
 - **graph-kit**: the working tree shows a modified submodule pointer. Moving the pin needs `make graphkit-bump`, which **pushes graph-kit**; needs your go. The graph-kit `theme.css` light `textMuted` contrast fix (WCAG AA, `2449d41b`) is on the llm-ide side only; check the graph-kit copy when you bump.
+- **Desktop-class client on `:3006`** (Swift, 2026-11-01): a paired loopback peer that says `clientClass: "desktop"` gets the desktop-only phone commands. It has had no independent review yet, and a phone reaching the port through an SSH tunnel or local proxy looks like loopback. Review before any release (MASTER-PLAN S2).
 - **Sparkle**: first signed update through the real feed has never been run.
 - Pin the extension origin (CORS accepts every `chrome-extension://*`, Q22); quit delay on macOS logout (Q21); `llmide://` from Chrome (Q11).
 - Real-corpus checks fixtures cannot give: platform-less notes, hidden-note semantics, iCloud placeholders.

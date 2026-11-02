@@ -43,12 +43,12 @@
 | Menu | Desktop | Remaining |
 |---|---|---|
 | Explorer | Real: code-rooted tree, Project folders sheet, Collapse All, editor/terminal/Code Assistant, search/SCM panels | Root-row label, Project Memory entry |
-| Graph | System page (graph-kit OS view, default) + Code graph toggle, graph file tree, canvas/filters/details | Graph scan/generation, modes, repo quick-pick, run footer |
-| Auto Tasks | **Soon** | Needs a core/API model for schedules and runs (Mac state is local) |
+| Graph | System page + Code graph toggle, file tree, canvas, filters; generation, modes, quick pick since added | 3D, routines/storage |
+| Auto Tasks | Native local screen (later commits `ae203be0` to `86bf3874`): catalog, cron, recent runs, run via core agent | Custom tasks, Mac-local editing |
 | Review Conflicts | Real read-only: code + LLM Doc tree, viewer, Open in Explorer, Code Assistant | Diff/hunk staging, New Change/provider workflows |
 | Issues | Real: board by label namespace, filters, links, GitHub import via vault token | GitLab import; create/edit/comment/close (provider write clients) |
 | Gantt | Real: issues + `/kb/issue-schedule`, day/week zoom, today/weekend, undated list, overlay editor | Drawn dependency arrows; provider-native GitLab dates |
-| Loop | **Soon** | Needs a core/API model for loop runs/verification (Mac state is local) |
+| Loop | Native (later commits, `plans/2026-11-01-loop-native-port.md`): committed `loop.json`, engine, approvals, journal | Incident triage, worktrees, MR shipping, background scheduling |
 | Doc Gen / Visual | Real: setup, sources (Code/LLM Doc/Data; Visual Data/Code), result/history, save, Mermaid | Step chrome and remaining Mac affordances |
 | Library | Real: notes sidebar/list/viewer/write, extension panes, and Code/Data project trees with a read-only viewer | Add-file/folder menus and the Mac's tree-integrated list |
 | Chat | Real, Mac-like layout/typography | Turn-action parity |
@@ -68,3 +68,5 @@
 2. Library file-tree sidebar parity (add-file/folder, category sections).
 3. Doc Gen/Visual step chrome.
 4. Auto Tasks/Loop only after a core state model is designed.
+
+_Update 2026-11-02: the Auto Tasks, Loop and Graph generation rows above were closed by later commits; see MASTER-PLAN S2 Phase 5._
