@@ -12,6 +12,7 @@ import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop } from "./runner.ts";
+import { shellBus } from "../../shell/bus";
 import { evaluateArtifact } from "./artifact.ts";
 import { approve, isApproved, revokeAll } from "./approvals.ts";
 import { reopenFault, runRegression } from "./regression.ts";
@@ -441,6 +442,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ""]);
     const started = Date.now();
+    let summaryPath: string | null = null;
     try {
       const outcome = await runNativeLoop(target.config, {
         isCancelled() { return cancelledRef.current; },
@@ -475,7 +477,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
       }
       if (target.config.writeSummaryNote) {
-        try { const path = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${path}`]); }
+        try { summaryPath = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${summaryPath}`]); }
         catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
       }
       setNotice(outcome.passed ? "The loop passed." : outcome.statusSummary);
@@ -810,6 +812,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
             {runRecord && Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
+            {runRecord && typeof runRecord.summaryPath === "string" ? <button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: runRecord.summaryPath as string })}>Open summary note</button> : null}
             {runRecord && Array.isArray(runRecord.stages) ? (
               <ul>{runRecord.stages.map((st, i) => { const o = st as Record<string, unknown>; const run = (o.run ?? {}) as Record<string, unknown>; const output = String(run.stdout ?? ""); return <li key={i}><details><summary>{String(o.stageName ?? "Stage")} · exit {String(run.exitCode ?? "?")} · {String(run.durationMs ?? "")} ms</summary>{output ? <pre className="loop-run-log">{output}</pre> : <p className="loop-native-hint">No captured output.</p>}</details></li>; })}</ul>
             ) : null}
