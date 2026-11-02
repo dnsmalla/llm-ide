@@ -2,7 +2,7 @@
 // Everything it needs arrives as props (store, host, optional rebuild runner, link openers), so it
 // renders and tests without Tauri; index.tsx wires the real ones.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { DocIcon, StatusBanner } from "@llmide/ui-kit";
 import type { NotesHost } from "./host.ts";
 import type { LibraryStore } from "./library-store.ts";
 import { IDLE_REBUILD, type RebuildProgress } from "./index-rebuild.ts";
@@ -257,7 +257,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             <NoteViewer key={selected} host={host} rel={selected} record={store.record(selected)} reloadKey={reloadKey} onOpenExternal={openExternal} onOpenNote={openNote} />
           ) : (
             <div className="lib-empty" role="status">
-              <div className="lib-empty-icon" aria-hidden="true">▤</div>
+              <div className="lib-empty-icon" aria-hidden="true"><DocIcon /></div>
               <p className="lib-empty-title">Select an Item</p>
               <p className="lib-muted">Choose a meeting, file, plugin, or LLM source from the list.</p>
             </div>

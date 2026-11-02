@@ -2,7 +2,7 @@
 // Only the rows in view are mounted, so 50,000+ notes scroll like 50; the visible rows' headers are
 // requested first from the background head reader.
 import { useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { RefreshIcon, SearchIcon, StatusBanner, XIcon } from "@llmide/ui-kit";
+import { RefreshIcon, SearchIcon, StatusBanner, WaveIcon, XIcon } from "@llmide/ui-kit";
 import type { LibraryState, LibraryStore } from "./library-store.ts";
 import { formatDate, formatDuration, sectionLabel, stepNoteRow, type NoteRecord, type Row } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
@@ -332,7 +332,8 @@ function Empty({ state }: { state: LibraryState }): ReactNode {
   if (state.records.length === 0) {
     return (
       <div className="lib-empty" role="status">
-        <p className="lib-empty-title">No meetings yet</p>
+        <div className="lib-empty-icon" aria-hidden="true"><WaveIcon /></div>
+        <p className="lib-empty-title">No Meetings Yet</p>
         <p className="lib-muted">Meetings captured in the Mac app and sources fetched into this folder appear here.</p>
       </div>
     );

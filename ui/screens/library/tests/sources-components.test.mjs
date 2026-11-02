@@ -30,7 +30,7 @@ test("connection entries: six panes with stable ids, and the nav shows them unde
   await store.init();
   await L.settle(store);
   const out = html(h(L.LibraryScreen, { store, host, connections: list }));
-  assert.match(out, /<h3 class="lib-nav-group">[\s\S]*?Connectors[\s\S]*?<\/h3>/);
+  assert.match(out, /<h3 class="lib-nav-group"[^>]*>[\s\S]*?Connectors[\s\S]*?<\/h3>/);
   for (const label of ["Email", "Google", "Slack", "Box", "Repositories", "Connectors"]) assert.match(out, new RegExp(`<span class="lib-nav-label">${label}</span>`));
   const none = html(h(L.LibraryScreen, { store, host }));
   assert.ok(!/Connectors[\s\S]*?<\/h3>/.test(none));

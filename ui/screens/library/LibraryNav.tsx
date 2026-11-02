@@ -79,11 +79,12 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
     return next;
   });
   const open = (id: string) => !collapsed.has(id);
-  const GroupHead = ({ id, icon, label, count }: { id: string; icon: ReactNode; label: string; count: number }) => (
-    <h3 className="lib-nav-group">
+  const GroupHead = ({ id, icon, label, count, onAdd, addLabel }: { id: string; icon: ReactNode; label: string; count?: number | null; onAdd?: () => void; addLabel?: string }) => (
+    <h3 className="lib-nav-group" data-accent={id}>
       <button type="button" className="lib-nav-group-btn" aria-expanded={open(id)} onClick={() => toggle(id)}>
-        {icon} {label} <span className="lib-count">{count.toLocaleString()}</span> <span aria-hidden="true">{open(id) ? "▾" : "▸"}</span>
+        <span className="lib-nav-chevron" aria-hidden="true">{open(id) ? "▾" : "▸"}</span>{icon} <span className="lib-nav-label">{label}</span>{count !== null && count !== undefined ? <span className="lib-count">{count.toLocaleString()}</span> : null}
       </button>
+      {onAdd ? <button type="button" className="lib-plus" aria-label={addLabel ?? `Add ${label}`} title={addLabel ?? `Add ${label}`} onClick={onAdd}>＋</button> : null}
     </h3>
   );
   const root: NotesRoot | null = state.root;
@@ -98,7 +99,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
           <RefreshIcon />
         </button>
       </div>
-      <GroupHead id="sources" icon={<WaveIcon />} label="Sources" count={sources.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} />
+      <GroupHead id="sources" icon={<WaveIcon />} label="Sources" count={sources.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} onAdd={() => p.onExtension("connectors")} addLabel="Open connectors to add a source" />
       {open("sources") ? (
         <ul className="lib-nav-list">
           {sources.map((s) => (
@@ -107,8 +108,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
         </ul>
       ) : null}
       {p.projectNav}
-      {docs.length > 0 && (
-        <>
+      <>
           <GroupHead id="docs" icon={<DocIcon />} label="LLM Doc" count={docs.reduce((n, s) => n + (state.counts.get(s.id) ?? 0), 0)} />
           {open("docs") ? (
             <ul className="lib-nav-list">
@@ -117,20 +117,20 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
               ))}
             </ul>
           ) : null}
-        </>
-      )}
+      </>
       {p.extensions.map((x) => (
         <Fragment key={x.id}>
-          <h3 className="lib-nav-group">
+          <h3 className="lib-nav-group" data-accent={x.id}>
             <button type="button" className="lib-nav-group-btn" aria-expanded={open(x.id)} onClick={() => p.onExtension(x.id)}>
-              <PuzzleIcon /> {x.label} <span aria-hidden="true">›</span>
+              <span className="lib-nav-chevron" aria-hidden="true">{open(x.id) ? "▾" : "▸"}</span><PuzzleIcon /> <span className="lib-nav-label">{x.label}</span>
             </button>
+            <button type="button" className="lib-plus" aria-label={`Open ${x.label}`} title={`Open ${x.label}`} onClick={() => p.onExtension(x.id)}>＋</button>
           </h3>
         </Fragment>
       ))}
       {p.connections && p.connections.length > 0 && (
         <>
-          <GroupHead id="connectors" icon={<WaveIcon />} label="Connectors" count={p.connections.length} />
+          <GroupHead id="connectors" icon={<WaveIcon />} label="Connectors" count={p.connections.length} onAdd={() => p.onExtension(p.connections![0]?.id ?? "connectors")} addLabel="Open connectors" />
           {open("connectors") ? <ul className="lib-nav-list">
             {p.connections.map((x) => {
               const sel = p.extensionId === x.id;

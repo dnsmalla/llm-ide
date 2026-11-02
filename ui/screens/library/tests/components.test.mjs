@@ -59,7 +59,7 @@ test("loaded: navigation landmark, sections with counts, aria-current, Unsorted,
   assert.match(out, /<span class="lib-nav-label">Meetings<\/span><span class="lib-count" aria-label="1 notes">1</);
   assert.match(out, /<span class="lib-nav-label">Unsorted<\/span>/);
   assert.match(out, /<span class="lib-nav-label">Emails?<\/span>|<span class="lib-nav-label">Emails<\/span>/);
-  for (const label of ["Plugins", "LLM Sources", "MCP Plugins", "Extensions"]) assert.match(out, new RegExp(`${label} <span`));
+  for (const label of ["Plugins", "LLM Sources", "MCP Plugins", "Extensions"]) assert.match(out, new RegExp(`>${label}</span>`));
   assert.match(out, /aria-label="Refresh notes"/);
   assert.match(out, /Change notes folder/);
   assert.ok(!out.includes("Rebuild search index"), "no rebuild button without a runner");
@@ -123,7 +123,7 @@ test("Library is the Mac search bar over one list, with no desktop filter/action
 test("empty folder and listing states are announced politely", async () => {
   const { host, store } = await mkStore();
   const out = html(screen(store, host));
-  assert.match(out, /role="status"[\s\S]*No meetings yet/);
+  assert.match(out, /role="status"[\s\S]*No Meetings Yet/);
 });
 
 test("Extensions entries: a supplied render replaces the placeholder (S-J seam)", async () => {

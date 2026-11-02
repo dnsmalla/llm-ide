@@ -133,3 +133,23 @@
 /* Mac Library is a search field over one sectioned list; these desktop-only controls were never in the Mac. */
 .lib-list-actions, .lib-chips, .lib-status, .lib-nav-head, .lib-nav-foot { display: none; }
 .lib-empty-icon { font-size: 30px; color: var(--tok-color-text-muted); opacity: .7; }
+
+/* Mac Library group headers: chevron + tinted icon + count + add. */
+.lib-nav-chevron { flex: none; width: 10px; color: var(--tok-color-text-muted); font-size: 10px; }
+.lib-nav-group .lib-nav-label { font-weight: inherit; }
+.lib-plus { flex: none; border: 0; background: none; color: var(--tok-color-text-muted); font: inherit; cursor: pointer; padding: 0 2px; line-height: 1; }
+.lib-plus:hover { color: var(--tok-color-text); }
+.lib-nav-group[data-accent="sources"] .lib-nav-group-btn svg { color: var(--tok-color-accent); }
+.lib-nav-group[data-accent="docs"] .lib-nav-group-btn svg { color: #59a6ff; }
+.lib-nav-group[data-accent="plugins"] .lib-nav-group-btn svg { color: #35c6b0; }
+.lib-nav-group[data-accent="llm-sources"] .lib-nav-group-btn svg { color: #d9b44a; }
+.lib-nav-group[data-accent="mcp-plugins"] .lib-nav-group-btn svg { color: #a78bfa; }
+.lib-nav-group[data-accent="extensions"] .lib-nav-group-btn svg { color: #5ad1a6; }
+.lib-nav-group[data-accent="connectors"] .lib-nav-group-btn svg { color: #9ca3af; }
+.lib-project-headrow { display: flex; align-items: center; gap: var(--tok-space-xs); }
+.lib-project-headrow .lib-project-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.lib-project-headrow .lib-count { margin-left: auto; }
+.lib-project-root[data-accent="code"] .lib-project-icon { color: #28c76f; }
+.lib-project-root[data-accent="data"] .lib-project-icon { color: #a78bfa; }
+.lib-project-icon { font-size: 10px; width: 14px; display: inline-block; text-align: center; }
+.lib-empty-icon svg { width: 32px; height: 32px; }

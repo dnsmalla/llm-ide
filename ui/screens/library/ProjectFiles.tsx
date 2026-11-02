@@ -1,6 +1,7 @@
 // Library > Project files: the Mac's Code and Data categories as lazy file trees with a read-only viewer. The note
 // sections stay the notes index; these two come from the project folders through the host's read-only fs commands.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { CodeIcon, TableIcon } from "@llmide/ui-kit";
 import { shellBus } from "../shell/bus";
 import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, type ProjectEntry } from "./project-files.ts";
 
@@ -11,6 +12,7 @@ export interface ProjectFilesDeps {
 
 export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { deps: ProjectFilesDeps; selected: string | null; onSelect: (path: string | null) => void; active?: boolean }): ReactNode {
   const [roots, setRoots] = useState<Record<string, ProjectEntry[] | "error" | undefined>>({});
+  const [counts, setCounts] = useState<Record<string, number | undefined>>({});
   const [children, setChildren] = useState<Map<string, ProjectEntry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [closedRoots, setClosedRoots] = useState<Set<string>>(new Set());
@@ -19,6 +21,19 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     try {
       const entries = decodeProjectEntries(await deps.list(path));
       setRoots((r) => ({ ...r, [path]: entries }));
+      const count = async (dir: string, cap = 5000): Promise<number> => {
+        let n = 0;
+        try {
+          const list = decodeProjectEntries(await deps.list(dir));
+          for (const e of list) {
+            if (n >= cap) return cap;
+            if (e.kind === "dir") n += await count(e.path, cap - n); else n += 1;
+          }
+        } catch { /* unreadable subtree */ }
+        return n;
+      };
+      const total = await count(path);
+      setCounts((c) => ({ ...c, [path]: total }));
     } catch {
       setRoots((r) => ({ ...r, [path]: "error" }));
     }
@@ -57,14 +72,18 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
         const entries = roots[root.path];
         const open = !closedRoots.has(root.path);
         return (
-          <div key={root.path} className="lib-project-root">
-            <button type="button" className="lib-project-head" aria-expanded={open} onClick={() => setClosedRoots((s) => {
-              const n = new Set(s);
-              if (n.has(root.path)) n.delete(root.path); else n.add(root.path);
-              return n;
-            })}>
-              <span className="lib-project-caret">{open ? "▾" : "▸"}</span> {root.label}
-            </button>
+          <div key={root.path} className="lib-project-root" data-accent={root.path}>
+            <div className="lib-project-headrow">
+              <button type="button" className="lib-project-head" aria-expanded={open} onClick={() => setClosedRoots((s) => {
+                const n = new Set(s);
+                if (n.has(root.path)) n.delete(root.path); else n.add(root.path);
+                return n;
+              })}>
+                <span className="lib-project-caret">{open ? "▾" : "▸"}</span> <span className="lib-project-icon" aria-hidden="true">{root.path === "code" ? <CodeIcon /> : <TableIcon />}</span> {root.label}
+              </button>
+              {root.path === "code" && counts[root.path] !== undefined ? <span className="lib-count">{counts[root.path]!.toLocaleString()}</span> : null}
+              <button type="button" className="lib-plus" aria-label={`Open Explorer to add ${root.label}`} title={`Open Explorer to add ${root.label}`} onClick={() => shellBus.publish({ type: "goto-section", section: "explorer" })}>＋</button>
+            </div>
             {open ? (
               entries === undefined ? <p className="lib-muted lib-project-note">Loading…</p>
                 : entries === "error" ? <p className="lib-muted lib-project-note">{root.path}/ is missing.</p>
