@@ -4,6 +4,18 @@
 // end or start). Undated issues are kept in a separate list, never given a made-up span.
 import type { Issue } from "../issues/issues-model.ts";
 
+
+/** GitHub titles imported by the local importer may already start with "#<number>"; don't render it twice. */
+export function issueTitleBody(issue: Pick<Issue, "number" | "title">): string {
+  if (issue.number === null) return issue.title;
+  const match = new RegExp(`^#\\s*${issue.number}\\b[\\s:.-]*`).exec(issue.title.trim());
+  return match ? issue.title.trim().slice(match[0].length) || issue.title.trim() : issue.title;
+}
+export function issueLabel(issue: Pick<Issue, "number" | "title">): string {
+  const body = issueTitleBody(issue);
+  return issue.number === null ? body : `#${issue.number} ${body}`.trim();
+}
+
 export interface Schedule {
   provider: string;
   repo: string;

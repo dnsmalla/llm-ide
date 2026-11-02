@@ -16,6 +16,8 @@ import {
   isWeekend,
   timelineRange,
   undatedRows,
+  issueLabel,
+  issueTitleBody,
   type GanttRow,
   type Schedule,
   type TimelineRange,
@@ -182,7 +184,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
               <div className="gnt-labels-head">Issue</div>
               {dated.map((r) => (
                 <button key={r.issue.id} type="button" className="gnt-rowlabel" data-on={selected?.issue.id === r.issue.id || undefined} onClick={() => setSelected(r)} title={r.issue.title}>
-                  <span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {r.issue.title}
+                  <span className="gnt-num">{r.issue.number !== null ? `#${r.issue.number}` : ""}</span> {issueTitleBody(r.issue)}
                 </button>
               ))}
             </div>
@@ -212,7 +214,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                           onClick={() => setSelected(r)}
                         >
                           {r.dependsOn.length ? <span className="gnt-dep" title={`Depends on #${r.dependsOn.join(", #")}`}>⤷</span> : null}
-                          {r.issue.number !== null ? `#${r.issue.number} ` : ""}{r.issue.title}
+                          {issueLabel(r.issue)}
                         </button>
                       ) : null}
                     </div>
@@ -229,7 +231,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
                 {undated.map((r) => (
                   <li key={r.issue.id}>
                     <button type="button" className="gnt-link" onClick={() => setSelected(r)}>
-                      {r.issue.number !== null ? `#${r.issue.number} ` : ""}{r.issue.title}
+                      {issueLabel(r.issue)}
                     </button>
                     <span className="gnt-hint"> {r.issue.repo}</span>
                     <button type="button" className="gnt-btn gnt-schedule" onClick={() => setSelected(r)}>Set dates</button>
@@ -325,7 +327,7 @@ function ScheduleEditor({ row, deps, onClose, onSaved, onOpenIssue }: {
   return (
     <div className="gnt-editor" role="dialog" aria-modal="false" aria-label="Schedule issue">
       <div className="gnt-editor-head">
-        <strong>{row.issue.number !== null ? `#${row.issue.number} ` : ""}{row.issue.title}</strong>
+        <strong>{issueLabel(row.issue)}</strong>
         <span className="gnt-hint">{row.issue.repo}</span>
         <span className="gnt-spacer" />
         {onOpenIssue ? <button type="button" className="gnt-link" onClick={onOpenIssue}>Open issue</button> : null}

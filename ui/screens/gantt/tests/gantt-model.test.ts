@@ -64,3 +64,11 @@ test("bar geometry clamps to the range and never goes negative", () => {
   assert.equal(barGeometry(row, { start: row.start! + 20, days: 10 }, 10), null);
   assert.equal(isWeekend(dayNumber("2026-01-03")!), true, "2026-01-03 is a Saturday");
 });
+
+import { issueLabel, issueTitleBody } from "../gantt-model.ts";
+
+test("issue labels do not duplicate a title's existing #number", () => {
+  assert.equal(issueTitleBody({ number: 24, title: "#24 InboxStore: no concurrency protection" }), "InboxStore: no concurrency protection");
+  assert.equal(issueLabel({ number: 24, title: "#24 InboxStore: no concurrency protection" }), "#24 InboxStore: no concurrency protection");
+  assert.equal(issueLabel({ number: 30, title: "After creating an issue" }), "#30 After creating an issue");
+});
