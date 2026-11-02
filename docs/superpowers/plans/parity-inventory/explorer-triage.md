@@ -67,10 +67,10 @@ All of these sit under `FEATURE_EXPLORER`.
 | SCM discard prompt | REWORDED | 1 | Native `native_ask("Discard changes?")` (`git_scm.rs:797-798`) | - | | | | |
 | SCM permanent delete after trash failure | MAC_ONLY | 3 | Desktop policy: `trash_guard.rs:1-5`, no permanent-delete fallback on any path | - (deliberate) | | | | |
 | SCM create branch | REWORDED | 1 | `BranchesView.tsx:14-23` "Create and switch" | - | | | | |
-| SCM branch delete | REAL_GAP | 2 | No delete command in `git_scm.rs`; no delete in `BranchesView` | Delete a non-current branch, fully merged only | rust | S | Deletes a ref | HOLD |
-| SCM stash | REAL_GAP | 7 | No stash command (`git_scm.rs:20-21`) | Stash with optional message (untracked included), list, pop | rust | M | Rewrites the working tree | HOLD |
+| SCM branch delete | REAL_GAP | 2 | No delete command in `git_scm.rs`; no delete in `BranchesView` | Delete a non-current branch, fully merged only | rust | S | Deletes a ref | BUILT (2026-11-03): `git_branch_delete`, `-d` first; `-D` only after a second explicit step |
+| SCM stash | REAL_GAP | 7 | No stash command (`git_scm.rs:20-21`) | Stash with optional message (untracked included), list, pop | rust | M | Rewrites the working tree | BUILT (2026-11-03): `git_stash_list/push/apply/pop/drop`, Branches tab |
 | SCM discard all | REAL_GAP | 3 | Per-file discard only; `controller.discardSelected` (`controller.ts:264`) is never called | Discard All with confirmation and the merge-in-progress refusal | rust (exact parity) or ui (unstaged + untracked only) | S | Overwrites files | HOLD |
-| SCM tags | REAL_GAP | 6 | No tag command in `git_scm.rs` | Create a lightweight tag at HEAD; list tags newest first; overflow menu | rust | S | Create adds a ref; listing is read-only | Listing could go first; create HOLD |
+| SCM tags | REAL_GAP | 6 | No tag command in `git_scm.rs` | Create a lightweight tag at HEAD; list tags newest first; overflow menu | rust | S | Create adds a ref; listing is read-only | BUILT (2026-11-03): listing + `git_tag_create` (lightweight, or annotated with a message) |
 | SCM commit file list | REAL_GAP | 1 | `HistoryView.tsx:41-52` has no count and no empty text | "Files (N)" header and "No files in this commit" | ui | S | No | Yes |
 | SCM publish branch | REAL_GAP | 1 | No push of any kind (`api.ts:3-5`) | Push -u origin with the stored token | rust | L | Push + credentials | HOLD |
 | SCM merge branch | REAL_GAP | 2 | No merge command; the conflict grouping already exists (`model.ts:8`) | Merge another local branch into the current one | rust | M | Changes the tree | HOLD |
@@ -128,9 +128,9 @@ them. They belong with Publish Branch in Batch C.
 | Item | Decision needed | Safeguards for a safe implementation |
 |---|---|---|
 | Discard All | Exact parity (staged too, Rust) or unstaged + untracked only (existing `git_discard`, UI only)? | Native confirm in the host; refuse during merge, cherry-pick or revert; untracked files go to the trash only, never permanent delete; root confinement |
-| Branch delete | None beyond the HOLD | `git branch -d` only, never `-D`; refuse the current branch; native confirm; validated branch name |
-| Stash / pop | Include untracked by default, as the Mac does? | Native confirm on pop; refuse during merge; show pop conflicts through the existing conflict flow |
-| Tag create | None beyond the HOLD | Validated name; lightweight tag only; never push tags |
+| Branch delete (BUILT) | Decided: `-D` allowed after a second explicit in-page step and a native dialog naming the commits lost | `git branch -d` first; refuse the current branch and one checked out in another worktree; native confirm; validated branch name; force refused if the tip moved during the dialog |
+| Stash / pop (BUILT) | Decided: Include untracked is on by default (a checkbox), as the Mac does | Native confirm on pop and drop; apply/pop refused while files are unmerged; pop conflicts left in git's state for the existing conflict flow; entries addressed by index + commit hash (a list that moved is refused) |
+| Tag create (BUILT) | Decided: an optional message makes an annotated tag (needs the identity) | Validated name (`check-ref-format`); never moves a tag; signing off; never push tags |
 | Merge into current | None beyond the HOLD | Refuse a dirty tree; no fast-forward-only surprises (state the mode); never `--force`; conflicts go to the existing conflict UI |
 | Amend | None beyond the HOLD | Refuse when HEAD is already on the upstream (pushed); refuse during merge; keep the typed message on failure; never offer push after an amend |
 | Publish / Push / Pull / Sync / Commit & Push | Who holds the git credential: the core vault through a short-lived handoff to Rust, or the system git credential helper? | Never `--force`; refuse a dirty tree for pull; never log credentials or put them in a URL or argv (use a credential helper or env passed only to the child process); explicit confirm on the first push of a branch |

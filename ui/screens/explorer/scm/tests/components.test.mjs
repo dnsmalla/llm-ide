@@ -216,7 +216,13 @@ test("tags: read-only list names the commit and the annotated or lightweight kin
   assert.match(out, /aria-label="Local tags"/);
   assert.match(out, /v1\.0\/rc[\s\S]*abc1234 · annotated/);
   assert.match(out, /light[\s\S]*def5678 · lightweight/);
-  assert.doesNotMatch(out, /<button[^>]*>[^<]*tag/i, "no tag action is offered");
+  // Listed tags are read-only: no control at all inside the list, and the whole Tags section has exactly one
+  // button, the New tag form's Create (no delete, push or move anywhere).
+  const list = out.match(/<ul[^>]*scm-tag-list[\s\S]*?<\/ul>/)[0];
+  assert.doesNotMatch(list, /<(button|a|input|select)\b/, "no action on a listed tag");
+  const section = out.match(/<section[^>]*scm-tags[\s\S]*?<\/section>/)[0];
+  assert.deepEqual([...section.matchAll(/<button[^>]*>([^<]*)</g)].map((m) => m[1]), ["Create tag"]);
+  assert.doesNotMatch(section, /delete|push|move/i);
 });
 
 test("tags: an empty listing says so", async () => {
@@ -224,4 +230,58 @@ test("tags: an empty listing says so", async () => {
   c.setTab("branches");
   await new Promise((r) => setTimeout(r, 0));
   assert.match(html(h(BranchesView, { controller: c, snap: c.getSnapshot() })), /No tags yet\./);
+});
+
+test("branches: delete is offered on every branch except the current one", async () => {
+  const { c } = await ctl({ entries: [], branches: [{ name: "main", current: true, hash: "abc1234", upstream: null }, { name: "dev", current: false, hash: "def5678", upstream: null }] });
+  await c.loadBranches();
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /aria-label="Delete dev"/);
+  assert.doesNotMatch(out, /aria-label="Delete main"/);
+});
+
+test("branches: a not-merged delete asks for the explicit second confirmation with the commit count", async () => {
+  const { c } = await ctl({ entries: [], branches: [{ name: "main", current: true, hash: "abc1234", upstream: null }, { name: "feat", current: false, hash: "def5678", upstream: null }], unmerged: ["feat"] });
+  await c.loadBranches();
+  await c.deleteBranch("feat");
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /Delete anyway \(loses 2 commits not on any other branch\)/);
+  assert.match(out, /aria-label="Keep branch feat"/);
+});
+
+test("tags: the new tag form validates the name and sends the message only when there is one", async () => {
+  const { c } = await ctl({ entries: [], tags: [] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /aria-label="New tag name"/);
+  assert.match(out, /aria-label="Tag message \(optional\)"/);
+  assert.match(out, /aria-label="Create tag"[^>]*disabled=""/, "no name, no create");
+  assert.match(out, /created at the current commit \(HEAD\)/i);
+});
+
+test("stash: list with apply, pop and drop per entry, and the stash form with include untracked on", async () => {
+  const { c } = await ctl({ entries: [], stashes: ["WIP on main: fix", "older"] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  const out = html(h(BranchesView, { controller: c, snap: c.getSnapshot() }));
+  assert.match(out, /aria-labelledby="scm-stash-title"[\s\S]*>Stash</);
+  for (const label of ["Apply stash 0", "Pop stash 0", "Drop stash 0", "Apply stash 1"]) assert.ok(out.includes(`aria-label="${label}"`), label);
+  assert.match(out, /WIP on main: fix/);
+  assert.match(out, /<input[^>]*type="checkbox"[^>]*checked=""[^>]*aria-label="Include untracked files"|<input[^>]*aria-label="Include untracked files"[^>]*checked=""/);
+  assert.match(out, /aria-label="Stash changes"/);
+});
+
+test("stash: an empty stash list says so, and a pending drop names its message", async () => {
+  const { c } = await ctl({ entries: [], stashes: [] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(html(h(BranchesView, { controller: c, snap: c.getSnapshot() })), /No stashes\./);
+  const d = await ctl({ entries: [], stashes: ["keep me"] });
+  d.c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  d.c.askDropStash(d.c.getSnapshot().stashes.list[0]);
+  const out = html(h(BranchesView, { controller: d.c, snap: d.c.getSnapshot() }));
+  assert.match(out, /Drop the stash “keep me”\?/);
+  assert.match(out, /aria-label="Drop stash 0 now"/);
 });

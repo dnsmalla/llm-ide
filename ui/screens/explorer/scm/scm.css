@@ -71,6 +71,14 @@
 .scm-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .scm-more { margin: var(--tok-space-sm); align-self: flex-start; }
 .scm-newbranch { display: flex; flex-direction: column; gap: var(--tok-space-xs); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
+.scm-branch-row { display: flex; align-items: center; gap: var(--tok-space-xs); border-bottom: 1px solid var(--tok-color-border); padding-right: var(--tok-space-sm); }
+.scm-branch-row > .scm-branch-item { flex: 1; min-width: 0; border-bottom: 0; }
+.scm-newtag { display: flex; flex-direction: column; gap: var(--tok-space-xs); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
+.scm-stash, .scm-tags { display: flex; flex-direction: column; }
+.scm-stash-list, .scm-tag-list { list-style: none; margin: 0; padding: 0; }
+.scm-stash-item { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); min-width: 0; }
+.scm-confirm { display: flex; flex-direction: column; gap: var(--tok-space-xs); margin: var(--tok-space-sm); padding: 6px 8px; border: 1px solid var(--tok-color-warning); border-radius: var(--tok-radius-sm); }
+.scm-confirm p { margin: 0; overflow-wrap: anywhere; }
 .scm-detail-head { display: flex; align-items: center; gap: var(--tok-space-sm); padding: 4px var(--tok-space-sm); }
 .scm-message-text { margin: 0; padding: 0 var(--tok-space-sm) var(--tok-space-sm); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
 

@@ -3,13 +3,16 @@
 // stale-response guards and wording. `subscribe` / `getSnapshot` fit React's `useSyncExternalStore`.
 import {
   ScmError, toScmError,
-  type Branch, type CommitDetail, type HunkDiff, type Identity, type LogEntry, type ScmApi, type ScmStatus, type Tag,
+  type Branch, type CommitDetail, type HunkDiff, type Identity, type LogEntry, type ScmApi, type ScmStatus, type Stash, type Tag,
 } from "./api";
 import {
   GROUP_ORDER, MAX_DISCARD, NO_SELECTION, STAGE_CHUNK, actionsFor, branchNameError, buildGroups, chunk, describeError, displayText,
-  flatten, hunkIndexes, pruneSelection, rowKey, selectAllHunks, selectRow, selectedItems, toggleHunk, validateCommit,
+  flatten, hunkIndexes, messageError, pruneSelection, rowKey, selectAllHunks, selectRow, selectedItems, tagNameError, toggleHunk, validateCommit,
   type ErrorInfo, type FileItem, type GroupId, type Groups, type Row, type Selection,
 } from "./model";
+
+/** A branch the host refused to delete because it has commits no merged branch holds. Nothing was deleted. */
+export interface PendingBranchDelete { name: string; tip: string; unique: number }
 
 export type ScmTab = "changes" | "history" | "branches";
 
@@ -52,6 +55,11 @@ export interface ScmSnapshot {
   /** Read-only tag listing shown under the branches (a failure here never blocks the branch list). */
   tags: { list: readonly Tag[]; truncated: boolean; loading: boolean; error: ErrorInfo | null };
   history: HistoryState;
+  /** Stash list, read on the branches tab (the Mac's stash menu lists the same entries). */
+  stashes: { list: readonly Stash[]; truncated: boolean; loading: boolean; error: ErrorInfo | null };
+  pendingBranchDelete: PendingBranchDelete | null;
+  /** A stash drop waiting for the in-page confirmation. */
+  pendingStashDrop: Stash | null;
   counts: { staged: number; changes: number; untracked: number; conflicts: number };
 }
 
@@ -84,6 +92,9 @@ export class ScmController {
       branches: { list: [], truncated: false, loading: false, error: null },
       tags: { list: [], truncated: false, loading: false, error: null },
       history: { entries: [], hasMore: false, loading: false, error: null, open: null },
+      stashes: { list: [], truncated: false, loading: false, error: null },
+      pendingBranchDelete: null,
+      pendingStashDrop: null,
       counts: { staged: 0, changes: 0, untracked: 0, conflicts: 0 },
     };
   }
@@ -168,6 +179,7 @@ export class ScmController {
     if (tab === "branches") {
       void this.loadBranches();
       void this.loadTags();
+      void this.loadStashes();
     }
   }
 
@@ -390,6 +402,122 @@ export class ScmController {
     });
     await this.loadBranches();
     return !!ok;
+  }
+
+  // ---- branch delete ---------------------------------------------------------------------------------------
+
+  /** Never forced: a branch with unmerged commits is kept and the user gets the second, explicit step. */
+  async deleteBranch(name: string): Promise<void> {
+    await this.runBranchDelete(name, false);
+  }
+
+  async forceDeleteBranch(): Promise<void> {
+    const p = this.snap.pendingBranchDelete;
+    if (p) await this.runBranchDelete(p.name, true);
+  }
+
+  cancelBranchDelete() {
+    this.set({ pendingBranchDelete: null });
+  }
+
+  private async runBranchDelete(name: string, force: boolean): Promise<void> {
+    const bad = branchNameError(name);
+    if (bad) {
+      this.set({ notice: { kind: "error", info: describeError("invalid_ref", bad), text: bad } });
+      return;
+    }
+    if (this.snap.status?.branch === name) {
+      const text = "You are on this branch. Switch to another branch, then delete it.";
+      this.set({ notice: { kind: "error", info: describeError("current_branch", text), text } });
+      return;
+    }
+    const res = await this.run("Deleting branch", () => this.api.branchDelete(name, force));
+    if (res?.status === "not_merged") {
+      this.set({
+        pendingBranchDelete: { name, tip: res.tip, unique: res.unique_commits },
+        notice: { kind: "info", info: null, text: `Branch ${name} has commits that are not merged, so Git kept it.` },
+      });
+    } else if (res) {
+      this.set({ pendingBranchDelete: null, notice: { kind: "info", info: null, text: `Deleted branch ${name}.` } });
+    }
+    await this.loadBranches();
+  }
+
+  // ---- tags (create) ---------------------------------------------------------------------------------------
+
+  /** Validated here, then by the host (which never moves an existing tag). Resolves true when the tag was created. */
+  async createTag(name: string, message: string): Promise<boolean> {
+    const bad = tagNameError(name) ?? messageError("tag", message);
+    if (bad) {
+      this.set({ notice: { kind: "error", info: null, text: bad } });
+      return false;
+    }
+    const res = await this.run("Creating tag", () => this.api.tagCreate(name, message.trim() ? message : undefined));
+    await this.loadTags();
+    if (!res) return false;
+    this.set({ notice: { kind: "info", info: null, text: `Created tag ${name}.` } });
+    return true;
+  }
+
+  // ---- stash -----------------------------------------------------------------------------------------------
+
+  async loadStashes() {
+    this.set({ stashes: { ...this.snap.stashes, loading: true, error: null } });
+    try {
+      const l = await this.api.stashList();
+      this.set({ stashes: { list: l.stashes, truncated: l.truncated, loading: false, error: null } });
+    } catch (e) {
+      this.set({ stashes: { ...this.snap.stashes, loading: false, error: this.fail(e) } });
+    }
+  }
+
+  /** Stashes the working tree (tracked changes, plus untracked files when asked). Resolves true when it stashed. */
+  async stashChanges(message: string, includeUntracked: boolean): Promise<boolean> {
+    const bad = messageError("stash", message);
+    if (bad) {
+      this.set({ notice: { kind: "error", info: null, text: bad } });
+      return false;
+    }
+    const res = await this.run("Stashing", async () => {
+      await this.api.stashPush(message, includeUntracked);
+      return true;
+    });
+    await this.loadStashes();
+    if (!res) return false;
+    this.set({ notice: { kind: "info", info: null, text: "Stashed the changes." } });
+    return true;
+  }
+
+  async applyStash(st: Stash) {
+    await this.stashOp("Applying stash", () => this.api.stashApply(st.index, st.hash), "Applied the stash. It is still in the list.");
+  }
+
+  async popStash(st: Stash) {
+    await this.stashOp("Popping stash", () => this.api.stashPop(st.index, st.hash), "Popped the stash.");
+  }
+
+  askDropStash(stash: Stash) {
+    this.set({ pendingStashDrop: stash });
+  }
+
+  cancelDropStash() {
+    this.set({ pendingStashDrop: null });
+  }
+
+  async dropStash() {
+    const p = this.snap.pendingStashDrop;
+    if (!p) return;
+    this.set({ pendingStashDrop: null });
+    await this.stashOp("Dropping stash", () => this.api.stashDrop(p.index, p.hash), "Dropped the stash.");
+  }
+
+  private async stashOp(label: string, fn: () => Promise<void>, done: string) {
+    const res = await this.run(label, async () => {
+      await fn();
+      return true;
+    });
+    await this.loadStashes();
+    if (res) this.set({ notice: { kind: "info", info: null, text: done } });
   }
 
   // ---- history ---------------------------------------------------------------------------------------------

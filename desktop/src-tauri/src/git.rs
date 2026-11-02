@@ -214,6 +214,9 @@ pub(crate) struct Opts<'a> {
     pub env: Vec<(&'static str, String)>,
     /// Wall-clock limit; default 30 s. Bulk index writes on huge trees use more.
     pub timeout: Option<Duration>,
+    /// Turns OFF the runner's literal-pathspec env for a call that passes no paths. With it on, `git stash push
+    /// --include-untracked` reports success and leaves the untracked files in place (checked with git 2.54).
+    pub glob_pathspecs: bool,
 }
 
 /// Runs `git <base> args` in `root`. `Err` on spawn failure, timeout or non-zero exit (stderr in the message).
@@ -231,7 +234,7 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
         .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_LITERAL_PATHSPECS", "1")
+        .env("GIT_LITERAL_PATHSPECS", if opts.glob_pathspecs { "0" } else { "1" })
         .env("GIT_PAGER", "cat")
         .env("LC_ALL", "C");
     if opts.user_config {

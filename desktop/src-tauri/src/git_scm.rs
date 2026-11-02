@@ -17,8 +17,9 @@
 //!   size-capped, control characters and bidi/invisible format characters are removed, and the
 //!   UI renders it as plain text.
 //!
-//! Not here (deferred, they need credentials or are not v1): push/pull/fetch/remote, amend,
-//! stash, blame, hosted PR/issue actions.
+//! Branch delete (safe `-d` first), tag create (never moves a tag) and stash (list, push, apply, pop,
+//! drop) are here too. Not here (deferred, they need credentials or are not v1): push/pull/fetch/remote,
+//! amend, merge, blame, hosted PR/issue actions.
 
 use std::path::{Path, PathBuf};
 
@@ -802,6 +803,314 @@ pub fn commit_diff(root: &Path, hash: &str, path: &str) -> R<CommitDiff> {
     Ok(CommitDiff { text: sanitize_text(&String::from_utf8_lossy(&out.stdout)), truncated: out.truncated })
 }
 
+// ---- branch delete, tag create, stash ----------------------------------------------------
+
+/// `git` said no (exit 1 for a plain question such as `--is-ancestor`): `false`. Refused repos, timeouts and a
+/// missing git stay errors.
+fn git_says(res: R<crate::git::Out>) -> R<bool> {
+    match res {
+        Ok(_) => Ok(true),
+        Err(e) if e.code == "git_failed" => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+fn map_git_error<T>(res: R<T>, code: &'static str, message: &str) -> R<T> {
+    res.map_err(|e| if e.code == "git_failed" { FsError { code, message: message.into() } } else { e })
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BranchDelete {
+    Deleted,
+    /// Refused without changing anything: the branch has commits no merged branch contains. Carries what the
+    /// second, explicit confirmation needs to name.
+    NotMerged { tip: String, unique_commits: usize },
+}
+
+/// Merged means: an ancestor of HEAD, or of the branch's upstream (the two places `git branch -d` looks).
+fn merged(root: &Path, name: &str) -> R<bool> {
+    let r = format!("refs/heads/{name}");
+    if git_says(run_git(root, &["merge-base", "--is-ancestor", &r, "HEAD"], 256))? {
+        return Ok(true);
+    }
+    match run_git(root, &["rev-parse", "--verify", "-q", &format!("{r}@{{upstream}}")], 256) {
+        Ok(up) => {
+            let up = String::from_utf8_lossy(&up.stdout).trim().to_string();
+            git_says(run_git(root, &["merge-base", "--is-ancestor", &r, &up], 256))
+        }
+        Err(e) if e.code == "git_failed" => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Commits reachable from the branch and from no other local branch (or HEAD): what a forced delete loses.
+fn unique_commits(root: &Path, name: &str) -> R<usize> {
+    let r = format!("refs/heads/{name}");
+    // Every other local branch is listed explicitly: `--exclude` did not drop the branch itself on git 2.54.
+    let others = run_git(root, &["for-each-ref", "--format=%(refname)", "refs/heads/"], 4 * 1024 * 1024)?;
+    let mut args: Vec<String> = vec!["rev-list".into(), "--count".into(), r.clone(), "--not".into()];
+    if has_head(root)? {
+        args.push("HEAD".into());
+    }
+    args.extend(String::from_utf8_lossy(&others.stdout).lines().filter(|l| *l != r).map(str::to_string));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_git(root, &refs, 256)?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0))
+}
+
+/// Deletes a local branch. Refuses the current branch and anything that is not a local branch ref; a branch
+/// that is not merged is NOT deleted: the result says so (`NotMerged`) and the caller decides on a forced delete.
+/// Every actual deletion goes through `confirm` first (the host's native dialog in the app).
+pub fn branch_delete(root: &Path, name: &str, force: bool, confirm: &dyn Fn(&str) -> bool) -> R<BranchDelete> {
+    valid_branch_name(name)?;
+    if !branch_exists(root, name) {
+        return gerr("not_found", format!("no local branch named {}", line(name, 80)));
+    }
+    if status(root)?.branch.as_deref() == Some(name) {
+        return gerr("current_branch", "you are on this branch. Switch to another branch, then delete it");
+    }
+    let wt = run_git(root, &["worktree", "list", "--porcelain"], 1024 * 1024)?;
+    let checked_out = format!("branch refs/heads/{name}");
+    if String::from_utf8_lossy(&wt.stdout).lines().any(|l| l == checked_out) {
+        return gerr("checked_out", "this branch is checked out in another worktree. Switch that worktree to another branch first");
+    }
+    let shown = line(name, 80);
+    let tip_of = || run_git(root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{name}")], 256).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    if !force {
+        if !merged(root, name)? {
+            let tip = String::from_utf8_lossy(&run_git(root, &["rev-parse", "--short", &format!("refs/heads/{name}")], 256)?.stdout).trim().to_string();
+            return Ok(BranchDelete::NotMerged { tip, unique_commits: unique_commits(root, name)? });
+        }
+        if !confirm(&format!("Delete the local branch \u{201C}{shown}\u{201D}? It is fully merged, so no commits are lost. Remote branches are not touched.")) {
+            return gerr("cancelled", "branch delete cancelled");
+        }
+        map_git_error(run_git(root, &["branch", "-d", name], 64 * 1024), "not_merged", "the branch is no longer fully merged (it changed while the confirmation was open). Nothing was deleted")?;
+    } else {
+        let tip = tip_of()?;
+        let n = unique_commits(root, name)?;
+        let prompt = format!("Delete the unmerged branch \u{201C}{shown}\u{201D} at {}? This loses {n} commit(s) that are not on any other local branch.", &tip[..7.min(tip.len())]);
+        if !confirm(&prompt) {
+            return gerr("cancelled", "branch delete cancelled");
+        }
+        // The dialog named this tip and count: a branch that moved meanwhile is not force-deleted.
+        if tip_of().ok().as_deref() != Some(tip.as_str()) {
+            return gerr("changed", "the branch changed while the confirmation was open. Nothing was deleted");
+        }
+        run_git(root, &["branch", "-D", name], 64 * 1024)?;
+    }
+    Ok(BranchDelete::Deleted)
+}
+
+fn valid_tag_name(root: &Path, name: &str) -> R<()> {
+    let bad = |why: &str| gerr("invalid_ref", format!("not a valid tag name: {why}"));
+    if name.is_empty() || name.len() > 200 {
+        return bad("1 to 200 bytes");
+    }
+    if name.starts_with('-') {
+        return bad("it must not start with '-'");
+    }
+    if name.chars().any(|c| c.is_control() || crate::tray::is_invisible_format(c)) {
+        return bad("it contains a control or invisible character");
+    }
+    // Git's own rule, so nothing we accept is looser than git's (`--allow-onelevel` as the tag command uses).
+    map_git_error(
+        run_git(root, &["check-ref-format", "--allow-onelevel", &format!("refs/tags/{name}")], 256).map(|_| ()),
+        "invalid_ref",
+        "not a valid tag name: git does not allow that name (no spaces, ~ ^ : ? * [ \\, \"..\", \"@{\", or a part ending in .lock)",
+    )
+}
+
+/// Full commit id for a tag target: HEAD (the default), a commit id, or a branch / tag name.
+fn tag_target(root: &Path, target: Option<&str>) -> R<String> {
+    let t = target.map(str::trim).filter(|t| !t.is_empty()).unwrap_or("HEAD");
+    let plain = t == "HEAD" || is_hex(&t.to_ascii_lowercase()) || valid_branch_name(t).is_ok();
+    if !plain {
+        return gerr("invalid_ref", "the tag target must be HEAD, a branch, a tag or a commit id");
+    }
+    let spec = format!("{t}^{{commit}}");
+    let out = map_git_error(run_git(root, &["rev-parse", "--verify", "-q", &spec], 256), "not_found", &format!("there is no commit named {}", line(t, 80)))?;
+    let full = String::from_utf8_lossy(&out.stdout).trim().to_ascii_lowercase();
+    if !is_hex(&full) {
+        return gerr("not_found", format!("there is no commit named {}", line(t, 80)));
+    }
+    Ok(full)
+}
+
+/// Creates a tag and never moves an existing one (no `-f`). With a message it is annotated, with the
+/// user's own identity as tagger (never GPG-signed); without one it is lightweight and needs no identity. Nothing is pushed.
+pub fn tag_create(root: &Path, name: &str, message: Option<&str>, target: Option<&str>, home: &Option<PathBuf>) -> R<Tag> {
+    valid_tag_name(root, name)?;
+    if message.is_some_and(|m| m.len() > MAX_TAG_MESSAGE) {
+        return gerr("too_large", format!("the tag message is longer than {MAX_TAG_MESSAGE} bytes"));
+    }
+    if run_git(root, &["rev-parse", "--verify", "-q", &format!("refs/tags/{name}")], 256).is_ok() {
+        return gerr("exists", format!("a tag named {} already exists. Tags are never moved here", line(name, 80)));
+    }
+    let commit = tag_target(root, target)?;
+    let text = message.map(str::trim).filter(|m| !m.is_empty()).map(validate_message).transpose()?;
+    match &text {
+        None => {
+            run_git(root, &["tag", name, &commit], 64 * 1024)?;
+        }
+        Some(msg) => {
+            let id = identity(root, home)?;
+            let env = vec![("GIT_COMMITTER_NAME", id.name), ("GIT_COMMITTER_EMAIL", id.email)];
+            run_git_opts(
+                root,
+                &["-c", "tag.gpgsign=false", "-c", "tag.forceSignAnnotated=false", "tag", "-a", "-F", "-", name, &commit],
+                64 * 1024,
+                &Opts { stdin: Some(msg.as_bytes()), env, ..Opts::default() },
+            )?;
+        }
+    }
+    Ok(Tag { name: name.to_string(), target: commit.chars().take(7).collect(), annotated: text.is_some() })
+}
+
+const MAX_TAG_MESSAGE: usize = 2048;
+pub const MAX_STASHES: usize = 100;
+const MAX_STASH_MESSAGE: usize = 2048;
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Stash {
+    /// Position in the list: `stash@{index}`. Newest is 0.
+    pub index: usize,
+    /// Full commit id of the entry. Apply, pop and drop send it back so a list that changed since it was shown
+    /// is refused instead of acting on whatever entry now sits at `index`.
+    pub hash: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct StashList {
+    pub stashes: Vec<Stash>,
+    pub truncated: bool,
+}
+
+/// Stash entries, newest first, at most `MAX_STASHES`. Read-only. Records are NUL-separated, the hash and the
+/// subject unit-separated (neither can contain either byte).
+pub fn stash_list(root: &Path) -> R<StashList> {
+    let out = run_git(root, &["stash", "list", "-z", "--format=%H%x1f%gs", &format!("--max-count={}", MAX_STASHES + 1)], 1024 * 1024)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut all: Vec<(&str, &str)> = text.split('\0').filter_map(|s| s.split_once('\u{1f}')).filter(|(h, _)| is_hex(h)).collect();
+    let truncated = all.len() > MAX_STASHES;
+    all.truncate(MAX_STASHES);
+    let stashes =
+        all.into_iter().enumerate().map(|(index, (h, m))| Stash { index, hash: h.to_string(), message: line(m, 200) }).collect();
+    Ok(StashList { stashes, truncated })
+}
+
+/// `stash@{N}` and a dialog label, for an entry that sits at `index` with commit `hash` right now. The index is
+/// an integer and the hash is checked as hex, so no refspec text from the webview ever reaches git.
+fn stash_entry(root: &Path, index: usize, hash: &str) -> R<(String, String)> {
+    let hash = hash.to_ascii_lowercase();
+    if hash.len() < 40 || !is_hex(&hash) {
+        return gerr("invalid_ref", "not a stash id");
+    }
+    let spec = format!("stash@{{{index}}}");
+    let out = map_git_error(run_git(root, &["rev-parse", "--verify", "-q", &format!("refs/{spec}")], 256), "not_found", &format!("there is no stash {index}"))?;
+    if String::from_utf8_lossy(&out.stdout).trim() != hash {
+        return gerr("changed", "the stash list changed since it was shown. Nothing was changed: check the list and try again");
+    }
+    let subject = run_git(root, &["stash", "list", "--skip", &index.to_string(), "--max-count=1", "--format=%gs"], 1024)
+        .map(|o| line(&String::from_utf8_lossy(&o.stdout), 200))
+        .unwrap_or_default();
+    Ok((spec, format!("{subject} ({})", &hash[..7])))
+}
+
+fn conflicted(root: &Path) -> bool {
+    status(root).is_ok_and(|s| s.entries.iter().any(|e| e.kind == "unmerged"))
+}
+
+/// Maps a failed apply or pop: conflicts are git's own state (left in place for the user), a dirty tree is
+/// refused by git before anything changes.
+fn map_stash_error(root: &Path, e: FsError) -> FsError {
+    if e.code != "git_failed" {
+        return e;
+    }
+    if conflicted(root) {
+        return FsError { code: "conflicts", message: "The stash did not apply cleanly. The conflicted files are marked in Source Control: edit them, then stage each one. Git kept the stash in the list.".into() };
+    }
+    if e.message.contains("would be overwritten") || e.message.contains("local changes") {
+        return FsError { code: "dirty_stash", message: "your uncommitted changes would be overwritten. Commit or discard them first. Nothing was changed.".into() };
+    }
+    e
+}
+
+/// Stashes the working tree (tracked changes, and untracked files when asked), like the Mac's stash. Needs the
+/// user's identity because a stash is a commit. Refuses an unmerged tree and an empty change set.
+pub fn stash_push(root: &Path, message: &str, include_untracked: bool, home: &Option<PathBuf>) -> R<()> {
+    if message.len() > MAX_STASH_MESSAGE {
+        return gerr("too_large", format!("the stash message is longer than {MAX_STASH_MESSAGE} bytes"));
+    }
+    let msg = line(message, 200);
+    let st = status(root)?;
+    if st.entries.iter().any(|e| e.kind == "unmerged") {
+        return gerr("conflict", "resolve the conflicted files before stashing");
+    }
+    let any = if include_untracked { !st.entries.is_empty() } else { st.entries.iter().any(|e| e.kind != "untracked") };
+    if !any {
+        return gerr("nothing_to_stash", "there are no local changes to stash");
+    }
+    if !has_head(root)? {
+        return gerr("no_commits", "make the first commit before stashing");
+    }
+    let id = identity(root, home)?;
+    let env = vec![
+        ("GIT_AUTHOR_NAME", id.name.clone()),
+        ("GIT_AUTHOR_EMAIL", id.email.clone()),
+        ("GIT_COMMITTER_NAME", id.name),
+        ("GIT_COMMITTER_EMAIL", id.email),
+    ];
+    let mut args = vec!["-c", "commit.gpgsign=false", "stash", "push"];
+    if include_untracked {
+        args.push("--include-untracked");
+    }
+    let m = format!("--message={msg}");
+    if !msg.is_empty() {
+        args.push(&m);
+    }
+    // No paths are passed, so the glob setting only lets git see the untracked files it must stash.
+    run_git_opts(root, &args, 64 * 1024, &Opts { env, glob_pathspecs: true, ..Opts::default() }).map(|_| ())
+}
+
+/// Git refuses to apply onto an unmerged index; saying so first keeps that apart from a stash that conflicts.
+fn refuse_unmerged(root: &Path) -> R<()> {
+    if conflicted(root) {
+        return gerr("conflict", "resolve the conflicted files before applying a stash");
+    }
+    Ok(())
+}
+
+pub fn stash_apply(root: &Path, index: usize, hash: &str) -> R<()> {
+    refuse_unmerged(root)?;
+    let (spec, _) = stash_entry(root, index, hash)?;
+    run_git(root, &["stash", "apply", &spec], 64 * 1024).map(|_| ()).map_err(|e| map_stash_error(root, e))
+}
+
+pub fn stash_pop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+    refuse_unmerged(root)?;
+    let (_, label) = stash_entry(root, index, hash)?;
+    let prompt = format!(
+        "Pop the stash \u{201C}{label}\u{201D}? Its changes go into your working tree and the stash is removed from the list. If they conflict with your files, Git stops and keeps the stash."
+    );
+    if !confirm(&prompt) {
+        return gerr("cancelled", "pop cancelled");
+    }
+    // Checked again: the list can change while the dialog is open.
+    let (spec, _) = stash_entry(root, index, hash)?;
+    run_git(root, &["stash", "pop", &spec], 64 * 1024).map(|_| ()).map_err(|e| map_stash_error(root, e))
+}
+
+pub fn stash_drop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+    let (_, label) = stash_entry(root, index, hash)?;
+    if !confirm(&format!("Drop the stash \u{201C}{label}\u{201D}? Its changes are removed from the list and cannot be recovered from LLM-IDE.")) {
+        return gerr("cancelled", "drop cancelled");
+    }
+    let (spec, _) = stash_entry(root, index, hash)?;
+    run_git(root, &["stash", "drop", &spec], 64 * 1024).map(|_| ())
+}
+
 // ---- Tauri commands --------------------------------------------------------------------
 
 use crate::git::blocking;
@@ -910,6 +1219,53 @@ pub struct CommitDiffReq {
 #[tauri::command]
 pub async fn git_commit_diff(req: CommitDiffReq) -> R<CommitDiff> {
     blocking(move |root| commit_diff(&root, &req.hash, &req.path)).await
+}
+
+#[tauri::command]
+pub async fn git_branch_delete(name: String, force: bool) -> R<BranchDelete> {
+    blocking(move |root| {
+        let ask = if force { native_ask("Delete unmerged branch?", "Delete anyway") } else { native_ask("Delete branch?", "Delete") };
+        DESTRUCTIVE_DIALOGS.run(|| branch_delete(&root, &name, force, &ask))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_tag_create(name: String, message: Option<String>, target: Option<String>) -> R<Tag> {
+    blocking(move |root| tag_create(&root, &name, message.as_deref(), target.as_deref(), &None)).await
+}
+
+#[tauri::command]
+pub async fn git_stash_list() -> R<StashList> {
+    blocking(|root| stash_list(&root)).await
+}
+
+#[derive(Deserialize)]
+pub struct StashPushReq {
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub include_untracked: bool,
+}
+
+#[tauri::command]
+pub async fn git_stash_push(req: StashPushReq) -> R<()> {
+    blocking(move |root| stash_push(&root, &req.message, req.include_untracked, &None)).await
+}
+
+#[tauri::command]
+pub async fn git_stash_apply(index: usize, hash: String) -> R<()> {
+    blocking(move |root| stash_apply(&root, index, &hash)).await
+}
+
+#[tauri::command]
+pub async fn git_stash_pop(index: usize, hash: String) -> R<()> {
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| stash_pop(&root, index, &hash, &native_ask("Pop stash?", "Pop")))).await
+}
+
+#[tauri::command]
+pub async fn git_stash_drop(index: usize, hash: String) -> R<()> {
+    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| stash_drop(&root, index, &hash, &native_ask("Drop stash?", "Drop")))).await
 }
 
 #[cfg(test)]
@@ -1725,5 +2081,563 @@ mod tag_tests {
     fn refuses_a_root_that_is_not_a_repository() {
         let d = scratch("not-a-repo");
         assert!(tags(&d).is_err());
+    }
+}
+
+#[cfg(test)]
+mod mutate_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::fs;
+    use std::process::Command;
+
+    fn have_git() -> bool {
+        Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("llmide-mut-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::canonicalize(&d).unwrap()
+    }
+
+    fn g_at(root: &Path, args: &[&str], date: Option<&str>) {
+        let mut c = Command::new("git");
+        c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        if let Some(d) = date {
+            c.env("GIT_COMMITTER_DATE", d).env("GIT_AUTHOR_DATE", d);
+        }
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn g(root: &Path, args: &[&str]) {
+        g_at(root, args, None);
+    }
+
+    fn out(root: &Path, args: &[&str]) -> String {
+        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        String::from_utf8(o.stdout).unwrap().trim().to_string()
+    }
+
+    fn exists(root: &Path, refname: &str) -> bool {
+        Command::new("git").args(["rev-parse", "--verify", "-q", refname]).current_dir(root).output().is_ok_and(|o| o.status.success())
+    }
+
+    /// A repository with one commit on `main` (a.txt = "base").
+    fn repo(name: &str) -> PathBuf {
+        let r = scratch(name);
+        g(&r, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "base\n").unwrap();
+        g_at(&r, &["add", "."], None);
+        g_at(&r, &["commit", "-q", "-m", "base"], Some("2020-01-01T00:00:00Z"));
+        r
+    }
+
+    fn commit_text(root: &Path, text: &str) {
+        fs::write(root.join("a.txt"), text).unwrap();
+        g_at(root, &["add", "."], None);
+        g_at(root, &["commit", "-q", "-m", text], Some("2021-01-01T00:00:00Z"));
+    }
+
+    fn code<T>(r: R<T>) -> &'static str {
+        match r {
+            Ok(_) => "ok",
+            Err(e) => e.code,
+        }
+    }
+
+    /// The hash the list shows at `index`, or a well-formed id that names no stash.
+    fn h_at(r: &Path, index: usize) -> String {
+        stash_list(r).unwrap().stashes.get(index).map(|s| s.hash.clone()).unwrap_or_else(|| "0".repeat(40))
+    }
+
+    fn yes(_: &str) -> bool {
+        true
+    }
+    fn no(_: &str) -> bool {
+        false
+    }
+
+    /// A home directory holding the user's git identity (or none).
+    fn home(name: &str, ident: bool) -> Option<PathBuf> {
+        let h = scratch(name);
+        if ident {
+            fs::write(h.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n").unwrap();
+        }
+        Some(h)
+    }
+
+    // ---- branch delete ----------------------------------------------------------------------
+
+    #[test]
+    fn deletes_a_merged_branch_after_one_confirmation() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-merged");
+        g(&r, &["branch", "feature"]);
+        let asked = Cell::new(0);
+        let ask = |_: &str| {
+            asked.set(asked.get() + 1);
+            true
+        };
+        assert_eq!(branch_delete(&r, "feature", false, &ask).unwrap(), BranchDelete::Deleted);
+        assert_eq!(asked.get(), 1, "a merged delete asks exactly once");
+        assert!(!exists(&r, "refs/heads/feature"));
+    }
+
+    #[test]
+    fn an_unmerged_branch_is_refused_without_asking_then_force_deletes_it() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-unmerged");
+        g(&r, &["checkout", "-q", "-b", "feat"]);
+        commit_text(&r, "feat work");
+        let tip = out(&r, &["rev-parse", "--short", "refs/heads/feat"]);
+        g(&r, &["checkout", "-q", "main"]);
+        let asked = Cell::new(0);
+        let ask = |_: &str| {
+            asked.set(asked.get() + 1);
+            true
+        };
+        assert_eq!(
+            branch_delete(&r, "feat", false, &ask).unwrap(),
+            BranchDelete::NotMerged { tip: tip.clone(), unique_commits: 1 }
+        );
+        assert_eq!(asked.get(), 0, "an unmerged refusal changes nothing and asks nothing");
+        assert!(exists(&r, "refs/heads/feat"), "the branch survives the refusal");
+        // The explicit force path: cancelled leaves it, accepted deletes it.
+        assert_eq!(code(branch_delete(&r, "feat", true, &no)), "cancelled");
+        assert!(exists(&r, "refs/heads/feat"));
+        assert_eq!(branch_delete(&r, "feat", true, &yes).unwrap(), BranchDelete::Deleted);
+        assert!(!exists(&r, "refs/heads/feat"));
+    }
+
+    #[test]
+    fn the_current_branch_is_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-current");
+        assert_eq!(code(branch_delete(&r, "main", false, &yes)), "current_branch");
+        assert_eq!(code(branch_delete(&r, "main", true, &yes)), "current_branch");
+        assert!(exists(&r, "refs/heads/main"));
+    }
+
+    #[test]
+    fn option_shaped_and_odd_names_are_refused_before_git_runs() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-names");
+        g(&r, &["branch", "keep"]);
+        for bad in ["-x", "--all", "-D", "a..b", "HEAD", "a b", "", "a:b", "a\u{202E}b", "a\nb", "keep\u{0}"] {
+            assert_eq!(code(branch_delete(&r, bad, true, &yes)), "invalid_ref", "{bad:?}");
+        }
+        assert!(exists(&r, "refs/heads/keep"));
+    }
+
+    #[test]
+    fn a_missing_branch_is_not_found() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-missing");
+        assert_eq!(code(branch_delete(&r, "nope", false, &yes)), "not_found");
+    }
+
+    #[test]
+    fn remote_tracking_refs_are_never_deleted() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-remote");
+        g(&r, &["update-ref", "refs/remotes/origin/feat", "HEAD"]);
+        assert_eq!(code(branch_delete(&r, "origin/feat", true, &yes)), "not_found");
+        assert!(exists(&r, "refs/remotes/origin/feat"), "a remote-tracking ref is untouched");
+    }
+
+    // ---- tag create -------------------------------------------------------------------------
+
+    #[test]
+    fn a_lightweight_tag_at_head_needs_no_identity() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-light");
+        let no_id = home("tc-light-home", false);
+        let t = tag_create(&r, "v1", None, None, &no_id).unwrap();
+        assert!(!t.annotated);
+        assert_eq!(t.name, "v1");
+        assert_eq!(out(&r, &["cat-file", "-t", "refs/tags/v1"]), "commit");
+        assert_eq!(t.target, out(&r, &["rev-parse", "--short", "HEAD"]));
+        // A blank message is no message.
+        assert!(!tag_create(&r, "v2", Some("   "), None, &no_id).unwrap().annotated);
+    }
+
+    #[test]
+    fn an_annotated_tag_is_tagged_with_the_users_identity() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-ann");
+        let t = tag_create(&r, "v1.0", Some("first release"), None, &home("tc-ann-home", true)).unwrap();
+        assert!(t.annotated);
+        assert_eq!(out(&r, &["cat-file", "-t", "refs/tags/v1.0"]), "tag");
+        let body = out(&r, &["cat-file", "-p", "refs/tags/v1.0"]);
+        assert!(body.contains("tagger Ada Lovelace <ada@example.com>"), "{body}");
+        assert!(body.contains("first release"));
+    }
+
+    #[test]
+    fn an_annotated_tag_without_an_identity_is_refused_and_nothing_is_written() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-noid");
+        let before = fs::read(r.join(".git").join("config")).unwrap();
+        assert_eq!(code(tag_create(&r, "v1", Some("notes"), None, &home("tc-noid-home", false))), "identity_missing");
+        assert!(!exists(&r, "refs/tags/v1"));
+        assert_eq!(fs::read(r.join(".git").join("config")).unwrap(), before, "git config is never written");
+    }
+
+    #[test]
+    fn an_existing_tag_is_refused_and_never_moved() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-exists");
+        tag_create(&r, "v1", None, None, &None).unwrap();
+        let before = out(&r, &["rev-parse", "refs/tags/v1"]);
+        commit_text(&r, "second");
+        assert_eq!(code(tag_create(&r, "v1", None, None, &home("tc-exists-home", true))), "exists");
+        assert_eq!(out(&r, &["rev-parse", "refs/tags/v1"]), before, "the tag still names its old commit");
+    }
+
+    #[test]
+    fn invalid_tag_names_are_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-names");
+        for bad in ["-x", "--force", "a..b", "a b", "a~1", "a^", "a:b", "a?", "a*", "a[", "a\\b", "x.lock", "a/.b", "", "a\u{202E}b", "a\u{0}b", "a\tb"] {
+            assert_eq!(code(tag_create(&r, bad, None, None, &None)), "invalid_ref", "{bad:?}");
+        }
+        assert!(!exists(&r, "refs/tags/a"));
+    }
+
+    #[test]
+    fn a_unicode_tag_name_round_trips() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-unicode");
+        let name = "\u{7248}\u{672C}/\u{00FC}ber-1";
+        assert_eq!(tag_create(&r, name, None, None, &None).unwrap().name, name);
+        assert!(exists(&r, &format!("refs/tags/{name}")));
+    }
+
+    #[test]
+    fn target_defaults_to_head_and_accepts_a_commit_or_a_branch() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-target");
+        let first = out(&r, &["rev-parse", "HEAD"]);
+        commit_text(&r, "second");
+        let t = tag_create(&r, "old", None, Some(&first), &None).unwrap();
+        assert_eq!(t.target, first[..7]);
+        g(&r, &["branch", "side", &first]);
+        assert_eq!(tag_create(&r, "from-branch", None, Some("side"), &None).unwrap().target, first[..7]);
+        assert!(tag_create(&r, "head", None, Some("HEAD"), &None).is_ok());
+        assert_eq!(code(tag_create(&r, "nope", None, Some("no-such-thing"), &None)), "not_found");
+        assert_eq!(code(tag_create(&r, "dash", None, Some("-x"), &None)), "invalid_ref");
+    }
+
+    #[test]
+    fn tag_messages_are_bounded_and_not_option_shaped() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("tc-msg");
+        let h = home("tc-msg-home", true);
+        assert_eq!(code(tag_create(&r, "big", Some(&"x".repeat(2049)), None, &h)), "too_large");
+        assert_eq!(code(tag_create(&r, "dash", Some("-n"), None, &h)), "invalid_message");
+        assert!(!exists(&r, "refs/tags/big"));
+        assert!(tag_create(&r, "ok", Some(&"x".repeat(2048)), None, &h).is_ok());
+    }
+
+    // ---- stash ------------------------------------------------------------------------------
+
+    #[test]
+    fn stash_push_list_apply_pop_and_drop_round_trip() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-cycle");
+        let h = home("st-cycle-home", true);
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        stash_push(&r, "first\nline two", false, &h).unwrap();
+        let list = stash_list(&r).unwrap();
+        assert_eq!(list.stashes.len(), 1);
+        assert!(list.stashes[0].message.contains("first"));
+        assert!(!list.stashes[0].message.contains('\n'), "one line");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "base\n", "the tree is clean after push");
+
+        stash_apply(&r, 0, &h_at(&r, 0)).unwrap();
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "changed\n");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1, "apply keeps the stash");
+
+        g(&r, &["checkout", "--", "a.txt"]);
+        stash_pop(&r, 0, &h_at(&r, 0), &yes).unwrap();
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "changed\n");
+        assert!(stash_list(&r).unwrap().stashes.is_empty(), "pop removes it");
+
+        g(&r, &["checkout", "--", "a.txt"]);
+        fs::write(r.join("a.txt"), "second\n").unwrap();
+        stash_push(&r, "second", false, &h).unwrap();
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1);
+        stash_drop(&r, 0, &h_at(&r, 0), &yes).unwrap();
+        assert!(stash_list(&r).unwrap().stashes.is_empty());
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "base\n", "drop does not touch the tree");
+    }
+
+    #[test]
+    fn a_cancelled_pop_or_drop_changes_nothing() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-cancel");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        stash_push(&r, "keep me", false, &home("st-cancel-home", true)).unwrap();
+        assert_eq!(code(stash_pop(&r, 0, &h_at(&r, 0), &no)), "cancelled");
+        assert_eq!(code(stash_drop(&r, 0, &h_at(&r, 0), &no)), "cancelled");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1);
+    }
+
+    #[test]
+    fn nothing_to_stash_is_a_typed_refusal() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-nothing");
+        assert_eq!(code(stash_push(&r, "", false, &home("st-nothing-home", true))), "nothing_to_stash");
+        assert!(stash_list(&r).unwrap().stashes.is_empty());
+    }
+
+    #[test]
+    fn untracked_files_only_stash_when_asked() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-untracked");
+        let h = home("st-untracked-home", true);
+        fs::write(r.join("new.txt"), "hello\n").unwrap();
+        assert_eq!(code(stash_push(&r, "", false, &h)), "nothing_to_stash", "an untracked file is not a change without the flag");
+        stash_push(&r, "with new", true, &h).unwrap();
+        assert!(!r.join("new.txt").exists(), "the untracked file was stashed");
+        stash_apply(&r, 0, &h_at(&r, 0)).unwrap();
+        assert_eq!(fs::read_to_string(r.join("new.txt")).unwrap(), "hello\n");
+    }
+
+    #[test]
+    fn stash_needs_an_identity_and_a_bounded_message() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-id");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        assert_eq!(code(stash_push(&r, "", false, &home("st-id-home", false))), "identity_missing");
+        assert!(stash_list(&r).unwrap().stashes.is_empty());
+        assert_eq!(code(stash_push(&r, &"m".repeat(2049), false, &home("st-id-home2", true))), "too_large");
+    }
+
+    #[test]
+    fn a_pop_that_conflicts_is_a_typed_error_and_keeps_the_stash() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-conflict");
+        fs::write(r.join("a.txt"), "two\n").unwrap();
+        stash_push(&r, "two", false, &home("st-conflict-home", true)).unwrap();
+        commit_text(&r, "three");
+        assert_eq!(code(stash_pop(&r, 0, &h_at(&r, 0), &yes)), "conflicts");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1, "git kept the stash");
+        let st = status(&r).unwrap();
+        assert!(st.entries.iter().any(|e| e.kind == "unmerged"), "the conflict is in git's own state");
+        // While those files are unmerged, another apply or pop is refused up front (not reported as a new conflict).
+        assert_eq!(code(stash_apply(&r, 0, &h_at(&r, 0))), "conflict");
+        assert_eq!(code(stash_pop(&r, 0, &h_at(&r, 0), &yes)), "conflict");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1);
+    }
+
+    #[test]
+    fn an_index_outside_the_list_is_refused() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-index");
+        assert_eq!(code(stash_apply(&r, 0, &h_at(&r, 0))), "not_found");
+        assert_eq!(code(stash_pop(&r, 0, &h_at(&r, 0), &yes)), "not_found");
+        assert_eq!(code(stash_drop(&r, 0, &h_at(&r, 0), &yes)), "not_found");
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        stash_push(&r, "one", false, &home("st-index-home", true)).unwrap();
+        assert_eq!(code(stash_apply(&r, 1, &h_at(&r, 1))), "not_found");
+        assert_eq!(code(stash_drop(&r, 1, &h_at(&r, 1), &yes)), "not_found");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 1);
+    }
+
+    #[test]
+    fn the_stash_list_is_capped_at_100_and_says_so() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-cap");
+        for i in 0..150 {
+            fs::write(r.join("a.txt"), format!("change {i}\n")).unwrap();
+            g(&r, &["stash", "push", "-q", "-m", &format!("s{i}")]);
+        }
+        let list = stash_list(&r).unwrap();
+        assert_eq!(list.stashes.len(), MAX_STASHES);
+        assert!(list.truncated);
+        assert_eq!(list.stashes[0].index, 0);
+        assert!(list.stashes[0].message.contains("s149"), "newest first: {}", list.stashes[0].message);
+    }
+    // ---- review additions -------------------------------------------------------------------
+
+    #[test]
+    fn a_stale_stash_index_is_refused_and_nothing_is_dropped() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-stale");
+        let h = home("st-stale-home", true);
+        fs::write(r.join("a.txt"), "one\n").unwrap();
+        stash_push(&r, "older", false, &h).unwrap();
+        let seen = stash_list(&r).unwrap().stashes.remove(0); // the user sees "older" at 0
+        fs::write(r.join("a.txt"), "two\n").unwrap();
+        stash_push(&r, "newer", false, &h).unwrap(); // now "newer" is at 0
+        assert_eq!(code(stash_drop(&r, 0, &seen.hash, &yes)), "changed");
+        assert_eq!(code(stash_pop(&r, 0, &seen.hash, &yes)), "changed");
+        assert_eq!(code(stash_apply(&r, 0, &seen.hash)), "changed");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 2, "nothing was dropped or popped");
+        for bad in ["", "stash@{0}", "-x", "HEAD", &"g".repeat(40)] {
+            assert_eq!(code(stash_drop(&r, 1, bad, &yes)), "invalid_ref", "{bad:?}");
+        }
+        // The list changing while the dialog is open is caught too.
+        let older = h_at(&r, 1);
+        let ask = |_: &str| {
+            fs::write(r.join("a.txt"), "three\n").unwrap();
+            g(&r, &["stash", "push", "-q", "-m", "during"]);
+            true
+        };
+        assert_eq!(code(stash_drop(&r, 1, &older, &ask)), "changed");
+        assert_eq!(stash_list(&r).unwrap().stashes.len(), 3);
+        assert_eq!(code(stash_drop(&r, 2, &older, &yes)), "ok", "the right index and hash still work");
+        assert!(stash_list(&r).unwrap().stashes.iter().all(|s| s.hash != older));
+    }
+
+    #[test]
+    fn a_branch_that_moves_during_the_dialog_is_not_deleted() {
+        if !have_git() {
+            return;
+        }
+        // Merged when asked, unmerged when git runs: `-d` must refuse it (a `-D` here would lose the commit).
+        let r = repo("bd-moved");
+        g(&r, &["branch", "feature"]);
+        let ask = |_: &str| {
+            g(&r, &["checkout", "-q", "feature"]);
+            commit_text(&r, "late work");
+            g(&r, &["checkout", "-q", "main"]);
+            true
+        };
+        assert_eq!(code(branch_delete(&r, "feature", false, &ask)), "not_merged");
+        assert!(exists(&r, "refs/heads/feature"), "the late commit is still on its branch");
+        // Forced: the dialog named the old tip, so a moved branch is refused as well.
+        let ask = |_: &str| {
+            g(&r, &["checkout", "-q", "feature"]);
+            commit_text(&r, "later work");
+            g(&r, &["checkout", "-q", "main"]);
+            true
+        };
+        assert_eq!(code(branch_delete(&r, "feature", true, &ask)), "changed");
+        assert!(exists(&r, "refs/heads/feature"));
+    }
+
+    #[test]
+    fn a_branch_checked_out_in_another_worktree_is_refused_before_asking() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("bd-wt");
+        let wt = scratch("bd-wt-linked");
+        fs::remove_dir_all(&wt).unwrap();
+        g(&r, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
+        let asked = Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
+            true
+        };
+        assert_eq!(code(branch_delete(&r, "other", true, &ask)), "checked_out");
+        assert!(!asked.get());
+        assert!(exists(&r, "refs/heads/other"));
+    }
+
+    #[test]
+    fn a_stash_message_is_never_a_pathspec_and_ignored_files_stay() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("st-magic");
+        let h = home("st-magic-home", true);
+        fs::write(r.join(".gitignore"), "*.log\n").unwrap();
+        g(&r, &["add", ".gitignore"]);
+        g(&r, &["commit", "-q", "-m", "ignore"]);
+        fs::write(r.join("a.txt"), "changed\n").unwrap();
+        fs::write(r.join("new.txt"), "new\n").unwrap();
+        fs::write(r.join("keep.log"), "ignored\n").unwrap();
+        stash_push(&r, ":(glob)nothing -- a.txt", true, &h).unwrap();
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "base\n", "the whole tree was stashed");
+        assert!(!r.join("new.txt").exists());
+        assert!(r.join("keep.log").exists(), "ignored files are never stashed (no --all)");
+        assert!(stash_list(&r).unwrap().stashes[0].message.contains(":(glob)nothing -- a.txt"));
+    }
+
+    #[test]
+    fn stash_in_a_repo_without_commits_is_a_plain_refusal() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("st-empty");
+        g(&r, &["init", "-q"]);
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        assert_eq!(code(stash_push(&r, "", true, &home("st-empty-home", true))), "no_commits");
+        assert!(stash_list(&r).unwrap().stashes.is_empty());
+    }
+
+    #[test]
+    fn repo_signing_config_never_starts_gpg_for_a_tag_or_a_stash() {
+        if !have_git() {
+            return;
+        }
+        // A repo that asks for signing (or names a gpg program) is refused before git runs at all.
+        for (k, v) in [("tag.gpgSign", "true"), ("tag.forceSignAnnotated", "true"), ("gpg.program", "/nonexistent/gpg"), ("commit.gpgSign", "true")] {
+            let r = repo(&format!("sign-cfg-{}", k.replace('.', "-")));
+            let h = home(&format!("sign-cfg-home-{}", k.replace('.', "-")), true);
+            g(&r, &["config", k, v]);
+            let tag = tag_create(&r, "v1", Some("notes"), None, &h);
+            fs::write(r.join("a.txt"), "changed\n").unwrap();
+            let st = stash_push(&r, "s", false, &h);
+            // Either refused as untrusted, or (an allowed key) run with signing forced off: never a gpg failure.
+            for res in [tag.map(|_| ()), st] {
+                assert!(matches!(&res, Ok(()) | Err(FsError { code: "untrusted_repo_config", .. })), "{k}: {res:?}");
+            }
+        }
     }
 }

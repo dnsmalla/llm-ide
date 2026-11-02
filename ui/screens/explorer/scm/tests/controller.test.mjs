@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "../../tests/helpers.mjs";
-import { entry, makeScm, ScmErr } from "./fakes.mjs";
+import { entry, fakeHash, makeScm, ScmErr } from "./fakes.mjs";
 
 const { ScmController } = await load("scm/controller.ts");
 
@@ -238,4 +238,121 @@ test("tags: loaded on the branches tab, read-only, and a tag failure never block
   assert.equal(bad.snap().tags.error.title !== undefined, true);
   assert.equal(bad.snap().branches.list.length, 1);
   assert.equal(bad.snap().branches.error, null);
+});
+
+// ---- branch delete, tag create, stash (desktop host commands) ---------------------------------------
+
+test("branch delete: a merged branch is deleted (the host asks natively) and the list reloads", async () => {
+  const { c, api, snap } = await ctl({ entries: [], branches: [{ name: "main", current: true, hash: "abc1234", upstream: null }, { name: "dev", current: false, hash: "def5678", upstream: null }] });
+  await c.loadBranches();
+  await c.deleteBranch("dev");
+  assert.deepEqual(calls(api, "branchDelete").map((x) => [x[1], x[2]]), [["dev", false]]);
+  assert.deepEqual(snap().branches.list.map((b) => b.name), ["main"]);
+  assert.equal(snap().notice.kind, "info");
+  assert.equal(snap().pendingBranchDelete, null);
+});
+
+test("branch delete: not merged keeps the branch, names the commits, and only the explicit second step forces it", async () => {
+  const { c, api, snap } = await ctl({ entries: [], branches: [{ name: "main", current: true, hash: "abc1234", upstream: null }, { name: "feat", current: false, hash: "def5678", upstream: null }], unmerged: ["feat"] });
+  await c.loadBranches();
+  await c.deleteBranch("feat");
+  assert.deepEqual(snap().pendingBranchDelete, { name: "feat", tip: "def5678", unique: 2 });
+  assert.equal(snap().branches.list.length, 2, "nothing is removed by the refusal");
+  c.cancelBranchDelete();
+  assert.equal(snap().pendingBranchDelete, null);
+  await c.deleteBranch("feat");
+  await c.forceDeleteBranch();
+  assert.deepEqual(calls(api, "branchDelete").map((x) => x[2]), [false, false, true]);
+  assert.deepEqual(snap().branches.list.map((b) => b.name), ["main"]);
+});
+
+test("branch delete: the current branch and bad names never reach the host", async () => {
+  const { c, api, snap } = await ctl({ entries: [] });
+  await c.deleteBranch("main");
+  await c.deleteBranch("-x");
+  await c.deleteBranch("a..b");
+  assert.equal(calls(api, "branchDelete").length, 0);
+  assert.equal(snap().notice.kind, "error");
+});
+
+test("tags: a new tag is validated first, sends an empty message as none, and reloads the list", async () => {
+  const { c, api, snap } = await ctl({ entries: [], tags: [] });
+  assert.equal(await c.createTag("bad name", ""), false);
+  assert.equal(calls(api, "tagCreate").length, 0, "an invalid name never reaches the host");
+  assert.equal(await c.createTag("v1.0", "   "), true);
+  assert.deepEqual(calls(api, "tagCreate")[0].slice(1), ["v1.0", undefined, undefined]);
+  assert.equal(snap().notice.text, "Created tag v1.0.");
+  assert.deepEqual(snap().tags.list.map((t) => t.name), ["v1.0"]);
+});
+
+test("tags: an oversized message is refused before the host; a host refusal is a plain sentence", async () => {
+  const { c, api, snap } = await ctl({ entries: [], tags: [] });
+  assert.equal(await c.createTag("big", "x".repeat(2049)), false);
+  assert.equal(calls(api, "tagCreate").length, 0);
+  assert.equal(await c.createTag("v1.0", "notes"), true);
+  assert.equal(await c.createTag("v1.0", "notes"), false);
+  assert.equal(snap().notice.kind, "error");
+  assert.match(snap().notice.info.detail, /already exists/);
+});
+
+test("stash: the list loads with the branches tab and is newest first", async () => {
+  const { c, api, snap } = await ctl({ entries: [], stashes: ["WIP on main: newest", "older"] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(calls(api, "stashList").length, 1);
+  assert.deepEqual(snap().stashes.list.map((s) => [s.index, s.message]), [[0, "WIP on main: newest"], [1, "older"]]);
+});
+
+test("stash: stash changes sends the message and the include flag, then reloads", async () => {
+  const { c, api, snap } = await ctl({ entries: [{ path: "a.txt", orig_path: null, index: ".", worktree: "M", kind: "changed", submodule: false }], stashes: [] });
+  assert.equal(await c.stashChanges("wip", true), true);
+  assert.deepEqual(calls(api, "stashPush")[0].slice(1), ["wip", true]);
+  assert.deepEqual(snap().stashes.list.map((s) => s.message), ["wip"]);
+  assert.equal(await c.stashChanges("x".repeat(2049), false), false);
+  assert.equal(calls(api, "stashPush").length, 1, "an oversized message is refused before the host");
+});
+
+test("stash: apply keeps the stash; pop removes it; a conflict is an error and the stash stays", async () => {
+  const { c, api, snap } = await ctl({ entries: [], stashes: ["one", "two"] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  await c.applyStash(snap().stashes.list[1]);
+  assert.equal(snap().stashes.list.length, 2);
+  await c.popStash(snap().stashes.list[0]);
+  assert.deepEqual(snap().stashes.list.map((s) => s.message), ["two"]);
+  api.state.failNext = new ScmErr("conflicts", "The stash did not apply cleanly.");
+  await c.popStash(snap().stashes.list[0]);
+  assert.equal(snap().notice.kind, "error");
+  assert.equal(snap().stashes.list.length, 1, "a conflicted pop leaves the list as git left it");
+  assert.deepEqual(calls(api, "stashPop").map((x) => x[1]), [0, 0]);
+});
+
+test("stash: drop waits for the in-page confirmation, names the message, then drops", async () => {
+  const { c, api, snap } = await ctl({ entries: [], stashes: ["keep me"] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  c.askDropStash(snap().stashes.list[0]);
+  assert.deepEqual(snap().pendingStashDrop, { index: 0, hash: fakeHash("keep me"), message: "keep me" });
+  assert.equal(calls(api, "stashDrop").length, 0, "nothing is dropped by asking");
+  c.cancelDropStash();
+  assert.equal(snap().pendingStashDrop, null);
+  c.askDropStash(snap().stashes.list[0]);
+  await c.dropStash();
+  assert.equal(calls(api, "stashDrop").length, 1);
+  assert.equal(snap().stashes.list.length, 0);
+  assert.equal(snap().pendingStashDrop, null);
+});
+
+test("stash: apply, pop and drop send the hash the user saw; a list that moved is refused and nothing changes", async () => {
+  const { c, api, snap } = await ctl({ entries: [], stashes: ["seen"] });
+  c.setTab("branches");
+  await new Promise((r) => setTimeout(r, 0));
+  const seen = snap().stashes.list[0];
+  c.askDropStash(seen);
+  api.state.stashes = ["pushed elsewhere", "seen"]; // another tool stashed meanwhile: index 0 is now a different entry
+  await c.dropStash();
+  assert.deepEqual(calls(api, "stashDrop")[0].slice(1), [0, fakeHash("seen")]);
+  assert.equal(snap().notice.kind, "error");
+  assert.deepEqual(api.state.stashes, ["pushed elsewhere", "seen"], "the other stash was not dropped");
+  assert.deepEqual(snap().stashes.list.map((s) => s.message), ["pushed elsewhere", "seen"], "the list reloads");
 });

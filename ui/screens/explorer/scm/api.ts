@@ -1,8 +1,9 @@
 // Typed wrappers over the Rust host's Source Control commands (desktop/src-tauri/src/{git,git_scm}.rs).
 // The webview never sends an absolute path or patch text: paths are relative to the open project root and
 // hunk staging sends hunk indexes plus the diff id the host handed out. Destructive commands (discard,
-// checkout) ask in a native host dialog the page cannot answer. Local actions only: there is no push, pull,
-// fetch, remote, amend or stash command, by design (they need credentials; see the parity checklist).
+// checkout, branch delete, stash pop and drop) ask in a native host dialog the page cannot answer. Local actions
+// only: there is no push, pull, fetch, remote, amend or merge command, by design (they need credentials or are
+// later work; see the parity checklist).
 import { invokeHost } from "../../shell/host";
 
 export interface ScmStatusEntry {
@@ -49,6 +50,12 @@ export interface CommitDiff { text: string; truncated: boolean }
 /** `annotated` is false for a lightweight tag. `target` is the short id of the commit it names. */
 export interface Tag { name: string; target: string; annotated: boolean }
 export interface TagList { tags: Tag[]; truncated: boolean }
+/** `not_merged` is a refusal that deleted nothing: `tip` is the branch's last commit, `unique_commits` what a forced delete loses. */
+export type BranchDelete = { status: "deleted" } | { status: "not_merged"; tip: string; unique_commits: number };
+/** `index` is the position in the list (`stash@{index}`), newest first; `hash` is the entry's commit, sent back with
+ * apply / pop / drop so the host refuses (`changed`) when the list moved since it was shown. */
+export interface Stash { index: number; hash: string; message: string }
+export interface StashList { stashes: Stash[]; truncated: boolean }
 
 export interface ScmApi {
   status(): Promise<ScmStatus>;
@@ -66,6 +73,13 @@ export interface ScmApi {
   commitFiles(hash: string): Promise<CommitDetail>;
   commitDiff(hash: string, path: string): Promise<CommitDiff>;
   tags(): Promise<TagList>;
+  branchDelete(name: string, force: boolean): Promise<BranchDelete>;
+  tagCreate(name: string, message?: string, target?: string): Promise<Tag>;
+  stashList(): Promise<StashList>;
+  stashPush(message: string, includeUntracked: boolean): Promise<void>;
+  stashApply(index: number, hash: string): Promise<void>;
+  stashPop(index: number, hash: string): Promise<void>;
+  stashDrop(index: number, hash: string): Promise<void>;
 }
 
 /** What the host rejects with: `{ code, message }`. Anything else is mapped to `io` / `unavailable`. */
@@ -113,5 +127,12 @@ export function createHostScm(): ScmApi {
     commitFiles: (hash) => call("git_commit_files", { hash }),
     commitDiff: (hash, path) => call("git_commit_diff", { req: { hash, path } }),
     tags: () => call("git_tags"),
+    branchDelete: (name, force) => call("git_branch_delete", { name, force }),
+    tagCreate: (name, message, target) => call("git_tag_create", { name, message: message ?? null, target: target ?? null }),
+    stashList: () => call("git_stash_list"),
+    stashPush: (message, includeUntracked) => call("git_stash_push", { req: { message, include_untracked: includeUntracked } }),
+    stashApply: (index, hash) => call("git_stash_apply", { index, hash }),
+    stashPop: (index, hash) => call("git_stash_pop", { index, hash }),
+    stashDrop: (index, hash) => call("git_stash_drop", { index, hash }),
   };
 }

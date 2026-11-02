@@ -228,6 +228,16 @@ export function validateCommit(message: string, stagedCount: number, conflictCou
   return { ok: true, reason: "", bytes };
 }
 
+/** Tag names follow git's ref rules, the same as branch names; the host has the final word. */
+export function tagNameError(name: string): string | null {
+  return branchNameError(name)?.replace(/branch name/g, "tag name") ?? null;
+}
+
+/** Tag and stash messages are capped at 2 KB of UTF-8 (the host refuses more). */
+export function messageError(what: "tag" | "stash", message: string): string | null {
+  return utf8Length(message) > 2048 ? `The ${what} message is longer than 2 KB.` : null;
+}
+
 /** Mirror of the host's branch-name check (`git check-ref-format --branch`, stricter). Returns an error or null. */
 export function branchNameError(name: string): string | null {
   if (name === "" || utf8Length(name) > 200) return "Use 1 to 200 characters.";
@@ -283,6 +293,14 @@ export function describeError(code: string, message: string): ErrorInfo {
       return { code, title: "Switch refused", detail: "Your uncommitted changes would be overwritten by that checkout. Commit or discard them first. Nothing was changed.", steps: [] };
     case "conflict":
       return { code, title: "Resolve conflicts first", detail: clean || "Files are in conflict. Edit them, then stage each one to mark it resolved.", steps: [] };
+    case "current_branch":
+      return { code, title: "Cannot delete this branch", detail: clean, steps: [] };
+    case "conflicts":
+      return { code, title: "The stash did not apply cleanly", detail: clean, steps: [] };
+    case "nothing_to_stash":
+      return { code, title: "Nothing to stash", detail: "Change a file first, or tick Include untracked files for new files.", steps: [] };
+    case "dirty_stash":
+      return { code, title: "Cannot apply the stash", detail: "Your uncommitted changes would be overwritten. Commit or discard them first. Nothing was changed.", steps: [] };
     case "nothing_staged":
       return { code, title: "Nothing is staged", detail: "Stage some changes before committing.", steps: [] };
     case "cancelled":
