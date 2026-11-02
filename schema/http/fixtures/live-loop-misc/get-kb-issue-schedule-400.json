@@ -1,9 +1,11 @@
 {
   "endpoint": "GET /kb/issue-schedule",
   "status": 400,
+  "description": "A repo that is not owner/name. An omitted or empty repo is not an error: it lists every schedule for the provider (the Gantt's All repositories view).",
   "request": {
     "query": {
-      "provider": "github"
+      "provider": "github",
+      "repo": "bad"
     }
   },
   "response": {
