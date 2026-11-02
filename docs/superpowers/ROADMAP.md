@@ -8,7 +8,7 @@ Current numbers: `SERVER_API_VERSION` 104, migration head 0058 on pushed `main` 
 
 - **Professional quality over speed** (user, 2026-10-29). No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green.
 - **Token-affecting changes ship OFF** until you run the bench and say go (user, 2026-10-30). Paid or subscription bench runs are yours to start.
-- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Local `main` is ahead of `origin/main` by 227 commits (see section 2; counted against the last successful fetch). No branches: work happens on `main`.
+- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Local `main` is ahead of `origin/main` (`76bd166d`) by 236 commits as of 2026-11-02 (see section 2). The push is **on hold by your decision** until you rule on the token-affecting chat commits `ce31d950`, `dbf4994e`, `7ea6ba4a` (section 6). No branches: work happens on `main`.
 - **Delegation applies to the open questions.** You said "do the best, secure, usable for big projects" and I decided. Those answers are marked **delegated, revisit if wrong** below; any of them can be reopened by saying so. They are: relay design choices D1-D5 and D7-D9 (tiered clients, no third-party analytics, upload-only files, per-user accounts); sync-kit S1-S6; ui-kit U1-U6 (provisional); Phase 7 defaults D4-D8 (tree-only to cloud models, stop-only, browser profile, audit retention, first-party mount); Issues token migration into the core vault (W2); Mac Auto Tasks moving to the SDK engine for Claude with multi-engine kept.
 - **macOS first and finished, then Windows and Linux.** The Tauri macOS app must reach parity and daily use before the other two OSes get more than CI.
 - **Swift feature freeze is in force** (inferred from the 2026-10-31 acceptance of ADR 0018 for Phase 3; you have not contradicted it). Allowed: security fixes, parity work needed for the shared core, and build/release work. The one planned exception is the Live capture helper (Phase 5 question 2).
@@ -52,7 +52,7 @@ Pushed state is `origin/main` at `6f51e1e6`.
 
 ## 2. Running or just landed (local, not pushed)
 
-`git rev-list --count origin/main..main` was 227 at the 2026-11-02 review (the 2026-11-01/02 desktop work, listed at the end of this section, is all local). The older local commits listed here are still unpushed too:
+`git rev-list --count origin/main..main` was 236 on 2026-11-02 (push held, see section 6) (the 2026-11-01/02 desktop work, listed at the end of this section, is all local). The older local commits listed here are still unpushed too:
 
 - **Doc Gen and Visual** (Tauri): request model, sources, run state machine, screen with templates and history, hostile-output tests, shell section, parity rows (`9b2fa3f6`, `392a70ed`, `46dae4df`, `885e6fe6`). Built and unit-tested, not GUI-verified.
 - **Google connectors, server side** (another agent, in progress at the time of writing): G1 OAuth core with PKCE and loopback flow (`87c98768`, migration 0059), G2 Gmail over REST with a `historyId` cursor (`43d721ab`), G3 and G4 Calendar and Drive as Pattern A connectors (`e72654c9`). Still open in the plan: G5 routes and sync-state storage, G6 Library screen and setup guide, G7 scheduled sync, G0 (your answers to Q-G1 to Q-G3; the plan's recommendations are being followed meanwhile). I could not verify which of G5-G7 have landed beyond the commits above; check `git log -- extension/connectors/google extension/routes`.
@@ -114,6 +114,7 @@ Open decisions (only the unanswered ones, each with a recommendation) are sectio
 - Pin the extension origin (CORS accepts every `chrome-extension://*`, Q22); quit delay on macOS logout (Q21); `llmide://` from Chrome (Q11).
 - Real-corpus checks fixtures cannot give: platform-less notes, hidden-note semantics, iCloud placeholders.
 - Two Macs on one account can flap note-index keys (detected, not prevented).
+- **Push on hold (2026-11-02):** another session committed `ce31d950` (compact system prompt default for Execute turns), `dbf4994e` and `7ea6ba4a` (Mac chat history cap). They change token use by default, which the bench rule keeps OFF until your go. Approve them, or have them put behind an off-by-default switch; then push. The three push-gate flakes found on the way are fixed (`e1171f1d`, `87fdb452`, `2650bc59`).
 - Plugin sub-agent tools stay unavailable until X2.
 - Google rules (CASA for local apps, 7-day expiry, scope tiers) come from third-party summaries; verify in your own Cloud console.
 - Spec pages for API 100 and 101 are current; the spec index may lag the API 102 line; `make docs-check` is the guard.
