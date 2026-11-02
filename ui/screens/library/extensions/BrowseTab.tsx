@@ -6,6 +6,7 @@ import type { CatalogEntry } from "./decoders.ts";
 import { BROWSE_ROW_HEIGHT, browseWindow } from "./list-model.ts";
 import type { ExtensionsModel, ExtensionsState } from "./model.ts";
 import { catalogNeverFetched, entryAction, kindLabel, repoName, sourceStatusText } from "./presentation.ts";
+import { publicHttpsUrl } from "../safe-url.ts";
 import { Badge } from "./ui.tsx";
 import { useScroller } from "../use-library.ts";
 
@@ -17,8 +18,9 @@ const KINDS: { id: string | null; label: string }[] = [
   { id: "llm-source", label: "Skill bundles" },
 ];
 
-function EntryRow({ model, entry, index, total, busy }: { model: ExtensionsModel; entry: CatalogEntry; index: number; total: number; busy: boolean }): ReactNode {
+function EntryRow({ model, entry, index, total, busy, openRepository }: { model: ExtensionsModel; entry: CatalogEntry; index: number; total: number; busy: boolean; openRepository?: (url: string) => void }): ReactNode {
   const act = entryAction(entry);
+  const repo = !act.installable && openRepository && entry.sourceUrl ? publicHttpsUrl(entry.sourceUrl) : null;
   return (
     <div role="listitem" className="ext-entry" style={{ top: index * BROWSE_ROW_HEIGHT, height: BROWSE_ROW_HEIGHT }} aria-posinset={index + 1} aria-setsize={total}>
       <div className="ext-entry-main">
@@ -43,12 +45,17 @@ function EntryRow({ model, entry, index, total, busy }: { model: ExtensionsModel
             Browse only
           </Badge>
         )}
+        {repo && openRepository && (
+          <button type="button" className="lib-btn" aria-label={`Open repository of ${entry.name}`} onClick={() => openRepository(repo)}>
+            Open repository
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-export function BrowseTab({ model, state, initialHeight }: { model: ExtensionsModel; state: ExtensionsState; initialHeight?: number }): ReactNode {
+export function BrowseTab({ model, state, initialHeight, openRepository }: { model: ExtensionsModel; state: ExtensionsState; initialHeight?: number; openRepository?: (url: string) => void }): ReactNode {
   const b = state.browse;
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 520);
@@ -127,7 +134,7 @@ export function BrowseTab({ model, state, initialHeight }: { model: ExtensionsMo
           <div ref={ref} className="lib-scroll ext-list" role="list" aria-label="Catalog results" tabIndex={0}>
             <div style={{ height: b.results.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
               {b.results.slice(w.start, w.end).map((e, i) => (
-                <EntryRow key={`${e.indexId}|${e.sourcePath ?? ""}|${e.name}`} model={model} entry={e} index={w.start + i} total={b.total} busy={state.install.installing} />
+                <EntryRow key={`${e.indexId}|${e.sourcePath ?? ""}|${e.name}`} model={model} entry={e} index={w.start + i} total={b.total} busy={state.install.installing} openRepository={openRepository} />
               ))}
             </div>
             {b.loadingMore && (

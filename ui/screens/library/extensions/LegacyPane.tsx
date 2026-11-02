@@ -1,9 +1,11 @@
-// Plugins, LLM Sources and MCP Plugins panes of the Library: a windowed list with an on/off switch per row and the
-// two consent gates (plugin hook trust, MCP server consent). Add, remove, import and update dialogs are parity rows.
+// Plugins, LLM Sources and MCP Plugins panes of the Library: a windowed list with an on/off switch per row, the
+// two consent gates (plugin hook trust, MCP server consent), read-only status badges and a detail pane per row.
+// Add, remove, import and apply-update dialogs are parity rows.
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
-import { createLegacyApi, LegacyModel, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { createLegacyApi, LegacyModel, RELOAD_BUSY, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { LegacyDetail } from "./LegacyDetail.tsx";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
 import { consentRuns, consentTitle } from "./presentation.ts";
 import { Badge, Modal } from "./ui.tsx";
@@ -25,29 +27,41 @@ function rowMeta(kind: LegacyKind, r: LegacyRow): string {
     return [s.origin, s.version ? `v${s.version}` : null, `${s.skillCount} skills`, `${s.agentCount} agents`, `${s.commandCount} commands`, s.disabledItemCount > 0 ? `${s.disabledItemCount} items off` : null].filter(Boolean).join(" · ");
   }
   const m = r as McpRow;
-  return [m.source, m.transport, m.runs].filter(Boolean).join(" · ");
+  return [m.source, m.transport, m.versionLabel, m.runs].filter(Boolean).join(" · ");
 }
 
-function Row({ model, kind, row, busy, index, total }: { model: LegacyModel; kind: LegacyKind; row: LegacyRow; busy: boolean; index: number; total: number }): ReactNode {
+function Row({ model, kind, row, state, index, total }: { model: LegacyModel; kind: LegacyKind; row: LegacyRow; state: LegacyState; index: number; total: number }): ReactNode {
+  const busy = state.busy.includes(row.id);
+  const selected = state.selected === row.id;
   const name = kind === "plugins" ? (row as PluginRow).displayName : (row as { name: string }).name;
   const enabled = (row as { enabled: boolean }).enabled;
   const id = `ext-leg-${kind}-${row.id}`;
   const p = kind === "plugins" ? (row as PluginRow) : null;
   const m = kind === "mcp-plugins" ? (row as McpRow) : null;
+  const src = kind === "llm-sources" ? (row as LlmSourceRow) : null;
   const hasHooks = !!p && (p.hookCount > 0 || p.declaresHooks || p.executableKinds.length > 0);
+  const sourceUpdate = src ? state.sourceUpdates[row.id] : undefined;
+  const mcpVersion = m ? state.mcpVersions[m.id] : undefined;
   return (
-    <div role="listitem" className="ext-entry" style={{ top: index * BROWSE_ROW_HEIGHT, height: BROWSE_ROW_HEIGHT }} aria-posinset={index + 1} aria-setsize={total}>
+    <div role="listitem" className="ext-entry" data-selected={selected} style={{ top: index * BROWSE_ROW_HEIGHT, height: BROWSE_ROW_HEIGHT }} aria-posinset={index + 1} aria-setsize={total}>
       <div className="ext-entry-main">
         <span className="ext-row-name">{name}</span>
         <span className="ext-row-meta">{rowMeta(kind, row)}</span>
         <span className="ext-badges">
           {p && hasHooks && <Badge tone="warn">{p.hooksTrusted ? "Hooks trusted" : p.trustOutdated ? "Hook trust outdated" : "Hooks not trusted"}</Badge>}
+          {p && state.pluginUpdates[p.name] && <Badge tone="accent">Update available</Badge>}
           {m && <Badge tone={m.consented ? "ok" : "neutral"}>{m.consented ? "Consented" : "No consent yet"}</Badge>}
           {m?.credentialMissing && <Badge tone="warn">Credential missing</Badge>}
           {m && enabled && m.effective === false && <Badge tone="warn">Not loaded in chats</Badge>}
+          {mcpVersion?.status === "update-available" && <Badge tone="accent" title={`A newer version is available: ${mcpVersion.latest ?? ""}`}>Update</Badge>}
+          {src && !src.installed && <Badge>not installed</Badge>}
+          {sourceUpdate?.status === "update-available" && <Badge tone="accent" title="A newer version is available: open the source and press Update">update</Badge>}
         </span>
       </div>
       <div className="ext-entry-act">
+        <button type="button" className="lib-btn" aria-pressed={selected} aria-label={`Details of ${name}`} onClick={() => model.select(selected ? null : row.id)}>
+          Details
+        </button>
         {p && hasHooks && !p.hooksTrusted && (
           <button type="button" className="lib-btn" disabled={busy} onClick={() => model.requestHookTrust(p.name)} aria-label={`Review and trust hooks of ${name}`}>
             Review hooks
@@ -136,14 +150,20 @@ export function LegacyView({ model, initialHeight }: { model: LegacyModel; initi
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 520);
   const t = TITLES[model.kind];
   const w = browseWindow(state.rows.length, scrollTop, height);
+  const detail = state.selected !== null;
   return (
     <div className="ext-root ext-legacy" aria-busy={state.loading}>
       <header className="ext-head">
         <h2 className="ext-title">{t.title}</h2>
         <span className="lib-count">{state.loaded ? state.rows.length.toLocaleString() : ""}</span>
-        <button type="button" className="lib-btn" disabled={state.loading} onClick={() => void model.load()}>
+        <button type="button" className="lib-btn" disabled={state.loading} onClick={() => void model.load(true)}>
           Reload list
         </button>
+        {model.kind === "plugins" && (
+          <button type="button" className="lib-btn" disabled={state.loading || state.busy.includes(RELOAD_BUSY)} onClick={() => void model.reloadPlugins()}>
+            Reload from disk
+          </button>
+        )}
       </header>
       <p className="lib-muted">{t.intro}</p>
       {state.notice && <StatusBanner severity={state.notice.error ? "error" : "info"} message={state.notice.text} onDismiss={() => model.dismissNotice()} />}
@@ -156,17 +176,34 @@ export function LegacyView({ model, initialHeight }: { model: LegacyModel; initi
         <p className="lib-empty" role="status">
           Loading…
         </p>
-      ) : state.loaded && state.rows.length === 0 ? (
+      ) : state.loaded && state.rows.length === 0 && !detail ? (
         <p className="lib-empty" role="status">
           {t.empty}
         </p>
-      ) : (
-        <div ref={ref} className="lib-scroll ext-list" role="list" aria-label={t.title} tabIndex={0}>
-          <div style={{ height: state.rows.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
-            {state.rows.slice(w.start, w.end).map((r, i) => (
-              <Row key={r.id} model={model} kind={model.kind} row={r} busy={state.busy.includes(r.id)} index={w.start + i} total={state.rows.length} />
-            ))}
+      ) : state.loaded && state.rows.length === 0 ? (
+        // The open row vanished: its pane says so instead of closing silently.
+        <div className="ext-split">
+          <div className="ext-split-list" />
+          <div className="ext-split-detail">
+            <LegacyDetail model={model} state={state} />
           </div>
+        </div>
+      ) : (
+        <div className={detail ? "ext-split" : undefined}>
+          <div className={detail ? "ext-split-list" : undefined}>
+            <div ref={ref} className="lib-scroll ext-list" role="list" aria-label={t.title} tabIndex={0}>
+              <div style={{ height: state.rows.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
+                {state.rows.slice(w.start, w.end).map((r, i) => (
+                  <Row key={r.id} model={model} kind={model.kind} row={r} state={state} index={w.start + i} total={state.rows.length} />
+                ))}
+              </div>
+            </div>
+          </div>
+          {detail && (
+            <div className="ext-split-detail">
+              <LegacyDetail model={model} state={state} />
+            </div>
+          )}
         </div>
       )}
       <LegacySheetView model={model} state={state} />

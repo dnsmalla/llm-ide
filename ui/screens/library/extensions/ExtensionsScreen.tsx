@@ -28,7 +28,7 @@ function Sheets({ model, state, initialHeight }: { model: ExtensionsModel; state
   return <ConfirmSheet model={model} action={sh.action} />;
 }
 
-export function ExtensionsView({ model, initialHeight }: { model: ExtensionsModel; initialHeight?: number }): ReactNode {
+export function ExtensionsView({ model, initialHeight, openRepository }: { model: ExtensionsModel; initialHeight?: number; openRepository?: (url: string) => void }): ReactNode {
   const state = useExtensionsState(model);
   const updates = state.items.filter(hasUpdate).length;
   const onTabKey = (e: KeyboardEvent): void => {
@@ -75,7 +75,7 @@ export function ExtensionsView({ model, initialHeight }: { model: ExtensionsMode
 
       <div id="ext-panel" role="tabpanel" aria-labelledby={`ext-tab-${state.tab}`} className="ext-panel">
         {state.tab === "installed" && <InstalledTab model={model} state={state} initialHeight={initialHeight} />}
-        {state.tab === "browse" && <BrowseTab model={model} state={state} initialHeight={initialHeight} />}
+        {state.tab === "browse" && <BrowseTab model={model} state={state} initialHeight={initialHeight} openRepository={openRepository} />}
         {state.tab === "install" && <InstallTab model={model} state={state} />}
       </div>
       {state.tab === "installed" && state.active && (
@@ -89,11 +89,11 @@ export function ExtensionsView({ model, initialHeight }: { model: ExtensionsMode
 }
 
 /** Mount point: one model per mount, cancelled on unmount. Appearing reads only the core's cached lists. */
-export function ExtensionsScreen({ api, initialHeight }: { api: ExtensionsApi; initialHeight?: number }): ReactNode {
+export function ExtensionsScreen({ api, initialHeight, openRepository }: { api: ExtensionsApi; initialHeight?: number; openRepository?: (url: string) => void }): ReactNode {
   const model = useMemo(() => new ExtensionsModel(api), [api]);
   useEffect(() => {
     void model.init();
     return () => model.dispose();
   }, [model]);
-  return <ExtensionsView model={model} initialHeight={initialHeight} />;
+  return <ExtensionsView model={model} initialHeight={initialHeight} openRepository={openRepository} />;
 }

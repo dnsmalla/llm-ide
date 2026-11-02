@@ -268,6 +268,9 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
       <div className="lib-empty" role="status">
         <p className="lib-empty-title">Nothing installed yet</p>
         <p className="lib-muted">Use Browse to pick from the catalog, or Install to add a GitHub repository. Installs start switched off.</p>
+        <button type="button" className="lib-btn" onClick={() => void model.showTab("install")}>
+          Install from URL
+        </button>
       </div>
     );
   }
