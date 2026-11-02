@@ -1,6 +1,6 @@
-// Project and session memory for the memory viewer: READ only. Two GET routes on the Node core
+// Project and session memory for the memory viewer. Two GET routes and two DELETE routes on the Node core
 // (extension/routes/agent.mjs): /kb/agent/project-memory and /kb/agent/session-memory. Facts are text the model
-// wrote, so they are returned as plain strings and rendered as text only. Forget and Clear are not here (HOLD).
+// wrote, so they are returned as plain strings and rendered as text only. The writes are explicit, one fact or one section at a time.
 import { call, type CoreClient } from "../../settings/core-api.ts";
 import { displayLine } from "../scm/model.ts";
 
@@ -97,4 +97,30 @@ export function factText(fact: string): string {
 export function factLearned(fact: string): string | null {
   const m = /\(t:(\d{4}-\d{2}-\d{2})\)\s*$/.exec(fact);
   return m ? m[1] : null;
+}
+
+
+/** The project facts in a DELETE reply. Throws on a malformed reply rather than showing a false empty list. */
+export function decodeProjectFacts(raw: unknown): string[] {
+  if (!isRecord(raw)) throw new TypeError("project memory reply is not an object");
+  return factList(raw.facts);
+}
+
+/** Removes one project fact; returns the remaining facts. The untouched fact (with its stamp) is sent back. */
+export async function deleteProjectFact(client: CoreClient, target: Pick<MemoryTarget, "workspaceRoot">, repo: string, fact: string, signal?: AbortSignal): Promise<string[]> {
+  const body: Record<string, unknown> = { repo, fact };
+  if (target.workspaceRoot) body.workspaceRoot = target.workspaceRoot;
+  return decodeProjectFacts(await call(client, "DELETE", "/kb/agent/project-memory", body, signal));
+}
+
+/** Clears every project fact; returns the remaining facts (normally []). */
+export async function clearProjectFacts(client: CoreClient, target: Pick<MemoryTarget, "workspaceRoot">, repo: string, signal?: AbortSignal): Promise<string[]> {
+  const body: Record<string, unknown> = { repo, all: true };
+  if (target.workspaceRoot) body.workspaceRoot = target.workspaceRoot;
+  return decodeProjectFacts(await call(client, "DELETE", "/kb/agent/project-memory", body, signal));
+}
+
+/** Deletes this chat's session memory. Needs no repo: session memory is keyed by the chat session. */
+export async function forgetSessionMemory(client: CoreClient, sessionId: string, signal?: AbortSignal): Promise<void> {
+  await call(client, "DELETE", "/kb/agent/session-memory", { sessionId }, signal);
 }

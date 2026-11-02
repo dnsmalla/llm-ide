@@ -106,3 +106,14 @@
 .mem-list { margin: 0; padding: 0; list-style: none; }
 .mem-fact { display: flex; flex-direction: column; gap: 2px; padding: var(--tok-space-sm) 0; border-bottom: 1px solid var(--tok-color-border); overflow-wrap: anywhere; }
 .mem-learned { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.mem-head-actions { display: flex; align-items: center; gap: var(--tok-space-sm); }
+.mem-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tok-space-sm); }
+.mem-link { border: 0; background: none; padding: 0; color: var(--tok-color-accent); font: inherit; font-size: var(--tok-type-caption-size); cursor: pointer; }
+.mem-link.danger { color: var(--tok-color-danger, #e5484d); }
+.mem-link:disabled { opacity: .5; cursor: default; }
+.mem-fact-row { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: var(--tok-space-sm); }
+.mem-fact-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mem-trash { flex: none; border: 0; background: none; color: var(--tok-color-text-muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.mem-confirm { border: 1px solid var(--tok-color-border); border-radius: 8px; background: var(--tok-color-surface); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.mem-confirm p { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
+.mem-confirm-actions { display: flex; justify-content: flex-end; gap: var(--tok-space-md); }

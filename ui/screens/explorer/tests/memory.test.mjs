@@ -19,7 +19,7 @@ function fakeClient(routes) {
   return {
     calls,
     async request(method, path, body, signal) {
-      calls.push({ method, path, signal });
+      calls.push({ method, path, body, signal });
       const key = `${method} ${path.split("?")[0]}`;
       const r = routes[key];
       if (!r) return { status: 404, body: { error: { code: "NOT_FOUND" } } };
@@ -107,6 +107,29 @@ test("fact text: the recency stamp is shown as a date, not inline; control and b
   assert.equal(model.factLearned(f), "2026-10-01");
   assert.equal(model.factLearned("No stamp here."), null);
   assert.equal(model.factText("evil‮fdp\u0007 text"), "evilfdp text");
+});
+
+test("prune: one project fact, all project facts, and this chat's memory send the documented DELETE bodies", async () => {
+  const client = fakeClient({
+    "DELETE /kb/agent/project-memory": { facts: ["[db|x] keeps SQLite."] },
+    "DELETE /kb/agent/session-memory": { removed: 2 },
+  });
+  assert.deepEqual(await model.deleteProjectFact(client, { workspaceRoot: "/w" }, "/r", "[db|x] old (t:2026-10-01)"), ["[db|x] keeps SQLite."]);
+  assert.deepEqual(await model.clearProjectFacts(client, {}, "/r"), ["[db|x] keeps SQLite."]);
+  await model.forgetSessionMemory(client, "s1");
+  assert.deepEqual(client.calls.map((c) => [c.method, c.path, c.body]), [
+    ["DELETE", "/kb/agent/project-memory", { repo: "/r", fact: "[db|x] old (t:2026-10-01)", workspaceRoot: "/w" }],
+    ["DELETE", "/kb/agent/project-memory", { repo: "/r", all: true }],
+    ["DELETE", "/kb/agent/session-memory", { sessionId: "s1" }],
+  ]);
+});
+
+test("body: with actions, session Forget and per-fact trash are rendered; without actions it stays read only", () => {
+  const data = { project: { facts: ["[db|x] uses SQLite."], repo: "/x" }, projectFailed: false, session: ["chat fact"] };
+  const out = html(h(MemoryBody, { state: { status: "ready", data }, actions: { onDeleteFact: () => {}, onForgetSession: () => {} } }));
+  assert.match(out, />Forget<\/button>/);
+  assert.match(out, /aria-label="Forget \[db\|x\] uses SQLite\."/);
+  assert.doesNotMatch(html(h(MemoryBody, { state: { status: "ready", data } })), />Forget<\/button>/);
 });
 
 test("body: loading, no project, nothing yet, a failed load and the two sections", () => {

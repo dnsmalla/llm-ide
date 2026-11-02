@@ -42,7 +42,7 @@ test("the viewer loads project and session memory through the chat adapter (open
   assert.match(core.calls[0].path, /^\/kb\/agent\/project-memory\?workspaceRoot=%2Fwork%2Fapp$/);
 });
 
-test("the Memory popover offers the project memory viewer, and the viewer stays read only", () => {
+test("the Memory popover offers the project memory viewer, and Chat adds no second prune control", () => {
   const screen = src("ChatScreen.tsx");
   assert.match(screen, /import \{ ProjectMemoryView \} from "\.\.\/explorer\/memory\/ProjectMemoryView"/);
   assert.match(screen, />Project memory<\/button>/, "the popover's button, worded as the Mac's Project memory");
