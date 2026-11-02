@@ -267,11 +267,13 @@ test('abort kills the whole process group, not just the shell — grandchildren 
 test('a timed-out command also takes its grandchildren with it', async () => {
   const pidFile = path.join(tmp, 'timeout-grandchild.pid');
   const p = handleRunBash(
-    { command: `sleep 60 & echo $! > ${pidFile}; sleep 60`, timeout: 400 },
+    // 2 s, not 0.4 s: under the pre-push gate (Swift suite alongside) bash sometimes had not written
+    // the pid file before a 0.4 s timeout killed it, leaving nothing to check.
+    { command: `sleep 60 & echo $! > ${pidFile}; sleep 60`, timeout: 2000 },
     { workspaceRoot: workspace },
   );
   const r = await p;
-  assert.match(r.error, /timed out after 0\.4s/);
+  assert.match(r.error, /timed out after 2s/);
   assert.equal(r.exitCode, null);
 
   const grandchildPid = Number(fs.readFileSync(pidFile, 'utf8').trim());
