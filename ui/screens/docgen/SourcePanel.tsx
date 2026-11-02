@@ -29,6 +29,8 @@ export interface SourcePanelProps {
   onPaste: (text: string) => boolean;
   /** Test hook: start on this tab. */
   initialTab?: Tab;
+  /** When set, the selected source kind is remembered under this localStorage key. */
+  sourceTabKey?: string;
   initialViewport?: number;
 }
 
@@ -51,7 +53,11 @@ const SOURCE_ROOTS: Record<"doc" | "visual", readonly { path: string; label: str
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i;
 
 export function SourcePanel(p: SourcePanelProps): ReactNode {
-  const [tab, setTab] = useState<Tab>(p.initialTab ?? "files");
+  const [tab, setTabState] = useState<Tab>(() => {
+    if (p.sourceTabKey) { try { const v = localStorage.getItem(p.sourceTabKey); if (v === "files" || v === "notes" || v === "paste") return v; } catch { /* session */ } }
+    return p.initialTab ?? "files";
+  });
+  const setTab = (next: Tab) => { setTabState(next); if (p.sourceTabKey) { try { localStorage.setItem(p.sourceTabKey, next); } catch { /* session */ } } };
   const tabs: { id: Tab; label: string }[] = [
     { id: "files", label: "Project files" },
     { id: "notes", label: "Library notes" },
