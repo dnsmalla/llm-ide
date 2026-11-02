@@ -6,6 +6,9 @@ import { Fragment, type ReactNode } from "react";
 import { Badge } from "./ui.tsx";
 import type { DiscoveryItem, LegacyKind, LegacyRow, LegacyState, LlmSourceRow, McpRow, PluginRow } from "./legacy.ts";
 import type { LegacyModel } from "./legacy.ts";
+import { componentRowText, hookTrustState, hooksHeading, installSourceText, mcpSourceLabel, outdatedTrustText, type LocationReveal } from "./legacy-labels.ts";
+
+export { mcpSourceBadge, mcpSourceLabel } from "./legacy-labels.ts";
 
 export const NOT_FOUND: Record<LegacyKind, string> = {
   plugins: "Plugin not found — it may have been uninstalled.",
@@ -13,23 +16,7 @@ export const NOT_FOUND: Record<LegacyKind, string> = {
   "llm-sources": "Source not found — it may have been removed.",
 };
 
-/** Same wording as the Mac's McpUpdatePresentation.sourceLabel. */
-export function mcpSourceLabel(source: string): string {
-  switch (source) {
-    case "catalog":
-      return "Catalog";
-    case "claude":
-      return "Imported from Claude Code";
-    case "codex":
-      return "Imported from Codex";
-    case "plugin":
-      return "From plugin";
-    default:
-      return "Manually registered";
-  }
-}
-
-export function LegacyDetail({ model, state }: { model: LegacyModel; state: LegacyState }): ReactNode {
+export function LegacyDetail({ model, state, revealer }: { model: LegacyModel; state: LegacyState; revealer?: LocationReveal }): ReactNode {
   const id = state.selected;
   if (id === null) return null;
   const row = state.rows.find((r) => r.id === id) as LegacyRow | undefined;
@@ -44,7 +31,7 @@ export function LegacyDetail({ model, state }: { model: LegacyModel; state: Lega
   }
   if (model.kind === "plugins") return <PluginDetail state={state} p={row as PluginRow} />;
   if (model.kind === "mcp-plugins") return <McpDetail state={state} m={row as McpRow} />;
-  return <SourceDetail model={model} state={state} s={row as LlmSourceRow} />;
+  return <SourceDetail model={model} state={state} s={row as LlmSourceRow} revealer={revealer} />;
 }
 
 function Facts({ rows }: { rows: readonly [string, string][] }): ReactNode {
@@ -66,6 +53,7 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
   const hasHooks = p.hookCount > 0 || p.declaresHooks || p.executableKinds.length > 0;
   const hookState = p.hooksTrusted ? "Hooks trusted" : p.trustOutdated ? "Hook trust outdated" : "Hooks not trusted";
   const imported = p.origin === "claude" || p.origin === "codex";
+  const source = installSourceText(p.installSource);
   return (
     <div className="ext-detail" aria-label={`Details of ${p.displayName}`}>
       <div className="ext-detail-head">
@@ -74,6 +62,7 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
           {p.version ? `v${p.version}` : "No version"}
           {p.author ? ` · by ${p.author}` : ""}
         </p>
+        {source && <p className="lib-muted ext-install-source" title={source}>{source}</p>}
       </div>
       <span className="ext-badges">
         <Badge tone={p.enabled ? "ok" : "neutral"}>{p.enabled ? "On" : "Off"}</Badge>
@@ -141,10 +130,29 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
               ))}
             {p.unsupportedComponents.map((c) => (
               <li key={`u-${c}`} className="lib-muted">
-                {c} — unsupported, ignored
+                {componentRowText(c, p)}
               </li>
             ))}
           </ul>
+        </section>
+      )}
+      {hasHooks && (
+        // Read-only: the state the core reports. Granting or revoking trust stays on the list row and its sheet.
+        <section aria-label="Hook trust">
+          <h3>{hooksHeading(p)}</h3>
+          <Facts rows={[["State", hookTrustState(p)]]} />
+          {p.trustOutdated && !p.hooksTrusted && <p>{outdatedTrustText(p)}</p>}
+          {!p.enabled && <p className="lib-muted">Enable the plugin first — its hooks and scripts only run for an enabled plugin.</p>}
+          {!p.nativeDelivery && p.hookNotes.length > 0 && (
+            <ul aria-label="Hook notes">
+              {p.hookNotes.map((n, i) => (
+                <li key={i} className="lib-muted">
+                  {n}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="lib-muted">Trust is granted or revoked from this plugin&apos;s row in the list.</p>
         </section>
       )}
       {imported && (
@@ -173,6 +181,14 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
 function McpDetail({ state, m }: { state: LegacyState; m: McpRow }): ReactNode {
   const v = state.mcpVersions[m.id];
   const label = m.transport === "stdio" ? "Command" : "URL";
+  // Names only, never values: env and header values stay on the server (the list answer redacts them).
+  const facts: [string, string][] = [
+    [label, m.runs || "none"],
+    ["Transport", m.transport || "unknown"],
+  ];
+  if (m.envKeys.length > 0) facts.push(["Environment", m.envKeys.join(", ")]);
+  if (m.headerKeys.length > 0) facts.push(["Headers", m.headerKeys.join(", ")]);
+  if (m.hasCredential) facts.push(["Credential", m.credentialMissing ? "not set" : "set"]);
   return (
     <div className="ext-detail" aria-label={`Details of ${m.name}`}>
       <div className="ext-detail-head">
@@ -185,7 +201,7 @@ function McpDetail({ state, m }: { state: LegacyState; m: McpRow }): ReactNode {
         {m.credentialMissing && <Badge tone="warn">Credential missing</Badge>}
         {m.enabled && m.effective === false && <Badge tone="warn">Not loaded in chats</Badge>}
       </span>
-      <Facts rows={[[label, m.runs || "none"], ["Transport", m.transport || "unknown"], ...(m.envKeys.length > 0 ? ([["Environment", m.envKeys.join(", ")]] as [string, string][]) : [])]} />
+      <Facts rows={facts} />
       <p className="lib-muted">Consent before enabling — an enabled-but-unconsented server is never offered to the agent.</p>
       {m.enabled && <p className="lib-muted">Once enabled it is offered to the agent as mcp__{m.id}__* tools.</p>}
       {m.credentialMissing && <p className="lib-muted">No value is stored for this server&apos;s credential, so it will fail to authenticate.</p>}
@@ -205,10 +221,17 @@ function McpDetail({ state, m }: { state: LegacyState; m: McpRow }): ReactNode {
   );
 }
 
-function SourceDetail({ model, state, s }: { model: LegacyModel; state: LegacyState; s: LlmSourceRow }): ReactNode {
+function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state: LegacyState; s: LlmSourceRow; revealer?: LocationReveal }): ReactNode {
   const st = state.sourceUpdates[s.id];
   const busy = state.busy.includes(s.id);
   const d = state.discovery?.id === s.id ? state.discovery : null;
+  // Mac primary button (LlmSourceDetailView.primaryUpdateButton): Install for a missing bundled kit, Rescan for a local
+  // folder, else Update. Update is the only one that resets a git checkout, so it is shown only when an update exists
+  // and always goes through the confirmation. All three call the same existing route, POST …/llm-sources/update.
+  const install = s.builtin && !s.installed;
+  const local = s.origin === "local";
+  const updateAvailable = st?.status === "update-available";
+  const reveal = revealer && s.location && s.installed && revealer.canReveal(s.location) ? s.location : null;
   return (
     <div className="ext-detail" aria-label={`Details of ${s.name}`}>
       <div className="ext-detail-head">
@@ -225,6 +248,7 @@ function SourceDetail({ model, state, s }: { model: LegacyModel; state: LegacySt
         rows={[
           ["Origin", s.origin || "unknown"],
           ...(s.location ? ([["Location", s.location]] as [string, string][]) : []),
+          ...(s.ref ? ([["Ref", s.ref]] as [string, string][]) : []),
           ["Skills", String(s.skillCount)],
           ["Agents", String(s.agentCount)],
           ["Commands", String(s.commandCount)],
@@ -253,12 +277,27 @@ function SourceDetail({ model, state, s }: { model: LegacyModel; state: LegacySt
           <p className="lib-muted">Could not check for updates: {state.statusError}</p>
         ) : null}
         <div className="ext-actions">
-          <button type="button" className="lib-btn" disabled={state.statusLoading} onClick={() => void model.checkSourceUpdates()}>
+          <button type="button" className="lib-btn" disabled={state.statusLoading || !s.installed || local} onClick={() => void model.checkSourceUpdates()}>
             Check for updates
           </button>
-          {st?.status === "update-available" && (
-            <button type="button" className="lib-btn lib-btn-primary" disabled={busy} onClick={() => void model.updateSource(s.id)}>
+          {updateAvailable && (
+            <button type="button" className="lib-btn lib-btn-primary" disabled={busy || (!s.builtin && !s.installed)} onClick={() => model.requestSourceUpdate(s.id)}>
               Update
+            </button>
+          )}
+          {!updateAvailable && install && (
+            <button type="button" className="lib-btn" disabled={busy} onClick={() => void model.updateSource(s.id)}>
+              Install
+            </button>
+          )}
+          {!updateAvailable && !install && local && (
+            <button type="button" className="lib-btn" disabled={busy || !s.installed} onClick={() => void model.updateSource(s.id)}>
+              Rescan
+            </button>
+          )}
+          {reveal !== null && (
+            <button type="button" className="lib-btn" disabled={busy} onClick={() => revealer?.reveal(reveal)}>
+              Reveal
             </button>
           )}
         </div>

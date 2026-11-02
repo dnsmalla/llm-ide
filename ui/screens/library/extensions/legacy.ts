@@ -63,6 +63,39 @@ export interface PluginRow {
   subagents: PluginSubagent[];
   unsupportedComponents: string[];
   pendingComponents: string[];
+  /** Whether the Agent SDK can read this package (a .claude-plugin layout). Undefined from an older server (readable). */
+  sdkReadable?: boolean;
+  /** This user's "Let plugins load natively" preference. Undefined from an older server (on). */
+  nativePluginsOn?: boolean;
+  /** True when the agent engine loads this plugin itself (trusted, enabled, native loading on). */
+  nativeDelivery: boolean;
+  /** The executable kinds an earlier hook trust did not cover (empty when the trust is current or unknown). */
+  trustOutdatedKinds: string[];
+  /** Where a git, marketplace or zip install came from. Undefined for a plugin with no recorded provenance. */
+  installSource?: InstallSource;
+}
+/** Provenance of an installed plugin (the server's PluginInstallSource, cleaned). */
+export interface InstallSource {
+  kind: string;
+  url?: string;
+  ref?: string;
+  commit?: string;
+  entry?: string;
+  version?: string;
+  fileName?: string;
+}
+function decodeInstallSource(v: unknown, at: string): InstallSource | undefined {
+  if (v == null) return undefined;
+  const r = rec(v, at);
+  return {
+    kind: r.kind == null ? "" : str(r.kind, `${at}.kind`, 20),
+    url: optStr(r.url, `${at}.url`, 300),
+    ref: optStr(r.ref, `${at}.ref`, 120),
+    commit: optStr(r.commit, `${at}.commit`, 80),
+    entry: optStr(r.entry, `${at}.entry`, 120),
+    version: optStr(r.version, `${at}.version`, 60),
+    fileName: optStr(r.fileName, `${at}.fileName`, 200),
+  };
 }
 export interface PluginCommand {
   trigger: string;
@@ -101,6 +134,11 @@ export function decodePlugins(body: unknown): PluginRow[] {
       subagents: cleanObjects(r.subagents, `plugins[${i}].subagents`, 200, (c, at) => ({ name: str(c.name, `${at}.name`, 120), description: c.description == null ? "" : str(c.description, `${at}.description`, 300) })),
       unsupportedComponents: strs(r.unsupportedComponents, `plugins[${i}].unsupportedComponents`, 20, 120),
       pendingComponents: strs(r.pendingComponents, `plugins[${i}].pendingComponents`, 20, 120),
+      sdkReadable: optBool(r.sdkReadable),
+      nativePluginsOn: optBool(r.nativePluginsOn),
+      nativeDelivery: optBool(r.nativeDelivery) === true,
+      trustOutdatedKinds: strs(r.trustOutdatedKinds, `plugins[${i}].trustOutdatedKinds`, 20, 30),
+      installSource: decodeInstallSource(r.installSource, `plugins[${i}].installSource`),
     };
   });
 }
@@ -121,6 +159,8 @@ export interface LlmSourceRow {
   hookCount: number;
   mcpCount: number;
   disabledItemCount: number;
+  /** The git branch or tag a git source follows (absent for a local folder or the bundled kit). */
+  ref?: string;
 }
 export function decodeLlmSources(body: unknown): LlmSourceRow[] {
   const o = rec(body, "llm-sources");
@@ -142,6 +182,7 @@ export function decodeLlmSources(body: unknown): LlmSourceRow[] {
       hookCount: count(r.hookCount),
       mcpCount: count(r.mcpCount),
       disabledItemCount: count(r.disabledItemCount),
+      ref: optStr(r.ref, `sources[${i}].ref`, 120),
     };
   });
 }
@@ -164,6 +205,10 @@ export interface McpRow {
   packageName?: string;
   /** Names of the environment variables the server is registered with (values are never sent to this client). */
   envKeys: string[];
+  /** Names of the HTTP headers the server is registered with (the server redacts the values; this client keeps names only). */
+  headerKeys: string[];
+  /** True when the server declares a credential (a vault key). Its value is never sent to this client. */
+  hasCredential: boolean;
 }
 export function decodeMcpPlugins(body: unknown): McpRow[] {
   const o = rec(body, "mcp-plugins");
@@ -186,6 +231,8 @@ export function decodeMcpPlugins(body: unknown): McpRow[] {
       versionLabel: versionLabelOf(r.package, `mcp[${i}].package`),
       packageName: r.package == null ? undefined : optStr(rec(r.package, `mcp[${i}].package`).name, `mcp[${i}].package.name`, 120),
       envKeys: r.env == null ? [] : Object.keys(rec(r.env, `mcp[${i}].env`)).sort().slice(0, 40).map((k) => cleanText(k, 80)),
+      headerKeys: r.headers == null ? [] : Object.keys(rec(r.headers, `mcp[${i}].headers`)).sort().slice(0, 40).map((k) => cleanText(k, 80)),
+      hasCredential: typeof r.credential === "object" && r.credential !== null,
     };
   });
 }
@@ -411,7 +458,9 @@ export type LegacyRow = PluginRow | LlmSourceRow | McpRow;
 
 export type LegacySheet =
   | { kind: "hooks"; name: string; label: string; kinds: string[]; notes: string[]; ticked: string[] }
-  | { kind: "mcp"; id: string; label: string; runs: string; transport: string; ticked: boolean };
+  | { kind: "mcp"; id: string; label: string; runs: string; transport: string; ticked: boolean }
+  /** Confirms an LLM source Update: the server resets a git source to its remote (or fast-forwards Central Skills). */
+  | { kind: "source-update"; id: string; label: string; builtin: boolean; ref: string | null };
 
 /** Read-only status from the core's caches, keyed by row id. A failed status read is `statusError`, never a fake "no update". */
 export interface LegacyStatus {
@@ -770,7 +819,15 @@ export class LegacyModel {
   get canConfirm(): boolean {
     const sh = this.state.sheet;
     if (!sh) return false;
+    if (sh.kind === "source-update") return true;
     return sh.kind === "mcp" ? sh.ticked : sh.kinds.length > 0 && sh.kinds.every((k) => sh.ticked.includes(k));
+  }
+
+  /** Opens the Update confirmation for an LLM source (the Update button is the only way in; nothing runs before Confirm). */
+  requestSourceUpdate(id: string): void {
+    const s = this.row(id) as LlmSourceRow | undefined;
+    if (!s || this.kind !== "llm-sources" || this.state.sheet || this.busySet.has(id)) return;
+    this.set({ sheet: { kind: "source-update", id, label: s.name, builtin: s.builtin, ref: s.ref ?? null } });
   }
 
   /** Apply in the consent sheet; refused while anything is unticked; the sheet closes first so a second tap does nothing. */
@@ -778,6 +835,10 @@ export class LegacyModel {
     const sh = this.state.sheet;
     if (!sh || !this.canConfirm) return;
     this.set({ sheet: null });
+    if (sh.kind === "source-update") {
+      await this.updateSource(sh.id);
+      return;
+    }
     if (sh.kind === "hooks") {
       await this.withBusy(sh.name, async () => {
         try {

@@ -6,6 +6,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
 import { createLegacyApi, LegacyModel, RELOAD_BUSY, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
 import { LegacyDetail } from "./LegacyDetail.tsx";
+import { mcpSourceBadge, type LocationReveal } from "./legacy-labels.ts";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
 import { consentRuns, consentTitle } from "./presentation.ts";
 import { Badge, Modal } from "./ui.tsx";
@@ -27,7 +28,7 @@ function rowMeta(kind: LegacyKind, r: LegacyRow): string {
     return [s.origin, s.version ? `v${s.version}` : null, `${s.skillCount} skills`, `${s.agentCount} agents`, `${s.commandCount} commands`, s.disabledItemCount > 0 ? `${s.disabledItemCount} items off` : null].filter(Boolean).join(" · ");
   }
   const m = r as McpRow;
-  return [m.source, m.transport, m.versionLabel, m.runs].filter(Boolean).join(" · ");
+  return [mcpSourceBadge(m.source), m.transport, m.versionLabel, m.runs].filter(Boolean).join(" · ");
 }
 
 function Row({ model, kind, row, state, index, total }: { model: LegacyModel; kind: LegacyKind; row: LegacyRow; state: LegacyState; index: number; total: number }): ReactNode {
@@ -100,6 +101,25 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
       </button>
     </>
   );
+  if (sh.kind === "source-update") {
+    // Cancel is the first focusable control, so the dialog opens on it.
+    return (
+      <Modal titleId="ext-leg-title" title={`Update ${sh.label}?`} onClose={() => model.dismissSheet()} footer={footer("Update")}>
+        {sh.builtin ? (
+          <>
+            <p>Central Skills fast-forwards to the latest kit on its remote branch. Nothing is discarded: the update is refused, and nothing changes, if its folder has uncommitted changes or commits that are not on the remote.</p>
+            <p>When the kit is this checkout&apos;s .skills folder and it moved, scripts/sync-skills.sh then re-syncs the kit&apos;s skill lock and agent tool definitions.</p>
+          </>
+        ) : (
+          // Same rules as the core's updateSource: a dirty folder is refused (409) before anything runs; a clean one is
+          // moved with git reset --hard FETCH_HEAD, which drops commits that exist only in the folder.
+          <p>
+            If its folder has uncommitted changes, the update is refused and nothing changes. Otherwise the source is reset to its remote version (origin/{sh.ref ?? "main"}) with git reset --hard, so commits in its folder that are not on the remote are discarded. New items it brings in are switched on.
+          </p>
+        )}
+      </Modal>
+    );
+  }
   if (sh.kind === "mcp") {
     return (
       <Modal titleId="ext-leg-title" title={`Allow ${sh.label} to run?`} onClose={() => model.dismissSheet()} footer={footer("Allow and switch on")}>
@@ -144,7 +164,7 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
   );
 }
 
-export function LegacyView({ model, initialHeight }: { model: LegacyModel; initialHeight?: number }): ReactNode {
+export function LegacyView({ model, initialHeight, revealer }: { model: LegacyModel; initialHeight?: number; revealer?: LocationReveal }): ReactNode {
   const state = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 520);
@@ -185,7 +205,7 @@ export function LegacyView({ model, initialHeight }: { model: LegacyModel; initi
         <div className="ext-split">
           <div className="ext-split-list" />
           <div className="ext-split-detail">
-            <LegacyDetail model={model} state={state} />
+            <LegacyDetail model={model} state={state} revealer={revealer} />
           </div>
         </div>
       ) : (
@@ -201,7 +221,7 @@ export function LegacyView({ model, initialHeight }: { model: LegacyModel; initi
           </div>
           {detail && (
             <div className="ext-split-detail">
-              <LegacyDetail model={model} state={state} />
+              <LegacyDetail model={model} state={state} revealer={revealer} />
             </div>
           )}
         </div>
@@ -211,13 +231,13 @@ export function LegacyView({ model, initialHeight }: { model: LegacyModel; initi
   );
 }
 
-export function LegacyScreen({ api, kind, initialHeight }: { api: LegacyApi; kind: LegacyKind; initialHeight?: number }): ReactNode {
+export function LegacyScreen({ api, kind, initialHeight, revealer }: { api: LegacyApi; kind: LegacyKind; initialHeight?: number; revealer?: LocationReveal }): ReactNode {
   const model = useMemo(() => new LegacyModel(api, kind), [api, kind]);
   useEffect(() => {
     void model.load();
     return () => model.dispose();
   }, [model]);
-  return <LegacyView model={model} initialHeight={initialHeight} />;
+  return <LegacyView model={model} initialHeight={initialHeight} revealer={revealer} />;
 }
 
 export { createLegacyApi };
