@@ -27,7 +27,7 @@
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "request" },
-        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
         "payload": { "type": "object" },
         "ts": { "type": "integer", "minimum": 0 },
         "rev": { "type": "integer", "minimum": 0 }
@@ -42,7 +42,7 @@
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "response" },
-        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
         "result": { "type": "object" },
         "ts": { "type": "integer", "minimum": 0 },
         "rev": { "type": "integer", "minimum": 0 }
@@ -57,7 +57,7 @@
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "event" },
-        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
         "payload": { "type": "object" },
         "ts": { "type": "integer", "minimum": 0 },
         "rev": { "type": "integer", "minimum": 0 }
@@ -72,7 +72,7 @@
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "error" },
-        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
         "error": { "$ref": "#/$defs/Error" },
         "ts": { "type": "integer", "minimum": 0 }
       }
