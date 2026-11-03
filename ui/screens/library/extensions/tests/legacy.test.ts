@@ -169,3 +169,18 @@ test("a failing list is a message with no rows", async () => {
   await model.load();
   assert.match(model.getSnapshot().error!, /could not be read/);
 });
+
+
+test("mcp: add sends the manual server shape, reloads, and remove sends DELETE", async () => {
+  const { core, model } = setup("mcp-plugins", {
+    "POST /auth/me/mcp-plugins/add": () => ok({ ok: true, plugin: { id: "manual-one", name: "Manual", enabled: false } }),
+    "DELETE /auth/me/mcp-plugins/manual-one": () => ok({ ok: true }),
+  });
+  await model.load();
+  const before = core.calls.filter((c) => c.method === "GET" && c.path === "/auth/me/mcp-plugins").length;
+  assert.equal(await model.addMcp({ name: "Manual", transport: "stdio", command: "npx", args: ["-y", "server"] }), true);
+  assert.deepEqual(posts(core, "mcp-plugins/add")[0]!.body, { name: "Manual", transport: "stdio", command: "npx", args: ["-y", "server"] });
+  assert.ok(core.calls.filter((c) => c.method === "GET" && c.path === "/auth/me/mcp-plugins").length > before, "reloads after add");
+  await model.removeMcp("manual-one");
+  assert.ok(core.calls.some((c) => c.method === "DELETE" && c.path === "/auth/me/mcp-plugins/manual-one"));
+});

@@ -34,7 +34,7 @@ export interface ExtRequestOptions {
 }
 
 export interface ExtCore {
-  request(method: "GET" | "POST", path: string, body: unknown, opts: ExtRequestOptions): Promise<ExtResponse>;
+  request(method: "GET" | "POST" | "DELETE", path: string, body: unknown, opts: ExtRequestOptions): Promise<ExtResponse>;
 }
 
 export interface ExtensionsApi {

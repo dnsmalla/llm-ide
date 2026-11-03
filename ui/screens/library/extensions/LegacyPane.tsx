@@ -1,7 +1,7 @@
 // Plugins, LLM Sources and MCP Plugins panes of the Library: a windowed list with an on/off switch per row, the
 // two consent gates (plugin hook trust, MCP server consent), read-only status badges and a detail pane per row.
 // Add, remove, import and apply-update dialogs are parity rows.
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
 import { createLegacyApi, LegacyModel, RELOAD_BUSY, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
@@ -164,6 +164,37 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
   );
 }
 
+/** Add one hand-written MCP server (the Mac's McpAddSheet manual form). The core stores it switched off. */
+function AddMcpDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+  const [name, setName] = useState("");
+  const [transport, setTransport] = useState<"stdio" | "http" | "sse">("stdio");
+  const [commandLine, setCommandLine] = useState("");
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const parts = commandLine.split(/\s+/).filter(Boolean);
+  const valid = transport === "stdio" ? parts.length > 0 : url.trim() !== "";
+  return (
+    <Modal titleId="mcp-add-title" title="Add an MCP server" onClose={onClose} footer={<><button type="button" className="lib-btn" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => {
+      setBusy(true);
+      const body = transport === "stdio"
+        ? { name: name.trim() || undefined, transport, command: parts[0]!, args: parts.slice(1) }
+        : { name: name.trim() || undefined, transport, url: url.trim() };
+      void model.addMcp(body).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false));
+    }}>{busy ? "Adding…" : "Add"}</button></>}>
+      <div className="ext-form" aria-label="Add an MCP server">
+        <div className="ext-field"><label htmlFor="mcp-add-name">Name (optional)</label><input id="mcp-add-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="my-server" maxLength={80} /></div>
+        <div className="ext-field"><label htmlFor="mcp-add-transport">Transport</label><select id="mcp-add-transport" value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)}><option value="stdio">Local (stdio)</option><option value="http">Hosted (http)</option><option value="sse">Hosted (sse)</option></select></div>
+        {transport === "stdio" ? (
+          <div className="ext-field"><label htmlFor="mcp-add-command">Command</label><input id="mcp-add-command" value={commandLine} onChange={(e) => setCommandLine(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-memory" spellCheck={false} /><p className="lib-muted">Split on spaces; the first word is the command and the rest are its arguments.</p></div>
+        ) : (
+          <div className="ext-field"><label htmlFor="mcp-add-url">URL</label><input id="mcp-add-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" spellCheck={false} /></div>
+        )}
+        <p className="lib-muted">The server is added switched off. You must consent and switch it on before it can run.</p>
+      </div>
+    </Modal>
+  );
+}
+
 export function LegacyView({ model, initialHeight, revealer }: { model: LegacyModel; initialHeight?: number; revealer?: LocationReveal }): ReactNode {
   const state = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const ref = useRef<HTMLDivElement>(null);
@@ -171,6 +202,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const t = TITLES[model.kind];
   const w = browseWindow(state.rows.length, scrollTop, height);
   const detail = state.selected !== null;
+  const [adding, setAdding] = useState(false);
   return (
     <div className="ext-root ext-legacy" aria-busy={state.loading}>
       <header className="ext-head">
@@ -179,6 +211,9 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
         <button type="button" className="lib-btn" disabled={state.loading} onClick={() => void model.load(true)}>
           Reload list
         </button>
+        {model.kind === "mcp-plugins" && (
+          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAdding(true)}>Add server</button>
+        )}
         {model.kind === "plugins" && (
           <button type="button" className="lib-btn" disabled={state.loading || state.busy.includes(RELOAD_BUSY)} onClick={() => void model.reloadPlugins()}>
             Reload from disk
@@ -186,6 +221,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
         )}
       </header>
       <p className="lib-muted">{t.intro}</p>
+      {adding ? <AddMcpDialog model={model} onClose={() => setAdding(false)} /> : null}
       {state.notice && <StatusBanner severity={state.notice.error ? "error" : "info"} message={state.notice.text} onDismiss={() => model.dismissNotice()} />}
       {state.error && (
         <div role="alert" className="ext-inline-error">

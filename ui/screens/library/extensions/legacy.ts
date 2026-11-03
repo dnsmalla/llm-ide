@@ -399,6 +399,15 @@ export function decodeSourceUpdated(body: unknown): SourceUpdated {
 }
 
 // ---- api --------------------------------------------------------------------------------------------
+function decodeAdded(body: unknown): void {
+  const o = rec(body, "added");
+  if (o.plugin !== undefined && !rec(o.plugin, "added.plugin")) throw new DecodeError("added.plugin", "object");
+}
+
+function decodeRemoved(body: unknown): void {
+  rec(body, "removed");
+}
+
 export interface LegacyApi {
   plugins(signal?: AbortSignal): Promise<PluginRow[]>;
   togglePlugin(name: string, enabled: boolean, signal?: AbortSignal): Promise<void>;
@@ -406,6 +415,9 @@ export interface LegacyApi {
   llmSources(signal?: AbortSignal): Promise<LlmSourceRow[]>;
   toggleLlmSource(id: string, enabled: boolean, signal?: AbortSignal): Promise<void>;
   mcpPlugins(signal?: AbortSignal): Promise<McpRow[]>;
+  /** Add a hand-written or catalog MCP server. The core validates and persists it switched off. */
+  addMcp(input: { catalogId?: string; arg?: string; name?: string; transport?: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string }, signal?: AbortSignal): Promise<void>;
+  removeMcp(id: string, signal?: AbortSignal): Promise<void>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
   reloadPlugins(signal?: AbortSignal): Promise<ReloadResult>;
@@ -418,7 +430,7 @@ export interface LegacyApi {
 }
 
 export function createLegacyApi(core: ExtCore): LegacyApi {
-  async function call<T>(method: "GET" | "POST", path: string, body: unknown, decode: (b: unknown) => T, signal?: AbortSignal): Promise<T> {
+  async function call<T>(method: "GET" | "POST" | "DELETE", path: string, body: unknown, decode: (b: unknown) => T, signal?: AbortSignal): Promise<T> {
     let res: ExtResponse;
     try {
       res = await core.request(method, path, body, { signal });
@@ -440,6 +452,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     llmSources: (s) => call("GET", "/auth/me/llm-sources", undefined, decodeLlmSources, s),
     toggleLlmSource: async (id, enabled, s) => void (await call("POST", "/auth/me/llm-sources/toggle", { id, enabled }, decodeToggled, s)),
     mcpPlugins: (s) => call("GET", "/auth/me/mcp-plugins", undefined, decodeMcpPlugins, s),
+    addMcp: async (input, s) => { await call("POST", "/auth/me/mcp-plugins/add", input, decodeAdded, s); },
+    removeMcp: async (id, s) => { await call("DELETE", "/auth/me/mcp-plugins/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
     reloadPlugins: (s) => call("POST", "/auth/me/plugins/reload", {}, decodeReload, s),
@@ -726,6 +740,33 @@ export class LegacyModel {
         if (this.state.selected === id) await this.loadDiscovery(id);
         const warn = r.warnings.length > 0 ? ` ${r.warnings.join(" ")}` : "";
         this.set({ notice: { text: `Updated: ${r.added} added, ${r.removed} removed.${warn}`, error: false } });
+      } catch (e) {
+        this.fail(e);
+      }
+    });
+  }
+
+  /** Add an MCP server and reload the list. Returns true when the add succeeded. */
+  async addMcp(input: { catalogId?: string; arg?: string; name?: string; transport?: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string }): Promise<boolean> {
+    try {
+      await this.api.addMcp(input, this.life.signal);
+      await this.load(true);
+      this.set({ notice: { text: `Added ${input.name || input.catalogId || "MCP server"}. It is off until you consent and switch it on.`, error: false } });
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
+  }
+
+  /** Remove an MCP server from the registry. No files are touched. */
+  async removeMcp(id: string): Promise<void> {
+    await this.withBusy(id, async () => {
+      try {
+        await this.api.removeMcp(id, this.life.signal);
+        if (this.state.selected === id) this.set({ selected: null });
+        await this.load(true);
+        this.set({ notice: { text: `Removed ${id}.`, error: false } });
       } catch (e) {
         this.fail(e);
       }

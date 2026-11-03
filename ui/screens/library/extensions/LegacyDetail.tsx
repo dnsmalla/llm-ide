@@ -2,7 +2,7 @@
 // from the core (plugin and source text is untrusted: rendered as React text only, already cleaned and capped by
 // the decoders). The only controls are the source's per-item switches and its Update / Check buttons, which are
 // the same calls the list uses. Consent, hook trust and removal stay on the list rows and their sheets.
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Badge } from "./ui.tsx";
 import type { DiscoveryItem, LegacyKind, LegacyRow, LegacyState, LlmSourceRow, McpRow, PluginRow } from "./legacy.ts";
 import type { LegacyModel } from "./legacy.ts";
@@ -30,7 +30,7 @@ export function LegacyDetail({ model, state, revealer }: { model: LegacyModel; s
     );
   }
   if (model.kind === "plugins") return <PluginDetail state={state} p={row as PluginRow} />;
-  if (model.kind === "mcp-plugins") return <McpDetail state={state} m={row as McpRow} />;
+  if (model.kind === "mcp-plugins") return <McpDetail model={model} state={state} m={row as McpRow} />;
   return <SourceDetail model={model} state={state} s={row as LlmSourceRow} revealer={revealer} />;
 }
 
@@ -178,7 +178,9 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
   );
 }
 
-function McpDetail({ state, m }: { state: LegacyState; m: McpRow }): ReactNode {
+function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState; m: McpRow }): ReactNode {
+  const [removing, setRemoving] = useState(false);
+  const busy = state.busy.includes(m.id);
   const v = state.mcpVersions[m.id];
   const label = m.transport === "stdio" ? "Command" : "URL";
   // Names only, never values: env and header values stay on the server (the list answer redacts them).
@@ -205,6 +207,17 @@ function McpDetail({ state, m }: { state: LegacyState; m: McpRow }): ReactNode {
       <p className="lib-muted">Consent before enabling — an enabled-but-unconsented server is never offered to the agent.</p>
       {m.enabled && <p className="lib-muted">Once enabled it is offered to the agent as mcp__{m.id}__* tools.</p>}
       {m.credentialMissing && <p className="lib-muted">No value is stored for this server&apos;s credential, so it will fail to authenticate.</p>}
+      <section aria-label="Remove server">
+        {!removing ? (
+          <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => setRemoving(true)}>Remove…</button>
+        ) : (
+          <div className="ext-actions" role="alertdialog" aria-label={`Remove ${m.name}?`}>
+            <span>Remove this server from the registry? No files are touched. This cannot be undone.</span>
+            <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeMcp(m.id)}>Remove server</button>
+            <button type="button" className="lib-btn" disabled={busy} onClick={() => setRemoving(false)}>Cancel</button>
+          </div>
+        )}
+      </section>
       {m.versionLabel !== undefined && (
         <section aria-label="Version">
           <h3>Version</h3>
