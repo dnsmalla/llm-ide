@@ -43,7 +43,7 @@
     "Response": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["apiVersion", "id", "replyTo", "type", "command", "result", "ts"],
+      "required": ["apiVersion", "id", "replyTo", "type", "command", "result", "ts", "rev"],
       "properties": {
         "apiVersion": { "type": "integer", "const": 1 },
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },

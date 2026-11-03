@@ -25,6 +25,7 @@ const EXPECTED_EVENT_COMMANDS = [
   "approval.request",
   "approval.cleared",
   "toolApproval.request",
+  "host.capabilities",
 ];
 
 // filename -> the envelope $defs variant it violates and the path the failure must name.
@@ -38,6 +39,7 @@ const INVALID_CASES = {
   "error-message-too-long.json": { def: "ErrorFrame", at: ".error.message" },
   "error-missing-error.json": { def: "ErrorFrame", at: ".error" },
   "response-missing-reply-to.json": { def: "Response", at: ".replyTo" },
+  "response-missing-rev.json": { def: "Response", at: ".rev" },
   "event-missing-rev.json": { def: "Event", at: ".rev" },
 };
 
@@ -95,10 +97,10 @@ if (commandPatterns.some((p) => typeof p !== "string")) {
   bad(`envelope: command.pattern differs across frame variants: ${JSON.stringify(commandPatterns)}`);
 }
 
-// rev is envelope ordering, not payload data: Event must carry it, Response and ErrorFrame
+// rev is envelope ordering, not payload data: Response and Event must carry it, ErrorFrame
 // may carry it (async ordering), and no command result repeats it.
 if (!defs.Event.required.includes("rev")) bad("envelope: Event must require rev");
-if (defs.Response.required.includes("rev")) bad("envelope: Response must not require rev");
+if (!defs.Response.required.includes("rev")) bad("envelope: Response must require rev");
 if (!Object.hasOwn(defs.ErrorFrame.properties, "rev")) bad("envelope: ErrorFrame must allow an optional rev");
 
 for (const f of fixtureNames("fixtures/valid")) {
@@ -232,12 +234,30 @@ for (const [i, variant] of (events.oneOf || []).entries()) {
 if (JSON.stringify([...eventCommands].sort()) !== JSON.stringify([...EXPECTED_EVENT_COMMANDS].sort())) {
   bad(`events: expected variants ${EXPECTED_EVENT_COMMANDS.join(", ")}, found ${[...eventCommands].join(", ")}`);
 }
+
+// Capability drift: the registry's capability list is the single source. Every enum a client
+// reads (handshake, pairing, token refresh and the capabilities-changed event) must offer
+// exactly that set, or a client hides a command the host can serve (or the reverse).
+const capabilityEnums = [
+  ["host.hello result", commands.commands["host.hello"]?.result?.properties?.capabilities?.items?.enum],
+  ["host.auth.pair result", commands.commands["host.auth.pair"]?.result?.properties?.capabilities?.items?.enum],
+  ["host.auth.token result", commands.commands["host.auth.token"]?.result?.properties?.capabilities?.items?.enum],
+];
+const capabilitiesEvent = (events.oneOf || []).find((v) => v.properties?.command?.const === "host.capabilities");
+capabilityEnums.push(["host.capabilities payload", capabilitiesEvent?.properties?.payload?.properties?.capabilities?.items?.enum]);
+for (const [where, list] of capabilityEnums) {
+  if (!Array.isArray(list)) bad(`${where}: missing capabilities.items.enum`);
+  else if (list.length !== caps.size || list.some((c) => !caps.has(c))) {
+    bad(`${where}: capabilities enum ${JSON.stringify(list)} does not match the registry ${JSON.stringify([...caps])}`);
+  }
+}
 for (const f of fixtureNames("fixtures/events")) {
   const errs = validate(events, json(`fixtures/events/${f}`), { defs });
   if (errs.length) bad(`events/${f}: ${JSON.stringify(errs)}`);
 }
 
 scanSchema(envelope, "envelope.schema.json");
+scanSchema(commandsSchema, "commands.schema.json");
 scanSchema(events, "events.schema.json");
 for (const [name, c] of Object.entries(commands.commands)) {
   scanSchema(c.request, `commands.json ${name}.request`);

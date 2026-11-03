@@ -178,6 +178,33 @@
         "ts": { "type": "integer", "minimum": 0 },
         "rev": { "type": "integer", "minimum": 0 }
       }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "host.capabilities" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capabilities"],
+          "properties": {
+            "capabilities": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+              "minItems": 1,
+              "maxItems": 20
+            }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
     }
   ]
 }

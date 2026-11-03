@@ -12,6 +12,7 @@ fixtures. It does not contain a host adapter or a client; those are later plans.
 - A frame is at most 1,048,576 bytes.
 - Lists default to 100 items, maximum 500.
 - Error messages are at most 500 characters.
+- Payload objects are closed: unknown fields are rejected with `invalid_payload`.
 
 ## Workflow
 
@@ -53,10 +54,10 @@ the same envelope and registry machinery.
 
 ## Events
 
-Events are the six flat variants in `events.schema.json`: `chat.delta`,
-`chat.done`, `chat.error`, `approval.request`, `approval.cleared` and
-`toolApproval.request`. Each variant is a complete object schema with its own
-`payload`; they are not composed with `allOf`.
+Events are the seven flat variants in `events.schema.json`: `chat.delta`,
+`chat.done`, `chat.error`, `approval.request`, `approval.cleared`,
+`toolApproval.request` and `host.capabilities`. Each variant is a complete
+object schema with its own `payload`; they are not composed with `allOf`.
 
 ## Snapshots
 
@@ -66,6 +67,6 @@ concrete shape.
 
 ## Ordering
 
-Frame ordering is the envelope `rev` on the frame itself. Snapshot command
-results do not repeat it in `result`; async errors may carry the same optional
-`rev`.
+Frame ordering is the envelope `rev` on the frame itself. Every `Response` and
+`Event` carries `rev`; an `ErrorFrame` may carry it. Snapshot command results
+do not repeat it in `result`.

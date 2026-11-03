@@ -20,6 +20,7 @@ test("host-api envelope: missing version, bad id and unknown fields fail", () =>
   assert.ok(check(json("fixtures/invalid/missing-api-version.json")).length > 0);
   assert.ok(check(json("fixtures/invalid/bad-request-id.json")).length > 0);
   assert.ok(check(json("fixtures/invalid/unknown-field.json")).length > 0);
+  assert.ok(check(json("fixtures/invalid/response-missing-rev.json")).length > 0);
 });
 
 const commandsSchema = json("commands.schema.json");
@@ -53,7 +54,7 @@ test("host-api chat commands and events decode", () => {
   for (const name of ["chat.send", "chat.snapshot", "chat.cancel", "chat.history.clear", "approvals.answer", "toolApprovals.answer"]) {
     assert.ok(commands.commands[name], name);
   }
-  for (const command of ["chat.delta", "chat.done", "chat.error", "approval.request", "approval.cleared", "toolApproval.request"]) {
+  for (const command of ["chat.delta", "chat.done", "chat.error", "approval.request", "approval.cleared", "toolApproval.request", "host.capabilities"]) {
     const fixture = json(`fixtures/events/${command}.json`);
     assert.deepEqual(validate(events, fixture, { defs: envelope.$defs }), [], command);
   }
@@ -99,7 +100,8 @@ test("host-api README lists every command with its metadata", () => {
     assert.deepEqual(rows.get(name), { capability: c.capability, idempotent: c.idempotent, v2Tag: c.v2Tag }, name);
   }
   assert.match(readme, /12 commands/);
-  assert.match(readme, /six flat variants/);
+  assert.match(readme, /seven flat variants/);
+  assert.match(readme, /host\.capabilities/);
   assert.match(readme, /envelope `rev`/);
 });
 
