@@ -160,7 +160,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
           </section>
         ) : <p className="iss-hint">This issue is closed.</p>}
         {nestedHint ? <p className="iss-hint">{nestedHint}</p> : null}
-        <p className="iss-hint">GitHub writes use the token saved in Settings → Built-in keys. GitLab writes are not wired yet; use the Mac app.</p>
+        <p className="iss-hint">Writes use the token saved in Settings → Built-in keys for the issue’s provider.</p>
       </section>
     </div>
   );

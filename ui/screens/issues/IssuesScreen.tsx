@@ -32,7 +32,7 @@ export interface IssuesDeps extends IssueDetailDeps {
 
 type Phase = "idle" | "loading" | "ready" | "error";
 
-const REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
+const REPO_SHAPE = /^[\w.-]+(?:\/[\w.-]+)+$/;
 
 export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps }): ReactNode {
   const [filters, setFilters] = useState<IssueFilters>({ provider: "github", state: "open", repo: "", label: "", query: "" });
@@ -126,7 +126,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     if (!REPO_SHAPE.test(repo) || !createTitle.trim()) { setError("Enter an owner/name repository and a title."); return; }
     setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await deps.request("POST", "/kb/issues/create", { provider: "github", repo, title: createTitle.trim(), body: createBody });
+      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody });
       if (r.status !== 200) {
         const b = r.body && typeof r.body === "object" ? r.body as { error?: { message?: unknown } } : {};
         setError(typeof b.error?.message === "string" ? b.error.message : `The issue could not be created (${r.status}).`);
@@ -181,7 +181,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           <input type="search" value={filters.query} placeholder="Title, label, repo, #number" onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} />
         </label>
         <button type="button" className="iss-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
-        <button type="button" className="iss-btn iss-primary" onClick={() => setCreateOpen(true)} disabled={filters.provider !== "github" || busy}>New issue</button>
+        <button type="button" className="iss-btn iss-primary" onClick={() => setCreateOpen(true)} disabled={busy}>New issue</button>
         <button type="button" className="iss-btn" onClick={() => setImportOpen((v) => !v)} disabled={filters.provider !== "github" || busy}>
           Import GitHub issues
         </button>
@@ -233,7 +233,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           <label className="iss-field iss-grow"><span>Description</span><textarea rows={3} value={createBody} placeholder="Optional description" onChange={(e) => setCreateBody(e.target.value)} disabled={busy} /></label>
           <button type="submit" className="iss-btn iss-primary" disabled={busy || createTitle.trim() === ""}>{busy ? "Creating…" : "Create issue"}</button>
           <button type="button" className="iss-btn" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</button>
-          <p className="iss-hint">Creates the issue on GitHub, then reloads the board. GitLab creation is not wired yet.</p>
+          <p className="iss-hint">Creates the issue on the selected provider, then reloads the board.</p>
         </form>
       ) : null}
 
@@ -288,8 +288,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       ) : null}
 
       <p className="iss-hint iss-foot">
-        GitHub create, comment and close use the core's provider write routes and the saved token. GitLab writes still
-        stay in the Mac app.
+Create, comment and close use the core's provider write routes and the saved GitHub/GitLab token.
       </p>
     </div>
   );
