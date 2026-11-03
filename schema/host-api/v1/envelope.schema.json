@@ -74,7 +74,8 @@
         "type": { "type": "string", "const": "error" },
         "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
         "error": { "$ref": "#/$defs/Error" },
-        "ts": { "type": "integer", "minimum": 0 }
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
       }
     }
   },

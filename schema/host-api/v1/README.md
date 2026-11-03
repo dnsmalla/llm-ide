@@ -18,10 +18,15 @@ fixtures. It does not contain a host adapter or a client; those are later plans.
 1. Add or change the command in `commands.json`.
 2. Add both fixtures under `fixtures/commands/<command>.request.json` and
    `.result.json`.
-3. Add or change the event in `events.schema.json` and add its fixture.
+3. Add or change the event in `events.schema.json` and add its fixture under
+   `fixtures/events/`.
 4. Run `node scripts/generate-host-api.mjs`.
 5. Run `node scripts/conformance-host-api.mjs`.
 6. Run `make host-api-check`.
+
+The conformance gate also composes every command fixture into a request and a
+response frame, and scans every schema for unsupported keywords, so a typo such
+as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
@@ -45,3 +50,16 @@ All 12 commands are listed below.
 The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM,
 issues, Self-Heal, generation, usage, activity) are added by later plans using
 the same envelope and registry machinery.
+
+## Events
+
+Events are the six flat variants in `events.schema.json`: `chat.delta`,
+`chat.done`, `chat.error`, `approval.request`, `approval.cleared` and
+`toolApproval.request`. Each variant is a complete object schema with its own
+`payload`; they are not composed with `allOf`.
+
+## Ordering
+
+Frame ordering is the envelope `rev` on the frame itself. Snapshot command
+results do not repeat it in `result`; async errors may carry the same optional
+`rev`.

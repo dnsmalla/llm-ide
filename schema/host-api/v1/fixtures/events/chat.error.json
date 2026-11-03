@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"e-4","type":"event","command":"chat.error","payload":{"message":"provider unavailable","retryable":true},"ts":1760000000005,"rev":5}

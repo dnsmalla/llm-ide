@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"e-5","type":"event","command":"approval.cleared","payload":{"requestId":"a-1","commandId":"c-1","reason":"answered"},"ts":1760000000006,"rev":6}

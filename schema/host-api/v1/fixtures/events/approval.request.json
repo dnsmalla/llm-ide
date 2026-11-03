@@ -1,1 +1,1 @@
-{"apiVersion":1,"id":"e-2","type":"event","command":"approval.request","payload":{"requestId":"a-1","question":"Run it?"},"ts":1760000000003,"rev":3}
+{"apiVersion":1,"id":"e-2","type":"event","command":"approval.request","payload":{"requestId":"a-1","commandId":"c-1","questions":[{"question":"Run it?","header":"Approve","options":[{"label":"Yes","description":"Run it now"},{"label":"No"}],"multiSelect":false}]},"ts":1760000000003,"rev":3}

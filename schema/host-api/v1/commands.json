@@ -22,12 +22,17 @@
       "result": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["hostName", "hostKind", "apiVersion", "capabilities", "protocolVersion", "requiresAuth"],
+        "required": ["hostName", "hostKind", "apiVersion", "apiVersions", "capabilities", "protocolVersion", "requiresAuth"],
         "properties": {
           "hostName": { "type": "string", "minLength": 1, "maxLength": 120 },
           "hostKind": { "type": "string", "enum": ["mac", "desktop"] },
           "apiVersion": { "type": "integer", "const": 1 },
-          "capabilities": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "apiVersions": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "minItems": 1
+          },
           "protocolVersion": { "type": "integer", "minimum": 1 },
           "requiresAuth": { "type": "boolean" },
           "certificateFingerprint": { "type": "string", "maxLength": 200 }
@@ -53,7 +58,11 @@
         "required": ["token", "capabilities"],
         "properties": {
           "token": { "type": "string", "minLength": 16, "maxLength": 512 },
-          "capabilities": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "minItems": 1
+          }
         }
       }
     },
@@ -75,7 +84,11 @@
         "additionalProperties": false,
         "required": ["capabilities"],
         "properties": {
-          "capabilities": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "minItems": 1
+          }
         }
       }
     },
@@ -107,14 +120,7 @@
       "idempotent": true,
       "v2Tag": "heartbeat",
       "request": { "type": "object", "additionalProperties": false, "properties": {} },
-      "result": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["rev"],
-        "properties": {
-          "rev": { "type": "integer", "minimum": 0 }
-        }
-      }
+      "result": { "type": "object", "additionalProperties": false, "properties": {} }
     },
     "host.snapshot": {
       "capability": "host",
@@ -137,9 +143,8 @@
       "result": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rev", "snapshots"],
+        "required": ["snapshots"],
         "properties": {
-          "rev": { "type": "integer", "minimum": 0 },
           "snapshots": { "type": "object" }
         }
       }
@@ -161,8 +166,7 @@
         "additionalProperties": false,
         "required": ["messages"],
         "properties": {
-          "messages": { "type": "array", "items": { "type": "object" }, "maxItems": 500 },
-          "rev": { "type": "integer", "minimum": 0 }
+          "messages": { "type": "array", "items": { "type": "object" }, "maxItems": 500 }
         }
       }
     },
@@ -186,7 +190,7 @@
         "required": ["accepted"],
         "properties": {
           "accepted": { "type": "boolean" },
-          "requestId": { "type": "string", "maxLength": 64 }
+          "requestId": { "type": "string", "minLength": 1, "maxLength": 64 }
         }
       }
     },
@@ -228,10 +232,14 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["requestId", "answer"],
+        "required": ["requestId", "commandId", "answers"],
         "properties": {
           "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
-          "answer": { "type": "object" }
+          "commandId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "answers": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "maxLength": 2000 }
+          }
         }
       },
       "result": {
@@ -251,9 +259,10 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["requestId", "decision"],
+        "required": ["requestId", "commandId", "decision"],
         "properties": {
           "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "commandId": { "type": "string", "minLength": 1, "maxLength": 64 },
           "decision": { "type": "string", "enum": ["allow_once", "deny"] }
         }
       },
