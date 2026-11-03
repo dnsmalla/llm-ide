@@ -384,7 +384,7 @@ export async function handleKB(req, res) {
         }
         sendJSON(res, 200, { ok: true, id: data?.id ?? null, url: typeof data?.web_url === 'string' ? data.web_url : typeof data?.html_url === 'string' ? data.html_url : null, state: typeof data?.state === 'string' ? data.state : null });
         return true;
-      } catch (e) {
+      } catch {
         sendJSON(res, 502, { error: { code: `${provider.toUpperCase()}_UNREACHABLE`, message: `${isGitLab ? 'GitLab' : 'GitHub'} could not be reached. Check the connection and try again.` } });
         return true;
       }
