@@ -109,3 +109,10 @@
 .chat-dock-menu form, .chat-dock-confirm { display: flex; flex-direction: column; gap: var(--tok-space-xs); }
 .chat-progress { display: flex; align-items: center; gap: var(--tok-space-xs); flex-wrap: wrap; }
 .chat-progress progress { flex: 1 1 120px; min-width: 80px; }
+.chat-session-picker { position: absolute; z-index: 30; top: 34px; left: 12px; width: 280px; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); box-shadow: 0 8px 24px color-mix(in srgb, var(--tok-color-body) 60%, transparent); }
+.chat-dock-head { position: relative; }
+.chat-dock-history { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; min-width: 0; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: inherit; font: inherit; font-size: 12px; padding: 3px 6px; cursor: pointer; }
+.chat-dock-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-session-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.chat-session-picker-row { width: 100%; text-align: left; border: 0; border-radius: var(--tok-radius-sm); background: none; color: inherit; font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-session-picker-row:hover, .chat-session-picker-row[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }

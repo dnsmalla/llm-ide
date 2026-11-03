@@ -45,9 +45,8 @@ test("two surfaces on one store: a chat opened in one is open in the other", () 
 test("DockHeader: CODE ASSISTANT label, history menu, New chat and Hide are named controls", () => {
   const out = html(h(c.DockHeader, { sessions: sess(3), activeId: "s1", busyIds: new Set(["s2"]), route: null, routeDisabled: false, onSelect: noop, onNew: noop, onCollapse: noop, onSetLimit: async () => {} }));
   assert.match(out, /<h2 class="chat-dock-title">CODE ASSISTANT<\/h2>/);
-  assert.match(out, /<select[^>]*aria-label="Chat history"/);
-  assert.match(out, /<option value="s1" selected="">Chat 1<\/option>/);
-  assert.match(out, /Chat 2 \(running\)/);
+  assert.match(out, /<button[^>]*aria-label="Chat history"/);
+  assert.match(out, /<span class="chat-dock-history-title">Chat 1<\/span>/);
   assert.match(out, /aria-label="New chat"/);
   assert.match(out, /aria-label="Hide Code Assistant"/);
   const noHide = html(h(c.DockHeader, { sessions: [], activeId: null, busyIds: new Set(), route: null, routeDisabled: true, onSelect: noop, onNew: noop, onSetLimit: async () => {} }));

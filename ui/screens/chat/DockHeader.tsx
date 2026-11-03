@@ -1,7 +1,7 @@
 // The docked Code Assistant's header (Mac `ChatSessionHeader` inside `CodeAssistantPanel`): the CODE ASSISTANT label,
 // the Route (token limit) chip, a chat history menu, New chat, and Hide. History is a bounded native select over the
 // chats already loaded (the Chat section has the full searchable list). Chat titles are untrusted text: rendered as text.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "@llmide/ui-kit";
 import { CapChip } from "./Pickers";
 import { DELETE_CHAT_DETAIL, DELETE_CHAT_TITLE, type RouteView } from "./route";
@@ -45,6 +45,9 @@ export interface DockHeaderProps {
 
 export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete }: DockHeaderProps) {
   const options = historyOptions(sessions, activeId, busyIds);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const historyButton = useRef<HTMLButtonElement>(null);
   const [actions, setActions] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
@@ -55,12 +58,22 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
       {meta ? <span className="chat-meta chat-dock-meta">{meta}</span> : null}
       <CapChip route={route} disabled={routeDisabled} onSetLimit={onSetLimit} />
       <span className="chat-spacer" />
-      {options.length > 0 && (
-        <select className="chat-dock-history" aria-label="Chat history" value={activeId ?? ""} onChange={(e) => e.target.value && onSelect(e.target.value)}>
-          {!activeId && <option value="">Chat history</option>}
-          {options.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-        </select>
-      )}
+      <button ref={historyButton} type="button" className="chat-dock-history" aria-label="Chat history" aria-haspopup="dialog" aria-expanded={historyOpen} onClick={() => setHistoryOpen((v) => !v)}>
+        <span className="chat-dock-history-title">{sessions.find((s) => s.id === activeId)?.title || "Chat history"}</span>
+        <span aria-hidden="true">▾</span>
+      </button>
+      {historyOpen ? (
+        <div className="chat-session-picker" role="dialog" aria-label="Chat history" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setHistoryOpen(false); historyButton.current?.focus(); } }}>
+          <input className="chat-input" type="search" autoFocus aria-label="Search chats" placeholder="Search chats" value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} />
+          <ul className="chat-session-picker-list">
+            {options.filter((o) => !historyQuery.trim() || o.text.toLowerCase().includes(historyQuery.trim().toLowerCase())).map((o) => (
+              <li key={o.id}><button type="button" className="chat-session-picker-row" data-on={o.id === activeId || undefined} onClick={() => { setHistoryOpen(false); setHistoryQuery(""); onSelect(o.id); }}>{o.text}</button></li>
+            ))}
+            {options.filter((o) => !historyQuery.trim() || o.text.toLowerCase().includes(historyQuery.trim().toLowerCase())).length === 0 ? <li className="chat-muted">No chats match.</li> : null}
+          </ul>
+          <button type="button" className="chat-btn chat-primary" onClick={() => { setHistoryOpen(false); setHistoryQuery(""); onNew(); }}>New chat</button>
+        </div>
+      ) : null}
       {activeId && (onRename || onDelete) ? <button type="button" className="chat-dock-btn" aria-label="Chat actions" aria-haspopup="menu" aria-expanded={actions} title="Chat actions" onClick={() => setActions((v) => !v)}>⋯</button> : null}
       {actions && activeId ? (
         <div className="chat-dock-menu" role="menu" aria-label="Chat actions">
