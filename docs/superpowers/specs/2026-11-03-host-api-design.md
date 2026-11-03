@@ -1,6 +1,6 @@
 # Host API v1 — one contract for Mac, desktop, iOS and web
 
-**Date:** 2026-11-03 · **Status:** proposed, awaiting review · **Owner:** dnsmalla
+**Date:** 2026-11-03 · **Status:** approved; v1 contract frozen by Plan 1 · **Owner:** dnsmalla
 
 ## Problem
 
@@ -90,7 +90,7 @@ Rules:
 - `rev` is a per-host monotonic counter for events and snapshots.
 - A client that sees an event `rev` greater than its snapshot `rev + 1`
   resubscribes and takes a fresh snapshot instead of guessing.
-- Unknown optional payload fields are ignored.
+- Payload objects are closed: unknown fields are rejected with `invalid_payload`.
 - Unknown commands are refused with `unknown_command`; unsupported capabilities
   with `capability_unavailable`.
 - Frames are UTF-8 JSON, max 1 MiB. Lists default to 100 items, max 500.
@@ -250,7 +250,8 @@ flag is set.
 - The gateway never proxies arbitrary URLs and never exposes core internals.
 - Web clients send an `Origin`; the host applies an allowlist and refuses
   unknown origins. No wildcard CORS.
-- No frame may carry a credential after pairing except `host.auth.token`.
+- No frame may carry a credential after pairing except `host.auth.token` and the
+  token in `host.auth.revoke` (self-revoke).
 
 ## Schema and generated types
 
