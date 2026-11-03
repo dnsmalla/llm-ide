@@ -274,6 +274,18 @@ test("panel: Replace all is disabled while the search is still running", async (
   assert.doesNotMatch(out, /aria-label="Replace all in a\.ts"/);
 });
 
+test("panel: Replace all is disabled until replacement text is entered", async () => {
+  const { c, api, tm } = mk();
+  c.setQuery("needle"); tm.fire(); await tick();
+  const st = api.starts[0];
+  st.onEvent({ type: "chunk", id: st.id, files: [file("a.ts", 2)] });
+  st.onEvent(done(st.id));
+  const empty = renderToStaticMarkup(h(SearchPanel, { controller: c, onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.match(empty, /<button[^>]*disabled=""[^>]*>Replace all<\/button>/);
+  const filled = renderToStaticMarkup(h(SearchPanel, { controller: c, initialReplacement: "x", onReplaceAll: async () => ({ files: 0, replacements: 0, failed: [] }) }));
+  assert.doesNotMatch(filled, /<button[^>]*disabled=""[^>]*>Replace all<\/button>/);
+});
+
 test("find in folder: '!' is never bracketed (a '[!]' class does not parse); a leading '!' or '#' is backslash-escaped", () => {
   assert.equal(model.folderIncludeGlob("a!b"), "a!b/**");
   assert.equal(model.folderIncludeGlob("!x"), "\\!x/**", "a leading ! would turn the include into an exclude");

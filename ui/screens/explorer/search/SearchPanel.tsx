@@ -191,7 +191,8 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
   const visible = visibleFiles(snap.files, snap.dismissed);
   const visibleSnap = { ...snap, files: visible };
   const allRequest = replaceAllRequest(snap);
-  const canReplace = !!onReplaceAll && !replacing && canReplaceAll(visibleSnap);
+  // An empty replacement is refused, as on the Mac: a stray Replace All must never delete every match.
+  const canReplace = !!onReplaceAll && !replacing && replacement !== "" && canReplaceAll(visibleSnap);
   // Per-file replace rewrites one listed file the user picked; the Mac allows it on a truncated search too.
   const canReplaceFile = !!onReplaceAll && !replacing && snap.phase === "done" && snap.query !== "";
   // Per-match replace: a direct click on one hit. As on the Mac (`canReplaceInline`), it needs a replacement text, so a
@@ -283,7 +284,7 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
               type="button"
               className="sx-toggle"
               disabled={!canReplace}
-              title={snap.done?.truncated ? "Replace all is disabled when the search was truncated; narrow the search first." : "Replace all matches in the listed text files"}
+              title={replacement === "" ? "Enter replacement text first." : snap.done?.truncated ? "Replace all is disabled when the search was truncated; narrow the search first." : "Replace all matches in the listed text files"}
               onClick={() => setConfirmAll(true)}
             >
               {replacing ? "Replacing…" : "Replace all"}
