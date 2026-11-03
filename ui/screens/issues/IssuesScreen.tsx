@@ -41,6 +41,10 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createBody, setCreateBody] = useState("");
+  const [createRepo, setCreateRepo] = useState("");
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
@@ -117,6 +121,24 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     }
   };
 
+  const createIssue = async () => {
+    const repo = (createRepo || filters.repo).trim();
+    if (!REPO_SHAPE.test(repo) || !createTitle.trim()) { setError("Enter an owner/name repository and a title."); return; }
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const r = await deps.request("POST", "/kb/issues/create", { provider: "github", repo, title: createTitle.trim(), body: createBody });
+      if (r.status !== 200) {
+        const b = r.body && typeof r.body === "object" ? r.body as { error?: { message?: unknown } } : {};
+        setError(typeof b.error?.message === "string" ? b.error.message : `The issue could not be created (${r.status}).`);
+        return;
+      }
+      setNotice("Issue created.");
+      setCreateOpen(false); setCreateTitle(""); setCreateBody(""); setCreateRepo("");
+      await load();
+    } catch { setError("The core could not be reached."); }
+    finally { setBusy(false); }
+  };
+
   const pageNote = phase === "loading"
     ? pagingNote({ stop: null, loaded: progress?.loaded ?? 0, total: progress?.total ?? null })
     : paging ? pagingNote({ stop: paging.stop, loaded: paging.issues.length, total: paging.total }) : "";
@@ -159,7 +181,8 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           <input type="search" value={filters.query} placeholder="Title, label, repo, #number" onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} />
         </label>
         <button type="button" className="iss-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
-        <button type="button" className="iss-btn iss-primary" onClick={() => setImportOpen((v) => !v)} disabled={filters.provider !== "github" || busy}>
+        <button type="button" className="iss-btn iss-primary" onClick={() => setCreateOpen(true)} disabled={filters.provider !== "github" || busy}>New issue</button>
+        <button type="button" className="iss-btn" onClick={() => setImportOpen((v) => !v)} disabled={filters.provider !== "github" || busy}>
           Import GitHub issues
         </button>
       </header>
@@ -200,6 +223,17 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
             Uses the GitHub token saved in Settings → Repositories. The import fetches the repository's issues into the
             local KB; no issue is created or changed on GitHub.
           </p>
+        </form>
+      ) : null}
+
+      {createOpen ? (
+        <form className="iss-import" onSubmit={(e) => { e.preventDefault(); void createIssue(); }}>
+          <label className="iss-field"><span>Repository</span><input value={createRepo} placeholder="owner/name" onChange={(e) => setCreateRepo(e.target.value)} disabled={busy} /></label>
+          <label className="iss-field iss-grow"><span>Title</span><input value={createTitle} placeholder="Issue title" onChange={(e) => setCreateTitle(e.target.value)} disabled={busy} autoFocus maxLength={500} /></label>
+          <label className="iss-field iss-grow"><span>Description</span><textarea rows={3} value={createBody} placeholder="Optional description" onChange={(e) => setCreateBody(e.target.value)} disabled={busy} /></label>
+          <button type="submit" className="iss-btn iss-primary" disabled={busy || createTitle.trim() === ""}>{busy ? "Creating…" : "Create issue"}</button>
+          <button type="button" className="iss-btn" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</button>
+          <p className="iss-hint">Creates the issue on GitHub, then reloads the board. GitLab creation is not wired yet.</p>
         </form>
       ) : null}
 
@@ -250,12 +284,12 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       )}
 
       {selected ? (
-        <IssueDetail issue={selected} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} />
+        <IssueDetail issue={selected} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} />
       ) : null}
 
       <p className="iss-hint iss-foot">
-        Reading and importing are real. Creating, editing, commenting on or closing issues is not in the desktop core
-        yet; the Mac app does those through its provider write clients.
+        GitHub create, comment and close use the core's provider write routes and the saved token. GitLab writes still
+        stay in the Mac app.
       </p>
     </div>
   );

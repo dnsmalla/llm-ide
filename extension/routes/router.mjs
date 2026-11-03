@@ -320,6 +320,64 @@ export async function handleKB(req, res) {
       return true;
     }
 
+    // Issue writes: GitHub comments, close and create. The token comes from the vault (the desktop never sends it);
+    // each route is bounded and uses the fixed api.github.com host. GitLab writes are not wired yet and answer 501.
+    //   POST /kb/issues/comment { provider, repo, number, body }
+    //   POST /kb/issues/close   { provider, repo, number }
+    //   POST /kb/issues/create  { provider, repo, title, body }
+    if (req.method === 'POST' && ['/kb/issues/comment', '/kb/issues/close', '/kb/issues/create'].includes(url.split('?')[0])) {
+      const path = url.split('?')[0];
+      let body;
+      try { body = parseJSON(await readBody(req, 64 * 1024)); } catch { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return true; }
+      const provider = typeof body?.provider === 'string' ? body.provider : 'github';
+      if (provider !== 'github') {
+        sendJSON(res, 501, { error: { code: 'PROVIDER_WRITE_UNSUPPORTED', message: 'Commenting, closing and creating are not wired for GitLab yet. Use the Mac app for GitLab writes.' } });
+        return true;
+      }
+      const repo = typeof body?.repo === 'string' ? body.repo : '';
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.length > 200) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repo must be owner/name' } }); return true;
+      }
+      const token = getSecret(kb.getDb(), userId, 'github.token');
+      if (!token) {
+        sendJSON(res, 400, { error: { code: 'GITHUB_TOKEN_MISSING', message: 'Add a GitHub token in Settings → Built-in keys first.' } });
+        return true;
+      }
+      const number = path === '/kb/issues/create' ? null : Number(body?.number);
+      if (path !== '/kb/issues/create' && (!Number.isInteger(number) || number <= 0)) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'number must be a positive integer' } }); return true;
+      }
+      const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+      const title = text(body?.title, 500).trim();
+      const note = text(body?.body, 20_000);
+      if (path === '/kb/issues/create' && !title) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'title is required' } }); return true; }
+      if (path === '/kb/issues/comment' && !note.trim()) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'body is required' } }); return true; }
+      const payload = path === '/kb/issues/create' ? { title, body: note }
+        : path === '/kb/issues/close' ? { state: 'closed' }
+          : { body: note };
+      const api = path === '/kb/issues/create' ? `https://api.github.com/repos/${repo}/issues`
+        : `https://api.github.com/repos/${repo}/issues/${number}${path === '/kb/issues/comment' ? '/comments' : ''}`;
+      try {
+        const r = await fetch(api, {
+          method: path === '/kb/issues/close' ? 'PATCH' : 'POST',
+          headers: { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const msg = typeof data?.message === 'string' ? data.message.slice(0, 300) : `GitHub answered ${r.status}`;
+          sendJSON(res, r.status === 401 || r.status === 403 ? 403 : 502, { error: { code: 'GITHUB_WRITE_FAILED', message: msg } });
+          return true;
+        }
+        sendJSON(res, 200, { ok: true, id: data?.id ?? null, url: typeof data?.html_url === 'string' ? data.html_url : null, state: typeof data?.state === 'string' ? data.state : null });
+        return true;
+      } catch (e) {
+        sendJSON(res, 502, { error: { code: 'GITHUB_UNREACHABLE', message: 'GitHub could not be reached. Check the connection and try again.' } });
+        return true;
+      }
+    }
+
     // List GitHub issues (and other tickets) from the KB. Filtering, ordering and
     // paging run in SQL (kb.listTicketSources): offset/limit page through the
     // user's own ticket rows, newest update first. Absent offset is the first page.

@@ -1,6 +1,6 @@
 // The read-only issue detail dialog, shared by the Issues board and the Gantt's row details (the Mac's
 // RepoIssueDetailSheet, read side). For GitHub issues it also shows the schedule overlay's dates and edits them with
-// the Gantt's ScheduleEditor. Writes (comment, close) stay Mac-only until the core has provider write routes.
+// the Gantt's ScheduleEditor. Comments and close call the core's GitHub write routes; GitLab writes are refused by the core.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDueDate, issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
 import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
@@ -23,12 +23,14 @@ export interface IssueDetailDeps {
   openExternal: (url: string) => Promise<void>;
 }
 
-export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged }: {
+export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged, onChanged }: {
   issue: Issue;
   deps: IssueDetailDeps;
   onClose: () => void;
   onNotice: (message: string) => void;
   onScheduleChanged?: () => void;
+  /** Reload the board after a successful comment/close. */
+  onChanged?: () => void;
 }): ReactNode {
   // The overlay keys GitHub owner/name and GitLab paths up to the core's limits; a key it refuses gets the hint, no dates.
   const view = issueDatesView(issue);
@@ -40,6 +42,10 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
   const [schedule, setSchedule] = useState<Schedule | null | undefined>(undefined);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [comment, setComment] = useState("");
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   const loadSchedule = useCallback(async () => {
     const r = await readIssueSchedule(deps.request, { provider: issue.provider, repo: issue.repo, number: issue.number });
@@ -65,6 +71,25 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
     void deps.openExternal(openUrl).catch(() => onNotice("That issue's link could not be opened."));
   };
   const ago = openedAgo(issue.createdAt);
+  const write = async (path: string, body: Record<string, unknown>, done: string) => {
+    if (!issue.number || writeBusy) return;
+    setWriteBusy(true);
+    setWriteError(null);
+    try {
+      const r = await deps.request("POST", path, { provider: issue.provider, repo: issue.repo, number: issue.number, ...body });
+      if (r.status >= 200 && r.status < 300) {
+        onNotice(done);
+        onChanged?.();
+        return true;
+      }
+      const b = r.body && typeof r.body === "object" ? r.body as { error?: { message?: unknown } } : {};
+      setWriteError(typeof b.error?.message === "string" ? b.error.message : `The write failed (${r.status}).`);
+      return false;
+    } catch {
+      setWriteError("The core could not be reached.");
+      return false;
+    } finally { setWriteBusy(false); }
+  };
 
   return (
     <div className="iss-detail-backdrop" role="presentation" onClick={onClose}>
@@ -117,11 +142,25 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged 
 
         <div className="iss-detail-actions">
           <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
-          <button type="button" className="iss-btn" disabled title="Creating, commenting and closing are Mac-only until the core has provider write routes">Comment</button>
-          <button type="button" className="iss-btn" disabled title="Closing is Mac-only until the core has provider write routes">Close issue</button>
         </div>
+        {writeError ? <p className="iss-error" role="alert">{writeError}</p> : null}
+        {issue.state !== "closed" ? (
+          <section className="iss-write" aria-label="Comment on this issue">
+            <label className="iss-field"><span>Comment</span><textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} disabled={writeBusy} placeholder="Write a comment…" /></label>
+            <div className="iss-detail-actions">
+              <button type="button" className="iss-btn iss-primary" disabled={writeBusy || comment.trim() === ""} onClick={() => { const body = comment.trim(); void write("/kb/issues/comment", { body }, "Comment posted.").then((ok) => { if (ok) setComment(""); }); }}>{writeBusy ? "Posting…" : "Comment"}</button>
+              {!confirmClose ? <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(true)}>Close issue</button> : (
+                <>
+                  <span className="iss-hint">Close this issue on GitHub?</span>
+                  <button type="button" className="iss-btn iss-danger" disabled={writeBusy} onClick={() => void write("/kb/issues/close", {}, "Issue closed.")}>Close issue</button>
+                  <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(false)}>Cancel</button>
+                </>
+              )}
+            </div>
+          </section>
+        ) : <p className="iss-hint">This issue is closed.</p>}
         {nestedHint ? <p className="iss-hint">{nestedHint}</p> : null}
-        <p className="iss-hint">Read-only detail from the cached issue. Comments, edits and state changes stay in the Mac app until the core gains provider write routes.</p>
+        <p className="iss-hint">GitHub writes use the token saved in Settings → Built-in keys. GitLab writes are not wired yet; use the Mac app.</p>
       </section>
     </div>
   );

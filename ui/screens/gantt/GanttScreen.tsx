@@ -273,6 +273,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           onClose={() => setDetail(null)}
           onNotice={setNotice}
           onScheduleChanged={() => void load()}
+          onChanged={() => void load()}
         />
       ) : null}
 

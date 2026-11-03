@@ -31,3 +31,7 @@
 .iss-detail-actions { display: flex; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .iss-dates { display: flex; flex-direction: column; gap: 6px; }
 .iss-dates-line { margin: 0; font-size: 13px; }
+.iss-write { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.iss-write textarea { font: inherit; color: inherit; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 6px 8px; resize: vertical; }
+.iss-btn.iss-danger { color: var(--tok-color-danger, #e5484d); }
+.iss-error { color: var(--tok-color-danger, #e5484d); font-size: var(--tok-type-caption-size); }
