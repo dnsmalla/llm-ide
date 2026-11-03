@@ -53,8 +53,31 @@ test("host-api chat commands and events decode", () => {
   for (const name of ["chat.send", "chat.snapshot", "chat.cancel", "chat.history.clear", "approvals.answer", "toolApprovals.answer"]) {
     assert.ok(commands.commands[name], name);
   }
-  assert.deepEqual(validate(events, json("fixtures/events/chat.delta.json"), { defs: events.$defs }), []);
-  assert.deepEqual(validate(events, json("fixtures/events/approval.request.json"), { defs: events.$defs }), []);
+  for (const command of ["chat.delta", "chat.done", "chat.error", "approval.request", "approval.cleared", "toolApproval.request"]) {
+    const fixture = json(`fixtures/events/${command}.json`);
+    assert.deepEqual(validate(events, fixture, { defs: envelope.$defs }), [], command);
+  }
+});
+
+test("host-api composes a chat.send request and response frame", () => {
+  const c = commandEntry("chat.send");
+  const request = json("fixtures/commands/chat.send.request.json");
+  const result = json("fixtures/commands/chat.send.result.json");
+  const requestFrame = { apiVersion: 1, id: "c-test", type: "request", command: "chat.send", payload: request, ts: 1 };
+  const responseFrame = {
+    apiVersion: 1,
+    id: "s-test",
+    replyTo: "c-test",
+    type: "response",
+    command: "chat.send",
+    result,
+    ts: 2,
+    rev: 0,
+  };
+  assert.deepEqual(check(requestFrame), []);
+  assert.deepEqual(validate(c.request, requestFrame.payload, { defs: envelope.$defs }), []);
+  assert.deepEqual(check(responseFrame), []);
+  assert.deepEqual(validate(c.result, responseFrame.result, { defs: envelope.$defs }), []);
 });
 
 test("host-api conformance script passes", () => {
@@ -62,12 +85,22 @@ test("host-api conformance script passes", () => {
   assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
-test("host-api README lists every command", () => {
+test("host-api README lists every command with its metadata", () => {
   const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-  for (const name of Object.keys(commands.commands)) {
-    assert.match(readme, new RegExp(`\\b${name.replaceAll(".", "\\.")}\\b`));
+  const rows = new Map();
+  for (const line of readme.split("\n")) {
+    const m = /^\|\s*`([^`]+)`\s*\|\s*([a-z_]+)\s*\|\s*(yes|no)\s*\|\s*(?:`([^`]+)`|—)\s*\|$/.exec(line.trim());
+    if (m) rows.set(m[1], { capability: m[2], idempotent: m[3] === "yes", v2Tag: m[4] ?? null });
+  }
+  const names = Object.keys(commands.commands);
+  assert.equal(rows.size, names.length);
+  for (const name of names) {
+    const c = commands.commands[name];
+    assert.deepEqual(rows.get(name), { capability: c.capability, idempotent: c.idempotent, v2Tag: c.v2Tag }, name);
   }
   assert.match(readme, /12 commands/);
+  assert.match(readme, /six flat variants/);
+  assert.match(readme, /envelope `rev`/);
 });
 
 test("generated Host API constants match the registry", () => {
