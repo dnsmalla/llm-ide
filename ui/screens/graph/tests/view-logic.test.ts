@@ -140,7 +140,8 @@ test("search over 50k nodes is quick and windowing renders a constant number of 
 });
 
 test("colours: stable, distinct for the first 8, valid for any id", () => {
-  assert.equal(new Set(Array.from({ length: 8 }, (_, i) => communityColor(i))).size, 8);
+  assert.equal(new Set(Array.from({ length: 15 }, (_, i) => communityColor(i))).size, 15);
+  assert.equal(communityColor(15), communityColor(0), "the Mac cycles the 15-colour palette");
   assert.match(communityColor(5000), /^#[0-9a-f]{6}$/);
   assert.equal(communityColor(3), communityColor(3));
 });
