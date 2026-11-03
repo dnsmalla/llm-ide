@@ -1,12 +1,13 @@
-// The model picker's two action notices (the Mac's ComposerCatalog): "Allow tools on provider models" and "Turn on the
-// session router". Chat never writes these settings: the button only asks the shell to open Settings, Model routing,
-// where the switches live. Pure rules first, then the bus call and the markup.
+// The model picker's two action notices (the Mac's ComposerCatalog): "Allow tools" and "Turn on the session router".
+// Allow tools writes the same Model-routing switch the Mac's composer writes; the router action still opens Settings
+// because it applies at the next backend start. Pure rules first, then the writes and the markup.
 import { shellBus, type ShellBus } from "../shell/bus";
+import type { CoreTransport } from "./transport";
 import type { ModelGroup, PlainChatReason } from "./route";
 
 /** The Settings group that holds the tools and session-router switches (ModelRoutingSwitches on the Mac). */
 export const MODEL_ROUTING_ANCHOR = "model-routing";
-export const TOOLS_NOTICE = { text: "Tools on provider models are off: these models answer in ask and document modes only.", label: "Allow tools on provider models" } as const;
+export const TOOLS_NOTICE = { text: "Tools on provider models are off: these models answer in ask and document modes only.", label: "Allow tools" } as const;
 export const ROUTER_NOTICE = { text: "Chat on these models needs the session router, which is off.", label: "Turn on the session router (applies at next backend start)" } as const;
 
 export type ModelNoticeKind = "tools" | "router";
@@ -24,14 +25,19 @@ export function openModelRouting(bus: Pick<ShellBus, "publish"> = shellBus): voi
   bus.publish({ type: "goto-section", section: "settings", anchor: MODEL_ROUTING_ANCHOR });
 }
 
-export function ModelNotices({ kinds }: { kinds: readonly ModelNoticeKind[] }) {
+/** The Mac's one-click "Allow tools": PUT the same Model-routing switch Settings edits. */
+export async function enableProviderTools(core: Pick<CoreTransport, "json">): Promise<void> {
+  await core.json("PUT", "/kb/providers/settings", { toolsEnabled: true });
+}
+
+export function ModelNotices({ kinds, onAllowTools }: { kinds: readonly ModelNoticeKind[]; onAllowTools?: () => void }) {
   return (
     <>
       {kinds.map((k) => {
         const n = k === "tools" ? TOOLS_NOTICE : ROUTER_NOTICE;
         return (
           <span key={k} className="chat-note" role="note">
-            {n.text} <button type="button" className="chat-link-btn" onClick={() => openModelRouting()}>{n.label}</button>
+            {n.text} <button type="button" className="chat-link-btn" onClick={() => (k === "tools" && onAllowTools ? onAllowTools() : openModelRouting())}>{n.label}</button>
           </span>
         );
       })}

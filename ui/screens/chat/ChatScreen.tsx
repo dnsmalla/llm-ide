@@ -13,7 +13,7 @@ import { MessageList } from "./MessageList";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
 import { CapChip, EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
 import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./effort";
-import { ModelNotices, modelNotices } from "./model-notices";
+import { enableProviderTools, ModelNotices, modelNotices } from "./model-notices";
 import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
 import { SessionList } from "./SessionList";
 import { ModeBanner } from "./approvals/ModeBanner";
@@ -257,6 +257,17 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);
   const effortLevels = effortLevelsFor(groups, current.provider, current.model);
   const remoteBusy = activeId ? controller.isRemoteBusy(activeId) : false;
+  const allowProviderTools = useCallback(async () => {
+    setModelNotice(null);
+    try {
+      await enableProviderTools(core);
+      const r = await loadModelGroups(core);
+      setListedGroups(r.groups);
+      setToolsEnabled(r.toolsEnabled);
+    } catch (e) {
+      setModelNotice(describeError(e).message);
+    }
+  }, [core]);
 
   const onLoadOlder = useCallback(() => (activeId ? controller.loadOlder(activeId) : Promise.resolve(0)), [activeId, controller]);
   const onScrollState = useCallback((scrollTop: number, stick: boolean) => { if (activeId) controller.setView(activeId, { scrollTop, stickToBottom: stick }); }, [activeId, controller]);
@@ -409,7 +420,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 userModels={userModels} onRemove={removeModel} />
               <EffortPicker levels={effortLevels} value={effectiveEffort(effortPick, effortLevels)} onChange={effortStore.set} />
               {modelNotice && <p className="chat-error" role="alert">{modelNotice}</p>}
-              <ModelNotices kinds={modelNotices({ plainChat: plain, routerOn: route?.enabled, groups })} />
+              <ModelNotices kinds={modelNotices({ plainChat: plain, routerOn: route?.enabled, groups })} onAllowTools={() => void allowProviderTools()} />
               <PendingSwitchNote pending={route?.pending} />
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>

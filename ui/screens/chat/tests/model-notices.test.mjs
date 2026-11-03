@@ -1,5 +1,5 @@
 // The two model-picker action notices: which ones show, and that their button only asks the shell to open Settings
-// at Model routing (one bus message, nothing else: no route write, no settings write).
+// at Model routing; Allow tools now writes the same switch the Mac writes.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, h, renderToStaticMarkup as html } from "./helpers.mjs";
@@ -21,11 +21,18 @@ test("the tools notice shows when a chat is plain because tools are off; the rou
 
 test("the notice buttons carry the Mac's labels", () => {
   const out = html(h(c.ModelNotices, { kinds: ["tools", "router"] }));
-  assert.match(out, /Allow tools on provider models/);
+  assert.match(out, /Allow tools/);
   assert.match(out, /Turn on the session router \(applies at next backend start\)/);
 });
 
-test("the button publishes one goto-section to Settings at Model routing and does nothing else", () => {
+test("Allow tools writes the provider settings switch and never opens Settings", async () => {
+  const calls = [];
+  const core = { async json(method, path, body) { calls.push({ method, path, body }); return {}; } };
+  await c.enableProviderTools(core);
+  assert.deepEqual(calls, [{ method: "PUT", path: "/kb/providers/settings", body: { toolsEnabled: true } }]);
+});
+
+test("the router button publishes one goto-section to Settings at Model routing", () => {
   const seen = [];
   const bus = { publish: (ev) => seen.push(ev), subscribe() { return () => {}; }, takePending() { return null; } };
   c.openModelRouting(bus);

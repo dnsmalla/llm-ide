@@ -200,3 +200,13 @@ test("the Memory chip is always rendered (not only after a turn), and closing th
   assert.match(screen, /if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); closeProjectMemory\(\); \}/);
   assert.match(screen, /<ModelPicker [^>]*route=\{route\}/);
 });
+
+
+test("the plain-chat notice offers the Mac's one-click Allow tools, with Settings as the fallback", async () => {
+  const notices = src("model-notices.tsx");
+  assert.match(notices, /label: "Allow tools"/);
+  assert.match(notices, /onAllowTools \? onAllowTools\(\) : openModelRouting\(\)/);
+  const screen = src("ChatScreen.tsx");
+  assert.match(screen, /enableProviderTools\(core\)/);
+  assert.match(screen, /<ModelNotices [^>]*onAllowTools=/);
+});
