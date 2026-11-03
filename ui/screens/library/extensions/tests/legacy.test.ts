@@ -197,3 +197,15 @@ test("llm source: add sends git/local shape, reloads, and remove sends DELETE", 
   await model.removeLlmSource("new-source");
   assert.ok(core.calls.some((c) => c.method === "DELETE" && c.path === "/auth/me/llm-sources/new-source"));
 });
+
+
+test("claude plugins: list decodes and import sends the installed source", async () => {
+  const { core, model } = setup("plugins", {
+    "GET /auth/me/claude-plugins/installed": () => ok({ plugins: [{ name: "helper", version: "1.2.0", skillCount: 2, commandCount: 1, alreadyImported: false, hasUpdate: true }] }),
+    "POST /auth/me/claude-plugins/import": () => ok({ ok: true, plugin: { name: "claude-helper" } }),
+  });
+  const rows = await model.claudePlugins();
+  assert.equal(rows[0]?.skillCount, 2);
+  assert.equal(await model.importClaude("helper"), true);
+  assert.deepEqual(posts(core, "claude-plugins/import")[0]!.body, { name: "helper", source: "installed" });
+});

@@ -399,6 +399,30 @@ export function decodeSourceUpdated(body: unknown): SourceUpdated {
 }
 
 // ---- api --------------------------------------------------------------------------------------------
+export interface ClaudePluginRow {
+  name: string;
+  version: string;
+  skillCount: number;
+  commandCount: number;
+  alreadyImported: boolean;
+  hasUpdate: boolean;
+}
+
+function decodeClaudePlugins(body: unknown): ClaudePluginRow[] {
+  const o = rec(body, "claude plugins");
+  return list(o.plugins ?? [], "claude.plugins", MAX_ITEMS).map((x, i) => {
+    const r = rec(x, `claude.plugins[${i}]`);
+    return {
+      name: ident(r.name, `claude.plugins[${i}].name`),
+      version: optStr(r.version, `claude.plugins[${i}].version`, 80) ?? "",
+      skillCount: typeof r.skillCount === "number" && Number.isFinite(r.skillCount) && r.skillCount >= 0 ? Math.trunc(r.skillCount) : 0,
+      commandCount: typeof r.commandCount === "number" && Number.isFinite(r.commandCount) && r.commandCount >= 0 ? Math.trunc(r.commandCount) : 0,
+      alreadyImported: r.alreadyImported === true,
+      hasUpdate: r.hasUpdate === true,
+    };
+  });
+}
+
 function decodeAdded(body: unknown): void {
   const o = rec(body, "added");
   if (o.plugin !== undefined && !rec(o.plugin, "added.plugin")) throw new DecodeError("added.plugin", "object");
@@ -424,6 +448,9 @@ export interface LegacyApi {
   addMcp(input: { catalogId?: string; arg?: string; name?: string; transport?: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string }, signal?: AbortSignal): Promise<void>;
   removeMcp(id: string, signal?: AbortSignal): Promise<void>;
   addLlmSource(input: { url?: string; path?: string; ref?: string; name?: string }, signal?: AbortSignal): Promise<void>;
+  /** Claude Code plugins available to import (the Mac's "Installed in Claude" tab). */
+  claudePlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
+  importClaude(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   removeLlmSource(id: string, signal?: AbortSignal): Promise<void>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
@@ -462,6 +489,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     addMcp: async (input, s) => { await call("POST", "/auth/me/mcp-plugins/add", input, decodeAdded, s); },
     removeMcp: async (id, s) => { await call("DELETE", "/auth/me/mcp-plugins/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     addLlmSource: async (input, s) => { await call("POST", "/auth/me/llm-sources/add", input, decodeSourceAdded, s); },
+    claudePlugins: (s) => call("GET", "/auth/me/claude-plugins/installed", undefined, decodeClaudePlugins, s),
+    importClaude: async (name, source, s) => { await call("POST", "/auth/me/claude-plugins/import", { name, source }, decodeSourceAdded, s); },
     removeLlmSource: async (id, s) => { await call("DELETE", "/auth/me/llm-sources/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
@@ -761,6 +790,24 @@ export class LegacyModel {
       await this.api.addMcp(input, this.life.signal);
       await this.load(true);
       this.set({ notice: { text: `Added ${input.name || input.catalogId || "MCP server"}. It is off until you consent and switch it on.`, error: false } });
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
+  }
+
+  /** The Claude Code plugins available to import (read-only; the server scans the Claude install). */
+  async claudePlugins(): Promise<ClaudePluginRow[]> {
+    return this.api.claudePlugins(this.life.signal);
+  }
+
+  /** Import one Claude Code plugin and reload the plugin list. */
+  async importClaude(name: string): Promise<boolean> {
+    try {
+      await this.api.importClaude(name, "installed", this.life.signal);
+      await this.load(true);
+      this.set({ notice: { text: `Imported Claude plugin ${name}.`, error: false } });
       return true;
     } catch (e) {
       this.fail(e);
