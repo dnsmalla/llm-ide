@@ -44,7 +44,7 @@ Define one versioned Host API that:
 | Listeners | v2 stays on its existing `ws://3006–3015` range; v1 TLS uses `wss://3016` by default (next free port if busy) |
 | Auth | Pairing PIN → per-device token; token in Keychain/browser storage; revocable and scoped |
 | Schema | JSON Schema is the source of truth; Swift and TypeScript types are generated |
-| Command naming | `<domain>.<verb>` (`chat.send`, `files.list`) |
+| Command naming | `<domain>.<verb>` with 2–3 segments (`chat.send`, `host.auth.pair`, `chat.history.clear`) |
 | Capability gating | Host advertises capabilities; clients hide unsupported commands |
 | Large payloads | Bounded frames, paginated lists, capped file reads |
 
