@@ -10,6 +10,7 @@ import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
 import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { cronMatches, describeCron, validateCron } from "./cron.ts";
+import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
 import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
@@ -41,6 +42,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [scheduleError, setScheduleError] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleActiveDraft, setScheduleActiveDraft] = useState(false);
+  const [templates, setTemplates] = useState<PromptTemplate[]>(loadTemplates);
+  const [templateSaved, setTemplateSaved] = useState<string | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [limitsOpen, setLimitsOpen] = useState(false);
@@ -236,8 +241,13 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         </section>
 
         <section className="atn-card">
-          <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setResetOpen(true)}>Restore Default</button><button type="button" className="atn-link" onClick={() => setNotice("Saving named prompt templates is part of the template-store port.")}>New…</button></header>
+          <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setResetOpen(true)}>Restore Default</button><button type="button" className="atn-link" onClick={() => { setTemplateName(""); setTemplateOpen(true); }}>Save as…</button></header>
           <select aria-label="Template" value={config.template} onChange={(e) => update({ template: e.target.value as "builtin" | "custom" })}><option value="builtin">Built-in prompt</option><option value="custom">Custom prompt</option></select>
+          <select aria-label="Saved prompt template" value={templateSaved ?? ""} onChange={(e) => { const t = templates.find((x) => x.id === e.target.value); if (t) { update({ template: "custom", prompt: t.prompt }); setTemplateSaved(t.id); } else setTemplateSaved(null); }}>
+            <option value="">Saved templates…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {templateSaved && templates.some((t) => t.id === templateSaved) ? <button type="button" className="atn-link" onClick={() => { const next = removeTemplate(templates, templateSaved); setTemplates(next); saveTemplates(next); setTemplateSaved(null); }}>Delete template</button> : null}
           <textarea aria-label="Prompt" rows={7} value={config.prompt} onChange={(e) => update({ prompt: e.target.value, template: "custom" })} />
         </section>
         <section className="atn-card">
@@ -273,6 +283,16 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
             <header><h2 id="atn-reset-title">{resetTemplateTitle(task.label)}</h2></header>
             <p id="atn-reset-body" className="atn-hint">{RESET_TEMPLATE_MESSAGE}</p>
             <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setResetOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-danger" onClick={() => { update({ template: "builtin", prompt: task.prompt }); setResetOpen(false); setNotice(`${task.label} prompt restored to default.`); }}>Reset to Default</button></div>
+          </div>
+        </div>
+      ) : null}
+      {templateOpen ? (
+        <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-template-title">
+          <div className="atn-modal-card">
+            <header><h2 id="atn-template-title">Save prompt template</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close template" onClick={() => setTemplateOpen(false)}>×</button></header>
+            <label className="atn-field"><span>Name</span><input value={templateName} autoFocus maxLength={80} placeholder="Review checklist" onChange={(e) => setTemplateName(e.target.value)} /></label>
+            <p className="atn-hint">Saves this task's current prompt as a reusable template.</p>
+            <div className="atn-modal-actions"><button type="button" className="atn-btn" onClick={() => setTemplateOpen(false)}>Cancel</button><button type="button" className="atn-btn atn-primary" disabled={!templateName.trim() || !config.prompt.trim()} onClick={() => { const r = addTemplate(templates, templateName, config.prompt); if (!r) return; setTemplates(r.list); saveTemplates(r.list); setTemplateSaved(r.saved.id); setTemplateOpen(false); setNotice(`Saved template “${r.saved.name}”.`); }}>Save</button></div>
           </div>
         </div>
       ) : null}
