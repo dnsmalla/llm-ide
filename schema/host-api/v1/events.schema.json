@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/host-api/v1/events.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "chat.delta" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string", "maxLength": 100000 }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "chat.done" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestId"],
+          "properties": {
+            "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "stopReason": { "type": "string", "maxLength": 200 }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "chat.error" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["message"],
+          "properties": {
+            "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "retryable": { "type": "boolean" }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "approval.request" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestId", "commandId", "questions"],
+          "properties": {
+            "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "commandId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "questions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["question", "options", "multiSelect"],
+                "properties": {
+                  "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                  "header": { "type": "string", "maxLength": 12 },
+                  "options": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["label"],
+                      "properties": {
+                        "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+                        "description": { "type": "string", "maxLength": 500 }
+                      }
+                    }
+                  },
+                  "multiSelect": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "approval.cleared" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestId", "commandId"],
+          "properties": {
+            "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "commandId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "reason": { "type": "string", "maxLength": 500 }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "toolApproval.request" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestId", "commandId", "toolName", "truncated"],
+          "properties": {
+            "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "commandId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "toolName": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "summary": { "type": "string", "maxLength": 2000 },
+            "filePath": { "type": "string", "maxLength": 2000 },
+            "oldString": { "type": "string", "maxLength": 20000 },
+            "newString": { "type": "string", "maxLength": 20000 },
+            "contentPreview": { "type": "string", "maxLength": 20000 },
+            "command": { "type": "string", "maxLength": 2000 },
+            "replaceAll": { "type": "boolean" },
+            "overwrites": { "type": "boolean" },
+            "truncated": { "type": "boolean" }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "const": "host.capabilities" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capabilities"],
+          "properties": {
+            "capabilities": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+              "minItems": 1,
+              "maxItems": 20
+            }
+          }
+        },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"e-6","type":"event","command":"toolApproval.request","payload":{"requestId":"t-1","commandId":"c-1","toolName":"Edit","summary":"Edit a file","filePath":"/tmp/a.swift","oldString":"a","newString":"b","contentPreview":"a","command":"echo hi","replaceAll":false,"overwrites":true,"truncated":false},"ts":1760000000007,"rev":7}

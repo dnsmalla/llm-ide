@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/host-api/v1/commands.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "limits", "capabilities", "commands"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxFrameBytes", "defaultListItems", "maxListItems"],
+      "properties": {
+        "maxFrameBytes": { "type": "integer", "const": 1048576 },
+        "defaultListItems": { "type": "integer", "const": 100 },
+        "maxListItems": { "type": "integer", "const": 500 }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+      "minItems": 1
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability", "direction", "idempotent", "v2Tag", "request", "result"],
+        "properties": {
+          "capability": { "type": "string" },
+          "direction": { "type": "string", "enum": ["client_to_host"] },
+          "idempotent": { "type": "boolean" },
+          "v2Tag": { "type": ["string", "null"] },
+          "request": { "type": "object" },
+          "result": { "type": "object" }
+        }
+      }
+    }
+  }
+}

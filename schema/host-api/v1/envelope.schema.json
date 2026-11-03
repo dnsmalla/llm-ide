@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/host-api/v1/envelope.schema.json",
+  "title": "HostApiFrame",
+  "$defs": {
+    "ErrorCode": {
+      "type": "string",
+      "enum": ["auth_failed", "capability_unavailable", "unknown_command", "invalid_payload", "not_found", "busy", "denied", "desktop_only", "rate_limited", "host_unreachable", "internal"]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "retryable": { "type": "boolean" },
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hint": { "type": "string", "maxLength": 500 },
+            "retryAfterMs": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "request" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
+        "payload": { "type": "object" },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "replyTo", "type", "command", "result", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "response" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
+        "result": { "type": "object" },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "command", "payload", "ts", "rev"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "event" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
+        "payload": { "type": "object" },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ErrorFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "id", "type", "error", "ts"],
+      "properties": {
+        "apiVersion": { "type": "integer", "const": 1 },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "type": "string", "const": "error" },
+        "command": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*){1,2}$" },
+        "error": { "$ref": "#/$defs/Error" },
+        "ts": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/Request" },
+    { "$ref": "#/$defs/Response" },
+    { "$ref": "#/$defs/Event" },
+    { "$ref": "#/$defs/ErrorFrame" }
+  ]
+}

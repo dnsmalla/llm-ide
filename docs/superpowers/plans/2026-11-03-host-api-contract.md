@@ -1027,3 +1027,20 @@ git commit -m "docs(host-api): document the v1 contract and wire the gate"
 - **Placeholder scan:** No TBD/TODO; every task has files, code, commands and expected results.
 - **Type consistency:** `commands.json` is the single source; generator and conformance both read the same `commands` map and the same `maxFrameBytes/defaultListItems/maxListItems` names used in the spec.
 - **Known deliberate gap:** `events.schema.json` variants are written flat because the existing validator has no `allOf`; the plan states this explicitly.
+
+---
+
+## Execution amendments (2026-11-03)
+
+These changes were ruled on during execution and are part of the delivered branch:
+
+- The initial surface is **12 commands**, not 11: `chat.history.clear` is required by the design spec.
+- Command names are 2–3 dot-separated segments (`host.auth.pair`, `chat.history.clear`), not only two.
+- The event union has **six** variants: `chat.delta`, `chat.done`, `chat.error`, `approval.request`, `approval.cleared`, `toolApproval.request`.
+- `rev` is **envelope-only**; snapshot results do not repeat it.
+- Approval requests carry `requestId`, `commandId` and `questions[]` (question/options/multiSelect), matching the v2 shape; answers are keyed by question text.
+- `toolApprovals.answer` carries `commandId` and `decision`.
+- `host.hello.result` carries `apiVersions`.
+- Invalid fixtures assert a specific `$defs` variant and the expected failing path.
+- The generated Swift file exposes `HostApiCommand`, per-command capability/idempotency, and `HostApiLimits`.
+- The generated Node file exposes `HOST_API_SCHEMAS`; desktop staging copies `schema/host-api`.

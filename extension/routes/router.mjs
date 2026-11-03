@@ -56,6 +56,7 @@ import { activeTurnCount } from './agent-v2.mjs';
 import { agentBusySummary } from '../core/agent-busy.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
+import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
 import { testMcpConnection, fetchMcpItems, markMcpSeen } from '../connectors/mcp-client.mjs';
@@ -366,7 +367,8 @@ export async function handleKB(req, res) {
         : path === '/kb/issues/create' ? `https://api.github.com/repos/${repo}/issues`
           : `https://api.github.com/repos/${repo}/issues/${number}${path === '/kb/issues/comment' ? '/comments' : ''}`;
       try {
-        const r = await fetch(api, {
+        const pinnedFetch = makePinnedFetch();
+        const r = await pinnedFetch(api, {
           method: path === '/kb/issues/close' ? (isGitLab ? 'PUT' : 'PATCH') : 'POST',
           headers: isGitLab
             ? { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' }

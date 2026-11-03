@@ -128,6 +128,7 @@ endif
 
 # SharedProtocol wire-format tests (used by mac + ios_app).
 test-shared-protocol:
+	node scripts/generate-host-api.mjs --check
 	cd ios_app/SharedProtocol && swift build
 ifeq ($(HAS_XCTEST),1)
 	cd ios_app/SharedProtocol && swift test
@@ -227,6 +228,12 @@ chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
 	node scripts/conformance-agent-v2.mjs
 
+# Host API v1 contract (schema/host-api/v1): envelope, command registry, events
+# and their fixtures. Node only and fast, so it belongs in `contract-gates`.
+.PHONY: host-api-check
+host-api-check:
+	node scripts/conformance-host-api.mjs
+
 # HTTP endpoint contract (schema/http): request and response shapes per route
 # group, checked against the roster. Part of `regression` (Phase 1 P16) and
 # run by the pre-push hook for mac/ pushes through `regression`; it is fast
@@ -235,6 +242,7 @@ chat-gates:
 contract-gates:
 	node scripts/conformance-http.mjs
 	node scripts/conformance-bus.mjs
+	$(MAKE) host-api-check
 	node scripts/gen-api-types.mjs --check
 	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --check

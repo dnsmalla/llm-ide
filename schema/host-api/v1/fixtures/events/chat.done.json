@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"e-3","type":"event","command":"chat.done","payload":{"requestId":"r-1","stopReason":"end_turn"},"ts":1760000000004,"rev":4}

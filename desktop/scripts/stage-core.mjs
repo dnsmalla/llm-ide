@@ -3,7 +3,7 @@
 // Produces desktop/resources/core/ which tauri.conf.json copies into the app:
 //   core/node/node[.exe]      pinned official Node LTS (node-runtime.mjs; npm/corepack not shipped)
 //   core/root/extension/...   pruned copy of extension/ with production deps
-//   core/root/schema/...      schema/models (read via ../../schema from providers/)
+//   core/root/schema/...      schema/models + schema/host-api (read via ../../schema from providers/)
 //
 // The source tree is only read. Dev-only paths (tests, src, dist, docs, live
 // DB files) are never copied. Usage:
@@ -208,6 +208,10 @@ if (sdkBinaryAllowed()) {
 const schemaOut = join(OUT, 'root', 'schema', 'models');
 mkdirSync(schemaOut, { recursive: true });
 copyFileSync(join(REPO, 'schema', 'models', 'anthropic-models.json'), join(schemaOut, 'anthropic-models.json'));
+
+// 4b. Host API v1 contract (envelope, command registry, events, fixtures) so the desktop
+// host validates frames against the same bytes as the Mac and the conformance gate.
+cpSync(join(REPO, 'schema', 'host-api'), join(OUT, 'root', 'schema', 'host-api'), { recursive: true });
 
 const nmFinal = dirBytes(nm); // after the SDK binary package was removed
 const sizes = {
