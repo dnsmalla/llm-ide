@@ -33,6 +33,8 @@ export interface DockHeaderProps {
   busyIds: ReadonlySet<string>;
   route: RouteView | null;
   routeDisabled: boolean;
+  /** The same compact turn/token line as the section header; omitted at very narrow widths. */
+  meta?: string;
   onSelect: (id: string) => void;
   onNew: () => void;
   onCollapse?: () => void;
@@ -41,7 +43,7 @@ export interface DockHeaderProps {
   onDelete?: () => void;
 }
 
-export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete }: DockHeaderProps) {
+export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete }: DockHeaderProps) {
   const options = historyOptions(sessions, activeId, busyIds);
   const [actions, setActions] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -50,6 +52,7 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
   return (
     <header className="chat-dock-head">
       <h2 className="chat-dock-title">{DOCK_TITLE}</h2>
+      {meta ? <span className="chat-meta chat-dock-meta">{meta}</span> : null}
       <CapChip route={route} disabled={routeDisabled} onSetLimit={onSetLimit} />
       <span className="chat-spacer" />
       {options.length > 0 && (

@@ -252,6 +252,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const history = useMemo(() => state.messages.filter((m) => m.role === "user").map((m) => (m as { text: string }).text).slice(-50), [state.messages]);
   // This chat's total, summed from the loaded replies' own counts (the Mac header's "N tokens").
   const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
+  const turnCount = useMemo(() => state.messages.filter((m) => m.role === "user").length, [state.messages]);
   const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, state]);
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);
   const effortLevels = effortLevelsFor(groups, current.provider, current.model);
@@ -316,6 +317,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
         {dock && (
           <DockHeader
             sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
+            meta={`${turnCount} turn${turnCount === 1 ? "" : "s"}${sessionTotal ? ` · ${sessionTotal.text}` : ""}`}
             onSelect={setActiveId} onNew={() => void newChat()} onCollapse={onCollapse}
             onRename={(title) => activeId && renameSession(activeId, title)}
             onDelete={() => activeId && deleteSession(activeId)}
@@ -332,39 +334,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           <>
             <header className="chat-header">
               <h2 className="chat-title">{sessions.find((s) => s.id === activeId)?.title || "Untitled chat"}</h2>
-              {state.context && (
-                <div className="chat-context">
-                  <button type="button" className="chat-chip-btn" aria-label={`Context ${state.context.percentage} percent used`} aria-haspopup="dialog" aria-expanded={contextOpen} onClick={() => setContextOpen((v) => !v)}>
-                    Context {state.context.percentage}%
-                  </button>
-                  {contextOpen ? (
-                    <div role="dialog" aria-label="Context usage" className="chat-popover">
-                      <p className="chat-muted">{state.context.totalTokens.toLocaleString()} of {state.context.maxTokens.toLocaleString()} tokens</p>
-                      <ul className="chat-context-list">
-                        {state.context.categories.map((c) => (
-                          <li key={`${c.kind}:${c.name}`}><span>{c.name}</span><span>{c.tokens.toLocaleString()}</span></li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              {/* Always shown, as the Mac's memory button: the project memory viewer is reachable before the first turn too. */}
-              <div className="chat-context">
-                <button ref={memoryChip} type="button" className="chat-chip-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
-                  {state.memory ? `Memory ${state.memory.sessionFacts}` : "Memory"}
-                </button>
-                {memoryOpen ? (
-                  <div role="dialog" aria-label="Session memory" className="chat-popover">
-                    {state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}
-                    <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button>
-                  </div>
-                ) : null}
-              </div>
-              {state.usage ? <span className="chat-muted" title="Input and output tokens for this turn">↑ {state.usage.inputTokens.toLocaleString()} ↓ {state.usage.outputTokens.toLocaleString()}</span> : null}
-              {sessionTotal ? <span className="chat-muted" title={sessionTotal.title} aria-label={sessionTotal.ariaLabel}>{sessionTotal.text}</span> : null}
-              {state.model && <span className="chat-muted">{state.model}</span>}
-              <HeaderBadges chatId={activeId} mode={current.mode} state={state} core={core} />
+              <span className="chat-meta" title={sessionTotal?.title ?? undefined} aria-label={`${turnCount} turns${sessionTotal ? `, ${sessionTotal.ariaLabel}` : ""}`}>
+                {turnCount} turn{turnCount === 1 ? "" : "s"}{sessionTotal ? ` · ${sessionTotal.text}` : ""}
+              </span>
+              <HeaderBadges chatId={activeId} state={state} core={core} />
               <span className="chat-spacer" />
               {!dock && <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />}
             </header>
@@ -402,6 +375,34 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             {approvals?.(state)}
             {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
             <div className="chat-controls">
+              {state.context && (
+                <div className="chat-context">
+                  <button type="button" className="chat-chip-btn" aria-label={`Context ${state.context.percentage} percent used`} aria-haspopup="dialog" aria-expanded={contextOpen} onClick={() => setContextOpen((v) => !v)}>
+                    Context {state.context.percentage}%
+                  </button>
+                  {contextOpen ? (
+                    <div role="dialog" aria-label="Context usage" className="chat-popover">
+                      <p className="chat-muted">{state.context.totalTokens.toLocaleString()} of {state.context.maxTokens.toLocaleString()} tokens</p>
+                      <ul className="chat-context-list">
+                        {state.context.categories.map((c) => (
+                          <li key={`${c.kind}:${c.name}`}><span>{c.name}</span><span>{c.tokens.toLocaleString()}</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+              <div className="chat-context">
+                <button ref={memoryChip} type="button" className="chat-chip-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
+                  {state.memory ? `Memory ${state.memory.sessionFacts}` : "Memory"}
+                </button>
+                {memoryOpen ? (
+                  <div role="dialog" aria-label="Session memory" className="chat-popover">
+                    {state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}
+                    <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button>
+                  </div>
+                ) : null}
+              </div>
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
               <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
                 onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
