@@ -204,3 +204,18 @@ test("graphCandidates: each mode has its own file, and code still falls back to 
   assert.deepEqual(graphCandidates("memory"), ["system/graph/graph-memory.json"]);
   assert.deepEqual(graphCandidates("all"), ["system/graph/graph-all.json"]);
 });
+
+
+test("revealNode unhides a searched kind and clears a community/preset filter", async () => {
+  const d = deps({ "/p/system/graph/graph.json": GOOD });
+  const store = new GraphStore(d);
+  await store.load("/p");
+  const entry = store.getSnapshot().entry!;
+  const kind = entry.model.nodeKinds[entry.model.kindOf[0]];
+  store.setFilters({ hiddenKinds: new Set([kind]), preset: "docs", community: 3 });
+  store.revealNode(0);
+  assert.equal(store.getSnapshot().selected, 0);
+  assert.equal(store.getSnapshot().filters.hiddenKinds.has(kind), false);
+  assert.equal(store.getSnapshot().filters.preset, "all");
+  assert.equal(store.getSnapshot().filters.community, null);
+});

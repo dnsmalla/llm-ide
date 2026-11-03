@@ -248,7 +248,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
           {s.query.trim() !== "" && (
             <div className="gr-results">
               <p className="gr-muted" role="status">{num(results.length)} match{results.length === 1 ? "" : "es"}</p>
-              <NodeList id="gr-search" label="Search results" model={model} layout={layout} count={results.length} nodeAt={(k) => results[k]} selected={sel} onSelect={(i) => store.select(i)} initialViewport={240} emptyText="No node matches." />
+              <NodeList id="gr-search" label="Search results" model={model} layout={layout} count={results.length} nodeAt={(k) => results[k]} selected={sel} onSelect={(i) => store.revealNode(i)} initialViewport={240} emptyText="No node matches." />
             </div>
           )}
           <details className="gr-advanced"><summary>Filters and communities</summary><Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} /></details>

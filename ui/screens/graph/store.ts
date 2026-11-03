@@ -122,6 +122,18 @@ export class GraphStore {
     const n = this.state.entry?.model.n ?? 0;
     this.set({ selected: Number.isInteger(i) && i >= 0 && i < n ? i : -1 });
   }
+
+  /** Select a node from search/list, first making its kind and community visible. The Mac's search must not
+   *  land on a node the canvas has filtered out; clearing the filters is the least surprising reveal. */
+  revealNode(i: number): void {
+    const entry = this.state.entry;
+    if (!entry || !Number.isInteger(i) || i < 0 || i >= entry.model.n) return;
+    const kind = entry.model.nodeKinds[entry.model.kindOf[i]];
+    const hiddenKinds = new Set(this.state.filters.hiddenKinds);
+    hiddenKinds.delete(kind);
+    this.set({ filters: { ...this.state.filters, hiddenKinds, community: null, preset: "all" } });
+    this.select(i);
+  }
   /** Focus a node (-1 clears). Bounds-checked like `select`. */
   setFocus(i: number): void {
     const n = this.state.entry?.model.n ?? 0;
