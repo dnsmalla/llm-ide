@@ -115,7 +115,7 @@ for (const f of fixtureNames("fixtures/events")) {
 }
 
 const gen = spawnSync(process.execPath, [join(ROOT, "scripts/generate-host-api.mjs"), "--check"], { encoding: "utf8" });
-if (gen.status !== 0) bad(gen.stderr.trim() || "generated Host API constants are stale");
+if (gen.status !== 0) bad((gen.stderr || "").trim() || "generated Host API constants are stale");
 
 if (problems.length) {
   for (const p of problems) console.error(`conformance-host-api: ${p}`);
