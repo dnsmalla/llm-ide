@@ -9,6 +9,7 @@
       "properties": {
         "apiVersion": { "type": "integer", "const": 1 },
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "event" },
         "command": { "type": "string", "const": "chat.delta" },
         "payload": { "type": "object", "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string", "maxLength": 100000 } } },
@@ -23,9 +24,10 @@
       "properties": {
         "apiVersion": { "type": "integer", "const": 1 },
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "replyTo": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "type": "string", "const": "event" },
         "command": { "type": "string", "const": "approval.request" },
-        "payload": { "type": "object", "additionalProperties": false, "required": ["requestId", "question"], "properties": { "requestId": { "type": "string" }, "question": { "type": "string", "maxLength": 2000 } } },
+        "payload": { "type": "object", "additionalProperties": false, "required": ["requestId", "question"], "properties": { "requestId": { "type": "string", "minLength": 1, "maxLength": 64 }, "question": { "type": "string", "maxLength": 2000 } } },
         "ts": { "type": "integer", "minimum": 0 },
         "rev": { "type": "integer", "minimum": 0 }
       }
