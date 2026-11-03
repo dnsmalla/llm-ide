@@ -7,6 +7,7 @@
 // against the specific $defs variant they are built to violate and must fail
 // at the expected path: validating them through the root oneOf collapses to a
 // single aggregate "must match exactly one variant" error and hides what broke.
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,7 @@ const EXPECTED_COMMANDS = 12;
 // filename -> the envelope $defs variant it violates and the path the failure must name.
 const INVALID_CASES = {
   "bad-command-shape.json": { def: "Request", at: ".command" },
+  "bad-command-pattern.json": { def: "Request", at: ".command" },
   "bad-request-id.json": { def: "Request", at: ".id" },
   "missing-api-version.json": { def: "Request", at: ".apiVersion" },
   "unknown-field.json": { def: "Request", at: ".surprise" },
@@ -36,6 +38,17 @@ const fixtureNames = (dir) => readdirSync(join(DIR, dir)).filter((f) => f.endsWi
 
 const envelope = json("envelope.schema.json");
 const defs = envelope.$defs;
+
+// The four frame variants must agree on the command grammar: the registry name check below
+// derives from Request, so a divergent Response/Event/ErrorFrame would accept or reject a
+// different set of names than the one the registry is validated against.
+const frameVariants = ["Request", "Response", "Event", "ErrorFrame"];
+const commandPatterns = frameVariants.map((v) => defs[v]?.properties?.command?.pattern);
+if (commandPatterns.some((p) => typeof p !== "string")) {
+  bad(`envelope: ${frameVariants.join(", ")} must all declare command.pattern`);
+} else if (new Set(commandPatterns).size !== 1) {
+  bad(`envelope: command.pattern differs across frame variants: ${JSON.stringify(commandPatterns)}`);
+}
 
 for (const f of fixtureNames("fixtures/valid")) {
   const errs = validate(envelope, json(`fixtures/valid/${f}`), { defs });
@@ -100,6 +113,9 @@ for (const f of fixtureNames("fixtures/events")) {
   const errs = validate(events, json(`fixtures/events/${f}`), { defs: events.$defs });
   if (errs.length) bad(`events/${f}: ${JSON.stringify(errs)}`);
 }
+
+const gen = spawnSync(process.execPath, [join(ROOT, "scripts/generate-host-api.mjs"), "--check"], { encoding: "utf8" });
+if (gen.status !== 0) bad(gen.stderr.trim() || "generated Host API constants are stale");
 
 if (problems.length) {
   for (const p of problems) console.error(`conformance-host-api: ${p}`);

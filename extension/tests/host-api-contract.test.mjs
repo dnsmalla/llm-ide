@@ -61,3 +61,8 @@ test("host-api conformance script passes", () => {
   const r = spawnSync(process.execPath, ["scripts/conformance-host-api.mjs"], { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr || r.stdout);
 });
+
+test("generated Host API constants match the registry", () => {
+  const r = spawnSync(process.execPath, ["scripts/generate-host-api.mjs", "--check"], { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
