@@ -36,10 +36,20 @@ test("host-api command registry: host commands have a capability and exact schem
   }
 });
 
+test("host-api command registry: 12 commands and every fixture validates", () => {
+  assert.equal(Object.keys(commands.commands).length, 12);
+  for (const [name, c] of Object.entries(commands.commands)) {
+    for (const [kind, schema] of [["request", c.request], ["result", c.result]]) {
+      const value = json(`fixtures/commands/${name}.${kind}.json`);
+      assert.deepEqual(validate(schema, value, { defs: envelope.$defs }), [], `${name} ${kind}`);
+    }
+  }
+});
+
 const events = json("events.schema.json");
 
 test("host-api chat commands and events decode", () => {
-  for (const name of ["chat.send", "chat.snapshot", "chat.cancel", "approvals.answer", "toolApprovals.answer"]) {
+  for (const name of ["chat.send", "chat.snapshot", "chat.cancel", "chat.history.clear", "approvals.answer", "toolApprovals.answer"]) {
     assert.ok(commands.commands[name], name);
   }
   assert.deepEqual(validate(events, json("fixtures/events/chat.delta.json"), { defs: events.$defs }), []);

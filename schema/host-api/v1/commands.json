@@ -205,6 +205,21 @@
         }
       }
     },
+    "chat.history.clear": {
+      "capability": "chat",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": "llmide_chat_history_clear",
+      "request": { "type": "object", "additionalProperties": false, "properties": {} },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cleared"],
+        "properties": {
+          "cleared": { "type": "boolean" }
+        }
+      }
+    },
     "approvals.answer": {
       "capability": "approvals",
       "direction": "client_to_host",
