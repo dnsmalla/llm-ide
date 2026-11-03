@@ -4,8 +4,10 @@
 //   node scripts/generate-host-api.mjs           write the generated files
 //   node scripts/generate-host-api.mjs --check   fail when a generated file is stale
 //
-// Two consumers: the Node route layer (extension/routes/host-api/commands.generated.mjs)
-// and the SharedProtocol Swift package (ios_app/SharedProtocol/Sources/SharedProtocol).
+// Two consumers: the Node route layer and desktop host
+// (extension/routes/host-api/commands.generated.mjs, which also carries every command's
+// request/result schema for frame validation) and the SharedProtocol Swift package
+// (ios_app/SharedProtocol/Sources/SharedProtocol).
 // Output is deterministic (commands sorted by name), so --check is a byte comparison.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -29,6 +31,9 @@ export const HOST_API_VERSION = ${registry.version};
 export const HOST_API_LIMITS = Object.freeze(${JSON.stringify(registry.limits)});
 export const HOST_API_COMMANDS = Object.freeze({
 ${names.map((n) => `  ${JSON.stringify(n)}: Object.freeze({ capability: ${JSON.stringify(registry.commands[n].capability)}, idempotent: ${registry.commands[n].idempotent} })`).join(",\n")}
+});
+export const HOST_API_SCHEMAS = Object.freeze({
+${names.map((n) => `  ${JSON.stringify(n)}: Object.freeze({ request: ${JSON.stringify(registry.commands[n].request)}, result: ${JSON.stringify(registry.commands[n].result)} })`).join(",\n")}
 });
 `;
 

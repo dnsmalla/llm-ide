@@ -107,3 +107,13 @@ test("generated Host API constants match the registry", () => {
   const r = spawnSync(process.execPath, ["scripts/generate-host-api.mjs", "--check"], { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr || r.stdout);
 });
+
+test("generated Host API schemas mirror every request and result verbatim", async () => {
+  const { HOST_API_SCHEMAS } = await import("../routes/host-api/commands.generated.mjs");
+  assert.ok(Object.isFrozen(HOST_API_SCHEMAS));
+  assert.deepEqual(Object.keys(HOST_API_SCHEMAS), Object.keys(commands.commands).sort());
+  for (const [name, c] of Object.entries(commands.commands)) {
+    assert.ok(Object.isFrozen(HOST_API_SCHEMAS[name]), name);
+    assert.deepEqual(HOST_API_SCHEMAS[name], { request: c.request, result: c.result }, name);
+  }
+});
