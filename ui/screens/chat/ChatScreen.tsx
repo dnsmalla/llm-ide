@@ -1,4 +1,4 @@
-// The Chat screen: session list, conversation, composer, pickers. Wiring only; the logic lives in the pure
+// The Chat screen: session dropdown, conversation, composer, pickers. Wiring only; the logic lives in the pure
 // modules (events, state, controller, route, virtual, markdown) and is tested without a DOM.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -11,11 +11,10 @@ import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
-import { CapChip, EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
+import { EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
 import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./effort";
 import { enableProviderTools, ModelNotices, modelNotices } from "./model-notices";
 import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
-import { SessionList } from "./SessionList";
 import { ModeBanner } from "./approvals/ModeBanner";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
@@ -35,7 +34,7 @@ import { chatTotalLabel } from "./usage";
 import type { ChatStore, SessionSummary } from "./store";
 import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
-import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE, unreadableNotice } from "./tauri-store";
+import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE } from "./tauri-store";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -84,7 +83,6 @@ const SESSION_PAGE = 100;
 
 export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, dock = false, onCollapse }: ChatScreenProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
@@ -94,14 +92,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const memoryChip = useRef<HTMLButtonElement>(null);
   // Closing the viewer hands focus back to the chip that opened it.
   const closeProjectMemory = useCallback(() => { setProjectMemoryOpen(false); memoryChip.current?.focus(); }, []);
-  const [unreadable, setUnreadable] = useState<string | null>(null);
   // Errors the user caused or can ignore are not alarms: a declined confirm is silent, bookkeeping is an info notice.
   const reportStoreError = useCallback((e: unknown) => {
     if (isDeclined(e)) return;
     if (isPendingCorrupt(e)) { setNotice(PENDING_CORRUPT_NOTICE); return; }
     setListError(describeError(e).message);
   }, []);
-  const refreshHealth = useCallback(() => { const h = store.listHealth?.(); setUnreadable(h ? unreadableNotice(h) : null); }, [store]);
   // One store for the open chat, picker choices and permission: shared with the other chat surface when given.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ui = useMemo(() => shared ?? createChatUiStore(initialSessionId), [shared]);
@@ -120,7 +116,6 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // The effort pick is one app-wide choice (the Mac's chat.effort), remembered across launches.
   const effortPick = useSyncExternalStore(effortStore.subscribe, effortStore.get, effortStore.get);
   const [route, setRoute] = useState<RouteView | null>(null);
-  const loadingMore = useRef(false);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
   const [refineNonce, setRefineNonce] = useState(0);
   useControllerVersion(controller); // re-render when any chat's busy flag changes
@@ -131,24 +126,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     if (skipRev.current === sessionsRev) return undefined; // our own change: the list is already up to date here
     const ac = new AbortController();
     store.listSessions({ limit: SESSION_PAGE, offset: 0 }, ac.signal)
-      .then((s) => { setSessions(s); setHasMoreSessions(s.length === SESSION_PAGE); refreshHealth(); })
+      .then(setSessions)
       .catch((e) => { if (!ac.signal.aborted) setListError(describeError(e).message); });
     return () => ac.abort();
-  }, [store, refreshHealth, sessionsRev]);
+  }, [store, sessionsRev]);
 
-  // Docked: no session column, so open the most recent chat when none is open yet.
+  // No session column: open the most recent chat when none is open yet, as the Mac does.
   useEffect(() => {
-    if (dock && !activeId && sessions.length > 0) setActiveId(sessions[0]!.id);
-  }, [dock, activeId, sessions, setActiveId]);
-
-  const loadMoreSessions = useCallback(() => {
-    if (loadingMore.current) return;
-    loadingMore.current = true;
-    store.listSessions({ limit: SESSION_PAGE, offset: sessions.length })
-      .then((more) => { setSessions((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.id === m.id))]); setHasMoreSessions(more.length === SESSION_PAGE); })
-      .catch((e) => setListError(describeError(e).message))
-      .finally(() => { loadingMore.current = false; });
-  }, [store, sessions.length]);
+    if (!activeId && sessions.length > 0) setActiveId(sessions[0]!.id);
+  }, [activeId, sessions, setActiveId]);
 
   // Model list once per screen.
   useEffect(() => {
@@ -317,41 +303,24 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   };
   return (
     <div className={dock ? "chat-screen chat-dock-mode" : "chat-screen"} data-dock={dock ? "" : undefined}>
-      {!dock && <SessionList
-        sessions={sessions} activeId={activeId} busyIds={busyIds} hasMore={hasMoreSessions} onLoadMore={loadMoreSessions}
-        onSelect={setActiveId} onNew={() => void newChat()}
-        onRename={renameSession}
-        onDelete={deleteSession}
-        unreadableNotice={unreadable}
-      />}
       <section className="chat-main" aria-label={dock ? "Code Assistant" : "Chat"}>
-        {dock && (
-          <DockHeader
-            sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
-            meta={`${turnCount} turn${turnCount === 1 ? "" : "s"}${sessionTotal ? ` · ${sessionTotal.text}` : ""}`}
-            onSelect={setActiveId} onNew={() => void newChat()} onCollapse={onCollapse}
-            onRename={(title) => activeId && renameSession(activeId, title)}
-            onDelete={() => activeId && deleteSession(activeId)}
-            onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
-          />
-        )}
+        <DockHeader
+          sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
+          meta={`${turnCount} turn${turnCount === 1 ? "" : "s"}${sessionTotal ? ` · ${sessionTotal.text}` : ""}`}
+          onSelect={setActiveId} onNew={() => void newChat()} onCollapse={dock ? onCollapse : undefined}
+          onRename={(title) => activeId && renameSession(activeId, title)}
+          onDelete={() => activeId && deleteSession(activeId)}
+          onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
+        />
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
         {typeof banner === "function" ? banner(state) : banner}
         {!activeId ? (
-          <div className="chat-empty"><p>Select a chat or start a new one.</p><button type="button" className="chat-btn chat-primary" onClick={() => void newChat()}>New chat</button></div>
+          <div className="chat-empty"><p>Start a new chat.</p><button type="button" className="chat-btn chat-primary" onClick={() => void newChat()}>New chat</button></div>
         ) : (
           <>
-            <header className="chat-header">
-              <h2 className="chat-title">{sessions.find((s) => s.id === activeId)?.title || "Untitled chat"}</h2>
-              <span className="chat-meta" title={sessionTotal?.title ?? undefined} aria-label={`${turnCount} turns${sessionTotal ? `, ${sessionTotal.ariaLabel}` : ""}`}>
-                {turnCount} turn{turnCount === 1 ? "" : "s"}{sessionTotal ? ` · ${sessionTotal.text}` : ""}
-              </span>
-              <HeaderBadges chatId={activeId} state={state} core={core} />
-              <span className="chat-spacer" />
-              {!dock && <CapChip route={route} disabled={busy} onSetLimit={async (limit) => { const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }} />}
-            </header>
+            <div className="chat-badges"><HeaderBadges chatId={activeId} state={state} core={core} /></div>
             {projectMemoryOpen && (
               <div role="dialog" aria-label="Project memory" className="chat-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeProjectMemory(); } }}>
                 <ProjectMemoryView client={memoryCore} repos={[]} workspaceRoot={host.projectRoot?.() ?? null} sessionId={activeId} onClose={closeProjectMemory} />

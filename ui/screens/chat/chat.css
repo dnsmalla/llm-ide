@@ -1,5 +1,5 @@
 /* Chat screen styles: tokens only (--tok-*), no raw colours, no remote resources. */
-.chat-screen { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
+.chat-screen { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
 .chat-sessions { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
 .chat-sessions-bar { display: flex; gap: var(--tok-space-sm); padding: var(--tok-space-sm); }
 .chat-sessions-scroll { flex: 1; min-height: 0; overflow-y: auto; }
@@ -89,9 +89,11 @@
 
 /* Docked Code Assistant (Explorer): one column, compact header, no session list. */
 .chat-dock-mode { grid-template-columns: minmax(0, 1fr); }
+.chat-badges { display: flex; align-items: center; gap: var(--tok-space-sm); padding: 3px var(--tok-space-md); border-bottom: 1px solid var(--tok-color-border); min-height: 0; }
+.chat-badges:empty { display: none; }
 .chat-dock-head { flex: none; display: flex; align-items: center; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); min-width: 0; }
 .chat-dock-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--tok-color-text-muted); white-space: nowrap; }
-.chat-dock-history { min-width: 0; max-width: 150px; font: inherit; font-size: 12px; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 2px 4px; }
+.chat-dock-history { min-width: 0; max-width: 220px; font: inherit; font-size: 12px; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 2px 4px; }
 .chat-dock-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; }
 .chat-dock-btn:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
 .chat-dock-mode .chat-controls { flex-wrap: wrap; }

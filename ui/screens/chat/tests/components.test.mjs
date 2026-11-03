@@ -151,9 +151,10 @@ test("ChatScreen renders its landmarks and the empty state (server render, no ne
   const store = new c.MemoryChatStore();
   const controller = new c.ChatController({ core: fakeCore(), store, workspaceRoot: () => "/p" });
   const out = html(h(c.ChatScreen, { controller, store, core: fakeCore(), host: { openLink: noop, copy: noop } }));
-  assert.match(out, /<nav[^>]*aria-label="Chats"/);
   assert.match(out, /<section[^>]*aria-label="Chat"/);
-  assert.match(out, /Select a chat or start a new one/);
+  assert.match(out, /CODE ASSISTANT/);
+  assert.match(out, /Start a new chat/);
+  assert.doesNotMatch(out, /aria-label="Chats"/, "the Mac uses the header session dropdown, not a column");
 });
 
 test("ChatScreen with an open chat has the conversation log, composer, mode and model controls", () => {

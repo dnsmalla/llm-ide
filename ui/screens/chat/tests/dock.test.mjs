@@ -83,9 +83,9 @@ test("ChatScreen docked: one column, Code Assistant landmark, no session list, s
   assert.match(dock, /aria-label="Hide Code Assistant"/);
   for (const re of [/Permission/i, /Model/i]) assert.match(dock, re);
   const full = html(h(c.ChatScreen, common));
-  assert.match(full, /aria-label="Chats"/);
   assert.match(full, /<section[^>]*aria-label="Chat"/);
-  assert.doesNotMatch(full, /CODE ASSISTANT/);
+  assert.match(full, /CODE ASSISTANT/);
+  assert.doesNotMatch(full, /aria-label="Chats"/, "both chat surfaces use the header session dropdown");
   assert.equal(count(dock, /aria-label="Message composer"/g), 1);
 });
 
@@ -98,5 +98,5 @@ test("ChatScreen takes the open chat from the shared store (the dock shows what 
   assert.match(out, /aria-label="Message composer"/, "a chat is open: the composer is shown, not the empty state");
   const empty = html(h(c.ChatScreen, { controller, store, core: fakeCore(), host: { openLink: noop, copy: noop }, shared: c.createChatUiStore(null), dock: true }));
   assert.doesNotMatch(empty, /aria-label="Message composer"/);
-  assert.match(empty, /Select a chat or start a new one/);
+  assert.match(empty, /Start a new chat/);
 });
