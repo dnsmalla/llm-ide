@@ -160,3 +160,6 @@ kb/llmide.db
 # and pytest's cache — per-machine tool state, never source.
 **/.claude/.cc-writes/
 .pytest_cache/
+
+# Agent worktrees (local only)
+.worktrees/
