@@ -2,7 +2,8 @@
 // the window is computed from the scroll offset, pages are requested for the rows that need them, and focus
 // stays on the tree element (aria-activedescendant) so keyboard use survives row recycling.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { ChevronIcon, FolderIcon, DocIcon } from "@llmide/ui-kit";
+import { ChevronIcon, FolderIcon, Icon } from "@llmide/ui-kit";
+import { fileKind, fileKindIcon } from "./file-kind.ts";
 import type { ExplorerController, ExplorerSnapshot } from "./controller";
 import {
   ROW_HEIGHT, canDrop, indexOfPath, navigate, rowsInRange, topLevel, typeAhead, windowRange, type NavKey, type Row,
@@ -295,6 +296,7 @@ function TreeRow({ row, index, snap, dropTarget, controller, onClick, onDoubleCl
       onDragOver={isDir ? (ev) => { ev.stopPropagation(); overDir(ev, e.path); } : undefined}
       onDrop={isDir ? (ev) => { ev.stopPropagation(); dropOn(ev, e.path); } : undefined}
     >
+      {Array.from({ length: row.depth }, (_, i) => <span key={i} className="ex-guide" style={{ left: 6 + i * INDENT }} aria-hidden="true" />)}
       {isDir ? (
         <button type="button" className="ex-chevron" tabIndex={-1} aria-hidden="true" onClick={(ev) => { ev.stopPropagation(); onToggle(e.path); }}>
           <span style={{ display: "inline-flex", transform: row.expanded ? "rotate(90deg)" : undefined }}><ChevronIcon /></span>
@@ -302,7 +304,7 @@ function TreeRow({ row, index, snap, dropTarget, controller, onClick, onDoubleCl
       ) : (
         <span className="ex-chevron" aria-hidden="true" />
       )}
-      <span className="ex-icon" aria-hidden="true">{isDir ? <FolderIcon /> : <DocIcon />}</span>
+      <span className="ex-icon" data-kind={fileKind(e.name, isDir)} aria-hidden="true">{isDir ? <FolderIcon /> : <Icon name={fileKindIcon(fileKind(e.name))} size={11} />}</span>
       <span className="ex-name">{e.name}</span>
       {e.symlink && <span className="ex-badge" title="Symbolic link">link</span>}
       {deco && <span className="ex-git-letter" aria-label={deco}>{GIT_LETTER[deco]}</span>}

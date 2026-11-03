@@ -114,8 +114,15 @@
 .lib-project-list { list-style: none; margin: 0; padding: 0; }
 .lib-project-row { line-height: 21px; }
 .lib-project-caret { display: inline-block; width: 14px; color: var(--tok-color-text-muted); }
-.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); text-align: left; cursor: pointer; padding: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); text-align: left; cursor: pointer; padding: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
 .lib-project-dir { color: var(--tok-color-text-muted); }
+.lib-project-icon { width: 15px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
+.lib-project-icon[data-kind="folder"] { color: #e8b64c; }
+.lib-project-icon[data-kind="code"] { color: #4c9aff; }
+.lib-project-icon[data-kind="config"] { color: #e09a3d; }
+.lib-project-icon[data-kind="doc"] { color: #72a7f0; }
+.lib-project-icon[data-kind="image"] { color: #3ec7c7; }
+.lib-project-icon[data-kind="data"] { color: #55c98a; }
 .lib-project-file[data-on] { background: var(--tok-color-accent); color: var(--tok-color-body); }
 .lib-project-note { margin: 2px 0 2px 14px; font-size: var(--tok-type-caption-size); }
 .lib-project-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }

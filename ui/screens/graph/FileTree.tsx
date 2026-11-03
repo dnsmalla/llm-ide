@@ -1,6 +1,8 @@
 // The left panel's file tree, Mac-style: folders expand, a file row focuses the nodes that mention it. It is built
 // from the graph's own paths (not the whole project), so every row has graph content behind it.
 import { useMemo, type ReactNode } from "react";
+import { FolderIcon, Icon } from "@llmide/ui-kit";
+import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { buildPathTree, fileCount, type FileNode } from "./path-tree";
 
 export interface GraphFileTreeProps {
@@ -47,13 +49,14 @@ function Node({ node, depth, selected, onSelect }: { node: FileNode; depth: numb
         title={node.path}
         onClick={() => onSelect(node.path)}
       >
+        <span className="gr-file-icon" data-kind={fileKind(node.name)} aria-hidden="true"><Icon name={fileKindIcon(fileKind(node.name))} size={11} /></span>
         {node.name}
       </button>
     );
   }
   return (
     <details className="gr-dir" open={depth < 1}>
-      <summary className="gr-dir-summary" title={node.path} style={{ paddingLeft: `${depth * 12}px` }}>{node.name}/</summary>
+      <summary className="gr-dir-summary" title={node.path} style={{ paddingLeft: `${depth * 12}px` }}><span className="gr-file-icon" data-kind="folder" aria-hidden="true"><FolderIcon /></span>{node.name}/</summary>
       {node.children.map((c) => <Node key={c.path} node={c} depth={depth + 1} selected={selected} onSelect={onSelect} />)}
     </details>
   );

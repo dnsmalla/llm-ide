@@ -69,8 +69,15 @@
 .gr-tree-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); }
 .gr-tree-title { font-size: var(--tok-type-caption-size); font-weight: var(--tok-type-caption-weight); text-transform: uppercase; letter-spacing: 0.06em; color: var(--tok-color-text-muted); }
 .gr-tree-body { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
-.gr-dir-summary { cursor: pointer; font-size: var(--tok-type-mono-size); color: var(--tok-color-text-muted); padding: 1px 0; }
-.gr-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); text-align: left; padding: 1px 0 1px 14px; cursor: pointer; border-radius: var(--tok-radius-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gr-dir-summary { cursor: pointer; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); color: var(--tok-color-text-muted); padding: 1px 0; display: flex; align-items: center; gap: 4px; }
+.gr-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); text-align: left; padding: 1px 0 1px 4px; cursor: pointer; border-radius: var(--tok-radius-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.gr-file-icon { width: 15px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
+.gr-file-icon[data-kind="folder"] { color: #e8b64c; }
+.gr-file-icon[data-kind="code"] { color: #4c9aff; }
+.gr-file-icon[data-kind="config"] { color: #e09a3d; }
+.gr-file-icon[data-kind="doc"] { color: #72a7f0; }
+.gr-file-icon[data-kind="image"] { color: #3ec7c7; }
+.gr-file-icon[data-kind="data"] { color: #55c98a; }
 .gr-file:hover { background: var(--tok-color-surface2); }
 .gr-file[data-on] { background: var(--tok-color-accent); color: var(--tok-color-body); }
 .gr-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }

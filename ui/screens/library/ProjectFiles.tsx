@@ -3,7 +3,8 @@
 // With `mutate` (desktop app) a row can be moved to the Trash, and a category's "+" adds a text file or an empty
 // folder. Every change is confirmed or explicit; the rules live in project-ops.ts.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CodeIcon, TableIcon } from "@llmide/ui-kit";
+import { CodeIcon, FolderIcon, Icon, TableIcon } from "@llmide/ui-kit";
+import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { shellBus } from "../shell/bus";
 import { Dialog } from "./write/Dialog";
 import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, type ProjectEntry } from "./project-files.ts";
@@ -287,7 +288,9 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
         onClick={() => (dir ? onToggle(entry.path) : onSelect(entry.path))}
         onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(entry, e.clientX, e.clientY); } : undefined}
       >
-        <span className="lib-project-caret" aria-hidden="true">{dir ? (open ? "▾" : "▸") : "·"}</span>{entry.name}
+        <span className="lib-project-caret" aria-hidden="true">{dir ? (open ? "▾" : "▸") : null}</span>
+        <span className="lib-project-icon" data-kind={fileKind(entry.name, dir)} aria-hidden="true">{dir ? <FolderIcon /> : <Icon name={fileKindIcon(fileKind(entry.name))} size={11} />}</span>
+        {entry.name}
       </button>
       {dir && open ? (
         <ul className="lib-project-list">
