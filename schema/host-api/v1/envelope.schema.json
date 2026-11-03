@@ -15,7 +15,14 @@
         "code": { "$ref": "#/$defs/ErrorCode" },
         "message": { "type": "string", "minLength": 1, "maxLength": 500 },
         "retryable": { "type": "boolean" },
-        "details": { "type": "object" }
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hint": { "type": "string", "maxLength": 500 },
+            "retryAfterMs": { "type": "integer", "minimum": 0 }
+          }
+        }
       }
     },
     "Request": {

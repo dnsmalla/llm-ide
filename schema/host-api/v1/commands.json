@@ -145,7 +145,11 @@
         "additionalProperties": false,
         "required": ["snapshots"],
         "properties": {
-          "snapshots": { "type": "object" }
+          "snapshots": {
+            "type": "object",
+            "description": "Per-domain snapshot payloads are opaque in v1; clients should request the typed domain snapshot command for a concrete shape.",
+            "additionalProperties": { "type": "object" }
+          }
         }
       }
     },
@@ -166,7 +170,19 @@
         "additionalProperties": false,
         "required": ["messages"],
         "properties": {
-          "messages": { "type": "array", "items": { "type": "object" }, "maxItems": 500 }
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["role", "content"],
+              "properties": {
+                "role": { "type": "string", "enum": ["user", "assistant"] },
+                "content": { "type": "string", "maxLength": 100000 }
+              }
+            },
+            "maxItems": 500
+          }
         }
       }
     },
@@ -181,7 +197,19 @@
         "required": ["text"],
         "properties": {
           "text": { "type": "string", "minLength": 1, "maxLength": 100000 },
-          "attachments": { "type": "array", "items": { "type": "object" }, "maxItems": 10 }
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "text"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "text": { "type": "string", "maxLength": 100000 }
+              }
+            },
+            "maxItems": 10
+          }
         }
       },
       "result": {

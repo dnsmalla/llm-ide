@@ -45,7 +45,9 @@ const INVALID_CASES = {
 const INVALID_COMMAND_CASES = {
   "chat.send.missing-text.json": { command: "chat.send", kind: "request", at: ".text" },
   "chat.send.empty-text.json": { command: "chat.send", kind: "request", at: ".text" },
+  "chat.send.attachment-unknown-field.json": { command: "chat.send", kind: "request", at: ".attachments[0].extra" },
   "chat.cancel.unknown-field.json": { command: "chat.cancel", kind: "request", at: ".x" },
+  "chat.snapshot.message-missing-content.json": { command: "chat.snapshot", kind: "result", at: ".messages[0].content" },
   "toolApprovals.answer.bad-decision.json": { command: "toolApprovals.answer", kind: "request", at: ".decision" },
 };
 

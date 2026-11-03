@@ -58,6 +58,12 @@ Events are the six flat variants in `events.schema.json`: `chat.delta`,
 `toolApproval.request`. Each variant is a complete object schema with its own
 `payload`; they are not composed with `allOf`.
 
+## Snapshots
+
+`host.snapshot` returns a `snapshots` map. Per-domain snapshot payloads are
+opaque in v1; clients should request the typed domain snapshot command for a
+concrete shape.
+
 ## Ordering
 
 Frame ordering is the envelope `rev` on the frame itself. Snapshot command
