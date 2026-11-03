@@ -8,8 +8,8 @@ import { isVisible, refusedMessage } from "./hidden-notes.ts";
 import { formatDate, formatDuration, sectionLabel, stepNoteRow, type NoteRecord, type Row } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
 
-export const ROW_HEIGHT = 68;
-const HEADER_HEIGHT = 28;
+export const ROW_HEIGHT = 78;
+const HEADER_HEIGHT = 32;
 
 function rowHeight(r: Row | undefined): number {
   return r?.kind === "header" ? HEADER_HEIGHT : ROW_HEIGHT;
