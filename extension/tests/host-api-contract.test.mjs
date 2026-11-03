@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { validate } from "../routes/bus/schema-validate.mjs";
@@ -54,4 +55,9 @@ test("host-api chat commands and events decode", () => {
   }
   assert.deepEqual(validate(events, json("fixtures/events/chat.delta.json"), { defs: events.$defs }), []);
   assert.deepEqual(validate(events, json("fixtures/events/approval.request.json"), { defs: events.$defs }), []);
+});
+
+test("host-api conformance script passes", () => {
+  const r = spawnSync(process.execPath, ["scripts/conformance-host-api.mjs"], { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
 });
