@@ -2,7 +2,7 @@
 // from the core (plugin and source text is untrusted: rendered as React text only, already cleaned and capped by
 // the decoders). The only controls are the source's per-item switches and its Update / Check buttons, which are
 // the same calls the list uses. Consent, hook trust and removal stay on the list rows and their sheets.
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Badge } from "./ui.tsx";
 import type { DiscoveryItem, LegacyKind, LegacyRow, LegacyState, LlmSourceRow, McpRow, PluginRow } from "./legacy.ts";
 import type { LegacyModel } from "./legacy.ts";
@@ -179,7 +179,6 @@ function PluginDetail({ state, p }: { state: LegacyState; p: PluginRow }): React
 }
 
 function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState; m: McpRow }): ReactNode {
-  const [removing, setRemoving] = useState(false);
   const busy = state.busy.includes(m.id);
   const v = state.mcpVersions[m.id];
   const label = m.transport === "stdio" ? "Command" : "URL";
@@ -207,17 +206,11 @@ function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState
       <p className="lib-muted">Consent before enabling — an enabled-but-unconsented server is never offered to the agent.</p>
       {m.enabled && <p className="lib-muted">Once enabled it is offered to the agent as mcp__{m.id}__* tools.</p>}
       {m.credentialMissing && <p className="lib-muted">No value is stored for this server&apos;s credential, so it will fail to authenticate.</p>}
-      <section aria-label="Remove server">
-        {!removing ? (
-          <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => setRemoving(true)}>Remove…</button>
-        ) : (
-          <div className="ext-actions" role="alertdialog" aria-label={`Remove ${m.name}?`}>
-            <span>Remove this server from the registry? No files are touched. This cannot be undone.</span>
-            <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeMcp(m.id)}>Remove server</button>
-            <button type="button" className="lib-btn" disabled={busy} onClick={() => setRemoving(false)}>Cancel</button>
-          </div>
-        )}
-      </section>
+      <details className="ext-remove">
+        <summary>Remove…</summary>
+        <p className="lib-muted">Remove this server from the registry? No files are touched. This cannot be undone.</p>
+        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeMcp(m.id)}>Remove server</button>
+      </details>
       {m.versionLabel !== undefined && (
         <section aria-label="Version">
           <h3>Version</h3>
@@ -315,6 +308,11 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
           )}
         </div>
       </section>
+      <details className="ext-remove">
+        <summary>Remove…</summary>
+        <p className="lib-muted">Remove this source registration? Its files are not touched. This cannot be undone.</p>
+        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeLlmSource(s.id)}>Remove source</button>
+      </details>
       {d?.loading && (
         <p className="lib-muted" role="status">
           Loading contents…

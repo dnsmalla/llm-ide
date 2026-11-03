@@ -80,3 +80,6 @@
 .ext-legacy-row { display: flex; align-items: center; gap: var(--tok-space-md); padding: var(--tok-space-sm) 0; border-bottom: 1px solid color-mix(in srgb, var(--tok-color-border) 50%, transparent); }
 .ext-legacy-row > :first-child { flex: 1; min-width: 0; }
 @media (prefers-reduced-motion: no-preference) { .ext-tab { transition: border-color 0.12s; } }
+.ext-remove { margin-top: 12px; color: var(--tok-color-text-muted); }
+.ext-remove > summary { cursor: pointer; font-size: var(--tok-type-caption-size); }
+.ext-remove .lib-btn { margin-top: 6px; }

@@ -164,6 +164,39 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
   );
 }
 
+/** Add a public git or local LLM source (the Mac's LlmSourceAddSheet). The core validates the real shape. */
+function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+  const [mode, setMode] = useState<"git" | "local">("git");
+  const [url, setUrl] = useState("");
+  const [ref, setRef] = useState("");
+  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = mode === "git" ? url.trim().startsWith("https://") : path.trim() !== "";
+  return (
+    <Modal titleId="source-add-title" title="Add LLM source" onClose={onClose} footer={<><button type="button" className="lib-btn" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => {
+      setBusy(true);
+      const body = mode === "git"
+        ? { url: url.trim(), ...(ref.trim() ? { ref: ref.trim() } : {}), ...(name.trim() ? { name: name.trim() } : {}) }
+        : { path: path.trim(), ...(name.trim() ? { name: name.trim() } : {}) };
+      void model.addLlmSource(body).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false));
+    }}>{busy ? "Adding…" : "Add"}</button></>}>
+      <div className="ext-form" aria-label="Add LLM source">
+        <div className="ext-field"><label htmlFor="source-add-mode">Kind</label><select id="source-add-mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}><option value="git">Git URL</option><option value="local">Local path</option></select></div>
+        {mode === "git" ? (
+          <>
+            <div className="ext-field"><label htmlFor="source-add-url">Git URL</label><input id="source-add-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" spellCheck={false} /><p className="lib-muted">Public HTTPS URL only. Cloned shallowly on the server.</p></div>
+            <div className="ext-field"><label htmlFor="source-add-ref">Branch or tag (optional)</label><input id="source-add-ref" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" spellCheck={false} /></div>
+          </>
+        ) : (
+          <div className="ext-field"><label htmlFor="source-add-path">Local path</label><input id="source-add-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/repo" spellCheck={false} /><p className="lib-muted">A directory containing registry.yaml, .claude-plugin/plugin.json + skills/, an agents/ dir, or a hooks manifest.</p></div>
+        )}
+        <div className="ext-field"><label htmlFor="source-add-name">Name (optional)</label><input id="source-add-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" maxLength={120} /></div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Add one hand-written MCP server (the Mac's McpAddSheet manual form). The core stores it switched off. */
 function AddMcpDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [name, setName] = useState("");
@@ -203,6 +236,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const w = browseWindow(state.rows.length, scrollTop, height);
   const detail = state.selected !== null;
   const [adding, setAdding] = useState(false);
+  const [addingSource, setAddingSource] = useState(false);
   return (
     <div className="ext-root ext-legacy" aria-busy={state.loading}>
       <header className="ext-head">
@@ -214,6 +248,9 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
         {model.kind === "mcp-plugins" && (
           <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAdding(true)}>Add server</button>
         )}
+        {model.kind === "llm-sources" && (
+          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAddingSource(true)}>Add source</button>
+        )}
         {model.kind === "plugins" && (
           <button type="button" className="lib-btn" disabled={state.loading || state.busy.includes(RELOAD_BUSY)} onClick={() => void model.reloadPlugins()}>
             Reload from disk
@@ -222,6 +259,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
       </header>
       <p className="lib-muted">{t.intro}</p>
       {adding ? <AddMcpDialog model={model} onClose={() => setAdding(false)} /> : null}
+      {addingSource ? <AddSourceDialog model={model} onClose={() => setAddingSource(false)} /> : null}
       {state.notice && <StatusBanner severity={state.notice.error ? "error" : "info"} message={state.notice.text} onDismiss={() => model.dismissNotice()} />}
       {state.error && (
         <div role="alert" className="ext-inline-error">

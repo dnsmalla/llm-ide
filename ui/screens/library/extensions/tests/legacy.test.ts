@@ -184,3 +184,16 @@ test("mcp: add sends the manual server shape, reloads, and remove sends DELETE",
   await model.removeMcp("manual-one");
   assert.ok(core.calls.some((c) => c.method === "DELETE" && c.path === "/auth/me/mcp-plugins/manual-one"));
 });
+
+
+test("llm source: add sends git/local shape, reloads, and remove sends DELETE", async () => {
+  const { core, model } = setup("llm-sources", {
+    "POST /auth/me/llm-sources/add": () => ok({ ok: true, source: { id: "new-source" } }),
+    "DELETE /auth/me/llm-sources/new-source": () => ok({ ok: true }),
+  });
+  await model.load();
+  assert.equal(await model.addLlmSource({ url: "https://github.com/o/r", ref: "main", name: "R" }), true);
+  assert.deepEqual(posts(core, "llm-sources/add")[0]!.body, { url: "https://github.com/o/r", ref: "main", name: "R" });
+  await model.removeLlmSource("new-source");
+  assert.ok(core.calls.some((c) => c.method === "DELETE" && c.path === "/auth/me/llm-sources/new-source"));
+});

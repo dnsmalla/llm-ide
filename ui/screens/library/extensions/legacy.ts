@@ -408,6 +408,11 @@ function decodeRemoved(body: unknown): void {
   rec(body, "removed");
 }
 
+function decodeSourceAdded(body: unknown): void {
+  const o = rec(body, "source");
+  if (o.source !== undefined) rec(o.source, "source.source");
+}
+
 export interface LegacyApi {
   plugins(signal?: AbortSignal): Promise<PluginRow[]>;
   togglePlugin(name: string, enabled: boolean, signal?: AbortSignal): Promise<void>;
@@ -418,6 +423,8 @@ export interface LegacyApi {
   /** Add a hand-written or catalog MCP server. The core validates and persists it switched off. */
   addMcp(input: { catalogId?: string; arg?: string; name?: string; transport?: "stdio" | "http" | "sse"; command?: string; args?: string[]; url?: string }, signal?: AbortSignal): Promise<void>;
   removeMcp(id: string, signal?: AbortSignal): Promise<void>;
+  addLlmSource(input: { url?: string; path?: string; ref?: string; name?: string }, signal?: AbortSignal): Promise<void>;
+  removeLlmSource(id: string, signal?: AbortSignal): Promise<void>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
   reloadPlugins(signal?: AbortSignal): Promise<ReloadResult>;
@@ -454,6 +461,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     mcpPlugins: (s) => call("GET", "/auth/me/mcp-plugins", undefined, decodeMcpPlugins, s),
     addMcp: async (input, s) => { await call("POST", "/auth/me/mcp-plugins/add", input, decodeAdded, s); },
     removeMcp: async (id, s) => { await call("DELETE", "/auth/me/mcp-plugins/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
+    addLlmSource: async (input, s) => { await call("POST", "/auth/me/llm-sources/add", input, decodeSourceAdded, s); },
+    removeLlmSource: async (id, s) => { await call("DELETE", "/auth/me/llm-sources/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
     reloadPlugins: (s) => call("POST", "/auth/me/plugins/reload", {}, decodeReload, s),
@@ -757,6 +766,33 @@ export class LegacyModel {
       this.fail(e);
       return false;
     }
+  }
+
+  /** Add a git or local LLM source and reload the list. Returns true on success. */
+  async addLlmSource(input: { url?: string; path?: string; ref?: string; name?: string }): Promise<boolean> {
+    try {
+      await this.api.addLlmSource(input, this.life.signal);
+      await this.load(true);
+      this.set({ notice: { text: `Added ${input.name || input.url || input.path || "source"}.`, error: false } });
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
+  }
+
+  /** Remove an LLM source registration. Its files are not touched. */
+  async removeLlmSource(id: string): Promise<void> {
+    await this.withBusy(id, async () => {
+      try {
+        await this.api.removeLlmSource(id, this.life.signal);
+        if (this.state.selected === id) this.set({ selected: null });
+        await this.load(true);
+        this.set({ notice: { text: `Removed ${id}.`, error: false } });
+      } catch (e) {
+        this.fail(e);
+      }
+    });
   }
 
   /** Remove an MCP server from the registry. No files are touched. */
