@@ -451,6 +451,8 @@ export interface LegacyApi {
   /** Claude Code plugins available to import (the Mac's "Installed in Claude" tab). */
   claudePlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
   importClaude(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
+  codexPlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
+  importCodex(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   removeLlmSource(id: string, signal?: AbortSignal): Promise<void>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
@@ -491,6 +493,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     addLlmSource: async (input, s) => { await call("POST", "/auth/me/llm-sources/add", input, decodeSourceAdded, s); },
     claudePlugins: (s) => call("GET", "/auth/me/claude-plugins/installed", undefined, decodeClaudePlugins, s),
     importClaude: async (name, source, s) => { await call("POST", "/auth/me/claude-plugins/import", { name, source }, decodeSourceAdded, s); },
+    codexPlugins: (s) => call("GET", "/auth/me/codex-plugins/installed", undefined, decodeClaudePlugins, s),
+    importCodex: async (name, source, s) => { await call("POST", "/auth/me/codex-plugins/import", { name, source }, decodeSourceAdded, s); },
     removeLlmSource: async (id, s) => { await call("DELETE", "/auth/me/llm-sources/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
@@ -800,6 +804,24 @@ export class LegacyModel {
   /** The Claude Code plugins available to import (read-only; the server scans the Claude install). */
   async claudePlugins(): Promise<ClaudePluginRow[]> {
     return this.api.claudePlugins(this.life.signal);
+  }
+
+  /** Codex Code plugins available to import. */
+  async codexPlugins(): Promise<ClaudePluginRow[]> {
+    return this.api.codexPlugins(this.life.signal);
+  }
+
+  /** Import one Codex plugin and reload the plugin list. */
+  async importCodex(name: string): Promise<boolean> {
+    try {
+      await this.api.importCodex(name, "installed", this.life.signal);
+      await this.load(true);
+      this.set({ notice: { text: `Imported Codex plugin ${name}.`, error: false } });
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
   }
 
   /** Import one Claude Code plugin and reload the plugin list. */

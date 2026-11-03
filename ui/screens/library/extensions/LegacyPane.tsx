@@ -197,6 +197,38 @@ function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: (
   );
 }
 
+function ImportCodexDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+  const [rows, setRows] = useState<Array<{ name: string; version: string; skillCount: number; commandCount: number; alreadyImported: boolean; hasUpdate: boolean }> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    let live = true;
+    void model.codexPlugins().then((r) => { if (live) setRows(r); }, (e: unknown) => { if (live) setError(e instanceof Error ? e.message : "Could not scan Codex."); });
+    return () => { live = false; };
+  }, [model]);
+  const shown = (rows ?? []).filter((r) => !query.trim() || r.name.toLowerCase().includes(query.trim().toLowerCase()));
+  return (
+    <Modal titleId="codex-import-title" title="Import from Codex" onClose={onClose} footer={<button type="button" className="lib-btn" onClick={onClose}>Done</button>}>
+      <div className="ext-form" aria-label="Codex plugins">
+        <p className="lib-muted">Plugins installed in Codex. Import copies one into LLM-IDE; it stays switched off until you enable it.</p>
+        <input className="chat-input" type="search" aria-label="Filter Claude plugins" placeholder="Filter plugins…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {rows === null && !error ? <p className="lib-muted" role="status">Scanning Codex…</p> : null}
+        {error ? <p role="alert" className="ext-inline-error">{error}</p> : null}
+        {rows !== null && shown.length === 0 ? <p className="lib-muted">{rows.length === 0 ? "No Codex plugins found." : "No plugins match."}</p> : null}
+        <ul className="ext-members" aria-label="Codex plugins">
+          {shown.map((r) => (
+            <li key={r.name}>
+              <span><strong>{r.name}</strong> <span className="lib-muted">{r.version ? `v${r.version}` : ""}{r.skillCount ? ` · ${r.skillCount} skills` : ""}{r.commandCount ? ` · ${r.commandCount} commands` : ""}</span></span>
+              {r.alreadyImported ? <span className="lib-muted">Imported</span> : <button type="button" className="lib-btn" disabled={busy !== null} onClick={() => { setBusy(r.name); void model.importCodex(r.name).then((ok) => { if (ok) setRows((cur) => cur?.map((x) => x.name === r.name ? { ...x, alreadyImported: true } : x) ?? null); }).finally(() => setBusy(null)); }}>{busy === r.name ? "Importing…" : "Import"}</button>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Modal>
+  );
+}
+
 /** Add a public git or local LLM source (the Mac's LlmSourceAddSheet). The core validates the real shape. */
 function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [mode, setMode] = useState<"git" | "local">("git");
@@ -271,6 +303,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const [adding, setAdding] = useState(false);
   const [addingSource, setAddingSource] = useState(false);
   const [importingClaude, setImportingClaude] = useState(false);
+  const [importingCodex, setImportingCodex] = useState(false);
   return (
     <div className="ext-root ext-legacy" aria-busy={state.loading}>
       <header className="ext-head">
@@ -286,7 +319,10 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
           <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAddingSource(true)}>Add source</button>
         )}
         {model.kind === "plugins" && (
-          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingClaude(true)}>Import from Claude…</button>
+          <>
+            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingClaude(true)}>Import from Claude…</button>
+            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingCodex(true)}>Import from Codex…</button>
+          </>
         )}
         {model.kind === "plugins" && (
           <button type="button" className="lib-btn" disabled={state.loading || state.busy.includes(RELOAD_BUSY)} onClick={() => void model.reloadPlugins()}>
@@ -298,6 +334,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
       {adding ? <AddMcpDialog model={model} onClose={() => setAdding(false)} /> : null}
       {addingSource ? <AddSourceDialog model={model} onClose={() => setAddingSource(false)} /> : null}
       {importingClaude ? <ImportClaudeDialog model={model} onClose={() => setImportingClaude(false)} /> : null}
+      {importingCodex ? <ImportCodexDialog model={model} onClose={() => setImportingCodex(false)} /> : null}
       {state.notice && <StatusBanner severity={state.notice.error ? "error" : "info"} message={state.notice.text} onDismiss={() => model.dismissNotice()} />}
       {state.error && (
         <div role="alert" className="ext-inline-error">
