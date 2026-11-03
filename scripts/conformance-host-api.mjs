@@ -220,9 +220,9 @@ for (const [i, variant] of (events.oneOf || []).entries()) {
   }
   const hasReplyTo = Object.hasOwn(props, "replyTo");
   if (hasReplyTo !== Object.hasOwn(defs.Event.properties, "replyTo")) {
-    bad(`events[${i}] ${variant.command?.const ?? "?"}: replyTo presence drifts from envelope Event`);
+    bad(`events[${i}] ${props.command?.const ?? "?"}: replyTo presence drifts from envelope Event`);
   } else if (hasReplyTo && JSON.stringify(props.replyTo) !== JSON.stringify(defs.Event.properties.replyTo)) {
-    bad(`events[${i}] ${variant.command?.const ?? "?"}: replyTo definition drifts from envelope Event`);
+    bad(`events[${i}] ${props.command?.const ?? "?"}: replyTo definition drifts from envelope Event`);
   }
   const command = props.command?.const;
   if (typeof command !== "string") bad(`events[${i}]: missing command const`);
