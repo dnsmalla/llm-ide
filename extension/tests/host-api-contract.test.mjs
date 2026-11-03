@@ -62,6 +62,14 @@ test("host-api conformance script passes", () => {
   assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
+test("host-api README lists every command", () => {
+  const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+  for (const name of Object.keys(commands.commands)) {
+    assert.match(readme, new RegExp(`\\b${name.replaceAll(".", "\\.")}\\b`));
+  }
+  assert.match(readme, /12 commands/);
+});
+
 test("generated Host API constants match the registry", () => {
   const r = spawnSync(process.execPath, ["scripts/generate-host-api.mjs", "--check"], { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr || r.stdout);
