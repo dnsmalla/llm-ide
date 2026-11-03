@@ -3,6 +3,7 @@ POST /auth/me/plugins/toggle
 POST /auth/me/plugins/hook-trust
 POST /auth/me/plugins/reload
 POST /auth/me/plugins/install
+POST /auth/me/plugins/install-git
 GET /auth/me/claude-plugins/installed
 GET /auth/me/claude-plugins/marketplace
 POST /auth/me/claude-plugins/import
