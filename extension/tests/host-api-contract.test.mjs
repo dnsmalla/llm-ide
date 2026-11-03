@@ -20,3 +20,18 @@ test("host-api envelope: missing version, bad id and unknown fields fail", () =>
   assert.ok(check(json("fixtures/invalid/bad-request-id.json")).length > 0);
   assert.ok(check(json("fixtures/invalid/unknown-field.json")).length > 0);
 });
+
+const commandsSchema = json("commands.schema.json");
+const commands = json("commands.json");
+const commandEntry = (name) => commands.commands[name];
+
+test("host-api command registry: host commands have a capability and exact schemas", () => {
+  assert.deepEqual(validate(commandsSchema, commands, { defs: commandsSchema.$defs }), []);
+  for (const name of ["host.hello", "host.auth.pair", "host.auth.token", "host.auth.revoke", "host.ping", "host.snapshot"]) {
+    const c = commandEntry(name);
+    assert.ok(c, `${name} exists`);
+    assert.equal(c.capability, "host", name);
+    assert.equal(c.request.type, "object", `${name} request`);
+    assert.equal(c.result.type, "object", `${name} result`);
+  }
+});
