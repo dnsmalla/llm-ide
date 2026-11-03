@@ -221,3 +221,14 @@ test("codex plugins: list decodes and import sends the installed source", async 
   assert.equal(await model.importCodex("helper"), true);
   assert.deepEqual(posts(core, "codex-plugins/import")[0]!.body, { name: "helper", source: "installed" });
 });
+
+
+test("claude marketplace: list decodes and import sends the marketplace source", async () => {
+  const { core, model } = setup("plugins", {
+    "GET /auth/me/claude-plugins/marketplace": () => ok({ plugins: [{ name: "market-helper", version: "2.0.0", skillCount: 0, commandCount: 0, alreadyImported: false }] }),
+    "POST /auth/me/claude-plugins/import": () => ok({ ok: true, plugin: { name: "claude-market-helper" } }),
+  });
+  assert.equal((await model.claudeMarketplace())[0]?.name, "market-helper");
+  assert.equal(await model.importClaude("market-helper", "marketplace"), true);
+  assert.deepEqual(posts(core, "claude-plugins/import")[0]!.body, { name: "market-helper", source: "marketplace" });
+});

@@ -450,6 +450,7 @@ export interface LegacyApi {
   addLlmSource(input: { url?: string; path?: string; ref?: string; name?: string }, signal?: AbortSignal): Promise<void>;
   /** Claude Code plugins available to import (the Mac's "Installed in Claude" tab). */
   claudePlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
+  claudeMarketplace(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
   importClaude(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   codexPlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
   importCodex(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
@@ -492,6 +493,7 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     removeMcp: async (id, s) => { await call("DELETE", "/auth/me/mcp-plugins/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     addLlmSource: async (input, s) => { await call("POST", "/auth/me/llm-sources/add", input, decodeSourceAdded, s); },
     claudePlugins: (s) => call("GET", "/auth/me/claude-plugins/installed", undefined, decodeClaudePlugins, s),
+    claudeMarketplace: (s) => call("GET", "/auth/me/claude-plugins/marketplace", undefined, decodeClaudePlugins, s),
     importClaude: async (name, source, s) => { await call("POST", "/auth/me/claude-plugins/import", { name, source }, decodeSourceAdded, s); },
     codexPlugins: (s) => call("GET", "/auth/me/codex-plugins/installed", undefined, decodeClaudePlugins, s),
     importCodex: async (name, source, s) => { await call("POST", "/auth/me/codex-plugins/import", { name, source }, decodeSourceAdded, s); },
@@ -806,6 +808,11 @@ export class LegacyModel {
     return this.api.claudePlugins(this.life.signal);
   }
 
+  /** The Claude marketplace plugins available to import. */
+  async claudeMarketplace(): Promise<ClaudePluginRow[]> {
+    return this.api.claudeMarketplace(this.life.signal);
+  }
+
   /** Codex Code plugins available to import. */
   async codexPlugins(): Promise<ClaudePluginRow[]> {
     return this.api.codexPlugins(this.life.signal);
@@ -825,9 +832,9 @@ export class LegacyModel {
   }
 
   /** Import one Claude Code plugin and reload the plugin list. */
-  async importClaude(name: string): Promise<boolean> {
+  async importClaude(name: string, source: "installed" | "marketplace" = "installed"): Promise<boolean> {
     try {
-      await this.api.importClaude(name, "installed", this.life.signal);
+      await this.api.importClaude(name, source, this.life.signal);
       await this.load(true);
       this.set({ notice: { text: `Imported Claude plugin ${name}.`, error: false } });
       return true;

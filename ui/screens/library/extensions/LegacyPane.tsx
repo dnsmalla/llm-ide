@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
-import { createLegacyApi, LegacyModel, RELOAD_BUSY, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { createLegacyApi, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
 import { LegacyDetail } from "./LegacyDetail.tsx";
 import { mcpSourceBadge, type LocationReveal } from "./legacy-labels.ts";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
@@ -166,29 +166,37 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
 
 /** Import one plugin already installed in Claude Code (the Mac's ClaudePluginImportSheet, installed tab). */
 function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
-  const [rows, setRows] = useState<Array<{ name: string; version: string; skillCount: number; commandCount: number; alreadyImported: boolean; hasUpdate: boolean }> | null>(null);
+  const [tab, setTab] = useState<"installed" | "marketplace">("installed");
+  const [installed, setInstalled] = useState<Array<ClaudePluginRow> | null>(null);
+  const [marketplace, setMarketplace] = useState<Array<ClaudePluginRow> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   useEffect(() => {
     let live = true;
-    void model.claudePlugins().then((r) => { if (live) setRows(r); }, (e: unknown) => { if (live) setError(e instanceof Error ? e.message : "Could not scan Claude Code."); });
+    void model.claudePlugins().then((r) => { if (live) setInstalled(r); }, (e: unknown) => { if (live) setError(e instanceof Error ? e.message : "Could not scan Claude Code."); });
+    void model.claudeMarketplace().then((r) => { if (live) setMarketplace(r); }, () => { if (live) setMarketplace([]); });
     return () => { live = false; };
   }, [model]);
+  const rows = tab === "installed" ? installed : marketplace;
   const shown = (rows ?? []).filter((r) => !query.trim() || r.name.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <Modal titleId="claude-import-title" title="Import from Claude Code" onClose={onClose} footer={<button type="button" className="lib-btn" onClick={onClose}>Done</button>}>
       <div className="ext-form" aria-label="Claude Code plugins">
-        <p className="lib-muted">Plugins installed in Claude Code. Import copies one into LLM-IDE; it stays switched off until you enable it.</p>
+        <div role="tablist" aria-label="Claude plugin source" className="ext-tabs">
+          <button type="button" role="tab" aria-selected={tab === "installed"} className="ext-tab" data-selected={tab === "installed"} onClick={() => setTab("installed")}>Installed in Claude</button>
+          <button type="button" role="tab" aria-selected={tab === "marketplace"} className="ext-tab" data-selected={tab === "marketplace"} onClick={() => setTab("marketplace")}>Marketplace</button>
+        </div>
+        <p className="lib-muted">{tab === "installed" ? "Plugins installed in Claude Code. Import copies one into LLM-IDE; it stays switched off until you enable it." : "Plugins from the Claude marketplace. Import copies one into LLM-IDE; it stays switched off until you enable it."}</p>
         <input className="chat-input" type="search" aria-label="Filter Claude plugins" placeholder="Filter plugins…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        {rows === null && !error ? <p className="lib-muted" role="status">Scanning Claude Code…</p> : null}
+        {rows === null && !error ? <p className="lib-muted" role="status">{tab === "installed" ? "Scanning Claude Code…" : "Loading the marketplace…"}</p> : null}
         {error ? <p role="alert" className="ext-inline-error">{error}</p> : null}
-        {rows !== null && shown.length === 0 ? <p className="lib-muted">{rows.length === 0 ? "No Claude Code plugins found." : "No plugins match."}</p> : null}
-        <ul className="ext-members" aria-label="Claude Code plugins">
+        {rows !== null && shown.length === 0 ? <p className="lib-muted">{rows.length === 0 ? "No Claude plugins found." : "No plugins match."}</p> : null}
+        <ul className="ext-members" aria-label="Claude plugins">
           {shown.map((r) => (
-            <li key={r.name}>
-              <span><strong>{r.name}</strong> <span className="lib-muted">{r.version ? `v${r.version}` : ""}{r.skillCount ? ` · ${r.skillCount} skills` : ""}{r.commandCount ? ` · ${r.commandCount} commands` : ""}</span></span>
-              {r.alreadyImported ? <span className="lib-muted">Imported</span> : <button type="button" className="lib-btn" disabled={busy !== null} onClick={() => { setBusy(r.name); void model.importClaude(r.name).then((ok) => { if (ok) setRows((cur) => cur?.map((x) => x.name === r.name ? { ...x, alreadyImported: true } : x) ?? null); }).finally(() => setBusy(null)); }}>{busy === r.name ? "Importing…" : "Import"}</button>}
+            <li key={`${tab}:${r.name}`}>
+              <span><strong>{r.name}</strong> <span className="lib-muted">{r.version ? `v${r.version}` : ""}{r.skillCount ? ` · ${r.skillCount} skills` : ""}{r.commandCount ? ` · ${r.commandCount} commands` : ""}{r.hasUpdate ? " · update available" : ""}</span></span>
+              {r.alreadyImported ? <span className="lib-muted">Imported</span> : <button type="button" className="lib-btn" disabled={busy !== null} onClick={() => { setBusy(r.name); void model.importClaude(r.name, tab).then((ok) => { if (ok) { const mark = (cur: Array<ClaudePluginRow> | null) => cur?.map((x) => x.name === r.name ? { ...x, alreadyImported: true } : x) ?? null; if (tab === "installed") setInstalled(mark); else setMarketplace(mark); } }).finally(() => setBusy(null)); }}>{busy === r.name ? "Importing…" : "Import"}</button>}
             </li>
           ))}
         </ul>
