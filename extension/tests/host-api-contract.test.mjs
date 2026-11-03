@@ -35,3 +35,13 @@ test("host-api command registry: host commands have a capability and exact schem
     assert.equal(c.result.type, "object", `${name} result`);
   }
 });
+
+const events = json("events.schema.json");
+
+test("host-api chat commands and events decode", () => {
+  for (const name of ["chat.send", "chat.snapshot", "chat.cancel", "approvals.answer", "toolApprovals.answer"]) {
+    assert.ok(commands.commands[name], name);
+  }
+  assert.deepEqual(validate(events, json("fixtures/events/chat.delta.json"), { defs: events.$defs }), []);
+  assert.deepEqual(validate(events, json("fixtures/events/approval.request.json"), { defs: events.$defs }), []);
+});

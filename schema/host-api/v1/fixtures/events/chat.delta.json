@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"e-1","type":"event","command":"chat.delta","payload":{"text":"hi"},"ts":1760000000002,"rev":2}

@@ -143,6 +143,113 @@
           "snapshots": { "type": "object" }
         }
       }
+    },
+    "chat.snapshot": {
+      "capability": "chat",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": "llmide_chat_history_list",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["messages"],
+        "properties": {
+          "messages": { "type": "array", "items": { "type": "object" }, "maxItems": 500 },
+          "rev": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "chat.send": {
+      "capability": "chat",
+      "direction": "client_to_host",
+      "idempotent": false,
+      "v2Tag": "llmide_chat",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 100000 },
+          "attachments": { "type": "array", "items": { "type": "object" }, "maxItems": 10 }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accepted"],
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "requestId": { "type": "string", "maxLength": 64 }
+        }
+      }
+    },
+    "chat.cancel": {
+      "capability": "chat",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": "llmide_cancel",
+      "request": { "type": "object", "additionalProperties": false, "properties": {} },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cancelled"],
+        "properties": {
+          "cancelled": { "type": "boolean" }
+        }
+      }
+    },
+    "approvals.answer": {
+      "capability": "approvals",
+      "direction": "client_to_host",
+      "idempotent": false,
+      "v2Tag": "approval_answer",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requestId", "answer"],
+        "properties": {
+          "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "answer": { "type": "object" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accepted"],
+        "properties": {
+          "accepted": { "type": "boolean" }
+        }
+      }
+    },
+    "toolApprovals.answer": {
+      "capability": "tool_approvals",
+      "direction": "client_to_host",
+      "idempotent": false,
+      "v2Tag": "tool_approval_answer",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requestId", "decision"],
+        "properties": {
+          "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "decision": { "type": "string", "enum": ["allow_once", "deny"] }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accepted"],
+        "properties": {
+          "accepted": { "type": "boolean" }
+        }
+      }
     }
   }
 }
