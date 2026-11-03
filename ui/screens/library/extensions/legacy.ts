@@ -453,6 +453,8 @@ export interface LegacyApi {
   claudeMarketplace(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
   importClaude(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   codexPlugins(signal?: AbortSignal): Promise<ClaudePluginRow[]>;
+  /** Install a plugin from a public git URL (the server clones and packages it). */
+  installPluginGit(url: string, ref?: string, signal?: AbortSignal): Promise<void>;
   importCodex(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   removeLlmSource(id: string, signal?: AbortSignal): Promise<void>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
@@ -496,6 +498,7 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     claudeMarketplace: (s) => call("GET", "/auth/me/claude-plugins/marketplace", undefined, decodeClaudePlugins, s),
     importClaude: async (name, source, s) => { await call("POST", "/auth/me/claude-plugins/import", { name, source }, decodeSourceAdded, s); },
     codexPlugins: (s) => call("GET", "/auth/me/codex-plugins/installed", undefined, decodeClaudePlugins, s),
+    installPluginGit: async (url, ref, s) => { await call("POST", "/auth/me/plugins/install-git", { url, ...(ref ? { ref } : {}) }, decodeAdded, s); },
     importCodex: async (name, source, s) => { await call("POST", "/auth/me/codex-plugins/import", { name, source }, decodeSourceAdded, s); },
     removeLlmSource: async (id, s) => { await call("DELETE", "/auth/me/llm-sources/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
@@ -811,6 +814,19 @@ export class LegacyModel {
   /** The Claude marketplace plugins available to import. */
   async claudeMarketplace(): Promise<ClaudePluginRow[]> {
     return this.api.claudeMarketplace(this.life.signal);
+  }
+
+  /** Install a plugin from a git URL and reload the list. */
+  async installPluginGit(url: string, ref?: string): Promise<boolean> {
+    try {
+      await this.api.installPluginGit(url, ref, this.life.signal);
+      await this.load(true);
+      this.set({ notice: { text: `Installed plugin from ${url}. It is switched off.`, error: false } });
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
   }
 
   /** Codex Code plugins available to import. */

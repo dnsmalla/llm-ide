@@ -164,6 +164,23 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
   );
 }
 
+/** Install a plugin from a public git URL (the server clones and packages it). */
+function InstallPluginGitDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+  const [url, setUrl] = useState("");
+  const [ref, setRef] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = url.trim().startsWith("https://") || url.trim().startsWith("git@");
+  return (
+    <Modal titleId="plugin-git-title" title="Install plugin from Git URL" onClose={onClose} footer={<><button type="button" className="lib-btn" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => { setBusy(true); void model.installPluginGit(url.trim(), ref.trim() || undefined).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false)); }}>{busy ? "Installing…" : "Install"}</button></>}>
+      <div className="ext-form" aria-label="Install plugin from Git URL">
+        <p className="lib-muted">Public HTTPS or git@ URL. The server clones it shallowly, packages and validates it before install. The plugin is installed switched off.</p>
+        <div className="ext-field"><label htmlFor="plugin-git-url">Git URL</label><input id="plugin-git-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" spellCheck={false} /></div>
+        <div className="ext-field"><label htmlFor="plugin-git-ref">Branch or tag (optional)</label><input id="plugin-git-ref" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" spellCheck={false} /></div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Import one plugin already installed in Claude Code (the Mac's ClaudePluginImportSheet, installed tab). */
 function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [tab, setTab] = useState<"installed" | "marketplace">("installed");
@@ -312,6 +329,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const [addingSource, setAddingSource] = useState(false);
   const [importingClaude, setImportingClaude] = useState(false);
   const [importingCodex, setImportingCodex] = useState(false);
+  const [installingGit, setInstallingGit] = useState(false);
   return (
     <div className="ext-root ext-legacy" aria-busy={state.loading}>
       <header className="ext-head">
@@ -330,6 +348,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
           <>
             <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingClaude(true)}>Import from Claude…</button>
             <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingCodex(true)}>Import from Codex…</button>
+            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setInstallingGit(true)}>Install from Git…</button>
           </>
         )}
         {model.kind === "plugins" && (
@@ -343,6 +362,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
       {addingSource ? <AddSourceDialog model={model} onClose={() => setAddingSource(false)} /> : null}
       {importingClaude ? <ImportClaudeDialog model={model} onClose={() => setImportingClaude(false)} /> : null}
       {importingCodex ? <ImportCodexDialog model={model} onClose={() => setImportingCodex(false)} /> : null}
+      {installingGit ? <InstallPluginGitDialog model={model} onClose={() => setInstallingGit(false)} /> : null}
       {state.notice && <StatusBanner severity={state.notice.error ? "error" : "info"} message={state.notice.text} onDismiss={() => model.dismissNotice()} />}
       {state.error && (
         <div role="alert" className="ext-inline-error">

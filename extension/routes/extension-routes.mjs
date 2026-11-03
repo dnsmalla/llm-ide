@@ -75,6 +75,7 @@ const EXACT_PATHS = new Set([
   '/auth/me/plugins/hook-trust',
   '/auth/me/plugins/reload',
   '/auth/me/plugins/install',
+  '/auth/me/plugins/install-git',
   '/auth/me/claude-plugins/installed',
   '/auth/me/claude-plugins/marketplace',
   '/auth/me/claude-plugins/import',
@@ -214,6 +215,50 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
       detail: { count: result.count },
     });
     send(res, 200, result);
+    return;
+  }
+
+  // POST /auth/me/plugins/install-git
+  // Body { url, ref? }. The server clones a public repo shallowly, packages it and hands the BYTES to the
+  // same installer as a zip upload. The webview never runs git and never supplies a path.
+  if (method === 'POST' && url.split('?')[0] === '/auth/me/plugins/install-git') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    let body;
+    try { body = await readJson(req, bodyLimit); } catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
+    const ref = typeof body?.ref === 'string' && body.ref.trim() ? body.ref.trim() : null;
+    const { clonePluginZip, validGitPluginUrl, validGitPluginRef } = await import('../plugins/git-install.mjs');
+    if (!validGitPluginUrl(body?.url)) { send(res, 400, { error: { code: 'INVALID_URL', message: 'Use a public https:// or git@ repository URL' } }); return; }
+    if (!validGitPluginRef(ref)) { send(res, 400, { error: { code: 'INVALID_REF', message: 'Invalid branch or tag' } }); return; }
+    let cloned;
+    try {
+      cloned = await clonePluginZip({ url: body.url, ref });
+      const { installFromZip } = await import('../plugins/installer.mjs');
+      const { clearHooksTrustForPlugin } = await import('../plugins/state.mjs');
+      const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
+      const result = await installFromZip(cloned.bytes, {
+        trust: { clearTrust: clearHooksTrustForPlugin, clearMcpConsents: clearPluginMcpConsents },
+      });
+      if (result.error) {
+        safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'plugin.install', outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });
+        send(res, result.status || 400, { error: { code: result.code || 'INSTALL_FAILED', message: result.error } });
+        return;
+      }
+      const { setSource, getSource } = await import('../plugins/source-store.mjs');
+      try { setSource(result.plugin.name, { kind: 'git', url: body.url, ref, commit: cloned.commit }); } catch (err) {
+        logger.warn('plugin source record write failed', { plugin: result.plugin.name, error: err.message });
+      }
+      const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
+      reloadPlugins();
+      safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'plugin.install', resource: result.plugin.name, outcome: 'success', detail: { sourceKind: 'git' } });
+      let installSource = null;
+      try { installSource = getSource(result.plugin.name) ?? null; } catch { /* record unreadable */ }
+      send(res, 200, { ...result, installSource });
+    } catch (err) {
+      logger.warn('plugin git install failed', { error: err?.message || err });
+      send(res, err?.status || 502, { error: { code: err?.code || 'GIT_INSTALL_FAILED', message: String(err?.message || err).slice(0, 300) } });
+    } finally {
+      await cloned?.cleanup?.().catch(() => {});
+    }
     return;
   }
 

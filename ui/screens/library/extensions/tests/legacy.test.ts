@@ -232,3 +232,13 @@ test("claude marketplace: list decodes and import sends the marketplace source",
   assert.equal(await model.importClaude("market-helper", "marketplace"), true);
   assert.deepEqual(posts(core, "claude-plugins/import")[0]!.body, { name: "market-helper", source: "marketplace" });
 });
+
+
+test("plugin git install sends the URL/ref and reloads", async () => {
+  const { core, model } = setup("plugins", {
+    "POST /auth/me/plugins/install-git": () => ok({ ok: true, plugin: { name: "git-plugin" } }),
+  });
+  await model.load();
+  assert.equal(await model.installPluginGit("https://github.com/o/r", "main"), true);
+  assert.deepEqual(core.calls.find((c) => c.method === "POST" && c.path === "/auth/me/plugins/install-git")!.body, { url: "https://github.com/o/r", ref: "main" });
+});
