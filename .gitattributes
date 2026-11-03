@@ -1,3 +1,8 @@
 # Fixtures that tests compare byte for byte across platforms: keep LF on every checkout
 # (a Windows runner with core.autocrlf would otherwise rewrite them to CRLF).
 mac/Tests/LlmIdeMacTests/Fixtures/lta/*.md text eol=lf
+
+# Host API generated constants: compared byte for byte by --check, so line endings
+# must not depend on the checkout's core.autocrlf.
+extension/routes/host-api/commands.generated.mjs text eol=lf
+ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift text eol=lf

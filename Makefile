@@ -128,6 +128,7 @@ endif
 
 # SharedProtocol wire-format tests (used by mac + ios_app).
 test-shared-protocol:
+	node scripts/generate-host-api.mjs --check
 	cd ios_app/SharedProtocol && swift build
 ifeq ($(HAS_XCTEST),1)
 	cd ios_app/SharedProtocol && swift test
