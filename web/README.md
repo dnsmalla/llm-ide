@@ -19,7 +19,8 @@ cd web && npm ci && npm run dev
 
 For the production bundle, `npm run build && npm start` serves `dist/` from
 the same origin with the CSP as a response header, SPA fallback and immutable
-hashed assets. `PORT`/`HOST` change the bind.
+hashed assets. `PORT`/`HOST` change the bind; `TLS_CERT`/`TLS_KEY` enable
+direct HTTPS. See [DEPLOY.md](DEPLOY.md) for local and domain setup.
 
 ## Moving to your domain
 
@@ -33,6 +34,8 @@ Plan 6.
 - The browser must trust the host's certificate. A self-signed certificate
   needs a manual trust step; Chromium Private Network Access may block an
   HTTPS page from reaching a LAN or loopback host.
+- A reverse proxy (Caddy) is the recommended way to serve the bundle; keep the
+  static server on loopback unless you are terminating TLS yourself.
 
 ## Manual check
 
