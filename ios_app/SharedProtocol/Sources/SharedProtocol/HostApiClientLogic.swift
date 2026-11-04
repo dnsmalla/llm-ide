@@ -149,3 +149,21 @@ public enum HostApiBackoff {
         return max(backoff, min(wait, 300_000))
     }
 }
+
+/// Chat-slice texts and decisions shared by both transports, so v1 never changes what a v2 user sees.
+public enum HostApiChatNotices {
+    /// The Mac's own v2 `ApprovalCleared` reason, verbatim: on v2 its capability frame lands first, so the
+    /// phone's text is the one the user reads (Task 6 review M1).
+    public static let toolApprovalsOff = "Tool requests can no longer be approved from the phone."
+    public static let chatOff = "Chat from this phone was turned off on your Mac."
+
+    /// Shown above a disabled composer when a connected host does not offer chat (nil capabilities = all).
+    public static func composer(connected: Bool, capabilities: Set<String>?) -> String? {
+        guard connected, let capabilities, !capabilities.contains(MobileProtocol.Capability.chat) else { return nil }
+        return chatOff
+    }
+
+    /// Only a local encode failure drops the connection (as before the transport move). A host refusal,
+    /// `internal` included, or an unreadable reply ends the turn and keeps the address (Task 6 review M5).
+    public static func disconnectsAfterSendFailure(_ error: Error) -> Bool { error is EncodingError }
+}

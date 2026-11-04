@@ -47,6 +47,13 @@ struct LlmIdeControlView: View {
                 }
                 chatTranscript
                 pinnedToolApproval
+                if let notice = HostApiChatNotices.composer(connected: isConnected, capabilities: connection.macCapabilities) {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, DesignSystem.Spacing.md)
+                }
                 inputBar
             }
             .background(DesignSystem.Colors.background.ignoresSafeArea())

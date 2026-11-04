@@ -100,9 +100,11 @@ final class LlmIdeChatStore: ObservableObject {
     /// (v1 `denied`, `busy`, …) arrived as an `error` frame. Both end the turn the same way.
     private func chatSendFailed(_ id: String, _ error: Error) {
         let r = error as? HostApiRejection
-        connection?.errorMessage = r?.message ?? "Failed to encode chat message: \(error.localizedDescription)"
+        let local = HostApiChatNotices.disconnectsAfterSendFailure(error)
+        connection?.errorMessage = r?.message ?? (local ? "Failed to encode chat message: \(error.localizedDescription)"
+                                                         : "Your Mac sent a reply this app could not read.")
         handleChatError(commandId: id)
-        if r == nil || r?.code == "internal" { connection?.disconnect() }
+        if local { connection?.disconnect() }
     }
 
     /// Load the shared server transcript (same history as Mac llm-chat sheet).
@@ -196,8 +198,13 @@ final class LlmIdeChatStore: ObservableObject {
 
     func submitToolApproval(allow: Bool) {
         // A card left over from before the host withdrew `tool_approvals` never sends (see `.capabilities`).
-        guard let request = pendingToolApproval,
-              connection?.host.capabilities.contains(HostApiCommand.toolApprovalsAnswer.capability) == true else { return }
+        guard let request = pendingToolApproval else { return }
+        guard connection?.host.capabilities.contains(HostApiCommand.toolApprovalsAnswer.capability) == true else {
+            // Never leave a card whose buttons do nothing (Task 6 review M2).
+            pendingToolApproval = nil
+            approvalNotice = HostApiChatNotices.toolApprovalsOff
+            return
+        }
         let answer = HostApiToolApprovalsAnswerRequest(commandId: request.commandId, decision: allow ? "allow_once" : "deny",
                                                        requestId: request.requestId)
         Task { [weak self] in
@@ -279,7 +286,7 @@ final class LlmIdeChatStore: ObservableObject {
             // answered, so take it down and say why instead of leaving a tap that would be refused.
             if pendingToolApproval != nil, !caps.contains(HostApiCommand.toolApprovalsAnswer.capability) {
                 pendingToolApproval = nil
-                approvalNotice = "Tool approvals from this phone were turned off on your Mac."
+                approvalNotice = HostApiChatNotices.toolApprovalsOff
             }
         case .resync:
             // A missed-event gap (spec "Wire envelope"): take a fresh snapshot. It is applied once not streaming.

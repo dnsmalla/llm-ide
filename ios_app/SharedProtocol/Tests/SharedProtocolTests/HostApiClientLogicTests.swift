@@ -233,3 +233,29 @@ struct HostApiBackoffTests {
         #expect(HostApiBackoff.delayMs(attempt: 0, retryAfterMs: 5_000) == 5_000)
     }
 }
+
+@Suite("HostApiChatNotices")
+struct HostApiChatNoticesTests {
+    @Test("the composer explains a chat-less host only when connected and the host lists capabilities")
+    func composer() {
+        #expect(HostApiChatNotices.composer(connected: true, capabilities: ["host"]) == HostApiChatNotices.chatOff)
+        #expect(HostApiChatNotices.composer(connected: true, capabilities: []) == HostApiChatNotices.chatOff)
+        #expect(HostApiChatNotices.composer(connected: true, capabilities: ["chat"]) == nil)
+        #expect(HostApiChatNotices.composer(connected: true, capabilities: nil) == nil, "unknown = everything")
+        #expect(HostApiChatNotices.composer(connected: false, capabilities: ["host"]) == nil)
+    }
+
+    @Test("only a local EncodingError disconnects after a failed chat.send")
+    func sendFailure() {
+        let encoding = EncodingError.invalidValue(Double.nan, .init(codingPath: [], debugDescription: "nan"))
+        let decoding = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))
+        #expect(HostApiChatNotices.disconnectsAfterSendFailure(encoding))
+        #expect(!HostApiChatNotices.disconnectsAfterSendFailure(decoding))
+        #expect(!HostApiChatNotices.disconnectsAfterSendFailure(HostApiRejection(replyTo: nil, code: "internal", message: "x")))
+    }
+
+    @Test("the tool-approvals notice is the Mac's v2 ApprovalCleared reason, verbatim")
+    func macText() {
+        #expect(HostApiChatNotices.toolApprovalsOff == "Tool requests can no longer be approved from the phone.")
+    }
+}
