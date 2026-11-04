@@ -26,7 +26,7 @@ test('a device token authenticates exactly its device; nothing stores the token'
   const { deviceId, token } = dev.issueDeviceToken(u, 'web');
   assert.match(deviceId, /^h1-[0-9a-f-]{36}$/);
   assert.ok(token.length >= 40);
-  assert.deepEqual(dev.authenticateDeviceToken(token), { userId: u, deviceId });
+  assert.deepEqual(dev.authenticateDeviceToken(token), { userId: u, deviceId, scopes: ['host', 'chat', 'approvals'] });
   assert.equal(dev.authenticateDeviceToken(token + 'x'), null);
   assert.equal(dev.authenticateDeviceToken(''), null);
   assert.ok(!JSON.stringify(dev.listDevices(u)).includes(token));
@@ -59,7 +59,7 @@ test('a new device is never evicted, even with an older clock', () => {
   for (let i = 0; i < 20; i++) dev.issueDeviceToken(u, `d${i}`, 1000 + i);
   const fresh = dev.issueDeviceToken(u, 'late', 5);
   assert.equal(dev.listDevices(u).length, 20);
-  assert.deepEqual(dev.authenticateDeviceToken(fresh.token, 6), { userId: u, deviceId: fresh.deviceId });
+  assert.deepEqual(dev.authenticateDeviceToken(fresh.token, 6), { userId: u, deviceId: fresh.deviceId, scopes: ['host', 'chat', 'approvals'] });
 });
 
 test('the quick chat id is per user', () => {

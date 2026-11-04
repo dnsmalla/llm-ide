@@ -7,8 +7,8 @@ import { HostApiSession, helloRefusal, internalId } from './session.mjs';
 import { createTranslator } from './translator.mjs';
 import { PairingThrottle } from './throttle.mjs';
 import { consumePin } from './pin.mjs';
-import { HOST_API_LIMITS } from './commands.generated.mjs';
-import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
+import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
+import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
 export const MAX_SESSIONS = 4;
 export const AUTH_DEADLINE_MS = 10_000;
@@ -57,7 +57,7 @@ export function messagesOf(lines, limit) {
 
 export function createGateway(overrides) {
   const deps = { ...defaultDeps(), ...overrides };
-  const sessions = new Map(); // handle -> { state, peer, num, queue, timer, rev }
+  const sessions = new Map(); // handle -> { state, peer, num, queue, timer, rev, grants, lastSent }
   // internal id -> { session, external, cancelRequested, started, zombie, userId, chatSessionId, translator, sdkSessionId, open }.
   // A closed session's in-flight commands stay as zombies (nothing sent) until their turn settles, so a cancel
   // requested before the turn held the engine lock can be re-issued when its init arrives.
@@ -65,7 +65,15 @@ export function createGateway(overrides) {
   const creatingQuickChat = new Map(); // userId -> Promise<chatSessionId>
   const throttle = new PairingThrottle();
   let nextNum = 0;
-  let lastCapabilities = deps.capabilities();
+
+  // A session's capabilities are served ∩ granted (the token's scopes), in served order; `host` is always granted.
+  const effective = (entry) => deps.capabilities().filter((c) => entry.grants?.has(c));
+  function grant(entry, scopes) {
+    entry.grants = new Set(['host', ...scopes]);
+    const caps = effective(entry);
+    entry.lastSent = JSON.stringify(caps);
+    return caps;
+  }
 
   // rev is per connection (spec): events bump the session's own counter; responses and errors carry its value.
   const revOf = (s) => sessions.get(s)?.rev ?? 0;
@@ -96,7 +104,7 @@ export function createGateway(overrides) {
       return;
     }
     nextNum += 1;
-    const entry = { state: new HostApiSession(), peer: String(peer ?? ''), num: nextNum, queue: Promise.resolve(), timer: null, rev: 0 };
+    const entry = { state: new HostApiSession(), peer: String(peer ?? ''), num: nextNum, queue: Promise.resolve(), timer: null, rev: 0, grants: null, lastSent: null };
     entry.timer = setTimeout(() => {
       if (sessions.get(session) !== entry || entry.state.deviceId) return;
       deps.log(`Host API v1 connection ${entry.num} did not authenticate in time — closing`);
@@ -147,10 +155,14 @@ export function createGateway(overrides) {
   }
 
   function capabilitiesChanged() {
-    const caps = deps.capabilities();
-    if (JSON.stringify(caps) === JSON.stringify(lastCapabilities)) return;
-    lastCapabilities = caps;
-    for (const [s, e] of sessions) if (e.state.deviceId) sendEvent(s, 'host.capabilities', { capabilities: caps });
+    for (const [s, e] of sessions) {
+      if (!e.state.deviceId) continue;
+      const caps = effective(e);
+      const key = JSON.stringify(caps);
+      if (key === e.lastSent) continue;
+      e.lastSent = key;
+      sendEvent(s, 'host.capabilities', { capabilities: caps });
+    }
   }
 
   // One session's frames are handled strictly in order; a slow command never reorders them.
@@ -267,7 +279,15 @@ export function createGateway(overrides) {
       deps.log(`Host API v1 refused a frame (${r.code}, ${Buffer.byteLength(text, 'utf8')} bytes)`);
       return fail(s, r.replyTo, r.code, r.message);
     }
-    const gate = entry.state.gate(r.command, new Set(deps.capabilities()));
+    const served = deps.capabilities();
+    if (entry.state.deviceId) {
+      const capability = HOST_API_COMMANDS[r.command]?.capability;
+      if (capability && served.includes(capability) && !entry.grants?.has(capability)) {
+        deps.log(`Host API v1 connection ${entry.num} refused ${capability} (not granted)`);
+        return fail(s, r.id, 'denied', `This device was not granted ${capability} — pair again to grant it.`);
+      }
+    }
+    const gate = entry.state.gate(r.command, new Set(entry.state.deviceId ? effective(entry) : served));
     if (!gate.allow) return fail(s, r.id, gate.code, gate.message);
     const { id, payload: p, command } = r;
     const userId = entry.state.userId;
@@ -292,10 +312,12 @@ export function createGateway(overrides) {
           return fail(s, id, 'auth_failed', 'Wrong PIN.');
         }
         throttle.success(entry.peer);
-        const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now());
+        // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
+        const scopes = [...new Set(['host', ...served])];
+        const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
         entry.state.authenticated(pinUser, deviceId);
         clearTimeout(entry.timer);
-        return respond(s, id, command, { token, capabilities: deps.capabilities() });
+        return respond(s, id, command, { token, capabilities: grant(entry, scopes) });
       }
       case 'host.auth.token': {
         if (throttled(s, id, entry.peer)) return;
@@ -307,7 +329,7 @@ export function createGateway(overrides) {
         throttle.success(entry.peer);
         entry.state.authenticated(auth.userId, auth.deviceId);
         clearTimeout(entry.timer);
-        return respond(s, id, command, { capabilities: deps.capabilities() });
+        return respond(s, id, command, { capabilities: grant(entry, auth.scopes ?? LEGACY_SCOPES) });
       }
       case 'host.auth.revoke': {
         const auth = deps.devices.authenticateDeviceToken(p.token, deps.now());

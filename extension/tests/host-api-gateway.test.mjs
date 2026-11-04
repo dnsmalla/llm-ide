@@ -10,12 +10,12 @@ const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, t
 
 function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, pending: [] };
-  const tokens = new Map(); // token -> { userId, deviceId }
+  const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   let quick = null;
   t.tokens = tokens;
   t.devices = {
-    issueDeviceToken(userId) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId }); return { deviceId, token }; },
+    issueDeviceToken(userId, _name, _now, scopes) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId, scopes }); return { deviceId, token }; },
     authenticateDeviceToken: (token) => tokens.get(token) ?? null,
     revokeDevice(userId, deviceId) { for (const [k, v] of tokens) if (v.userId === userId && v.deviceId === deviceId) tokens.delete(k); return true; },
   };
@@ -162,10 +162,13 @@ test('approvals.answer: not_found when not owned; owned answers carry the init s
   assert.equal(t.decided.length, 1);
 });
 
-test('toolApprovals.answer needs its capability; with it, allow_once is an allow', async () => {
-  const t = harness({ hold: true });
+test('toolApprovals.answer needs its capability served; with it, allow_once is an allow', async () => {
+  const t = harness({ hold: true, toolApprovals: true }); // paired while served, so it is granted
   const s = {};
   await t.paired(s);
+  t.toolApprovals = false;
+  t.g.capabilitiesChanged();
+  assert.deepEqual(t.last().payload.capabilities, ['host', 'chat', 'approvals']);
   await t.g.receive(s, req('c-t', 'toolApprovals.answer', { requestId: 'r2', commandId: 'c-9', decision: 'allow_once' }));
   assert.equal(t.lastError(), 'capability_unavailable');
   const before = t.sent.length;
