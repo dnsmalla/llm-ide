@@ -4,7 +4,7 @@ The machine-checked contract for Mac, desktop, iOS and web clients. Design:
 [`docs/superpowers/specs/2026-11-03-host-api-design.md`](../../../docs/superpowers/specs/2026-11-03-host-api-design.md).
 
 This directory contains the frame envelope, command registry, event schemas and
-fixtures. It does not contain a host adapter or a client; those are later plans.
+fixtures. The Mac host adapter is `mac/Sources/LlmIdeMac/Features/MobileControl/Services/HostApi/` (development listener only until TLS lands); Swift validation and payload types are generated into `ios_app/SharedProtocol`.
 
 ## Limits
 
@@ -21,6 +21,7 @@ fixtures. It does not contain a host adapter or a client; those are later plans.
    `.result.json`.
 3. Add or change the event in `events.schema.json` and add its fixture under
    `fixtures/events/`.
+   To add an invalid fixture, update `fixtures/invalid-cases.json`.
 4. Run `node scripts/generate-host-api.mjs`.
 5. Run `node scripts/conformance-host-api.mjs`.
 6. Run `make host-api-check`.

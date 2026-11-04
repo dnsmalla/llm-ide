@@ -271,6 +271,7 @@ final class MobileControlManager {
     private var mobileInflightTasks: [String: MobileInflightTask] = [:]
     /// Host API v1 gateway; nil until the v1 listener is started (Task 8 constructs it).
     private var hostApiGateway: HostApiV1Gateway?
+    private var hostApiListener: HostApiV1Listener?
     /// Command ids with a registered, not-yet-finished task (tests).
     var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
@@ -441,6 +442,20 @@ final class MobileControlManager {
         // advertising a port nothing listens on is exactly the phantom the
         // iPhone then misreads as "Wrong PIN". `mobileServerDidBind` starts
         // it with the port that actually took.
+        if HostApiV1Listener.devListenerAllowed(environment: ProcessInfo.processInfo.environment,
+                                                isDebugBuild: HostApiV1Listener.isDebugBuild) {
+            let gateway = HostApiV1Gateway(dependencies: makeHostApiDependencies())
+            let listener = HostApiV1Listener(
+                onOpen: { s, peer in Task { @MainActor in gateway.opened(session: s, peer: peer) } },
+                onFrame: { s, d in Task(priority: .userInitiated) { @MainActor in await gateway.receive(session: s, data: d) } },
+                onClose: { s in Task { @MainActor in gateway.closed(session: s) } },
+                onListening: { _ in },
+                onLog: { [weak self] line in Task { @MainActor [weak self] in self?.append(.info, line) } })
+            gateway.send = { s, d in listener.send(s, d) }
+            gateway.close = { s in listener.close(s) }
+            do { try listener.start(); hostApiGateway = gateway; hostApiListener = listener }
+            catch { append(.stderr, "Host API v1 development listener did not start: \(error.localizedDescription)") }
+        }
         status = .running
         startWorkspaceWatcher()
         startSessionDirectoryWatcher()
@@ -561,6 +576,8 @@ final class MobileControlManager {
         onMobileClientDisconnected()
         hostApiGateway?.closeAll()
         hostApiGateway = nil
+        hostApiListener?.stop()
+        hostApiListener = nil
         server?.stop()
         server = nil
         advertiser?.stop()
