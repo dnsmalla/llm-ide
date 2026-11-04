@@ -360,6 +360,7 @@ struct LlmIdeControlView: View {
             || !pendingImages.isEmpty
             || !pendingFiles.isEmpty)
             && isConnected
+            && connection.supports(MobileProtocol.Capability.chat)
             && !llmIdeStore.isStreaming   // one question at a time
     }
 

@@ -37,10 +37,12 @@ struct RootTabView: View {
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
 
-            ProjectView(deviceName: deviceName)
-                .tabItem { Label("Project", systemImage: "folder.fill") }
-                .badge(explorerStore.pendingApproval == nil ? 0 : 1)
-                .tag(Tab.project)
+            if ProjectView.Section.allCases.contains(where: { connection.supports($0.capability) }) {
+                ProjectView(deviceName: deviceName)
+                    .tabItem { Label("Project", systemImage: "folder.fill") }
+                    .badge(explorerStore.pendingApproval == nil ? 0 : 1)
+                    .tag(Tab.project)
+            }
 
             if connection.supports(MobileProtocol.Capability.activity) {
                 ActivityView()
@@ -74,6 +76,7 @@ struct RootTabView: View {
         .onChange(of: projectsStore.active?.id) { _ in projectDidChange() }
         // A Phone access switch flipped on the Mac, or a different Mac was paired.
         .onChange(of: connection.macCapabilities) { _ in
+            if selection == .project, !ProjectView.Section.allCases.contains(where: { connection.supports($0.capability) }) { selection = .chat }
             if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
             if !connection.supports(MobileProtocol.Capability.usage) { usageStore.resetForNewDevice() }
             if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
@@ -94,7 +97,8 @@ struct RootTabView: View {
     }
 
     private func refreshMacData() {
-        guard isConnected else { return }
+        // Host API v1 serves chat + approvals only (Plan 4); these stores still speak v2 and would send nothing.
+        guard isConnected, connection.hostApiVersion == 2 else { return }
         macStatusStore.requestMacStatus()
         autoTaskStore.refreshAll()
         loopStore.refreshAll()
