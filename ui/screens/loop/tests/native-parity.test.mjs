@@ -80,3 +80,14 @@ test("new default loops inherit the host Loop defaults; existing loops are untou
   assert.equal(added.config.writeSummaryNote, true);
   assert.equal(r.store.loops.find((l) => l.defaultKey === "regression"), kept);
 });
+
+test("a first-created project store applies the host defaults to every default loop", () => {
+  const defaults = { maxIterations: 4, consecutiveFailureStop: 1, wallClockMinutes: 15, maxRepairsPerStage: 0, pauseTimeoutMinutes: 0, protectedPathPolicy: "warn", writeSummaryNote: true };
+  const store = t.initialProjectStore("npm test", defaults);
+  assert.ok(store.loops.length > 1);
+  for (const loop of store.loops) {
+    assert.equal(loop.config.maxIterations, 4);
+    assert.equal(loop.config.wallClockBudgetSeconds, 900);
+    assert.equal(loop.config.protectedPathPolicy, "warn");
+  }
+});

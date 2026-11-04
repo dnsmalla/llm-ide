@@ -165,8 +165,12 @@ export function deleteCustomTemplate(id: string, storage: Storage | undefined = 
 /** Initial loops for a project that has no `system/loop.json`: the Mac's six starter loops, with fresh stage ids and
  *  the project's detected test command. A test-command stage is dropped when this project has none; skills remain
  *  editable but still need the core agent/skills to run. */
-export function initialProjectStore(testCommand: string | null) {
-  const loops: LoopDefinition[] = DEFAULT_LOOP_SPECS.map((spec) => starterLoop(spec, testCommand));
+export function initialProjectStore(testCommand: string | null, defaults?: LoopDefaults) {
+  const loops: LoopDefinition[] = DEFAULT_LOOP_SPECS.map((spec) => {
+    const loop = starterLoop(spec, testCommand);
+    loop.config = applyLoopDefaults(loop.config, defaults);
+    return loop;
+  });
   const first = loops.find((l) => l.defaultKey === "regression") ?? loops[0];
   if (first && !loops.some((l) => l.isPrimary)) first.isPrimary = true;
   return { schemaVersion: 2 as const, loops };
