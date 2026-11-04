@@ -474,7 +474,8 @@ mod tests {
         assert!(w.program.ends_with("rundll32.exe") && w.program.to_string_lossy().contains("System32"));
         assert_eq!(w.args, vec!["url.dll,FileProtocolHandler".to_string(), u.to_string()]);
         let l = open_url_invocation(Os::Linux, u);
-        assert!(l.program.to_string_lossy().ends_with("xdg-open") && l.program.is_absolute());
+        // A Unix absolute path whatever the host (`is_absolute` is false for `/usr/...` on Windows).
+        assert!(l.program.to_string_lossy().ends_with("xdg-open") && l.program.to_string_lossy().starts_with('/'));
         assert_eq!(l.args, vec![u.to_string()]);
     }
 

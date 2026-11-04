@@ -911,8 +911,9 @@ mod tests {
 
     #[test]
     fn shell_env_is_an_allowlist() {
+        // PATH must be absolute on the host for it to be kept.
         let src = env(&[
-            ("PATH", "/usr/bin"), ("HOME", "/h"), ("SHELL", "/bin/zsh"), ("LANG", "C"), ("LC_ALL", "C"), ("LC_CTYPE", "UTF-8"), ("TERM", "xterm"),
+            ("PATH", if cfg!(windows) { "C:\\Windows" } else { "/usr/bin" }), ("HOME", "/h"), ("SHELL", "/bin/zsh"), ("LANG", "C"), ("LC_ALL", "C"), ("LC_CTYPE", "UTF-8"), ("TERM", "xterm"),
             ("COLORTERM", "truecolor"), ("TMPDIR", "/t"), ("USER", "a"), ("LOGNAME", "a"),
             // everything below must go
             ("SSH_AUTH_SOCK", "/s"), ("LLMIDE_JWT_SECRET", "x"), ("LLMIDE_VAULT_KEY", "x"), ("ANTHROPIC_API_KEY", "x"),
@@ -928,17 +929,25 @@ mod tests {
 
     #[test]
     fn shell_path_is_sanitised() {
-        assert_eq!(sanitize_path("/usr/bin:.:bin::/usr/bin:/opt/x"), "/usr/bin:/opt/x");
-        assert_eq!(sanitize_path("relative:also/relative"), "");
+        // The host's own separator and notion of absolute (`/usr/bin` is relative on Windows).
+        if cfg!(windows) {
+            assert_eq!(sanitize_path("C:\\Windows;.;bin;;C:\\Windows;D:\\x"), "C:\\Windows;D:\\x");
+            assert_eq!(sanitize_path("relative;also\\relative;/rooted"), "");
+        } else {
+            assert_eq!(sanitize_path("/usr/bin:.:bin::/usr/bin:/opt/x"), "/usr/bin:/opt/x");
+            assert_eq!(sanitize_path("relative:also/relative"), "");
+        }
         let out = shell_env(env(&[("PATH", ".:rel"), ("HOME", "/h")]).into_iter());
         assert_eq!(out, env(&[("HOME", "/h")]), "a PATH with no absolute entry is not passed at all");
     }
 
     #[test]
     fn windows_shells_keep_the_variables_they_need_case_insensitively() {
-        let src = env(&[("SystemRoot", "C:\\Windows"), ("ComSpec", "C:\\cmd.exe"), ("Path", "C:\\Windows"), ("APPDATA", "C:\\a"), ("OPENAI_API_KEY", "x"), ("SSH_AUTH_SOCK", "x")]);
+        // `Path` is matched case-insensitively and kept when its entry is absolute on the host.
+        let path = if cfg!(windows) { "C:\\Windows" } else { "/usr/bin" };
+        let src = env(&[("SystemRoot", "C:\\Windows"), ("ComSpec", "C:\\cmd.exe"), ("Path", path), ("APPDATA", "C:\\a"), ("OPENAI_API_KEY", "x"), ("SSH_AUTH_SOCK", "x")]);
         let kept: Vec<String> = shell_env_for(true, src.into_iter()).into_iter().map(|(k, _)| k).collect();
-        assert_eq!(kept, ["SystemRoot", "ComSpec", "APPDATA"]);
+        assert_eq!(kept, ["SystemRoot", "ComSpec", "Path", "APPDATA"]);
     }
 
     #[test]

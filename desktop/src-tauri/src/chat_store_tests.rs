@@ -94,27 +94,29 @@ fn every_entry_point_refuses_a_path_shaped_id() {
 
 #[test]
 fn layout_per_os() {
-    let env = |k: &str| match k {
-        "HOME" => Some("/Users/me".to_string()),
-        "LOCALAPPDATA" => Some("/win/Local".to_string()),
+    // Absolute on the host running the test (`/Users/me` is relative on Windows).
+    let r = if cfg!(windows) { "C:" } else { "" };
+    let env = move |k: &str| match k {
+        "HOME" => Some(format!("{r}/Users/me")),
+        "LOCALAPPDATA" => Some(format!("{r}/win/Local")),
         _ => None,
     };
     let none = |_: &Path| false;
     let mac = layout_for(Os::Mac, &env, "u1", &none).unwrap();
-    assert_eq!(mac.sessions, PathBuf::from("/Users/me/Library/Application Support/llm-ide/sessions"));
+    assert_eq!(mac.sessions, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide/sessions")));
     assert!(mac.shared_with_mac);
     // Only the legacy folder exists: use it in place (the Mac app migrates it later, never us).
     let legacy_only = |p: &Path| p.ends_with("LLM IDE");
-    assert_eq!(layout_for(Os::Mac, &env, "u1", &legacy_only).unwrap().base, PathBuf::from("/Users/me/Library/Application Support/LLM IDE"));
+    assert_eq!(layout_for(Os::Mac, &env, "u1", &legacy_only).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/LLM IDE")));
     let both = |_: &Path| true;
-    assert_eq!(layout_for(Os::Mac, &env, "u1", &both).unwrap().base, PathBuf::from("/Users/me/Library/Application Support/llm-ide"));
+    assert_eq!(layout_for(Os::Mac, &env, "u1", &both).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide")));
     let lin = layout_for(Os::Linux, &env, "u1", &none).unwrap();
-    assert_eq!(lin.sessions, PathBuf::from("/Users/me/.local/share/llm-ide-desktop/chats/u1/sessions"));
+    assert_eq!(lin.sessions, PathBuf::from(format!("{r}/Users/me/.local/share/llm-ide-desktop/chats/u1/sessions")));
     assert!(!lin.shared_with_mac);
     let win = layout_for(Os::Windows, &env, "u1", &none).unwrap();
     assert!(win.base.ends_with("llm-ide-desktop/chats/u1") || win.base.ends_with("llm-ide-desktop\\chats\\u1"));
-    let over = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| "/tmp/x".to_string());
-    assert_eq!(layout_for(Os::Mac, &over, "u1", &none).unwrap().sessions, PathBuf::from("/tmp/x/sessions"));
+    let over = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| format!("{r}/tmp/x"));
+    assert_eq!(layout_for(Os::Mac, &over, "u1", &none).unwrap().sessions, PathBuf::from(format!("{r}/tmp/x/sessions")));
     let rel = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| "rel".to_string());
     assert!(layout_for(Os::Mac, &rel, "u1", &none).is_err());
     assert!(layout_for(Os::Linux, &env, "../u", &none).is_err());
