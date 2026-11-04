@@ -64,6 +64,16 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
   timeout denies, one at a time, 3 per 5 minutes. Features reach it only through `MobileBridgeHosting.requestDesktopApproval`.
   Re-check switch, setting and project AFTER the approval, before acting.
 - **Queued phone work is re-validated when it executes** (switch and active project), not only at receipt.
+- **Desktop class is host-granted at pairing, never self-declared.** A `MobilePairedDeviceStore` record gets
+  `clientClass = desktop` only when a PIN pairing from a loopback peer asks for it AND the Mac owner allows it in
+  the same native confirmation (`MobileControlManager.confirmDesktopClass`). A session is desktop only if its
+  record is desktop AND its real peer address is loopback (`MobileWebSocketServer.isLoopback`: 127/8, `::1`,
+  `::ffff:127.x`; never the throttle key). The class travels with each routed frame. Records paired before this
+  load as phones, so the desktop app pairs again once (Settings → Mobile Bridge).
+- **Code-writing actions always need a confirmation, desktop class included.** The desktop class lifts only the
+  D-tier refusal (toggle, config, templates) and the phone-only Phone-access switches; T1/T2 Auto Task runs, a
+  run-all that includes one, and loop starts still go through `PhoneDesktopApprovalGate`. Pinned by
+  `DesktopClassGateTests` and the desktop cases in `PhoneAutoTaskApprovalFlowTests`.
 
 ## Adding a phone capability (the bridge registry + Phone access)
 
