@@ -286,6 +286,23 @@ pub fn dismiss_in(dir: &Path) -> usize {
     removed
 }
 
+/// Deletes only the records this process (`pid`) wrote: a panic the app survived (a worker thread) must not
+/// show a crash banner after a clean exit. Records of earlier processes stay for their banner.
+pub fn clear_own_in(dir: &Path, pid: u32) -> usize {
+    let suffix = format!("-{pid}.json");
+    let mine = pending_files(dir).into_iter().filter(|(_, p)| {
+        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(&suffix))
+    });
+    mine.filter(|(_, p)| std::fs::remove_file(p).is_ok()).count()
+}
+
+/// Clean-exit hook: drops this process's own records. Failures are ignored (exit must not stall).
+pub fn clear_own_on_clean_exit() {
+    if let Ok(dir) = records_dir() {
+        clear_own_in(&dir, std::process::id());
+    }
+}
+
 /// Panic hook body: writes one record. Never panics itself (a panic inside a panic hook aborts the process),
 /// so every failure is dropped.
 pub fn record_panic(info: &std::panic::PanicHookInfo<'_>) {
@@ -429,6 +446,17 @@ mod tests {
             let r = redact(raw, None, 1000);
             assert!(!r.contains("abc.def") && !r.contains("hunter2"), "leaked: {r}");
         }
+    }
+
+    #[test]
+    fn clean_exit_drops_only_this_process_records() {
+        let dir = scratch("own");
+        write_record_at(&dir, &rec("earlier run"), 1, 17).unwrap();
+        write_record_at(&dir, &rec("survived"), 2, 7).unwrap();
+        assert_eq!(clear_own_in(&dir, 7), 1);
+        let left = latest_in(&dir).unwrap();
+        assert_eq!((left.message.as_str(), left.count), ("earlier run", 1), "pid 17 is not pid 7");
+        assert_eq!(clear_own_in(&dir, 7), 0, "a second clear is a no-op");
     }
 
     #[test]
