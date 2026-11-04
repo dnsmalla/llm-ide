@@ -112,6 +112,15 @@ struct PairingThrottle {
         if trustedHosts.count > 16 { trustedHosts.removeFirst() }
     }
 
+    /// The desktop's `peerKey`: IPv4-mapped IPv6 → the IPv4 string, other IPv6 → its /64, IPv4 unchanged.
+    static func peerKey(_ address: String) -> String {
+        let bare = String(address.split(separator: "%").first ?? "")
+        if bare.lowercased().hasPrefix("::ffff:"), bare.dropFirst(7).split(separator: ".").count == 4, !bare.dropFirst(7).contains(":") {
+            return String(bare.dropFirst(7))
+        }
+        return ipv6PrefixKey(address)
+    }
+
     /// The /64 prefix of an IPv6 literal — the smallest block a single
     /// attacker is assumed to control. Falls back to the input when it can't
     /// be parsed (never widens the key by accident).

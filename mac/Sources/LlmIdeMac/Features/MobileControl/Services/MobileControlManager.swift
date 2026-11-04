@@ -240,6 +240,10 @@ final class MobileControlManager {
     /// Phones that completed PIN pairing and hold a per-device token — the
     /// registry token auth checks against, and what Settings lists/revokes.
     private let pairedDeviceStore: MobilePairedDeviceStore
+    /// Host API v1 audit log (Plan 6 Task 8); tests inject one on a temp file.
+    private let hostApiAuditOverride: HostApiV1AuditLog?
+    @ObservationIgnored private lazy var hostApiAudit: HostApiV1AuditLog = hostApiAuditOverride
+        ?? HostApiV1AuditLog(echo: { [weak self] l in Task { @MainActor in self?.append(.info, l) } })
     /// Snapshot of `pairedDeviceStore.all` for the Settings list, refreshed on
     /// every pairing, authentication, and revoke.
     private(set) var pairedDevices: [MobilePairedDeviceStore.Device] = []
@@ -294,8 +298,9 @@ final class MobileControlManager {
     let decoder = JSONDecoder()
 
     /// `pairedDeviceStore` is injectable so tests use a temp file, never the real registry.
-    init(pairedDeviceStore: MobilePairedDeviceStore = MobilePairedDeviceStore()) {
+    init(pairedDeviceStore: MobilePairedDeviceStore = MobilePairedDeviceStore(), hostApiAudit: HostApiV1AuditLog? = nil) {
         self.pairedDeviceStore = pairedDeviceStore
+        self.hostApiAuditOverride = hostApiAudit
         pairedDevices = pairedDeviceStore.all
         installPhoneAccessObserver()
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
@@ -548,10 +553,17 @@ final class MobileControlManager {
         devices.map(\.id).filter { $0.hasPrefix(MobilePairedDeviceStore.hostApiDevicePrefix) }
     }
 
-    /// The one hook for Host API identity audit events (`identity_created`, `identity_reset`).
-    /// Task 8 wires this to the audit log; until then it only logs. Never carries key material.
-    private func recordHostApiAudit(_ event: String, detail: String? = nil) {
-        append(.info, "Host API v1 audit: \(event)" + (detail.map { " \($0)" } ?? ""))
+    /// Host-side audit events with no peer (`identity_created`, `identity_reset`, `revoke_host`).
+    /// Never carries key material.
+    private func recordHostApiAudit(_ event: String, deviceId: String? = nil, detail: String? = nil) {
+        hostApiAudit.record(event, peer: "-", deviceId: deviceId, detail: detail)
+    }
+
+    /// The listener's refusals, de-duplicated per peer (IPv6 /64), never per origin string (the desktop listenerRefusalAuditor): a flood of distinct
+    /// origins is one row per peer per minute. Network.framework gives the Origin handler no peer ("-"), so
+    /// `origin_refused` is in effect one row per minute; the audit log's per-event cap bounds the rest.
+    nonisolated static func auditListenerRefusal(_ audit: HostApiV1AuditLog, event: String, peer: String, detail: String) {
+        audit.record(event, peer: peer, detail: detail.isEmpty ? nil : detail, dedupeKey: PairingThrottle.peerKey(peer))
     }
 
     /// Start the v1 listener for the configured mode. The ONLY `loadOrCreate` call site, reached from
@@ -625,14 +637,16 @@ final class MobileControlManager {
     private func startHostApi(transport: HostApiV1Listener.Transport, fingerprint: String?) {
         let gateway = HostApiV1Gateway(dependencies: makeHostApiDependencies(fingerprint: fingerprint))
         let (events, continuation) = AsyncStream<HostApiV1ListenerEvent>.makeStream()
-        let allowlist = HostApiV1Origins.parse(HostApiV1Origins.configured(environment: ProcessInfo.processInfo.environment, defaults: .standard),
-                                               log: { [weak self] l in self?.append(.info, l) })
+        let configured = HostApiV1Origins.parse(HostApiV1Origins.configured(environment: ProcessInfo.processInfo.environment, defaults: .standard),
+                                                log: { [weak self] l in self?.append(.info, l) })
+        var isTLS = false
+        if case .tls = transport { isTLS = true }
+        let allowlist = HostApiV1Origins.forTransport(configured, tls: isTLS)
+        let audit = hostApiAudit
         let listener = HostApiV1Listener(
             transport: transport, originAllowlist: allowlist,
-            onRefused: { [weak self] event, peer, detail in
-                let line = "Host API v1 refused a connection: \(event) peer=\(peer)" + (detail.isEmpty ? "" : " \(detail)")
-                Task { @MainActor [weak self] in self?.append(.info, line) }
-            },
+            // Runs on the listener queue; the audit log is thread-safe and echoes event + peer to the log pane.
+            onRefused: { event, peer, detail in Self.auditListenerRefusal(audit, event: event, peer: peer, detail: detail) },
             onOpen: { s, peer in continuation.yield(.opened(s, peer)) },
             onFrame: { s, d in continuation.yield(.frame(s, d)) },
             onClose: { s in continuation.yield(.closed(s)) },
@@ -683,7 +697,10 @@ final class MobileControlManager {
             clear: { [weak self] in await self?.clearQuickChat() ?? .unavailable("Mobile Control stopped.") },
             cancel: { [weak self] in self?.cancelMobileInflightTask(commandId: $0) },
             log: { [weak self] in self?.append(.info, $0) },
-            certificateFingerprint: { fingerprint })
+            certificateFingerprint: { fingerprint },
+            audit: { [hostApiAudit] e, peer, device, detail, key in
+                hostApiAudit.record(e, peer: peer, deviceId: device, detail: detail, dedupeKey: key)
+            })
     }
 
     /// Tear down the native server and Bonjour advertisement. Idempotent —
@@ -1789,6 +1806,8 @@ final class MobileControlManager {
     /// connected right now it is told why and dropped.
     func revokeDevice(_ id: String) {
         pairedDeviceStore.revoke(id: id)
+        // v1 devices only: the v2 link is not audited by this plan.
+        if id.hasPrefix(MobilePairedDeviceStore.hostApiDevicePrefix) { recordHostApiAudit("revoke_host", deviceId: id) }
         refreshPairedDevices()
         hostApiGateway?.disconnect(deviceId: id)
         server?.disconnectClient(deviceId: id, code: .revoked,
@@ -1803,6 +1822,9 @@ final class MobileControlManager {
     func revokeAllDevices() {
         let ids = pairedDeviceStore.revokeAll()
         refreshPairedDevices()
+        for id in ids where id.hasPrefix(MobilePairedDeviceStore.hostApiDevicePrefix) {
+            recordHostApiAudit("revoke_host", deviceId: id, detail: "account_change")
+        }
         for id in ids { hostApiGateway?.disconnect(deviceId: id) }
         server?.disconnectCurrentClient(code: .revoked,
                                         message: "The Mac signed out of the account this phone was paired with")

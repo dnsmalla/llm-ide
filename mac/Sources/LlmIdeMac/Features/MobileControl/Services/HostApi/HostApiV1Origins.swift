@@ -32,6 +32,11 @@ enum HostApiV1Origins {
         return out
     }
 
+    /// The plaintext (DEBUG loopback) listener honours only loopback `http://` origins, never `https://` ones.
+    static func forTransport(_ allowlist: [String], tls: Bool) -> [String] {
+        tls ? allowlist : allowlist.filter { $0.hasPrefix("http://") }
+    }
+
     /// More than one `Origin` header is refused outright, like Node (which joins them into a never-listed "a, b").
     static func refused(headers: [(name: String, value: String)], allowlist: [String]) -> Bool {
         let origins = headers.filter { $0.name.lowercased() == "origin" }

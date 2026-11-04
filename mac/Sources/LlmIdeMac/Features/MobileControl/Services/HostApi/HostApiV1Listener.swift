@@ -63,6 +63,8 @@ final class HostApiV1Listener: @unchecked Sendable {
     /// must not hold sockets open by never finishing TLS, nor open them without bound.
     static let maxConnections = 32
     static let handshakeTimeout: TimeInterval = 10
+    /// The desktop's `MAX_BUFFERED_BYTES`: a peer that stops reading is closed, not buffered for without bound.
+    static let maxBufferedBytes = 4 * 1024 * 1024
 
     private let basePort: Int
     private let maxConnections: Int
@@ -82,6 +84,10 @@ final class HostApiV1Listener: @unchecked Sendable {
     private var stopped = false
     private var nextSession = 1
     private var connections: [Int: NWConnection] = [:]
+    /// Sessions that have sent a first frame, and so were handed to the gateway (`onOpen`).
+    private var opened: Set<Int> = []
+    /// Bytes handed to `conn.send` and not yet processed, per session (Network.framework exposes no buffered size).
+    private var inflight: [Int: Int] = [:]
 
     init(basePort: Int = 3016, candidates: Int = 10, transport: Transport, originAllowlist: [String],
          maxConnections: Int = HostApiV1Listener.maxConnections, handshakeTimeout: TimeInterval = HostApiV1Listener.handshakeTimeout,
@@ -103,22 +109,33 @@ final class HostApiV1Listener: @unchecked Sendable {
             self.stopped = true
             self.listener?.cancel(); self.listener = nil
             for (_, c) in self.connections { c.stateUpdateHandler = nil; c.cancel() }
-            self.connections.removeAll()
+            self.connections.removeAll(); self.opened.removeAll(); self.inflight.removeAll()
         }
     }
 
     func send(_ session: Int, _ data: Data) {
         queue.async {
             guard let conn = self.connections[session] else { return }
+            let pending = (self.inflight[session] ?? 0) + data.count
+            guard pending <= Self.maxBufferedBytes else {
+                self.onLog("Host API v1 connection \(session) stopped reading — closing")
+                conn.cancel()   // .cancelled then drops the entry and reports onClose
+                return
+            }
+            self.inflight[session] = pending
             let meta = NWProtocolWebSocket.Metadata(opcode: .text)
             let ctx = NWConnection.ContentContext(identifier: "hostapi", metadata: [meta])
-            conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { _ in })
+            conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { [weak self] _ in
+                // Runs on `queue`, the connection's queue.
+                if let n = self?.inflight[session] { self?.inflight[session] = n - data.count }
+            })
         }
     }
 
     func close(_ session: Int) {
         queue.asyncAfter(deadline: .now() + 0.2) {
             guard let conn = self.connections.removeValue(forKey: session) else { return }
+            self.opened.remove(session); self.inflight.removeValue(forKey: session)
             conn.stateUpdateHandler = nil
             conn.cancel()
         }
@@ -187,29 +204,33 @@ final class HostApiV1Listener: @unchecked Sendable {
             guard let self else { return }
             switch state {
             case .ready:
-                self.onOpen(session, "\(host)")
-                self.receive(session, conn)
+                // onOpen waits for the first frame: a handshake refused for its Origin still reaches .ready
+                // before it is cancelled, and must never take a gateway slot.
+                self.receive(session, conn, peer: "\(host)")
             case .failed, .cancelled:
-                if self.connections.removeValue(forKey: session) != nil { self.onClose(session) }
+                self.inflight.removeValue(forKey: session)
+                if self.connections.removeValue(forKey: session) != nil, self.opened.remove(session) != nil { self.onClose(session) }
                 conn.stateUpdateHandler = nil
             default: break
             }
         }
         conn.start(queue: queue)
-        // TLS + WebSocket handshake deadline; the .cancelled branch above then drops the entry.
+        // TLS + WebSocket handshake + first frame deadline; the .cancelled branch above then drops the entry.
         queue.asyncAfter(deadline: .now() + handshakeTimeout) { [weak self] in
-            guard let self, self.connections[session] === conn else { return }
-            if case .ready = conn.state { return }
+            guard let self, self.connections[session] === conn, !self.opened.contains(session) else { return }
+            self.onRefused("handshake_timeout", "\(host)", "")
             conn.cancel()
         }
     }
 
-    private func receive(_ session: Int, _ conn: NWConnection) {
+    private func receive(_ session: Int, _ conn: NWConnection, peer: String) {
         conn.receiveMessage { [weak self] data, _, _, error in
             guard let self else { return }
             guard let data, error == nil else { conn.cancel(); return }
+            guard self.connections[session] === conn else { return }
+            if self.opened.insert(session).inserted { self.onOpen(session, peer) }
             self.onFrame(session, data)
-            self.receive(session, conn)
+            self.receive(session, conn, peer: peer)
         }
     }
 

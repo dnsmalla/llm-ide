@@ -7,6 +7,11 @@ import Foundation
 @Suite("HostApiV1Advertisement", .serialized)
 @MainActor
 struct HostApiV1AdvertisementTests {
+    /// Never the real Application Support audit file.
+    private func tempAudit() -> HostApiV1AuditLog {
+        HostApiV1AuditLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("h1-adv-audit-\(UUID().uuidString).jsonl"))
+    }
+
     private func tempStore() -> MobilePairedDeviceStore {
         MobilePairedDeviceStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("h1-adv-\(UUID().uuidString)", isDirectory: true)
@@ -50,7 +55,7 @@ struct HostApiV1AdvertisementTests {
         _ = store.issueToken(deviceId: MobilePairedDeviceStore.hostApiDevicePrefix + "one", name: "web", scopes: ["host"])
         _ = store.issueToken(deviceId: "phone-v2", name: "iPhone")
         let before = try HostApiV1Identity.loadOrCreate(hostName: "test").fingerprint
-        let manager = MobileControlManager(pairedDeviceStore: store)
+        let manager = MobileControlManager(pairedDeviceStore: store, hostApiAudit: tempAudit())
 
         manager.resetHostApiIdentity()
 
@@ -67,7 +72,7 @@ struct HostApiV1AdvertisementTests {
         _ = KeychainStore.backend.write(account: HostApiV1Identity.account, service: "com.llmide.macapp", data: Data("junk".utf8))
         #expect(throws: HostApiV1Identity.Failure.corrupt) { try HostApiV1Identity.loadOrCreate(hostName: "test") }
         #expect(throws: HostApiV1Identity.Failure.corrupt) { try HostApiV1Identity.loadOrCreate(hostName: "test") }
-        MobileControlManager(pairedDeviceStore: tempStore()).resetHostApiIdentity()
+        MobileControlManager(pairedDeviceStore: tempStore(), hostApiAudit: tempAudit()).resetHostApiIdentity()
         #expect(try HostApiV1Identity.loadOrCreate(hostName: "test").created)
     }
 
@@ -83,7 +88,7 @@ struct HostApiV1AdvertisementTests {
     func credentialsRevoked() {
         let store = tempStore()
         _ = store.issueToken(deviceId: "h1-a", name: "a", scopes: ["host"])
-        let manager = MobileControlManager(pairedDeviceStore: store)
+        let manager = MobileControlManager(pairedDeviceStore: store, hostApiAudit: tempAudit())
         manager.accountCredentialsRevoked()
         #expect(MobileControlManager.hostApiDeviceIds(store.all).isEmpty)
     }

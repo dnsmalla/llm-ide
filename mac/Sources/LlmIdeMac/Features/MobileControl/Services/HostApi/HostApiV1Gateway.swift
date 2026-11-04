@@ -26,10 +26,15 @@ final class HostApiV1Gateway {
         var log: (String) -> Void
         /// The pinned TLS identity's fingerprint; nil on the plaintext development listener (field omitted).
         var certificateFingerprint: () -> String?
+        /// Audit sink (`HostApiV1AuditLog.record`). Never pass a token, PIN or frame text.
+        var audit: (_ event: String, _ peer: String, _ deviceId: String?, _ detail: String?, _ dedupeKey: String?) -> Void = { _, _, _, _, _ in }
+        var now: () -> Date = { Date() }
     }
 
     static let maxSessions = 4
     static let authDeadline: TimeInterval = 10
+    /// The desktop's `MAX_UNAUTHENTICATED_PER_PEER`: one peer (IPv6 /64) cannot hold every slot before auth.
+    static let maxUnauthenticatedPerPeer = 2
 
     var send: (_ session: Int, _ frame: Data) -> Void = { _, _ in }
     var close: (_ session: Int) -> Void = { _ in }
@@ -38,7 +43,10 @@ final class HostApiV1Gateway {
     private var sessions: [Int: (state: HostApiV1Session, peer: String, rev: Int)] = [:]
     /// internal command id → (session, external id, cancelled by the client)
     private var owned: [String: (session: Int, external: String, cancelled: Bool)] = [:]
-    private var throttle = PairingThrottle()
+    // Separate buckets: a wrong PIN must not delay a token reconnect from the same peer, nor the reverse.
+    private var pairThrottle = PairingThrottle()
+    private var tokenThrottle = PairingThrottle()
+    private var rate = HostApiV1RateLimiter()
     /// Per authed session: the capabilities its token was granted, and the effective list it was last sent.
     private var grants: [Int: Set<String>] = [:]
     private var lastSent: [Int: [String]] = [:]
@@ -55,8 +63,12 @@ final class HostApiV1Gateway {
     // MARK: - Connections
 
     func opened(session: Int, peer: String) {
-        guard sessions.count < Self.maxSessions else {
-            send(session, HostApiFrame.error(replyTo: nil, code: "busy", message: "This Mac already has the maximum number of Host API connections.", retryable: true, rev: 0))
+        let key = PairingThrottle.peerKey(peer)
+        let pending = sessions.values.filter { $0.state.deviceId == nil && PairingThrottle.peerKey($0.peer) == key }.count
+        let why = sessions.count >= Self.maxSessions ? "This Mac already has the maximum number of Host API connections."
+            : pending >= Self.maxUnauthenticatedPerPeer ? "This device already has connections waiting to sign in — finish or close one first." : nil
+        if let why {
+            send(session, HostApiFrame.error(replyTo: nil, code: "busy", message: why, retryable: true, rev: 0))
             close(session)
             return
         }
@@ -72,6 +84,7 @@ final class HostApiV1Gateway {
 
     func closed(session: Int) {
         sessions.removeValue(forKey: session)
+        rate.drop(session: session)
         grants.removeValue(forKey: session)
         lastSent.removeValue(forKey: session)
         for (id, o) in owned where o.session == session {
@@ -135,6 +148,10 @@ final class HostApiV1Gateway {
 
     func receive(session: Int, data: Data) async {
         guard let entry = sessions[session] else { return }
+        // The frame bucket runs before any parsing, so a flood costs one regex per frame.
+        if let wait = rate.frame(session: session, now: deps.now()) {
+            return rateRefused(session, Self.cheapId(data), wait)
+        }
         let request: HostApiInboundRequest
         switch HostApiFrame.parseRequest(data) {
         case .success(let r): request = r
@@ -145,6 +162,7 @@ final class HostApiV1Gateway {
             let capability = request.command.capability
             if served.contains(capability) && grants[session]?.contains(capability) != true {
                 deps.log("Host API v1 connection \(session) refused \(capability) (not granted)")
+                deps.audit("scope_denied", entry.peer, entry.state.deviceId, capability, "\(entry.state.deviceId ?? ""):\(capability)")
                 return fail(session, request.id, "denied", "This device was not granted \(capability) — pair again to grant it.")
             }
             served = Set(effective(session))
@@ -167,17 +185,13 @@ final class HostApiV1Gateway {
                 protocolVersion: MobileProtocol.protocolVersion, requiresAuth: true))
         case .hostAuthPair:
             guard let p = payload(HostApiHostAuthPairRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.pair payload.") }
-            switch throttle.decision(for: entry.peer, now: Date()) {
-            case .allow: break
-            case .wait(let s): return fail(session, id, "auth_failed", "Too many attempts — wait a moment and try again.", retryable: true, retryAfterMs: Int(s * 1000))
-            case .lockedOut: return fail(session, id, "auth_failed", "Too many wrong PINs — locked out for 15 minutes.", retryable: true, retryAfterMs: 15 * 60 * 1000)
-            case .serverThrottled: return fail(session, id, "auth_failed", "This Mac is refusing new pairings for a few minutes.", retryable: true, retryAfterMs: 60_000)
-            }
+            if throttled(session, id, entry.peer, pairThrottle, "pair_throttled") { return }
             guard deps.validatePin(p.pin) else {
-                throttle.registerFailure(host: entry.peer, now: Date())
+                pairThrottle.registerFailure(host: entry.peer, now: deps.now())
+                deps.audit("pair_failed", entry.peer, nil, nil, nil)
                 return fail(session, id, "auth_failed", "Wrong PIN.")
             }
-            throttle.registerSuccess(host: entry.peer)
+            pairThrottle.registerSuccess(host: entry.peer)
             guard case .awaitingAuth(let name) = entry.state.phase else {
                 return fail(session, id, "denied", "This connection is not waiting to pair.")
             }
@@ -187,20 +201,24 @@ final class HostApiV1Gateway {
             let token = deps.issueToken(deviceId, name, scopes)
             deps.pinConsumed()
             sessions[session]?.state.authenticated(deviceId: deviceId)
+            deps.audit("pair_ok", entry.peer, deviceId, name, nil)
             respond(session, id, .hostAuthPair, HostApiHostAuthPairResult(capabilities: grant(session, scopes), token: token))
         case .hostAuthToken:
             guard let p = payload(HostApiHostAuthTokenRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.token payload.") }
+            if throttled(session, id, entry.peer, tokenThrottle, "token_throttled") { return }
             guard let deviceId = deps.authenticate(p.token) else {
-                throttle.registerFailure(host: entry.peer, now: Date())
+                tokenThrottle.registerFailure(host: entry.peer, now: deps.now())
+                deps.audit("token_failed", entry.peer, nil, nil, nil)
                 return fail(session, id, "auth_failed", "This device is no longer paired with this Mac — pair again with the current PIN.")
             }
-            throttle.registerSuccess(host: entry.peer)
+            tokenThrottle.registerSuccess(host: entry.peer)
             sessions[session]?.state.authenticated(deviceId: deviceId)
             respond(session, id, .hostAuthToken, HostApiHostAuthTokenResult(capabilities: grant(session, deps.scopes(deviceId))))
         case .hostAuthRevoke:
             guard let p = payload(HostApiHostAuthRevokeRequest.self), let mine = entry.state.deviceId,
                   deps.authenticate(p.token) == mine else { return fail(session, id, "denied", "Only this connection's own token can be revoked here.") }
             deps.revoke(mine)
+            deps.audit("revoke_self", entry.peer, mine, nil, nil)
             respond(session, id, .hostAuthRevoke, HostApiHostAuthRevokeResult(revoked: true))
             // Every live session of this device ends, the asking one included (its response is already sent).
             disconnect(deviceId: mine)
@@ -225,6 +243,7 @@ final class HostApiV1Gateway {
             case .lines(let lines): respond(session, id, .chatSnapshot, HostApiChatSnapshotResult(messages: Self.messages(lines, limit: limit)))
             }
         case .chatSend:
+            if let wait = rate.turn(deviceId: entry.state.deviceId ?? "", now: deps.now()) { return rateRefused(session, id, wait) }
             guard let p = payload(HostApiChatSendRequest.self) else { return fail(session, id, "invalid_payload", "Bad chat.send payload.") }
             if let why = deps.tierRefusal(MobileProtocol.Tag.llmIdeChat) { return fail(session, id, "denied", why) }
             let internalId = HostApiV1CommandIds.internalId(session: session, external: id)
@@ -265,6 +284,42 @@ final class HostApiV1Gateway {
     }
 
     // MARK: - Helpers
+
+    /// The top-level request id from the frame's head, never a full parse (the desktop's `TOP_LEVEL_ID`): only
+    /// scalar envelope members may precede "id", so a payload's nested "id" never matches (nil then).
+    private static let topLevelId = try! NSRegularExpression(
+        pattern: #"^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})""#)
+
+    nonisolated static func cheapId(_ data: Data) -> String? {
+        let head = String(decoding: data.prefix(512), as: UTF8.self) as NSString
+        guard let m = topLevelId.firstMatch(in: head as String, range: NSRange(location: 0, length: head.length)) else { return nil }
+        return head.substring(with: m.range(at: 1))
+    }
+
+    private func rateRefused(_ session: Int, _ replyTo: String?, _ wait: TimeInterval) {
+        fail(session, replyTo, "rate_limited", "Too many requests — slow down and try again.", retryable: true,
+             retryAfterMs: Int((wait * 1000).rounded(.up)))
+        guard rate.refused(session: session), let entry = sessions[session] else { return }
+        deps.log("Host API v1 connection \(session) closed after repeated rate refusals")
+        deps.audit("rate_closed", entry.peer, entry.state.deviceId, nil, entry.peer)
+        close(session)
+        closed(session: session)
+    }
+
+    /// Consults one pairing throttle; true means the attempt was refused (and audited, de-duplicated per peer).
+    private func throttled(_ session: Int, _ id: String, _ peer: String, _ throttle: PairingThrottle, _ event: String) -> Bool {
+        let d = throttle.decision(for: peer, now: deps.now())
+        switch d {
+        case .allow: return false
+        case .wait(let s): fail(session, id, "auth_failed", "Too many attempts — wait a moment and try again.", retryable: true, retryAfterMs: Int(s * 1000))
+        case .lockedOut: fail(session, id, "auth_failed", "Too many wrong PINs — locked out for 15 minutes.", retryable: true, retryAfterMs: 15 * 60 * 1000)
+        case .serverThrottled: fail(session, id, "auth_failed", "This Mac is refusing new pairings for a few minutes.", retryable: true, retryAfterMs: 60_000)
+        }
+        let kind: String
+        switch d { case .wait: kind = "wait"; case .lockedOut: kind = "lockedOut"; default: kind = "serverThrottled" }
+        deps.audit(event, peer, nil, kind, peer)
+        return true
+    }
 
     static func messages(_ lines: [MobileChatLine], limit: Int) -> [HostApiChatSnapshotResultMessagesItem] {
         let recent = lines.filter { $0.role == "user" || $0.role == "assistant" }
