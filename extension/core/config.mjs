@@ -126,6 +126,14 @@ export function parseFeatures(raw, warn = console.warn) {
   return readOnlySet(enabled);
 }
 
+const WEB_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1):[0-9]{1,5}$/;
+/** LLMIDE_HOST_API_WEB_ORIGINS -> frozen list of loopback http origins; every dropped entry is reported by name. */
+export function parseHostApiWebOrigins(raw, warn = console.warn) {
+  const entries = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  for (const e of entries) if (!WEB_ORIGIN_RE.test(e)) warn(`[config] LLMIDE_HOST_API_WEB_ORIGINS: dropping ${JSON.stringify(e)} (only http://localhost:<port> or http://127.0.0.1:<port> are accepted)`);
+  return Object.freeze(entries.filter((e) => WEB_ORIGIN_RE.test(e)));
+}
+
 // The per-process test DB (see `dbPath` below) is removed when the test
 // process exits, so `npm test` leaves nothing behind in the temp dir.
 const TEST_DB_PATH = process.env.NODE_TEST_CONTEXT && !process.env.LLMIDE_DB_PATH
@@ -276,6 +284,12 @@ export const config = Object.freeze({
   // Enabled features (see parseFeatures above): null = all. Parsed once here
   // so routing, /health and ENDPOINTS all read the same set.
   features:     parseFeatures(process.env.LLMIDE_FEATURES),
+
+  // Host API v1 development listener (server/host-api-listener.mjs): never in production.
+  hostApiDev:           process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production',
+  hostApiToolApprovals: process.env.LLMIDE_HOST_API_TOOL_APPROVALS === '1',
+  hostApiChatClear:     process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
+  hostApiWebOrigins:    parseHostApiWebOrigins(process.env.LLMIDE_HOST_API_WEB_ORIGINS),
 
   // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
   // the first chat turn does not pay ~200 ms of module loading; boot itself

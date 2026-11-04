@@ -494,6 +494,8 @@ const ALL_ENDPOINTS = [
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 // The command bus executor (routes/bus/executor.mjs), created and started after listen; null while LLMIDE_BUS=off.
 let bus = null;
+// Host API v1 development listener (LLMIDE_HOST_API_DEV=1 only); { gateway, listener } once started.
+let hostApi = null;
 // Feature route-group handlers, filled at boot (see initFeatureRoutes below).
 let featureHandlers = {};
 
@@ -1149,6 +1151,7 @@ function shutdown(signal) {
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
   stopBackgroundOutcomePoller();
+  if (hostApi) { try { hostApi.gateway.closeAll(); void hostApi.listener.close(); } catch { /* best-effort */ } }
   // Command bus: end open event streams (server.close waits for them) and abort running jobs (their process groups).
   closeBusStreams();
   const busStopped = bus ? bus.stop().catch((err) => logger.warn('shutdown_bus_stop_failed', { error: err.message })) : Promise.resolve();
@@ -1452,5 +1455,20 @@ server.listen(PORT, HOST, () => {
   // either. Never throws — a failure is logged and the first turn retries.
   if (config.enginePrewarm) {
     setImmediate(() => { void prewarmAgentEngine(); });
+  }
+  // Host API v1 development listener: dynamic imports keep the gateway (and agent-v2) off the boot path when the flag is unset.
+  if (config.hostApiDev) {
+    void (async () => {
+      try {
+        const { createGateway } = await import('./routes/host-api/gateway.mjs');
+        const { startHostApiListener, sessionTransport } = await import('./server/host-api-listener.mjs');
+        const { hostname } = await import('node:os');
+        const log = (l) => logger.info(l);
+        const gateway = createGateway({ hostName: () => hostname(), log, ...sessionTransport });
+        const listener = await startHostApiListener({ gateway, log });
+        hostApi = { gateway, listener };
+        logger.info(`Host API v1 (development, loopback only) on 127.0.0.1:${listener.port}`);
+      } catch (err) { logger.error('host_api_listener_failed', { error: err.message }); }
+    })();
   }
 });
