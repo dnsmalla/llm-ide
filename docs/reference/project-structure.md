@@ -1,6 +1,6 @@
 # Project structure
 
-Moved from the root `CLAUDE.md` so the agent instructions stay focused. See [`CLAUDE.md`](../../CLAUDE.md) for the architecture summary.
+Moved from the root `CLAUDE.md` so the agent instructions stay focused. See [`CLAUDE.md`](https://github.com/dnsmalla/llm-ide/blob/main/CLAUDE.md) for the architecture summary.
 
 ```text
 llm-ide/
