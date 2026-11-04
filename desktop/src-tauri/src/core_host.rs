@@ -1141,12 +1141,32 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     if host_api_dev_env(cfg!(debug_assertions), std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref()) {
         cmd.env("LLMIDE_HOST_API_DEV", "1");
     }
+    if let Some(origins) = host_api_web_origins_env(
+        cfg!(debug_assertions),
+        std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref(),
+        std::env::var("LLMIDE_HOST_API_WEB_ORIGINS").ok().as_deref(),
+    ) {
+        cmd.env("LLMIDE_HOST_API_WEB_ORIGINS", origins);
+    }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
 }
 
 /// True when the spawned core gets `LLMIDE_HOST_API_DEV=1`: a debug build whose own env has exactly `1`.
 fn host_api_dev_env(debug: bool, value: Option<&str>) -> bool {
     debug && value == Some("1")
+}
+
+/// The browser origins the core's Host API dev listener may accept (Host API Plan 5). Debug builds only, and only
+/// together with the dev flag; the core itself keeps only loopback origins. Explicit `.env`, never `ALLOWED`.
+pub(crate) fn host_api_web_origins_env(debug: bool, dev: Option<&str>, origins: Option<&str>) -> Option<String> {
+    if !debug || dev != Some("1") {
+        return None;
+    }
+    let v = origins?.trim();
+    if v.is_empty() || v.len() > 1024 {
+        return None;
+    }
+    Some(v.to_string())
 }
 
 /// `node` with the cleared + allowlisted environment, cwd `extension/`, and the data
@@ -1254,6 +1274,18 @@ mod tests {
         assert!(!host_api_dev_env(true, None));
         assert!(!host_api_dev_env(true, Some("true")));
         assert!(!host_api_dev_env(true, Some("")));
+    }
+
+    #[test]
+    fn host_api_web_origins_pass_only_in_debug_with_the_dev_flag() {
+        let o = Some("http://127.0.0.1:5180");
+        assert_eq!(host_api_web_origins_env(true, Some("1"), o), Some("http://127.0.0.1:5180".to_string()));
+        assert_eq!(host_api_web_origins_env(false, Some("1"), o), None, "release builds never forward it");
+        assert_eq!(host_api_web_origins_env(true, None, o), None, "only together with LLMIDE_HOST_API_DEV=1");
+        assert_eq!(host_api_web_origins_env(true, Some("0"), o), None);
+        assert_eq!(host_api_web_origins_env(true, Some("1"), Some("   ")), None);
+        assert_eq!(host_api_web_origins_env(true, Some("1"), Some(&"x".repeat(1025))), None, "bounded");
+        assert_eq!(host_api_web_origins_env(true, Some("1"), None), None);
     }
 
     /// One-shot-per-connection fake server; `reply` builds the raw HTTP response.
