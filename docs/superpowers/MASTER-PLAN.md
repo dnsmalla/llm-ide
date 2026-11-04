@@ -17,12 +17,12 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 3 | 7 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 15 | 4 | 3 | 22 | API 106, contract gates, feature matrix and Host API v1 contract landed; kit K1 moves still ahead |
+| Shared server and core | 16 | 4 | 3 | 23 | API 106, contract gates, feature matrix and Host API v1 contract landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 101 | 61 | 77 | 239 |  |
+| Total | 102 | 61 | 77 | 240 |  |
 
 ## How the surfaces connect
 
@@ -260,7 +260,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Feature matrix: every key off, `404 feature_disabled`, nightly workflow (`bb4342dc`, `79e8207d`) (me)
 - [x] Server migrations append-only, up to `0060` (`extension/kb/migrations/`) (me)
 - [x] Host API v1 contract foundation (Plan 1 of 6: `host.*`, `chat.*`, `approvals.*`, `toolApprovals.*`): envelope, command registry and event schemas with valid/invalid fixtures in `schema/host-api/v1/`, `make host-api-check` conformance gate (12 commands, 7 events), generated Node and Swift command constants with a drift check (`scripts/generate-host-api.mjs --check`); spec `specs/2026-11-03-host-api-design.md` + plan `plans/2026-11-03-host-api-contract.md` (`5622a2b1`..`4fd4aa17`) (me)
-- [x] Host API v1 Plan 2, Mac adapter: loopback development listener (DEBUG + `LLMIDE_HOST_API_DEV=1`, 127.0.0.1:3016+), gateway over the v2 handlers, generated Swift validator/payloads/codec; plan `plans/2026-11-04-host-api-mac-adapter.md` (`b3dfd46b`..HEAD_SHA) (me)
+- [x] Host API v1 Plan 2, Mac adapter: loopback development listener (DEBUG + `LLMIDE_HOST_API_DEV=1`, 127.0.0.1:3016+), gateway over the v2 handlers, generated Swift validator/payloads/codec; plan `plans/2026-11-04-host-api-mac-adapter.md` (`b3dfd46b`..d12a5724) (me)
 - [ ] Host API Plans 3 to 6: desktop adapter, iOS transport, web client, TLS/WSS + fingerprint pinning + Origin allowlist (me)
 - [x] Plugin/MCP/LLM-source routes moved to `routes/extension-routes.mjs` (`58ac81b8`) (me)
 - [x] `POST /kb/complete` one-shot completion, API 88 (`ba65026b`) (me)
