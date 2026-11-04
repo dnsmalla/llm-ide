@@ -46,7 +46,8 @@ public final class HostApiV1Client: HostConnection {
     /// No reply in time, or the socket failed. It never leaves the client: `send` turns it into `host_unreachable`.
     private struct Silence: Error {}
 
-    nonisolated deinit {
+    // A deinit is nonisolated by default; spelling it `nonisolated` needs Swift 6.2+ (CI's Xcode is older).
+    deinit {
         readTask?.cancel()
         pingTask?.cancel()
         socket?.cancel()
