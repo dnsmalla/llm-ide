@@ -114,6 +114,10 @@ const SKIP_RULES = [
     when: (fx) => /^(GET|POST|DELETE) \/host-api\//.test(fx.endpoint) && fx.status !== 403,
   },
   {
+    why: 'token check: needs a vault token seeded for the fixture user; covered by tests/kb-repo-token.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /kb/repos/check-token' && (fx.status === 200 || fx.status === 403),
+  },
+  {
     why: 'rate limit (429): needs a bucket exhausted by earlier calls',
     when: (fx) => fx.status === 429,
   },
