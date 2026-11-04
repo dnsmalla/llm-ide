@@ -71,6 +71,12 @@ final class MobileControlManager {
     /// Everything user-facing (Bonjour, the pairing QR, the settings Port
     /// row) reads this, never the configured value.
     private(set) var activePort: Int?
+    /// The port the Host API v1 listener actually bound, and the TLS fingerprint clients pin (nil in plaintext dev mode).
+    private(set) var hostApiPort: Int?
+    private(set) var hostApiFingerprint: String?
+    /// Why the v1 TLS listener could not load its identity (`.corrupt` → Settings offers Reset security identity).
+    /// Never resolved by silently minting a new identity: that would break every pin.
+    private(set) var hostApiIdentityFailure: HostApiV1Identity.Failure?
     private(set) var logLines: [MobileLogLine] = []
     var lastError: String?
 
@@ -444,33 +450,20 @@ final class MobileControlManager {
         // advertising a port nothing listens on is exactly the phantom the
         // iPhone then misreads as "Wrong PIN". `mobileServerDidBind` starts
         // it with the port that actually took.
-        if HostApiV1Listener.devListenerAllowed(environment: ProcessInfo.processInfo.environment,
-                                                isDebugBuild: HostApiV1Listener.isDebugBuild) {
-            let gateway = HostApiV1Gateway(dependencies: makeHostApiDependencies())
-            let (events, continuation) = AsyncStream<HostApiV1ListenerEvent>.makeStream()
-            let listener = HostApiV1Listener(
-                onOpen: { s, peer in continuation.yield(.opened(s, peer)) },
-                onFrame: { s, d in continuation.yield(.frame(s, d)) },
-                onClose: { s in continuation.yield(.closed(s)) },
-                onListening: { _ in },
-                onLog: { [weak self] line in Task { @MainActor [weak self] in self?.append(.info, line) } })
-            gateway.send = { [weak listener] s, d in listener?.send(s, d) }
-            gateway.close = { [weak listener] s in listener?.close(s) }
-            // One sequential drain keeps a session's frames in order across the awaits inside receive.
-            hostApiDrain = Task { @MainActor in
-                for await e in events {
-                    switch e {
-                    case .opened(let s, let peer): gateway.opened(session: s, peer: peer)
-                    case .frame(let s, let d): await gateway.receive(session: s, data: d)
-                    case .closed(let s): gateway.closed(session: s)
-                    }
-                }
-            }
-            hostApiEvents = continuation
-            do { try listener.start(); hostApiGateway = gateway; hostApiListener = listener }
-            catch {
-                continuation.finish(); hostApiDrain?.cancel(); hostApiDrain = nil; hostApiEvents = nil
-                append(.stderr, "Host API v1 development listener did not start: \(error.localizedDescription)")
+        switch HostApiV1Listener.mode(environment: ProcessInfo.processInfo.environment, defaults: .standard,
+                                      isDebugBuild: HostApiV1Listener.isDebugBuild) {
+        case .off: break
+        case .devPlaintext: startHostApi(transport: .devPlaintext, fingerprint: nil)
+        case .tls:
+            // The only loadOrCreate call site: start() runs on the main actor, so it is never concurrent.
+            do {
+                let id = try HostApiV1Identity.loadOrCreate(hostName: Self.deviceName())
+                hostApiIdentityFailure = nil
+                startHostApi(transport: .tls(id.identity), fingerprint: id.fingerprint)
+            } catch {
+                let failure = error as? HostApiV1Identity.Failure ?? .securityFramework("unknown")
+                hostApiIdentityFailure = failure
+                append(.stderr, "Host API v1 TLS listener did not start: the security identity is unavailable (\(Self.describe(failure))). Unlock the keychain or use Reset security identity.")
             }
         }
         status = .running
@@ -556,7 +549,52 @@ final class MobileControlManager {
         self.advertiser = advertiser
     }
 
-    func makeHostApiDependencies() -> HostApiV1Gateway.Dependencies {
+    /// Short, stable failure text for the log (never the Security framework's free-form error string).
+    private static func describe(_ failure: HostApiV1Identity.Failure) -> String {
+        switch failure {
+        case .corrupt: return "corrupt"
+        case .keychain(let status): return "keychain \(status)"
+        case .securityFramework: return "security_framework"
+        }
+    }
+
+    private func startHostApi(transport: HostApiV1Listener.Transport, fingerprint: String?) {
+        let gateway = HostApiV1Gateway(dependencies: makeHostApiDependencies(fingerprint: fingerprint))
+        let (events, continuation) = AsyncStream<HostApiV1ListenerEvent>.makeStream()
+        let allowlist = HostApiV1Origins.parse(HostApiV1Origins.configured(environment: ProcessInfo.processInfo.environment, defaults: .standard),
+                                               log: { [weak self] l in self?.append(.info, l) })
+        let listener = HostApiV1Listener(
+            transport: transport, originAllowlist: allowlist,
+            onRefused: { [weak self] event, peer, detail in
+                let line = "Host API v1 refused a connection: \(event) peer=\(peer)" + (detail.isEmpty ? "" : " \(detail)")
+                Task { @MainActor [weak self] in self?.append(.info, line) }
+            },
+            onOpen: { s, peer in continuation.yield(.opened(s, peer)) },
+            onFrame: { s, d in continuation.yield(.frame(s, d)) },
+            onClose: { s in continuation.yield(.closed(s)) },
+            onListening: { [weak self] port in Task { @MainActor [weak self] in self?.hostApiPort = port } },
+            onLog: { [weak self] line in Task { @MainActor [weak self] in self?.append(.info, line) } })
+        gateway.send = { [weak listener] s, d in listener?.send(s, d) }
+        gateway.close = { [weak listener] s in listener?.close(s) }
+        // One sequential drain keeps a session's frames in order across the awaits inside receive.
+        hostApiDrain = Task { @MainActor in
+            for await e in events {
+                switch e {
+                case .opened(let s, let peer): gateway.opened(session: s, peer: peer)
+                case .frame(let s, let d): await gateway.receive(session: s, data: d)
+                case .closed(let s): gateway.closed(session: s)
+                }
+            }
+        }
+        hostApiEvents = continuation
+        do { try listener.start(); hostApiGateway = gateway; hostApiListener = listener; hostApiFingerprint = fingerprint }
+        catch {
+            continuation.finish(); hostApiDrain?.cancel(); hostApiDrain = nil; hostApiEvents = nil
+            append(.stderr, "Host API v1 listener did not start: \(error.localizedDescription)")
+        }
+    }
+
+    func makeHostApiDependencies(fingerprint: String? = nil) -> HostApiV1Gateway.Dependencies {
         HostApiV1Gateway.Dependencies(
             hostName: { Self.deviceName() },
             validatePin: { Self.pinMatches(candidate: $0, current: MobilePin.read()) },
@@ -575,7 +613,8 @@ final class MobileControlManager {
             history: { [weak self] in await self?.quickChatHistory(limit: $0) ?? .unavailable("Mobile Control stopped.") },
             clear: { [weak self] in await self?.clearQuickChat() ?? .unavailable("Mobile Control stopped.") },
             cancel: { [weak self] in self?.cancelMobileInflightTask(commandId: $0) },
-            log: { [weak self] in self?.append(.info, $0) })
+            log: { [weak self] in self?.append(.info, $0) },
+            certificateFingerprint: { fingerprint })
     }
 
     /// Tear down the native server and Bonjour advertisement. Idempotent —
@@ -598,6 +637,8 @@ final class MobileControlManager {
         hostApiListener = nil
         hostApiEvents?.finish(); hostApiEvents = nil
         hostApiDrain?.cancel(); hostApiDrain = nil
+        hostApiPort = nil
+        hostApiFingerprint = nil
         server?.stop()
         server = nil
         advertiser?.stop()

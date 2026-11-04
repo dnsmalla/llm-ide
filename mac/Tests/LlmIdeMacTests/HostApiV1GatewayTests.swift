@@ -16,6 +16,7 @@ final class HostApiV1GatewayTests {
     var pinRotations = 0
     var toolApprovals = false
     var historyLines = [MobileChatLine(role: "user", content: "hi")]
+    var fingerprint: String?
 
     func gateway() -> HostApiV1Gateway {
         let g = HostApiV1Gateway(dependencies: .init(
@@ -32,7 +33,8 @@ final class HostApiV1GatewayTests {
             history: { [unowned self] _ in .lines(self.historyLines) },
             clear: { .cleared },
             cancel: { [unowned self] in self.cancelled.append($0) },
-            log: { _ in }))
+            log: { _ in },
+            certificateFingerprint: { [unowned self] in self.fingerprint }))
         g.send = { [unowned self] s, d in self.sent.append((s, try! JSONSerialization.jsonObject(with: d) as! [String: Any])) }
         g.close = { [unowned self] in self.closed.append($0) }
         return g
@@ -48,6 +50,19 @@ final class HostApiV1GatewayTests {
         g.opened(session: session, peer: "127.0.0.1")
         await g.receive(session: session, data: request("c-h", "host.hello", #"{"clientName":"t","clientVersion":"1","platform":"web","apiVersions":[1]}"#))
         await g.receive(session: session, data: request("c-p", "host.auth.pair", #"{"pin":"\#(pin)"}"#))
+    }
+
+    @Test("host.hello carries certificateFingerprint on a TLS host and omits it on a plaintext one")
+    func helloFingerprint() async {
+        let g = gateway()
+        let hello = #"{"clientName":"t","clientVersion":"1","platform":"web","apiVersions":[1]}"#
+        g.opened(session: 1, peer: "127.0.0.1")
+        await g.receive(session: 1, data: request("c-h", "host.hello", hello))
+        #expect((last["result"] as! [String: Any]).keys.contains("certificateFingerprint") == false)
+        fingerprint = "sha256:abc"
+        g.opened(session: 2, peer: "127.0.0.1")
+        await g.receive(session: 2, data: request("c-h", "host.hello", hello))
+        #expect((last["result"] as! [String: Any])["certificateFingerprint"] as? String == "sha256:abc")
     }
 
     @Test("hello, pair, then the PIN rotates and the token re-authenticates a new connection")

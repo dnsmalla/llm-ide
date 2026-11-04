@@ -24,6 +24,8 @@ final class HostApiV1Gateway {
         var clear: () async -> HostApiQuickChatClear
         var cancel: (_ internalCommandId: String) -> Void
         var log: (String) -> Void
+        /// The pinned TLS identity's fingerprint; nil on the plaintext development listener (field omitted).
+        var certificateFingerprint: () -> String? = { nil }
     }
 
     static let maxSessions = 4
@@ -161,7 +163,7 @@ final class HostApiV1Gateway {
             sessions[session]?.state.greeted(clientName: p.clientName)
             respond(session, id, .hostHello, HostApiHostHelloResult(
                 apiVersion: 1, apiVersions: [1], capabilities: deps.capabilities(),
-                hostKind: "mac", hostName: HostApiFrame.clamp(deps.hostName(), maxUTF16: 120),
+                certificateFingerprint: deps.certificateFingerprint(), hostKind: "mac", hostName: HostApiFrame.clamp(deps.hostName(), maxUTF16: 120),
                 protocolVersion: MobileProtocol.protocolVersion, requiresAuth: true))
         case .hostAuthPair:
             guard let p = payload(HostApiHostAuthPairRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.pair payload.") }

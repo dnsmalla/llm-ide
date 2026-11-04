@@ -12,11 +12,11 @@ struct HostApiV1ListenerTests {
         #expect(!HostApiV1Listener.devListenerAllowed(environment: ["LLMIDE_HOST_API_DEV": "true"], isDebugBuild: true))
     }
 
-    @Test("a handshake carrying Origin is refused, whatever its case")
+    @Test("with an empty allowlist a handshake carrying Origin is refused, whatever its case")
     func origin() {
-        #expect(HostApiV1Listener.refusesHandshake(headers: [("Origin", "https://evil.example")]))
-        #expect(HostApiV1Listener.refusesHandshake(headers: [("origin", "null")]))
-        #expect(!HostApiV1Listener.refusesHandshake(headers: [("Host", "127.0.0.1:3016")]))
+        #expect(HostApiV1Listener.refusesHandshake(headers: [("Origin", "https://evil.example")], allowlist: []))
+        #expect(HostApiV1Listener.refusesHandshake(headers: [("origin", "null")], allowlist: []))
+        #expect(!HostApiV1Listener.refusesHandshake(headers: [("Host", "127.0.0.1:3016")], allowlist: []))
     }
 
     @Test("listener events drain in yield order from one stream")
@@ -38,7 +38,8 @@ struct HostApiV1ListenerTests {
     func loopbackRoundTrip() async throws {
         let port = 3016 + Int.random(in: 200...900)
         let frames = FrameBox()
-        let listener = HostApiV1Listener(basePort: port, candidates: 3,
+        let listener = HostApiV1Listener(basePort: port, candidates: 3, transport: .devPlaintext, originAllowlist: [],
+                                         onRefused: { _, _, _ in },
                                          onOpen: { _, _ in }, onFrame: { s, d in frames.add(s, d) }, onClose: { _ in },
                                          onListening: { frames.bound($0) }, onLog: { _ in })
         try listener.start()
@@ -59,6 +60,7 @@ final class FrameBox: @unchecked Sendable {
     private var frames: [Data] = []
     func bound(_ p: Int) { lock.lock(); port = p; lock.unlock() }
     func add(_ s: Int, _ d: Data) { lock.lock(); frames.append(d); lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return frames.count }
     func waitForBind() async throws -> Int {
         for _ in 0..<100 { lock.lock(); let p = port; lock.unlock(); if let p { return p }; try await Task.sleep(nanoseconds: 20_000_000) }
         throw CancellationError()
