@@ -59,3 +59,21 @@ test("the list renders at most 50 messages and offers older ones", () => {
   assert.match(out, /Show older/);
   assert.doesNotMatch(out, /line-69\b/);
 });
+
+test("an over-long send keeps the draft, raises the alert and never reaches send", () => {
+  const calls = { send: 0, draft: [], error: [] };
+  const g = UI.createDraftGuard({ send: () => calls.send++, setDraft: (t) => calls.draft.push(t), setError: (m) => calls.error.push(m) });
+  g.onSend("x".repeat(100_001)); g.onDraft(""); // the Composer clears right after onSend
+  assert.equal(calls.send, 0);
+  assert.deepEqual(calls.draft, []);
+  assert.match(calls.error.at(-1), /under 100,000/);
+  g.onSend("ok"); g.onDraft("");
+  assert.equal(calls.send, 1);
+  assert.deepEqual(calls.draft, [""]);
+  assert.equal(calls.error.at(-1), null);
+});
+
+test("clear history is disabled while offline or without chat", () => {
+  assert.match(html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: { kind: "idle" } }))), /<button[^>]*disabled[^>]*>Clear history/);
+  assert.doesNotMatch(html(h(UI.WebChat, chatProps(UI.initialChatState, { capabilities: caps("chat") }))), /<button[^>]*disabled[^>]*>Clear history/);
+});

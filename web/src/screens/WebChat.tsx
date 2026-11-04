@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Chip, StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
 import { Composer } from "@llmide/screens/chat/Composer.tsx";
@@ -8,6 +8,7 @@ import "@llmide/screens/chat/approvals/approvals.css";
 import type { ConnectionState } from "../host-api/connection.ts";
 import type { HostApiCapability } from "../host-api/types.generated.ts";
 import type { ChatState, WebMessage } from "../chat/store.ts";
+import { MAX_SEND_CHARS } from "../chat/controller.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 export interface WebChatProps {
@@ -26,6 +27,25 @@ export interface WebChatProps {
 
 const PAGE = 50;
 const openLink = (href: string) => { if (/^https?:\/\//.test(href)) window.open(href, "_blank", "noopener,noreferrer"); };
+
+export const TOO_LONG = "Keep a message under 100,000 characters. Your text is kept so you can shorten it.";
+
+// The shared Composer clears the draft right after onSend; an over-long send must keep it (the controller would refuse it unseen).
+export function createDraftGuard(o: { send: (t: string) => void; setDraft: (t: string) => void; setError: (m: string | null) => void }) {
+  let refused = false;
+  return {
+    onSend(text: string) {
+      if (text.trim().length > MAX_SEND_CHARS) { refused = true; o.setError(TOO_LONG); return; }
+      o.setError(null);
+      o.send(text);
+    },
+    onDraft(text: string) {
+      if (text === "" && refused) { refused = false; return; }
+      refused = false;
+      o.setDraft(text);
+    },
+  };
+}
 
 function chipLabel(c: ConnectionState) {
   if (c.kind === "ready") return "Connected";
@@ -47,6 +67,11 @@ function Message({ m }: { m: WebMessage }) {
 export function WebChat(p: WebChatProps) {
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(PAGE);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const guard = useRef<ReturnType<typeof createDraftGuard>>(null);
+  const send = useRef(p.onSend);
+  send.current = p.onSend;
+  guard.current ??= createDraftGuard({ send: (t) => send.current(t), setDraft, setError: setSendError });
   const { state } = p;
   const msgs = state.messages;
   const visible = msgs.slice(Math.max(0, msgs.length - shown));
@@ -59,18 +84,19 @@ export function WebChat(p: WebChatProps) {
         <h1>{p.hostName}</h1>
         <Chip label={chipLabel(p.connection)} />
         <span className="chat-spacer" />
-        {!state.turn && <button type="button" onClick={p.onClear}>Clear history</button>}
+        {!state.turn && <button type="button" onClick={p.onClear} disabled={disabledReason !== null} title={disabledReason ?? undefined}>Clear history</button>}
         <button type="button" onClick={p.onForget}>Forget this host</button>
       </header>
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
       {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
-      <ul className="web-list" aria-live="polite">{visible.map((m) => <Message key={m.key} m={m} />)}</ul>
+      <p className="web-status" role="status" aria-live="polite">{state.turn ? "The assistant is replying…" : ""}</p>
+      <ul className="web-list">{visible.map((m) => <Message key={m.key} m={m} />)}</ul>
       {state.approvals.map((a) =>
         a.kind === "question" ? (
           <div key={a.requestId}>
             <QuestionCard
-              approval={{ requestId: a.requestId, kind: "AskUserQuestion", questions: a.questions as never }}
+              approval={{ requestId: a.requestId, kind: "AskUserQuestion", questions: a.questions }}
               ui={{ phase: a.submitting ? "submitting" : "idle", error: a.error, shown: "", confirmingRule: false }}
               position={questions.indexOf(a) + 1} total={questions.length} turnClosed={false}
               onAnswer={(answers) => p.onAnswer(a.requestId, answers)} onDecline={() => p.onDecline(a.requestId)} />
@@ -79,9 +105,10 @@ export function WebChat(p: WebChatProps) {
         ) : p.capabilities.has("tool_approvals") ? (
           <ToolApprovalCard key={a.requestId} approval={a} onDecide={(d) => p.onTool(a.requestId, d)} />
         ) : null)}
-      <Composer draft={draft} onDraft={setDraft} busy={state.turn !== null} aborting={false} queue={[]}
+      {sendError && <p role="alert" className="web-error">{sendError}</p>}
+      <Composer draft={draft} onDraft={(t) => guard.current!.onDraft(t)} busy={state.turn !== null} aborting={false} queue={[]}
         history={msgs.filter((m) => m.role === "user").map((m) => m.text)}
-        onSend={(t) => { p.onSend(t); setDraft(""); }} onStop={p.onStop} onDropQueued={() => {}} disabledReason={disabledReason} />
+        onSend={(t) => guard.current!.onSend(t)} onStop={p.onStop} onDropQueued={() => {}} disabledReason={disabledReason} />
     </main>
   );
 }

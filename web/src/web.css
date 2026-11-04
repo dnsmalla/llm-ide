@@ -10,3 +10,5 @@
 .web-user { align-self: flex-end; max-width: 85%; }
 .web-summary, .web-path { margin: 4px 0; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .web-actions { display: flex; gap: 8px; }
+.web-status:empty { display: none; }
+.web-error { margin: 0; }
