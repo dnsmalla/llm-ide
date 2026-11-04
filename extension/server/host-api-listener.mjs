@@ -10,6 +10,11 @@ import { handshakeRefusal, acceptUpgrade } from './ws-server.mjs';
 const PATH = '/host-api/v1';
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
+/** Bounds for the TLS listener, which an unpaired LAN peer can reach in the same process as the main server and
+ *  SQLite: a socket must finish TLS and send its upgrade within 10 s, and at most 32 sockets are open at once
+ *  (the gateway's 4-session cap and 10 s auth timeout only start after the upgrade). */
+export const LISTENER_LIMITS = Object.freeze({ handshakeTimeoutMs: 10_000, maxConnections: 32, requestTimeoutMs: 10_000 });
+
 export const sessionTransport = {
   send: (s, text) => { try { s.conn.send(text); } catch { /* closed */ } },
   close: (s) => { try { s.conn.close(1000); } catch { /* closed */ } },
@@ -40,14 +45,17 @@ function listenOn(server, port, host) {
 }
 
 export async function startHostApiListener({ gateway, tls = null, basePort = 3016, candidates = 10, log = () => {},
-  onRefused = () => {}, originAllowlist = config.hostApiWebOrigins }) {
+  onRefused = () => {}, originAllowlist = config.hostApiWebOrigins, limits = LISTENER_LIMITS }) {
   let nextId = 0;
   const live = new Set();
   const notFound = (req, res) => { res.writeHead(404, { 'Content-Length': 0 }).end(); };
   const host = tls ? '0.0.0.0' : '127.0.0.1';
   const server = tls
-    ? https.createServer({ cert: tls.certPem, key: tls.keyPem, minVersion: 'TLSv1.2' }, notFound)
+    ? https.createServer({ cert: tls.certPem, key: tls.keyPem, minVersion: 'TLSv1.2', handshakeTimeout: limits.handshakeTimeoutMs }, notFound)
     : http.createServer(notFound);
+  server.maxConnections = limits.maxConnections;
+  server.headersTimeout = limits.requestTimeoutMs;
+  server.requestTimeout = limits.requestTimeoutMs;
 
   if (tls) {
     // A pin mismatch shows up here as the client aborting the handshake. Logged by code only, once per peer per minute.

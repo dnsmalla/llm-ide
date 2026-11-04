@@ -258,6 +258,10 @@ if (_bcryptCost < 10 || _bcryptCost > 14) {
   throw new Error(`LLMIDE_BCRYPT_COST must be between 10 and 14 (got ${_bcryptCost})`);
 }
 
+// Host API v1 listener switches, read once so hostApiMode and the flags cannot disagree.
+const HOST_API_TLS = process.env.LLMIDE_HOST_API_TLS === '1';
+const HOST_API_DEV = process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production';
+
 export const config = Object.freeze({
   env:          isProd ? 'production' : envStr('NODE_ENV', 'development'),
   isProd,
@@ -279,14 +283,13 @@ export const config = Object.freeze({
   features:     parseFeatures(process.env.LLMIDE_FEATURES),
 
   // Host API v1 development listener (server/host-api-listener.mjs): never in production.
-  hostApiDev:           process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production',
+  hostApiDev:           HOST_API_DEV,
   hostApiToolApprovals: process.env.LLMIDE_HOST_API_TOOL_APPROVALS === '1',
   hostApiChatClear:     process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
-  hostApiTls:           process.env.LLMIDE_HOST_API_TLS === '1',
+  hostApiTls:           HOST_API_TLS,
   hostApiWebOrigins:    parseOriginAllowlist(process.env.LLMIDE_HOST_API_WEB_ORIGINS, console.warn),
   // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
-  hostApiMode:          process.env.LLMIDE_HOST_API_TLS === '1' ? 'tls'
-    : (process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production') ? 'dev' : 'off',
+  hostApiMode:          HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',
 
   // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
   // the first chat turn does not pay ~200 ms of module loading; boot itself

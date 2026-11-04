@@ -7,6 +7,7 @@ process.env.LLMIDE_LOG_FILE = 'none';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +17,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { getDb } = await import('../kb/db.mjs');
 const { loadOrCreateHostIdentity, resetHostIdentity } = await import('../server/host-identity.mjs');
-const { startHostApiListener, upgradeRefusal } = await import('../server/host-api-listener.mjs');
+const { startHostApiListener, upgradeRefusal, LISTENER_LIMITS } = await import('../server/host-api-listener.mjs');
 const { pinnedUpgrade } = await import('./helpers/pinned-ws.mjs');
 
 after(() => { for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } } });
@@ -103,4 +104,61 @@ test('upgradeRefusal: plaintext refuses a non-loopback peer; TLS does not; origi
   assert.deepEqual(upgradeRefusal(req('192.168.1.20', { origin: 'https://evil.example' }), { tls: true, allowlist: [] }),
     { status: 403, event: 'origin_refused', detail: 'https://evil.example' });
   assert.deepEqual(upgradeRefusal({ ...req('127.0.0.1'), url: '/x' }, { tls: false, allowlist: [] }), { status: 404, event: null, detail: '' });
+});
+
+test('a reloaded identity pins the certificate actually served', async () => {
+  const reloaded = loadOrCreateHostIdentity(getDb(), { hostName: 'Test' });
+  assert.equal(reloaded.created, false);
+  const l = await startHostApiListener({ gateway: fakeGateway(), tls: { certPem: reloaded.certPem, keyPem: reloaded.keyPem }, basePort: 0 });
+  const { status, socket } = await pinnedUpgrade({ port: l.port, fingerprint: reloaded.fingerprint });
+  assert.equal(status, 101);
+  socket.destroy();
+  await l.close();
+});
+
+const closedWithin = (sock, ms) => new Promise((resolve) => {
+  const t = setTimeout(() => resolve(false), ms);
+  sock.on('close', () => { clearTimeout(t); resolve(true); });
+  sock.on('error', () => {});
+});
+
+test('a socket that never completes TLS is closed after the handshake timeout', async () => {
+  const l = await start({ limits: { ...LISTENER_LIMITS, handshakeTimeoutMs: 300 } });
+  const idle = net.connect(l.port, '127.0.0.1');
+  const t0 = Date.now();
+  assert.equal(await closedWithin(idle, 3000), true);
+  assert.ok(Date.now() - t0 >= 250, 'not before the timeout');
+  await l.close();
+});
+
+test('connections past the cap are refused', async () => {
+  const gateway = fakeGateway();
+  const l = await start({ gateway, limits: { ...LISTENER_LIMITS, maxConnections: 2 } });
+  const held = [net.connect(l.port, '127.0.0.1'), net.connect(l.port, '127.0.0.1')];
+  await Promise.all(held.map((s) => new Promise((r) => s.once('connect', r))));
+  await wait(50);
+  const third = net.connect(l.port, '127.0.0.1');
+  assert.equal(await closedWithin(third, 1000), true, 'the third socket is dropped');
+  await assert.rejects(pinnedUpgrade({ port: l.port, fingerprint: identity.fingerprint }));
+  assert.equal(gateway.openedCount, undefined);
+  for (const s of held) s.destroy();
+  await l.close();
+  assert.equal(LISTENER_LIMITS.maxConnections, 32);
+  assert.equal(LISTENER_LIMITS.handshakeTimeoutMs, 10_000);
+  assert.equal(LISTENER_LIMITS.requestTimeoutMs, 10_000);
+});
+
+test('TLS client errors are logged once per peer per minute, by code only', async () => {
+  const lines = [];
+  const l = await start({ log: (line) => lines.push(line) });
+  for (let i = 0; i < 2; i++) {
+    const s = net.connect(l.port, '127.0.0.1', () => s.write('GET /host-api/v1 HTTP/1.1\r\nHost: x\r\nX-Secret: hunter2\r\n\r\n'));
+    await closedWithin(s, 2000);
+  }
+  await wait(50);
+  const tlsLines = lines.filter((x) => /TLS handshake failed/.test(x));
+  assert.equal(tlsLines.length, 1, JSON.stringify(lines));
+  assert.match(tlsLines[0], /^Host API v1 TLS handshake failed from [0-9a-f:.]+: [A-Z0-9_]+$/);
+  assert.ok(!/GET|hunter2/.test(tlsLines[0]));
+  await l.close();
 });

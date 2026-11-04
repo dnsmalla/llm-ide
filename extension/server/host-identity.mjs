@@ -59,9 +59,14 @@ export function loadOrCreateHostIdentity(db, { hostName, now = Date.now(), onEve
   const row = db.prepare('SELECT cert_der, key_enc, fingerprint, not_after FROM host_api_identity WHERE id = 1').get();
   if (row) {
     try {
-      const keyPem = crypto.createPrivateKey({ key: Buffer.from(decryptKey(VAULT_SCOPE, row.key_enc), 'base64'), format: 'der', type: 'pkcs8' })
-        .export({ type: 'pkcs8', format: 'pem' });
-      return { certPem: new X509Certificate(row.cert_der).toString(), keyPem, fingerprint: row.fingerprint, notAfter: row.not_after, created: false };
+      const key = crypto.createPrivateKey({ key: Buffer.from(decryptKey(VAULT_SCOPE, row.key_enc), 'base64'), format: 'der', type: 'pkcs8' });
+      const x509 = new X509Certificate(row.cert_der);
+      // The advertised pin must be the served cert's, and that cert must belong to the key; otherwise unrecoverable.
+      const fingerprint = fingerprintOfSpki(x509.publicKey.export({ type: 'spki', format: 'der' }));
+      if (x509.checkPrivateKey(key) && fingerprint === row.fingerprint) {
+        return { certPem: x509.toString(), keyPem: key.export({ type: 'pkcs8', format: 'pem' }), fingerprint, notAfter: row.not_after, created: false };
+      }
+      reset = true;
     } catch (e) {
       if (!isUnrecoverable(e)) throw e;
       // The vault key changed (or the row was tampered with): the old key is unrecoverable. Every pinned

@@ -67,6 +67,27 @@ test('an unexpected error propagates and leaves identity and devices intact', ()
   assert.equal(db.prepare('SELECT COUNT(*) n FROM host_api_identity').get().n, 1);
 });
 
+test('a stored cert that does not match its key, or a tampered fingerprint column, resets the identity', () => {
+  const db = getDb();
+  id.resetHostIdentity(db);
+  const a = id.loadOrCreateHostIdentity(db, { hostName: 'Desk' });
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const foreign = id.buildSelfSignedCert({ privateKey, publicKey, commonName: 'LLM-IDE Other', notBefore: Date.now(),
+    notAfter: Date.now() + id.VALIDITY_MS, serial: Buffer.alloc(16, 0x11) });
+  db.prepare('UPDATE host_api_identity SET cert_der = ?').run(foreign);
+  const events = [];
+  const b = id.loadOrCreateHostIdentity(db, { hostName: 'Desk', onEvent: (e) => events.push(e) });
+  assert.ok(b.created);
+  assert.deepEqual(events, ['identity_reset', 'identity_created']);
+  assert.notEqual(b.fingerprint, a.fingerprint);
+  db.prepare('UPDATE host_api_identity SET fingerprint = ?').run(`sha256:${'A'.repeat(43)}`);
+  const c = id.loadOrCreateHostIdentity(db, { hostName: 'Desk', onEvent: (e) => events.push(e) });
+  assert.ok(c.created, 'a fingerprint column that does not pin the stored cert is not trusted');
+  const d = id.loadOrCreateHostIdentity(db, { hostName: 'Desk' });
+  assert.ok(!d.created);
+  assert.equal(d.fingerprint, id.fingerprintOfSpki(new X509Certificate(d.certPem).publicKey.export({ type: 'spki', format: 'der' })));
+});
+
 test('dates from 2050 are GeneralizedTime and still parse', () => {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const notAfter = Date.UTC(2051, 0, 2, 3, 4, 5);
