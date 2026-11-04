@@ -14,15 +14,15 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 21 | 38 | 15 | 74 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; CI green on macOS and Linux, Windows red only in `cargo test` (22) |
-| Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
+| Mobile (iPhone native, PWA) | 10 | 5 | 12 | 27 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 7 | 3 | 6 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 20 | 4 | 2 | 26 | API 107, contract gates, feature matrix, Host API v1 contract and desktop adapter landed; kit K1 moves still ahead |
+| Shared server and core | 20 | 4 | 2 | 26 | API 108, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 109 | 61 | 73 | 243 |  |
+| Total | 110 | 60 | 75 | 245 |  |
 
 ## How the surfaces connect
 
@@ -201,7 +201,9 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Command bus S2: the Swift security fixes are done and tested (one tier table and gate for every wire type; Auto Task run honours the enable flag; template/config/toggle desktop-only; implement, review-merge and Self-Heal apply/discard need a desktop confirmation; phone explore never inherits Bypass; queued Loop starts re-validated at execution; dead `history`/`images` fields removed); the envelope mapper behind `mobile.commandBus` is not started (me)
 - [x] Mobile docs corrected against the code (port fallback, tabs, chatHost, cleartext warning, capability table) and verification rows F1-F18 added; the 14 untested protocol files now have round-trip tests (me)
 - [ ] Run the new `docs/mobile/verification.md` F-rows on a real iPhone and record the result (you)
-- [~] Mobile TLS with SPKI pinning: design written (`plans/2026-10-31-mobile-tls-pinning-design.md`), not implemented; needs Q1-Q4 and an on-device Tailscale test (me)
+- [x] Mobile TLS with SPKI pinning for Host API v1: Mac TLS listener + identity (Plan 6), phone `wss://` pinning from the QR only, port follow from a matching TXT (Plan 4 Task 9, `1f9a20c9`..`fe874634`, `b71320b6`); the v2 link `:3006` stays plaintext until it retires; on-device pinned-pairing + Tailscale check deferred to the product stage (you) (me)
+- [ ] Before Host API TLS is on by default: one PIN throttle shared by the v2 link and the v1 gateway on the Mac (today a guesser gets both budgets; schema README "Host differences") (me)
+- [ ] Desktop Settings pairing card shows the `llmide://pair` QR (`h1port`, `h1fp`, `api=1`) so a phone can pin the desktop host (the phone pins from a QR only) (me)
 - [~] Command bus S3: API 100 job API is built and tested (nine `/bus/*` routes, desktop approvals with a nonce, execution-time re-check, idempotency, gap-free SSE replay, cancel, quotas, `LLMIDE_BUS=off`, crash recovery, engine interface: claude and adapter available, codex and gemini DISABLED `ENGINE_NOT_SANDBOXED` until an OS sandbox exists; security review H1/M1/M2/M3/M5 and the LOW items fixed in API 102: derived host proof, chat-bound Bypass token, own-property schema lookups, orphan reaper and per-user cap, byte caps, audit rows, read scope by class, hardened git); `custom.run` is desktop-only (registry `clients`, 403 `KIND_NOT_ALLOWED_FOR_CLIENT` for phone/extension; the Mac phone bridge refuses and hides custom tasks, 2026-10-31); only `review` is available, the other five kinds answer `KIND_NOT_AVAILABLE` until Node owns their data (source registry, note extractor, Loop definitions, custom tasks, write engines) (`docs/spec/command-bus.md`) (me)
 - [ ] Command bus S4: iOS client rewritten as renderer over the envelope, old path kept one release (me)
 - [ ] Command bus S5: extension moves to the envelope (me)
