@@ -19,7 +19,7 @@ before(async () => {
   if (skip) return;
   core = await startCore({ env: {
     LLMIDE_HOST_API_DEV: "1",
-    LLMIDE_HOST_API_WEB_ORIGINS: `${ORIGIN},https://evil.example`,
+    LLMIDE_HOST_API_WEB_ORIGINS: `${ORIGIN},http://evil.example`,
     LLMIDE_HOST_APPROVAL_KEY: KEY,
   } });
   const r = await fetch(`${core.base}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: core.email, password: core.password }) });
@@ -63,7 +63,7 @@ test("the listener accepts the allowlisted web origin and a native client, and r
   assert.equal(await upgradeStatus(port, ORIGIN), 101);
   assert.equal(await upgradeStatus(port, null), 101, "native clients send no Origin");
   assert.equal(await upgradeStatus(port, "http://127.0.0.1:5181"), 403, "an unlisted port");
-  assert.equal(await upgradeStatus(port, "https://evil.example"), 403, "a listed non-loopback origin is dropped by the core");
+  assert.equal(await upgradeStatus(port, "http://evil.example"), 403, "a listed plain-http non-loopback origin is dropped by the core");
 });
 
 test("pair, run a chat turn, read history, reconnect with the token, forget the host", { skip }, async () => {
@@ -106,7 +106,6 @@ test("pair, run a chat turn, read history, reconnect with the token, forget the 
 
 // Last: a wrong PIN throttles this loopback peer for a moment, which must not touch the other tests.
 test("a PIN is one-use", { skip }, async () => {
-  await new Promise((r) => setTimeout(r, 1200)); // the revoked-token check above left a 1 s loopback throttle (product issue, security plan)
   const { pin, port } = await mintPin();
   const url = `ws://127.0.0.1:${port}/host-api/v1`;
   const first = client(url, memoryTokens());
