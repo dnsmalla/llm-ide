@@ -79,3 +79,14 @@ do not repeat it in `result`.
 The desktop host adapter is `extension/routes/host-api/` (gateway, frame codec, session gate, translator) with the listener in `extension/server/host-api-listener.mjs` — development loopback only until TLS lands. The desktop UI mints the pairing PIN and manages paired devices through `POST /host-api/pin`, `GET /host-api/devices` and `DELETE /host-api/devices/:id` (contract `schema/http/host-api.schema.json`).
 
 The web client is `web/` (`web/src/host-api/connection.ts`), and its types are generated into `web/src/host-api/types.generated.ts` by `scripts/generate-host-api.mjs`.
+
+## Host differences
+
+The Mac and desktop hosts serve the same commands, codes and shapes. Where they legitimately differ:
+
+- **Gate prose.** Refusal messages say "This Mac…" on the Mac and "This computer…" on the desktop; the error `code`s (and `retryable`) are identical. Clients branch on `code`, never on message text.
+- **Engine rejections.** On the desktop, a turn refusal whose code it does not know (anything but `TURN_IN_PROGRESS`, `SDK_UPDATING`, `PLUGIN_UPDATING`, `ROUTE_UNAVAILABLE`, `SESSION_TOKEN_LIMIT`, `SLASH_COMMAND_FAILED`) becomes a `chat.error` with a generic message and `retryable: false`. The Mac turns its v2 `CommandError` into a `chat.error` carrying that message (`HostApiV2ChatBridge`), with no `retryable` flag.
+- **Snapshot trimming.** Both hosts trim `chat.snapshot` / `host.snapshot` messages to `maxListBytes` the same way (see Limits): oldest dropped first, the newest always kept.
+- **Which chat.** The Mac serves its shared quick chat (the same one the iPhone's v2 chat uses); the desktop serves one server-side "Phone chat" per user. On the Mac a chat history that cannot be read answers `capability_unavailable`; the desktop has no such state.
+- **Switches.** `tool_approvals` is served on the desktop only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`, on the Mac per its setting; `chat.history.clear` is `denied` on the desktop unless `LLMIDE_HOST_API_CHAT_CLEAR=1`. The Mac also applies its phone tier gate to `chat.send` and both approval answers (`denied`).
+- **`hello`.** `hostKind` is `mac` or `desktop`; `protocolVersion` is the Mac's v2 protocol version on the Mac and `1` on the desktop.
