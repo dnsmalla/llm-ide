@@ -88,3 +88,38 @@ struct HostApiClientLogicTests {
         #expect(HostApiEndpoint("") == nil)
     }
 }
+
+@Suite("Host API client logic: hardening")
+struct HostApiClientLogicHardeningTests {
+    @Test("rev: Int.max baseline never traps; duplicate or older is not a gap")
+    func revOverflow() {
+        var t = HostApiRevTracker()
+        t.baseline(Int.max)
+        #expect(t.observe(event: Int.max) == .inOrder)
+        #expect(t.observe(event: 5) == .inOrder)
+        #expect(t.observe(event: Int.min) == .inOrder)
+        var u = HostApiRevTracker(); u.baseline(5)
+        #expect(u.observe(event: 5) == .inOrder)
+        #expect(u.observe(event: 2) == .inOrder)
+    }
+
+    @Test("negotiation: a second start is ignored")
+    func secondStart() {
+        var n = HostApiNegotiation()
+        _ = n.handle(.start(v1Endpoint: true))
+        #expect(n.handle(.start(v1Endpoint: true)) == .ignore)
+        #expect(n.phase == .awaitingHello)
+    }
+
+    @Test("endpoint: host bypasses refused, IPv6 and case accepted, only the v1 path allowed")
+    func endpointStrict() {
+        for bad in ["ws://127.0.0.1.evil.com:3016", "ws://localhost.:3016", "ws://user@127.0.0.1:3016",
+                    "ws://127.0.0.1:3016/foo", "ws://127.0.0.1:3016?x=1", "ws://127.0.0.1:3016/host-api/v1?x=1",
+                    "ws://127.0.0.1:3016#f"] {
+            #expect(HostApiEndpoint(bad) == nil, "\(bad)")
+        }
+        #expect(HostApiEndpoint("ws://[::1]:3016")?.url.absoluteString == "ws://[::1]:3016/host-api/v1")
+        #expect(HostApiEndpoint("WS://LOCALHOST:3016")?.url.absoluteString == "ws://localhost:3016/host-api/v1")
+        #expect(HostApiEndpoint("ws://127.0.0.1:3016/host-api/v1")?.url.path == "/host-api/v1")
+    }
+}

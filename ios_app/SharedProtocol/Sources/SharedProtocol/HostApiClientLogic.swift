@@ -12,7 +12,8 @@ public struct HostApiRevTracker: Sendable, Equatable {
     public mutating func observe(event r: Int) -> Decision {
         defer { rev = max(rev ?? r, r) }
         guard let last = rev else { return .gap }
-        return r > last + 1 ? .gap : .inOrder
+        // r > last first: r - last cannot overflow then (the rev is untrusted wire input)
+        return r > last && r - last > 1 ? .gap : .inOrder
     }
 
     public mutating func reset() { rev = nil }
@@ -81,8 +82,10 @@ public struct HostApiEndpoint: Sendable, Equatable {
         // shortcut: wss is refused until Plan 6 supplies the certificate-fingerprint evaluator
         // (HostApiTrustEvaluating); a self-signed LAN host must never be trusted unpinned.
         guard scheme == "ws", Self.loopback.contains(host) else { return nil }
-        // The desktop listener upgrades only this path; the Mac ignores the path.
-        if c.path.isEmpty || c.path == "/" { c.path = "/host-api/v1" }
+        guard c.query == nil, c.fragment == nil, c.user == nil, c.password == nil,
+              ["", "/", "/host-api/v1"].contains(c.path) else { return nil }
+        c.path = "/host-api/v1"
+        c.scheme = scheme; c.host = host   // normalised to lowercase
         guard let url = c.url else { return nil }
         self.url = url
     }
