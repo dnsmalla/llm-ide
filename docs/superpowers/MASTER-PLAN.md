@@ -15,14 +15,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 21 | 38 | 15 | 74 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; CI green on macOS and Linux, Windows red only in `cargo test` (22) |
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 6 | 3 | 7 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 7 | 3 | 6 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 15 | 5 | 3 | 23 | API 106, contract gates, feature matrix and Host API v1 contract landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 103 | 62 | 75 | 240 |  |
+| Total | 104 | 62 | 74 | 240 |  |
 
 ## How the surfaces connect
 
@@ -53,7 +53,7 @@ Parents: [kit-by-kit migration](plans/2026-10-27-kit-by-kit-migration.md), [Taur
 
 - **Q-WEB-1 answered: option A.** The web app is the relay-served phone web view (PWA), built **last as part of sync-kit**.
 - **Q-WEB-3 answered:** the phone through the Mac is enough for now; phone-without-Mac (relay) comes later.
-- **Q-WEB-2 open by decision:** relay hosting (VPS or Cloudflare) is decided later, with the relay work.
+- **Q-WEB-2 answered 2026-11-04:** the web app runs on **localhost for now** (a loopback web origin allowlisted on the desktop v1 listener, Host API Plan 3 decision 6); later it moves to **your own domain on a VPS** (WSS + the domain in the Origin allowlist, Host API phase 6).
 
 The original analysis is kept below for the record.
 
@@ -218,7 +218,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Connector adapters for Box, git, issues, QA, SCIP, email, Slack with OAuth (`extension/connectors/`, CLAUDE.md) (me)
 - [x] Reusable React web bundles run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, OS view `b31133e0`); not a hosted web app (me)
 - [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
-- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decide at the start of R2 (Q-WEB-2 = D6, the only open relay decision); the PWA host is a separate account either way (you)
+- [x] Decide relay hosting (Q-WEB-2 = D6): localhost now, then your own domain on a VPS (user decision 2026-11-04); the domain and VPS are not set up yet (you)
 - [ ] Independent external security review of the relay spec and R1, R3, R4 code: release gate G-EXT, required before any public exposure (D9) (you)
 - [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
 - [x] End-to-end crypto design revised to every review finding (25 of 25 mapped in its traceability table): per-user keys with individual login, key hierarchy and capability sets, signed wrap, desktop-owned device registry, signed manifest, tiered clients (PWA read-only on a separate origin and account), fixed read-only ceiling, printed emergency-revoke code, no recovery in v1; user delegated D1 to D9 to the secure option, revisit if wrong (`docs/superpowers/plans/2026-10-31-relay-design.md`) (me)

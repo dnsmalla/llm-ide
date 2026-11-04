@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 58 open, 27 done, 85 total
+Open count: 57 open, 28 done, 85 total
 
 ## How to use this file
 
@@ -118,8 +118,8 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Source: [Phase 7 design section 12.2](plans/2026-10-31-phase7-desktop-control-design.md). Recommended: yes to all. If you wait: nothing is built before the spike; the defaults stay provisional.
 - [ ] **UN-038** Relay X1 and X2: no password at the relay (account bound to the desktop's signing key; say so if you want an extra login factor), and book the external security review during R0.
   - Source: [relay design section 13](plans/2026-10-31-relay-design.md). Recommended: yes to both. If you wait: R0 cannot freeze its spec.
-- [ ] **UN-039** Relay D6: hosting (small VPS first behind a storage interface, in your preferred region, hardware-key MFA, PWA host as a separate account) versus Cloudflare Workers and R2; plus a company domain and a named account owner.
-  - Source: [relay design section 8](plans/2026-10-31-relay-design.md). Decide at the start of R2. Recommended: VPS first. If you wait: nothing until R2.
+- [x] **UN-039** Relay D6: hosting (small VPS first behind a storage interface, in your preferred region, hardware-key MFA, PWA host as a separate account) versus Cloudflare Workers and R2; plus a company domain and a named account owner.
+  - Source: [relay design section 8](plans/2026-10-31-relay-design.md). Decide at the start of R2. Recommended: VPS first. If you wait: nothing until R2. Status: answered 2026-11-04 — a VPS with your own domain, later; the web app runs on localhost until then. The domain, VPS and account owner are set up at R2.
 - [ ] **UN-040** Knowledge-kit open questions: Q2 (agent search of meetings by default), Q5 (retire or fill entities), Q6 (keep ReviewConflicts a section), Q7, Q9 (kit boundaries), Q10, Q11 (notes in a cloud-sync folder), Q12 (N-1 window), Q13 (keyless kit), Q14 (single user). Q1, Q3, Q4, Q8 are answered.
   - Source: [knowledge-kit section 7](../kits/knowledge-kit.md). Recommended: the Leaning column. If you wait: K1 stays unstarted.
 - [ ] **UN-041** Q19 (notes without `platform` are invisible in Library) and Q16 (search latency at 50k notes).
