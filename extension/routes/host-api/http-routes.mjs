@@ -11,6 +11,7 @@
 import { send } from '../../server/route-http.mjs';
 import { sendError } from '../../core/errors.mjs';
 import { config } from '../../core/config.mjs';
+import { logger } from '../../core/logger.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { mintPin } from './pin.mjs';
 import { listDevices, revokeDevice } from '../../kb/host-api-devices.mjs';
@@ -23,10 +24,15 @@ export function isHostApiRoute(url) {
   return path === '/host-api' || path.startsWith('/host-api/');
 }
 
-/** `hostApi()` returns the running { gateway, listener } or null; `enabled` defaults to config.hostApiDev (test seam). */
+/** `hostApi()` returns the running { gateway, listener } or null; `enabled` defaults to config.hostApiDev (test seam);
+ *  `logger` is the request logger (server.mjs passes reqLog), so a 500 is logged like every other route's. */
 export async function handleHostApiRoute(req, res, opts = {}) {
   // A store failure (listDevices, revokeDevice) must still answer: the standard JSON 500 envelope.
-  try { return await route(req, res, opts); } catch (err) { if (!res.headersSent) sendError(res, err); else res.end(); return true; }
+  try { return await route(req, res, opts); } catch (err) {
+    if (!res.headersSent) sendError(res, err, { logger: opts.logger ?? logger });
+    else { (opts.logger ?? logger).error('request_failed', { message: err.message, stack: err.stack }); res.end(); }
+    return true;
+  }
 }
 
 async function route(req, res, { hostApi = () => null, enabled = config.hostApiDev, env = process.env }) {

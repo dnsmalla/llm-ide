@@ -28,12 +28,12 @@ const { handleHostApiRoute } = await import('../routes/host-api/http-routes.mjs'
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `r-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' }).id;
 
-const state = { userId: null, enabled: true };
+const state = { userId: null, enabled: true, logger: undefined };
 const disconnects = [];
 const hostApi = { listener: { port: 3016 }, gateway: { disconnectDevice: (u, d) => disconnects.push([u, d]) } };
 const server = http.createServer((req, res) => {
   req.user = { id: state.userId };
-  void handleHostApiRoute(req, res, { hostApi: () => hostApi, enabled: state.enabled, env });
+  void handleHostApiRoute(req, res, { hostApi: () => hostApi, enabled: state.enabled, env, logger: state.logger });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -115,12 +115,15 @@ test('a malformed device id is 400; the PIN route without a listener is 503', as
 });
 
 // Last: it breaks the device table for the rest of this file.
-test('a store failure answers a JSON 500, never a hung request', async () => {
+test('a store failure answers a JSON 500, never a hung request, and is logged', async () => {
   state.userId = user();
+  const logged = [];
+  state.logger = { error: (event) => logged.push(event), warn() {}, info() {} };
   kb.getDb().exec('DROP TABLE host_api_devices');
   for (const [m, p] of [['GET', '/host-api/devices'], ['DELETE', '/host-api/devices/h1-x']]) {
     const r = await call(m, p);
     assert.equal(r.status, 500);
     assert.equal(typeof r.body.error.code, 'string');
   }
+  assert.deepEqual(logged, ['request_failed', 'request_failed']);
 });

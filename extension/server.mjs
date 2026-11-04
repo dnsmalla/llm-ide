@@ -777,7 +777,7 @@ const server = http.createServer(async (req, res) => {
   // Host API v1 pairing PIN and devices (/host-api/*): JWT + bus host proof; 404 HOST_API_DISABLED without LLMIDE_HOST_API_DEV.
   if (isHostApiRoute(req.url || '')) {
     try {
-      await handleHostApiRoute(req, res, { hostApi: () => hostApi });
+      await handleHostApiRoute(req, res, { hostApi: () => hostApi, logger: reqLog });
     } catch (err) {
       sendError(res, err, { logger: reqLog });
     }
