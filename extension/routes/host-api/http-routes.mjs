@@ -2,7 +2,8 @@
 // server.mjs after authenticate and the rate limiter; nothing else imports it. Every route needs the JWT (req.user) AND
 // the bus host proof, so only the desktop UI the Tauri host spawned this core for can mint a PIN or manage devices.
 //
-//   POST   /host-api/pin           { pin, expiresAt, port }   mint the user's one-use 10-minute pairing PIN
+//   POST   /host-api/pin           { pin, expiresAt, port, fingerprint }   mint the user's one-use 10-minute pairing PIN
+//                                   (fingerprint: the TLS listener's certificate pin, null for the dev listener)
 //   GET    /host-api/devices       { devices: [...] }         the user's paired devices (never a token)
 //   DELETE /host-api/devices/:id   { revoked }                revoke one device and drop its live sessions
 //
@@ -24,7 +25,8 @@ export function isHostApiRoute(url) {
   return path === '/host-api' || path.startsWith('/host-api/');
 }
 
-/** `hostApi()` returns the running { gateway, listener } or null; `enabled` defaults to config.hostApiDev (test seam);
+/** `hostApi()` returns the running { gateway, listener, fingerprint } or null; `enabled` defaults to a v1 listener
+ *  mode being on, TLS or dev (test seam);
  *  `logger` is the request logger (server.mjs passes reqLog), so a 500 is logged like every other route's. */
 export async function handleHostApiRoute(req, res, opts = {}) {
   // A store failure (listDevices, revokeDevice) must still answer: the standard JSON 500 envelope.
@@ -35,7 +37,7 @@ export async function handleHostApiRoute(req, res, opts = {}) {
   }
 }
 
-async function route(req, res, { hostApi = () => null, enabled = config.hostApiDev, env = process.env }) {
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
@@ -43,10 +45,11 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiD
   if (!userId) return fail(res, 401, 'UNAUTHORIZED', 'Sign in first');
 
   if (req.method === 'POST' && path === '/host-api/pin') {
-    const port = hostApi()?.listener?.port;
+    const api = hostApi();
+    const port = api?.listener?.port;
     if (!port) return fail(res, 503, 'HOST_API_UNAVAILABLE', 'The Host API listener is not running');
     const { pin, expiresAt } = mintPin(userId);
-    send(res, 200, { pin, expiresAt, port });
+    send(res, 200, { pin, expiresAt, port, fingerprint: api.fingerprint ?? null });
     return true;
   }
   if (req.method === 'GET' && path === '/host-api/devices') {

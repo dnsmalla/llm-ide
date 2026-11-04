@@ -1,7 +1,10 @@
-// Host API v1 development listener: a loopback-only WebSocket endpoint in front of routes/host-api/gateway.mjs.
+// Host API v1 listener in front of routes/host-api/gateway.mjs. With `tls` it serves pinned TLS (WSS) on every
+// interface; without it, the development plaintext listener on loopback only, refusing non-loopback peers.
 // Session handle = { id, conn }; the gateway's send/close deps are `sessionTransport` (spread into createGateway).
 import http from 'node:http';
+import https from 'node:https';
 import { config } from '../core/config.mjs';
+import { originRefused } from '../core/host-api-origins.mjs';
 import { handshakeRefusal, acceptUpgrade } from './ws-server.mjs';
 
 const PATH = '/host-api/v1';
@@ -17,26 +20,55 @@ function refuse(socket, status, text) {
   socket.destroy();
 }
 
-function listenOn(server, port) {
+/** The refusal for an upgrade request before the WebSocket handshake check, or null. `event` names the audit
+ *  event (null for a wrong path). Plaintext refuses every non-loopback peer; TLS accepts any peer that pinned it. */
+export function upgradeRefusal(req, { tls, allowlist }) {
+  if ((req.url ?? '').split('?')[0] !== PATH) return { status: 404, event: null, detail: '' };
+  if (!tls && !LOOPBACK.has(req.socket?.remoteAddress)) return { status: 403, event: 'plaintext_refused', detail: '' };
+  if (originRefused(req.headers, allowlist)) {
+    return { status: 403, event: 'origin_refused', detail: String(req.headers.origin ?? '').slice(0, 200) };
+  }
+  return null;
+}
+
+function listenOn(server, port, host) {
   return new Promise((resolve, reject) => {
     const onError = (e) => reject(e);
     server.once('error', onError);
-    server.listen(port, '127.0.0.1', () => { server.off('error', onError); resolve(server.address().port); });
+    server.listen(port, host, () => { server.off('error', onError); resolve(server.address().port); });
   });
 }
 
-export async function startHostApiListener({ gateway, basePort = 3016, candidates = 10, log = () => {}, webOrigins = config.hostApiWebOrigins }) {
+export async function startHostApiListener({ gateway, tls = null, basePort = 3016, candidates = 10, log = () => {},
+  onRefused = () => {}, originAllowlist = config.hostApiWebOrigins }) {
   let nextId = 0;
   const live = new Set();
-  const server = http.createServer((req, res) => { res.writeHead(404, { 'Content-Length': 0 }).end(); });
+  const notFound = (req, res) => { res.writeHead(404, { 'Content-Length': 0 }).end(); };
+  const host = tls ? '0.0.0.0' : '127.0.0.1';
+  const server = tls
+    ? https.createServer({ cert: tls.certPem, key: tls.keyPem, minVersion: 'TLSv1.2' }, notFound)
+    : http.createServer(notFound);
+
+  if (tls) {
+    // A pin mismatch shows up here as the client aborting the handshake. Logged by code only, once per peer per minute.
+    const seen = new Map();
+    server.on('tlsClientError', (err, socket) => {
+      const peer = socket?.remoteAddress ?? '-';
+      const now = Date.now();
+      if (now - (seen.get(peer) ?? -Infinity) < 60_000) return;
+      if (seen.size > 1000) seen.clear();
+      seen.set(peer, now);
+      log(`Host API v1 TLS handshake failed from ${peer}: ${err?.code ?? 'unknown'}`);
+    });
+  }
 
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => {});
-    const url = (req.url ?? '').split('?')[0];
-    if (url !== PATH) return refuse(socket, 404, 'Not Found');
-    if (!LOOPBACK.has(socket.remoteAddress)) return refuse(socket, 403, 'Forbidden');
-    const origin = req.headers.origin;
-    if (origin !== undefined && !webOrigins.includes(origin)) return refuse(socket, 403, 'Forbidden');
+    const why = upgradeRefusal(req, { tls: !!tls, allowlist: originAllowlist });
+    if (why) {
+      if (why.event) onRefused(why.event, socket.remoteAddress ?? '-', why.detail);
+      return refuse(socket, why.status, why.status === 404 ? 'Not Found' : 'Forbidden');
+    }
     const status = handshakeRefusal(req);
     if (status) return refuse(socket, status, 'Bad Request');
     const conn = acceptUpgrade(req, socket, head);
@@ -49,13 +81,14 @@ export async function startHostApiListener({ gateway, basePort = 3016, candidate
 
   let port = null;
   for (let i = 0; i < candidates && port === null; i++) {
-    try { port = await listenOn(server, basePort === 0 ? 0 : basePort + i); } catch (e) {
+    try { port = await listenOn(server, basePort === 0 ? 0 : basePort + i, host); } catch (e) {
       if (e.code !== 'EADDRINUSE' || i === candidates - 1) throw e;
     }
   }
-  log(`Host API v1 listener on 127.0.0.1:${port}`);
+  log(`Host API v1 listener (${tls ? 'TLS' : 'development plaintext'}) on ${host}:${port}`);
   return {
     port,
+    address: host,
     close: () => new Promise((resolve) => {
       for (const c of live) { try { c.close(1001); } catch { /* closed */ } }
       server.close(() => resolve());

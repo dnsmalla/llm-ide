@@ -8,7 +8,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null } = {}) {
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, pending: [] };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
@@ -23,6 +23,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     send: (s, text) => t.sent.push([s, JSON.parse(text)]),
     close: (s) => t.closed.push(s),
     hostName: () => 'Test Computer',
+    certificateFingerprint: () => fingerprint,
     capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : [])],
     log: () => {},
     chatClearEnabled: () => chatClear,
@@ -287,6 +288,15 @@ test('hello returns the desktop host shape', async () => {
     hostName: 'Test Computer', hostKind: 'desktop', apiVersion: 1, apiVersions: [1],
     capabilities: ['host', 'chat', 'approvals'], protocolVersion: 1, requiresAuth: true,
   });
+});
+
+test('hello carries certificateFingerprint when the host has one', async () => {
+  const fp = `sha256:${'A'.repeat(43)}`;
+  const t = harness({ fingerprint: fp });
+  const s = {};
+  t.g.opened(s, '127.0.0.1');
+  await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+  assert.equal(t.last().result.certificateFingerprint, fp);
 });
 
 test('a fifth session is refused busy; an unauthenticated session closes after 10 s', async () => {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -78,6 +79,30 @@ test('the flag on: a six-digit PIN for the caller, with the listener port', asyn
   assert.equal(r.body.port, 3016);
   assert.ok(r.body.expiresAt > Date.now());
   assert.equal(pins.consumePin(r.body.pin), u, 'the PIN belongs to the user who minted it');
+});
+
+test('the PIN carries the certificate fingerprint: null for the dev listener, sha256: for TLS', async () => {
+  state.userId = user();
+  assert.equal((await call('POST', '/host-api/pin')).body.fingerprint, null);
+  const { loadOrCreateHostIdentity } = await import('../server/host-identity.mjs');
+  hostApi.fingerprint = loadOrCreateHostIdentity(kb.getDb(), { hostName: 'Test' }).fingerprint;
+  try {
+    const r = await call('POST', '/host-api/pin');
+    assert.equal(r.status, 200);
+    assert.match(r.body.fingerprint, /^sha256:[A-Za-z0-9_-]{43}$/);
+    assert.equal(r.body.fingerprint, hostApi.fingerprint);
+  } finally { delete hostApi.fingerprint; }
+});
+
+test('config.hostApiMode: tls wins over dev, dev never in production, else off', () => {
+  const mode = (extra) => execFileSync(process.execPath, ['--input-type=module', '-e',
+    "const { config } = await import('./core/config.mjs'); process.stdout.write(config.hostApiMode + ' ' + config.hostApiTls);"],
+  { cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'), env: { ...process.env, LLMIDE_HOST_API_TLS: '', LLMIDE_HOST_API_DEV: '', ...extra } }).toString();
+  assert.equal(mode({ LLMIDE_HOST_API_TLS: '1', LLMIDE_HOST_API_DEV: '1' }), 'tls true');
+  assert.equal(mode({ LLMIDE_HOST_API_TLS: '1', NODE_ENV: 'production' }), 'tls true');
+  assert.equal(mode({ LLMIDE_HOST_API_DEV: '1' }), 'dev false');
+  assert.equal(mode({ LLMIDE_HOST_API_DEV: '1', NODE_ENV: 'production' }), 'off false');
+  assert.equal(mode({}), 'off false');
 });
 
 test('GET lists the device, DELETE revokes it and disconnects; another user gets revoked:false', async () => {

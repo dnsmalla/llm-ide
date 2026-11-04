@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
 import { loadDevSecrets } from './dev-secrets.mjs';
 import { legacyTripwire } from './legacy-tripwire.mjs';
+import { parseOriginAllowlist } from './host-api-origins.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -124,14 +125,6 @@ export function parseFeatures(raw, warn = console.warn) {
     warn(`[config] LLMIDE_FEATURES: disabling ${dropped.join(', ')} — each requires file_explorer, which is not enabled`);
   }
   return readOnlySet(enabled);
-}
-
-const WEB_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1):[0-9]{1,5}$/;
-/** LLMIDE_HOST_API_WEB_ORIGINS -> frozen list of loopback http origins; every dropped entry is reported by name. */
-export function parseHostApiWebOrigins(raw, warn = console.warn) {
-  const entries = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  for (const e of entries) if (!WEB_ORIGIN_RE.test(e)) warn(`[config] LLMIDE_HOST_API_WEB_ORIGINS: dropping ${JSON.stringify(e)} (only http://localhost:<port> or http://127.0.0.1:<port> are accepted)`);
-  return Object.freeze(entries.filter((e) => WEB_ORIGIN_RE.test(e)));
 }
 
 // The per-process test DB (see `dbPath` below) is removed when the test
@@ -289,7 +282,11 @@ export const config = Object.freeze({
   hostApiDev:           process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production',
   hostApiToolApprovals: process.env.LLMIDE_HOST_API_TOOL_APPROVALS === '1',
   hostApiChatClear:     process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
-  hostApiWebOrigins:    parseHostApiWebOrigins(process.env.LLMIDE_HOST_API_WEB_ORIGINS),
+  hostApiTls:           process.env.LLMIDE_HOST_API_TLS === '1',
+  hostApiWebOrigins:    parseOriginAllowlist(process.env.LLMIDE_HOST_API_WEB_ORIGINS, console.warn),
+  // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
+  hostApiMode:          process.env.LLMIDE_HOST_API_TLS === '1' ? 'tls'
+    : (process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production') ? 'dev' : 'off',
 
   // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
   // the first chat turn does not pay ~200 ms of module loading; boot itself

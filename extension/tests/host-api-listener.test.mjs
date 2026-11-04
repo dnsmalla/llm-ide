@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
 import { startHostApiListener, sessionTransport } from '../server/host-api-listener.mjs';
-import { parseHostApiWebOrigins } from '../core/config.mjs';
 
 const skip = typeof WebSocket === 'undefined' ? 'no global WebSocket' : false;
 
@@ -29,7 +28,7 @@ const upgrade = (port, { path = '/host-api/v1', origin } = {}) => new Promise((r
 
 test('delivers frames, assigns monotonic session ids, releases the port', { skip }, async () => {
   const gw = fakeGateway();
-  const l = await startHostApiListener({ gateway: gw, basePort: 0, webOrigins: [] });
+  const l = await startHostApiListener({ gateway: gw, basePort: 0, originAllowlist: [] });
   const open = (ws) => new Promise((r) => ws.addEventListener('open', r));
   const a = new WebSocket(`ws://127.0.0.1:${l.port}/host-api/v1`);
   await open(a);
@@ -48,7 +47,7 @@ test('delivers frames, assigns monotonic session ids, releases the port', { skip
 
 test('refuses other paths, foreign origins, unlisted origins; non-upgrade gets 404', { skip }, async () => {
   const gw = fakeGateway();
-  const l = await startHostApiListener({ gateway: gw, basePort: 0, webOrigins: ['http://localhost:5173'] });
+  const l = await startHostApiListener({ gateway: gw, basePort: 0, originAllowlist: ['http://localhost:5173'] });
   assert.equal(await upgrade(l.port, { path: '/other' }), 404);
   assert.equal(await upgrade(l.port, { origin: 'https://evil.example' }), 403);
   assert.equal(await upgrade(l.port, { origin: 'http://localhost:5174' }), 403);
@@ -64,15 +63,17 @@ test('slides to the next port when the base is taken', async () => {
   const blocker = net.createServer().listen(0, '127.0.0.1');
   await new Promise((r) => blocker.once('listening', r));
   const base = blocker.address().port;
-  const l = await startHostApiListener({ gateway: fakeGateway(), basePort: base, webOrigins: [] });
+  const l = await startHostApiListener({ gateway: fakeGateway(), basePort: base, originAllowlist: [] });
   assert.ok(l.port > base);
   await l.close(); blocker.close();
 });
 
-test('web origin parsing keeps only loopback http origins', () => {
-  const dropped = [];
-  const out = parseHostApiWebOrigins('http://localhost:5173, https://localhost:1, http://evil.com:80,http://127.0.0.1:9', (m) => dropped.push(m));
-  assert.deepEqual([...out], ['http://localhost:5173', 'http://127.0.0.1:9']);
-  assert.equal(dropped.length, 2);
-  assert.throws(() => { 'use strict'; out.push('x'); });
+test('a refused upgrade reports its event; a wrong path reports none', { skip }, async () => {
+  const refused = [];
+  const l = await startHostApiListener({ gateway: fakeGateway(), basePort: 0, originAllowlist: [], onRefused: (...a) => refused.push(a) });
+  assert.equal(await upgrade(l.port, { path: '/other' }), 404);
+  assert.equal(await upgrade(l.port, { origin: 'https://evil.example' }), 403);
+  assert.deepEqual(refused.map((r) => [r[0], r[2]]), [['origin_refused', 'https://evil.example']]);
+  assert.equal(l.address, '127.0.0.1');
+  await l.close();
 });

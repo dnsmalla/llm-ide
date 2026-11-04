@@ -62,8 +62,8 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 
 ## Host API v1 (desktop)
 
-- **Flag**: `LLMIDE_HOST_API_DEV=1` (`config.hostApiDev`; never with `NODE_ENV=production`, and the Tauri host passes it only in a debug build) starts the listener and enables `/host-api/pin|devices` (else `404 HOST_API_DISABLED`; those routes also need the bus host proof).
-- **Listener**: `server/host-api-listener.mjs`, plaintext `ws://127.0.0.1:3016` (next free port up to 10), serving `/host-api/v1` only; an `Origin` is refused unless listed in `LLMIDE_HOST_API_WEB_ORIGINS` (loopback origins only).
+- **Mode** (`config.hostApiMode`): `tls` when `LLMIDE_HOST_API_TLS=1` (release builds too), else `dev` when `LLMIDE_HOST_API_DEV=1` (never with `NODE_ENV=production`; the Tauri host passes it only in a debug build), else `off`. Any mode but `off` starts the listener and enables `/host-api/pin|devices` (else `404 HOST_API_DISABLED`; those routes also need the bus host proof). The PIN answer carries the certificate `fingerprint` in `tls` mode, `null` in `dev`.
+- **Listener**: `server/host-api-listener.mjs` on 3016 (next free port up to 10), serving `/host-api/v1` only. `tls`: pinned WSS on `0.0.0.0` with the identity from `server/host-identity.mjs` (`host.hello` carries `certificateFingerprint`). `dev`: plaintext on `127.0.0.1`, non-loopback peers refused. Both refuse an `Origin` not in `LLMIDE_HOST_API_WEB_ORIGINS` (`core/host-api-origins.mjs`: exact loopback http with a port, or exact https DNS origin; pinned by `schema/host-api/v1/fixtures/security/origins.json`).
 - **No HTTP inside**: the gateway (`routes/host-api/gateway.mjs`) runs turns in process through `startHostTurn` / `cancelChatTurn` / `clearChatSessionState` from `routes/agent-v2.mjs`, never over HTTP, and never reads UI state.
 - **Phone chat**: one server-side chat per user (`host_api_quick_chat`), run in mode `auto_read_only` in the extension chat workspace, not the open project.
 - **Ordering**: frames of one session are processed in order (one at a time per session).

@@ -4,6 +4,7 @@
   "response": {
     "pin": "042917",
     "expiresAt": 1793750400000,
-    "port": 3016
+    "port": 3016,
+    "fingerprint": null
   }
 }

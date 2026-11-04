@@ -46,6 +46,7 @@ function defaultDeps() {
     pins: { consumePin },
     now: () => Date.now(),
     log: () => {},
+    certificateFingerprint: () => null, // the TLS listener's pin; a plaintext dev host omits it
   };
 }
 
@@ -308,9 +309,11 @@ export function createGateway(overrides) {
         const why = helloRefusal(p.apiVersions);
         if (why) return fail(s, id, 'capability_unavailable', why);
         entry.state.greeted(p.clientName);
+        const fingerprint = deps.certificateFingerprint();
         return respond(s, id, command, {
           hostName: clamp(deps.hostName() || 'Computer', 120), hostKind: 'desktop', apiVersion: 1, apiVersions: [1],
           capabilities: deps.capabilities(), protocolVersion: 1, requiresAuth: true,
+          ...(fingerprint ? { certificateFingerprint: fingerprint } : {}),
         });
       }
       case 'host.auth.pair': {

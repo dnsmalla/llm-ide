@@ -315,7 +315,8 @@ const HOST = config.host;
 //   v105 — issues paging and fields (additive; no new route). GET /kb/issues pages in SQL: `offset` (default 0; negative, NaN or empty is 0) with `limit` (default 20, capped at 100), ordered updatedAt descending then id; the answer gains `total` (matches after the provider, repo and state filters), `hasMore` and `nextOffset` (null when there is no further page). Each issue gains `milestone` ({ title, dueOn } or null) and `assignees` (logins, [] when none), and `url` now carries the stored issue URL (it was always empty). An absent offset is the first page, as before, in the new order. The GitHub import (POST /kb/connect-github-issues) pages up to 20 pages of 100 per run, stops at 2 000 rows or 60 s and answers `truncated` and `pages` in addition to the existing fields. Spec docs/spec/api-server.md section 7j.
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
-const SERVER_API_VERSION = 107;
+//   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
+const SERVER_API_VERSION = 108;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -499,7 +500,7 @@ const ALL_ENDPOINTS = [
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 // The command bus executor (routes/bus/executor.mjs), created and started after listen; null while LLMIDE_BUS=off.
 let bus = null;
-// Host API v1 development listener (LLMIDE_HOST_API_DEV=1 only); { gateway, listener } once started.
+// Host API v1 listener (config.hostApiMode 'tls' or 'dev'); { gateway, listener, fingerprint } once started.
 let hostApi = null;
 // Feature route-group handlers, filled at boot (see initFeatureRoutes below).
 let featureHandlers = {};
@@ -774,7 +775,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Host API v1 pairing PIN and devices (/host-api/*): JWT + bus host proof; 404 HOST_API_DISABLED without LLMIDE_HOST_API_DEV.
+  // Host API v1 pairing PIN and devices (/host-api/*): JWT + bus host proof; 404 HOST_API_DISABLED unless LLMIDE_HOST_API_TLS=1 or LLMIDE_HOST_API_DEV=1.
   if (isHostApiRoute(req.url || '')) {
     try {
       await handleHostApiRoute(req, res, { hostApi: () => hostApi, logger: reqLog });
@@ -1474,18 +1475,29 @@ server.listen(PORT, HOST, () => {
   if (config.enginePrewarm) {
     setImmediate(() => { void prewarmAgentEngine(); });
   }
-  // Host API v1 development listener: dynamic imports keep the gateway (and agent-v2) off the boot path when the flag is unset.
-  if (config.hostApiDev) {
+  // Host API v1 listener ('tls' pinned on every interface, or 'dev' plaintext loopback): dynamic imports keep the
+  // gateway (and agent-v2) off the boot path when the mode is 'off'.
+  if (config.hostApiMode !== 'off') {
     void (async () => {
       try {
         const { createGateway } = await import('./routes/host-api/gateway.mjs');
         const { startHostApiListener, sessionTransport } = await import('./server/host-api-listener.mjs');
         const { hostname } = await import('node:os');
         const log = (l) => logger.info(l);
-        const gateway = createGateway({ hostName: () => hostname(), log, ...sessionTransport });
-        const listener = await startHostApiListener({ gateway, log });
-        hostApi = { gateway, listener };
-        logger.info(`Host API v1 (development, loopback only) on 127.0.0.1:${listener.port}`);
+        let tls = null;
+        let fingerprint = null;
+        if (config.hostApiMode === 'tls') {
+          const { loadOrCreateHostIdentity } = await import('./server/host-identity.mjs');
+          const id = loadOrCreateHostIdentity(getDb(), { hostName: hostname(), onEvent: (e) => logger.info(`host_api_${e}`) });
+          tls = { certPem: id.certPem, keyPem: id.keyPem };
+          fingerprint = id.fingerprint;
+        }
+        const gateway = createGateway({ hostName: () => hostname(), log, certificateFingerprint: () => fingerprint, ...sessionTransport });
+        const onRefused = (event, peer) => logger.info(`host_api_${event}`, { peer });
+        const listener = await startHostApiListener({ gateway, tls, log, onRefused });
+        hostApi = { gateway, listener, fingerprint };
+        logger.info(tls ? `Host API v1 (TLS, all interfaces) on 0.0.0.0:${listener.port}, ${fingerprint}`
+          : `Host API v1 (development, loopback only) on 127.0.0.1:${listener.port}`);
       } catch (err) { logger.error('host_api_listener_failed', { error: err.message }); }
     })();
   }
