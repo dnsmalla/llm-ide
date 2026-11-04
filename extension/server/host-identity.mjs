@@ -23,11 +23,13 @@ const int = (raw) => {
   if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0]), b]);
   return tlv(0x02, b);
 };
+// RFC 5280 4.1.2.5: UTCTime before 2050, GeneralizedTime from 2050.
 const utc = (ms) => {
   const d = new Date(ms);
-  if (d.getUTCFullYear() >= 2050) throw new Error('UTCTime covers years before 2050 only');
+  const y = d.getUTCFullYear();
   const p = (n) => String(n).padStart(2, '0');
-  return tlv(0x17, Buffer.from(`${p(d.getUTCFullYear() % 100)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`));
+  const rest = `${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+  return y >= 2050 ? tlv(0x18, Buffer.from(`${y}${rest}`)) : tlv(0x17, Buffer.from(`${p(y % 100)}${rest}`));
 };
 const ECDSA_SHA256 = '2a8648ce3d040302';
 
@@ -72,7 +74,7 @@ export function loadOrCreateHostIdentity(db, { hostName, now = Date.now(), onEve
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const serial = crypto.randomBytes(16); serial[0] = (serial[0] & 0x7f) | 0x01;
   const notAfter = now + VALIDITY_MS;
-  const der = buildSelfSignedCert({ privateKey, publicKey, commonName: `LLM-IDE ${String(hostName).slice(0, 64)}`, notBefore: now - 300_000, notAfter, serial });
+  const der = buildSelfSignedCert({ privateKey, publicKey, commonName: `LLM-IDE ${String(hostName || 'host').slice(0, 64)}`, notBefore: now - 300_000, notAfter, serial });
   const fingerprint = fingerprintOfSpki(publicKey.export({ type: 'spki', format: 'der' }));
   const keyEnc = encrypt(VAULT_SCOPE, privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'));
   db.transaction(() => {

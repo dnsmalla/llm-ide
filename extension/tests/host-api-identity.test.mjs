@@ -66,3 +66,12 @@ test('an unexpected error propagates and leaves identity and devices intact', ()
   assert.ok(dev.authenticateDeviceToken(token));
   assert.equal(db.prepare('SELECT COUNT(*) n FROM host_api_identity').get().n, 1);
 });
+
+test('dates from 2050 are GeneralizedTime and still parse', () => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const notAfter = Date.UTC(2051, 0, 2, 3, 4, 5);
+  const der = id.buildSelfSignedCert({ privateKey, publicKey, commonName: 'X', notBefore: Date.UTC(2049, 0, 1), notAfter, serial: Buffer.alloc(16, 1) });
+  assert.equal(new X509Certificate(der).validToDate.getTime(), notAfter);
+  assert.ok(der.includes(Buffer.concat([Buffer.from([0x18, 15]), Buffer.from('20510102030405Z')])), 'GeneralizedTime');
+  assert.ok(der.includes(Buffer.concat([Buffer.from([0x17, 13]), Buffer.from('490101000000Z')])), 'UTCTime before 2050');
+});
