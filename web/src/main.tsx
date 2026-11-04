@@ -6,3 +6,10 @@ import { App } from "./App.tsx";
 
 applyTheme(globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark");
 createRoot(document.getElementById("root")!).render(<App />);
+
+// Production only: the dev server's module graph is not a stable shell, and a stale worker would hide edits.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  });
+}

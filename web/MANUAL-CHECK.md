@@ -39,6 +39,9 @@ Open <http://127.0.0.1:5180>.
       revoked notice.
 - [ ] **Forget this host** returns to pairing and the token is gone.
 - [ ] Resize to phone width; the composer and cards remain usable.
+- [ ] Install the app from the browser's install control; it opens in its own window.
+- [ ] Stop the web server and reopen the installed app: the shell loads and shows an offline state, not a blank page.
+- [ ] Reconnect the host and reload: pairing/chat work again.
 
 ## 4. Domain check (later)
 
