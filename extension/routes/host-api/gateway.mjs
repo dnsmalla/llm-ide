@@ -5,13 +5,15 @@
 import { parseRequest, response, event, errorFrame, clamp } from './frame.mjs';
 import { HostApiSession, helloRefusal, internalId } from './session.mjs';
 import { createTranslator } from './translator.mjs';
-import { PairingThrottle } from './throttle.mjs';
+import { PairingThrottle, peerKey } from './throttle.mjs';
+import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
 export const MAX_SESSIONS = 4;
-export const AUTH_DEADLINE_MS = 10_000;
+export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
+export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every MAX_SESSIONS slot before auth
 // Refusals that clear by themselves; SESSION_TOKEN_LIMIT and SLASH_COMMAND_FAILED do not.
 const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
 const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED']);
@@ -46,6 +48,7 @@ function defaultDeps() {
     pins: { consumePin },
     now: () => Date.now(),
     log: () => {},
+    audit: () => {}, // (event, { peer, userId, deviceId, clientName, detail, dedupeKey }); server.mjs passes routes/host-api/audit.mjs
     certificateFingerprint: () => null, // the TLS listener's pin; a plaintext dev host omits it
   };
 }
@@ -75,7 +78,10 @@ export function createGateway(overrides) {
   // requested before the turn held the engine lock can be re-issued when its init arrives.
   const owned = new Map();
   const creatingQuickChat = new Map(); // userId -> Promise<chatSessionId>
-  const throttle = new PairingThrottle();
+  // Separate buckets: a wrong PIN must not delay a token reconnect from the same peer, nor the reverse.
+  const pairThrottle = new PairingThrottle();
+  const tokenThrottle = new PairingThrottle();
+  const rate = createRateLimiter();
   let nextNum = 0;
 
   // A session's capabilities are served ∩ granted (the token's scopes), in served order; `host` is always granted.
@@ -109,8 +115,15 @@ export function createGateway(overrides) {
     deps.send(s, text);
   }
 
+  // Audit fields without undefined keys, so a row carries only what is known.
+  const audit = (event, fields) => {
+    try { deps.audit(event, Object.fromEntries(Object.entries(fields).filter(([, v]) => v != null))); } catch { /* never fail a frame */ }
+  };
+
   function opened(session, peer) {
-    if (sessions.size >= MAX_SESSIONS) {
+    const key = peerKey(peer);
+    const pending = [...sessions.values()].filter((e) => !e.state.deviceId && peerKey(e.peer) === key).length;
+    if (sessions.size >= MAX_SESSIONS || pending >= MAX_UNAUTHENTICATED_PER_PEER) {
       fail(session, null, 'busy', 'This computer already has the maximum number of Host API connections.', { retryable: true });
       deps.close(session);
       return;
@@ -129,7 +142,7 @@ export function createGateway(overrides) {
 
   function closed(session) {
     const entry = sessions.get(session);
-    if (entry) clearTimeout(entry.timer);
+    if (entry) { clearTimeout(entry.timer); rate.drop(entry.num); }
     sessions.delete(session);
     for (const o of owned.values()) {
       if (o.session !== session || o.zombie) continue;
@@ -181,6 +194,12 @@ export function createGateway(overrides) {
   function receive(session, text) {
     const entry = sessions.get(session);
     if (!entry) return Promise.resolve();
+    // The frame bucket runs before any parsing, so a flood costs one regex per frame.
+    const wait = rate.frame(entry.num, deps.now());
+    if (wait != null) {
+      rateRefused(session, entry, cheapId(text), wait);
+      return Promise.resolve();
+    }
     entry.queue = entry.queue.then(() => handle(session, text)).catch((e) => {
       deps.log(`Host API v1 frame handler failed (${e?.code ?? 'error'})`);
       let replyTo = null;
@@ -190,8 +209,24 @@ export function createGateway(overrides) {
     return entry.queue;
   }
 
-  function throttled(s, id, peer) {
+  // The request id from the frame's head only, never a full parse.
+  function cheapId(text) {
+    const m = /"id"\s*:\s*"([^"\\]{1,128})"/.exec(String(text).slice(0, 512));
+    return m ? m[1] : null;
+  }
+
+  function rateRefused(s, entry, replyTo, wait) {
+    fail(s, replyTo, 'rate_limited', 'Too many requests — slow down and try again.', { retryable: true, retryAfterMs: wait });
+    if (!rate.refused(entry.num)) return;
+    deps.log(`Host API v1 connection ${entry.num} closed after repeated rate refusals`);
+    audit('rate_closed', { peer: entry.peer, userId: entry.state.userId, deviceId: entry.state.deviceId, dedupeKey: entry.peer });
+    deps.close(s);
+    closed(s);
+  }
+
+  function throttled(s, id, peer, throttle, event) {
     const d = throttle.decision(peer, deps.now());
+    if (d.kind !== 'allow') audit(event, { peer, detail: d.kind, dedupeKey: peer });
     switch (d.kind) {
       case 'wait': fail(s, id, 'auth_failed', 'Too many attempts — wait a moment and try again.', { retryable: true, retryAfterMs: d.ms }); return true;
       case 'lockedOut': fail(s, id, 'auth_failed', 'Too many wrong PINs — locked out for 15 minutes.', { retryable: true, retryAfterMs: d.ms }); return true;
@@ -296,6 +331,8 @@ export function createGateway(overrides) {
       const capability = HOST_API_COMMANDS[r.command]?.capability;
       if (capability && served.includes(capability) && !entry.grants?.has(capability)) {
         deps.log(`Host API v1 connection ${entry.num} refused ${capability} (not granted)`);
+        const { userId: u, deviceId: d } = entry.state;
+        audit('scope_denied', { peer: entry.peer, userId: u, deviceId: d, detail: capability, dedupeKey: `${d}:${capability}` });
         return fail(s, r.id, 'denied', `This device was not granted ${capability} — pair again to grant it.`);
       }
     }
@@ -317,30 +354,33 @@ export function createGateway(overrides) {
         });
       }
       case 'host.auth.pair': {
-        if (throttled(s, id, entry.peer)) return;
+        if (throttled(s, id, entry.peer, pairThrottle, 'pair_throttled')) return;
         // Checked before the PIN so a correct PIN is never spent on a connection that cannot pair.
         if (entry.state.phase.kind !== 'awaitingAuth') return fail(s, id, 'denied', 'This connection is not waiting to pair.');
         const pinUser = deps.pins.consumePin(p.pin, deps.now());
         if (pinUser == null) {
-          throttle.failure(entry.peer, deps.now());
+          pairThrottle.failure(entry.peer, deps.now());
+          audit('pair_failed', { peer: entry.peer });
           return fail(s, id, 'auth_failed', 'Wrong PIN.');
         }
-        throttle.success(entry.peer);
+        pairThrottle.success(entry.peer);
         // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
         const scopes = [...new Set(['host', ...served])];
         const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
         entry.state.authenticated(pinUser, deviceId);
         clearTimeout(entry.timer);
+        audit('pair_ok', { peer: entry.peer, userId: pinUser, deviceId, clientName: entry.state.phase.clientName });
         return respond(s, id, command, { token, capabilities: grant(entry, scopes) });
       }
       case 'host.auth.token': {
-        if (throttled(s, id, entry.peer)) return;
+        if (throttled(s, id, entry.peer, tokenThrottle, 'token_throttled')) return;
         const auth = deps.devices.authenticateDeviceToken(p.token, deps.now());
         if (!auth) {
-          throttle.failure(entry.peer, deps.now());
+          tokenThrottle.failure(entry.peer, deps.now());
+          audit('token_failed', { peer: entry.peer });
           return fail(s, id, 'auth_failed', 'This device is no longer paired with this computer — pair again with a new PIN.');
         }
-        throttle.success(entry.peer);
+        tokenThrottle.success(entry.peer);
         entry.state.authenticated(auth.userId, auth.deviceId);
         clearTimeout(entry.timer);
         return respond(s, id, command, { capabilities: grant(entry, auth.scopes ?? LEGACY_SCOPES) });
@@ -350,6 +390,7 @@ export function createGateway(overrides) {
         const { deviceId } = entry.state;
         if (!auth || auth.userId !== userId || auth.deviceId !== deviceId) return fail(s, id, 'denied', 'Only this connection\'s own token can be revoked here.');
         deps.devices.revokeDevice(userId, deviceId);
+        audit('revoke_self', { peer: entry.peer, userId, deviceId });
         respond(s, id, command, { revoked: true });
         // Every live session of this device ends, the asking one included (its response is already sent).
         return disconnectDevice(userId, deviceId);
@@ -368,6 +409,8 @@ export function createGateway(overrides) {
         return respond(s, id, command, { messages: await lines(userId, limit) });
       }
       case 'chat.send': {
+        const wait = rate.turn(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
         if (owned.has(internalId(entry.num, id))) return fail(s, id, 'busy', 'That request id is still running.');
         if ([...owned.values()].some((o) => o.session === s)) return fail(s, id, 'busy', 'A chat turn is already running on this connection.');
         const chatSessionId = await quickChatFor(userId);

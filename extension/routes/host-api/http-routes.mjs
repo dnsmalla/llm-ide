@@ -61,6 +61,7 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
     try { id = decodeURIComponent(path.slice('/host-api/devices/'.length)); } catch { id = ''; }
     if (!DEVICE_ID_RE.test(id)) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid device id');
     const revoked = revokeDevice(userId, id);
+    if (revoked) hostApi()?.audit?.record('revoke_host', { peer: req.socket?.remoteAddress, userId, deviceId: id });
     // Drop live sessions either way: disconnectDevice is per user, so another user's id closes nothing.
     try { hostApi()?.gateway?.disconnectDevice(userId, id); } catch { /* best effort */ }
     send(res, 200, { revoked });

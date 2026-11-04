@@ -1484,18 +1484,23 @@ server.listen(PORT, HOST, () => {
         const { startHostApiListener, sessionTransport } = await import('./server/host-api-listener.mjs');
         const { hostname } = await import('node:os');
         const log = (l) => logger.info(l);
+        const { createAuditSink } = await import('./routes/host-api/audit.mjs');
+        const audit = createAuditSink({ db: getDb(), log });
         let tls = null;
         let fingerprint = null;
         if (config.hostApiMode === 'tls') {
           const { loadOrCreateHostIdentity } = await import('./server/host-identity.mjs');
-          const id = loadOrCreateHostIdentity(getDb(), { hostName: hostname(), onEvent: (e) => logger.info(`host_api_${e}`) });
+          const id = loadOrCreateHostIdentity(getDb(), { hostName: hostname(), onEvent: (e) => audit.record(e, {}) });
           tls = { certPem: id.certPem, keyPem: id.keyPem };
           fingerprint = id.fingerprint;
         }
-        const gateway = createGateway({ hostName: () => hostname(), log, certificateFingerprint: () => fingerprint, ...sessionTransport });
-        const onRefused = (event, peer) => logger.info(`host_api_${event}`, { peer });
+        const gateway = createGateway({ hostName: () => hostname(), log, certificateFingerprint: () => fingerprint,
+          audit: (event, fields) => audit.record(event, fields), ...sessionTransport });
+        // De-duplicated per origin / per peer for 60 s, so a refused flood cannot grow audit_log without bound.
+        const onRefused = (event, peer, detail) => audit.record(event, { peer, detail: detail || undefined,
+          dedupeKey: event === 'origin_refused' ? detail : peer });
         const listener = await startHostApiListener({ gateway, tls, log, onRefused });
-        hostApi = { gateway, listener, fingerprint };
+        hostApi = { gateway, listener, fingerprint, audit };
         logger.info(tls ? `Host API v1 (TLS, all interfaces) on 0.0.0.0:${listener.port}, ${fingerprint}`
           : `Host API v1 (development, loopback only) on 127.0.0.1:${listener.port}`);
       } catch (err) { logger.error('host_api_listener_failed', { error: err.message }); }

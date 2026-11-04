@@ -304,9 +304,9 @@ test('a fifth session is refused busy; an unauthenticated session closes after 1
   try {
     const t = harness();
     const ss = [{}, {}, {}, {}];
-    for (const s of ss) t.g.opened(s, '127.0.0.1');
+    ss.forEach((s, i) => t.g.opened(s, `10.0.0.${i + 1}`)); // distinct peers: one peer may hold only 2 before auth
     const fifth = {};
-    t.g.opened(fifth, '127.0.0.1');
+    t.g.opened(fifth, '10.0.0.9');
     assert.equal(t.lastError(), 'busy');
     assert.deepEqual(t.closed, [fifth]);
     await t.g.receive(ss[0], req('c-h', 'host.hello', HELLO));
