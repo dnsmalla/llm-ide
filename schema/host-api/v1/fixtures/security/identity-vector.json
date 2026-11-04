@@ -1,0 +1,8 @@
+{
+  "note": "TEST VECTOR ONLY - never a real host identity",
+  "d": "i7j3KYAUh5d6zRV8sqkKNmx0OYqm-bnnItc4AVbjiUo",
+  "x": "YTV7yMBpYpMWAIz5b8nxkvMcmkaFeyQN-YUm5q82ML8",
+  "y": "hoH3H54IZwWM3HH4pwRGK3ddlEU7Tt1-37OVAGiOKDY",
+  "spkiDerBase64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEYTV7yMBpYpMWAIz5b8nxkvMcmkaFeyQN+YUm5q82ML+GgfcfnghnBYzccfinBEYrd12URTtO3X7fs5UAaI4oNg==",
+  "fingerprint": "sha256:Obc_bPbPYYhshcJb4oQ97dFGrmWLJpTgi4AkF9zTlJ0"
+}

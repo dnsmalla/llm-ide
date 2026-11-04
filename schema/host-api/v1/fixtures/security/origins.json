@@ -1,0 +1,20 @@
+{
+  "allowlist": "http://localhost:5173, https://App.Example.com, https://app.example.org:8443, https://example.net:443, http://evil.example, *, https://*.example.com, http://localhost:5173/, null, https://192.168.1.20, http://127.0.0.1:99999, http://[::1]:3000",
+  "parsed": ["http://localhost:5173", "https://app.example.com", "https://app.example.org:8443", "https://example.net", "http://[::1]:3000"],
+  "cases": [
+    { "origin": null, "refused": false },
+    { "origin": "http://localhost:5173", "refused": false },
+    { "origin": "HTTP://LOCALHOST:5173", "refused": false },
+    { "origin": "http://localhost:5174", "refused": true },
+    { "origin": "https://app.example.com", "refused": false },
+    { "origin": "https://app.example.com:443", "refused": true },
+    { "origin": "https://evil.app.example.com", "refused": true },
+    { "origin": "http://app.example.com", "refused": true },
+    { "origin": "https://app.example.org:8443", "refused": false },
+    { "origin": "https://example.net", "refused": false },
+    { "origin": "null", "refused": true },
+    { "origin": "", "refused": true },
+    { "origin": "http://localhost:5173, https://app.example.com", "refused": true },
+    { "origin": "http://[::1]:3000", "refused": false }
+  ]
+}
