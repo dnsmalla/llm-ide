@@ -263,7 +263,9 @@ pub fn stage_all(root: &Path, stage: bool) -> R<()> {
     let bulk = Opts { timeout: Some(std::time::Duration::from_secs(180)), ..Opts::default() };
     if stage {
         let st = status(root)?;
-        let bulk = Opts { timeout: Some(crate::git::scaled_timeout(st.entries.len()).max(std::time::Duration::from_secs(60))), ..Opts::default() };
+        // Collapsed untracked folders undercount the files `add -A` hashes (10k files in 100 folders = 100 entries),
+        // so the floor is the same 180 s hang guard the unstage branch uses.
+        let bulk = Opts { timeout: Some(crate::git::scaled_timeout(st.entries.len()).max(std::time::Duration::from_secs(180))), ..Opts::default() };
         if st.entries.iter().any(|e| e.kind == "unmerged") {
             return gerr("conflict", "resolve the conflicted files first; Stage All would mark them resolved");
         }
