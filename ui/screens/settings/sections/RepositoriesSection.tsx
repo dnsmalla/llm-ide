@@ -43,6 +43,7 @@ export default function RepositoriesSection() {
   const [draft, setDraft] = useState("");
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   // Tokens saved in this session live only in memory; the vault never returns them. They make Clone one click.
   const [memoryTokens, setMemoryTokens] = useState<Record<RepoProvider, string | null>>({ gitlab: null, github: null });
   const [cloneFor, setCloneFor] = useState<string | null>(null);
@@ -116,6 +117,23 @@ export default function RepositoriesSection() {
       setError(sourcesError(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const checkToken = async () => {
+    setChecking(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const body = await call(client, "POST", "/kb/repos/check-token", { provider: provider.id });
+      const b = body && typeof body === "object" ? body as { login?: unknown; name?: unknown; scopes?: unknown } : {};
+      const login = typeof b.login === "string" ? b.login : "";
+      const scopes = Array.isArray(b.scopes) ? b.scopes.filter((x): x is string => typeof x === "string") : [];
+      setStatus(`Token works${login ? ` for @${login}` : ""}${scopes.length ? ` · ${scopes.join(", ")}` : ""}.`);
+    } catch (e) {
+      setError(sourcesError(e));
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -303,7 +321,8 @@ export default function RepositoriesSection() {
               <Button onClick={() => setVisible((v) => !v)}>{visible ? "Hide" : "Show"}</Button>
             ) : null}
             <Button tone="primary" disabled={busy || draft.trim() === ""} onClick={() => void saveToken()}>{busy ? "Saving…" : "Save token"}</Button>
-            {connected ? <Button tone="danger" disabled={busy} onClick={() => void clearToken()}>Clear token</Button> : null}
+            {connected ? <Button disabled={busy || checking} onClick={() => void checkToken()}>{checking ? "Checking…" : "Check token"}</Button> : null}
+            {connected ? <Button tone="danger" disabled={busy || checking} onClick={() => void clearToken()}>Clear token</Button> : null}
           </div>
           <span className="st-hint">
             Stored write-only in the core vault; the saved value is never shown again. {REPOS_TEXT.saveOnly}

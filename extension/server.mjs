@@ -317,7 +317,9 @@ const HOST = config.host;
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 //   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
 //   v109 — Host API v1 pairing QR, additive (no new route): POST /host-api/pin also returns addresses (string[]): in TLS mode this computer's IPv4s best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6), so the desktop Settings card can show the llmide://pair QR; always [] for the dev listener.
-const SERVER_API_VERSION = 109;
+//   v110 — additive: POST /kb/repos/check-token { provider } verifies the vault's github.token / gitlab.token
+//          against the provider's /user endpoint and answers { ok, login, name, scopes? }; no token is returned.
+const SERVER_API_VERSION = 110;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -361,6 +363,7 @@ const ALL_ENDPOINTS = [
   '/kb/ingest-scip',
   '/kb/ingest-code-graph',
   '/kb/connect-github-issues',
+  '/kb/repos/check-token',
   '/kb/connect-tickets-json',
   '/kb/connect-qa',
   '/kb/email/test',
