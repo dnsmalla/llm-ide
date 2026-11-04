@@ -1,10 +1,28 @@
 // App-shell service worker. It caches the built page and its hashed assets so the installed client opens
 // offline; it never caches the Host API WebSocket, pairing data, tokens or any cross-origin response.
-const CACHE = "llmide-shell-v1";
+importScripts("/sw-prune.js");
+
+const CACHE = "llmide-shell-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png", "/icons/apple-touch-icon.png"];
 
+/** Delete hashed assets from older builds; the current index.html is the source of truth. */
+async function pruneOldAssets(cache) {
+  const index = (await cache.match("/index.html")) ?? (await cache.match("/"));
+  if (!index) return;
+  const keep = self.LLMIDESwPrune.assetsInIndex(await index.text());
+  if (keep.length === 0) return;
+  const keys = await cache.keys();
+  for (const raw of self.LLMIDESwPrune.staleAssetPaths(keys.map((r) => r.url), keep)) {
+    await cache.delete(raw);
+  }
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then(async (c) => {
+    await c.addAll(SHELL);
+    await pruneOldAssets(c);
+    await self.skipWaiting();
+  }));
 });
 
 self.addEventListener("activate", (event) => {
