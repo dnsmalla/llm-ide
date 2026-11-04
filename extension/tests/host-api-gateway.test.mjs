@@ -1,0 +1,318 @@
+// Host API v1 desktop gateway — scenarios ported from mac/Tests/LlmIdeMacTests/HostApiV1GatewayTests.swift,
+// driven with injected fakes (no engine, no DB, no network).
+import { test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { createGateway } from '../routes/host-api/gateway.mjs';
+
+const flush = () => new Promise((r) => setImmediate(r));
+const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
+const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
+
+function harness({ toolApprovals = false, chatClear = false, hold = false } = {}) {
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], toolApprovals, pending: [] };
+  const tokens = new Map(); // token -> { userId, deviceId }
+  let n = 0;
+  let quick = null;
+  t.tokens = tokens;
+  t.devices = {
+    issueDeviceToken(userId) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId }); return { deviceId, token }; },
+    authenticateDeviceToken: (token) => tokens.get(token) ?? null,
+    revokeDevice(userId, deviceId) { for (const [k, v] of tokens) if (v.userId === userId && v.deviceId === deviceId) tokens.delete(k); return true; },
+  };
+  t.g = createGateway({
+    send: (s, text) => t.sent.push([s, JSON.parse(text)]),
+    close: (s) => t.closed.push(s),
+    hostName: () => 'Test Computer',
+    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : [])],
+    log: () => {},
+    chatClearEnabled: () => chatClear,
+    pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
+    devices: t.devices,
+    quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => 'chat-1' },
+    history: async () => [{ role: 'user', content: 'hi' }, { role: 'tool', content: 'x' }, { role: 'assistant', content: 'yo' }],
+    turn: (args) => {
+      t.turns.push(args);
+      args.onEvent({ type: 'init', sessionId: 'sdk-1' });
+      if (hold) return new Promise((resolve) => t.pending.push(resolve));
+      args.onEvent({ type: 'delta', text: 'hi' });
+      args.onEvent({ type: 'result', subtype: 'success' });
+      return Promise.resolve();
+    },
+    cancel: (userId, chatSessionId) => { t.cancelled.push([userId, chatSessionId]); return true; },
+    clear: (userId, chatSessionId) => { t.cleared.push([userId, chatSessionId]); return { cleared: true }; },
+    decide: (args) => { t.decided.push(args); return { ok: true }; },
+  });
+  t.last = () => t.sent.at(-1)[1];
+  t.lastError = () => t.last().error?.code;
+  t.paired = async (s) => {
+    t.g.opened(s, '127.0.0.1');
+    await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+    await t.g.receive(s, req('c-p', 'host.auth.pair', { pin: '123456' }));
+  };
+  return t;
+}
+
+test('pairing: hello, pair, then the token authenticates a second session', async () => {
+  const t = harness();
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  const result = t.last().result;
+  assert.equal(t.last().replyTo, 'c-p');
+  assert.ok(result.token.startsWith('tok-h1-'));
+  assert.deepEqual(result.capabilities, ['host', 'chat', 'approvals']);
+  const s2 = { n: 2 };
+  t.g.opened(s2, '127.0.0.1');
+  await t.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s2, req('c-t', 'host.auth.token', { token: result.token }));
+  assert.equal(t.last().type, 'response');
+  assert.deepEqual(t.last().result, { capabilities: ['host', 'chat', 'approvals'] });
+});
+
+test('wrong PIN: auth_failed, not retryable; commands before auth are refused', async () => {
+  const t = harness();
+  const s = {};
+  t.g.opened(s, '127.0.0.1');
+  await t.g.receive(s, req('c-1', 'chat.snapshot'));
+  assert.equal(t.lastError(), 'auth_failed');
+  await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s, req('c-p', 'host.auth.pair', { pin: '000000' }));
+  assert.equal(t.lastError(), 'auth_failed');
+  assert.equal(t.last().error.retryable, false);
+  // The throttle now asks this peer to wait before the next attempt.
+  await t.g.receive(s, req('c-p2', 'host.auth.pair', { pin: '123456' }));
+  assert.equal(t.lastError(), 'auth_failed');
+  assert.equal(t.last().error.retryable, true);
+  assert.ok(t.last().error.details.retryAfterMs > 0);
+});
+
+test('chat.send runs a turn on the quick chat and routes delta + done', async () => {
+  const t = harness();
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello', attachments: [{ name: 'a.md', text: 'x' }] }));
+  await flush();
+  const reply = t.sent.find(([, f]) => f.replyTo === 'c-9' && f.type === 'response')[1];
+  assert.deepEqual(reply.result, { accepted: true, requestId: 'c-9' });
+  assert.equal(t.turns.length, 1);
+  assert.equal(t.turns[0].userId, 'u1');
+  assert.equal(t.turns[0].chatSessionId, 'chat-1');
+  assert.equal(t.turns[0].message, 'hello');
+  assert.deepEqual(t.turns[0].files, [{ name: 'a.md', text: 'x' }]);
+  assert.equal('permissionMode' in t.turns[0], false);
+  const events = t.sent.filter(([, f]) => f.type === 'event').map(([, f]) => f);
+  assert.deepEqual(events.map((f) => f.command), ['chat.delta', 'chat.done']);
+  assert.deepEqual(events.map((f) => f.replyTo), ['c-9', 'c-9']);
+  assert.equal(events[0].payload.text, 'hi');
+  const revs = t.sent.map(([, f]) => f.rev);
+  assert.deepEqual(revs, [...revs].sort((a, b) => a - b));
+  assert.equal(t.g.rev, 2);
+  // Ownership ended at the terminal frame: the same id may run again.
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'again' }));
+  assert.equal(t.last().type === 'error', false);
+});
+
+test('a reused in-flight chat.send id is busy', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'a' }));
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'b' }));
+  assert.equal(t.lastError(), 'busy');
+  await t.g.receive(s, req('c-10', 'chat.send', { text: 'c' }));
+  assert.equal(t.lastError(), 'busy');
+  assert.equal(t.turns.length, 1);
+});
+
+test('cancel ends the turn as a cancelled done', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  await t.g.receive(s, req('c-x', 'chat.cancel'));
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  assert.deepEqual(t.last().result, { cancelled: true });
+  // The real engine ends an aborted turn without an error event: the turn just resolves.
+  t.pending[0]();
+  await flush();
+  assert.equal(t.last().command, 'chat.done');
+  assert.deepEqual(t.last().payload, { requestId: 'c-9', stopReason: 'cancelled' });
+  await t.g.receive(s, req('c-y', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: false });
+});
+
+test('approvals.answer: not_found when not owned; owned answers carry the init sdkSessionId', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-a', 'approvals.answer', { requestId: 'r1', commandId: 'someone-else', answers: {} }));
+  assert.equal(t.lastError(), 'not_found');
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  await t.g.receive(s, req('c-a2', 'approvals.answer', { requestId: 'r1', commandId: 'c-9', answers: {} }));
+  assert.equal(t.lastError(), 'not_found', 'the request id is not open');
+  t.turns[0].onEvent({ type: 'approval_request', requestId: 'r1', kind: 'AskUserQuestion', questions: [{ question: 'Q?', options: [{ label: 'A' }] }] });
+  assert.equal(t.last().command, 'approval.request');
+  assert.equal(t.last().payload.commandId, 'c-9');
+  await t.g.receive(s, req('c-a3', 'approvals.answer', { requestId: 'r1', commandId: 'c-9', answers: { 'Q?': 'A' } }));
+  assert.deepEqual(t.last().result, { accepted: true });
+  assert.deepEqual(t.decided, [{ requestId: 'r1', sdkSessionId: 'sdk-1', userId: 'u1', action: 'answer', answers: { 'Q?': 'A' } }]);
+  assert.equal(t.decided.length, 1);
+});
+
+test('toolApprovals.answer needs its capability; with it, allow_once is an allow', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-t', 'toolApprovals.answer', { requestId: 'r2', commandId: 'c-9', decision: 'allow_once' }));
+  assert.equal(t.lastError(), 'capability_unavailable');
+  t.toolApprovals = true;
+  t.g.capabilitiesChanged();
+  assert.equal(t.last().command, 'host.capabilities');
+  assert.ok(t.last().payload.capabilities.includes('tool_approvals'));
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  t.turns[0].onEvent({ type: 'approval_request', requestId: 'r2', kind: 'ToolApproval', toolName: 'Bash', argsSummary: 'ls' });
+  await t.g.receive(s, req('c-t2', 'toolApprovals.answer', { requestId: 'r2', commandId: 'c-9', decision: 'allow_once' }));
+  assert.deepEqual(t.last().result, { accepted: true });
+  assert.deepEqual(t.decided, [{ requestId: 'r2', sdkSessionId: 'sdk-1', userId: 'u1', action: 'allow' }]);
+});
+
+test('chat.history.clear: denied without the flag, cleared with it, busy while a turn runs', async () => {
+  const off = harness();
+  const s = {};
+  await off.paired(s);
+  await off.g.receive(s, req('c-c', 'chat.history.clear'));
+  assert.equal(off.lastError(), 'denied');
+  assert.deepEqual(off.cleared, []);
+
+  const t = harness({ chatClear: true, hold: true });
+  const s2 = {};
+  await t.paired(s2);
+  await t.g.receive(s2, req('c-9', 'chat.send', { text: 'hello' }));
+  await t.g.receive(s2, req('c-c', 'chat.history.clear'));
+  assert.equal(t.lastError(), 'busy');
+  assert.deepEqual(t.cleared, []);
+  t.pending[0]();
+  await flush();
+  await t.g.receive(s2, req('c-c2', 'chat.history.clear'));
+  assert.deepEqual(t.last().result, { cleared: true });
+  assert.deepEqual(t.cleared, [['u1', 'chat-1']]);
+});
+
+test('snapshot serves chat only, user and assistant lines only', async () => {
+  const t = harness();
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-s', 'host.snapshot', { topics: ['chat'] }));
+  assert.deepEqual(t.last().result, { snapshots: { chat: { messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'yo' }] } } });
+  await t.g.receive(s, req('c-s2', 'host.snapshot', { topics: ['chat', 'loop'] }));
+  assert.equal(t.lastError(), 'capability_unavailable');
+  await t.g.receive(s, req('c-s3', 'chat.snapshot', { limit: 1 }));
+  assert.deepEqual(t.last().result, { messages: [{ role: 'assistant', content: 'yo' }] });
+});
+
+test('self-revoke: another token is denied; its own token revokes and closes every session of the device', async () => {
+  const t = harness();
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  const token = t.sent.find(([, f]) => f.replyTo === 'c-p')[1].result.token;
+  const s2 = { n: 2 };
+  t.g.opened(s2, '127.0.0.1');
+  await t.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  await t.g.receive(s1, req('c-r', 'host.auth.revoke', { token: 'tok-h1-other-0123456789' }));
+  assert.equal(t.lastError(), 'denied');
+  assert.deepEqual(t.closed, []);
+  await t.g.receive(s1, req('c-r2', 'host.auth.revoke', { token }));
+  const response = t.sent.find(([, f]) => f.replyTo === 'c-r2')[1];
+  assert.deepEqual(response.result, { revoked: true });
+  assert.equal(t.tokens.size, 0);
+  assert.deepEqual(new Set(t.closed), new Set([s1, s2]));
+});
+
+test('closeAll cancels every in-flight turn and closes every session', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  const s2 = { n: 2 };
+  await t.paired(s1);
+  await t.paired(s2);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'a' }));
+  await t.g.receive(s2, req('c-2', 'chat.send', { text: 'b' }));
+  const before = t.sent.length;
+  t.g.closeAll();
+  assert.equal(t.cancelled.length, 2);
+  assert.deepEqual(new Set(t.closed), new Set([s1, s2]));
+  // Late engine events after close are dropped.
+  t.turns[0].onEvent({ type: 'delta', text: 'late' });
+  t.turns[0].onEvent({ type: 'result' });
+  assert.equal(t.sent.length, before);
+});
+
+test('hello returns the desktop host shape', async () => {
+  const t = harness();
+  const s = {};
+  t.g.opened(s, '127.0.0.1');
+  await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+  assert.deepEqual(t.last().result, {
+    hostName: 'Test Computer', hostKind: 'desktop', apiVersion: 1, apiVersions: [1],
+    capabilities: ['host', 'chat', 'approvals'], protocolVersion: 1, requiresAuth: true,
+  });
+});
+
+test('a fifth session is refused busy; an unauthenticated session closes after 10 s', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const t = harness();
+    const ss = [{}, {}, {}, {}];
+    for (const s of ss) t.g.opened(s, '127.0.0.1');
+    const fifth = {};
+    t.g.opened(fifth, '127.0.0.1');
+    assert.equal(t.lastError(), 'busy');
+    assert.deepEqual(t.closed, [fifth]);
+    await t.g.receive(ss[0], req('c-h', 'host.hello', HELLO));
+    await t.g.receive(ss[0], req('c-p', 'host.auth.pair', { pin: '123456' }));
+    mock.timers.tick(10_000);
+    assert.deepEqual(new Set(t.closed), new Set([fifth, ss[1], ss[2], ss[3]]));
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an engine-callback throw never escapes', async () => {
+  const t = harness();
+  const s = {};
+  await t.paired(s);
+  let code = 'TURN_IN_PROGRESS';
+  const g = createGateway({
+    send: (_s, text) => t.sent.push([_s, JSON.parse(text)]), close: () => {}, hostName: () => 'X', capabilities: () => ['host', 'chat', 'approvals'], log: () => {},
+    pins: { consumePin: () => 'u1' }, devices: t.devices,
+    quickChat: { get: () => 'chat-1', set: () => {}, create: () => 'chat-1' },
+    turn: () => Promise.reject(Object.assign(new Error('Busy.'), { code })),
+  });
+  const s2 = {};
+  g.opened(s2, '127.0.0.1');
+  await g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await g.receive(s2, req('c-p', 'host.auth.pair', { pin: '123456' }));
+  await g.receive(s2, req('c-1', 'chat.send', { text: 'a' }));
+  await flush();
+  assert.equal(t.last().command, 'chat.error');
+  assert.equal(t.last().payload.retryable, true);
+  code = 'SESSION_TOKEN_LIMIT';
+  await g.receive(s2, req('c-2', 'chat.send', { text: 'a' }));
+  await flush();
+  assert.equal(t.last().command, 'chat.error');
+  assert.equal(t.last().payload.retryable, false);
+  // onEvent swallows a send failure rather than throwing into the engine.
+  let thrown = null;
+  const g2 = createGateway({
+    send: (_s, text) => { if (JSON.parse(text).type === 'event') throw new Error('socket gone'); }, close: () => {}, hostName: () => 'X', capabilities: () => ['host', 'chat', 'approvals'], log: () => {},
+    pins: { consumePin: () => 'u1' }, devices: t.devices,
+    quickChat: { get: () => 'chat-1', set: () => {}, create: () => 'chat-1' },
+    turn: ({ onEvent }) => { try { onEvent({ type: 'delta', text: 'x' }); onEvent({ type: 'result' }); } catch (e) { thrown = e; } return Promise.resolve(); },
+  });
+  const s3 = {};
+  g2.opened(s3, '127.0.0.1');
+  await g2.receive(s3, req('c-h', 'host.hello', HELLO));
+  await g2.receive(s3, req('c-p', 'host.auth.pair', { pin: '123456' }));
+  await g2.receive(s3, req('c-1', 'chat.send', { text: 'a' }));
+  await flush();
+  assert.equal(thrown, null);
+});
