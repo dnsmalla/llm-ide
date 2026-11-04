@@ -9,6 +9,15 @@ export type LoopStageKind =
   | "regressionSweep" | "shellCommand" | "skill" | "artifactCheck" | "testMap" | "testPrune"
   | "incidentTriage" | "codeGraph" | "sdkSurfaceDiff" | "unsupported";
 
+/** Stage kinds the native runner executes; testMap is runnable only for the operations listed below. */
+const NATIVE_RUNNABLE_KINDS: ReadonlySet<LoopStageKind> = new Set(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"]);
+const NATIVE_TEST_OPS: ReadonlySet<string> = new Set(["structure", "map", "ledger"]);
+
+/** The one place that says whether the desktop's native runner can run a stage (run guard, Run stage, button). */
+export function isNativeRunnable(stage: Pick<LoopStage, "kind" | "testOp">): boolean {
+  return NATIVE_RUNNABLE_KINDS.has(stage.kind) || (stage.kind === "testMap" && stage.testOp !== null && NATIVE_TEST_OPS.has(stage.testOp));
+}
+
 export interface LoopStage {
   id: string;
   name: string;

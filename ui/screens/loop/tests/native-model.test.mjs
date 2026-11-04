@@ -55,3 +55,10 @@ test("store distinguishes missing from corrupt and never overwrites silently", a
   assert.equal((await s.loadLoops(fakeFs("{not json"))).kind, "corrupt");
   assert.equal((await s.loadLoops(fakeFs(JSON.stringify({ nope: true })))).kind, "corrupt");
 });
+
+test("isNativeRunnable is the single list of kinds the native runner executes", () => {
+  for (const kind of ["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"]) assert.equal(m.isNativeRunnable({ kind, testOp: null }), true, kind);
+  for (const testOp of ["structure", "map", "ledger"]) assert.equal(m.isNativeRunnable({ kind: "testMap", testOp }), true, testOp);
+  assert.equal(m.isNativeRunnable({ kind: "testMap", testOp: null }), false);
+  for (const kind of ["incidentTriage", "sdkSurfaceDiff", "unsupported"]) assert.equal(m.isNativeRunnable({ kind, testOp: null }), false, kind);
+});

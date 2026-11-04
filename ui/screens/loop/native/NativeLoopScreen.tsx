@@ -8,7 +8,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
-import type { LoopDefinition, LoopProjectStore, LoopStage } from "./model.ts";
+import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
@@ -576,7 +576,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const executeLoop = async (target: LoopDefinition, scheduled = false) => {
     if (dirty) return;
-    const unsupported = target.config.stages.find((s) => s.enabled && !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(s.kind) || (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map" || s.testOp === "ledger"))));
+    const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
@@ -749,7 +749,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runSelectedStage = async () => {
     if (!loop || !stage || dirty || runningStage) return;
-    if (!(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger")))) { setNotice("This stage kind cannot run in the native runner yet."); return; }
+    if (!isNativeRunnable(stage)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
     if (stage.kind === "skill" && isBatchSkill(stage.skillId)) { setNotice("This refactor batch stage needs the Mac app's rollback; run it from the Mac."); return; }
@@ -847,7 +847,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !(["shellCommand", "regressionSweep", "skill", "artifactCheck", "codeGraph", "testPrune"].includes(stage.kind) || (stage.kind === "testMap" && (stage.testOp === "structure" || stage.testOp === "map" || stage.testOp === "ledger"))) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !isNativeRunnable(stage) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
           <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
           <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
