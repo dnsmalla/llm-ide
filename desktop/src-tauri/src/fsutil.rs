@@ -144,12 +144,39 @@ pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
 }
 
 /// Strips the `\\?\` verbatim prefix `canonicalize` adds on Windows: `\\?\C:\x` -> `C:\x`,
-/// `\\?\UNC\srv\share` -> `\\srv\share`. Pure string form, so it is testable on every host.
+/// `\\?\UNC\srv\share` -> `\\srv\share`, but only when the plain form names the same path. Win32 trims a
+/// trailing dot or space, maps `nul`/`con`/... to devices, treats `/` as a separator and stops at MAX_PATH, so a
+/// verbatim path with any of those stays verbatim (same rule as the `dunce` crate). Pure string form, so it is
+/// testable on every host.
 pub fn plain_windows_path(p: &str) -> String {
-    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{rest}");
-    }
-    p.strip_prefix(r"\\?\").unwrap_or(p).to_string()
+    let (plain, rest) = if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        (format!(r"\\{rest}"), rest)
+    } else if let Some(rest) = p.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        // Only a drive path (`C:\...`); `\\?\Volume{...}` and `\\?\GLOBALROOT` have no plain form.
+        if !(b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\') {
+            return p.to_string();
+        }
+        (rest.to_string(), &rest[3..])
+    } else {
+        return p.to_string();
+    };
+    let reserved = |c: &str| {
+        let base = c.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+        matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+            || (base.len() == 4 && (base.starts_with("COM") || base.starts_with("LPT")) && base.as_bytes()[3].is_ascii_digit())
+    };
+    let parts: Vec<&str> = rest.split('\\').collect();
+    let last = parts.len().saturating_sub(1);
+    let safe = plain.len() < 260
+        && !rest.contains('/')
+        && parts.iter().enumerate().all(|(i, c)| {
+            if c.is_empty() {
+                return i == last; // only a trailing separator (`C:\`)
+            }
+            !c.ends_with(['.', ' ']) && !reserved(c)
+        });
+    if safe { plain } else { p.to_string() }
 }
 
 /// `p` without the Windows verbatim prefix (unchanged elsewhere). Git (MSYS) and `cmd.exe` cannot use a
@@ -171,10 +198,33 @@ mod tests {
         assert_eq!(plain_windows_path(r"\\?\UNC\srv\share\p"), r"\\srv\share\p");
         assert_eq!(plain_windows_path(r"C:\x"), r"C:\x");
         assert_eq!(plain_windows_path("/usr/x"), "/usr/x");
+        assert_eq!(plain_windows_path(r"\\?\C:\"), r"C:\");
+        // No plain spelling for these: they stay verbatim.
+        for keep in [
+            r"\\?\C:\a.\b", r"\\?\C:\a \b", r"\\?\C:\x\nul", r"\\?\C:\x\COM1.txt", r"\\?\C:\a/b", r"\\?\C:\a\\b",
+            r"\\?\Volume{1}\x", r"\\?\UNC\srv\share\x.", r"\\?\C:\a.",
+        ] {
+            assert_eq!(plain_windows_path(keep), keep);
+        }
+        let long = format!(r"\\?\C:\{}", "a\\".repeat(130));
+        assert_eq!(plain_windows_path(&long), long, "over MAX_PATH");
         let canon = std::fs::canonicalize(std::env::temp_dir()).unwrap();
         let plain = plain_path(&canon);
         assert!(!plain.to_string_lossy().starts_with(r"\\?\"), "{plain:?}");
         assert_eq!(std::fs::canonicalize(&plain).unwrap(), canon, "same folder");
+    }
+
+    /// A real folder whose name ends in a dot (only the verbatim API can make one) keeps its `\\?\` form.
+    #[cfg(windows)]
+    #[test]
+    fn a_trailing_dot_folder_stays_verbatim() {
+        let base = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("llmide-fs-{}-dot", std::process::id()));
+        let dotted = PathBuf::from(format!("{}.", base.display()));
+        let _ = std::fs::remove_dir_all(&dotted);
+        std::fs::create_dir_all(&dotted).unwrap();
+        assert_eq!(plain_path(&dotted), dotted, "the plain form would name {base:?}");
+        assert!(!base.exists());
+        std::fs::remove_dir_all(&dotted).unwrap();
     }
 
     #[allow(dead_code)]
