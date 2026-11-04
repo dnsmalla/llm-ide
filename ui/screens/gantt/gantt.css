@@ -106,3 +106,6 @@
 .gnt-bar { z-index: 2; }
 .gnt-deps path { fill: none; stroke: var(--tok-color-text-muted); stroke-width: 1.5; }
 .gnt-deps marker path { fill: var(--tok-color-text-muted); stroke: none; }
+
+.gnt-bar { touch-action: pan-y; user-select: none; }
+.gnt-bar[data-dragging] { cursor: grabbing; z-index: 4; }

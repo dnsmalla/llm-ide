@@ -45,6 +45,8 @@ export interface GanttChartProps {
   today: number;
   selectedId: string | undefined;
   onActivate: (row: GanttRow, target: RowTarget) => void;
+  /** Drag/keyboard shift of a bar's inclusive dates, in whole days. Absent: bars are not draggable. */
+  onShift?: (row: GanttRow, days: number) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   /** Test seam: the viewport height used before the scroller is measured. */
   assumedViewportHeight?: number;
@@ -83,6 +85,7 @@ interface RowProps {
   selected: boolean;
   onActivate: (row: GanttRow, target: RowTarget) => void;
   onFocusRow: (index: number) => void;
+  onShift?: (row: GanttRow, days: number) => void;
 }
 
 const GanttLabel = memo(function GanttLabel({ row, index, count, selected, onActivate, onFocusRow }: RowProps & { count: number }) {
@@ -109,19 +112,57 @@ interface TrackProps extends RowProps {
   dayWidth: number;
 }
 
-const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWidth, onActivate, onFocusRow }: TrackProps) {
+const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWidth, onActivate, onFocusRow, onShift }: TrackProps) {
   const g = barGeometry(row, range, dayWidth);
+  const [dx, setDx] = useState(0);
+  const drag = useRef<{ x: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  if (!g) return <div className="gnt-track" data-on={selected || undefined} style={{ top: HEAD_H + index * ROW_H }} />;
+  const canShift = !!onShift && row.start !== null && row.end !== null;
+  const finish = (clientX: number) => {
+    const d = drag.current;
+    drag.current = null;
+    setDx(0);
+    if (!d || !canShift) return;
+    const days = Math.round((clientX - d.x) / dayWidth);
+    if (d.moved) suppressClick.current = true;
+    if (d.moved && days !== 0) onShift?.(row, days);
+  };
   return (
     <div className="gnt-track" data-on={selected || undefined} style={{ top: HEAD_H + index * ROW_H }}>
       {g ? (
         <button
           type="button"
           className="gnt-bar"
-          style={{ left: g.left, width: g.width }}
+          style={{ left: g.left, width: g.width, transform: dx ? `translateX(${dx}px)` : undefined }}
           data-selected={selected || undefined}
-          title={`${row.issue.title}\n${barDates(row)}\nEdit schedule`}
+          data-dragging={dx !== 0 || undefined}
+          title={`${row.issue.title}\n${barDates(row)}\n${canShift ? "Drag to move; Alt+Left/Right for one day" : "Edit schedule"}`}
           onFocus={() => onFocusRow(index)}
-          onClick={() => onActivate(row, "bar")}
+          onPointerDown={(e) => {
+            if (!canShift || e.button !== 0) return;
+            drag.current = { x: e.clientX, moved: false };
+            suppressClick.current = false;
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            const d = drag.current;
+            if (!d) return;
+            const delta = e.clientX - d.x;
+            if (Math.abs(delta) >= 3) d.moved = true;
+            setDx(d.moved ? Math.round(delta / dayWidth) * dayWidth : 0);
+          }}
+          onPointerUp={(e) => finish(e.clientX)}
+          onPointerCancel={() => { drag.current = null; setDx(0); }}
+          onKeyDown={(e) => {
+            if (!canShift || !e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+            e.preventDefault();
+            onShift?.(row, e.key === "ArrowRight" ? 1 : -1);
+          }}
+          onClick={() => {
+            if (suppressClick.current) { suppressClick.current = false; return; }
+            onActivate(row, "bar");
+          }}
         >
           {row.dependsOn.length ? <span className="gnt-dep" title={`Depends on #${row.dependsOn.join(", #")}`}>⤷</span> : null}
           {issueLabel(row.issue)}
@@ -132,7 +173,7 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
 });
 
 export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
-  const { rows, dayWidth, today, scrollRef, onActivate } = p;
+  const { rows, dayWidth, today, scrollRef, onActivate, onShift } = p;
   const [vp, setVp] = useState({ w: 0, h: 0 });
   const labelsRef = useRef<HTMLDivElement>(null);
   // The focused row is pinned into the window: a Tab from it always lands on a mounted row.
@@ -254,7 +295,7 @@ export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
             </div>
           </div>
           {visibleIdx.map((i) => (
-            <GanttTrack key={rows[i]!.issue.id} row={rows[i]!} index={i} selected={rows[i]!.issue.id === p.selectedId} range={range} dayWidth={dayWidth} onActivate={onActivate} onFocusRow={onFocusRow} />
+            <GanttTrack key={rows[i]!.issue.id} row={rows[i]!} index={i} selected={rows[i]!.issue.id === p.selectedId} range={range} dayWidth={dayWidth} onActivate={onActivate} onFocusRow={onFocusRow} onShift={onShift} />
           ))}
         </div>
       </div>

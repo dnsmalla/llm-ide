@@ -149,6 +149,22 @@ export function estimateSpanDays(est: number, anchor: "start" | "due"): number {
   return Math.max(1, anchor === "start" ? Math.floor(est) : Math.ceil(est));
 }
 
+/** Shift a row's inclusive bar span by whole days. Returns null for a zero shift or a row with no span. */
+export function shiftSchedule(row: Pick<GanttRow, "start" | "end">, days: number): { startDate: string; dueDate: string } | null {
+  if (!Number.isInteger(days) || days === 0 || row.start === null || row.end === null) return null;
+  return { startDate: dayString(row.start + days), dueDate: dayString(row.end + days) };
+}
+
+/** The PUT body for a drag/keyboard shift; null when the row cannot be scheduled or the shift is zero. */
+export function shiftScheduleBody(row: GanttRow, days: number): (ScheduleKey & { startDate: string; dueDate: string; estimateDays: number | null; dependsOn: number[] }) | null {
+  const shifted = shiftSchedule(row, days);
+  if (shifted === null || row.issue.number === null) return null;
+  return {
+    provider: row.issue.provider, repo: row.issue.repo, issueNumber: row.issue.number,
+    ...shifted, estimateDays: row.schedule?.estimateDays ?? null, dependsOn: row.dependsOn,
+  };
+}
+
 /**
  * A bar's drawn days, as inclusive day numbers, by the Mac's exact rule (GanttView.swift barGeometry): the bar
  * starts on startOfDay(startDate) and is max(1, days from startOfDay(startDate) to startOfDay(endDate)) long, so
