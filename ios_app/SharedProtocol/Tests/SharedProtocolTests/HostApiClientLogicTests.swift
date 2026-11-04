@@ -77,12 +77,11 @@ struct HostApiClientLogicTests {
         #expect(n.handle(.silent) == .ignore)
     }
 
-    @Test("endpoint: plaintext only to loopback, wss refused until Plan 6, default path added")
+    @Test("endpoint: plaintext only to loopback, default path added")
     func endpoint() {
         #expect(HostApiEndpoint("ws://127.0.0.1:3016")?.url.absoluteString == "ws://127.0.0.1:3016/host-api/v1")
         #expect(HostApiEndpoint("ws://localhost:3017/host-api/v1")?.url.path == "/host-api/v1")
         #expect(HostApiEndpoint("ws://192.168.1.20:3016") == nil, "plaintext off loopback")
-        #expect(HostApiEndpoint("wss://192.168.1.20:3016") == nil, "no pinning evaluator before Plan 6")
         #expect(HostApiEndpoint("ws://127.0.0.1") == nil, "the port is never assumed")
         #expect(HostApiEndpoint("http://127.0.0.1:3016") == nil)
         #expect(HostApiEndpoint("") == nil)

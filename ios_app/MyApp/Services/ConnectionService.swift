@@ -297,10 +297,15 @@ final class ConnectionService: ObservableObject {
     }
 
     private func connectV1(_ endpoint: HostApiEndpoint, ip: String, port: Int, pin: String, generation: Int) {
+        // wss without a stored pin is refused here, before any socket opens, and never falls back to v2.
+        let trust: HostApiTrustEvaluating?
+        do { trust = try HostApiPinning.trust(for: endpoint, pin: connectionStore?.hostApiPin) } catch {
+            return handleV1Refusal(HostApiPinning.missingPin)
+        }
         let client = HostApiV1Client(
             config: .init(clientName: UIDevice.current.name,
                           clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"),
-            makeSocket: { URLSessionHostApiSocket(url: endpoint.url) })
+            makeSocket: { URLSessionHostApiSocket(url: endpoint.url, trust: trust) })
         client.onEvent = { [weak self] in self?.route($0) }
         let token = connectionStore?.hostApiToken ?? ""
         let credential: HostCredential = token.isEmpty ? .pin(pin) : .token(token)

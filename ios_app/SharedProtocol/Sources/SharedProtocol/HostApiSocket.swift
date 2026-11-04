@@ -16,11 +16,15 @@ public protocol HostApiTrustEvaluating: Sendable {
 
 /// `URLSessionWebSocketTask` behind `HostApiSocket`. It has one ephemeral session per socket, invalidated
 /// on `cancel`, so a reconnect never leaks a session. A TLS challenge goes to `trust`; with none, every
-/// TLS host is refused rather than trusted through the system store.
+/// TLS host is refused rather than trusted through the system store. Once `trust` refused the host, every
+/// `send`/`receive` throws `HostApiPinning.mismatch`, so the client reports it instead of "no v1 host".
 public final class URLSessionHostApiSocket: NSObject, HostApiSocket, URLSessionDelegate, @unchecked Sendable {
     private let trust: HostApiTrustEvaluating?
     private var session: URLSession!
     private var task: URLSessionWebSocketTask!
+    private let refused = NSLock()
+    private var _trustRefused = false
+    private var trustRefused: Bool { refused.withLock { _trustRefused } }
 
     public init(url: URL, trust: HostApiTrustEvaluating? = nil) {
         self.trust = trust
@@ -31,10 +35,14 @@ public final class URLSessionHostApiSocket: NSObject, HostApiSocket, URLSessionD
         task.resume()
     }
 
-    public func send(_ text: String) async throws { try await task.send(.string(text)) }
+    public func send(_ text: String) async throws {
+        do { try await task.send(.string(text)) } catch { throw trustRefused ? HostApiPinning.mismatch : error }
+    }
 
     public func receive() async throws -> Data {
-        switch try await task.receive() {
+        let message: URLSessionWebSocketTask.Message
+        do { message = try await task.receive() } catch { throw trustRefused ? HostApiPinning.mismatch : error }
+        switch message {
         case .string(let s): return Data(s.utf8)
         case .data(let d): return d
         @unknown default: return Data()
@@ -53,6 +61,7 @@ public final class URLSessionHostApiSocket: NSObject, HostApiSocket, URLSessionD
             return completionHandler(.performDefaultHandling, nil)
         }
         guard let trust, trust.evaluate(serverTrust, host: challenge.protectionSpace.host) else {
+            refused.withLock { _trustRefused = true }
             return completionHandler(.cancelAuthenticationChallenge, nil)
         }
         completionHandler(.useCredential, URLCredential(trust: serverTrust))

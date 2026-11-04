@@ -23,6 +23,10 @@ final class ConnectionStore: ObservableObject {
     /// Host API v1 device token (spec "Security": in Keychain on iOS). Separate from the v2 `deviceToken`:
     /// the Mac keeps v1 and v2 devices apart. Empty until a v1 pairing.
     @Published private(set) var hostApiToken: String
+    /// The v1 host's certificate fingerprint learned at pairing (QR / Bonjour TXT), Keychain-held next to the v1
+    /// token, and its TLS port (UserDefaults). Empty/0 when the host offered no v1 TLS listener.
+    private(set) var hostApiPin: String
+    private(set) var hostApiPort: Int
     /// Stable id this phone presents to every Mac it pairs with. Minted once,
     /// kept in UserDefaults (it is an identifier, not a secret).
     let deviceId: String
@@ -61,19 +65,33 @@ final class ConnectionStore: ObservableObject {
         devicePIN   = CredentialKeychain.load(account: .pin) ?? ""
         deviceToken = CredentialKeychain.load(account: .token) ?? ""
         hostApiToken = CredentialKeychain.load(account: .hostApiToken) ?? ""
+        hostApiPin = CredentialKeychain.load(account: .hostApiPin) ?? ""
+        hostApiPort = defaults.integer(forKey: "agent_h1port")
     }
 
     /// A fresh PIN means a fresh pairing: any token from a previous pairing is
     /// for a registry entry that is about to be replaced, so drop it, or the
     /// connect path would keep presenting a token the Mac may have revoked.
-    func save(ip: String, port: Int, pin: String) {
+    ///
+    /// `hostApiOffer` is what the QR or the Bonjour TXT offered for v1. Only a fresh pairing (a PIN) may change
+    /// the stored pin; without a PIN the offer is ignored, so a spoofed TXT can never re-pin the phone.
+    func save(ip: String, port: Int, pin: String, hostApiOffer: HostApiPairingOffer? = nil) {
         deviceIP   = ip
         devicePort = port
         devicePIN  = pin
         defaults.set(ip,   forKey: "agent_ip")
         defaults.set(port, forKey: "agent_port")
         CredentialKeychain.save(pin, account: .pin)
-        if !pin.isEmpty { clearToken() }
+        guard !pin.isEmpty else { return }
+        clearToken()
+        let newPin = HostApiPinning.pinAfterOffer(stored: hostApiPin, offered: hostApiOffer?.fingerprint, freshPairing: true)
+        // A pin the Keychain refused is dropped: v1 is then not dialled, never dialled unpinned.
+        if let newPin, CredentialKeychain.save(newPin, account: .hostApiPin) { hostApiPin = newPin } else {
+            hostApiPin = ""
+            CredentialKeychain.delete(account: .hostApiPin)
+        }
+        hostApiPort = hostApiPin.isEmpty ? 0 : hostApiOffer?.port ?? 0
+        defaults.set(hostApiPort, forKey: "agent_h1port")
     }
 
     /// The Mac accepted the PIN and issued a token. Keep the token, drop the
@@ -100,16 +118,16 @@ final class ConnectionStore: ObservableObject {
         return true
     }
 
-    /// Where to try Host API v1 first; nil means go straight to v2. That is every release build until spec
-    /// phase 6 (WSS + pinning) puts the v1 port in Bonjour and the QR. Development only: a DEBUG build reads
-    /// `LLMIDE_HOST_API_URL` from the Xcode scheme (Run → Environment), e.g. `ws://127.0.0.1:3016/host-api/v1`
-    /// for the Simulator against a DEBUG Mac or desktop host started with `LLMIDE_HOST_API_DEV=1`.
+    /// Where to try Host API v1 first; nil means go straight to v2. A pairing that stored a pin dials
+    /// `wss://<ip>:<h1port>/host-api/v1`. Development only: a DEBUG build lets `LLMIDE_HOST_API_URL` from the
+    /// Xcode scheme (Run → Environment) override it, e.g. `ws://127.0.0.1:3016/host-api/v1` for the Simulator
+    /// against a DEBUG Mac or desktop host started with `LLMIDE_HOST_API_DEV=1`.
     var hostApiEndpoint: HostApiEndpoint? {
         #if DEBUG
-        return ProcessInfo.processInfo.environment["LLMIDE_HOST_API_URL"].flatMap(HostApiEndpoint.init)
-        #else
-        return nil
+        if let dev = ProcessInfo.processInfo.environment["LLMIDE_HOST_API_URL"].flatMap(HostApiEndpoint.init) { return dev }
         #endif
+        guard !hostApiPin.isEmpty, !deviceIP.isEmpty else { return nil }
+        return HostApiPairingOffer(port: hostApiPort, fingerprint: hostApiPin).endpoint(host: deviceIP)
     }
 
     private func clearToken() {
@@ -152,11 +170,15 @@ final class ConnectionStore: ObservableObject {
         devicePIN   = ""
         deviceToken = ""
         hostApiToken = ""
+        hostApiPin = ""
+        hostApiPort = 0
         devicePort  = 3006
         deviceName  = ""
         defaults.removeObject(forKey: "agent_ip")
         defaults.removeObject(forKey: "agent_port")
         defaults.removeObject(forKey: "agent_device_name")
+        defaults.removeObject(forKey: "agent_h1port")
+        CredentialKeychain.delete(account: .hostApiPin)
         CredentialKeychain.delete(account: .pin)
         CredentialKeychain.delete(account: .token)
         CredentialKeychain.delete(account: .hostApiToken)
@@ -173,6 +195,7 @@ private enum CredentialKeychain {
         case pin = "saved-mac"
         case token = "device-token"
         case hostApiToken = "host-api-token"
+        case hostApiPin = "host-api-pin"
     }
 
     private static func baseQuery(_ account: Account) -> [String: Any] {

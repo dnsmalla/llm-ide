@@ -183,7 +183,9 @@ public final class HostApiV1Client: HostConnection {
         return try await withCheckedThrowingContinuation { continuation in
             pending[id] = (command, mine, continuation)
             Task { [weak self] in
-                do { try await socket.send(frame) } catch { self?.resolve(id, mine, gen, throwing: Silence()) }
+                do { try await socket.send(frame) } catch {
+                    self?.resolve(id, mine, gen, throwing: (error as? HostApiRejection) ?? Silence())
+                }
             }
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: Self.nanoseconds(timeout, default: 15))
@@ -202,7 +204,7 @@ public final class HostApiV1Client: HostConnection {
         readTask = Task { [weak self] in
             while true {
                 let data: Data
-                do { data = try await s.receive() } catch { self?.socketEnded(gen); return }
+                do { data = try await s.receive() } catch { self?.socketEnded(gen, error as? HostApiRejection); return }
                 guard let self, gen == self.generation else { return }
                 self.handle(data)
             }
@@ -221,18 +223,19 @@ public final class HostApiV1Client: HostConnection {
         }
     }
 
-    private func socketEnded(_ gen: Int) {
+    /// `reason` is the socket's own refusal (a pin mismatch); without one the socket just went away.
+    private func socketEnded(_ gen: Int, _ reason: HostApiRejection? = nil) {
         guard gen == generation else { return }
         guard state == .connected else {
             // connect is awaiting a reply: fail it, and connect decides (v2 fallback or refusal) and tears down.
             let waiting = pending
             pending.removeAll()
-            for (_, p) in waiting { p.continuation.resume(throwing: Silence()) }
+            for (_, p) in waiting { p.continuation.resume(throwing: reason ?? Silence()) }
             return
         }
         teardown()
-        onEvent?(.disconnected(reason: .init(replyTo: nil, code: "host_unreachable",
-                                             message: "The connection to the host was lost.", retryable: true)))
+        onEvent?(.disconnected(reason: reason ?? .init(replyTo: nil, code: "host_unreachable",
+                                                       message: "The connection to the host was lost.", retryable: true)))
     }
 
     private func handle(_ data: Data) {

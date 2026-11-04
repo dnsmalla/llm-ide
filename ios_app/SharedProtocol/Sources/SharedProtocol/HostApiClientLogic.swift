@@ -82,17 +82,17 @@ public extension HostApiNegotiation {
     static func clearsCredentials(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }
 }
 
-/// Where to reach a Host API v1 listener. Spec "Security": plaintext only on loopback.
+/// Where to reach a Host API v1 listener. Spec "Security": `wss://` to any host (pinned, `HostApiPinning`),
+/// plaintext `ws://` only on loopback (the DEBUG dev listener).
 public struct HostApiEndpoint: Sendable, Equatable {
     public let url: URL
+    public var isTLS: Bool { url.scheme == "wss" }
     static let loopback: Set<String> = ["127.0.0.1", "localhost", "[::1]"]
 
     public init?(_ string: String) {
         guard var c = URLComponents(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = c.scheme?.lowercased(), let host = c.host?.lowercased(), c.port != nil else { return nil }
-        // shortcut: wss is refused until Plan 6 supplies the certificate-fingerprint evaluator
-        // (HostApiTrustEvaluating); a self-signed LAN host must never be trusted unpinned.
-        guard scheme == "ws", Self.loopback.contains(host) else { return nil }
+        guard scheme == "wss" || (scheme == "ws" && Self.loopback.contains(host)) else { return nil }
         guard c.query == nil, c.fragment == nil, c.user == nil, c.password == nil,
               ["", "/", "/host-api/v1"].contains(c.path) else { return nil }
         c.path = "/host-api/v1"

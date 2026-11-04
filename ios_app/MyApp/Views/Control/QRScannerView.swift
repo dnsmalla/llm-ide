@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import SharedProtocol
 
 /// Result of scanning the Mac app's pairing QR code
 /// (`llmide://pair?ip=…&port=…&pin=…`; also accepts the legacy `aicontrol://`).
@@ -16,6 +17,8 @@ struct PairingInfo {
     let ip: String
     let port: Int
     let pin: String
+    /// The host's v1 TLS listener and certificate pin (`h1port` + `h1fp`); nil while it serves only v2.
+    let hostApiOffer: HostApiPairingOffer?
 
     static let defaultPort = 3006
 
@@ -37,6 +40,8 @@ struct PairingInfo {
         self.ip = canonicalHost
         self.pin = pin
         self.port = port
+        self.hostApiOffer = HostApiPairingOffer(port: items.first(where: { $0.name == "h1port" })?.value,
+                                                fingerprint: items.first(where: { $0.name == "h1fp" })?.value)
     }
 
     /// Exactly six ASCII digits — the shape `MobilePin.regenerate` produces.

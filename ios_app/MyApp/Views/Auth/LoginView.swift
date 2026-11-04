@@ -136,7 +136,7 @@ struct ConnectView: View {
             QRScannerSheet { info in
                 errorMessage = nil
                 connectAttempted = true
-                connectionStore.save(ip: info.ip, port: info.port, pin: info.pin)
+                connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer)
                 connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
             }
         }
@@ -172,7 +172,8 @@ struct ConnectView: View {
                         let portToUse = device.port > 0
                             ? device.port
                             : (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
-                        connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN)
+                        connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN,
+                                             hostApiOffer: device.hostApiOffer)
                         connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
                     }
                 )

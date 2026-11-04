@@ -6,6 +6,9 @@ struct DiscoveredDevice: Identifiable, Equatable {
     let name: String
     let host: String
     let port: Int
+    /// From the TXT record (`h1port` + `h1fp`). Used only when the user pairs with this Mac; a TXT record on its
+    /// own never changes a stored pin (`HostApiPinning.pinAfterOffer`).
+    var hostApiOffer: HostApiPairingOffer? = nil
 }
 
 /// Discovers LLM-IDE Mac apps on the local network via Bonjour (_llmide._tcp).
@@ -52,7 +55,10 @@ extension DeviceDiscovery: NetServiceBrowserDelegate {
 extension DeviceDiscovery: NetServiceDelegate {
     nonisolated func netServiceDidResolveAddress(_ sender: NetService) {
         guard let ip = sender.ipv4Address else { return }
-        let device = DiscoveredDevice(name: sender.name, host: ip, port: sender.port)
+        let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
+        let field = { (key: String) in txt[key].flatMap { String(data: $0, encoding: .utf8) } }
+        let device = DiscoveredDevice(name: sender.name, host: ip, port: sender.port,
+                                      hostApiOffer: HostApiPairingOffer(port: field("h1port"), fingerprint: field("h1fp")))
         Task { @MainActor in
             self.devices.removeAll { $0.name == sender.name }
             self.devices.append(device)
