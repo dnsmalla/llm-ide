@@ -3,6 +3,9 @@ import { shellBus } from "../../shell/bus";
 import type { ProjectPaths } from "../host.ts";
 import { PATHS_TEXT, folderNote, projectError, syncProviderFor } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
+import { createHostFs } from "../../explorer/fs.ts";
+import { projectIdFor } from "../../docgen/docs-api.ts";
+import { decodeExportBundle, runProjectExport } from "../export-project.ts";
 import { Button, ErrorText, NeedsHost } from "../ui.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 
@@ -12,13 +15,15 @@ import { PartialNote } from "./NoticeSections.tsx";
  * The layout itself stays read-only in the desktop (the Mac edits it with a native dialog).
  */
 export default function PathsSection() {
-  const { host } = useEnv();
+  const { host, client } = useEnv();
   const [data, setData] = useState<ProjectPaths | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuilt, setRebuilt] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"data" | "plans" | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const load = useCallback(() => {
     host.projectPaths?.().then(
@@ -57,6 +62,28 @@ export default function PathsSection() {
       setError(projectError(e));
     } finally {
       setRebuilding(false);
+    }
+  };
+
+  const exportProject = async (kind: "data" | "plans") => {
+    if (!data) return;
+    setExporting(kind);
+    setError(null);
+    setExportNotice(null);
+    try {
+      const id = await projectIdFor(data.root);
+      const raw = await client.request("GET", `/kb/project/${encodeURIComponent(id)}/export`);
+      const bundle = decodeExportBundle(raw);
+      if (!bundle) throw new Error("The core returned an export bundle this app could not read.");
+      const fs = createHostFs();
+      const r = await runProjectExport({ bundle, projectId: id, fs, nowIso: new Date().toISOString(), plansOnly: kind === "plans" });
+      setExportNotice(kind === "plans"
+        ? r.plans === 0 ? "No plans to export." : `Exported ${r.plans} plan${r.plans === 1 ? "" : "s"} to llm-doc/plans.`
+        : `Exported ${r.meetings} meeting${r.meetings === 1 ? "" : "s"} and ${r.plans} plan${r.plans === 1 ? "" : "s"}.${r.plansWriteFailed ? " The plans side-export failed; the meetings were written." : ""}`);
+    } catch (e) {
+      setError(projectError(e));
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -108,6 +135,12 @@ export default function PathsSection() {
               <span className="st-hint">Re-creates missing canonical folders and seed files; never overwrites existing ones.</span>
             </div>
           ) : null}
+          <div className="st-row">
+            <Button disabled={exporting !== null} onClick={() => void exportProject("data")}>{exporting === "data" ? "Exporting…" : "Export Project Data"}</Button>
+            <Button disabled={exporting !== null} onClick={() => void exportProject("plans")}>{exporting === "plans" ? "Exporting…" : "Export Plans"}</Button>
+            <span className="st-hint">Writes the canonical source/meetings, llm-doc/plans, README badge and system/sync.json. Plans-only writes llm-doc/plans.</span>
+          </div>
+          {exportNotice ? <p className="st-ok" role="status">{exportNotice}</p> : null}
           {rebuilt ? <p className="st-ok" role="status">{rebuilt}</p> : null}
         </>
       ) : null}
