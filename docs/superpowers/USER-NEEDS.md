@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 59 open, 26 done, 85 total
+Open count: 58 open, 27 done, 85 total
 
 ## How to use this file
 
@@ -15,10 +15,10 @@ Open count: 59 open, 26 done, 85 total
 
 ## A. Do now (only you can run or look at these)
 
-- [ ] **UN-001** First run of the Tauri desktop app on your Mac.
+- [x] **UN-001** First run of the Tauri desktop app on your Mac.
   - Why you: needs your Mac, a real login and eyes on the screen; no screen has ever been seen in the real app, so every "built" row depends on it.
   - How: `scripts/build-desktop-mac.sh`, open the app, then follow [RUN-ON-MAC.md, First-run checklist](../../desktop/RUN-ON-MAC.md#first-run-checklist) (sign up on the local core, scratch project, Chat, approvals, Trust banner, Explorer, Search, terminal, Source Control, Library, Settings, Extensions, Code Graph, Doc Gen). Report differences with the bug template at the end of that file.
-  - Effort: 45 minutes. Blocks: the parity checklist, Phase 3 exit, every Tauri "built, not GUI-verified" row. Status: not run.
+  - Effort: 45 minutes. Blocks: the parity checklist, Phase 3 exit, every Tauri "built, not GUI-verified" row. Status: done 2026-11-04 — you ran the desktop app and reported Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop all OK.
 - [ ] **UN-002** iPhone device tests: Phone access, tiers and approvals.
   - Why you: needs a real iPhone on the same network as the Mac.
   - How: [verification.md, rows F1 to F18](../mobile/verification.md) (F4 to F7c approval dialogs, F7b custom tasks absent on the phone, F9 template edit refused, F17 lock, kill, revoke, reconnect). Also check that the phone sees archived chats and notes only through the Mac, and background and reconnect behaviour. Record pass or fail per row in that file.
