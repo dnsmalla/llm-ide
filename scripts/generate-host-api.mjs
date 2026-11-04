@@ -7,7 +7,8 @@
 // Two consumers: the Node route layer and desktop host
 // (extension/routes/host-api/commands.generated.mjs, which also carries every command's
 // request/result schema for frame validation) and the SharedProtocol Swift package
-// (ios_app/SharedProtocol/Sources/SharedProtocol).
+// (ios_app/SharedProtocol/Sources/SharedProtocol: the command constants in HostApiCommands.swift
+// and the parsed schema tables in HostApiSchemas.swift, for HostApiSchemaValidator).
 // Output is deterministic (commands sorted by name), so --check is a byte comparison.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -75,9 +76,43 @@ ${names.map((n) => `        ${JSON.stringify(n)}: .${swiftCase(n)}`).join(",\n")
 }
 `;
 
+// The schema tables let Swift judge frames exactly like the Node gate (HostApiSchemaValidator).
+const readSchema = (f) => JSON.parse(readFileSync(join(ROOT, "schema/host-api/v1", f), "utf8"));
+const schemaTable = {
+  envelope: readSchema("envelope.schema.json"),
+  events: readSchema("events.schema.json"),
+  commands: Object.fromEntries(names.map((n) => [n, { request: registry.commands[n].request, result: registry.commands[n].result }])),
+};
+const schemaText = JSON.stringify(schemaTable);
+if (schemaText.includes('"##')) throw new Error('host-api: schema text contains "##, pick a longer Swift raw-string delimiter');
+
+const swiftSchemas = `${header}
+import Foundation
+
+/// The Host API v1 schemas as parsed JSON, for \`HostApiSchemaValidator\`.
+public enum HostApiSchemas {
+    private static let table: [String: Any] = {
+        let text = ##"${schemaText}"##
+        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+    }()
+
+    public static var envelope: [String: Any] { table["envelope"] as? [String: Any] ?? [:] }
+    public static var events: [String: Any] { table["events"] as? [String: Any] ?? [:] }
+
+    public static func request(for command: HostApiCommand) -> [String: Any] {
+        ((table["commands"] as? [String: Any])?[command.rawValue] as? [String: Any])?["request"] as? [String: Any] ?? [:]
+    }
+
+    public static func result(for command: HostApiCommand) -> [String: Any] {
+        ((table["commands"] as? [String: Any])?[command.rawValue] as? [String: Any])?["result"] as? [String: Any] ?? [:]
+    }
+}
+`;
+
 const outputs = [
   ["extension/routes/host-api/commands.generated.mjs", js],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift", swift],
+  ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiSchemas.swift", swiftSchemas],
 ];
 
 let stale = false;

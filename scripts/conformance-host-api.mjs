@@ -28,30 +28,10 @@ const EXPECTED_EVENT_COMMANDS = [
   "host.capabilities",
 ];
 
-// filename -> the envelope $defs variant it violates and the path the failure must name.
-const INVALID_CASES = {
-  "bad-command-shape.json": { def: "Request", at: ".command" },
-  "bad-command-pattern.json": { def: "Request", at: ".command" },
-  "bad-request-id.json": { def: "Request", at: ".id" },
-  "missing-api-version.json": { def: "Request", at: ".apiVersion" },
-  "unknown-field.json": { def: "Request", at: ".surprise" },
-  "unknown-error-code.json": { def: "ErrorFrame", at: ".error.code" },
-  "error-message-too-long.json": { def: "ErrorFrame", at: ".error.message" },
-  "error-missing-error.json": { def: "ErrorFrame", at: ".error" },
-  "response-missing-reply-to.json": { def: "Response", at: ".replyTo" },
-  "response-missing-rev.json": { def: "Response", at: ".rev" },
-  "event-missing-rev.json": { def: "Event", at: ".rev" },
-};
-
-// Command-payload fixtures: filename -> command, its request/result schema, and the failing path.
-const INVALID_COMMAND_CASES = {
-  "chat.send.missing-text.json": { command: "chat.send", kind: "request", at: ".text" },
-  "chat.send.empty-text.json": { command: "chat.send", kind: "request", at: ".text" },
-  "chat.send.attachment-unknown-field.json": { command: "chat.send", kind: "request", at: ".attachments[0].extra" },
-  "chat.cancel.unknown-field.json": { command: "chat.cancel", kind: "request", at: ".x" },
-  "chat.snapshot.message-missing-content.json": { command: "chat.snapshot", kind: "result", at: ".messages[0].content" },
-  "toolApprovals.answer.bad-decision.json": { command: "toolApprovals.answer", kind: "request", at: ".decision" },
-};
+// The expectation maps live beside the fixtures so the Swift validator tests read the same table.
+const { envelope: INVALID_CASES, commands: INVALID_COMMAND_CASES } = JSON.parse(
+  readFileSync(join(DIR, "fixtures/invalid-cases.json"), "utf8"),
+);
 
 // The subset validator understands exactly these keywords. A typo (`minLenght`) otherwise
 // changes nothing at validate time — it is silently ignored — so the schema text is scanned.
