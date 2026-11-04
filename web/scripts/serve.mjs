@@ -40,7 +40,7 @@ const HEADERS = {
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 };
-const securityHeaders = (tls) => (tls ? { ...securityHeaders(tls), "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : HEADERS);
+export const securityHeaders = (tls) => (tls ? { ...HEADERS, "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : HEADERS);
 
 /** True only for a file under distDir; a decoded `..`/absolute path is refused. */
 export function safePath(distDir, rawPath) {

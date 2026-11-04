@@ -5,7 +5,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { createWebServer } = await import("../scripts/serve.mjs");
+const { createWebServer, securityHeaders } = await import("../scripts/serve.mjs");
+
+test("TLS mode adds HSTS on top of the base security headers", () => {
+  const plain = securityHeaders(null);
+  const tls = securityHeaders({ key: "k", cert: "c" });
+  assert.equal(plain["Strict-Transport-Security"], undefined);
+  assert.match(tls["Strict-Transport-Security"], /max-age=31536000/);
+  assert.equal(tls["Content-Security-Policy"], plain["Content-Security-Policy"]);
+});
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "llmide-web-"));
