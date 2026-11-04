@@ -9,6 +9,9 @@ const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 export const MAX_MESSAGE_BYTES = 1048576;
 const MAX_FRAGMENTS = 1024; // bounds parts[] even when fragments carry few bytes
 const CLOSE_GRACE_MS = 1000; // peer gets this long to answer our close before the socket is destroyed
+// A peer that stops reading must not make us buffer without limit: past this many unsent bytes the connection
+// is closed with 1013 (try again later) instead of queueing the next message.
+export const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 export class WsError extends Error {
   constructor(code) { super(`websocket close ${code}`); this.code = code; }
@@ -102,6 +105,7 @@ export class WsConnection extends EventEmitter {
 
   send(text) {
     if (this.closed) return;
+    if (this.socket.writableLength > MAX_BUFFERED_BYTES) { this.close(1013); return; }
     this.socket.write(encodeFrame(1, Buffer.from(String(text), 'utf8')));
   }
 

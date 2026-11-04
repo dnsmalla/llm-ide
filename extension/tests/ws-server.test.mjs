@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { acceptKey, handshakeRefusal, readFrame, encodeFrame, WsError, acceptUpgrade, MAX_MESSAGE_BYTES } from '../server/ws-server.mjs';
+import { EventEmitter } from 'node:events';
+import { acceptKey, handshakeRefusal, readFrame, encodeFrame, WsError, acceptUpgrade, MAX_MESSAGE_BYTES, MAX_BUFFERED_BYTES, WsConnection } from '../server/ws-server.mjs';
 
 // Builds one masked client frame. Handles 7-bit and 16-bit lengths (payloads under 65536 bytes).
 const mask = (opcode, payload, fin = true) => {
@@ -234,4 +235,22 @@ test('a frame pipelined in the upgrade head reaches listeners attached after acc
   conn.on('message', (t) => got.push(t));
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(got, [hello]);
+});
+
+test('a peer that stops reading is closed with 1013 once more than MAX_BUFFERED_BYTES are unsent', () => {
+  assert.equal(MAX_BUFFERED_BYTES, 4 * 1024 * 1024);
+  const socket = Object.assign(new EventEmitter(), {
+    writableLength: 0, writes: 0,
+    write(b) { this.writableLength += b.length; this.writes += 1; },
+    end() {}, destroy() {},
+  });
+  const conn = new WsConnection(socket);
+  const closes = [];
+  conn.on('close', (c) => closes.push(c));
+  const big = 'x'.repeat(1024 * 1024);
+  for (let i = 0; i < 5; i++) conn.send(big); // the 5th finds more than 4 MiB queued
+  assert.deepEqual(closes, [1013]);
+  assert.equal(socket.writes, 5, 'four messages and one close frame, never the fifth message');
+  conn.send(big);
+  assert.equal(socket.writes, 5);
 });
