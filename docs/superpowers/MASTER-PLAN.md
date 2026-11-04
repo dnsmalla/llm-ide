@@ -17,12 +17,12 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 7 | 3 | 6 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 15 | 7 | 3 | 25 | API 107, contract gates, feature matrix, Host API v1 contract and desktop adapter landed; kit K1 moves still ahead |
+| Shared server and core | 18 | 4 | 3 | 25 | API 107, contract gates, feature matrix, Host API v1 contract and desktop adapter landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 104 | 64 | 74 | 242 |  |
+| Total | 107 | 61 | 74 | 242 |  |
 
 ## How the surfaces connect
 
