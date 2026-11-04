@@ -72,3 +72,7 @@ concrete shape.
 Frame ordering is the envelope `rev` on the frame itself. Every `Response` and
 `Event` carries `rev`; an `ErrorFrame` may carry it. Snapshot command results
 do not repeat it in `result`.
+
+## Hosts
+
+The desktop host adapter is `extension/routes/host-api/` (gateway, frame codec, session gate, translator) with the listener in `extension/server/host-api-listener.mjs` — development loopback only until TLS lands. The desktop UI mints the pairing PIN and manages paired devices through `POST /host-api/pin`, `GET /host-api/devices` and `DELETE /host-api/devices/:id` (contract `schema/http/host-api.schema.json`).
