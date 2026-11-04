@@ -74,6 +74,11 @@ const CAPS = new Set<string>(HOST_API_CAPABILITIES);
 const CODES = new Set<string>(HOST_API_ERROR_CODES);
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const unreachable = (m: string) => new HostApiError("host_unreachable", m, true);
+const refused = (e: HostApiError): { id: string; done: Promise<never> } => {
+  const done = Promise.reject(e);
+  done.catch(() => {});
+  return { id: "", done };
+};
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 
 interface Pending { frame: string; idempotent: boolean; retried: boolean; timer: unknown; resolve: (r: never) => void; reject: (e: HostApiError) => void }
@@ -115,10 +120,18 @@ export class HostConnection implements HostLink {
   onResync(fn: () => void) { this.#onResync.add(fn); return () => { this.#onResync.delete(fn); }; }
   onState(fn: (s: ConnectionState) => void) { this.#onState.add(fn); return () => { this.#onState.delete(fn); }; }
 
+  // Contract: the promise settles on the first outcome (ready, needsPin or an error). With a stored token the client
+  // keeps reconnecting after a rejection, so callers watch onState; a rejection nobody awaits is not "unhandled".
   connect(pin?: string): Promise<"ready" | "needsPin"> {
+    this.#reject(unreachable("Superseded by a new connect()."));
+    const old = this.#socket;
+    this.#socket = null; // the old socket's handlers are now stale
+    this.#rejectAll("The connection was restarted.");
+    old?.close(1000);
     this.#wanted = true;
     this.#pin = pin ?? null;
     const p = new Promise<"ready" | "needsPin">((resolve, reject) => { this.#settle = { resolve, reject }; });
+    p.catch(() => {});
     this.#open();
     return p;
   }
@@ -126,21 +139,23 @@ export class HostConnection implements HostLink {
   async pair(pin: string): Promise<void> {
     if (this.#state.kind !== "needsPin") throw new HostApiError("denied", "Pairing needs a connected host that asked for a PIN.");
     const r = await this.#request("host.auth.pair", { pin }).done;
+    if (typeof r?.token !== "string" || !Array.isArray(r.capabilities)) throw new HostApiError("internal", "The host sent an invalid pairing reply.");
     this.#o.tokens.set(r.token);
     this.#caps = this.#known(r.capabilities);
     this.#ready();
   }
 
   send<C extends HostApiCommandName>(command: C, payload: HostApiRequest<C>): { id: string; done: Promise<HostApiResult<C>> } {
-    if (this.#state.kind !== "ready") return { id: "", done: Promise.reject(unreachable("Not connected to the host.")) };
+    if (this.#state.kind !== "ready") return refused(unreachable("Not connected to the host."));
     if (!this.#caps.has(HOST_API_COMMANDS[command].capability)) {
-      return { id: "", done: Promise.reject(new HostApiError("capability_unavailable", "This host does not serve that feature.")) };
+      return refused(new HostApiError("capability_unavailable", "This host does not serve that feature."));
     }
     return this.#request(command, payload);
   }
 
   close(): void {
     this.#wanted = false;
+    this.#pin = null;
     this.#clearRetry();
     const s = this.#socket;
     this.#socket = null;
@@ -169,7 +184,7 @@ export class HostConnection implements HostLink {
     this.#socket = s;
     let opened = false;
     s.onopen = () => { opened = true; void this.#handshake(); };
-    s.onmessage = (e) => this.#receive(e.data);
+    s.onmessage = (e) => { if (this.#socket === s) this.#receive(e.data); };
     s.onclose = () => { if (this.#socket === s) this.#lost(opened); };
     s.onerror = () => {}; // a close always follows
   }
@@ -202,7 +217,10 @@ export class HostConnection implements HostLink {
       try { await this.pair(pin); } catch (e) { this.#reject(e instanceof HostApiError ? e : new HostApiError("internal", "Pairing failed.")); }
     } catch (e) {
       const err = e instanceof HostApiError ? e : new HostApiError("internal", "The host answered with something this page cannot read.");
-      if (err.code === "host_unreachable") return; // #lost owns this path
+      if (err.code === "host_unreachable") { // #lost owns this path; a timeout leaves the socket open, so close it
+        if (this.#socket?.readyState === 1) this.#socket.close();
+        return;
+      }
       if (err.retryable && this.#o.tokens.get()) { this.#socket?.close(); return; } // throttled: back off and retry
       this.#fail(err);
     }
@@ -210,6 +228,7 @@ export class HostConnection implements HostLink {
 
   #ready() {
     this.#attempt = 0;
+    this.#pin = null;
     this.#setState({ kind: "ready" });
     this.#resolve("ready");
     for (const fn of this.#onResync) fn();
@@ -253,6 +272,7 @@ export class HostConnection implements HostLink {
       this.#arm(id, p);
       s.send(frame);
     });
+    done.catch(() => {}); // callers that await still see the rejection; ones that drop it do not crash
     return { id, done };
   }
 

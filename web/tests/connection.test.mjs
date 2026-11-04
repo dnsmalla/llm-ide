@@ -160,3 +160,61 @@ test("forget revokes with the stored token, deletes it and closes", async () => 
   assert.equal(h.token(), null);
   assert.equal(h.conn.state.kind, "idle");
 });
+
+test("a handshake timeout closes the socket so the client reconnects instead of hanging", async () => {
+  const h = harness({ token: "k".repeat(40), script: { "host.hello": () => null } });
+  const p = h.conn.connect();
+  await h.tick();
+  h.runTimers(); // idempotent hello resent
+  h.runTimers(); // second timeout
+  await assert.rejects(p, (e) => e.code === "host_unreachable");
+  assert.equal(h.conn.state.kind, "reconnecting");
+});
+
+test("a second connect() closes the old socket and ignores its late frames", async () => {
+  const h = harness({ token: "k".repeat(40) });
+  const first = h.conn.connect(); // still connecting when superseded
+  const second = h.conn.connect();
+  await assert.rejects(first, (e) => e.code === "host_unreachable");
+  assert.equal(await second, "ready");
+  assert.equal(h.sockets.length, 2);
+  let seen = 0; h.conn.onEvent(() => seen++);
+  h.event(h.sockets[0], "chat.delta", { text: "x" }, 1, "c-1");
+  await h.tick();
+  assert.equal(seen, 0);
+});
+
+test("the PIN does not outlive authentication", async () => {
+  let revoke = false;
+  const h = harness({ token: "k".repeat(40), script: { "host.auth.token": () => revoke ? { error: { code: "auth_failed", message: "Revoked.", retryable: false } } : { result: { capabilities: CAPS } } } });
+  assert.equal(await h.conn.connect("123456"), "ready");
+  revoke = true;
+  h.sockets[0].close();
+  await h.tick();
+  h.runTimers();
+  await h.tick(); await h.tick();
+  assert.equal(h.conn.state.kind, "needsPin");
+  assert.equal(h.sent.some((f) => f.command === "host.auth.pair"), false);
+});
+
+test("a pairing reply without capabilities is rejected and no token is kept", async () => {
+  const h = harness({ script: { "host.auth.pair": () => ({ result: { token: "t".repeat(43) } }) } });
+  await assert.rejects(h.conn.connect("123456"), (e) => /invalid pairing reply/.test(e.message));
+  assert.equal(h.token(), null);
+  assert.equal(h.conn.state.kind, "needsPin");
+});
+
+test("refused sends and timeouts never surface as unhandled rejections", async () => {
+  const seen = [];
+  const on = (e) => seen.push(e);
+  process.on("unhandledRejection", on);
+  try {
+    const h = harness({ token: "k".repeat(40) });
+    h.conn.send("chat.snapshot", {}); // not ready: refused locally, result dropped
+    const p = h.conn.connect();
+    h.sockets[0].onopen = null; h.sockets[0].close();
+    await h.tick(); await h.tick();
+    assert.equal(seen.length, 0);
+    void p;
+  } finally { process.off("unhandledRejection", on); }
+});
