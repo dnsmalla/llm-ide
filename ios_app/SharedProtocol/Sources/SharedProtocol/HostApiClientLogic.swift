@@ -74,7 +74,7 @@ public struct HostApiNegotiation: Sendable, Equatable {
 /// Where to reach a Host API v1 listener. Spec "Security": plaintext only on loopback.
 public struct HostApiEndpoint: Sendable, Equatable {
     public let url: URL
-    static let loopback: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
+    static let loopback: Set<String> = ["127.0.0.1", "localhost", "[::1]"]
 
     public init?(_ string: String) {
         guard var c = URLComponents(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
