@@ -56,11 +56,12 @@ public final class URLSessionHostApiSocket: NSObject, HostApiSocket, URLSessionD
 
     public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
             return completionHandler(.performDefaultHandling, nil)
         }
-        guard let trust, trust.evaluate(serverTrust, host: challenge.protectionSpace.host) else {
+        // A server-trust challenge never reaches system trust, not even one without a trust object.
+        guard let serverTrust = challenge.protectionSpace.serverTrust, let trust,
+              trust.evaluate(serverTrust, host: challenge.protectionSpace.host) else {
             refused.withLock { _trustRefused = true }
             return completionHandler(.cancelAuthenticationChallenge, nil)
         }

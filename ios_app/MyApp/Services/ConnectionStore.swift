@@ -126,8 +126,17 @@ final class ConnectionStore: ObservableObject {
         #if DEBUG
         if let dev = ProcessInfo.processInfo.environment["LLMIDE_HOST_API_URL"].flatMap(HostApiEndpoint.init) { return dev }
         #endif
-        guard !hostApiPin.isEmpty, !deviceIP.isEmpty else { return nil }
+        guard !hostApiPin.isEmpty, !deviceIP.isEmpty, hostApiPort > 0 else { return nil }
         return HostApiPairingOffer(port: hostApiPort, fingerprint: hostApiPin).endpoint(host: deviceIP)
+    }
+
+    /// A Bonjour TXT from the paired host may move the v1 port (never the pin), only when its `h1fp` is the pin.
+    func refreshHostApiPort(host: String, offer: HostApiPairingOffer?) {
+        guard host == deviceIP else { return }
+        let port = HostApiPinning.portAfterOffer(storedPin: hostApiPin, storedPort: hostApiPort, offer: offer)
+        guard port != hostApiPort else { return }
+        hostApiPort = port
+        defaults.set(port, forKey: "agent_h1port")
     }
 
     private func clearToken() {

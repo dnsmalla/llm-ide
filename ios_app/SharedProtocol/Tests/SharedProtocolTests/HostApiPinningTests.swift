@@ -85,6 +85,21 @@ struct HostApiPinningTests {
         #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: "junk", freshPairing: true) == nil)
     }
 
+    @Test("a TXT may move only the v1 port, and only when its h1fp is the stored pin")
+    func portFollowsMatchingTXT() throws {
+        let fp = try Self.vector().fingerprint
+        let other = "sha256:" + String(repeating: "B", count: 43)
+        #expect(HostApiPinning.portAfterOffer(storedPin: fp, storedPort: 3016,
+                                              offer: HostApiPairingOffer(port: 3018, fingerprint: fp)) == 3018)
+        #expect(HostApiPinning.portAfterOffer(storedPin: fp, storedPort: 3016,
+                                              offer: HostApiPairingOffer(port: 3018, fingerprint: other)) == 3016)
+        #expect(HostApiPinning.portAfterOffer(storedPin: fp, storedPort: 3016, offer: nil) == 3016, "no h1fp")
+        #expect(HostApiPinning.portAfterOffer(storedPin: nil, storedPort: 0,
+                                              offer: HostApiPairingOffer(port: 3018, fingerprint: fp)) == 0, "unpaired")
+        // The pin itself is untouched by any TXT.
+        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: false) == fp)
+    }
+
     @Test("pairing offer: h1port + h1fp parsed and validated")
     func offer() throws {
         let fp = try Self.vector().fingerprint

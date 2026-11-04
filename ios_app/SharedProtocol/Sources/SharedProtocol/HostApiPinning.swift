@@ -63,6 +63,14 @@ public enum HostApiPinning {
         return offered.flatMap { isValidFingerprint($0) ? $0 : nil }
     }
 
+    /// The v1 port to keep after a Bonjour TXT offer. Hosts bind the first free port in 3016…3025, so the port
+    /// can move between starts. A TXT whose `h1fp` IS the stored pin may move it; anything else changes nothing.
+    /// Safe because the connection stays pinned: a spoofed TXT can only point at a port where the pin fails.
+    public static func portAfterOffer(storedPin: String?, storedPort: Int, offer: HostApiPairingOffer?) -> Int {
+        guard let offer, matches(offer.fingerprint, pin: storedPin) else { return storedPort }
+        return offer.port
+    }
+
     /// The trust evaluator for `endpoint`: nil for loopback `ws://`; for `wss://` a pinned evaluator, or
     /// `missingPin` thrown so no socket is ever opened unpinned.
     public static func trust(for endpoint: HostApiEndpoint, pin: String?) throws -> HostApiTrustEvaluating? {

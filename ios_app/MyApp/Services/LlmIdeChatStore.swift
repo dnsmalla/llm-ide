@@ -145,7 +145,8 @@ final class LlmIdeChatStore: ObservableObject {
             guard let self, let version = self.connection?.host.apiVersion,
                   HostApiChatTurn.endsAfterCancel(apiVersion: version, cancelled: result?.cancelled) else { return }
             self.cancelledCommandIds.remove(id)
-            self.handleChatError(commandId: id)
+            // A late reply must not end the next turn's spinner.
+            if self.currentCommandId == id { self.handleChatError(commandId: id) }
         }
     }
 

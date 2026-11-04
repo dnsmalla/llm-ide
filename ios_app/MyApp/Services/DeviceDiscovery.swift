@@ -16,6 +16,8 @@ struct DiscoveredDevice: Identifiable, Equatable {
 final class DeviceDiscovery: NSObject, ObservableObject {
     @Published var devices: [DiscoveredDevice] = []
     @Published var isSearching: Bool = false
+    /// Every resolved service, as it resolves.
+    var onResolve: ((DiscoveredDevice) -> Void)?
 
     private let browser = NetServiceBrowser()
     private var pending: [NetService] = []
@@ -62,6 +64,7 @@ extension DeviceDiscovery: NetServiceDelegate {
         Task { @MainActor in
             self.devices.removeAll { $0.name == sender.name }
             self.devices.append(device)
+            self.onResolve?(device)
         }
     }
 

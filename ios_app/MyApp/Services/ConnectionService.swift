@@ -327,12 +327,16 @@ final class ConnectionService: ObservableObject {
                         self.errorMessage = "Connected, but the pairing token could not be saved to the Keychain — you will need to pair again next time."
                     }
                 }
+                self.portWatch?.stop()
+                self.portWatch = nil
                 self.connectionStatus = .connected
             case .notV1:
                 // A v1-only phone must not try v2 with nothing to present: the Mac's auth_failed would wipe
                 // the v1 token over a transient outage (Mac restarting). Back off and retry v1 instead.
                 let hasV2Credential = !(self.connectionStore?.deviceToken ?? "").isEmpty || !pin.isEmpty
                 guard HostApiNegotiation.fallsBackToV2(hasV1Token: !token.isEmpty, hasV2Credential: hasV2Credential) else {
+                    // The host may have bound another port in 3016…3025: listen for its TXT while retrying.
+                    self.watchForMovedHostApiPort()
                     return self.handleV1Refusal(HostApiRejection(
                         replyTo: nil, code: "host_unreachable",
                         message: "Couldn't reach the Mac. Retrying…", retryable: true))
@@ -342,6 +346,19 @@ final class ConnectionService: ObservableObject {
                 self.handleV1Refusal(r)
             }
         }
+    }
+
+    /// Bonjour while a pinned v1 host is unreachable. A TXT carrying the stored pin moves the stored port, and
+    /// the next backoff retry dials it (`hostApiEndpoint` is read on every connect).
+    private var portWatch: DeviceDiscovery?
+    private func watchForMovedHostApiPort() {
+        guard portWatch == nil, connectionStore?.hostApiPort ?? 0 > 0 else { return }
+        let watch = DeviceDiscovery()
+        watch.onResolve = { [weak self] device in
+            self?.connectionStore?.refreshHostApiPort(host: device.host, offer: device.hostApiOffer)
+        }
+        watch.start()
+        portWatch = watch
     }
 
     /// A v1 host refused. Retryable (throttle, busy, unreachable) keeps the pairing and backs off. Only a
@@ -471,6 +488,8 @@ final class ConnectionService: ObservableObject {
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
+        portWatch?.stop()
+        portWatch = nil
         // Demo mode has no socket to close and nothing to reconnect to, so it
         // is torn down here rather than in invalidateSocket() — which also runs
         // on the reconnect path, where dropping the responder would strand the
