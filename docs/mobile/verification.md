@@ -129,7 +129,7 @@ User decision 2026-11-04: these are run at the product stage and do not gate Pla
 
 | # | Check | Expected |
 |---|---|---|
-| H1 | Fresh pair over v1 with the Mac PIN, or a QR scan | Chat tab only; the Mac log shows a Host API v1 connection; Keychain holds `host-api-token` and the pinned `h1fp`; the PIN is gone |
+| H1 | Fresh pair over v1 by QR scan (a typed PIN pairs over v2, keeping any existing pin for that host) | Chat tab only; the Mac log shows a Host API v1 connection; Keychain holds `host-api-token` and the pinned `h1fp`; the PIN is gone |
 | H2 | Send, Stop, clear history, answer a question, Allow once or Deny a tool prompt | Same results as on v2, with no status lines during the turn |
 | H3 | Quit and relaunch the host with v1 off | The phone falls back to v2 within about 3 s only if it was never paired over v1; a v1-paired phone stays on v1 and shows `host_unreachable` |
 | H4 | Background the app for 1 minute, then return | It reconnects by token and the transcript reloads |

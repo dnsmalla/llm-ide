@@ -76,7 +76,11 @@ public struct HostApiNegotiation: Sendable, Equatable {
 public extension HostApiNegotiation {
     /// After `.connectV2`: take the v2 path only with a v2 credential to present, or no v1 token to lose.
     /// Otherwise an empty v2 `Pairing` earns `auth_failed`, whose credential wipe deletes the v1 token.
-    static func fallsBackToV2(hasV1Token: Bool, hasV2Credential: Bool) -> Bool { !hasV1Token || hasV2Credential }
+    /// A pinned (`wss`) endpoint never falls back: the stored pin proves the host offered TLS, and silence on
+    /// its port must not become a cleartext v2 pairing (final review I1).
+    static func fallsBackToV2(hasV1Token: Bool, hasV2Credential: Bool, pinned: Bool) -> Bool {
+        !pinned && (!hasV1Token || hasV2Credential)
+    }
 
     /// Only the host saying the device is not paired (non-retryable `auth_failed`) clears the credentials.
     static func clearsCredentials(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }

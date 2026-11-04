@@ -334,7 +334,8 @@ final class ConnectionService: ObservableObject {
                 // A v1-only phone must not try v2 with nothing to present: the Mac's auth_failed would wipe
                 // the v1 token over a transient outage (Mac restarting). Back off and retry v1 instead.
                 let hasV2Credential = !(self.connectionStore?.deviceToken ?? "").isEmpty || !pin.isEmpty
-                guard HostApiNegotiation.fallsBackToV2(hasV1Token: !token.isEmpty, hasV2Credential: hasV2Credential) else {
+                guard HostApiNegotiation.fallsBackToV2(hasV1Token: !token.isEmpty, hasV2Credential: hasV2Credential,
+                                                       pinned: endpoint.isTLS) else {
                     // The host may have bound another port in 3016…3025: listen for its TXT while retrying.
                     self.watchForMovedHostApiPort()
                     return self.handleV1Refusal(HostApiRejection(

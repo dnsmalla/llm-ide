@@ -131,10 +131,17 @@ struct HostApiClientLogicHardeningTests {
 struct HostApiPairingSafetyTests {
     @Test("a v1-only phone never falls back to v2; a v2 credential or no v1 token does")
     func fallback() {
-        #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: false))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: true))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: false))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: true))
+        #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: false, pinned: false))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: true, pinned: false))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: false, pinned: false))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: true, pinned: false))
+    }
+
+    @Test("a pinned wss endpoint never falls back to cleartext v2, whatever credentials the phone holds")
+    func pinnedNeverDowngrades() {
+        for v1 in [false, true] { for v2 in [false, true] {
+            #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: v1, hasV2Credential: v2, pinned: true), "\(v1) \(v2)")
+        } }
     }
 
     @Test("only a non-retryable auth_failed clears the credentials")

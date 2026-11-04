@@ -74,24 +74,24 @@ struct HostApiPinningTests {
         #expect(!HostApiPinning.isValidFingerprint("sha256:" + String(repeating: "+", count: 43)))
     }
 
-    @Test("a TXT record never replaces a stored pin; only a fresh pairing does")
-    func pinReplacement() throws {
-        let fp = try Self.vector().fingerprint
-        let other = "sha256:" + String(repeating: "B", count: 43)
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: false) == fp)
-        #expect(HostApiPinning.pinAfterOffer(stored: nil, offered: other, freshPairing: false) == nil, "no unpaired TOFU from TXT")
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: true) == other)
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: nil, freshPairing: true) == nil, "a v2-only pairing drops the old pin")
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: "junk", freshPairing: true) == nil)
-    }
-
-    @Test("only an explicit pairing sets or replaces the pin; a saved-PIN reconnect never does")
+    @Test("pinning is QR-only: only a QR scan sets or replaces the pin; a TXT never does")
     func explicitPairingOnly() throws {
         let fp = try Self.vector().fingerprint
         let other = "sha256:" + String(repeating: "C", count: 43)
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: true) == other, "QR / typed PIN")
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: false) == fp, "saved-PIN tap")
-        #expect(HostApiPinning.pinAfterOffer(stored: nil, offered: other, freshPairing: false) == nil, "no pin created")
+        func pin(_ stored: String?, _ offered: String?, _ source: HostApiPairingSource, sameHost: Bool = true) -> String? {
+            HostApiPinning.pinAfterOffer(stored: stored, offered: offered, source: source, sameHost: sameHost)
+        }
+        #expect(pin(fp, other, .qrScan) == other, "a QR scan replaces the pin")
+        #expect(pin(nil, other, .qrScan) == other, "a QR scan creates one")
+        #expect(pin(fp, nil, .qrScan) == nil, "a v2-only QR drops the old pin")
+        #expect(pin(fp, "junk", .qrScan) == nil)
+        #expect(pin(fp, other, .savedPin) == fp, "saved-PIN tap keeps the old pin")
+        #expect(pin(nil, other, .savedPin) == nil, "saved-PIN tap creates none")
+        #expect(pin(nil, other, .typedPin) == nil, "a typed PIN never adopts the TXT h1fp")
+        #expect(pin(fp, other, .typedPin) == fp, "a typed PIN to the same host keeps the pin (final M5)")
+        #expect(pin(fp, nil, .typedPin) == fp, "manual entry carries no offer and keeps the pin")
+        #expect(pin(fp, nil, .typedPin, sameHost: false) == nil, "a pin is never carried to another host")
+        #expect(pin(fp, other, .savedPin, sameHost: false) == nil)
     }
 
     @Test("a TXT may move only the v1 port, and only when its h1fp is the stored pin")
@@ -106,7 +106,7 @@ struct HostApiPinningTests {
         #expect(HostApiPinning.portAfterOffer(storedPin: nil, storedPort: 0,
                                               offer: HostApiPairingOffer(port: 3018, fingerprint: fp)) == 0, "unpaired")
         // The pin itself is untouched by any TXT.
-        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: false) == fp)
+        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, source: .savedPin, sameHost: true) == fp)
     }
 
     @Test("pairing offer: h1port + h1fp parsed and validated")

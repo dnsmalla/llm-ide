@@ -92,7 +92,7 @@ Host API v1 is a second, pinned link. It is **off by default**. A v1 iOS client 
 
 - **Mac:** set the `HostApiV1.tlsEnabled` defaults key (or `LLMIDE_HOST_API_TLS=1`). The listener serves `wss://` on port 3016+, with a per-install identity in the Keychain. The pairing QR then carries `h1port` and `h1fp` (and `api=1`), and the Bonjour TXT carries `api=1,2`, `h1port` and `h1fp`.
 - **Desktop:** set `LLMIDE_HOST_API_TLS=1`; pairing is by manual entry, with the fingerprint shown in Settings.
-- **Trust:** the fingerprint in the QR (`sha256:` plus base64url of the SHA-256 of the key) is what the phone trusts. It pins `h1fp` and accepts `wss://` to any host; `ws://` is accepted for loopback only. A mismatch fails with `pin_mismatch` (or `pin_missing`), never clears credentials and never falls back to v2. Only an explicit pairing (a QR scan or a typed PIN) can set or replace a pin.
+- **Trust:** the fingerprint in the QR (`sha256:` plus base64url of the SHA-256 of the key) is what the phone trusts. It pins `h1fp` and accepts `wss://` to any host; `ws://` is accepted for loopback only. A mismatch fails with `pin_mismatch` (or `pin_missing`), never clears credentials and never falls back to v2. Pinning is QR-only: only a QR scan can set or replace a pin. A PIN typed on a Bonjour card or by manual entry never adopts the TXT `h1fp`; it keeps the same host's existing pin, or pairs over v2 when there is none. A pinned (`wss`) phone never falls back to v2.
 - **Reset:** the Mac's Reset security identity button makes a new certificate; every phone must pair again.
 
 ### Developer: Host API v1 in the Simulator

@@ -137,7 +137,7 @@ struct ConnectView: View {
                 errorMessage = nil
                 connectAttempted = true
                 connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer,
-                                     freshPairing: true)
+                                     source: .qrScan)
                 connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
             }
         }
@@ -174,7 +174,8 @@ struct ConnectView: View {
                             ? device.port
                             : (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
                         connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN,
-                                             hostApiOffer: device.hostApiOffer, freshPairing: typed)
+                                             hostApiOffer: device.hostApiOffer,
+                                             source: typed ? .typedPin : .savedPin)
                         connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
                     }
                 )
@@ -235,7 +236,7 @@ struct ConnectView: View {
                 connectAttempted = true
                 let port = enteredPort
                     ?? (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
-                connectionStore.save(ip: host, port: port, pin: code, freshPairing: true)
+                connectionStore.save(ip: host, port: port, pin: code, source: .typedPin)
                 connection.connectDirect(ip: host, port: port, pin: code)
             } label: {
                 HStack(spacing: DesignSystem.Spacing.sm) {
@@ -373,6 +374,14 @@ private struct DiscoveredDeviceCard: View {
                     .disabled(pinEntry.isEmpty)
                 }
                 .padding([.horizontal, .bottom], DesignSystem.Spacing.md)
+                // v1 pinning is QR-only: a typed PIN pairs over the classic link, never adopting the TXT pin.
+                if device.hostApiOffer != nil {
+                    Text("Scan the QR code on the Mac to use the encrypted connection.")
+                        .font(DesignSystem.Typography.footnoteFont)
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding([.horizontal, .bottom], DesignSystem.Spacing.md)
+                }
             }
         }
         .background(DesignSystem.Colors.surface)

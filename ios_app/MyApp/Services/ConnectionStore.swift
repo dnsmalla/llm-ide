@@ -73,11 +73,11 @@ final class ConnectionStore: ObservableObject {
     /// for a registry entry that is about to be replaced, so drop it, or the
     /// connect path would keep presenting a token the Mac may have revoked.
     ///
-    /// `hostApiOffer` is what the QR or the Bonjour TXT offered for v1. Only a fresh pairing (a PIN) may change
-    /// the stored pin; without a PIN the offer is ignored, so a spoofed TXT can never re-pin the phone.
-    /// `freshPairing` is true only for a QR scan or a PIN the user typed. A one-tap reconnect with a saved PIN
-    /// keeps the stored pin (and never creates one); its TXT may only move the port (`refreshHostApiPort`).
-    func save(ip: String, port: Int, pin: String, hostApiOffer: HostApiPairingOffer? = nil, freshPairing: Bool = false) {
+    /// `hostApiOffer` is what the QR or the Bonjour TXT offered for v1.
+    /// `source` says how the user paired. Pinning is QR-only (`HostApiPinning.pinAfterOffer`): a typed or saved
+    /// PIN keeps the same host's pin, and its TXT may only move the port (`refreshHostApiPort`).
+    func save(ip: String, port: Int, pin: String, hostApiOffer: HostApiPairingOffer? = nil, source: HostApiPairingSource) {
+        let sameHost = ip == deviceIP
         deviceIP   = ip
         devicePort = port
         devicePIN  = pin
@@ -86,8 +86,9 @@ final class ConnectionStore: ObservableObject {
         CredentialKeychain.save(pin, account: .pin)
         guard !pin.isEmpty else { return }
         clearToken()
-        guard freshPairing else { return refreshHostApiPort(host: ip, offer: hostApiOffer) }
-        let newPin = HostApiPinning.pinAfterOffer(stored: hostApiPin, offered: hostApiOffer?.fingerprint, freshPairing: true)
+        let newPin = HostApiPinning.pinAfterOffer(stored: hostApiPin.isEmpty ? nil : hostApiPin,
+                                                  offered: hostApiOffer?.fingerprint, source: source, sameHost: sameHost)
+        if source != .qrScan, newPin != nil { return refreshHostApiPort(host: ip, offer: hostApiOffer) }
         // A pin the Keychain refused is dropped: v1 is then not dialled, never dialled unpinned.
         if let newPin, CredentialKeychain.save(newPin, account: .hostApiPin) { hostApiPin = newPin } else {
             hostApiPin = ""

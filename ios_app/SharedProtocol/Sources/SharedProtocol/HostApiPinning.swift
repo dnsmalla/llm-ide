@@ -56,11 +56,16 @@ public enum HostApiPinning {
         return zip(a, b).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
     }
 
-    /// The pin to keep after a host offers `offered` (QR or Bonjour TXT). Only a fresh pairing the user started
-    /// (QR scan, PIN entry) may change it; a TXT on its own never does, or a spoofed record could re-pin the phone.
-    public static func pinAfterOffer(stored: String?, offered: String?, freshPairing: Bool) -> String? {
-        guard freshPairing else { return stored }
-        return offered.flatMap { isValidFingerprint($0) ? $0 : nil }
+    /// The pin to keep after a pairing. Pinning is QR-only: the QR is the one channel the user sees come from
+    /// the Mac, so only `.qrScan` sets or replaces the pin (a v2-only QR, without `h1fp`, drops it). A typed or
+    /// saved PIN keeps the stored pin for the same host and never adopts a Bonjour TXT `h1fp`, which a spoofed
+    /// service with the Mac's name could carry. A pin is never carried to another host.
+    public static func pinAfterOffer(stored: String?, offered: String?, source: HostApiPairingSource,
+                                     sameHost: Bool) -> String? {
+        switch source {
+        case .qrScan: return offered.flatMap { isValidFingerprint($0) ? $0 : nil }
+        case .typedPin, .savedPin: return sameHost ? stored : nil
+        }
     }
 
     /// The v1 port to keep after a Bonjour TXT offer. Hosts bind the first free port in 3016…3025, so the port
@@ -78,6 +83,16 @@ public enum HostApiPinning {
         guard let pin, isValidFingerprint(pin) else { throw missingPin }
         return HostApiPinnedTrust(pin: pin)
     }
+}
+
+/// How the user started a pairing (`HostApiPinning.pinAfterOffer`).
+public enum HostApiPairingSource: Sendable, Equatable {
+    /// Scanned the Mac's pairing QR.
+    case qrScan
+    /// Typed the PIN: a Bonjour card or manual entry.
+    case typedPin
+    /// One tap on a known Mac, re-sending the saved, not yet exchanged PIN.
+    case savedPin
 }
 
 /// Accepts exactly the paired leaf key. System trust is never consulted: the host certificate is self-signed.
