@@ -72,6 +72,12 @@ HOST=0.0.0.0 PORT=443 npm start
 It sends HSTS in this mode. A proxy is still preferred for certificate renewal,
 access logs and rate limiting.
 
+## Installable output
+
+The build ships `manifest.webmanifest`, icons and `sw.js`; `npm start` serves the manifest as
+`application/manifest+json` and the worker with `no-cache`. Installation and service workers require HTTPS or
+`localhost`; a plain-HTTP domain will load the page but not offer install/offline.
+
 ## Release checklist
 
 - [ ] `npm ci && npm test && npm run build && npm run test:e2e`

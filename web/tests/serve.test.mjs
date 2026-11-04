@@ -12,6 +12,8 @@ function fixture() {
   mkdirSync(join(dir, "assets"));
   writeFileSync(join(dir, "index.html"), "<!doctype html><title>LLM-IDE</title>");
   writeFileSync(join(dir, "assets", "app-123.js"), "console.log('app')");
+  writeFileSync(join(dir, "manifest.webmanifest"), '{"name":"LLM-IDE"}');
+  writeFileSync(join(dir, "sw.js"), 'self.addEventListener("fetch", () => {});');
   return dir;
 }
 
@@ -39,6 +41,10 @@ test("serves the SPA, falls back to index.html, and caches hashed assets", async
     const unknown = await fetch(`${base}/chat/deep/link`);
     assert.equal(unknown.status, 200);
     assert.match(await unknown.text(), /LLM-IDE/);
+    const manifest = await fetch(`${base}/manifest.webmanifest`);
+    assert.equal(manifest.headers.get("content-type"), "application/manifest+json; charset=utf-8");
+    const sw = await fetch(`${base}/sw.js`);
+    assert.match(sw.headers.get("cache-control") ?? "", /no-cache/);
     const missingAsset = await fetch(`${base}/assets/missing-xyz.js`);
     assert.equal(missingAsset.status, 404);
     const missingFile = await fetch(`${base}/favicon.ico`);

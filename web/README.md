@@ -41,6 +41,15 @@ Plan 6.
 
 Use [MANUAL-CHECK.md](MANUAL-CHECK.md) before calling a release shipped.
 
+## Installable shell
+
+The built client is a PWA: `manifest.webmanifest`, PNG/SVG icons and a service worker that caches only the app
+shell and hashed assets. It never caches the Host API socket, tokens or cross-origin responses. The installed
+client opens offline with a clear "Offline" state until the host is reachable. Service-worker registration is
+production-only; `npm run dev` never installs one.
+
+Install needs HTTPS, except on `localhost`/`127.0.0.1`, where browsers allow it for development.
+
 ## Security notes
 
 - The token lives in `localStorage` per host; **Forget this host** revokes it. The PIN is never stored.
