@@ -183,7 +183,7 @@ export class HostConnection implements HostLink {
     try { s = this.#o.createSocket(this.#o.url); } catch { this.#lost(false); return; }
     this.#socket = s;
     let opened = false;
-    s.onopen = () => { opened = true; void this.#handshake(); };
+    s.onopen = () => { if (this.#socket !== s) return; opened = true; void this.#handshake(); };
     s.onmessage = (e) => { if (this.#socket === s) this.#receive(e.data); };
     s.onclose = () => { if (this.#socket === s) this.#lost(opened); };
     s.onerror = () => {}; // a close always follows
