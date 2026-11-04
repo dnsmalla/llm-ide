@@ -13,6 +13,7 @@ fixtures. The Mac host adapter is `mac/Sources/LlmIdeMac/Features/MobileControl/
 - Lists default to 100 items, maximum 500.
 - Error messages are at most 500 characters.
 - Payload objects are closed: unknown fields are rejected with `invalid_payload`.
+- Schema `pattern`s must end in `$` and avoid `\d`, `\w`, `\s` and `.`: the Swift validator rewrites only a trailing `$` to end-of-input and otherwise uses ICU semantics, which differ from JS for those classes.
 
 ## Workflow
 

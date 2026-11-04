@@ -1426,7 +1426,7 @@ Command behaviour (session gate first, then):
 
 | Command | Behaviour |
 |---|---|
-| `host.hello` | Refused `capability_unavailable` (with `helloRefusal`'s text) unless the client offers version 1. Otherwise mark greeted and reply `{hostName, hostKind:"mac", apiVersion:1, apiVersions:[1,2], capabilities, protocolVersion: MobileProtocol.protocolVersion, requiresAuth:true}`. `certificateFingerprint` is omitted because there is no TLS in this plan. |
+| `host.hello` | Refused `capability_unavailable` (with `helloRefusal`'s text) unless the client offers version 1. Otherwise mark greeted and reply `{hostName, hostKind:"mac", apiVersion:1, apiVersions:[1], capabilities, protocolVersion: MobileProtocol.protocolVersion, requiresAuth:true}`. `certificateFingerprint` is omitted because there is no TLS in this plan. |
 | `host.auth.pair` | `PairingThrottle.decision(for: peer)` first. `wait`/`lockedOut`/`serverThrottled` → `auth_failed`, retryable, with `retryAfterMs`. A wrong PIN → `auth_failed`, not retryable, and `registerFailure`. A right PIN → `issueToken("h1-" + UUID, clientName)`, `pinConsumed()`, authenticated, reply `{token, capabilities}`. |
 | `host.auth.token` | `authenticate(token)` → authenticated and reply `{capabilities}`. Otherwise `auth_failed`, not retryable, and `registerFailure`. |
 | `host.auth.revoke` | Only the session's own token: `authenticate(token) == session deviceId` → `revoke`, reply `{revoked:true}`, then close the session. Otherwise `denied`. |
@@ -1741,7 +1741,7 @@ final class HostApiV1Gateway {
             if let why = HostApiV1Session.helloRefusal(apiVersions: p.apiVersions) { return fail(session, id, "capability_unavailable", why) }
             sessions[session]?.state.greeted(clientName: p.clientName)
             respond(session, id, .hostHello, HostApiHostHelloResult(
-                apiVersion: 1, apiVersions: [1, 2], capabilities: deps.capabilities(),
+                apiVersion: 1, apiVersions: [1], capabilities: deps.capabilities(),
                 hostKind: "mac", hostName: HostApiFrame.clamp(deps.hostName(), maxUTF16: 120),
                 protocolVersion: MobileProtocol.protocolVersion, requiresAuth: true))
         case .hostAuthPair:
