@@ -364,6 +364,16 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             host.sendAutoTaskReply(.ack(ok: false, message: "The project changed on your Mac meanwhile, so nothing ran."))
             return
         }
+        // runNow runs what is enabled NOW: a T1/T2 task turned on during the dialog was never confirmed.
+        let gatedNow = AutoTask.allCases.filter {
+            ac.isTaskEnabled($0) && Self.approvalTarget(taskId: $0.rawValue).tier.needsDesktopApproval
+        }
+        guard Set(gatedNow).isSubset(of: Set(gated)) else {
+            host.sendAutoTaskReply(.ack(ok: false,
+                                        message: "The tasks to run changed on your Mac while you were deciding, so nothing ran. Ask again.",
+                                        code: MobileRefusalCode.desktopDenied))
+            return
+        }
         let started = ac.runNow(trigger: .manual)
         host.sendAutoTaskReply(.ack(ok: started, message: started ? "Started all enabled tasks." : "The Mac declined to start the run."))
         replyAutoTaskStateOrAck()
@@ -383,7 +393,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             title: "Run \(name) from \(fromDesktop ? "the LLM-IDE desktop app" : "your iPhone")?", lines: shown.lines,
             requester: fromDesktop ? PhoneDesktopApprovalRequest.desktopRequester : PhoneDesktopApprovalRequest.phoneRequester))
         guard approvalGranted(outcome) else { return }
-        guard controlAllowed else {
+        guard fromDesktop || host.isPhoneAccessAllowed(.autoTaskControl) else {
             host.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
             return
         }

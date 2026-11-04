@@ -44,8 +44,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// deviceId → the class stored on its paired-device record (nil = phone). The desktop class is host-granted
     /// at pairing (`onDesktopClassRequested` → the owner approves → `grantDesktopClass`), never taken from the frame.
     private let storedClientClass: (String) -> String?
-    /// A loopback PIN pairing asked for the desktop class and got a token: the Mac owner must approve it.
-    private let onDesktopClassRequested: (String) -> Void
+    /// (deviceId, hash of the token just issued): a loopback PIN pairing asked for the desktop class; the Mac
+    /// owner must approve it, and the grant binds to that token so a re-pair meanwhile does not inherit it.
+    private let onDesktopClassRequested: (String, String) -> Void
     /// The paired session's class: `desktop` only for a desktop-class record on a loopback peer. Queue-only;
     /// passed with every routed frame so the manager never keeps a mirror that could land out of order.
     private(set) var clientClass: String?
@@ -120,7 +121,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
          onClientIdentified: @escaping (String?) -> Void = { _ in },
-         onDesktopClassRequested: @escaping (String) -> Void = { _ in },
+         onDesktopClassRequested: @escaping (String, String) -> Void = { _, _ in },
          onPinConsumed: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
@@ -575,8 +576,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             admit(conn, deviceId: reply.token != nil ? deviceId : nil, loopback: loopback, clientClass: nil, reply: reply)
             onPinConsumed()
             if pairing.clientClass == MobilePairedDeviceStore.desktopClientClass, loopback,
-               reply.token != nil, let deviceId {
-                onDesktopClassRequested(deviceId)
+               let token = reply.token, let deviceId {
+                onDesktopClassRequested(deviceId, MobilePairedDeviceStore.hash(token))
             }
         case .wrong:
             // Diagnostic: show the received candidate's shape (not its value)

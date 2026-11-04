@@ -420,8 +420,8 @@ final class MobileControlManager {
                     self?.refreshPairedDevices()
                 }
             },
-            onDesktopClassRequested: { [weak self] deviceId in
-                Task { @MainActor [weak self] in await self?.confirmDesktopClass(deviceId: deviceId) }
+            onDesktopClassRequested: { [weak self] deviceId, tokenHash in
+                Task { @MainActor [weak self] in await self?.confirmDesktopClass(deviceId: deviceId, tokenHash: tokenHash) }
             },
             onPinConsumed: { [weak self] in
                 // Retire the PIN HERE, synchronously on the server's queue, so
@@ -810,7 +810,7 @@ final class MobileControlManager {
 
     /// The desktop app paired from loopback and asked for the desktop class: the owner decides, in the same native
     /// confirmation as a phone's code-writing run (default Cancel, timeout denies). Only an approval stores the class.
-    func confirmDesktopClass(deviceId: String) async {
+    func confirmDesktopClass(deviceId: String, tokenHash: String) async {
         let outcome = await desktopApproval.request(PhoneDesktopApprovalRequest(
             title: "Allow the LLM-IDE desktop app on this Mac to control Auto Tasks?",
             lines: ["It can turn Auto Tasks on or off, edit their settings and templates, and start runs.",
@@ -825,7 +825,7 @@ final class MobileControlManager {
             }
             return
         }
-        guard pairedDeviceStore.grantDesktopClass(deviceId: deviceId) else { return }
+        guard pairedDeviceStore.grantDesktopClass(deviceId: deviceId, tokenHash: tokenHash) else { return }
         server?.grantDesktopClass(deviceId: deviceId)
         refreshPairedDevices()
         append(.info, "Desktop app pairing: Auto Tasks control allowed")

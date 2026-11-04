@@ -164,11 +164,12 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
     }
 
     /// Mark `deviceId` as the desktop app. Called only after the Mac owner approved a loopback desktop pairing.
-    /// False when the record is gone (revoked or replaced meanwhile).
+    /// Bound to the token the request was made with: false when the record is gone or was re-paired meanwhile.
     @discardableResult
-    func grantDesktopClass(deviceId: String) -> Bool {
+    func grantDesktopClass(deviceId: String, tokenHash: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard let index = devices.firstIndex(where: { $0.id == deviceId }) else { return false }
+        guard let index = devices.firstIndex(where: { $0.id == deviceId }),
+              Self.constantTimeEqual(devices[index].tokenHash, tokenHash) else { return false }
         devices[index].clientClass = Self.desktopClientClass
         persistLocked()
         return true

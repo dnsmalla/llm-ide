@@ -229,4 +229,21 @@ final class PhoneAutoTaskApprovalFlowTests: XCTestCase {
         XCTAssertFalse(settings.isEnabled(task: .reviewCode))
         XCTAssertTrue(host.approvalRequests.isEmpty)
     }
+
+    /// Re-review N1: a T1/T2 task turned on while a desktop run-all's dialog is open was never confirmed.
+    func testDesktopRunAllRefusesWhenACodeWritingTaskIsTurnedOnDuringTheDialog() async {
+        let (bridge, host, service, settings) = make()
+        settings.setEnabled(false, task: .reviewMerge)   // the dialog names implement only
+        host.isDesktopBridge = true
+        host.approvalOutcomes = [.approved]
+        host.autoTaskRequest = .run(.init(task: nil))
+        _ = bridge.handle(type: "auto_task_run", data: nil)
+        settings.setEnabled(true, task: .reviewMerge)    // toggled on before the approval resumes
+        await waitForAcks(host, 2)
+        XCTAssertEqual(host.approvalRequests.count, 1)
+        XCTAssertFalse(host.approvalRequests[0].lines.joined().contains(AutoTask.reviewMerge.label))
+        XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.desktopDenied)
+        XCTAssertEqual(host.lastAck?.ok, false)
+        XCTAssertFalse(service.hasScheduledRun, "nothing unconfirmed runs")
+    }
 }

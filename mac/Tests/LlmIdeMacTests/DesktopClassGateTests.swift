@@ -41,13 +41,22 @@ final class DesktopClassGateTests: XCTestCase {
 
     func testRecordsDefaultToPhoneAndOnlyAGrantMakesThemDesktop() {
         let store = tempStore()
-        _ = store.issueToken(deviceId: "d1", name: "LLM-IDE Desktop")
+        let t1 = store.issueToken(deviceId: "d1", name: "LLM-IDE Desktop")
         XCTAssertNil(store.clientClass(deviceId: "d1"), "a fresh record is a phone")
-        XCTAssertTrue(store.grantDesktopClass(deviceId: "d1"))
+        XCTAssertTrue(store.grantDesktopClass(deviceId: "d1", tokenHash: MobilePairedDeviceStore.hash(t1)))
         XCTAssertEqual(store.clientClass(deviceId: "d1"), "desktop")
         _ = store.issueToken(deviceId: "d1", name: "LLM-IDE Desktop")
         XCTAssertNil(store.clientClass(deviceId: "d1"), "pairing again resets to phone until approved again")
-        XCTAssertFalse(store.grantDesktopClass(deviceId: "nope"))
+        XCTAssertFalse(store.grantDesktopClass(deviceId: "nope", tokenHash: MobilePairedDeviceStore.hash(t1)))
+    }
+
+    /// Re-review m1: a re-pair of the same id while the dialog is open must not inherit the owner's Allow.
+    func testAGrantIsBoundToTheTokenItWasRequestedWith() {
+        let store = tempStore()
+        let requested = MobilePairedDeviceStore.hash(store.issueToken(deviceId: "d1", name: "LLM-IDE Desktop"))
+        _ = store.issueToken(deviceId: "d1", name: "someone else")   // re-pair during the dialog
+        XCTAssertFalse(store.grantDesktopClass(deviceId: "d1", tokenHash: requested))
+        XCTAssertNil(store.clientClass(deviceId: "d1"), "the new record stays a phone")
     }
 
     func testAnOldRecordWithoutAClassLoadsAsPhone() throws {
@@ -64,13 +73,13 @@ final class DesktopClassGateTests: XCTestCase {
     private final class Recorder: @unchecked Sendable {
         private let lock = NSLock()
         private var _classes: [String?] = []
-        private var _requested: [String] = []
+        private var _requested: [(String, String)] = []
         private var _port: Int?
         func frame(_ cls: String?) { lock.lock(); _classes.append(cls); lock.unlock() }
-        func request(_ id: String) { lock.lock(); _requested.append(id); lock.unlock() }
+        func request(_ id: String, _ hash: String) { lock.lock(); _requested.append((id, hash)); lock.unlock() }
         func bound(_ p: Int) { lock.lock(); _port = p; lock.unlock() }
         var classes: [String?] { lock.lock(); defer { lock.unlock() }; return _classes }
-        var requested: [String] { lock.lock(); defer { lock.unlock() }; return _requested }
+        var requested: [(String, String)] { lock.lock(); defer { lock.unlock() }; return _requested }
         var port: Int? { lock.lock(); defer { lock.unlock() }; return _port }
     }
 
@@ -87,7 +96,7 @@ final class DesktopClassGateTests: XCTestCase {
             storedClientClass: { store.clientClass(deviceId: $0) },
             onInbound: { _, cls in rec.frame(cls) },
             onLog: { _ in },
-            onDesktopClassRequested: { rec.request($0) },
+            onDesktopClassRequested: { rec.request($0, $1) },
             onListening: { rec.bound($0) })
         try server.start()
         waitUntil { rec.port != nil }
@@ -124,7 +133,7 @@ final class DesktopClassGateTests: XCTestCase {
     func testADesktopTokenFromLoopbackGetsTheDesktopClass() throws {
         let store = tempStore(), rec = Recorder()
         let token = store.issueToken(deviceId: "desk-1", name: "LLM-IDE Desktop")
-        XCTAssertTrue(store.grantDesktopClass(deviceId: "desk-1"))
+        XCTAssertTrue(store.grantDesktopClass(deviceId: "desk-1", tokenHash: MobilePairedDeviceStore.hash(token)))
         let server = try makeServer(store: store, rec: rec)
         defer { server.stop() }
         let task = pairAndSend(port: rec.port!, token: token, deviceId: "desk-1")
@@ -141,10 +150,11 @@ final class DesktopClassGateTests: XCTestCase {
         defer { task.cancel() }
         waitUntil { !rec.classes.isEmpty }
         XCTAssertEqual(rec.classes, [nil], "the PIN alone never grants the desktop class")
-        XCTAssertEqual(rec.requested, ["desk-2"], "the Mac is asked")
+        XCTAssertEqual(rec.requested.map(\.0), ["desk-2"], "the Mac is asked")
         XCTAssertNil(store.clientClass(deviceId: "desk-2"))
         // The owner allows it: the record and the live loopback session become desktop.
-        XCTAssertTrue(store.grantDesktopClass(deviceId: "desk-2"))
+        XCTAssertTrue(store.grantDesktopClass(deviceId: "desk-2", tokenHash: rec.requested[0].1),
+                      "the request carries the issued token's hash")
         server.grantDesktopClass(deviceId: "desk-2")
         task.send(.string(#"{"type":"auto_task_list"}"#)) { _ in }
         waitUntil { rec.classes.count >= 2 }
