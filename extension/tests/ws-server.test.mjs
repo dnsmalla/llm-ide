@@ -224,3 +224,14 @@ test('a binary frame closes with 1003 and invalid UTF-8 with 1007', () => withSe
 test('MAX_MESSAGE_BYTES is the Host API frame cap', () => {
   assert.equal(MAX_MESSAGE_BYTES, 1048576);
 });
+
+test('a frame pipelined in the upgrade head reaches listeners attached after acceptUpgrade returns', async () => {
+  const { EventEmitter } = await import('node:events');
+  const socket = Object.assign(new EventEmitter(), { write() {}, setNoDelay() {}, end() {}, destroy() {} });
+  const hello = '{"type":"request","command":"host.hello"}';
+  const conn = acceptUpgrade({ headers: { 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' } }, socket, mask(1, Buffer.from(hello)));
+  const got = [];
+  conn.on('message', (t) => got.push(t));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(got, [hello]);
+});

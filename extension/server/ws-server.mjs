@@ -189,6 +189,8 @@ export function acceptUpgrade(req, socket, head) {
   );
   socket.setNoDelay(true);
   const conn = new WsConnection(socket);
-  if (head && head.length) socket.emit('data', head);
+  // Replayed on the next tick: the caller attaches its listeners after this returns, and a pipelined first frame
+  // (a hello) in `head` would otherwise be parsed and emitted to nobody. nextTick still runs before later socket data.
+  if (head && head.length) process.nextTick(() => socket.emit('data', head));
   return conn;
 }
