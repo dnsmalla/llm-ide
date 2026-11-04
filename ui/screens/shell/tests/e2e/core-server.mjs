@@ -31,7 +31,8 @@ function freePort() {
 }
 
 /** `register: false` leaves the data directory empty (no user), for the first-run flow: the test registers through the shell client. */
-export async function startCore({ bootTimeoutMs = 40_000, register = true } = {}) {
+/** `env` is applied after the defaults (e.g. LLMIDE_HOST_API_DEV for the Host API e2e). */
+export async function startCore({ bootTimeoutMs = 40_000, register = true, env: extraEnv = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "llmide-e2e-"));
   const workspace = join(dir, "workspace");
   mkdirSync(workspace);
@@ -55,6 +56,7 @@ export async function startCore({ bootTimeoutMs = 40_000, register = true } = {}
     LLMIDE_ENGINE_PREWARM: "0",
     LLMIDE_BENCH_FAKE: "1",
   });
+  Object.assign(env, extraEnv);
   const child = spawn(NODE, ["server.mjs", "--bench-fake"], { cwd: EXT, env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d) => { output += d; });
