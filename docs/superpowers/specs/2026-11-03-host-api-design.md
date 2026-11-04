@@ -87,7 +87,7 @@ Rules:
 - `id` is unique per client connection and used for correlation.
 - Requests may be retried only when the command declares `idempotent: true`;
   otherwise the client generates a new `id` after a timeout.
-- `rev` is a per-host monotonic counter for events and snapshots.
+- `rev` is a monotonic counter **per connection** for events and snapshots: each connection's events carry that connection's own counter, and responses carry its current value. (Amended 2026-11-04: a host-wide counter made every event delivered to one connection look like a gap to every other connection.)
 - A client that sees an event `rev` greater than its snapshot `rev + 1`
   resubscribes and takes a fresh snapshot instead of guessing.
 - Payload objects are closed: unknown fields are rejected with `invalid_payload`.
