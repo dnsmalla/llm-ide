@@ -31,6 +31,8 @@ struct HostApiV1SessionTests {
         s.greeted(clientName: "web")
         s.authenticated(deviceId: "h1-A")
         #expect(s.phase == .authed(deviceId: "h1-A", clientName: "web"))
+        s.authenticated(deviceId: "h1-B")
+        #expect(s.phase == .authed(deviceId: "h1-A", clientName: "web"))
         #expect(s.gate(.hostAuthPair, served: all) == .refuse(code: "denied", message: "This connection is already authenticated."))
         #expect(s.gate(.hostAuthToken, served: all) == .refuse(code: "denied", message: "This connection is already authenticated."))
         #expect(s.gate(.hostAuthRevoke, served: all) == .allow)
@@ -54,6 +56,11 @@ struct HostApiV1SessionTests {
         #expect(HostApiV1CommandIds.parse("h1.7.c.1")! == (7, "c.1"))
         #expect(HostApiV1CommandIds.parse("9D2F6A1E-0000-0000-0000-000000000000") == nil)
         #expect(HostApiV1CommandIds.parse("h1.x.c-1") == nil)
+        #expect(HostApiV1CommandIds.parse("h1.007.x") == nil)
+        #expect(HostApiV1CommandIds.parse("h1.-1.x") == nil)
+        #expect(HostApiV1CommandIds.parse("h1.+7.x") == nil)
+        #expect(HostApiV1CommandIds.parse("h1.") == nil)
+        #expect(HostApiV1CommandIds.parse("h1.7.") == nil)
         #expect(!HostApiV1CommandIds.isV1("llmide_chat_history"))
     }
 }

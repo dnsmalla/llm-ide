@@ -16,10 +16,9 @@ struct HostApiV1Session {
     mutating func greeted(clientName: String) { phase = .awaitingAuth(clientName: clientName) }
 
     mutating func authenticated(deviceId: String) {
-        switch phase {
-        case .awaitingAuth(let name), .authed(_, let name): phase = .authed(deviceId: deviceId, clientName: name)
-        case .awaitingHello: break
-        }
+        // Only the pairing/token step may authenticate; from any other phase the call is a no-op.
+        guard case .awaitingAuth(let name) = phase else { return }
+        phase = .authed(deviceId: deviceId, clientName: name)
     }
 
     var deviceId: String? { if case .authed(let id, _) = phase { return id }; return nil }

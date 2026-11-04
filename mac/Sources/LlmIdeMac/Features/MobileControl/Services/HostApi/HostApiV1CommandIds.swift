@@ -13,7 +13,9 @@ enum HostApiV1CommandIds {
         let rest = id.dropFirst(prefix.count)
         guard let dot = rest.firstIndex(of: "."), let session = Int(rest[..<dot]) else { return nil }
         let external = String(rest[rest.index(after: dot)...])
-        return external.isEmpty ? nil : (session, external)
+        // Canonical only: "h1.007.x", "h1.+7.x" and "h1.-1.x" parse to a session but do not round-trip.
+        guard session >= 0, !external.isEmpty, internalId(session: session, external: external) == id else { return nil }
+        return (session, external)
     }
 
     static func isV1(_ id: String) -> Bool { parse(id) != nil }
