@@ -57,30 +57,33 @@ export function messagesOf(lines, limit) {
 
 export function createGateway(overrides) {
   const deps = { ...defaultDeps(), ...overrides };
-  const sessions = new Map(); // handle -> { state, peer, num, queue, timer }
+  const sessions = new Map(); // handle -> { state, peer, num, queue, timer, rev }
   // internal id -> { session, external, cancelRequested, started, zombie, userId, chatSessionId, translator, sdkSessionId, open }.
   // A closed session's in-flight commands stay as zombies (nothing sent) until their turn settles, so a cancel
   // requested before the turn held the engine lock can be re-issued when its init arrives.
   const owned = new Map();
   const creatingQuickChat = new Map(); // userId -> Promise<chatSessionId>
   const throttle = new PairingThrottle();
-  let rev = 0;
   let nextNum = 0;
   let lastCapabilities = deps.capabilities();
 
-  const fail = (s, replyTo, code, message, extra = {}) => deps.send(s, errorFrame({ replyTo, code, message, rev, ...extra }));
+  // rev is per connection (spec): events bump the session's own counter; responses and errors carry its value.
+  const revOf = (s) => sessions.get(s)?.rev ?? 0;
+  const fail = (s, replyTo, code, message, extra = {}) => deps.send(s, errorFrame({ replyTo, code, message, rev: revOf(s), ...extra }));
   function respond(s, replyTo, command, result) {
     let text;
-    try { text = response(replyTo, command, result, rev); } catch {
+    try { text = response(replyTo, command, result, revOf(s)); } catch {
       deps.log(`Host API v1 ${command} result failed validation — sent internal`);
       return fail(s, replyTo, 'internal', 'This computer could not build this reply.');
     }
     deps.send(s, text);
   }
   function sendEvent(s, command, payload, replyTo) {
-    rev += 1;
+    const entry = sessions.get(s);
+    if (!entry) return;
+    entry.rev += 1;
     let text;
-    try { text = event(command, payload, rev, replyTo); } catch {
+    try { text = event(command, payload, entry.rev, replyTo); } catch {
       return deps.log(`Host API v1 ${command} event failed validation — dropped`);
     }
     deps.send(s, text);
@@ -93,7 +96,7 @@ export function createGateway(overrides) {
       return;
     }
     nextNum += 1;
-    const entry = { state: new HostApiSession(), peer: String(peer ?? ''), num: nextNum, queue: Promise.resolve(), timer: null };
+    const entry = { state: new HostApiSession(), peer: String(peer ?? ''), num: nextNum, queue: Promise.resolve(), timer: null, rev: 0 };
     entry.timer = setTimeout(() => {
       if (sessions.get(session) !== entry || entry.state.deviceId) return;
       deps.log(`Host API v1 connection ${entry.num} did not authenticate in time — closing`);
@@ -362,6 +365,5 @@ export function createGateway(overrides) {
 
   return {
     opened, receive, closed, closeAll, capabilitiesChanged, disconnectDevice,
-    get rev() { return rev; },
   };
 }

@@ -106,7 +106,7 @@ test('chat.send runs a turn on the quick chat and routes delta + done', async ()
   assert.equal(events[0].payload.text, 'hi');
   const revs = t.sent.map(([, f]) => f.rev);
   assert.deepEqual(revs, [...revs].sort((a, b) => a - b));
-  assert.equal(t.g.rev, 2);
+  assert.equal(revs.at(-1), 2);
   await flush();
   assert.deepEqual(t.saved, [['u1', 'chat-1', { role: 'user', content: 'hello' }], ['u1', 'chat-1', { role: 'assistant', content: 'hi' }]]);
   // Ownership ended at the terminal frame: the same id may run again.
@@ -388,4 +388,28 @@ test('a throwing handler answers internal with replyTo', async () => {
   await t.g.receive(s, req('c-s', 'chat.snapshot'));
   assert.equal(t.lastError(), 'internal');
   assert.equal(t.last().replyTo, 'c-s');
+});
+
+test('rev is per connection: events to one session never advance another\'s', async () => {
+  const t = harness({ hold: true });
+  const a = { n: 'A' };
+  const b = { n: 'B' };
+  await t.paired(a);
+  await t.paired(b);
+  const of = (s) => t.sent.filter(([x]) => x === s).map(([, f]) => f);
+  assert.deepEqual(of(b).map((f) => f.rev), [0, 0], 'a new session starts at 0');
+  await t.g.receive(a, req('c-1', 'chat.send', { text: 'hello' }));
+  const q = [{ question: 'Q?', options: [{ label: 'A' }] }];
+  t.turns[0].onEvent({ type: 'approval_request', requestId: 'r1', kind: 'AskUserQuestion', questions: q });
+  t.turns[0].onEvent({ type: 'approval_resolved', requestId: 'r1', outcome: 'answered' });
+  t.turns[0].onEvent({ type: 'delta', text: 'x' });
+  t.turns[0].onEvent({ type: 'result' });
+  assert.deepEqual(of(a).filter((f) => f.type === 'event').map((f) => f.rev), [1, 2, 3, 4], 'strictly +1 per event');
+  await t.g.receive(a, req('c-p', 'host.ping'));
+  assert.equal(t.last().rev, 4, 'a response carries the session\'s current rev');
+  await t.g.receive(b, req('c-p', 'host.ping'));
+  assert.equal(t.last().rev, 0, 'session B did not move');
+  await t.g.receive(b, req('c-u', 'nope.cmd'));
+  assert.equal(t.last().type, 'error');
+  assert.equal(t.last().rev, 0);
 });
