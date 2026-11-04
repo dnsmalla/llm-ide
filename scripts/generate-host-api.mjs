@@ -109,10 +109,67 @@ public enum HostApiSchemas {
 }
 `;
 
+// One Codable struct per payload schema. The mapping is deliberately narrow: a schema shape it does not
+// know fails generation loudly instead of producing a lossy type.
+const pascal = (name) => name.split(".").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
+const structs = [];
+
+function swiftType(schema, name) {
+  switch (schema.type) {
+    case "string": return "String";
+    case "integer": return "Int";
+    case "boolean": return "Bool";
+    case "array": return `[${swiftType(schema.items, `${name}Item`)}]`;
+    case "object": {
+      if (!schema.properties && schema.additionalProperties && typeof schema.additionalProperties === "object") {
+        const v = schema.additionalProperties;
+        if (v.type === "object" && !v.properties) return "[String: HostApiJSONValue]";
+        return `[String: ${swiftType(v, `${name}Value`)}]`;
+      }
+      emitStruct(name, schema);
+      return name;
+    }
+    default:
+      throw new Error(`host-api: no Swift type for ${name}: ${JSON.stringify(schema)}`);
+  }
+}
+
+function emitStruct(name, schema) {
+  const required = new Set(schema.required || []);
+  const fields = Object.keys(schema.properties || {}).sort().map((prop) => {
+    if (!/^[a-z][A-Za-z0-9]*$/.test(prop)) throw new Error(`host-api: ${name}.${prop} is not a Swift identifier`);
+    const t = swiftType(schema.properties[prop], `${name}${prop[0].toUpperCase()}${prop.slice(1)}`);
+    return { prop, type: required.has(prop) ? t : `${t}?`, optional: !required.has(prop) };
+  });
+  const lines = [`public struct ${name}: Codable, Equatable, Sendable {`];
+  for (const f of fields) lines.push(`    public var ${f.prop}: ${f.type}`);
+  const params = fields.map((f) => `${f.prop}: ${f.type}${f.optional ? " = nil" : ""}`).join(", ");
+  lines.push("", `    public init(${params}) {`);
+  for (const f of fields) lines.push(`        self.${f.prop} = ${f.prop}`);
+  lines.push("    }", "}");
+  structs.push(lines.join("\n"));
+}
+
+for (const n of names) {
+  swiftType(registry.commands[n].request, `HostApi${pascal(n)}Request`);
+  swiftType(registry.commands[n].result, `HostApi${pascal(n)}Result`);
+}
+for (const variant of schemaTable.events.oneOf) {
+  const event = variant.properties.command.const;
+  swiftType(variant.properties.payload, `HostApi${pascal(event)}Event`);
+}
+
+const swiftPayloads = `${header}
+import Foundation
+
+${structs.join("\n\n")}
+`;
+
 const outputs = [
   ["extension/routes/host-api/commands.generated.mjs", js],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift", swift],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiSchemas.swift", swiftSchemas],
+  ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiPayloads.swift", swiftPayloads],
 ];
 
 let stale = false;
