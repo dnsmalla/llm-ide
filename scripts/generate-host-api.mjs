@@ -9,6 +9,7 @@
 // request/result schema for frame validation) and the SharedProtocol Swift package
 // (ios_app/SharedProtocol/Sources/SharedProtocol: the command constants in HostApiCommands.swift
 // and the parsed schema tables in HostApiSchemas.swift, for HostApiSchemaValidator).
+// Third consumer: the web client (web/src/host-api/types.generated.ts), TypeScript types only.
 // Output is deterministic (commands sorted by name), so --check is a byte comparison.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -172,11 +173,75 @@ import Foundation
 ${structs.join("\n\n")}
 `;
 
+// TypeScript for the web client (web/): the same schemas as types only. The host validates every frame it sends;
+// the client checks just the fields it reads. A shape this mapping does not know fails generation loudly.
+const TS_REFS = { "#/$defs/ErrorCode": "HostApiErrorCode" };
+function tsType(schema) {
+  if (schema.$ref) {
+    if (!TS_REFS[schema.$ref]) throw new Error(`host-api: no TypeScript type for $ref ${schema.$ref}`);
+    return TS_REFS[schema.$ref];
+  }
+  if (schema.const !== undefined) return JSON.stringify(schema.const);
+  if (schema.enum) return schema.enum.map((v) => JSON.stringify(v)).join(" | ");
+  switch (schema.type) {
+    case "string": return "string";
+    case "integer": return "number";
+    case "boolean": return "boolean";
+    case "array": return `Array<${tsType(schema.items)}>`;
+    case "object": {
+      const keys = Object.keys(schema.properties || {}).sort();
+      if (!keys.length) {
+        const ap = schema.additionalProperties;
+        if (ap === false) return "Record<string, never>";
+        if (ap && typeof ap === "object") return `Record<string, ${ap.type === "object" && !ap.properties ? "Record<string, unknown>" : tsType(ap)}>`;
+        return "Record<string, unknown>";
+      }
+      const required = new Set(schema.required || []);
+      return `{ ${keys.map((k) => {
+        if (!/^[A-Za-z_$][\w$]*$/.test(k)) throw new Error(`host-api: ${k} is not a TypeScript identifier`);
+        return `${k}${required.has(k) ? "" : "?"}: ${tsType(schema.properties[k])}`;
+      }).join("; ")} }`;
+    }
+    default:
+      throw new Error(`host-api: no TypeScript type for ${JSON.stringify(schema)}`);
+  }
+}
+
+const tsEvents = schemaTable.events.oneOf
+  .map((v) => [v.properties.command.const, v.properties.payload])
+  .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+
+const ts = `${header}
+// Types for the web client. Types only: the host validates every frame it sends.
+export const HOST_API_VERSION = ${registry.version};
+export const HOST_API_LIMITS = ${JSON.stringify(registry.limits)} as const;
+export const HOST_API_CAPABILITIES = ${JSON.stringify(registry.capabilities)} as const;
+export type HostApiCapability = (typeof HOST_API_CAPABILITIES)[number];
+export const HOST_API_ERROR_CODES = ${JSON.stringify(schemaTable.envelope.$defs.ErrorCode.enum)} as const;
+export type HostApiErrorCode = (typeof HOST_API_ERROR_CODES)[number];
+export type HostApiErrorBody = ${tsType(schemaTable.envelope.$defs.Error)};
+export const HOST_API_COMMANDS = {
+${names.map((n) => `  ${JSON.stringify(n)}: { capability: ${JSON.stringify(registry.commands[n].capability)}, idempotent: ${registry.commands[n].idempotent} },`).join("\n")}
+} as const;
+export type HostApiCommandName = keyof typeof HOST_API_COMMANDS;
+export interface HostApiCommandMap {
+${names.map((n) => `  ${JSON.stringify(n)}: { request: ${tsType(registry.commands[n].request)}; result: ${tsType(registry.commands[n].result)} };`).join("\n")}
+}
+export type HostApiRequest<C extends HostApiCommandName> = HostApiCommandMap[C]["request"];
+export type HostApiResult<C extends HostApiCommandName> = HostApiCommandMap[C]["result"];
+export const HOST_API_EVENT_NAMES = ${JSON.stringify(tsEvents.map(([e]) => e))} as const;
+export type HostApiEventName = (typeof HOST_API_EVENT_NAMES)[number];
+export interface HostApiEventMap {
+${tsEvents.map(([e, p]) => `  ${JSON.stringify(e)}: ${tsType(p)};`).join("\n")}
+}
+`;
+
 const outputs = [
   ["extension/routes/host-api/commands.generated.mjs", js],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift", swift],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiSchemas.swift", swiftSchemas],
   ["ios_app/SharedProtocol/Sources/SharedProtocol/HostApiPayloads.swift", swiftPayloads],
+  ["web/src/host-api/types.generated.ts", ts],
 ];
 
 let stale = false;
