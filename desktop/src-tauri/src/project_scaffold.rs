@@ -212,10 +212,12 @@ fn claude_settings(p: &NewProject) -> String {
 /// True for a canonical parent inside an operating-system tree, where a project must never be created
 /// (on macOS `/etc` resolves to `/private/etc`, so the canonical form is what is checked).
 fn parent_is_system_tree(real_parent: &str) -> bool {
-    let w = real_parent.replace('\\', "/").to_lowercase();
+    // Without the verbatim prefix (`\\?\D:\` on Windows), so a drive root reads as one `d:` segment.
+    let w = crate::project::normalise(real_parent).to_lowercase();
     let segs: Vec<&str> = w.split('/').filter(|s| !s.is_empty()).collect();
     match segs.as_slice() {
         [] => true,
+        [drive] if drive.len() == 2 && drive.ends_with(':') => true,
         ["etc" | "usr" | "bin" | "sbin" | "system" | "library" | "proc" | "dev" | "sys" | "boot", ..] => true,
         ["private", "etc", ..] => true,
         ["private", "var", third, ..] => !matches!(*third, "folders" | "tmp"),

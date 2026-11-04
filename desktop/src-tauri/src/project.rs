@@ -44,7 +44,7 @@ pub struct ProjectInfo {
 
 /// Normalises a canonical path to forward slashes and strips the Windows verbatim
 /// prefix (`\\?\C:\x` -> `C:/x`, `\\?\UNC\srv\share` -> `//srv/share`).
-fn normalise(p: &str) -> String {
+pub(crate) fn normalise(p: &str) -> String {
     let w = p.replace('\\', "/");
     if let Some(rest) = w.strip_prefix("//?/UNC/") {
         return format!("//{rest}");

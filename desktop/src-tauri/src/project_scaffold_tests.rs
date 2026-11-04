@@ -127,6 +127,16 @@ fn an_existing_symlink_is_refused_and_a_symlinked_parent_resolves_first() {
 }
 
 #[test]
+fn drive_roots_are_system_trees_in_any_spelling() {
+    for p in ["/", r"D:\", r"\\?\D:\", "d:/", "/etc", r"\\?\C:\"] {
+        assert!(parent_is_system_tree(p), "{p}");
+    }
+    for p in [r"D:\work", r"\\?\D:\work", "/Users/me/code"] {
+        assert!(!parent_is_system_tree(p), "{p}");
+    }
+}
+
+#[test]
 fn too_broad_or_unusable_parents_are_refused() {
     for p in ["/", "/etc", "/usr", "/System", "/Users", "/home"] {
         if Path::new(p).is_dir() {
