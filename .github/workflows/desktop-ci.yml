@@ -109,6 +109,10 @@ jobs:
         working-directory: ui/kit
         run: npm ci
 
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
       # vite.config.ts resolves `three` from graph-kit's web package (System page).
       - name: Install graph-kit web dependencies
         working-directory: mac/LocalPackages/graph-kit/web
@@ -119,6 +123,19 @@ jobs:
         run: |
           npm test
           npm run type-check
+
+      - name: web tests and type-check
+        working-directory: web
+        run: |
+          npm test
+          npx tsc --noEmit -p .
+          npm run build
+
+      # Real core over the loopback dev listener: needs the extension install above.
+      - name: web end-to-end tests
+        if: runner.os != 'Windows'
+        working-directory: web
+        run: npm run test:e2e
 
       - name: Node tests
         working-directory: desktop

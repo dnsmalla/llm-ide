@@ -34,6 +34,9 @@ test-desktop-node:
 	@if [ -d ui/kit/node_modules ]; then \
 	  cd ui/kit && npm test --silent && npm run -s type-check; \
 	else echo "test-desktop: ui/kit/node_modules missing (cd ui/kit && npm ci); skipping ui-kit checks"; fi
+	@if [ -d web/node_modules ]; then \
+	  cd web && npm test --silent && npx tsc --noEmit -p .; \
+	else echo "test-desktop: web/node_modules missing (cd web && npm ci); skipping web checks"; fi
 
 # test-desktop-node is under 2 s and is part of `make regression`; the cargo
 # step compiles Tauri (minutes cold), so it stays out of the regression gate
