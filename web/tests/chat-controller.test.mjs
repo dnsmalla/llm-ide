@@ -81,3 +81,44 @@ test("answers go out with the card's command id; decline cancels the turn", asyn
   await chat.declineQuestion("r-2");
   assert.equal(link.calls.at(-1).command, "chat.cancel");
 });
+
+const Q1 = [{ question: "Pick?", multiSelect: false, options: [{ label: "Yes" }] }];
+const ask = (link, id = "r-1") => link.emit({ command: "approval.request", payload: { requestId: id, commandId: "c-1", questions: Q1 }, rev: 1, replyTo: "c-1" });
+
+test("accepted:false keeps the question card and shows an error", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true }, "approvals.answer": { accepted: false } });
+  const chat = createChatController(link);
+  await chat.send("hi"); ask(link);
+  await chat.answerQuestion("r-1", { "Pick?": "Yes" });
+  const [a] = chat.getState().approvals;
+  assert.deepEqual([a.submitting, typeof a.error], [false, "string"]);
+});
+
+test("cancelled:false on decline keeps the card", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true }, "chat.cancel": { cancelled: false } });
+  const chat = createChatController(link);
+  await chat.send("hi"); ask(link);
+  await chat.declineQuestion("r-1");
+  assert.equal(chat.getState().approvals.length, 1);
+  assert.ok(chat.getState().approvals[0].error);
+});
+
+test("tool approvals answer with the card's command id; refusal keeps the card", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true }, "toolApprovals.answer": { accepted: true } });
+  link.capabilities = new Set(["host", "chat", "approvals", "tool_approvals"]);
+  const chat = createChatController(link);
+  await chat.send("hi");
+  const tool = (id) => link.emit({ command: "toolApproval.request", payload: { requestId: id, commandId: "c-1", toolName: "Edit", truncated: false }, rev: 1, replyTo: "c-1" });
+  tool("t-1");
+  await chat.answerTool("t-1", "allow_once");
+  assert.deepEqual(link.calls.at(-1), { id: "c-2", command: "toolApprovals.answer", payload: { requestId: "t-1", commandId: "c-1", decision: "allow_once" } });
+  assert.equal(chat.getState().approvals.length, 0);
+});
+
+test("capabilities apply before any snapshot, so an unserved tool approval is ignored", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true } });
+  const chat = createChatController(link);
+  await chat.send("hi");
+  link.emit({ command: "toolApproval.request", payload: { requestId: "t-1", commandId: "c-1", toolName: "Edit", truncated: false }, rev: 1, replyTo: "c-1" });
+  assert.equal(chat.getState().approvals.length, 0);
+});

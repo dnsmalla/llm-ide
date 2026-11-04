@@ -20,6 +20,7 @@ export interface ChatState {
   notice: string | null;
   loaded: boolean;
   seq: number;
+  capabilities: ReadonlySet<HostApiCapability> | null; // null until the controller reports them
 }
 
 export type ChatAction =
@@ -35,7 +36,7 @@ export type ChatAction =
   | { type: "cleared" }
   | { type: "notice"; text: string | null };
 
-export const initialChatState: ChatState = { messages: [], turn: null, approvals: [], notice: null, loaded: false, seq: 0 };
+export const initialChatState: ChatState = { messages: [], turn: null, approvals: [], notice: null, loaded: false, seq: 0, capabilities: null };
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 const cap = (m: WebMessage[]) => (m.length > MAX_MESSAGES ? m.slice(-MAX_MESSAGES) : m);
@@ -88,7 +89,7 @@ export function reduce(s: ChatState, a: ChatAction): ChatState {
       return { ...(s.turn ? endTurn(s, "interrupted", "The connection closed; the host stopped this reply.") : s), approvals: [] };
     case "event": return onEvent(s, a.event);
     case "capabilities":
-      return { ...s, approvals: s.approvals.filter((x) => a.capabilities.has(x.kind === "tool" ? "tool_approvals" : "approvals")) };
+      return { ...s, capabilities: a.capabilities, approvals: s.approvals.filter((x) => a.capabilities.has(x.kind === "tool" ? "tool_approvals" : "approvals")) };
     case "approvalSubmitting": return patchCard(s, a.requestId, { submitting: true, error: null });
     case "approvalFailed": return patchCard(s, a.requestId, { submitting: false, error: a.message });
     case "approvalCleared": return { ...s, approvals: s.approvals.filter((x) => x.requestId !== a.requestId) };
@@ -109,11 +110,13 @@ function onEvent(s: ChatState, e: HostEvent): ChatState {
       return e.replyTo !== null && e.replyTo === s.turn ? endTurn(s, "error", str(e.payload.message, 2000) || "The reply failed.") : s;
     case "approval.request": {
       const p = e.payload;
+      if (s.capabilities && !s.capabilities.has("approvals")) return s;
       if (p.commandId !== s.turn || !Array.isArray(p.questions) || s.approvals.some((x) => x.requestId === p.requestId)) return s;
       return { ...s, approvals: [...s.approvals, { kind: "question", requestId: p.requestId, commandId: p.commandId, questions: p.questions, submitting: false, error: null }] };
     }
     case "toolApproval.request": {
       const p = e.payload;
+      if (s.capabilities && !s.capabilities.has("tool_approvals")) return s;
       if (p.commandId !== s.turn || s.approvals.some((x) => x.requestId === p.requestId)) return s;
       return { ...s, approvals: [...s.approvals, {
         kind: "tool", requestId: p.requestId, commandId: p.commandId, toolName: str(p.toolName, 200) || "tool",

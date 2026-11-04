@@ -56,3 +56,28 @@ test("a lost connection interrupts the reply and drops every approval", () => {
   assert.match(s.messages.at(-1).error, /connection closed/);
   assert.deepEqual([s.turn, s.approvals.length], [null, 0]);
 });
+
+test("a tool approval is ignored when tool_approvals is not served", () => {
+  const caps = { type: "capabilities", capabilities: new Set(["host", "chat", "approvals"]) };
+  const s = run(caps, { type: "sent", commandId: "c-1", text: "hi" }, ev("toolApproval.request", { requestId: "r-2", commandId: "c-1", toolName: "Edit", truncated: false }, "c-1"));
+  assert.equal(s.approvals.length, 0);
+});
+
+test("approvalFailed keeps the card with the error", () => {
+  let s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("approval.request", { requestId: "r-1", commandId: "c-1", questions: Q }, "c-1"));
+  s = reduce(reduce(s, { type: "approvalSubmitting", requestId: "r-1" }), { type: "approvalFailed", requestId: "r-1", message: "nope" });
+  assert.deepEqual([s.approvals[0].submitting, s.approvals[0].error], [false, "nope"]);
+});
+
+test("done and error for an unknown or finished request are no-ops", () => {
+  const s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("chat.done", { requestId: "c-1" }, "c-1"));
+  assert.equal(reduce(s, ev("chat.done", { requestId: "c-x" }, "c-x")), s);
+  assert.equal(reduce(s, ev("chat.error", { message: "late" }, "c-1")), s);
+});
+
+test("sent respects the message cap", () => {
+  const msgs = Array.from({ length: 500 }, (_, i) => ({ role: "user", content: `m${i}` }));
+  const s = reduce(reduce(S0, { type: "snapshot", messages: msgs }), { type: "sent", commandId: "c-1", text: "new" });
+  assert.equal(s.messages.length, 500);
+  assert.equal(s.messages.at(-2).text, "new");
+});

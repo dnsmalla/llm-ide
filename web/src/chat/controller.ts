@@ -12,6 +12,7 @@ export function createChatController(link: HostLink, { historyLimit = 200 }: { h
   let resyncing: Promise<void> | null = null;
 
   const resync = (): Promise<void> => (resyncing ??= (async () => {
+    dispatch({ type: "capabilities", capabilities: link.capabilities });
     try {
       const r = await link.send("chat.snapshot", { limit: historyLimit }).done;
       dispatch({ type: "snapshot", messages: r.messages });
@@ -23,14 +24,18 @@ export function createChatController(link: HostLink, { historyLimit = 200 }: { h
     }
   })());
 
-  const answer = async (requestId: string, go: (commandId: string) => Promise<unknown>) => {
+  const answer = async (requestId: string, go: (commandId: string) => Promise<unknown>, ok: (r: any) => boolean) => {
     const card = state.approvals.find((x) => x.requestId === requestId);
     if (!card || card.submitting) return;
     dispatch({ type: "approvalSubmitting", requestId });
-    try { await go(card.commandId); dispatch({ type: "approvalCleared", requestId }); }
+    try {
+      if (!ok(await go(card.commandId))) return dispatch({ type: "approvalFailed", requestId, message: "The host did not accept this answer. Try again." });
+      dispatch({ type: "approvalCleared", requestId });
+    }
     catch (e) { dispatch({ type: "approvalFailed", requestId, message: messageOf(e) }); }
   };
 
+  dispatch({ type: "capabilities", capabilities: link.capabilities });
   const offs = [
     link.onEvent((event) => {
       dispatch({ type: "event", event });
@@ -67,11 +72,11 @@ export function createChatController(link: HostLink, { historyLimit = 200 }: { h
       catch (e) { dispatch({ type: "notice", text: messageOf(e) }); }
     },
     answerQuestion: (requestId: string, answers: Record<string, string>) =>
-      answer(requestId, (commandId) => link.send("approvals.answer", { requestId, commandId, answers }).done),
+      answer(requestId, (commandId) => link.send("approvals.answer", { requestId, commandId, answers }).done, (r) => r.accepted === true),
     // v1 has no decline: stopping the reply is the honest equivalent (the host clears the question).
-    declineQuestion: (requestId: string) => answer(requestId, () => link.send("chat.cancel", {}).done),
+    declineQuestion: (requestId: string) => answer(requestId, () => link.send("chat.cancel", {}).done, (r) => r.cancelled === true),
     answerTool: (requestId: string, decision: "allow_once" | "deny") =>
-      answer(requestId, (commandId) => link.send("toolApprovals.answer", { requestId, commandId, decision }).done),
+      answer(requestId, (commandId) => link.send("toolApprovals.answer", { requestId, commandId, decision }).done, (r) => r.accepted === true),
     dispose() { for (const off of offs) off(); subs.clear(); },
   };
 }
