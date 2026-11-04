@@ -60,6 +60,16 @@ struct HostApiSchemaValidatorTests {
         #expect(!HostApiSchemaValidator.validate(boolSchema, parsed[1], defs: [:]).isEmpty)
     }
 
+    @Test("a pattern's trailing $ matches only at end of input, like JS (no trailing newline)")
+    func patternEndAnchorIsEndOfInput() {
+        let id: [String: Any] = ["type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"]
+        let pin: [String: Any] = ["type": "string", "pattern": "^[0-9]{6}$"]
+        #expect(HostApiSchemaValidator.validate(id, "abc", defs: [:]).isEmpty)
+        #expect(!HostApiSchemaValidator.validate(id, "abc\n", defs: [:]).isEmpty, "trailing newline must fail the id pattern")
+        #expect(!HostApiSchemaValidator.validate(pin, "123456\n", defs: [:]).isEmpty, "trailing newline must fail the PIN pattern")
+        #expect(HostApiSchemaValidator.validate(pin, "123456", defs: [:]).isEmpty)
+    }
+
     @Test("lengths count UTF-16 code units, like the Node validator")
     func utf16Lengths() {
         let schema: [String: Any] = ["type": "string", "maxLength": 1]

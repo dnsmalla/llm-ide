@@ -105,10 +105,20 @@ public enum HostApiSchemaValidator {
         let regex: NSRegularExpression
         if let cached = regexCache.object(forKey: pattern as NSString) { regex = cached }
         else {
-            guard let built = try? NSRegularExpression(pattern: pattern) else { return false }
+            guard let built = try? NSRegularExpression(pattern: jsEndAnchor(pattern)) else { return false }
             regexCache.setObject(built, forKey: pattern as NSString)
             regex = built
         }
         return regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+
+    /// ICU's `$` also matches before a trailing newline; JS's `$` (no `m` flag) matches only at the end of
+    /// input. A pattern ending in an unescaped `$` therefore becomes `\z`. Other `$` uses are not rewritten:
+    /// the Host API patterns all end in `$`, and any new one that does not is a schema-review item.
+    static func jsEndAnchor(_ pattern: String) -> String {
+        guard pattern.hasSuffix("$") else { return pattern }
+        let body = pattern.dropLast()
+        let backslashes = body.reversed().prefix(while: { $0 == "\\" }).count
+        return backslashes % 2 == 0 ? body + "\\z" : pattern
     }
 }
