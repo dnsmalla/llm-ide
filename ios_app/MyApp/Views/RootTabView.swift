@@ -85,6 +85,8 @@ struct RootTabView: View {
     }
 
     private func projectDidChange() {
+        // These stores speak MobileProtocol v2 only; a Host API v1 host has no project screens to refresh.
+        guard connection.hostApiVersion == 2 else { return }
         generationStore.invalidateProjectScopedCaches()
         sourceControlStore.invalidate()
         filesStore.invalidateAll()
