@@ -193,6 +193,8 @@ fn stage_shell(command: &str) -> Command {
     let root = std::env::var_os("SystemRoot").filter(|s| !s.is_empty()).unwrap_or_else(|| "C:\\Windows".into());
     let mut c = Command::new(std::path::PathBuf::from(root).join("System32").join("cmd.exe"));
     c.raw_arg(format!("/D /S /C \"{command}\""));
+    // cmd.exe otherwise runs a bare name from the working folder before PATH (a repo's own `git.bat`); sh never does.
+    c.env("NoDefaultCurrentDirectoryInExePath", "1");
     c
 }
 
@@ -689,6 +691,17 @@ mod tests {
         std::fs::create_dir_all(&plain).unwrap();
         assert!(changed_paths_in(&plain).is_err(), "a non-repo must not read as clean");
         let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_program_in_the_working_folder_does_not_shadow_path() {
+        let root = project("shadow", "hostname");
+        std::fs::write(root.join("hostname.bat"), "@echo planted\r\n").unwrap();
+        let r = run_stage(&root, "s1", Some(10)).unwrap();
+        assert!(!r.stdout.contains("planted"), "{r:?}");
+        assert_eq!(r.exit_code, Some(0), "{r:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
