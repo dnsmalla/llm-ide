@@ -33,6 +33,7 @@ function MacBridge(): ReactNode {
           <Button onClick={() => macBridge.refresh()}>Refresh</Button>
           <Button tone="danger" onClick={() => macBridge.forget()}>Forget pairing</Button>
         </div>
+        <ErrorText text={snap.error} />
       </div>
     );
   }

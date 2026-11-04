@@ -59,6 +59,16 @@ export interface BridgeSnapshot {
 }
 
 type Msg = Record<string, unknown> & { type?: unknown };
+
+// The Mac grants the desktop class only at a PIN pairing it approved; a phone-class record is refused desktop types.
+export const PAIR_AGAIN = "Auto Tasks control is not allowed for this pairing. Pair again from Settings → Mobile Bridge to allow Auto Tasks control (Forget pairing, then enter the PIN and allow it on your Mac).";
+
+/** What to show for a Mac refusal: `desktop_only` means this pairing is a phone record. */
+export function refusalText(code: string | null, message: string | null): string {
+  if (code === "desktop_only") return PAIR_AGAIN;
+  if (code === "desktop_denied" && !message) return PAIR_AGAIN;
+  return message ?? "The Mac refused that request.";
+}
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -196,10 +206,16 @@ export class MacBridge {
         this.send({ type: "loop_history" });
         break;
       }
-      case "error":
-        // CommandError from the Mac's tier gate or a bridge refusal (e.g. before desktop-class writes were allowed).
-        this.emit({ acks: [{ ok: false, message: str(msg.message) ?? "The Mac refused that request.", code: str(msg.code), at: Date.now() }, ...this.snapshot.acks].slice(0, 20) });
+      case "error": {
+        // CommandError from the Mac's tier gate or a bridge refusal; a refused desktop pairing also shows in Settings.
+        const code = str(msg.code);
+        const text = refusalText(code, str(msg.message));
+        this.emit({
+          acks: [{ ok: false, message: text, code, at: Date.now() }, ...this.snapshot.acks].slice(0, 20),
+          ...(code === "desktop_only" || str(msg.commandId) === "pairing" ? { error: text } : {}),
+        });
         break;
+      }
       case "auth_failed":
         this.token = null;
         this.save();
@@ -278,9 +294,6 @@ export class MacBridge {
   toggle(task: string | null, enabled: boolean): void { this.send({ type: "auto_task_toggle", task, enabled }); }
   loopHistory(): void { this.send({ type: "loop_history" }); }
   loopRefresh(): void { this.send({ type: "loop_status_list" }); }
-  startLoop(): void { this.send({ type: "loop_start" }); }
-  startStage(stageId: string): void { this.send({ type: "loop_start_stage", stageId }); }
-  stopLoop(): void { this.send({ type: "loop_stop" }); }
 }
 
 export const macBridge = new MacBridge();
