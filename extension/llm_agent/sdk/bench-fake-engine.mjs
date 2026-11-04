@@ -76,6 +76,12 @@ export async function runBenchFakeTurn({
       { name: 'Messages', kind: 'used', tokens: priorTranscript + newPromptTokens + replyTokens },
     ],
   };
+  // The terminal event the real engine forwards (events.mjs mapSdkMessage): stream consumers such as the Host API
+  // translator end the turn on it.
+  onEvent?.({
+    type: 'result', subtype: 'success', costUsd: null, numTurns: 1, durationMs: 0, sessionId,
+    stopReason: 'end_turn', modelUsage: null, usage: null,
+  });
   return {
     result: { subtype: 'success', result: reply, sessionId },
     usageTotals,
