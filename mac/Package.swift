@@ -241,6 +241,7 @@ if mobileIncluded {
     libExcludes.append("Features/MobileControl")
     let mobileTestExcludes: Set<String> = [
         "MobilePairingFrameTests.swift",
+        "HostApiV1AdvertisementTests.swift",
         "HostApiV1DeviceStoreTests.swift",
         "HostApiV1GatewayTests.swift",
         "HostApiV1IdentityTests.swift",

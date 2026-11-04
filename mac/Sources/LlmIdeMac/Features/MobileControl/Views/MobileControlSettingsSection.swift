@@ -17,6 +17,7 @@ struct MobileControlSettingsSection: View {
     /// appear; committed (validated) by `applyPortEdit`.
     @State private var portText: String = String(MobileControlManager.configuredPort)
     @State private var portError: String?
+    @State private var confirmingIdentityReset = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -124,6 +125,10 @@ struct MobileControlSettingsSection: View {
             // re-probe when we regain focus so the IP shows without Refresh.
             if phase == .active { refreshConnection() }
         }
+        .onChange(of: mobile.hostApiFingerprint) { _, _ in
+            // The v1 TLS listener binds after v2 and on Reset security identity; the QR must follow.
+            refreshConnection()
+        }
         .onChange(of: mobile.activePort) { _, _ in
             // The bind resolves asynchronously and may land on a fallback
             // port after this view already rendered pairing info — re-read so
@@ -144,7 +149,8 @@ struct MobileControlSettingsSection: View {
     /// actually bound.
     private func refreshConnection() {
         connection = MobileConnectionInfo.current(
-            port: mobile.activePort ?? MobileControlManager.configuredPort)
+            port: mobile.activePort ?? MobileControlManager.configuredPort,
+            hostApiPort: mobile.hostApiPort, hostApiFingerprint: mobile.hostApiFingerprint)
     }
 
     /// Base-port editor. The number itself carries no security weight — the
@@ -233,6 +239,7 @@ struct MobileControlSettingsSection: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             qrBlock
+            hostApiIdentityBlock
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
@@ -367,6 +374,40 @@ struct MobileControlSettingsSection: View {
                     .foregroundStyle(theme.current.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    // MARK: - Host API v1 security identity
+
+    /// The v1 TLS fingerprint line and Reset security identity. Reset is offered while the TLS listener
+    /// serves, and when the stored identity is corrupt (never silently regenerated).
+    @ViewBuilder
+    private var hostApiIdentityBlock: some View {
+        let corrupt = mobile.hostApiIdentityFailure == .corrupt
+        if let fp = connection.hostApiFingerprint, let port = connection.hostApiPort {
+            Text("Host API v1 (encrypted): port \(port) · fingerprint \(String(fp.prefix(16)))…")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .textSelection(.enabled)
+        }
+        if corrupt {
+            Text("The Host API v1 security identity in the Keychain is unreadable, so the encrypted listener is off. Reset it to create a new one.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.danger)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if mobile.hostApiFingerprint != nil || corrupt {
+            Button("Reset security identity") { confirmingIdentityReset = true }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(theme.current.danger)
+                .help("Create a new Host API v1 certificate and revoke every device paired over Host API v1.")
+                .confirmationDialog("Reset security identity?", isPresented: $confirmingIdentityReset, titleVisibility: .visible) {
+                    Button("Reset", role: .destructive) { mobile.resetHostApiIdentity() }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Every device paired over Host API v1 must pair again. Phones on the older link are not affected.")
+                }
         }
     }
 

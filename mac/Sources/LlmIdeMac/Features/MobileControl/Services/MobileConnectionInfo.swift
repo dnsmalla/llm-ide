@@ -90,28 +90,46 @@ struct MobileConnectionInfo: Equatable {
     /// scan, or nil when no LAN/Tailscale address is available. Prefers the
     /// Tailscale address (works across networks) over local Wi-Fi.
     let qrPayload: String?
+    /// The Host API v1 TLS port and the fingerprint clients pin; nil when the TLS listener is not serving.
+    let hostApiPort: Int?
+    let hostApiFingerprint: String?
 
-    static func current(port: Int = MobileControlManager.defaultAgentPort) -> MobileConnectionInfo {
+    static func current(port: Int = MobileControlManager.defaultAgentPort,
+                        hostApiPort: Int? = nil, hostApiFingerprint: String? = nil) -> MobileConnectionInfo {
         let tailscaleIP = LocalIPs.tailscaleIPv4()
         let lanIP = LocalIPs.lanIPv4()
         let pin = MobilePin.read()
-        let host = tailscaleIP ?? lanIP
-        let qr = host.flatMap { host -> String? in
-            var c = URLComponents()
-            c.scheme = "llmide"; c.host = "pair"
-            c.queryItems = [
-                URLQueryItem(name: "ip", value: host),
-                URLQueryItem(name: "port", value: String(port)),
-                URLQueryItem(name: "pin", value: pin ?? "")
-            ]
-            return c.url?.absoluteString
+        let qr = (tailscaleIP ?? lanIP).flatMap {
+            qrPayload(host: $0, port: port, pin: pin, hostApiPort: hostApiPort, hostApiFingerprint: hostApiFingerprint)
         }
         return MobileConnectionInfo(
             tailscaleIP: tailscaleIP,
             lanIP: lanIP,
             port: port,
             pin: pin,
-            qrPayload: qr
+            qrPayload: qr,
+            hostApiPort: hostApiPort,
+            hostApiFingerprint: hostApiFingerprint
         )
+    }
+
+    /// `ip`/`port`/`pin` stay first and unchanged (today's iOS parser looks items up by name); the v1
+    /// items are added only when both the TLS port and the fingerprint are known.
+    static func qrPayload(host: String, port: Int, pin: String?, hostApiPort: Int?, hostApiFingerprint: String?) -> String? {
+        var c = URLComponents()
+        c.scheme = "llmide"; c.host = "pair"
+        c.queryItems = [
+            URLQueryItem(name: "ip", value: host),
+            URLQueryItem(name: "port", value: String(port)),
+            URLQueryItem(name: "pin", value: pin ?? "")
+        ]
+        if let hostApiPort, let hostApiFingerprint {
+            c.queryItems! += [
+                URLQueryItem(name: "h1port", value: String(hostApiPort)),
+                URLQueryItem(name: "h1fp", value: hostApiFingerprint),
+                URLQueryItem(name: "api", value: "1")
+            ]
+        }
+        return c.url?.absoluteString
     }
 }

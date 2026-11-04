@@ -8,6 +8,7 @@ final class MobileBonjourAdvertiser: NSObject, NetServiceDelegate {
     private let name: String
     private let port: Int
     private var service: NetService?
+    private var txt: [String: String] = [:]
 
     init(name: String, port: Int) {
         self.name = name
@@ -20,6 +21,18 @@ final class MobileBonjourAdvertiser: NSObject, NetServiceDelegate {
         service.delegate = self
         service.publish()
         self.service = service
+        applyTXT()
+    }
+
+    /// Store the TXT fields and, when published, apply them now (the Host API v1 port can bind after v2).
+    func setTXT(_ fields: [String: String]) {
+        txt = fields
+        applyTXT()
+    }
+
+    private func applyTXT() {
+        guard let service, !txt.isEmpty else { return }
+        service.setTXTRecord(NetService.data(fromTXTRecord: txt.mapValues { Data($0.utf8) }))
     }
 
     func stop() {

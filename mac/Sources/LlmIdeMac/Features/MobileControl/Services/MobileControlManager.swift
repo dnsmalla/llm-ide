@@ -239,7 +239,7 @@ final class MobileControlManager {
     var mobileClientPaired = false
     /// Phones that completed PIN pairing and hold a per-device token — the
     /// registry token auth checks against, and what Settings lists/revokes.
-    private let pairedDeviceStore = MobilePairedDeviceStore()
+    private let pairedDeviceStore: MobilePairedDeviceStore
     /// Snapshot of `pairedDeviceStore.all` for the Settings list, refreshed on
     /// every pairing, authentication, and revoke.
     private(set) var pairedDevices: [MobilePairedDeviceStore.Device] = []
@@ -293,7 +293,9 @@ final class MobileControlManager {
     // internal: shared with the Mobile*Bridge classes (feature folders)
     let decoder = JSONDecoder()
 
-    init() {
+    /// `pairedDeviceStore` is injectable so tests use a temp file, never the real registry.
+    init(pairedDeviceStore: MobilePairedDeviceStore = MobilePairedDeviceStore()) {
+        self.pairedDeviceStore = pairedDeviceStore
         pairedDevices = pairedDeviceStore.all
         installPhoneAccessObserver()
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
@@ -317,7 +319,7 @@ final class MobileControlManager {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.revokeAllDevices()
+                self?.accountCredentialsRevoked()
             }
         }
     }
@@ -450,22 +452,7 @@ final class MobileControlManager {
         // advertising a port nothing listens on is exactly the phantom the
         // iPhone then misreads as "Wrong PIN". `mobileServerDidBind` starts
         // it with the port that actually took.
-        switch HostApiV1Listener.mode(environment: ProcessInfo.processInfo.environment, defaults: .standard,
-                                      isDebugBuild: HostApiV1Listener.isDebugBuild) {
-        case .off: break
-        case .devPlaintext: startHostApi(transport: .devPlaintext, fingerprint: nil)
-        case .tls:
-            // The only loadOrCreate call site: start() runs on the main actor, so it is never concurrent.
-            do {
-                let id = try HostApiV1Identity.loadOrCreate(hostName: Self.deviceName())
-                hostApiIdentityFailure = nil
-                startHostApi(transport: .tls(id.identity), fingerprint: id.fingerprint)
-            } catch {
-                let failure = error as? HostApiV1Identity.Failure ?? .securityFramework("unknown")
-                hostApiIdentityFailure = failure
-                append(.stderr, "Host API v1 TLS listener did not start: the security identity is unavailable (\(Self.describe(failure))). Unlock the keychain or use Reset security identity.")
-            }
-        }
+        startHostApiFromMode()
         status = .running
         startWorkspaceWatcher()
         startSessionDirectoryWatcher()
@@ -545,8 +532,85 @@ final class MobileControlManager {
         }
         advertiser?.stop()
         let advertiser = MobileBonjourAdvertiser(name: deviceName, port: port)
+        advertiser.setTXT(Self.hostApiTXT(port: hostApiPort, fingerprint: hostApiFingerprint))
         advertiser.start()
         self.advertiser = advertiser
+    }
+
+    /// Bonjour TXT for discovery: only a TLS v1 listener is advertised, never the dev plaintext one.
+    nonisolated static func hostApiTXT(port: Int?, fingerprint: String?) -> [String: String] {
+        guard let port, let fingerprint else { return ["api": "2"] }
+        return ["api": "1,2", "h1port": String(port), "h1fp": fingerprint]
+    }
+
+    /// Paired devices that belong to Host API v1 (host-minted `h1-` ids); v2 phones are a different listener.
+    nonisolated static func hostApiDeviceIds(_ devices: [MobilePairedDeviceStore.Device]) -> [String] {
+        devices.map(\.id).filter { $0.hasPrefix(MobilePairedDeviceStore.hostApiDevicePrefix) }
+    }
+
+    /// The one hook for Host API identity audit events (`identity_created`, `identity_reset`).
+    /// Task 8 wires this to the audit log; until then it only logs. Never carries key material.
+    private func recordHostApiAudit(_ event: String, detail: String? = nil) {
+        append(.info, "Host API v1 audit: \(event)" + (detail.map { " \($0)" } ?? ""))
+    }
+
+    /// Start the v1 listener for the configured mode. The ONLY `loadOrCreate` call site, reached from
+    /// `start()` and `restartHostApi()`, all on the main actor, so identity creation is never concurrent.
+    private func startHostApiFromMode() {
+        switch HostApiV1Listener.mode(environment: ProcessInfo.processInfo.environment, defaults: .standard,
+                                      isDebugBuild: HostApiV1Listener.isDebugBuild) {
+        case .off: break
+        case .devPlaintext: startHostApi(transport: .devPlaintext, fingerprint: nil)
+        case .tls:
+            do {
+                let id = try HostApiV1Identity.loadOrCreate(hostName: Self.deviceName())
+                hostApiIdentityFailure = nil
+                if id.created { recordHostApiAudit("identity_created") }
+                startHostApi(transport: .tls(id.identity), fingerprint: id.fingerprint)
+            } catch {
+                let failure = error as? HostApiV1Identity.Failure ?? .securityFramework("unknown")
+                hostApiIdentityFailure = failure
+                append(.stderr, "Host API v1 TLS listener did not start: the security identity is unavailable (\(Self.describe(failure))). Unlock the keychain or use Reset security identity.")
+            }
+        }
+    }
+
+    /// Tear down only the v1 listener (the v2 server and Bonjour stay up), then withdraw v1 from the TXT.
+    private func stopHostApi() {
+        hostApiGateway?.closeAll()
+        hostApiGateway = nil
+        hostApiListener?.stop()
+        hostApiListener = nil
+        hostApiEvents?.finish(); hostApiEvents = nil
+        hostApiDrain?.cancel(); hostApiDrain = nil
+        hostApiPort = nil
+        hostApiFingerprint = nil
+        advertiser?.setTXT(Self.hostApiTXT(port: nil, fingerprint: nil))
+    }
+
+    /// Stop and start the v1 listener only, through the same serialized path as `start()`.
+    /// Only while Mobile Control runs: a stopped manager mints nothing until its next start.
+    private func restartHostApi() {
+        stopHostApi()
+        if case .running = status { startHostApiFromMode() }
+    }
+
+    /// Settings → Mobile Control → Reset security identity. Every v1 pin breaks, so every v1 device is
+    /// revoked; v2 phones use a different listener and are untouched. Also the way out of `.corrupt`.
+    func resetHostApiIdentity() {
+        stopHostApi()
+        HostApiV1Identity.reset()
+        hostApiIdentityFailure = nil
+        for id in Self.hostApiDeviceIds(pairedDeviceStore.all) { revokeDevice(id) }
+        recordHostApiAudit("identity_reset")
+        if case .running = status { startHostApiFromMode() }
+    }
+
+    /// The account went away ("disconnect all" also deletes the v1 identity from the Keychain): revoke
+    /// every device, v1 included, and restart v1 so it never keeps serving an identity that is gone.
+    func accountCredentialsRevoked() {
+        revokeAllDevices()
+        restartHostApi()
     }
 
     /// Short, stable failure text for the log (never the Security framework's free-form error string).
@@ -573,7 +637,11 @@ final class MobileControlManager {
             onFrame: { s, d in continuation.yield(.frame(s, d)) },
             onClose: { s in continuation.yield(.closed(s)) },
             // The fingerprint is published only once the listener is actually serving (bind failures are async).
-            onListening: { [weak self] port in Task { @MainActor [weak self] in self?.hostApiPort = port; self?.hostApiFingerprint = fingerprint } },
+            onListening: { [weak self] port in Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.hostApiPort = port; self.hostApiFingerprint = fingerprint
+                self.advertiser?.setTXT(Self.hostApiTXT(port: port, fingerprint: fingerprint))
+            } },
             onLog: { [weak self] line in Task { @MainActor [weak self] in self?.append(.info, line) } })
         gateway.send = { [weak listener] s, d in listener?.send(s, d) }
         gateway.close = { [weak listener] s in listener?.close(s) }
@@ -632,14 +700,7 @@ final class MobileControlManager {
         activityBridge?.removePushObservers()
         registeredBridges.forEach { $0.bridge.removePushObservers() }
         onMobileClientDisconnected()
-        hostApiGateway?.closeAll()
-        hostApiGateway = nil
-        hostApiListener?.stop()
-        hostApiListener = nil
-        hostApiEvents?.finish(); hostApiEvents = nil
-        hostApiDrain?.cancel(); hostApiDrain = nil
-        hostApiPort = nil
-        hostApiFingerprint = nil
+        stopHostApi()
         server?.stop()
         server = nil
         advertiser?.stop()
