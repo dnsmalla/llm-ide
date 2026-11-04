@@ -225,14 +225,27 @@ pub(crate) fn open_nofollow(p: &Path, write: bool) -> std::io::Result<File> {
     o.open(p)
 }
 
+/// Hard-link count of the open file `f` (`m` is its `fstat`). Fails closed: `u64::MAX` when it cannot be read.
 #[cfg(unix)]
-pub(crate) fn nlink(m: &Metadata) -> u64 {
+pub(crate) fn nlink(_f: &File, m: &Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     m.nlink()
 }
-#[cfg(not(unix))]
-pub(crate) fn nlink(_: &Metadata) -> u64 {
-    1
+#[cfg(windows)]
+pub(crate) fn nlink(f: &File, _m: &Metadata) -> u64 {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+    // SAFETY: a plain C struct; all-zero is a valid value that the call overwrites.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle is open for as long as `f` lives; `info` is a valid out pointer.
+    if unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } == 0 {
+        return u64::MAX;
+    }
+    u64::from(info.nNumberOfLinks)
+}
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn nlink(_f: &File, _m: &Metadata) -> u64 {
+    u64::MAX
 }
 
 /// Opens `canonical` (already inside the root) and verifies the OPEN descriptor.
@@ -250,7 +263,7 @@ fn open_verified(root: &Path, canonical: &Path) -> R<(File, Metadata)> {
     if !meta.is_file() {
         return err("not_regular", "not a regular file");
     }
-    if nlink(&meta) > 1 {
+    if nlink(&f, &meta) > 1 {
         return err("hardlink", "file has several hard links; refusing to follow it");
     }
     Ok((f, meta))
@@ -1300,13 +1313,21 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn fifo_and_hardlink_are_refused() {
+    fn a_fifo_is_refused() {
         let root = scratch("fifo");
         let c = std::ffi::CString::new(root.join("pipe").to_str().unwrap()).unwrap();
         // SAFETY: valid NUL-terminated path.
         assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
         assert_eq!(code(read_file(&root, &ReadReq { path: "pipe".into(), max_bytes: None })), "not_regular");
-        let out = scratch("fifo-out");
+    }
+
+    /// Runs on every OS (NTFS has hard links too): a link inside the root must not reach a file outside it.
+    #[test]
+    fn a_hardlink_is_refused() {
+        let root = scratch("hardlink");
+        fs::write(root.join("plain.txt"), "p").unwrap();
+        assert_eq!(read_file(&root, &ReadReq { path: "plain.txt".into(), max_bytes: None }).unwrap().text.as_deref(), Some("p"), "one link is fine");
+        let out = scratch("hardlink-out");
         fs::write(out.join("outside.txt"), "x").unwrap();
         fs::hard_link(out.join("outside.txt"), root.join("alias.txt")).unwrap();
         assert_eq!(code(read_file(&root, &ReadReq { path: "alias.txt".into(), max_bytes: None })), "hardlink");

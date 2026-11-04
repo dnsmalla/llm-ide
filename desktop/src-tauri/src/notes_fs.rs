@@ -265,7 +265,7 @@ pub(crate) fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std
     }
     // A hard link may be another name for a file outside the notes folder: its path says nothing about where
     // the bytes live, so it is never read (same rule as the project file reads).
-    if crate::fs_ops::nlink(&meta) > 1 {
+    if crate::fs_ops::nlink(&file, &meta) > 1 {
         return Err(err("hardlink", "the note has several hard links; refusing to read it"));
     }
     if is_dataless(&meta) {

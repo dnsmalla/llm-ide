@@ -333,7 +333,7 @@ fn scan_file(root: &Path, path: &Path, re: &Regex, max_bytes: u64, ctl: &ScanCtl
         None => return FileOutcome::Other,
     }
     let Ok(meta) = f.metadata() else { return FileOutcome::Other };
-    if !meta.is_file() || nlink(&meta) > 1 {
+    if !meta.is_file() || nlink(&f, &meta) > 1 {
         return FileOutcome::Other;
     }
     if meta.len() > max_bytes {
