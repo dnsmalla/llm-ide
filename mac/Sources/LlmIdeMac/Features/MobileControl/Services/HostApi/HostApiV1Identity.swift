@@ -62,7 +62,19 @@ enum HostApiV1Identity {
         guard let secKey = SecKeyCreateWithData(key.x963Representation as CFData, attrs as CFDictionary, &err) else {
             throw Failure.securityFramework(String(describing: err?.takeRetainedValue()))
         }
-        guard let identity = SecIdentityCreate(nil, cert, secKey) else { throw Failure.securityFramework("SecIdentityCreate returned nil") }
+        guard let create = secIdentityCreate else { throw Failure.securityFramework("SecIdentityCreate is unavailable") }
+        guard let identity = create(nil, cert, secKey)?.takeRetainedValue() else {
+            throw Failure.securityFramework("SecIdentityCreate returned nil")
+        }
         return Loaded(identity: identity, certificateDER: der, fingerprint: fp, notAfter: notAfter, created: created)
     }
+
+    // SecIdentityCreate has been in Security.framework since macOS 10.12 but is declared only by newer SDKs
+    // (CI's Xcode 16.4 / macOS 15.5 SDK lacks it), so it is resolved at runtime with its C signature.
+    // shortcut: runtime lookup, call it directly once every build uses an SDK that declares it.
+    private typealias SecIdentityCreateFn = @convention(c) (CFAllocator?, SecCertificate, SecKey) -> Unmanaged<SecIdentity>?
+    private static let secIdentityCreate: SecIdentityCreateFn? = {
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "SecIdentityCreate") else { return nil }  // RTLD_DEFAULT
+        return unsafeBitCast(sym, to: SecIdentityCreateFn.self)
+    }()
 }
