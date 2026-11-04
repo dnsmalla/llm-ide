@@ -1141,12 +1141,10 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     if host_api_dev_env(cfg!(debug_assertions), std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref()) {
         cmd.env("LLMIDE_HOST_API_DEV", "1");
     }
-    if let Some(origins) = host_api_web_origins_env(
-        cfg!(debug_assertions),
-        std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref(),
-        std::env::var("LLMIDE_HOST_API_WEB_ORIGINS").ok().as_deref(),
-    ) {
-        cmd.env("LLMIDE_HOST_API_WEB_ORIGINS", origins);
+    for key in ["LLMIDE_HOST_API_TLS", "LLMIDE_HOST_API_WEB_ORIGINS"] {
+        if let Some(v) = host_api_env(key, std::env::var(key).ok().as_deref()) {
+            cmd.env(key, v);
+        }
     }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
 }
@@ -1156,17 +1154,14 @@ fn host_api_dev_env(debug: bool, value: Option<&str>) -> bool {
     debug && value == Some("1")
 }
 
-/// The browser origins the core's Host API dev listener may accept (Host API Plan 5). Debug builds only, and only
-/// together with the dev flag; the core itself keeps only loopback origins. Explicit `.env`, never `ALLOWED`.
-pub(crate) fn host_api_web_origins_env(debug: bool, dev: Option<&str>, origins: Option<&str>) -> Option<String> {
-    if !debug || dev != Some("1") {
-        return None;
+/// Host API v1 env the core may receive. TLS and the web-origin list are allowed in release builds
+/// (they only tighten or enable the pinned listener); the plaintext dev flag stays debug-only (Plan 3).
+fn host_api_env(key: &str, value: Option<&str>) -> Option<String> {
+    match (key, value) {
+        ("LLMIDE_HOST_API_TLS", Some("1")) => Some("1".into()),
+        ("LLMIDE_HOST_API_WEB_ORIGINS", Some(v)) if v.len() <= 2048 => Some(v.into()),
+        _ => None,
     }
-    let v = origins?.trim();
-    if v.is_empty() || v.len() > 1024 {
-        return None;
-    }
-    Some(v.to_string())
 }
 
 /// `node` with the cleared + allowlisted environment, cwd `extension/`, and the data
@@ -1277,15 +1272,16 @@ mod tests {
     }
 
     #[test]
-    fn host_api_web_origins_pass_only_in_debug_with_the_dev_flag() {
-        let o = Some("http://127.0.0.1:5180");
-        assert_eq!(host_api_web_origins_env(true, Some("1"), o), Some("http://127.0.0.1:5180".to_string()));
-        assert_eq!(host_api_web_origins_env(false, Some("1"), o), None, "release builds never forward it");
-        assert_eq!(host_api_web_origins_env(true, None, o), None, "only together with LLMIDE_HOST_API_DEV=1");
-        assert_eq!(host_api_web_origins_env(true, Some("0"), o), None);
-        assert_eq!(host_api_web_origins_env(true, Some("1"), Some("   ")), None);
-        assert_eq!(host_api_web_origins_env(true, Some("1"), Some(&"x".repeat(1025))), None, "bounded");
-        assert_eq!(host_api_web_origins_env(true, Some("1"), None), None);
+    fn host_api_env_passes_only_known_values() {
+        assert_eq!(host_api_env("LLMIDE_HOST_API_TLS", Some("1")), Some("1".to_string()));
+        assert_eq!(host_api_env("LLMIDE_HOST_API_TLS", Some("true")), None, "only the exact value 1");
+        assert_eq!(host_api_env("LLMIDE_HOST_API_TLS", None), None);
+        let o = "https://app.example.com,http://127.0.0.1:5180";
+        assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", Some(o)), Some(o.to_string()));
+        assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", Some(&"x".repeat(2049))), None, "bounded");
+        assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", None), None);
+        assert_eq!(host_api_env("LLMIDE_HOST_API_DEV", Some("1")), None, "the dev flag has its own debug-only gate");
+        assert_eq!(host_api_env("LLMIDE_VAULT_KEY", Some("1")), None);
     }
 
     /// One-shot-per-connection fake server; `reply` builds the raw HTTP response.

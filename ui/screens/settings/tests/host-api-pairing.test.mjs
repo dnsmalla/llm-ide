@@ -79,6 +79,18 @@ test("Show pairing PIN displays the six digits, the port and the countdown", asy
   assert.throws(() => m.decodePin({ pin: "12345", expiresAt: 1, port: 3016 }), /BAD_RESPONSE/);
 });
 
+test("a TLS PIN shows the certificate fingerprint; a dev PIN shows none", async () => {
+  const tls = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200-tls") }));
+  assert.match(tls.fingerprint, /^sha256:/);
+  const html = view({ pin: tls, now: tls.expiresAt - 1000 });
+  assert.ok(html.includes(`Fingerprint: ${tls.fingerprint}`));
+  assert.match(html, /wss:\/\//);
+  const dev = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200") }));
+  assert.equal(dev.fingerprint, null);
+  assert.doesNotMatch(view({ pin: dev, now: dev.expiresAt - 1000 }), /Fingerprint/);
+  assert.throws(() => m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: "md5:x" }), /BAD_RESPONSE/);
+});
+
 test("Revoke asks first (Cancel focused first), then deletes the device", async () => {
   const devices = m.decodeDevices(reply("get-host-api-devices-200").body);
   assert.doesNotMatch(view({ devices }), /alertdialog/);

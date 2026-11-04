@@ -1,7 +1,7 @@
 // Settings → Mobile Control: pairing a Host API v1 client (iPhone or web) with THIS desktop's core
 // (routes POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id; contract schema/http/host-api.schema.json).
 // The routes need the bus host proof, which the shell's core client attaches; a core started without
-// LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
+// LLMIDE_HOST_API_TLS=1 or LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
 // the card then renders nothing. The PIN lives in component state only: never persisted, logged or sent anywhere.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, call, type CoreClient } from "../core-api.ts";
@@ -9,7 +9,8 @@ import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 
-export interface HostPin { pin: string; expiresAt: number; port: number }
+/** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener. */
+export interface HostPin { pin: string; expiresAt: number; port: number; fingerprint: string | null }
 export interface HostDevice { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -17,8 +18,9 @@ const HIDDEN = new Set(["HOST_API_DISABLED", "HOST_PROOF_REQUIRED"]);
 
 export function decodePin(v: unknown): HostPin {
   if (isRecord(v) && typeof v.pin === "string" && /^[0-9]{6}$/.test(v.pin) && Number.isInteger(v.expiresAt)
-    && Number.isInteger(v.port) && (v.port as number) > 0 && (v.port as number) < 65536) {
-    return { pin: v.pin, expiresAt: v.expiresAt as number, port: v.port as number };
+    && Number.isInteger(v.port) && (v.port as number) > 0 && (v.port as number) < 65536
+    && (v.fingerprint == null || (typeof v.fingerprint === "string" && /^sha256:[A-Za-z0-9_-]{43}$/.test(v.fingerprint)))) {
+    return { pin: v.pin, expiresAt: v.expiresAt as number, port: v.port as number, fingerprint: (v.fingerprint as string | undefined) ?? null };
   }
   throw new ApiError(0, "BAD_RESPONSE");
 }
@@ -91,11 +93,13 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
   return (
     <div className="st-stack" role="group" aria-label="Host API pairing">
       <span className="st-label">Pair a phone or web client with this desktop</span>
-      <p className="st-hint">Development only: the listener is plaintext on 127.0.0.1 and serves this computer alone.</p>
       {live ? (
         <div className="st-stack" role="status">
           <p className="st-pre" aria-label="Pairing PIN"><strong>{live.pin}</strong></p>
-          <p className="st-hint">ws://127.0.0.1:{live.port}/host-api/v1 · expires in {remaining(live.expiresAt - now)} · one use</p>
+          <p className="st-hint">{live.fingerprint ? "wss://<this computer>" : "ws://127.0.0.1"}:{live.port}/host-api/v1 · expires in {remaining(live.expiresAt - now)} · one use</p>
+          {live.fingerprint
+            ? <p className="st-pre" aria-label="Certificate fingerprint" style={{ userSelect: "text" }}>Fingerprint: {live.fingerprint}</p>
+            : <p className="st-hint">Development only: the listener is plaintext on 127.0.0.1 and serves this computer alone.</p>}
         </div>
       ) : null}
       <div className="st-row">
