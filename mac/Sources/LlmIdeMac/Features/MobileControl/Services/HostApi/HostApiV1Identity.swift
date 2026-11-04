@@ -33,6 +33,12 @@ enum HostApiV1Identity {
         }
     }
 
+    /// True only when the Keychain says the item is absent (a read failure is not "missing").
+    static func isMissing(backend: RawKeychainAccess = KeychainStore.backend) -> Bool {
+        if case .notFound = backend.read(account: account, service: service) { return true }
+        return false
+    }
+
     static func reset(backend: RawKeychainAccess = KeychainStore.backend) { backend.delete(account: account, service: service) }
 
     static func fingerprint(spkiDER: Data) -> String {

@@ -284,6 +284,8 @@ final class MobileControlManager {
     private var hostApiListener: HostApiV1Listener?
     private var hostApiDrain: Task<Void, Never>?
     private var hostApiEvents: AsyncStream<HostApiV1ListenerEvent>.Continuation?
+    /// Bumped by `stopHostApi()`, so a stopped listener's late `onListening` cannot publish a stale port/fingerprint.
+    private var hostApiGeneration = 0
     /// Command ids with a registered, not-yet-finished task (tests).
     var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
@@ -589,6 +591,7 @@ final class MobileControlManager {
 
     /// Tear down only the v1 listener (the v2 server and Bonjour stay up), then withdraw v1 from the TXT.
     private func stopHostApi() {
+        hostApiGeneration += 1
         hostApiGateway?.closeAll()
         hostApiGateway = nil
         hostApiListener?.stop()
@@ -621,6 +624,8 @@ final class MobileControlManager {
     /// The account went away ("disconnect all" also deletes the v1 identity from the Keychain): revoke
     /// every device, v1 included, and restart v1 so it never keeps serving an identity that is gone.
     func accountCredentialsRevoked() {
+        // The wipe deleted the identity this listener was serving: the restart mints a new one, which is a reset.
+        if hostApiFingerprint != nil, HostApiV1Identity.isMissing() { recordHostApiAudit("identity_reset", detail: "account_wipe") }
         revokeAllDevices()
         restartHostApi()
     }
@@ -643,6 +648,7 @@ final class MobileControlManager {
         if case .tls = transport { isTLS = true }
         let allowlist = HostApiV1Origins.forTransport(configured, tls: isTLS)
         let audit = hostApiAudit
+        let generation = hostApiGeneration
         let listener = HostApiV1Listener(
             transport: transport, originAllowlist: allowlist,
             // Runs on the listener queue; the audit log is thread-safe and echoes event + peer to the log pane.
@@ -652,7 +658,7 @@ final class MobileControlManager {
             onClose: { s in continuation.yield(.closed(s)) },
             // The fingerprint is published only once the listener is actually serving (bind failures are async).
             onListening: { [weak self] port in Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.hostApiGeneration == generation else { return }
                 self.hostApiPort = port; self.hostApiFingerprint = fingerprint
                 self.advertiser?.setTXT(Self.hostApiTXT(port: port, fingerprint: fingerprint))
             } },

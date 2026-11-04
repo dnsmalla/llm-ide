@@ -50,6 +50,8 @@ final class HostApiV1Gateway {
     /// Per authed session: the capabilities its token was granted, and the effective list it was last sent.
     private var grants: [Int: Set<String>] = [:]
     private var lastSent: [Int: [String]] = [:]
+    /// Set by `closeAll()`: events still buffered in the stream after a stop must not pair, mint or rotate the PIN.
+    private var stopped = false
 
     init(dependencies: Dependencies) { self.deps = dependencies }
 
@@ -63,6 +65,7 @@ final class HostApiV1Gateway {
     // MARK: - Connections
 
     func opened(session: Int, peer: String) {
+        guard !stopped else { return close(session) }
         let key = PairingThrottle.peerKey(peer)
         let pending = sessions.values.filter { $0.state.deviceId == nil && PairingThrottle.peerKey($0.peer) == key }.count
         let why = sessions.count >= Self.maxSessions ? "This Mac already has the maximum number of Host API connections."
@@ -102,6 +105,7 @@ final class HostApiV1Gateway {
     }
 
     func closeAll() {
+        stopped = true
         for id in Array(sessions.keys) {
             close(id)
             closed(session: id)
@@ -147,7 +151,7 @@ final class HostApiV1Gateway {
     // MARK: - Inbound
 
     func receive(session: Int, data: Data) async {
-        guard let entry = sessions[session] else { return }
+        guard !stopped, let entry = sessions[session] else { return }
         // The frame bucket runs before any parsing, so a flood costs one regex per frame.
         if let wait = rate.frame(session: session, now: deps.now()) {
             return rateRefused(session, Self.cheapId(data), wait)

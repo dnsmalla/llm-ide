@@ -326,6 +326,30 @@ final class HostApiV1AuditRateTests {
         #expect(rows.first?.deviceId == "h1-one")
     }
 
+    // MARK: - Stopped gateway (Task 5 review minor 2)
+
+    @Test("events still buffered after closeAll never open a session, pair, mint a token or rotate the PIN")
+    func stoppedGatewayIgnoresEvents() async {
+        let g = gateway()
+        g.closeAll()
+        g.opened(session: 1, peer: "10.0.0.1")
+        await g.receive(session: 1, data: request("c-h", "host.hello", Self.hello))
+        await g.receive(session: 1, data: request("c-p", "host.auth.pair", #"{"pin":"\#(pin)"}"#))
+        #expect(store.all.isEmpty)
+        #expect(sent.isEmpty && closed == [1])
+        #expect(events("pair_ok").isEmpty)
+    }
+
+    @Test("identity isMissing follows the Keychain item: absent, created, reset")
+    func identityMissing() throws {
+        let backend = InMemoryKeychainAccess()
+        #expect(HostApiV1Identity.isMissing(backend: backend))
+        _ = try HostApiV1Identity.loadOrCreate(hostName: "Mac", backend: backend)
+        #expect(!HostApiV1Identity.isMissing(backend: backend))
+        HostApiV1Identity.reset(backend: backend)
+        #expect(HostApiV1Identity.isMissing(backend: backend))
+    }
+
     // MARK: - Listener
 
     @Test("the plaintext listener honours only loopback http:// origins, never https://")
