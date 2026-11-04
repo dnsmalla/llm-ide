@@ -3,7 +3,7 @@
 // in the OS keychain by the Rust host) and never leaves this process. Structure mirrors the Mac's
 // HostApiV1Certificate.swift; both are checked against schema/host-api/v1/fixtures/security/.
 import crypto, { X509Certificate } from 'node:crypto';
-import { encrypt, decrypt } from './vault.mjs';
+import { encrypt, decrypt, isVaultError } from './vault.mjs';
 
 export const VALIDITY_MS = 5 * 365 * 24 * 3600 * 1000;
 const VAULT_SCOPE = 'host-api-identity'; // HKDF salt: separates this key from every per-user vault key
@@ -48,19 +48,25 @@ export const fingerprintOfSpki = (spki) => `sha256:${crypto.createHash('sha256')
 
 export function resetHostIdentity(db) { db.prepare('DELETE FROM host_api_identity').run(); }
 
-export function loadOrCreateHostIdentity(db, { hostName, now = Date.now(), onEvent = () => {} }) {
+// Only a vault failure or a key/cert parse failure means the stored identity is unrecoverable; anything else is a bug.
+const isUnrecoverable = (e) => isVaultError(e) || /^ERR_(OSSL|CRYPTO)/.test(String(e?.code));
+
+export function loadOrCreateHostIdentity(db, { hostName, now = Date.now(), onEvent = () => {}, deps = {} }) {
+  const { decryptKey = decrypt } = deps; // test seam
+  let reset = false;
   const row = db.prepare('SELECT cert_der, key_enc, fingerprint, not_after FROM host_api_identity WHERE id = 1').get();
   if (row) {
     try {
-      const keyPem = crypto.createPrivateKey({ key: Buffer.from(decrypt(VAULT_SCOPE, row.key_enc), 'base64'), format: 'der', type: 'pkcs8' })
+      const keyPem = crypto.createPrivateKey({ key: Buffer.from(decryptKey(VAULT_SCOPE, row.key_enc), 'base64'), format: 'der', type: 'pkcs8' })
         .export({ type: 'pkcs8', format: 'pem' });
       return { certPem: new X509Certificate(row.cert_der).toString(), keyPem, fingerprint: row.fingerprint, notAfter: row.not_after, created: false };
-    } catch {
+    } catch (e) {
+      if (!isUnrecoverable(e)) throw e;
       // The vault key changed (or the row was tampered with): the old key is unrecoverable. Every pinned
       // client will now fail its pin check, which is the intended fail-closed result; their tokens were
-      // bound to the old identity, so they go too (all users: the identity is per install).
-      db.transaction(() => { resetHostIdentity(db); db.prepare('DELETE FROM host_api_devices').run(); })();
-      onEvent('identity_reset');
+      // bound to the old identity, so they go too (all users: the identity is per install). The wipe
+      // happens in the same transaction as the new INSERT below.
+      reset = true;
     }
   }
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -69,8 +75,12 @@ export function loadOrCreateHostIdentity(db, { hostName, now = Date.now(), onEve
   const der = buildSelfSignedCert({ privateKey, publicKey, commonName: `LLM-IDE ${String(hostName).slice(0, 64)}`, notBefore: now - 300_000, notAfter, serial });
   const fingerprint = fingerprintOfSpki(publicKey.export({ type: 'spki', format: 'der' }));
   const keyEnc = encrypt(VAULT_SCOPE, privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'));
-  db.prepare('INSERT INTO host_api_identity (id, cert_der, key_enc, fingerprint, created_at, not_after) VALUES (1, ?, ?, ?, ?, ?)')
-    .run(der, keyEnc, fingerprint, now, notAfter);
+  db.transaction(() => {
+    if (reset) { resetHostIdentity(db); db.prepare('DELETE FROM host_api_devices').run(); }
+    db.prepare('INSERT INTO host_api_identity (id, cert_der, key_enc, fingerprint, created_at, not_after) VALUES (1, ?, ?, ?, ?, ?)')
+      .run(der, keyEnc, fingerprint, now, notAfter);
+  })();
+  if (reset) onEvent('identity_reset');
   onEvent('identity_created');
   return { certPem: new X509Certificate(der).toString(), keyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }), fingerprint, notAfter, created: true };
 }

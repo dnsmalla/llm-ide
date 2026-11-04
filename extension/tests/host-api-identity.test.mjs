@@ -55,3 +55,14 @@ test('load-or-create persists one identity, encrypted; a vault change resets and
   assert.deepEqual(events, ['identity_created', 'identity_reset', 'identity_created']);
   assert.equal(dev.authenticateDeviceToken(token), null, 'devices wiped with the identity');
 });
+
+test('an unexpected error propagates and leaves identity and devices intact', () => {
+  const db = getDb();
+  id.resetHostIdentity(db);
+  id.loadOrCreateHostIdentity(db, { hostName: 'Desk' });
+  const u = users.registerUser(db, { email: `id2-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'h' }).id;
+  const { token } = dev.issueDeviceToken(u, 'phone');
+  assert.throws(() => id.loadOrCreateHostIdentity(db, { hostName: 'Desk', deps: { decryptKey: () => { throw new TypeError('bug'); } } }), TypeError);
+  assert.ok(dev.authenticateDeviceToken(token));
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM host_api_identity').get().n, 1);
+});
