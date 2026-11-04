@@ -328,9 +328,20 @@ export async function handleKB(req, res) {
       try { body = parseJSON(await readBody(req, 16 * 1024)); } catch { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return true; }
       const provider = body?.provider;
       if (provider !== 'github' && provider !== 'gitlab') { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider must be github or gitlab' } }); return true; }
+      // Self-hosted GitLab: an explicit HTTPS instance, with no credentials/query/hash. The pinned fetch still
+      // classifies every resolved address, so this cannot be turned into an SSRF probe.
+      let gitlabBase = 'https://gitlab.com';
+      if (provider === 'gitlab' && body?.baseUrl !== undefined) {
+        if (typeof body.baseUrl !== 'string' || body.baseUrl.length > 300) { sendJSON(res, 400, { error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an https URL.' } }); return true; }
+        try {
+          const u = new URL(body.baseUrl);
+          if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw new Error('bad base');
+          gitlabBase = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+        } catch { sendJSON(res, 400, { error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an https URL without credentials, query or fragment.' } }); return true; }
+      }
       const token = getSecret(kb.getDb(), userId, `${provider}.token`);
       if (!token) { sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_TOKEN_MISSING`, message: `Save a ${provider === 'github' ? 'GitHub' : 'GitLab'} token first.` } }); return true; }
-      const endpoint = provider === 'github' ? 'https://api.github.com/user' : 'https://gitlab.com/api/v4/user';
+      const endpoint = provider === 'github' ? 'https://api.github.com/user' : `${gitlabBase}/api/v4/user`;
       try {
         const r = await makePinnedFetch()(endpoint, {
           headers: provider === 'github'

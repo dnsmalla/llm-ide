@@ -5197,6 +5197,8 @@ export type PostKbReposCheckTokenRequest = {
   body: {
     /** Which vault token to verify. */
     provider: "github" | "gitlab";
+    /** Self-hosted GitLab HTTPS base URL; ignored for GitHub. */
+    baseUrl?: string;
   };
 };
 

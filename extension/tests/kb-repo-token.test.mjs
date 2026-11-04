@@ -76,3 +76,28 @@ test("an invalid token is a 401, a forbidden token a 403, and a missing token a 
   assert.equal(missing.statusCode, 400, missing.body);
   assert.equal(JSON.parse(missing.body).error.code, "GITHUB_TOKEN_MISSING");
 });
+
+
+test("a custom GitLab instance is used for the check; invalid bases are refused", async () => {
+  reset();
+  const u = users.registerUser(db.getDb(), { email: `tok3-${Date.now()}@example.com`, password: "CorrectHorseBattery", displayName: "tok3" });
+  setSecret(db.getDb(), u.id, "gitlab.token", "glpat_secret_value_12345");
+  let seen = null;
+  _setPinnedFetchForTests(async (url) => {
+    seen = url;
+    return new Response(JSON.stringify({ username: "selfhosted" }), { status: 200 });
+  });
+  try {
+    const out = res();
+    await handleKB(req(u.id, { provider: "gitlab", baseUrl: "https://gitlab.example.com/sub/" }), out);
+    assert.equal(out.statusCode, 200, out.body);
+    assert.equal(seen, "https://gitlab.example.com/sub/api/v4/user");
+    assert.deepEqual(JSON.parse(out.body), { ok: true, login: "selfhosted", name: "", scopes: [] });
+  } finally { _setPinnedFetchForTests(null); }
+  for (const baseUrl of ["http://gitlab.example.com", "https://user:pass@gitlab.example.com", "https://gitlab.example.com/?x=1", "not a url"]) {
+    const bad = res();
+    await handleKB(req(u.id, { provider: "gitlab", baseUrl }), bad);
+    assert.equal(bad.statusCode, 400, baseUrl);
+    assert.equal(JSON.parse(bad.body).error.code, "INVALID_BASE_URL", baseUrl);
+  }
+});
