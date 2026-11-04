@@ -324,6 +324,14 @@ final class ConnectionService: ObservableObject {
                 }
                 self.connectionStatus = .connected
             case .notV1:
+                // A v1-only phone must not try v2 with nothing to present: the Mac's auth_failed would wipe
+                // the v1 token over a transient outage (Mac restarting). Back off and retry v1 instead.
+                let hasV2Credential = !(self.connectionStore?.deviceToken ?? "").isEmpty || !pin.isEmpty
+                guard HostApiNegotiation.fallsBackToV2(hasV1Token: !token.isEmpty, hasV2Credential: hasV2Credential) else {
+                    return self.handleV1Refusal(HostApiRejection(
+                        replyTo: nil, code: "host_unreachable",
+                        message: "Couldn't reach the Mac. Retrying…", retryable: true))
+                }
                 self.connectV2(ip: ip, port: port, pin: pin, generation: generation)
             case .refused(let r):
                 self.handleV1Refusal(r)
@@ -331,8 +339,9 @@ final class ConnectionService: ObservableObject {
         }
     }
 
-    /// A v1 host refused: the same outcomes as v2's `auth_failed`. Retryable (throttle, busy) keeps the
-    /// pairing and backs off; anything else clears the credentials and returns to pairing.
+    /// A v1 host refused. Retryable (throttle, busy, unreachable) keeps the pairing and backs off. Only a
+    /// non-retryable `auth_failed` (the device is not paired) clears the credentials and returns to pairing;
+    /// any other refusal keeps the pairing and stops, showing the host's message.
     private func handleV1Refusal(_ r: HostApiRejection) {
         errorMessage = r.message.isEmpty ? "Your Mac refused the connection." : r.message
         if r.retryable {
@@ -342,6 +351,7 @@ final class ConnectionService: ObservableObject {
             scheduleReconnect()
             return
         }
+        guard HostApiNegotiation.clearsCredentials(r) else { return closeConnection() }
         directPIN = nil
         connectionStore?.clearCredentials()
         disconnect(clearDirect: true)

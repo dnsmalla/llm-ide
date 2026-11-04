@@ -127,3 +127,26 @@ struct HostApiClientLogicHardeningTests {
         #expect(HostApiEndpoint("ws://127.0.0.1:3016/host-api/v1")?.url.path == "/host-api/v1")
     }
 }
+
+@Suite("Host API client logic: pairing safety")
+struct HostApiPairingSafetyTests {
+    @Test("a v1-only phone never falls back to v2; a v2 credential or no v1 token does")
+    func fallback() {
+        #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: false))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: true))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: false))
+        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: true))
+    }
+
+    @Test("only a non-retryable auth_failed clears the credentials")
+    func clears() {
+        func r(_ code: String, _ retryable: Bool = false) -> HostApiRejection {
+            HostApiRejection(replyTo: nil, code: code, message: "m", retryable: retryable)
+        }
+        #expect(HostApiNegotiation.clearsCredentials(r("auth_failed")))
+        #expect(!HostApiNegotiation.clearsCredentials(r("auth_failed", true)))
+        for code in ["internal", "invalid_payload", "denied", "busy", "rate_limited", "host_unreachable", "capability_unavailable"] {
+            #expect(!HostApiNegotiation.clearsCredentials(r(code)))
+        }
+    }
+}

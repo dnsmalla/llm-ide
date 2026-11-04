@@ -71,6 +71,17 @@ public struct HostApiNegotiation: Sendable, Equatable {
     }
 }
 
+/// What a failed v1 attempt may do to the phone's pairing. A transient outage or a non-auth refusal must
+/// never unpair it (Task 5 review I1, I2).
+public extension HostApiNegotiation {
+    /// After `.connectV2`: take the v2 path only with a v2 credential to present, or no v1 token to lose.
+    /// Otherwise an empty v2 `Pairing` earns `auth_failed`, whose credential wipe deletes the v1 token.
+    static func fallsBackToV2(hasV1Token: Bool, hasV2Credential: Bool) -> Bool { !hasV1Token || hasV2Credential }
+
+    /// Only the host saying the device is not paired (non-retryable `auth_failed`) clears the credentials.
+    static func clearsCredentials(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }
+}
+
 /// Where to reach a Host API v1 listener. Spec "Security": plaintext only on loopback.
 public struct HostApiEndpoint: Sendable, Equatable {
     public let url: URL
