@@ -559,6 +559,7 @@ final class MobileControlManager {
         activityBridge?.removePushObservers()
         registeredBridges.forEach { $0.bridge.removePushObservers() }
         onMobileClientDisconnected()
+        hostApiGateway?.closeAll()
         hostApiGateway = nil
         server?.stop()
         server = nil
@@ -626,19 +627,27 @@ final class MobileControlManager {
         // A v2 phone picks its own command ids; it must never be able to name a Host API v1 one
         // (it could cancel or answer a v1 client's command, or have v1 frames routed to it).
         if Self.refusesV1CommandId(data) {
-            struct TypeOnly: Decodable { let type: String? }
-            let label = MobileLogPolicy.typeLabel((try? decoder.decode(TypeOnly.self, from: data))?.type ?? "")
-            append(.stderr, "Refused '\(label)': reserved command id")
-            reply(CommandError(commandId: label, message: "Invalid command id", code: "invalid_command_id"))
+            // Fixed id, never the type label: a label could itself be a v1 id and be routed to v1 by `emit`.
+            append(.stderr, "Refused a frame naming a reserved command id (\(MobileLogPolicy.frameLabel(data)))")
+            reply(CommandError(commandId: "invalid_command_id", message: "Invalid command id", code: "invalid_command_id"))
             return
         }
         dispatchInbound(data)
     }
 
-    /// True when a v2 frame names a Host API v1 command id (pure; pinned by HostApiV1GatewayTests).
+    /// True when a v2 frame names a Host API v1 command id in its `commandId` or its `type` (pure; pinned by tests).
     nonisolated static func refusesV1CommandId(_ frame: Data) -> Bool {
-        guard let cid = commandId(in: frame) else { return false }
-        return HostApiV1CommandIds.isV1(cid)
+        struct Names: Decodable { let type: String?; let commandId: String? }
+        guard let n = try? JSONDecoder().decode(Names.self, from: frame) else { return false }
+        return [n.type, n.commandId].contains { $0.map(HostApiV1CommandIds.isV1) ?? false }
+    }
+
+    enum OutboundRoute: Equatable { case v1, v2, drop }
+
+    /// Where an outbound frame goes: a v1 command id never reaches the v2 server.
+    nonisolated static func outboundRoute(commandId: String?, hasGateway: Bool) -> OutboundRoute {
+        guard let commandId, HostApiV1CommandIds.isV1(commandId) else { return .v2 }
+        return hasGateway ? .v1 : .drop
     }
 
     /// The v2 dispatch itself. The Host API v1 gateway forwards here, past the v1-id refusal above.
@@ -1353,12 +1362,13 @@ final class MobileControlManager {
     /// The one path for Mac -> client frames. A frame for a Host API v1 command (`h1.` command id) goes
     /// to the v1 gateway, which translates it; everything else goes to the v2 phone exactly as before.
     func emit(_ message: some Encodable) async {
-        if let gateway = hostApiGateway, let data = try? JSONEncoder().encode(message),
-           let cid = Self.commandId(in: data), HostApiV1CommandIds.isV1(cid) {
-            gateway.deliver(v2Frame: data, internalCommandId: cid)
-            return
+        guard let data = try? JSONEncoder().encode(message) else { await server?.send(message); return }
+        let cid = Self.commandId(in: data)
+        switch Self.outboundRoute(commandId: cid, hasGateway: hostApiGateway != nil) {
+        case .v1: hostApiGateway?.deliver(v2Frame: data, internalCommandId: cid ?? "")
+        case .drop: append(.info, "Dropped a Host API v1 frame with no gateway (\(MobileLogPolicy.frameLabel(data)))")
+        case .v2: await server?.send(message)
         }
-        await server?.send(message)
     }
 
     nonisolated static func commandId(in frame: Data) -> String? {

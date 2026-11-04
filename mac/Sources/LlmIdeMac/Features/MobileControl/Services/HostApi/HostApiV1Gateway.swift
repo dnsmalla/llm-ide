@@ -82,6 +82,13 @@ final class HostApiV1Gateway {
         }
     }
 
+    func closeAll() {
+        for id in Array(sessions.keys) {
+            close(id)
+            closed(session: id)
+        }
+    }
+
     func owns(_ internalCommandId: String) -> Bool { owned[internalCommandId] != nil }
 
     // MARK: - Outbound (from MobileControlManager.emit)
@@ -141,7 +148,9 @@ final class HostApiV1Gateway {
                 return fail(session, id, "auth_failed", "Wrong PIN.")
             }
             throttle.registerSuccess(host: entry.peer)
-            guard case .awaitingAuth(let name) = entry.state.phase else { return }
+            guard case .awaitingAuth(let name) = entry.state.phase else {
+                return fail(session, id, "denied", "This connection is not waiting to pair.")
+            }
             let deviceId = MobilePairedDeviceStore.hostApiDevicePrefix + UUID().uuidString
             let token = deps.issueToken(deviceId, name)
             deps.pinConsumed()
@@ -161,8 +170,8 @@ final class HostApiV1Gateway {
                   deps.authenticate(p.token) == mine else { return fail(session, id, "denied", "Only this connection's own token can be revoked here.") }
             deps.revoke(mine)
             respond(session, id, .hostAuthRevoke, HostApiHostAuthRevokeResult(revoked: true))
-            close(session)
-            closed(session: session)
+            // Every live session of this device ends, the asking one included (its response is already sent).
+            disconnect(deviceId: mine)
         case .hostPing:
             respond(session, id, .hostPing, HostApiHostPingResult())
         case .hostSnapshot:

@@ -137,7 +137,31 @@ final class HostApiV1GatewayTests {
         await g.receive(session: 1, data: request("c-r", "host.auth.revoke", #"{"token":"tok-h1-other-0123456789"}"#))
         #expect(lastError == "denied")
         await g.receive(session: 1, data: request("c-r2", "host.auth.revoke", #"{"token":"\#(token)"}"#))
-        #expect((last["result"] as! [String: Any])["revoked"] as? Bool == true && tokens.isEmpty && closed == [1])
+        let response = sent.first { $0.1["replyTo"] as? String == "c-r2" }?.1
+        #expect((response?["result"] as? [String: Any])?["revoked"] as? Bool == true && tokens.isEmpty && closed == [1])
+    }
+
+    @Test("self-revoke also closes another live session of the same device")
+    func revokeClosesSiblings() async {
+        let g = gateway()
+        await paired(g)
+        let token = tokens.first!.key
+        g.opened(session: 2, peer: "127.0.0.1")
+        await g.receive(session: 2, data: request("c-h", "host.hello", #"{"clientName":"t","clientVersion":"1","platform":"web","apiVersions":[1]}"#))
+        await g.receive(session: 2, data: request("c-t", "host.auth.token", #"{"token":"\#(token)"}"#))
+        await g.receive(session: 1, data: request("c-r", "host.auth.revoke", #"{"token":"\#(token)"}"#))
+        #expect(Set(closed) == [1, 2])
+    }
+
+    @Test("closeAll cancels every owned command and closes every session")
+    func closeAll() async {
+        let g = gateway()
+        await paired(g)
+        await paired(g, session: 2)
+        await g.receive(session: 1, data: request("c-1", "chat.send", #"{"text":"a"}"#))
+        await g.receive(session: 2, data: request("c-2", "chat.send", #"{"text":"b"}"#))
+        g.closeAll()
+        #expect(Set(cancelled) == ["h1.1.c-1", "h1.2.c-2"] && Set(closed) == [1, 2])
     }
 
     @Test("closing a session cancels its commands and drops later frames")
@@ -157,5 +181,11 @@ final class HostApiV1GatewayTests {
         #expect(MobileControlManager.refusesV1CommandId(Data(#"{"type":"llmide_cancel","commandId":"h1.1.c-9"}"#.utf8)))
         #expect(!MobileControlManager.refusesV1CommandId(Data(#"{"type":"llmide_cancel","commandId":"6F1C2E7A-0000-4000-8000-000000000000"}"#.utf8)))
         #expect(!MobileControlManager.refusesV1CommandId(Data(#"{"type":"llmide_chat_history"}"#.utf8)))
+        #expect(MobileControlManager.refusesV1CommandId(Data(#"{"type":"h1.1.c-9","commandId":"x"}"#.utf8)))
+        #expect(MobileControlManager.refusesV1CommandId(Data(#"{"type":"h1.1.c-9"}"#.utf8)))
+        #expect(MobileControlManager.outboundRoute(commandId: "h1.1.c-9", hasGateway: true) == .v1)
+        #expect(MobileControlManager.outboundRoute(commandId: "h1.1.c-9", hasGateway: false) == .drop)
+        #expect(MobileControlManager.outboundRoute(commandId: "abc", hasGateway: false) == .v2)
+        #expect(MobileControlManager.outboundRoute(commandId: nil, hasGateway: true) == .v2)
     }
 }
