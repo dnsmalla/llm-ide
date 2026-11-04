@@ -1,0 +1,154 @@
+// Settings → Mobile Control: pairing a Host API v1 client (iPhone or web) with THIS desktop's core
+// (routes POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id; contract schema/http/host-api.schema.json).
+// The routes need the bus host proof, which the shell's core client attaches; a core started without
+// LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
+// the card then renders nothing. The PIN lives in component state only: never persisted, logged or sent anywhere.
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ApiError, call, type CoreClient } from "../core-api.ts";
+import { useEnv } from "../context.tsx";
+import { describeError } from "../errors.ts";
+import { Button, ErrorText } from "../ui.tsx";
+
+export interface HostPin { pin: string; expiresAt: number; port: number }
+export interface HostDevice { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const HIDDEN = new Set(["HOST_API_DISABLED", "HOST_PROOF_REQUIRED"]);
+
+export function decodePin(v: unknown): HostPin {
+  if (isRecord(v) && typeof v.pin === "string" && /^[0-9]{6}$/.test(v.pin) && Number.isInteger(v.expiresAt)
+    && Number.isInteger(v.port) && (v.port as number) > 0 && (v.port as number) < 65536) {
+    return { pin: v.pin, expiresAt: v.expiresAt as number, port: v.port as number };
+  }
+  throw new ApiError(0, "BAD_RESPONSE");
+}
+
+export function decodeDevices(v: unknown): HostDevice[] {
+  if (!isRecord(v) || !Array.isArray(v.devices)) throw new ApiError(0, "BAD_RESPONSE");
+  return v.devices.filter((d): d is HostDevice => isRecord(d) && typeof d.deviceId === "string" && typeof d.name === "string"
+    && typeof d.pairedAt === "number" && typeof d.lastSeenAt === "number");
+}
+
+/** The paired devices, or null when this core does not serve the Host API to this UI (the card hides). */
+export async function loadDevices(client: CoreClient): Promise<HostDevice[] | null> {
+  try {
+    return decodeDevices(await call(client, "GET", "/host-api/devices"));
+  } catch (e) {
+    if (e instanceof ApiError && HIDDEN.has(e.code)) return null;
+    throw e;
+  }
+}
+
+export const mintPin = async (client: CoreClient): Promise<HostPin> => decodePin(await call(client, "POST", "/host-api/pin"));
+
+export async function revokeDevice(client: CoreClient, deviceId: string): Promise<boolean> {
+  const b = await call(client, "DELETE", `/host-api/devices/${encodeURIComponent(deviceId)}`);
+  return isRecord(b) && b.revoked === true;
+}
+
+const remaining = (ms: number): string => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+function RevokeConfirm({ device, busy, onCancel, onRevoke }: { device: HostDevice; busy: boolean; onCancel: () => void; onRevoke: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div className="st-dialog" role="alertdialog" aria-label={`Revoke ${device.name}`}>
+      <strong>Revoke {device.name}?</strong>
+      <p className="st-hint">It is disconnected now and must pair again with a new PIN.</p>
+      <div className="st-row">
+        <button ref={cancel} type="button" className="st-btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <Button tone="danger" disabled={busy} onClick={onRevoke}>Revoke</Button>
+      </div>
+    </div>
+  );
+}
+
+export function HostApiPairingView({ devices, pin, now, busy, error, confirming, onShowPin, onAskRevoke, onCancelRevoke, onRevoke }: {
+  devices: HostDevice[];
+  pin: HostPin | null;
+  now: number;
+  busy: boolean;
+  error: string | null;
+  confirming: string | null;
+  onShowPin: () => void;
+  onAskRevoke: (deviceId: string) => void;
+  onCancelRevoke: () => void;
+  onRevoke: (deviceId: string) => void;
+}): ReactNode {
+  const live = pin && pin.expiresAt > now ? pin : null;
+  return (
+    <div className="st-stack" role="group" aria-label="Host API pairing">
+      <span className="st-label">Pair a phone or web client with this desktop</span>
+      <p className="st-hint">Development only: the listener is plaintext on 127.0.0.1 and serves this computer alone.</p>
+      {live ? (
+        <div className="st-stack" role="status">
+          <p className="st-pre" aria-label="Pairing PIN"><strong>{live.pin}</strong></p>
+          <p className="st-hint">ws://127.0.0.1:{live.port}/host-api/v1 · expires in {remaining(live.expiresAt - now)} · one use</p>
+        </div>
+      ) : null}
+      <div className="st-row">
+        <Button tone="primary" disabled={busy} onClick={onShowPin}>{live ? "New pairing PIN" : "Show pairing PIN"}</Button>
+      </div>
+      <span className="st-label">Paired devices</span>
+      {devices.length === 0 ? <p className="st-hint">No devices are paired.</p> : (
+        <ul className="st-stack" aria-label="Paired devices">
+          {devices.map((d) => (
+            <li key={d.deviceId} className="st-stack">
+              <div className="st-row">
+                <span className="st-grow">{d.name}</span>
+                <span className="st-hint">last seen {new Date(d.lastSeenAt).toLocaleString()}</span>
+                <Button tone="danger" label={`Revoke ${d.name}`} disabled={busy || confirming !== null} onClick={() => onAskRevoke(d.deviceId)}>Revoke…</Button>
+              </div>
+              {confirming === d.deviceId ? <RevokeConfirm device={d} busy={busy} onCancel={onCancelRevoke} onRevoke={() => onRevoke(d.deviceId)} /> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <ErrorText text={error} />
+    </div>
+  );
+}
+
+export default function HostApiPairing(): ReactNode {
+  const { client } = useEnv();
+  const [devices, setDevices] = useState<HostDevice[] | null>(null);
+  const [pin, setPin] = useState<HostPin | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    // A failed first load keeps the card hidden; a later failure keeps the last list and shows why.
+    try { setDevices(await loadDevices(client)); } catch (e) { setError(describeError(e)); }
+  }, [client]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!pin) return;
+    const t = window.setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= pin.expiresAt) setPin(null);
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [pin]);
+
+  if (devices === null) return null;
+  const run = async (f: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try { await f(); } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <HostApiPairingView
+      devices={devices} pin={pin} now={now} busy={busy} error={error} confirming={confirming}
+      onShowPin={() => void run(async () => { const p = await mintPin(client); setNow(Date.now()); setPin(p); })}
+      onAskRevoke={setConfirming}
+      onCancelRevoke={() => setConfirming(null)}
+      onRevoke={(id) => void run(async () => { await revokeDevice(client, id); setConfirming(null); await refresh(); })}
+    />
+  );
+}

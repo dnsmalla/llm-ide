@@ -4,8 +4,18 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMacBridge } from "../../bridge/BridgeGate.tsx";
 import { macBridge } from "../../bridge/mac-bridge.ts";
 import { Button, ErrorText } from "../ui.tsx";
+import HostApiPairing from "./HostApiPairing.tsx";
 
 export default function MobileBridge(): ReactNode {
+  return (
+    <div className="st-stack">
+      <MacBridge />
+      <HostApiPairing />
+    </div>
+  );
+}
+
+function MacBridge(): ReactNode {
   const snap = useMacBridge();
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);

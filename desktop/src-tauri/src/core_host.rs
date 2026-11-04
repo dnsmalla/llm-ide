@@ -1137,7 +1137,16 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     for (k, v) in crate::prefs::core_env_pairs(&p, host_features.as_deref()) {
         cmd.env(k, v);
     }
+    // Host API v1 loopback dev listener: debug builds only, explicit `.env` (never a widened core_env ALLOWED).
+    if host_api_dev_env(cfg!(debug_assertions), std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref()) {
+        cmd.env("LLMIDE_HOST_API_DEV", "1");
+    }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
+}
+
+/// True when the spawned core gets `LLMIDE_HOST_API_DEV=1`: a debug build whose own env has exactly `1`.
+fn host_api_dev_env(debug: bool, value: Option<&str>) -> bool {
+    debug && value == Some("1")
 }
 
 /// `node` with the cleared + allowlisted environment, cwd `extension/`, and the data
@@ -1237,6 +1246,15 @@ mod tests {
     use super::*;
     use std::io::Write as _;
     use std::net::TcpListener;
+
+    #[test]
+    fn host_api_dev_flag_is_debug_only_and_exact() {
+        assert!(host_api_dev_env(true, Some("1")));
+        assert!(!host_api_dev_env(false, Some("1")), "a release build never passes it");
+        assert!(!host_api_dev_env(true, None));
+        assert!(!host_api_dev_env(true, Some("true")));
+        assert!(!host_api_dev_env(true, Some("")));
+    }
 
     /// One-shot-per-connection fake server; `reply` builds the raw HTTP response.
     fn fake(reply: impl Fn() -> String + Send + 'static) -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
