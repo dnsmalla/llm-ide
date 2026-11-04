@@ -6,8 +6,8 @@ public struct HostApiInboundRequest: Sendable, Equatable {
     public let payload: Data
 }
 
-/// Why an inbound frame was refused. `message` is fixed host text: it names the failing schema path,
-/// never a value from the frame, so it can carry no token or file content.
+/// Why an inbound frame was refused. `message` names the failing schema path, which can include a
+/// property name taken from the frame (clamped to 80 UTF-16 units), never a value from the frame.
 public struct HostApiRejection: Error, Sendable, Equatable {
     public let replyTo: String?
     public let code: String
@@ -35,7 +35,7 @@ public enum HostApiFrame {
         let replyTo = (obj["id"] as? String).flatMap { HostApiSchemaValidator.matches($0, idPattern) ? $0 : nil }
         if let first = HostApiSchemaValidator.validate(defs["Request"] ?? [:], obj, defs: defs).first {
             return .failure(.init(replyTo: replyTo, code: "invalid_payload",
-                                  message: "The frame does not match the Host API envelope (\(first.path))."))
+                                  message: "The frame does not match the Host API envelope (\(clamp(first.path, maxUTF16: 80)))."))
         }
         guard let name = obj["command"] as? String, let command = HostApi.commands[name] else {
             return .failure(.init(replyTo: replyTo, code: "unknown_command", message: "This host does not serve that command."))
@@ -43,7 +43,7 @@ public enum HostApiFrame {
         let payload = obj["payload"] ?? [String: Any]()
         if let first = HostApiSchemaValidator.validate(HostApiSchemas.request(for: command), payload, defs: defs).first {
             return .failure(.init(replyTo: replyTo, code: "invalid_payload",
-                                  message: "The payload does not match \(name) (\(first.path))."))
+                                  message: "The payload does not match \(name) (\(clamp(first.path, maxUTF16: 80)))."))
         }
         guard let id = replyTo, let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
             return .failure(.init(replyTo: nil, code: "invalid_payload", message: "The frame does not match the Host API envelope (.id)."))

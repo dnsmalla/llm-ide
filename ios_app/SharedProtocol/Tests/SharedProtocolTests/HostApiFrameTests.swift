@@ -28,6 +28,15 @@ struct HostApiFrameTests {
         #expect(HostApiFrame.parseRequest(badPayload).failure == HostApiRejection(replyTo: "c-3", code: "invalid_payload", message: "The payload does not match chat.send (.text)."))
     }
 
+    @Test("a frame-controlled key name is clamped, so a rejection message stays within 500 UTF-16 units")
+    func boundedRejectionPath() {
+        let longKey = String(repeating: "k", count: 2_000)
+        let f = frame(#"{"apiVersion":1,"id":"c-4","type":"request","command":"host.ping","payload":{},"ts":1,"\#(longKey)":true}"#)
+        guard let r = HostApiFrame.parseRequest(f).failure else { Issue.record("expected a rejection"); return }
+        #expect(r.code == "invalid_payload")
+        #expect(r.message.utf16.count <= 500)
+    }
+
     @Test("a response is a valid Response frame and a bad result is refused, not sent")
     func response() throws {
         let data = try HostApiFrame.response(replyTo: "c-1", command: .hostPing, result: HostApiHostPingResult(), rev: 3)
