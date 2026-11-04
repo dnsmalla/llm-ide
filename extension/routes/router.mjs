@@ -321,6 +321,41 @@ export async function handleKB(req, res) {
       return true;
     }
 
+    // Repositories settings: verify the provider token that is already in the vault. The browser never supplies it
+    // and the response never echoes it. Fixed hosts, pinned fetch, 15 s ceiling.
+    if (req.method === 'POST' && url.split('?')[0] === '/kb/repos/check-token') {
+      let body;
+      try { body = parseJSON(await readBody(req, 16 * 1024)); } catch { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return true; }
+      const provider = body?.provider;
+      if (provider !== 'github' && provider !== 'gitlab') { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider must be github or gitlab' } }); return true; }
+      const token = getSecret(kb.getDb(), userId, `${provider}.token`);
+      if (!token) { sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_TOKEN_MISSING`, message: `Save a ${provider === 'github' ? 'GitHub' : 'GitLab'} token first.` } }); return true; }
+      const endpoint = provider === 'github' ? 'https://api.github.com/user' : 'https://gitlab.com/api/v4/user';
+      try {
+        const r = await makePinnedFetch()(endpoint, {
+          headers: provider === 'github'
+            ? { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}` }
+            : { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token },
+          signal: AbortSignal.timeout(15_000),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const message = typeof data?.message === 'string' ? data.message.slice(0, 300) : typeof data?.error === 'string' ? data.error.slice(0, 300) : `The ${provider === 'github' ? 'GitHub' : 'GitLab'} token was refused (${r.status}).`;
+          sendJSON(res, r.status === 401 || r.status === 403 ? 403 : 502, { error: { code: 'TOKEN_REFUSED', message } });
+          return true;
+        }
+        const login = typeof data?.login === 'string' ? data.login : typeof data?.username === 'string' ? data.username : '';
+        if (!login) { sendJSON(res, 502, { error: { code: 'TOKEN_RESPONSE_INVALID', message: 'The provider did not return a user.' } }); return true; }
+        const name = typeof data?.name === 'string' ? data.name : '';
+        const scopes = provider === 'github' && typeof r.headers.get('x-oauth-scopes') === 'string' ? String(r.headers.get('x-oauth-scopes')).split(',').map((x) => x.trim()).filter(Boolean) : [];
+        sendJSON(res, 200, { ok: true, login, name, scopes });
+        return true;
+      } catch {
+        sendJSON(res, 502, { error: { code: 'PROVIDER_UNREACHABLE', message: `The ${provider === 'github' ? 'GitHub' : 'GitLab'} API could not be reached.` } });
+        return true;
+      }
+    }
+
     // Issue writes: GitHub and GitLab comments, close and create. The token comes from the vault (the desktop never
     // sends it); each route is bounded and uses the provider's fixed host.
     //   POST /kb/issues/comment { provider, repo, number, body }

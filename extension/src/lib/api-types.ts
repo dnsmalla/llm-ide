@@ -5192,6 +5192,29 @@ export type PostKbIngestResponse400 = CommonError;
 
 export type PostKbIngestResponse401 = CommonError;
 
+/** Request parts for `POST /kb/repos/check-token` (schema/http/kb-sources.schema.json). */
+export type PostKbReposCheckTokenRequest = {
+  body: {
+    /** Which vault token to verify. */
+    provider: "github" | "gitlab";
+  };
+};
+
+export type PostKbReposCheckTokenResponse200 = {
+  ok: true;
+  login: string;
+  name: string;
+  scopes: string[];
+};
+
+export type PostKbReposCheckTokenResponse400 = CommonError;
+
+export type PostKbReposCheckTokenResponse401 = CommonError;
+
+export type PostKbReposCheckTokenResponse403 = CommonError;
+
+export type PostKbReposCheckTokenResponse502 = CommonError;
+
 /** Request parts for `POST /kb/connect-git` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectGitRequest = {
   body: {
@@ -9296,6 +9319,16 @@ export interface ApiEndpoints {
       200: PostKbIngestResponse200;
       400: PostKbIngestResponse400;
       401: PostKbIngestResponse401;
+    };
+  };
+  "POST /kb/repos/check-token": {
+    request: PostKbReposCheckTokenRequest;
+    responses: {
+      200: PostKbReposCheckTokenResponse200;
+      400: PostKbReposCheckTokenResponse400;
+      401: PostKbReposCheckTokenResponse401;
+      403: PostKbReposCheckTokenResponse403;
+      502: PostKbReposCheckTokenResponse502;
     };
   };
   "POST /kb/connect-git": {

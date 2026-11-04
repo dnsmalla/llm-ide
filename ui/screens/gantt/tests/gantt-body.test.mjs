@@ -163,3 +163,12 @@ test("head and rows are border-box, so HEAD_H (52) and ROW_H (44) are the real h
     assert.ok(rule.split(",").map((x) => x.trim()).includes(c), `${c} is border-box`);
   }
 });
+
+test("bars advertise drag only when the chart has a shift handler", () => {
+  const { rows, range } = fixture(3, 30);
+  const plain = renderToStaticMarkup(h(GanttChart, props(rows, range)));
+  assert.match(plain, /Edit schedule/);
+  assert.doesNotMatch(plain, /Drag to move/);
+  const draggable = renderToStaticMarkup(h(GanttChart, props(rows, range, { onShift: () => {} })));
+  assert.match(draggable, /Drag to move; Alt\+Left\/Right for one day/);
+});

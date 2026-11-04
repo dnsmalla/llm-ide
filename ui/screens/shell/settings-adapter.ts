@@ -73,6 +73,8 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         setRoutePrefs: async (p) => { await writePrefs({ router: p.router, cap: p.router ? p.cap : false }); },
         getExtraPrefs: async () => { const p = (await readPrefs()).stored; return { compress: p.compress, learn: p.learn, terminal: p.terminal }; },
         setExtraPrefs: async (p) => { await writePrefs(p); },
+        getLoopDefaults: async () => (await readPrefs()).stored.loopDefaults,
+        setLoopDefaults: async (loopDefaults) => { const p = (await writePrefs({ loopDefaults })).stored; return p.loopDefaults; },
         async pickFolder(title) {
           const choice = decodePickedChoice(await d.invoke<unknown>("pick_folder", { title }));
           if (!choice) return null;

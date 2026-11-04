@@ -5,6 +5,7 @@
 // desktop host" placeholder instead of pretending.
 
 import type { CoreClient } from "./core-api.ts";
+import type { LoopDefaults } from "../shell/host-prefs.ts";
 
 export type ThemeChoice = "dark" | "light" | "midnight";
 
@@ -126,6 +127,9 @@ export interface SettingsHost {
   /** Further host prefs read when the app/backend next starts: prompt compression, learned limits, the Terminal feature. */
   getExtraPrefs?(): Promise<{ compress: boolean; learn: boolean; terminal: boolean }>;
   setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean }>): Promise<void>;
+  /** App-wide defaults for loops added to a newly detected project. */
+  getLoopDefaults?(): Promise<LoopDefaults>;
+  setLoopDefaults?(defaults: LoopDefaults): Promise<LoopDefaults>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
   /** The optional-component store (Mermaid): status, and install/remove behind the host's native dialogs. */

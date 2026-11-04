@@ -91,11 +91,9 @@ export const REPOS_TEXT = {
   empty: "No repositories are approved yet.",
   removeConfirm: "Remove this folder from the allow-list? Its files and history are untouched.",
   saveOnly:
-    "The Mac's Save & verify checks the token against the provider and then stores it; this desktop build stores it for the core's workflows but does not verify it yet.",
+    "Stored write-only; Check token verifies the saved token against the provider without storing or showing it again.",
   cloneGap:
     "Clone repository copies it into the active project's code/ folder and registers that folder with the core. A private repository needs a token: the one saved in this session is used, or paste one for this clone; it is not stored.",
-  partial:
-    "The provider tabs, write-only tokens, automation switches, saved repositories and Clone into the project's code/ folder are real. Token verification, pull/re-sync and the Mac's resolve step are not in the desktop yet; clone destinations default to the code/ folder from Settings → Paths.",
 } as const;
 
 /** A plain sentence for a failed catalog or repo call; never the server's raw text. */

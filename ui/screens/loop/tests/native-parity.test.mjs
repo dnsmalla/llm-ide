@@ -64,3 +64,30 @@ test("a re-added default loop never becomes a second primary", () => {
   assert.equal(r.store.loops.filter((l) => l.isPrimary).length, 1);
   assert.equal(r.store.loops.find((l) => l.defaultKey === "regression").isPrimary, false);
 });
+
+
+test("new default loops inherit the host Loop defaults; existing loops are untouched", () => {
+  const full = t.initialProjectStore("npm test");
+  const without = { ...full, loops: full.loops.filter((l) => l.defaultKey !== "refactor") };
+  const kept = without.loops.find((l) => l.defaultKey === "regression");
+  const defaults = { maxIterations: 4, consecutiveFailureStop: 1, wallClockMinutes: 15, maxRepairsPerStage: 0, pauseTimeoutMinutes: 0, protectedPathPolicy: "warn", writeSummaryNote: true };
+  const r = t.ensureDefaultLoops(without, "npm test", defaults);
+  const added = r.store.loops.find((l) => l.defaultKey === "refactor");
+  assert.equal(added.config.maxIterations, 4);
+  assert.equal(added.config.wallClockBudgetSeconds, 900);
+  assert.equal(added.config.pauseTimeoutSeconds, 0);
+  assert.equal(added.config.protectedPathPolicy, "warn");
+  assert.equal(added.config.writeSummaryNote, true);
+  assert.equal(r.store.loops.find((l) => l.defaultKey === "regression"), kept);
+});
+
+test("a first-created project store applies the host defaults to every default loop", () => {
+  const defaults = { maxIterations: 4, consecutiveFailureStop: 1, wallClockMinutes: 15, maxRepairsPerStage: 0, pauseTimeoutMinutes: 0, protectedPathPolicy: "warn", writeSummaryNote: true };
+  const store = t.initialProjectStore("npm test", defaults);
+  assert.ok(store.loops.length > 1);
+  for (const loop of store.loops) {
+    assert.equal(loop.config.maxIterations, 4);
+    assert.equal(loop.config.wallClockBudgetSeconds, 900);
+    assert.equal(loop.config.protectedPathPolicy, "warn");
+  }
+});

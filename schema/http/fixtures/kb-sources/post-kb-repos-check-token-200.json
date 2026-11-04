@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/repos/check-token",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "github"
+    }
+  },
+  "response": {
+    "ok": true,
+    "login": "octocat",
+    "name": "The Octocat",
+    "scopes": [
+      "repo"
+    ]
+  }
+}

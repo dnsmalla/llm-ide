@@ -24,6 +24,7 @@ import { checkWrites } from "./protected.ts";
 import { guardedAgentCall, type AgentWrites } from "./agent-call.ts";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
+import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -87,6 +88,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const fs = useMemo(() => createHostFs(), []);
   const [load, setLoad] = useState<LoopLoad | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [loopDefaults, setLoopDefaults] = useState<LoopDefaults | undefined>(undefined);
   const [selectedLoopId, setSelectedLoopId] = useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -133,13 +135,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!projectRoot) return undefined;
     void loadLoops(fs).then(async (r) => {
       if (!live) return;
+      // Read the host defaults for BOTH a normal store and the first-creation ("missing") path.
+      const prefs = await invokeHost<unknown>("get_prefs").catch(() => null);
+      if (!live) return;
+      const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
+      setLoopDefaults(defaults);
       // Mac parity: a missing default loop is re-added in memory and only written when the user saves.
       let next = r;
       let added: string[] = [];
       if (r.kind === "ok") {
         const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
         if (!live) return;
-        const ensured = ensureDefaultLoops(r.store, env.command);
+        const ensured = ensureDefaultLoops(r.store, env.command, defaults);
         added = ensured.added;
         if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
       }
@@ -790,7 +797,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setSaving(true);
       try {
         const env = await detectTestCommand(fs);
-        const store = initialProjectStore(env.command);
+        const store = initialProjectStore(env.command, loopDefaults);
         const r = await saveLoops(fs, store, null);
         setLoad({ kind: "ok", store, hash: r.hash });
         setSelectedLoopId(store.loops[0].id);

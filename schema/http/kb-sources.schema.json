@@ -1099,6 +1099,33 @@
         }
       }
     },
+    "POST /kb/repos/check-token": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": ["provider"],
+          "properties": {
+            "provider": { "type": "string", "enum": ["github", "gitlab"], "description": "Which vault token to verify." }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["ok", "login", "name", "scopes"],
+          "properties": {
+            "ok": { "const": true },
+            "login": { "type": "string" },
+            "name": { "type": "string" },
+            "scopes": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "502": { "$ref": "_common#/$defs/Error" }
+      }
+    },
     "POST /kb/connect-git": {
       "request": {
         "body": {

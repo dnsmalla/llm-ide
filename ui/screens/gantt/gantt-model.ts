@@ -149,6 +149,35 @@ export function estimateSpanDays(est: number, anchor: "start" | "due"): number {
   return Math.max(1, anchor === "start" ? Math.floor(est) : Math.ceil(est));
 }
 
+/** A pointer drag's day delta: a 3 px threshold stops a click from becoming a tiny move. */
+export function dragShift(startX: number, clientX: number, dayWidth: number): { moved: boolean; days: number } {
+  const delta = clientX - startX;
+  return { moved: Math.abs(delta) >= 3, days: Math.round(delta / Math.max(1, dayWidth)) };
+}
+
+/** Shift a row's actual schedule dates by whole days, preserving a missing side; fall back to the drawn bar for an
+ *  estimate-only row (where moving the bar must materialise dates). Null for a zero/no-span shift. */
+export function shiftSchedule(row: Pick<GanttRow, "schedule" | "start" | "end">, days: number): { startDate: string | null; dueDate: string | null } | null {
+  if (!Number.isInteger(days) || days === 0) return null;
+  const start = row.schedule?.startDate ? dayNumber(row.schedule.startDate) : null;
+  const due = row.schedule?.dueDate ? dayNumber(row.schedule.dueDate) : null;
+  if (start !== null || due !== null) {
+    return { startDate: start === null ? null : dayString(start + days), dueDate: due === null ? null : dayString(due + days) };
+  }
+  if (row.start === null || row.end === null) return null;
+  return { startDate: dayString(row.start + days), dueDate: dayString(row.end + days + 1) };
+}
+
+/** The PUT body for a drag/keyboard shift; null when the row cannot be scheduled or the shift is zero. */
+export function shiftScheduleBody(row: GanttRow, days: number): (ScheduleKey & { startDate: string | null; dueDate: string | null; estimateDays: number | null; dependsOn: number[] }) | null {
+  const shifted = shiftSchedule(row, days);
+  if (shifted === null || row.issue.number === null) return null;
+  return {
+    provider: row.issue.provider, repo: row.issue.repo, issueNumber: row.issue.number,
+    ...shifted, estimateDays: row.schedule?.estimateDays ?? null, dependsOn: row.dependsOn,
+  };
+}
+
 /**
  * A bar's drawn days, as inclusive day numbers, by the Mac's exact rule (GanttView.swift barGeometry): the bar
  * starts on startOfDay(startDate) and is max(1, days from startOfDay(startDate) to startOfDay(endDate)) long, so
