@@ -66,20 +66,19 @@ test("the listener accepts the allowlisted web origin and a native client, and r
   assert.equal(await upgradeStatus(port, "https://evil.example"), 403, "a listed non-loopback origin is dropped by the core");
 });
 
-test("pair, run a chat turn, read history, reconnect with the token, forget the host", { skip }, async (t) => {
+test("pair, run a chat turn, read history, reconnect with the token, forget the host", { skip }, async () => {
   const { pin, port } = await mintPin();
   const url = `ws://127.0.0.1:${port}/host-api/v1`;
   const tokens = memoryTokens();
-  const conn = client(url, tokens);
+  const open = [];
+  const conn = client(url, tokens); open.push(conn);
+  try {
   assert.equal(await conn.connect(pin), "ready");
   assert.equal(conn.hello.hostKind, "desktop");
   assert.deepEqual(conn.hello.apiVersions, [1]);
   assert.ok(conn.capabilities.has("chat"));
   const token = tokens.get();
   assert.ok(token && token.length >= 16);
-
-  await assert.rejects(client(url, memoryTokens()).connect(pin), (e) => e.code === "auth_failed" && e.retryable === false, "the PIN is one-use");
-  await new Promise((r) => setTimeout(r, 1200)); // the wrong-PIN attempt costs this peer a 1 s throttle delay
 
   const chat = createChatController(conn);
   await chat.resync();
@@ -90,14 +89,11 @@ test("pair, run a chat turn, read history, reconnect with the token, forget the 
   assert.match(reply.text, /^(ok )+/, "the bench-fake canned reply");
 
   await chat.resync();
-  // The desktop gateway does not yet save the phone chat, so the snapshot is empty.
-  await t.test("history returns the turn", { todo: "gateway persists the phone chat (in progress)" }, () => {
-    assert.deepEqual(chat.getState().messages.slice(-2).map((m) => [m.role, m.status]), [["user", "done"], ["assistant", "done"]]);
-  });
+  assert.deepEqual(chat.getState().messages.slice(-2).map((m) => [m.role, m.status]), [["user", "done"], ["assistant", "done"]]);
   chat.dispose();
   conn.close();
 
-  const again = client(url, tokens);
+  const again = client(url, tokens); open.push(again);
   assert.equal(await again.connect(), "ready", "the stored token re-authenticates");
   assert.equal(await again.forget(), true);
   assert.equal(tokens.get(), null);
@@ -105,4 +101,17 @@ test("pair, run a chat turn, read history, reconnect with the token, forget the 
   const stale = client(url, { get: () => token, set() {} });
   assert.equal(await stale.connect(), "needsPin", "a revoked token is refused");
   stale.close();
+  } finally { open.forEach((c) => c.close()); }
+});
+
+// Last: a wrong PIN throttles this loopback peer for a moment, which must not touch the other tests.
+test("a PIN is one-use", { skip }, async () => {
+  await new Promise((r) => setTimeout(r, 1200)); // the revoked-token check above left a 1 s loopback throttle (product issue, security plan)
+  const { pin, port } = await mintPin();
+  const url = `ws://127.0.0.1:${port}/host-api/v1`;
+  const first = client(url, memoryTokens());
+  try {
+    assert.equal(await first.connect(pin), "ready");
+    await assert.rejects(client(url, memoryTokens()).connect(pin), (e) => e.code === "auth_failed" && e.retryable === false);
+  } finally { first.close(); }
 });
