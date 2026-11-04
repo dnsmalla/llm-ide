@@ -16,7 +16,7 @@ const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const dev = await import('../kb/host-api-devices.mjs');
 const pins = await import('../routes/host-api/pin.mjs');
-const { PairingThrottle } = await import('../routes/host-api/throttle.mjs');
+const { PairingThrottle, peerKey } = await import('../routes/host-api/throttle.mjs');
 
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `h1-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'h' }).id;
@@ -48,7 +48,18 @@ test('a user keeps at most 20 devices, the least recently seen evicted', () => {
   const first = dev.issueDeviceToken(u, 'd0', 1);
   for (let i = 1; i <= 20; i++) dev.issueDeviceToken(u, `d${i}`, 1 + i);
   assert.equal(dev.listDevices(u).length, 20);
-  assert.equal(dev.authenticateDeviceToken(first.token), null);
+  assert.ok(!dev.listDevices(u).some((d) => d.deviceId === first.deviceId), 'oldest evicted');
+  const newest = dev.issueDeviceToken(u, 'd21', 100);
+  assert.equal(dev.listDevices(u).length, 20);
+  assert.ok(dev.authenticateDeviceToken(newest.token, 101));
+});
+
+test('a new device is never evicted, even with an older clock', () => {
+  const u = user();
+  for (let i = 0; i < 20; i++) dev.issueDeviceToken(u, `d${i}`, 1000 + i);
+  const fresh = dev.issueDeviceToken(u, 'late', 5);
+  assert.equal(dev.listDevices(u).length, 20);
+  assert.deepEqual(dev.authenticateDeviceToken(fresh.token, 6), { userId: u, deviceId: fresh.deviceId });
 });
 
 test('the quick chat id is per user', () => {
@@ -89,4 +100,14 @@ test('the throttle locks a peer out after repeated failures and has a server-wid
   for (let i = 0; i < 40; i++) s.failure(`peer-${i}`, 0);
   assert.equal(s.decision('fresh', 1).kind, 'serverThrottled');
   assert.equal(s.decision('paired', 1).kind, 'allow', 'a paired peer is exempt');
+});
+
+test('peers key by IPv6 /64, IPv4-mapped as IPv4, IPv4 unchanged', () => {
+  assert.equal(peerKey('fe80::1'), peerKey('FE80:0000::2'));
+  assert.equal(peerKey('::ffff:127.0.0.1'), '127.0.0.1');
+  assert.equal(peerKey('10.0.0.5'), '10.0.0.5');
+  assert.notEqual(peerKey('fe80::1'), peerKey('fe81::1'));
+  const t = new PairingThrottle();
+  for (let i = 0; i < 8; i++) t.failure(`2001:db8:1:2::${i + 1}`, 0);
+  assert.equal(t.decision('2001:db8:1:2:aaaa::9', 1000).kind, 'lockedOut');
 });
