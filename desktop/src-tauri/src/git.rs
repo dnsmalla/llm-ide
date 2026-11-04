@@ -582,7 +582,7 @@ mod tests {
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
             .args(args)
             .current_dir(root)
-            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE).env("GIT_CONFIG_NOSYSTEM", "1")
             .output()
             .unwrap();
         assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
@@ -666,7 +666,11 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         assert_eq!(status(&root).unwrap().entries[0].index, 'A');
         g(&root, &["commit", "-q", "-m", "init"]);
         fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
-        fs::write(root.join(":(glob)*"), "literal pathspec\n").unwrap();
+        // `:` and `*` are not allowed in Windows file names: the literal-pathspec check runs on unix only.
+        let glob_name = !cfg!(windows);
+        if glob_name {
+            fs::write(root.join(":(glob)*"), "literal pathspec\n").unwrap();
+        }
         let st = status(&root).unwrap();
         assert_eq!(st.branch.as_deref(), Some("main"));
         assert!(st.entries.iter().any(|e| e.path == "a.txt" && e.worktree == 'M'));
@@ -680,10 +684,12 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         stage(&root, &["a.txt".into()], false).unwrap();
         assert!(status(&root).unwrap().entries.iter().any(|e| e.path == "a.txt" && e.index == '.' && e.worktree == 'M'));
         // Literal pathspec: staging the weird name does not glob.
-        stage(&root, &[":(glob)*".into()], true).unwrap();
-        let st = status(&root).unwrap();
-        assert!(st.entries.iter().any(|e| e.path == ":(glob)*" && e.index == 'A'));
-        assert!(st.entries.iter().any(|e| e.path == "a.txt" && e.index == '.'));
+        if glob_name {
+            stage(&root, &[":(glob)*".into()], true).unwrap();
+            let st = status(&root).unwrap();
+            assert!(st.entries.iter().any(|e| e.path == ":(glob)*" && e.index == 'A'));
+            assert!(st.entries.iter().any(|e| e.path == "a.txt" && e.index == '.'));
+        }
     }
 
     #[test]
@@ -835,7 +841,7 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         g(&main, &["commit", "-q", "-m", "i"]);
         let wt = scratch("gd-wt");
         let _ = fs::remove_dir_all(&wt);
-        g(&main, &["worktree", "add", "-q", "-b", "w", wt.to_str().unwrap()]);
+        g(&main, &["worktree", "add", "-q", "-b", "w", crate::fsutil::plain_path(&wt).to_str().unwrap()]);
         status(&wt).unwrap();
         // The backing config is scanned too.
         let mut cur = fs::read(main.join(".git/config")).unwrap();
@@ -859,7 +865,7 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         fs::write(outer.join("o"), "o").unwrap();
         g(&outer, &["add", "."]);
         g(&outer, &["commit", "-q", "-m", "o"]);
-        let o = Command::new("git").args(["-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.to_str().unwrap(), "sub"]).current_dir(&outer).env("GIT_CONFIG_GLOBAL", NULL_DEVICE).output().unwrap();
+        let o = Command::new("git").args(["-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.to_str().unwrap(), "sub"]).current_dir(&outer).env("GIT_CONFIG_GLOBAL", NULL_DEVICE).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         // The submodule's own config tries to run a program on any status/diff inside it.
         let marker = scratch("sm-marker").join("pwned");

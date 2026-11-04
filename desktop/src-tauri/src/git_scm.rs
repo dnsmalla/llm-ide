@@ -1782,7 +1782,7 @@ mod tests {
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", "-c", "protocol.file.allow=always"])
             .args(args)
             .current_dir(root)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1")
             .output()
             .unwrap()
             .status
@@ -1850,7 +1850,7 @@ mod tests {
         }
         for name in corpus {
             if valid_branch_name(&name).is_ok() {
-                let ok = Command::new("git").args(["check-ref-format", "--branch", &name]).env("GIT_CONFIG_GLOBAL", "/dev/null").output().map(|o| o.status.success()).unwrap_or(false);
+                let ok = Command::new("git").args(["check-ref-format", "--branch", &name]).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").output().map(|o| o.status.success()).unwrap_or(false);
                 assert!(ok, "we accept {name:?} but git refuses it");
             }
         }
@@ -2081,7 +2081,7 @@ mod tests {
         let h = home("h2", true);
         let res = commit(&r, "feat: add a\n\nbody line\n", &h).unwrap();
         assert!(res.hash.len() >= 7);
-        let out = Command::new("git").args(["log", "-1", "--format=%an <%ae>|%cn|%B"]).current_dir(&r).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        let out = Command::new("git").args(["log", "-1", "--format=%an <%ae>|%cn|%B"]).current_dir(&r).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout).to_string();
         assert!(text.starts_with("Ada Lovelace <ada@example.com>|Ada Lovelace|feat: add a\n\nbody line"), "{text}");
         assert!(!fs::read_to_string(r.join(".git/config")).unwrap().contains("[user]"));
@@ -2321,7 +2321,7 @@ mod tests {
         fs::write(outer.join("o.txt"), "o\n").unwrap();
         g(&outer, &["add", "."]);
         g(&outer, &["commit", "-q", "-m", "o"]);
-        assert!(try_g(&outer, &["submodule", "add", "-q", inner.to_str().unwrap(), "sub"]));
+        assert!(try_g(&outer, &["submodule", "add", "-q", crate::fsutil::plain_path(&inner).to_str().unwrap(), "sub"]));
         let st = status(&outer).unwrap();
         let sub = st.entries.iter().find(|e| e.path == "sub").expect("sub entry");
         assert!(sub.submodule);
@@ -2335,14 +2335,15 @@ mod tests {
         g(&outer, &["commit", "-q", "-m", "add sub"]);
         let wt = outer.parent().unwrap().join(format!("{}-wt", outer.file_name().unwrap().to_string_lossy()));
         let _ = fs::remove_dir_all(&wt);
-        g(&outer, &["worktree", "add", "-q", "-b", "wtb", wt.to_str().unwrap()]);
+        g(&outer, &["worktree", "add", "-q", "-b", "wtb", crate::fsutil::plain_path(&wt).to_str().unwrap()]);
         let wst = status(&wt).unwrap();
         assert_eq!(wst.branch.as_deref(), Some("wtb"));
         assert_eq!(branches(&wt).unwrap().branches.len(), 2);
         // Shallow clone
         let shallow = scratch("shallow");
-        let url = format!("file://{}", inner.display());
-        assert!(Command::new("git").args(["clone", "-q", "--depth", "1", &url, "."]).current_dir(&shallow).env("GIT_CONFIG_GLOBAL", "/dev/null").status().unwrap().success());
+        let inner_url = crate::fsutil::plain_path(&inner).to_string_lossy().replace('\\', "/");
+        let url = if inner_url.starts_with('/') { format!("file://{inner_url}") } else { format!("file:///{inner_url}") };
+        assert!(Command::new("git").args(["clone", "-q", "--depth", "1", &url, "."]).current_dir(&shallow).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").status().unwrap().success());
         assert!(status(&shallow).unwrap().entries.is_empty());
         assert_eq!(log(&shallow, 0, 10).unwrap().entries.len(), 1);
         // Bare repository: refused cleanly, not a crash.
@@ -2436,7 +2437,7 @@ mod tag_tests {
         c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"])
             .args(args)
             .current_dir(root)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null");
+            .env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
         if let Some(d) = date {
             c.env("GIT_COMMITTER_DATE", d).env("GIT_AUTHOR_DATE", d);
         }
@@ -2598,7 +2599,7 @@ mod mutate_tests {
         c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"])
             .args(args)
             .current_dir(root)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null");
+            .env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
         if let Some(d) = date {
             c.env("GIT_COMMITTER_DATE", d).env("GIT_AUTHOR_DATE", d);
         }
@@ -2611,7 +2612,7 @@ mod mutate_tests {
     }
 
     fn out(root: &Path, args: &[&str]) -> String {
-        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
         String::from_utf8(o.stdout).unwrap().trim().to_string()
     }
 
@@ -3069,7 +3070,7 @@ mod mutate_tests {
         let r = repo("bd-wt");
         let wt = scratch("bd-wt-linked");
         fs::remove_dir_all(&wt).unwrap();
-        g(&r, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
+        g(&r, &["worktree", "add", "-q", "-b", "other", crate::fsutil::plain_path(&wt).to_str().unwrap()]);
         let asked = Cell::new(false);
         let ask = |_: &str| {
             asked.set(true);
@@ -3158,7 +3159,7 @@ mod merge_amend_discard_tests {
         c.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
             .args(args)
             .current_dir(root)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_COMMITTER_DATE", "2021-01-01T00:00:00Z")
             .env("GIT_AUTHOR_DATE", "2021-01-01T00:00:00Z");
         if let Some((n, e)) = author {
@@ -3173,7 +3174,7 @@ mod merge_amend_discard_tests {
     }
 
     fn out(root: &Path, args: &[&str]) -> String {
-        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        let o = Command::new("git").args(args).current_dir(root).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
         String::from_utf8(o.stdout).unwrap().trim().to_string()
     }
 
@@ -3792,7 +3793,11 @@ mod merge_amend_discard_tests {
         g(&r, &["mv", "old.txt", "new.txt"]);
         let odd = "sp ace \u{e9}.txt";
         fs::write(r.join(odd), "odd\n").unwrap();
-        fs::write(r.join("new\nline.txt"), "kept\n").unwrap();
+        // Windows forbids control characters in names, so only the nested repository is skipped there.
+        let ctl = !cfg!(windows);
+        if ctl {
+            fs::write(r.join("new\nline.txt"), "kept\n").unwrap();
+        }
         fs::write(r.join("a.txt"), "changed\n").unwrap();
         let trash = scratch("rv-classes-trash");
         let seen = RefCell::new(String::new());
@@ -3810,9 +3815,9 @@ mod merge_amend_discard_tests {
         assert_eq!(fs::read_to_string(r.join("d/secret.env")).unwrap(), "secret\n", "an ignored file inside an untracked folder stays");
         assert_eq!(fs::read_to_string(r.join("forced.env")).unwrap(), "forced\n", "a force-added ignored file stays once unstaged");
         assert!(r.join("d/deep/n/.git").exists() && r.join("d/deep/n/inner.txt").exists(), "the nested repository stays");
-        assert!(r.join("new\nline.txt").exists(), "a control-character name is left, never deleted");
+        assert!(!ctl || r.join("new\nline.txt").exists(), "a control-character name is left, never deleted");
         assert_eq!(res.trashed, 4, "{res:?}");
-        assert_eq!(res.skipped, 2, "the nested repository and the control-character name: {res:?}");
+        assert_eq!(res.skipped, 1 + u32::from(ctl), "the nested repository and the control-character name: {res:?}");
         assert!(seen.borrow().contains("4 untracked item(s)"), "the dialog counted what was then done: {}", seen.borrow());
     }
 
@@ -3926,7 +3931,7 @@ mod merge_amend_discard_tests {
         let r = repo_with_feat("rv-wt");
         let wt = r.parent().unwrap().join(format!("llmide-mad-{}-rv-wt-linked", std::process::id()));
         let _ = fs::remove_dir_all(&wt);
-        g(&r, &["worktree", "add", "-q", wt.to_str().unwrap(), "feat"]);
+        g(&r, &["worktree", "add", "-q", crate::fsutil::plain_path(&wt).to_str().unwrap(), "feat"]);
         let tip = out(&r, &["rev-parse", "refs/heads/feat"]);
         merge(&r, "feat", MergeMode::NoFastForward, &ada(), &yes).unwrap();
         assert_eq!(out(&r, &["rev-parse", "refs/heads/feat"]), tip);
