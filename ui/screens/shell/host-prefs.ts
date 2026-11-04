@@ -3,6 +3,23 @@
 // malformed answer reads as "unavailable" instead of showing invented values.
 
 export type LtaModeValue = "off" | "shadow" | "on";
+export type ProtectedPathPolicy = "revert" | "stop" | "warn" | "off";
+
+/** App-wide defaults for loops added to a newly detected project (see desktop prefs::LoopDefaults). */
+export interface LoopDefaults {
+  maxIterations: number;
+  consecutiveFailureStop: number;
+  wallClockMinutes: number;
+  maxRepairsPerStage: number;
+  pauseTimeoutMinutes: number;
+  protectedPathPolicy: ProtectedPathPolicy;
+  writeSummaryNote: boolean;
+}
+
+export const DEFAULT_LOOP_DEFAULTS: LoopDefaults = Object.freeze({
+  maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0,
+  maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false,
+});
 
 export interface HostPrefs {
   ltaMode: LtaModeValue;
@@ -23,6 +40,8 @@ export interface HostPrefs {
   backendPort: number;
   /** Start the core when the app launches. */
   backendAutoStart: boolean;
+  /** Defaults applied to loops the Loop screen re-adds to a project. */
+  loopDefaults: LoopDefaults;
 }
 
 export interface HostPrefsView {
@@ -36,6 +55,22 @@ export interface HostPrefsView {
 export type HostPrefsPatch = Partial<HostPrefs>;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Defensive decode of the Loop defaults; absent/bad values fall back to the shipped defaults. */
+export function decodeLoopDefaults(raw: unknown): LoopDefaults {
+  if (!isObj(raw)) return { ...DEFAULT_LOOP_DEFAULTS };
+  const n = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
+  const policy = raw.protectedPathPolicy;
+  return {
+    maxIterations: n(raw.maxIterations, DEFAULT_LOOP_DEFAULTS.maxIterations, 100) || DEFAULT_LOOP_DEFAULTS.maxIterations,
+    consecutiveFailureStop: n(raw.consecutiveFailureStop, DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop, 20) || DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop,
+    wallClockMinutes: n(raw.wallClockMinutes, DEFAULT_LOOP_DEFAULTS.wallClockMinutes, 1440),
+    maxRepairsPerStage: n(raw.maxRepairsPerStage, DEFAULT_LOOP_DEFAULTS.maxRepairsPerStage, 20),
+    pauseTimeoutMinutes: n(raw.pauseTimeoutMinutes, DEFAULT_LOOP_DEFAULTS.pauseTimeoutMinutes, 240),
+    protectedPathPolicy: policy === "stop" || policy === "warn" || policy === "off" ? policy : "revert",
+    writeSummaryNote: raw.writeSummaryNote === true,
+  };
+}
 
 export function decodePrefs(raw: unknown): HostPrefs | null {
   if (!isObj(raw)) return null;
@@ -52,7 +87,8 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const backendDir = typeof raw.backendDir === "string" ? raw.backendDir.slice(0, 4096) : "";
   const backendPort = typeof raw.backendPort === "number" && Number.isInteger(raw.backendPort) && raw.backendPort >= 0 && raw.backendPort <= 65535 ? raw.backendPort : 0;
   const backendAutoStart = raw.backendAutoStart !== false;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart };
+  const loopDefaults = decodeLoopDefaults(raw.loopDefaults);
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {

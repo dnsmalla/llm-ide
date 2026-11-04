@@ -24,6 +24,7 @@ import { checkWrites } from "./protected.ts";
 import { guardedAgentCall, type AgentWrites } from "./agent-call.ts";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
+import { decodePrefsView } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import "./native-loop.css";
@@ -138,8 +139,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       let added: string[] = [];
       if (r.kind === "ok") {
         const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
+        const prefs = await invokeHost<unknown>("get_prefs").catch(() => null);
         if (!live) return;
-        const ensured = ensureDefaultLoops(r.store, env.command);
+        const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
+        const ensured = ensureDefaultLoops(r.store, env.command, defaults);
         added = ensured.added;
         if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
       }

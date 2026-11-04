@@ -21,7 +21,8 @@ before(async () => {
   m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 });
 
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true };
+const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -59,7 +60,7 @@ test("the prefs keys match the Rust schema", () => {
 
 test("without a host nothing host-backed is offered (the placeholders stay honest)", () => {
   const { host } = env({ host: false });
-  for (const k of ["getLtaMode", "setLtaMode", "launchLtaMode", "getRoutePrefs", "setRoutePrefs", "getExtraPrefs", "pickFolder", "confirmTrust"]) assert.equal(host[k], undefined, k);
+  for (const k of ["getLtaMode", "setLtaMode", "launchLtaMode", "getRoutePrefs", "setRoutePrefs", "getExtraPrefs", "getLoopDefaults", "setLoopDefaults", "pickFolder", "confirmTrust"]) assert.equal(host[k], undefined, k);
 });
 
 test("archiving mode and router/cap round-trip through get_prefs/set_prefs with a typed patch", async () => {
@@ -118,4 +119,15 @@ test("theme: the host's copy only fills in when the webview lost its own", () =>
   assert.equal(m.seedThemeFromHost("light", mem()), true);
   assert.equal(m.getTheme(), "light");
   delete globalThis.document;
+});
+
+test("Loop defaults decode defensively and round-trip through set_prefs", async () => {
+  assert.deepEqual(m.decodeLoopDefaults(undefined), LOOP);
+  assert.deepEqual(m.decodeLoopDefaults({ ...LOOP, protectedPathPolicy: "nonsense", maxIterations: 0 }), { ...LOOP, maxIterations: 10 });
+  const { host, calls, state } = env();
+  assert.deepEqual(await host.getLoopDefaults(), LOOP);
+  const next = { ...LOOP, maxIterations: 20, protectedPathPolicy: "warn", writeSummaryNote: true };
+  assert.deepEqual(await host.setLoopDefaults(next), next);
+  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { loopDefaults: next } }]);
+  assert.deepEqual(state.stored.loopDefaults, next);
 });

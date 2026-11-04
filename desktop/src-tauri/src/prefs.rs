@@ -56,6 +56,37 @@ pub enum Theme {
     Midnight,
 }
 
+/// App-wide Loop defaults for loops added to a project the first time. Stored with the other host prefs; read by
+/// the Loop screen when it re-adds a missing default loop.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct LoopDefaults {
+    pub max_iterations: u32,
+    pub consecutive_failure_stop: u32,
+    /// 0 = no wall-clock limit.
+    pub wall_clock_minutes: u32,
+    pub max_repairs_per_stage: u32,
+    /// 0 = no pause timeout.
+    pub pause_timeout_minutes: u32,
+    /// revert | stop | warn | off
+    pub protected_path_policy: String,
+    pub write_summary_note: bool,
+}
+
+impl Default for LoopDefaults {
+    fn default() -> Self {
+        Self {
+            max_iterations: 10,
+            consecutive_failure_stop: 2,
+            wall_clock_minutes: 0,
+            max_repairs_per_stage: 3,
+            pause_timeout_minutes: 30,
+            protected_path_policy: "revert".to_string(),
+            write_summary_note: false,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct Prefs {
@@ -79,6 +110,8 @@ pub struct Prefs {
     pub backend_port: u16,
     /// Start the core when the app starts (false leaves it stopped until Start).
     pub backend_auto_start: bool,
+    /// App-wide defaults for loops added to a newly detected project.
+    pub loop_defaults: LoopDefaults,
 }
 
 impl Default for Prefs {
@@ -86,6 +119,7 @@ impl Default for Prefs {
         Self {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
+            loop_defaults: LoopDefaults::default(),
         }
     }
 }
@@ -107,6 +141,7 @@ pub struct PrefsPatch {
     pub backend_dir: Option<String>,
     pub backend_port: Option<u16>,
     pub backend_auto_start: Option<bool>,
+    pub loop_defaults: Option<LoopDefaults>,
 }
 
 /// An explicit feature list: only keys the server knows, in the canonical order, with `agent_chat` always on.
@@ -137,6 +172,12 @@ impl Prefs {
         if let Some(v) = &p.backend_dir { n.backend_dir = v.trim().to_string(); }
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
+        if let Some(v) = &p.loop_defaults {
+            n.loop_defaults = v.clone();
+            n.loop_defaults.protected_path_policy = match v.protected_path_policy.as_str() {
+                "stop" => "stop", "warn" => "warn", "off" => "off", _ => "revert",
+            }.to_string();
+        }
         if let Some(v) = &p.features {
             if v.is_empty() {
                 // Empty stays "inherit every feature"; the Terminal flag is left as it was.
@@ -174,6 +215,7 @@ pub fn parse(text: &str) -> Prefs {
         features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
         backend_source: Some(p.backend_source), backend_node: Some(p.backend_node.clone()), backend_dir: Some(p.backend_dir.clone()),
         backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
+        loop_defaults: Some(p.loop_defaults.clone()),
     })).unwrap_or_default()
 }
 
@@ -281,7 +323,7 @@ pub struct PrefsView {
 fn view(stored: Prefs, persisted: bool) -> PrefsView {
     let launch = launch();
     // The theme applies at once; only the others need a restart.
-    let restart_needed = Prefs { theme: launch.theme, ..stored.clone() } != launch;
+    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), ..stored.clone() } != launch;
     PrefsView { stored, launch, restart_needed, persisted }
 }
 
@@ -510,5 +552,25 @@ mod tests {
         assert!(!on(Some("agent_chat,terminal"), false), "the pref wins over the env");
         assert!(on(Some("agent_chat,terminal"), true));
         assert!(terminal_enabled(None), "default launch: on");
+    }
+}
+
+#[cfg(test)]
+mod loop_default_tests {
+    use super::*;
+
+    #[test]
+    fn loop_defaults_round_trip_and_clamp_the_policy() {
+        let d = LoopDefaults {
+            max_iterations: 4, consecutive_failure_stop: 1, wall_clock_minutes: 15,
+            max_repairs_per_stage: 0, pause_timeout_minutes: 0,
+            protected_path_policy: "bogus".to_string(), write_summary_note: true,
+        };
+        let p = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(d), ..Default::default() });
+        assert_eq!(p.loop_defaults.max_iterations, 4);
+        assert_eq!(p.loop_defaults.protected_path_policy, "revert");
+        assert!(p.loop_defaults.write_summary_note);
+        let back = parse(&serde_json::to_string(&p).unwrap());
+        assert_eq!(back.loop_defaults, p.loop_defaults);
     }
 }
