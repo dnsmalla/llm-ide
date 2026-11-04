@@ -341,7 +341,10 @@ export async function handleKB(req, res) {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
           const message = typeof data?.message === 'string' ? data.message.slice(0, 300) : typeof data?.error === 'string' ? data.error.slice(0, 300) : `The ${provider === 'github' ? 'GitHub' : 'GitLab'} token was refused (${r.status}).`;
-          sendJSON(res, r.status === 401 || r.status === 403 ? 403 : 502, { error: { code: 'TOKEN_REFUSED', message } });
+          // Keep the provider's 401 ("this token is invalid/expired") distinct from 403 ("valid but not allowed").
+          if (r.status === 401) { sendJSON(res, 401, { error: { code: 'TOKEN_UNAUTHORIZED', message } }); return true; }
+          if (r.status === 403) { sendJSON(res, 403, { error: { code: 'TOKEN_FORBIDDEN', message } }); return true; }
+          sendJSON(res, 502, { error: { code: 'TOKEN_REFUSED', message } });
           return true;
         }
         const login = typeof data?.login === 'string' ? data.login : typeof data?.username === 'string' ? data.username : '';

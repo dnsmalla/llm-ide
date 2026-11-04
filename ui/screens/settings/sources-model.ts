@@ -114,6 +114,12 @@ export function sourcesError(e: unknown): string {
     case "UNREACHABLE":
     case "NETWORK":
       return "The core is not reachable right now.";
+    case "TOKEN_UNAUTHORIZED":
+      return "The saved token is invalid or has expired. Paste a new token and save it.";
+    case "TOKEN_FORBIDDEN":
+      return "The saved token is valid but lacks permission to read the account. Add the required scope and try again.";
+    case "TOKEN_REFUSED":
+      return "The provider refused that token.";
     default:
       return typeof e === "string" && e.trim() ? e.slice(0, 200) : e instanceof Error && e.message ? e.message : "The action failed.";
   }

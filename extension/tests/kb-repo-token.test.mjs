@@ -53,16 +53,23 @@ test("GitHub token check returns the login and scopes, never the token", async (
   } finally { _setPinnedFetchForTests(null); }
 });
 
-test("a refused token is a 403 and a missing token is a 400", async () => {
+test("an invalid token is a 401, a forbidden token a 403, and a missing token a 400", async () => {
   reset();
   const u = users.registerUser(db.getDb(), { email: `tok2-${Date.now()}@example.com`, password: "CorrectHorseBattery", displayName: "tok2" });
   setSecret(db.getDb(), u.id, "gitlab.token", "glpat_secret_value_12345");
   _setPinnedFetchForTests(async () => new Response(JSON.stringify({ message: "401 Unauthorized" }), { status: 401 }));
   try {
-    const refused = res();
-    await handleKB(req(u.id, { provider: "gitlab" }), refused);
-    assert.equal(refused.statusCode, 403, refused.body);
-    assert.equal(JSON.parse(refused.body).error.code, "TOKEN_REFUSED");
+    const unauthorized = res();
+    await handleKB(req(u.id, { provider: "gitlab" }), unauthorized);
+    assert.equal(unauthorized.statusCode, 401, unauthorized.body);
+    assert.equal(JSON.parse(unauthorized.body).error.code, "TOKEN_UNAUTHORIZED");
+  } finally { _setPinnedFetchForTests(null); }
+  _setPinnedFetchForTests(async () => new Response(JSON.stringify({ message: "403 Forbidden" }), { status: 403 }));
+  try {
+    const forbidden = res();
+    await handleKB(req(u.id, { provider: "gitlab" }), forbidden);
+    assert.equal(forbidden.statusCode, 403, forbidden.body);
+    assert.equal(JSON.parse(forbidden.body).error.code, "TOKEN_FORBIDDEN");
   } finally { _setPinnedFetchForTests(null); }
   const missing = res();
   await handleKB(req(u.id, { provider: "github" }), missing);
