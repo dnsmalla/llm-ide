@@ -63,11 +63,22 @@ final class LlmIdeChatStore: ObservableObject {
     /// Ask llm-ide's agent a question through `connection.host`. The reply streams back as
     /// `HostEvent`s (`handle`), landing in `llmIdeMessages`.
     ///
-    /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary.
-    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) {
+    /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary. Returns false only when
+    /// a v1 host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
+    @discardableResult
+    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) -> Bool {
         guard connection?.connectionStatus == .connected else {
             connection?.errorMessage = "Not connected to your Mac — wait for Live status, then try again."
-            return
+            return true
+        }
+        var request = HostApiChatSendRequest(attachments: files.isEmpty ? nil : files.map { .init(name: $0.name, text: $0.text) },
+                                             text: text)
+        // v1 validates against the schema; v2 sends exactly what it always did.
+        if connection?.host.apiVersion == 1 {
+            switch HostApiChatSendPolicy.request(text: text, files: files) {
+            case .send(let r): request = r
+            case .refuse(let message): connection?.errorMessage = message; return false
+            }
         }
         // The Mac's own session store is the transcript: the phone sends only the new text (and files),
         // never a history window or images (the Mac ignored the first and refused the second).
@@ -75,7 +86,6 @@ final class LlmIdeChatStore: ObservableObject {
         isStreaming = true
         currentCommandId = id
         startStreamTimeout(for: id, idleSeconds: idleWindow(for: id))
-        let request = HostApiChatSendRequest(attachments: files.isEmpty ? nil : files.map { .init(name: $0.name, text: $0.text) }, text: text)
         Task { [weak self] in
             do {
                 _ = try await self?.connection?.host.send(.chatSend, request, id: id, as: HostApiChatSendResult.self)
@@ -83,6 +93,7 @@ final class LlmIdeChatStore: ObservableObject {
                 self?.chatSendFailed(id, error)
             }
         }
+        return true
     }
 
     /// Before the transport move, an encode failure set this message and disconnected; a host refusal

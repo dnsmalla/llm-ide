@@ -374,7 +374,8 @@ struct LlmIdeControlView: View {
         let files = pendingFiles
         guard !text.isEmpty || !images.isEmpty || !files.isEmpty else { return }
         if speech.isListening { speech.finish() }
-        llmIdeStore.sendLlmideChat(text, files: files)
+        // Refused by the host's limits (a too-large file): keep the composer so the user can remove it.
+        guard llmIdeStore.sendLlmideChat(text, files: files) else { return }
         inputText = ""
         pendingImages = []
         pendingFiles = []

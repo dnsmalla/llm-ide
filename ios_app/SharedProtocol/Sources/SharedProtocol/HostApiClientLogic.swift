@@ -112,3 +112,29 @@ public enum HostApiChatTurn {
     /// `chat.error`, so the turn ends locally. v2 keeps waiting for the Mac's answering error frame.
     public static func endsAfterCancel(apiVersion: Int, cancelled: Bool?) -> Bool { apiVersion == 1 && cancelled != true }
 }
+
+/// Makes a v1 `chat.send` from what the phone's composer allows, so the user never meets a schema error
+/// (final review I2). The limits equal `commands.json` `chat.send`; `HostApiChatSendPolicyTests` pins them.
+public enum HostApiChatSendPolicy {
+    public static let maxTextUTF16 = 100_000, maxAttachments = 10, maxAttachmentTextUTF16 = 100_000, maxNameUTF16 = 300
+    public static let fileTooLarge = "That file is too large to send to this Mac."
+    public static let tooManyFiles = "You can attach up to \(maxAttachments) files to one message."
+    public static let textTooLong = "That message is too long to send to this Mac."
+
+    public enum Outcome: Sendable, Equatable { case send(HostApiChatSendRequest), refuse(String) }
+
+    /// A files-only message (v1 `text` needs minLength 1) carries the file names as its text.
+    public static func request(text: String, files: [ChatFileText]) -> Outcome {
+        guard files.count <= maxAttachments else { return .refuse(tooManyFiles) }
+        guard files.allSatisfy({ $0.text.utf16.count <= maxAttachmentTextUTF16 }) else { return .refuse(fileTooLarge) }
+        let names = files.map { $0.name.isEmpty ? "file" : HostApiFrame.clamp($0.name, maxUTF16: maxNameUTF16) }
+        let body = text.isEmpty ? "Attached: " + names.joined(separator: ", ") : text
+        guard !body.isEmpty, body.utf16.count <= maxTextUTF16 else { return .refuse(textTooLong) }
+        let attachments = zip(names, files).map { HostApiChatSendRequestAttachmentsItem(name: $0, text: $1.text) }
+        let request = HostApiChatSendRequest(attachments: attachments.isEmpty ? nil : attachments, text: body)
+        // Together the files can still pass the 1 MiB frame cap; 4 KiB is left for the envelope.
+        guard let bytes = try? JSONEncoder().encode(request).count,
+              bytes <= HostApi.limits.maxFrameBytes - 4096 else { return .refuse(fileTooLarge) }
+        return .send(request)
+    }
+}

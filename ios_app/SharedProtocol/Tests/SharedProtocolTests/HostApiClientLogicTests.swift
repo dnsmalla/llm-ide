@@ -168,3 +168,45 @@ struct HostApiChatTurnTests {
         #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 2, cancelled: nil))
     }
 }
+
+@Suite("HostApiChatSendPolicy")
+struct HostApiChatSendPolicyTests {
+    typealias P = HostApiChatSendPolicy
+
+    @Test("the limits equal commands.json chat.send")
+    func limitsMatchSchema() throws {
+        let props = try #require(HostApiSchemas.request(for: .chatSend)["properties"] as? [String: Any])
+        let text = try #require(props["text"] as? [String: Any])
+        let att = try #require(props["attachments"] as? [String: Any])
+        let item = try #require((att["items"] as? [String: Any])?["properties"] as? [String: Any])
+        #expect(text["maxLength"] as? Int == P.maxTextUTF16)
+        #expect(text["minLength"] as? Int == 1)
+        #expect(att["maxItems"] as? Int == P.maxAttachments)
+        #expect((item["text"] as? [String: Any])?["maxLength"] as? Int == P.maxAttachmentTextUTF16)
+        #expect((item["name"] as? [String: Any])?["maxLength"] as? Int == P.maxNameUTF16)
+    }
+
+    @Test("a files-only message carries the file names as text and validates against the schema")
+    func filesOnly() throws {
+        guard case .send(let r) = P.request(text: "", files: [.init(name: "a.pdf", text: "x"), .init(name: "b.md", text: "y")])
+        else { Issue.record("refused"); return }
+        #expect(r.text == "Attached: a.pdf, b.md")
+        _ = try HostApiFrame.request(id: "c-1", command: .chatSend, payload: r)   // throws invalid_payload if not
+    }
+
+    @Test("plain text passes unchanged, with no attachments key")
+    func plain() {
+        #expect(P.request(text: "hi", files: []) == .send(HostApiChatSendRequest(text: "hi")))
+    }
+
+    @Test("oversized or too many attachments, or overlong text, are refused with a user sentence")
+    func refusals() {
+        let big = String(repeating: "a", count: P.maxAttachmentTextUTF16 + 1)
+        #expect(P.request(text: "hi", files: [.init(name: "big.pdf", text: big)]) == .refuse(P.fileTooLarge))
+        #expect(P.request(text: "hi", files: Array(repeating: .init(name: "f", text: "x"), count: 11)) == .refuse(P.tooManyFiles))
+        #expect(P.request(text: String(repeating: "a", count: P.maxTextUTF16 + 1), files: []) == .refuse(P.textTooLong))
+        // Ten files at the per-file limit (UTF-16) pass each check, but as 2-byte UTF-8 they exceed the 1 MiB frame.
+        let full = String(repeating: "é", count: P.maxAttachmentTextUTF16)
+        #expect(P.request(text: "hi", files: Array(repeating: .init(name: "f", text: full), count: 10)) == .refuse(P.fileTooLarge))
+    }
+}
