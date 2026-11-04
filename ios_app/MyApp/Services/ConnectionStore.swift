@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SharedProtocol
 
 /// Persists the user's saved computer connection. IP and port live in
 /// UserDefaults; the secrets — the PIN while pairing, then the per-device
@@ -19,6 +20,9 @@ final class ConnectionStore: ObservableObject {
     @Published var devicePIN: String
     /// Per-device token issued by the Mac at pairing time; empty until then.
     @Published private(set) var deviceToken: String
+    /// Host API v1 device token (spec "Security": in Keychain on iOS). Separate from the v2 `deviceToken`:
+    /// the Mac keeps v1 and v2 devices apart. Empty until a v1 pairing.
+    @Published private(set) var hostApiToken: String
     /// Stable id this phone presents to every Mac it pairs with. Minted once,
     /// kept in UserDefaults (it is an identifier, not a secret).
     let deviceId: String
@@ -27,7 +31,7 @@ final class ConnectionStore: ObservableObject {
 
     /// Either credential lets the phone connect: a token after pairing, or a
     /// PIN the user just entered and has not yet exchanged.
-    var hasDevice: Bool { !deviceIP.isEmpty && (!deviceToken.isEmpty || !devicePIN.isEmpty) }
+    var hasDevice: Bool { !deviceIP.isEmpty && (!deviceToken.isEmpty || !hostApiToken.isEmpty || !devicePIN.isEmpty) }
 
     /// Title for the paired home screen — prefers the Mac name over raw IP.
     var displayName: String { deviceName.isEmpty ? deviceIP : deviceName }
@@ -56,6 +60,7 @@ final class ConnectionStore: ObservableObject {
         }
         devicePIN   = CredentialKeychain.load(account: .pin) ?? ""
         deviceToken = CredentialKeychain.load(account: .token) ?? ""
+        hostApiToken = CredentialKeychain.load(account: .hostApiToken) ?? ""
     }
 
     /// A fresh PIN means a fresh pairing: any token from a previous pairing is
@@ -85,9 +90,33 @@ final class ConnectionStore: ObservableObject {
         return true
     }
 
+    /// Same contract as `saveToken`, for the v1 token. It drops the PIN, which the host rotated.
+    @discardableResult
+    func saveHostApiToken(_ token: String) -> Bool {
+        guard !token.isEmpty, CredentialKeychain.save(token, account: .hostApiToken) else { return false }
+        hostApiToken = token
+        devicePIN = ""
+        CredentialKeychain.delete(account: .pin)
+        return true
+    }
+
+    /// Where to try Host API v1 first; nil means go straight to v2. That is every release build until spec
+    /// phase 6 (WSS + pinning) puts the v1 port in Bonjour and the QR. Development only: a DEBUG build reads
+    /// `LLMIDE_HOST_API_URL` from the Xcode scheme (Run → Environment), e.g. `ws://127.0.0.1:3016/host-api/v1`
+    /// for the Simulator against a DEBUG Mac or desktop host started with `LLMIDE_HOST_API_DEV=1`.
+    var hostApiEndpoint: HostApiEndpoint? {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["LLMIDE_HOST_API_URL"].flatMap(HostApiEndpoint.init)
+        #else
+        return nil
+        #endif
+    }
+
     private func clearToken() {
         deviceToken = ""
         CredentialKeychain.delete(account: .token)
+        hostApiToken = ""
+        CredentialKeychain.delete(account: .hostApiToken)
     }
 
     /// Both secrets gone; IP/port/name stay so the Mac is still recognized on
@@ -122,6 +151,7 @@ final class ConnectionStore: ObservableObject {
         deviceIP    = ""
         devicePIN   = ""
         deviceToken = ""
+        hostApiToken = ""
         devicePort  = 3006
         deviceName  = ""
         defaults.removeObject(forKey: "agent_ip")
@@ -129,6 +159,7 @@ final class ConnectionStore: ObservableObject {
         defaults.removeObject(forKey: "agent_device_name")
         CredentialKeychain.delete(account: .pin)
         CredentialKeychain.delete(account: .token)
+        CredentialKeychain.delete(account: .hostApiToken)
     }
 }
 
@@ -141,6 +172,7 @@ private enum CredentialKeychain {
     enum Account: String {
         case pin = "saved-mac"
         case token = "device-token"
+        case hostApiToken = "host-api-token"
     }
 
     private static func baseQuery(_ account: Account) -> [String: Any] {

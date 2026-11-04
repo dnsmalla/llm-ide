@@ -127,6 +127,17 @@ final class ConnectionService: ObservableObject {
     /// gets `Capability.legacy`, so screens for newer features hide instead of spinning.
     @Published private(set) var macCapabilities: Set<String>?
     @Published private(set) var macProtocolVersion: Int?
+    /// The transport the chat + approvals slice speaks (spec phase 4). It is v2 (today's socket, through
+    /// `V2HostConnection`) unless negotiation found a v1 host. The other stores still use `sendEncodable` (v2).
+    var host: HostConnection { v1Client ?? v2Host }
+    /// 1 while a Host API v1 connection is up, 2 otherwise. Views gate the v2-only screens on it (Plan 4 decision 6).
+    @Published private(set) var hostApiVersion = 2
+    private(set) lazy var v2Host: V2HostConnection = {
+        let h = V2HostConnection(service: self)
+        h.onEvent = { [weak self] in self?.route($0) }
+        return h
+    }()
+    private var v1Client: HostApiV1Client?
 
     /// Whether to offer a feature. Optimistic until the first handshake so tabs don't flicker
     /// in after launch; after it, exactly what the Mac advertised.
@@ -229,6 +240,19 @@ final class ConnectionService: ObservableObject {
         invalidateSocket()
         connectionStatus = .connecting
         let generation = connectionGeneration
+        // Spec "Compatibility with MobileProtocol v2": try host.hello first, but only at a v1 endpoint that is
+        // actually known. Port 3016 is never assumed (Plan 4 decision 1).
+        var negotiation = HostApiNegotiation()
+        if !isDemo, let endpoint = connectionStore?.hostApiEndpoint,
+           negotiation.handle(.start(v1Endpoint: true)) == .openV1AndHello {
+            connectV1(endpoint, ip: ip, port: port, pin: pin, generation: generation)
+            return
+        }
+        connectV2(ip: ip, port: port, pin: pin, generation: generation)
+    }
+
+    /// Today's v2 connect, unchanged: URL, Pairing frame, pairing deadline, receive loop.
+    private func connectV2(ip: String, port: Int, pin: String, generation: Int) {
         // Built with URLComponents, and the PIN is NOT in the URL: it only ever
         // travels in the `Pairing` frame below. The query copy was redundant
         // (the Mac stopped reading it) and put the pairing secret into
@@ -270,6 +294,74 @@ final class ConnectionService: ObservableObject {
         }
         startPairingDeadline(generation: generation)
         receiveMessage(generation: generation)
+    }
+
+    private func connectV1(_ endpoint: HostApiEndpoint, ip: String, port: Int, pin: String, generation: Int) {
+        let client = HostApiV1Client(
+            config: .init(clientName: UIDevice.current.name,
+                          clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"),
+            makeSocket: { URLSessionHostApiSocket(url: endpoint.url) })
+        client.onEvent = { [weak self] in self?.route($0) }
+        let token = connectionStore?.hostApiToken ?? ""
+        let credential: HostCredential = token.isEmpty ? .pin(pin) : .token(token)
+        Task { @MainActor [weak self] in
+            let outcome = await client.connect(credential)
+            guard let self, generation == self.connectionGeneration else { client.close(); return }
+            switch outcome {
+            case .ready(let hello, let newToken):
+                self.v1Client = client
+                self.hostApiVersion = 1
+                self.macProtocolVersion = hello.protocolVersion
+                self.macCapabilities = client.capabilities
+                self.errorMessage = nil
+                self.reconnectAttempt = 0
+                self.connectionStore?.updateDeviceName(hello.hostName)
+                if let newToken {
+                    self.directPIN = nil
+                    if self.connectionStore?.saveHostApiToken(newToken) == false {
+                        self.errorMessage = "Connected, but the pairing token could not be saved to the Keychain — you will need to pair again next time."
+                    }
+                }
+                self.connectionStatus = .connected
+            case .notV1:
+                self.connectV2(ip: ip, port: port, pin: pin, generation: generation)
+            case .refused(let r):
+                self.handleV1Refusal(r)
+            }
+        }
+    }
+
+    /// A v1 host refused: the same outcomes as v2's `auth_failed`. Retryable (throttle, busy) keeps the
+    /// pairing and backs off; anything else clears the credentials and returns to pairing.
+    private func handleV1Refusal(_ r: HostApiRejection) {
+        errorMessage = r.message.isEmpty ? "Your Mac refused the connection." : r.message
+        if r.retryable {
+            reconnectAttempt = max(reconnectAttempt, 1)
+            invalidateSocket()
+            connectionStatus = .disconnected
+            scheduleReconnect()
+            return
+        }
+        directPIN = nil
+        connectionStore?.clearCredentials()
+        disconnect(clearDirect: true)
+    }
+
+    /// Transport events → app state and stores. Task 6 adds the chat store routing.
+    private func route(_ event: HostEvent) {
+        switch event {
+        case .capabilities(let caps):
+            macCapabilities = caps
+        case .disconnected(let reason):
+            guard hostApiVersion == 1 else { return }
+            if !reason.retryable { return handleV1Refusal(reason) }
+            if errorMessage == nil { errorMessage = "Disconnected from the Mac. Retrying…" }
+            invalidateSocket()
+            connectionStatus = .disconnected
+            scheduleReconnect()
+        case .event, .progress, .resync:
+            break
+        }
     }
 
     /// TCP can connect while the handshake never completes — Mac app up but
@@ -383,6 +475,10 @@ final class ConnectionService: ObservableObject {
         pairingDeadlineTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        v1Client?.close()
+        v1Client = nil
+        hostApiVersion = 2
+        v2Host.connectionEnded()
     }
 
     // MARK: — Heartbeat
@@ -438,14 +534,7 @@ final class ConnectionService: ObservableObject {
         userFacing: Bool = false,
         onSendFailure: ((String) -> Void)? = nil
     ) -> Bool {
-        guard connectionStatus == .connected, webSocketTask != nil || isDemo else {
-            if userFacing {
-                errorMessage = connectionStatus == .connecting
-                    ? "Still connecting to your Mac — wait for Live status, then try again."
-                    : "Not connected to your Mac — reconnect from Settings."
-            }
-            return false
-        }
+        guard canSendV2(userFacing: userFacing) else { return false }
         guard let data = try? JSONEncoder().encode(payload),
               let str = String(data: data, encoding: .utf8) else {
             if userFacing {
@@ -454,6 +543,26 @@ final class ConnectionService: ObservableObject {
             return false
         }
         sendTextFrame(str, userFacing: userFacing, onSendFailure: onSendFailure)
+        return true
+    }
+
+    /// sendEncodable's guard, shared with `V2HostConnection`, which sends frames it has already encoded.
+    private func canSendV2(userFacing: Bool) -> Bool {
+        guard connectionStatus == .connected, webSocketTask != nil || isDemo else {
+            if userFacing {
+                errorMessage = connectionStatus == .connecting
+                    ? "Still connecting to your Mac — wait for Live status, then try again."
+                    : "Not connected to your Mac — reconnect from Settings."
+            }
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func sendV2Frame(_ data: Data, userFacing: Bool = false) -> Bool {
+        guard canSendV2(userFacing: userFacing) else { return false }
+        sendTextFrame(String(decoding: data, as: UTF8.self), userFacing: userFacing)
         return true
     }
 
