@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -527,19 +527,26 @@ test("an older core (before API 106) answers 400 for a nested key: one request, 
 
 
 test("shiftSchedule moves both inclusive bar days and refuses zero/no-span shifts", () => {
-  const row = span(sched({ startDate: "2026-01-05", dueDate: "2026-01-08" }));
+  const schedule = sched({ startDate: "2026-01-05", dueDate: "2026-01-08" });
+  const row = { ...span(schedule), schedule };
   assert.deepEqual(shiftSchedule(row, 1), { startDate: "2026-01-06", dueDate: "2026-01-09" });
   assert.deepEqual(shiftSchedule(row, -2), { startDate: "2026-01-03", dueDate: "2026-01-06" });
   assert.equal(shiftSchedule(row, 0), null);
-  assert.equal(shiftSchedule({ start: null, end: row.end }, 1), null);
+  assert.equal(shiftSchedule({ ...row, start: null, schedule: null }, 1), null);
   assert.equal(shiftSchedule(row, 1.5), null);
+  const sameDay = sched({ startDate: "2026-01-05", dueDate: "2026-01-05" });
+  assert.deepEqual(shiftSchedule({ ...span(sameDay), schedule: sameDay }, 1), { startDate: "2026-01-06", dueDate: "2026-01-06" });
+  const startOnly = sched({ startDate: "2026-01-05" });
+  assert.deepEqual(shiftSchedule({ ...span(startOnly), schedule: startOnly }, 1), { startDate: "2026-01-06", dueDate: null });
+  const dueOnly = sched({ dueDate: "2026-01-08" });
+  assert.deepEqual(shiftSchedule({ ...span(dueOnly), schedule: dueOnly }, 1), { startDate: null, dueDate: "2026-01-09" });
 });
 
 
 test("shiftScheduleBody preserves estimate/dependencies and refuses numberless rows", () => {
   const row = {
     issue: issue({ number: 7, provider: "gitlab", repo: "acme/web" }),
-    schedule: sched({ estimateDays: 3, dependsOn: [2] }),
+    schedule: sched({ startDate: "2026-02-02", dueDate: "2026-02-05", estimateDays: 3, dependsOn: [2] }),
     ...span(sched({ startDate: "2026-02-02", dueDate: "2026-02-05" })), dependsOn: [2],
   };
   assert.deepEqual(shiftScheduleBody(row, 2), {
@@ -548,4 +555,13 @@ test("shiftScheduleBody preserves estimate/dependencies and refuses numberless r
   });
   assert.equal(shiftScheduleBody({ ...row, issue: issue({ number: null }) }, 1), null);
   assert.equal(shiftScheduleBody(row, 0), null);
+});
+
+
+test("dragShift uses a 3 px threshold and whole-day round steps", () => {
+  assert.deepEqual(dragShift(100, 102, 20), { moved: false, days: 0 });
+  assert.deepEqual(dragShift(100, 103, 20), { moved: true, days: 0 });
+  assert.deepEqual(dragShift(100, 141, 20), { moved: true, days: 2 });
+  assert.deepEqual(dragShift(100, 59, 20), { moved: true, days: -2 });
+  assert.deepEqual(dragShift(100, 100, 0), { moved: false, days: 0 });
 });

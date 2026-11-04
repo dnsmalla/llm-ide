@@ -94,8 +94,6 @@ export const REPOS_TEXT = {
     "Stored write-only; Check token verifies the saved token against the provider without storing or showing it again.",
   cloneGap:
     "Clone repository copies it into the active project's code/ folder and registers that folder with the core. A private repository needs a token: the one saved in this session is used, or paste one for this clone; it is not stored.",
-  partial:
-    "The provider tabs, write-only tokens, Check token, automation switches, saved repositories and Clone into the project's code/ folder are real. Pull/re-sync and the Mac's resolve step are not in the desktop yet; clone destinations default to the code/ folder from Settings → Paths.",
 } as const;
 
 /** A plain sentence for a failed catalog or repo call; never the server's raw text. */

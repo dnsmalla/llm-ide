@@ -330,7 +330,7 @@ export default function RepositoriesSection() {
             Stored write-only in the core vault; the saved value is never shown again. {REPOS_TEXT.saveOnly}
           </span>
         </label>
-        {connected ? <p className="st-ok" role="status">Connected · {provider.id === "gitlab" ? hostOf(cfg.gitlabBaseUrl) : "github.com"}</p> : null}
+        {connected ? <p className="st-ok" role="status">Connected · {provider.id === "gitlab" ? hostOf(cfg.gitlabBaseUrl) || "custom instance" : "github.com"}</p> : null}
         {status ? <p className="st-ok" role="status">{status}</p> : null}
         {cloneNotice ? <p className="st-ok" role="status">{cloneNotice} <Button onClick={() => shellBus.publish({ type: "goto-section", section: "library" })}>Open Library</Button></p> : null}
 
@@ -442,8 +442,8 @@ export default function RepositoriesSection() {
 /** The host of a GitLab instance URL, for the "Connected · host" row; never throws. */
 function hostOf(raw: string): string {
   try {
-    return new URL(normalizeBase(raw)).host || "gitlab.com";
+    return new URL(normalizeBase(raw)).host || "";
   } catch {
-    return "gitlab.com";
+    return "";
   }
 }

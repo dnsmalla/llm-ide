@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject
 import {
   barDates,
   barGeometry,
+  dragShift,
   dependencyLines,
   GANTT_ROW_ACTIONS,
   fillRange,
@@ -124,9 +125,9 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
     drag.current = null;
     setDx(0);
     if (!d || !canShift) return;
-    const days = Math.round((clientX - d.x) / dayWidth);
-    if (d.moved) suppressClick.current = true;
-    if (d.moved && days !== 0) onShift?.(row, days);
+    const shot = dragShift(d.x, clientX, dayWidth);
+    if (shot.moved) suppressClick.current = true;
+    if (shot.moved && shot.days !== 0) onShift?.(row, shot.days);
   };
   return (
     <div className="gnt-track" data-on={selected || undefined} style={{ top: HEAD_H + index * ROW_H }}>
@@ -149,9 +150,9 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
             const d = drag.current;
             if (!d) return;
             if (e.buttons === 0) { drag.current = null; setDx(0); return; }
-            const delta = e.clientX - d.x;
-            if (Math.abs(delta) >= 3) d.moved = true;
-            setDx(d.moved ? Math.round(delta / dayWidth) * dayWidth : 0);
+            const shift = dragShift(d.x, e.clientX, dayWidth);
+            if (shift.moved) d.moved = true;
+            setDx(d.moved ? shift.days * dayWidth : 0);
           }}
           onPointerUp={(e) => finish(e.clientX)}
           onPointerCancel={() => { drag.current = null; setDx(0); }}

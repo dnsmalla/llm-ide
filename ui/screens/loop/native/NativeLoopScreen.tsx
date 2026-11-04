@@ -135,15 +135,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!projectRoot) return undefined;
     void loadLoops(fs).then(async (r) => {
       if (!live) return;
+      // Read the host defaults for BOTH a normal store and the first-creation ("missing") path.
+      const prefs = await invokeHost<unknown>("get_prefs").catch(() => null);
+      if (!live) return;
+      const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
+      setLoopDefaults(defaults);
       // Mac parity: a missing default loop is re-added in memory and only written when the user saves.
       let next = r;
       let added: string[] = [];
       if (r.kind === "ok") {
         const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
-        const prefs = await invokeHost<unknown>("get_prefs").catch(() => null);
         if (!live) return;
-        const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
-        setLoopDefaults(defaults);
         const ensured = ensureDefaultLoops(r.store, env.command, defaults);
         added = ensured.added;
         if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
