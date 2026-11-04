@@ -37,7 +37,7 @@ struct RootTabView: View {
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
 
-            if ProjectView.Section.allCases.contains(where: { connection.supports($0.capability) }) {
+            if connection.hasProjectSections {
                 ProjectView(deviceName: deviceName)
                     .tabItem { Label("Project", systemImage: "folder.fill") }
                     .badge(explorerStore.pendingApproval == nil ? 0 : 1)
@@ -76,7 +76,7 @@ struct RootTabView: View {
         .onChange(of: projectsStore.active?.id) { _ in projectDidChange() }
         // A Phone access switch flipped on the Mac, or a different Mac was paired.
         .onChange(of: connection.macCapabilities) { _ in
-            if selection == .project, !ProjectView.Section.allCases.contains(where: { connection.supports($0.capability) }) { selection = .chat }
+            if selection == .project, !connection.hasProjectSections { selection = .chat }
             if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
             if !connection.supports(MobileProtocol.Capability.usage) { usageStore.resetForNewDevice() }
             if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
@@ -128,6 +128,11 @@ struct RootTabView: View {
 /// Slim strip under the Chat nav bar: which project the Mac is on, whether the
 /// link is live, and a one-tap Reconnect when it isn't. Tapping the project
 /// chip jumps to the Project tab.
+extension ConnectionService {
+    /// False on Host API v1: every Project segment needs a v2 capability.
+    var hasProjectSections: Bool { ProjectView.Section.allCases.contains { supports($0.capability) } }
+}
+
 struct ContextBar: View {
     let deviceName: String
     var onProjectTap: () -> Void
@@ -143,6 +148,7 @@ struct ContextBar: View {
 
     var body: some View {
         HStack(spacing: DesignSystem.Spacing.sm) {
+            if connection.hasProjectSections {
             Button(action: onProjectTap) {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
@@ -160,6 +166,7 @@ struct ContextBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Project \(projectLabel). Opens the Project tab")
+            }
 
             Spacer(minLength: 0)
 

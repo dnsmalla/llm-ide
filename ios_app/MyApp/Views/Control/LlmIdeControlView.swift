@@ -73,7 +73,7 @@ struct LlmIdeControlView: View {
                         Button(role: .destructive) {
                             showClearConfirm = true
                         } label: { Label("Clear chat history", systemImage: "trash") }
-                            .disabled(llmIdeStore.llmIdeMessages.isEmpty)
+                            .disabled(llmIdeStore.llmIdeMessages.isEmpty || !connection.supports(MobileProtocol.Capability.chat))
                     } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Chat options")
                 }
@@ -263,6 +263,7 @@ struct LlmIdeControlView: View {
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
                     }
+                    .disabled(!connection.supports(MobileProtocol.Capability.chat))
                     if connection.supports(MobileProtocol.Capability.generation) {
                         Divider()
                         Button { generateSurface = "doc"; showGenerate = true } label: {
@@ -367,6 +368,7 @@ struct LlmIdeControlView: View {
     // MARK: — Actions
 
     private func send() {
+        guard canSend else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let images = pendingImages
         let files = pendingFiles
