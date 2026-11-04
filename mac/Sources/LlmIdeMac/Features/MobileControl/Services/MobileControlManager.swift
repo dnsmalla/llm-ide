@@ -1398,7 +1398,8 @@ final class MobileControlManager {
     /// The one path for Mac -> client frames. A frame for a Host API v1 command (`h1.` command id) goes
     /// to the v1 gateway, which translates it; everything else goes to the v2 phone exactly as before.
     func emit(_ message: some Encodable) async {
-        guard let data = try? JSONEncoder().encode(message) else { await server?.send(message); return }
+        // No gateway (every release build): nothing to route, so skip the encode/decode pass.
+        guard hostApiGateway != nil, let data = try? JSONEncoder().encode(message) else { await server?.send(message); return }
         let cid = Self.commandId(in: data)
         switch Self.outboundRoute(commandId: cid, hasGateway: hostApiGateway != nil) {
         case .v1: hostApiGateway?.deliver(v2Frame: data, internalCommandId: cid ?? "")

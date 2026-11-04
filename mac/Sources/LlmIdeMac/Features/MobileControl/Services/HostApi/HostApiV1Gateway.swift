@@ -132,7 +132,7 @@ final class HostApiV1Gateway {
             if let why = HostApiV1Session.helloRefusal(apiVersions: p.apiVersions) { return fail(session, id, "capability_unavailable", why) }
             sessions[session]?.state.greeted(clientName: p.clientName)
             respond(session, id, .hostHello, HostApiHostHelloResult(
-                apiVersion: 1, apiVersions: [1, 2], capabilities: deps.capabilities(),
+                apiVersion: 1, apiVersions: [1], capabilities: deps.capabilities(),
                 hostKind: "mac", hostName: HostApiFrame.clamp(deps.hostName(), maxUTF16: 120),
                 protocolVersion: MobileProtocol.protocolVersion, requiresAuth: true))
         case .hostAuthPair:
@@ -196,6 +196,7 @@ final class HostApiV1Gateway {
             guard let p = payload(HostApiChatSendRequest.self) else { return fail(session, id, "invalid_payload", "Bad chat.send payload.") }
             if let why = deps.tierRefusal(MobileProtocol.Tag.llmIdeChat) { return fail(session, id, "denied", why) }
             let internalId = HostApiV1CommandIds.internalId(session: session, external: id)
+            guard owned[internalId] == nil else { return fail(session, id, "busy", "That request id is still running.") }
             owned[internalId] = (session, id, false)
             let files = (p.attachments ?? []).map { ChatFileText(name: $0.name, text: $0.text) }
             respond(session, id, .chatSend, HostApiChatSendResult(accepted: true, requestId: id))

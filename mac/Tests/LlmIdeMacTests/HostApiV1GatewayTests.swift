@@ -153,6 +153,15 @@ final class HostApiV1GatewayTests {
         #expect(Set(closed) == [1, 2])
     }
 
+    @Test("a reused in-flight chat.send id is busy and forwards nothing more")
+    func reusedId() async {
+        let g = gateway()
+        await paired(g)
+        await g.receive(session: 1, data: request("c-9", "chat.send", #"{"text":"a"}"#))
+        await g.receive(session: 1, data: request("c-9", "chat.send", #"{"text":"b"}"#))
+        #expect(lastError == "busy" && forwarded.count == 1)
+    }
+
     @Test("closeAll cancels every owned command and closes every session")
     func closeAll() async {
         let g = gateway()
