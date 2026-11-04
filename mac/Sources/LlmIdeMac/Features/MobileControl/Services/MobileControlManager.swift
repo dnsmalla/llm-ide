@@ -153,6 +153,7 @@ final class MobileControlManager {
         capabilityBox.value = caps
         // A phone already connected learned the old list at pairing; tell it about the new one.
         if changed, mobileClientPaired { reply(MacCapabilities(capabilities: caps)) }
+        hostApiGateway?.capabilitiesChanged()
     }
 
     /// Wire the access switches to the capability list. Called once from `init`-time setup.
@@ -171,7 +172,7 @@ final class MobileControlManager {
         where entry.engine.parkedApproval?.kind == "ToolApproval" {
             pendingPhoneApprovals.removeValue(forKey: commandId)
             truncatedToolRequestIds.remove(entry.requestId)
-            Task { await server?.send(ApprovalCleared(
+            Task { await emit(ApprovalCleared(
                 commandId: commandId, requestId: entry.requestId,
                 reason: "Tool requests can no longer be approved from the phone.")) }
         }
@@ -268,6 +269,8 @@ final class MobileControlManager {
         let task: Task<Void, Never>
     }
     private var mobileInflightTasks: [String: MobileInflightTask] = [:]
+    /// Host API v1 gateway; nil until the v1 listener is started (Task 8 constructs it).
+    private var hostApiGateway: HostApiV1Gateway?
     /// Command ids with a registered, not-yet-finished task (tests).
     var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
@@ -521,6 +524,27 @@ final class MobileControlManager {
         self.advertiser = advertiser
     }
 
+    func makeHostApiDependencies() -> HostApiV1Gateway.Dependencies {
+        HostApiV1Gateway.Dependencies(
+            hostName: { Self.deviceName() },
+            validatePin: { Self.pinMatches(candidate: $0, current: MobilePin.read()) },
+            pinConsumed: { [weak self] in self?.rotatePairingPin() },
+            issueToken: { [pairedDeviceStore] id, name in pairedDeviceStore.issueToken(deviceId: id, name: name) },
+            authenticate: { [pairedDeviceStore] in pairedDeviceStore.authenticate(token: $0) },
+            revoke: { [weak self] id in self?.pairedDeviceStore.revoke(id: id); self?.refreshPairedDevices() },
+            capabilities: { [weak self] in HostApiV1Gateway.capabilities(chatInstalled: self?.chatHost != nil,
+                                                                          toolApprovals: self?.phoneAccess.isAllowed(.toolApprovals) ?? false) },
+            tierRefusal: { type in
+                if case .refuse(_, let message) = PhoneTierTable.verdict(for: type, desktop: false) { return message }
+                return nil
+            },
+            forward: { [weak self] in self?.dispatchInbound($0) },
+            history: { [weak self] in await self?.quickChatHistory(limit: $0) ?? .unavailable("Mobile Control stopped.") },
+            clear: { [weak self] in await self?.clearQuickChat() ?? .unavailable("Mobile Control stopped.") },
+            cancel: { [weak self] in self?.cancelMobileInflightTask(commandId: $0) },
+            log: { [weak self] in self?.append(.info, $0) })
+    }
+
     /// Tear down the native server and Bonjour advertisement. Idempotent —
     /// safe to call from the Quit hook, the Stop button, or a failed restart.
     func stop() {
@@ -535,6 +559,7 @@ final class MobileControlManager {
         activityBridge?.removePushObservers()
         registeredBridges.forEach { $0.bridge.removePushObservers() }
         onMobileClientDisconnected()
+        hostApiGateway = nil
         server?.stop()
         server = nil
         advertiser?.stop()
@@ -598,6 +623,26 @@ final class MobileControlManager {
     /// single source of truth in `MobileProtocol.Tag`. Unknown types log and
     /// drop.
     func handleInbound(_ data: Data) {
+        // A v2 phone picks its own command ids; it must never be able to name a Host API v1 one
+        // (it could cancel or answer a v1 client's command, or have v1 frames routed to it).
+        if Self.refusesV1CommandId(data) {
+            struct TypeOnly: Decodable { let type: String? }
+            let label = MobileLogPolicy.typeLabel((try? decoder.decode(TypeOnly.self, from: data))?.type ?? "")
+            append(.stderr, "Refused '\(label)': reserved command id")
+            reply(CommandError(commandId: label, message: "Invalid command id", code: "invalid_command_id"))
+            return
+        }
+        dispatchInbound(data)
+    }
+
+    /// True when a v2 frame names a Host API v1 command id (pure; pinned by HostApiV1GatewayTests).
+    nonisolated static func refusesV1CommandId(_ frame: Data) -> Bool {
+        guard let cid = commandId(in: frame) else { return false }
+        return HostApiV1CommandIds.isV1(cid)
+    }
+
+    /// The v2 dispatch itself. The Host API v1 gateway forwards here, past the v1-id refusal above.
+    func dispatchInbound(_ data: Data) {
         struct Envelope: Decodable { let type: String }
         guard let env = try? decoder.decode(Envelope.self, from: data) else {
             // Never the frame itself: it is phone-controlled and up to 8 MiB.
@@ -947,7 +992,7 @@ final class MobileControlManager {
     /// transcript, so the post had no observers left.)
     private func handleChat(_ chat: LlmIdeChat) async {
         guard let api else {
-            await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
+            await emit(CommandError(commandId: chat.commandId, message: "Backend not configured"))
             return
         }
         guard let chatHost else {
@@ -970,7 +1015,7 @@ final class MobileControlManager {
             // nor `LlmChatSheet` has an attach affordance, and both run the
             // same image-less transport (see `VisualSourcePanel.swift`, which
             // states the same fact for Doc Gen's sources).
-            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+            await emit(Output(commandId: chat.commandId, payload: OutputPayload(
                 stream: "Images aren't supported in this chat — send the question as text. "
                     + "No LLM-IDE chat surface can send an image to the model right now.",
                 done: true)))
@@ -997,7 +1042,7 @@ final class MobileControlManager {
         // take seconds anyway.
         await backendManager?.refreshServerApiVersion()
         guard chatHost.quickChatServerSupportsAsk(apiVersion: backendManager?.serverApiVersion) else {
-            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+            await emit(Output(commandId: chat.commandId, payload: OutputPayload(
                 stream: chatHost.quickChatUnsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),
                 done: true)))
             return
@@ -1007,7 +1052,7 @@ final class MobileControlManager {
             // A normal reply, NOT a CommandError: the phone renders an error
             // as a failure, and "no project is open on the Mac" is an
             // answer — same no-project gate the menu bar / LLM Chat sheet use.
-            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+            await emit(Output(commandId: chat.commandId, payload: OutputPayload(
                 stream: chatHost.quickChatNoProjectMessage, done: true)))
             return
         }
@@ -1016,7 +1061,7 @@ final class MobileControlManager {
             // Unreachable in practice — `quickChat` always lands on a
             // real session — but a CommandError beats a silent hang if a
             // future change to that resolution ever leaves it empty.
-            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open your chat on the Mac."))
+            await emit(CommandError(commandId: chat.commandId, message: "Could not open your chat on the Mac."))
             return
         }
         // Fold extracted file text into the prompt (mirrors how history was
@@ -1068,14 +1113,14 @@ final class MobileControlManager {
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
                     Task {
                         guard !self.isMobileCommandCancelled(commandId) else { return }
-                        await self.server?.send(Output(
+                        await self.emit(Output(
                             commandId: commandId,
                             payload: OutputPayload(stream: label, done: false)))
                     }
                 }
             )
             guard !isMobileCommandCancelled(chat.commandId) else { return }
-            await server?.send(Output(commandId: chat.commandId,
+            await emit(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
         } catch let error where chatHost.isTurnCancellation(error) {
             // Covers a Mac-side Stop too — same as explore_chat below.
@@ -1088,7 +1133,7 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "llmide_chat failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
-            await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
+            await emit(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
     }
 
@@ -1117,7 +1162,7 @@ final class MobileControlManager {
     /// actually closes it.
     private func handleExploreChat(_ chat: ExploreChat) async {
         guard let api else {
-            await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
+            await emit(CommandError(commandId: chat.commandId, message: "Backend not configured"))
             return
         }
         guard let chatHost else {
@@ -1125,7 +1170,7 @@ final class MobileControlManager {
             return
         }
         guard let sid = UUID(uuidString: chat.sessionId) else {
-            await server?.send(CommandError(commandId: chat.commandId, message: "Bad session id"))
+            await emit(CommandError(commandId: chat.commandId, message: "Bad session id"))
             return
         }
         // Upfront existence check: a stale sessionId (the session was deleted
@@ -1138,7 +1183,7 @@ final class MobileControlManager {
         // workspace context (refs, agent context) attached.
         guard chatHost.explorerSession(id: sid, visibleInProject: activeExplorerProjectId) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
-            await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
+            await emit(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
         }
         var attachments = MobileExploreBridge.attachments(from: chat.files)
@@ -1173,7 +1218,7 @@ final class MobileControlManager {
         }
         guard let engine = chatHost.explorerTurnEngine(for: sid, api: api) else {
             append(.info, "explore_chat: could not resolve session \(chat.sessionId.prefix(8))")
-            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
+            await emit(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
             return
         }
         // Resolved AFTER the engine: a tier route must fit the engine (a v2
@@ -1211,14 +1256,14 @@ final class MobileControlManager {
                     append(.info, "code-assist: \(label)")
                     Task {
                         guard !self.isMobileCommandCancelled(commandId) else { return }
-                        await self.server?.send(Output(
+                        await self.emit(Output(
                             commandId: commandId,
                             payload: OutputPayload(stream: label, done: false)))
                     }
                 }
             )
             guard !isMobileCommandCancelled(chat.commandId) else { return }
-            await server?.send(Output(commandId: chat.commandId,
+            await emit(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
         } catch let error where chatHost.isTurnCancellation(error) {
             // Same as llmide_chat: a Mac-side Stop of a phone-driven turn
@@ -1230,7 +1275,7 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "code-assist failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
-            await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
+            await emit(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
     }
 
@@ -1305,14 +1350,28 @@ final class MobileControlManager {
                            message: "The Mac could not read this \(what). Update LLM-IDE on both devices to matching versions and try again."))
     }
 
+    /// The one path for Mac -> client frames. A frame for a Host API v1 command (`h1.` command id) goes
+    /// to the v1 gateway, which translates it; everything else goes to the v2 phone exactly as before.
+    func emit(_ message: some Encodable) async {
+        if let gateway = hostApiGateway, let data = try? JSONEncoder().encode(message),
+           let cid = Self.commandId(in: data), HostApiV1CommandIds.isV1(cid) {
+            gateway.deliver(v2Frame: data, internalCommandId: cid)
+            return
+        }
+        await server?.send(message)
+    }
+
+    nonisolated static func commandId(in frame: Data) -> String? {
+        struct Envelope: Decodable { let commandId: String? }
+        return (try? JSONDecoder().decode(Envelope.self, from: frame))?.commandId
+    }
+
     func reply(_ message: some Encodable) {
-        guard let server else {
+        if server == nil && hostApiGateway == nil {
             append(.stderr, "Mobile reply dropped — WebSocket server not running")
             return
         }
-        Task.detached(priority: .userInitiated) {
-            await server.send(message)
-        }
+        Task { await self.emit(message) }
     }
 
     /// A feature's own dependency isn't wired (e.g. Auto Tasks' `autoCode`) —
@@ -1394,10 +1453,13 @@ final class MobileControlManager {
         // Union, not assignment: a command the phone already cancelled is out
         // of `mobileInflightTasks` but its task may still be finishing, and
         // it must keep its flag until that task's own finish prunes it.
-        truncatedToolRequestIds.removeAll()
-        mobileCancelledCommandIds.formUnion(mobileInflightTasks.keys)
-        for entry in mobileInflightTasks.values { entry.task.cancel() }
-        mobileInflightTasks.removeAll()
+        // Host API v1 work belongs to its own sessions, so a v2 disconnect leaves it alone.
+        let v1RequestIds = Set(pendingPhoneApprovals.filter { HostApiV1CommandIds.isV1($0.key) }.map { $0.value.requestId })
+        truncatedToolRequestIds.formIntersection(v1RequestIds)
+        let v2Inflight = mobileInflightTasks.filter { !HostApiV1CommandIds.isV1($0.key) }
+        mobileCancelledCommandIds.formUnion(v2Inflight.keys)
+        for entry in v2Inflight.values { entry.task.cancel() }
+        for key in v2Inflight.keys { mobileInflightTasks.removeValue(forKey: key) }
     }
 
     // MARK: - Mid-turn questions
@@ -1441,7 +1503,7 @@ final class MobileControlManager {
         }
         guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
         Task { [weak self] in
-            await self?.server?.send(ApprovalCleared(
+            await self?.emit(ApprovalCleared(
                 commandId: commandId, requestId: entry.requestId,
                 reason: "This turn has finished."))
         }
@@ -1461,12 +1523,12 @@ final class MobileControlManager {
             pendingPhoneApprovals[commandId] = (engine, approval.requestId)
             let request = await Task.detached { MobileToolApproval.request(from: approval, commandId: commandId) }.value
             if request.truncated { truncatedToolRequestIds.insert(approval.requestId) }
-            await server?.send(request)
+            await emit(request)
             return
         }
         guard approval.kind == "AskUserQuestion", !approval.questions.isEmpty else { return }
         pendingPhoneApprovals[commandId] = (engine, approval.requestId)
-        await server?.send(ApprovalRequest(
+        await emit(ApprovalRequest(
             commandId: commandId,
             requestId: approval.requestId,
             questions: approval.questions.map { q in
@@ -1506,14 +1568,14 @@ final class MobileControlManager {
             pendingRequestId: entry.flatMap { $0.requestId == answer.requestId ? pending?.requestId : nil },
             pendingKind: pending?.kind, answerRequestId: answer.requestId) {
             // Refused: the prompt (if any) stays parked on the Mac for its owner to decide.
-            await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId, reason: why))
+            await emit(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId, reason: why))
             return
         }
         guard let entry, let pending else { return }
         if answer.allow, truncatedToolRequestIds.contains(answer.requestId) {
             // Denying is always fine; allowing a change that could not be shown in full is not. The
             // prompt stays parked on the Mac for someone who can read all of it.
-            await server?.send(ApprovalCleared(
+            await emit(ApprovalCleared(
                 commandId: answer.commandId, requestId: answer.requestId,
                 reason: "That change was too long to review on the phone — approve it on the Mac."))
             return
@@ -1522,7 +1584,7 @@ final class MobileControlManager {
         append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.toolName ?? "tool")")
         let submitError = await entry.engine.submitPhoneToolDecision(action: Self.phoneToolDecisionAction(allow: answer.allow))
         pendingPhoneApprovals.removeValue(forKey: answer.commandId)
-        await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
+        await emit(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
                                            reason: submitError))
     }
 
@@ -1537,7 +1599,7 @@ final class MobileControlManager {
             // Already answered, expired, or belongs to another turn. Tell the
             // phone rather than leaving its card up waiting for a reply that
             // is never coming.
-            await server?.send(ApprovalCleared(
+            await emit(ApprovalCleared(
                 commandId: answer.commandId, requestId: answer.requestId,
                 reason: "That question is no longer open."))
             return
@@ -1547,7 +1609,7 @@ final class MobileControlManager {
         // Either it landed (the card should go) or it failed and the state
         // kept its error for the Mac to show; the phone's copy is done either
         // way — a retry belongs to the surface that can see the error.
-        await server?.send(ApprovalCleared(
+        await emit(ApprovalCleared(
             commandId: answer.commandId, requestId: answer.requestId,
             reason: submitError))
     }
@@ -1577,6 +1639,7 @@ final class MobileControlManager {
     func revokeDevice(_ id: String) {
         pairedDeviceStore.revoke(id: id)
         refreshPairedDevices()
+        hostApiGateway?.disconnect(deviceId: id)
         server?.disconnectClient(deviceId: id, code: .revoked,
                                  message: "This device was removed in Settings → Mobile Control on the Mac")
         append(.info, "Revoked paired device \(id.prefix(8))…")
@@ -1589,6 +1652,7 @@ final class MobileControlManager {
     func revokeAllDevices() {
         let ids = pairedDeviceStore.revokeAll()
         refreshPairedDevices()
+        for id in ids { hostApiGateway?.disconnect(deviceId: id) }
         server?.disconnectCurrentClient(code: .revoked,
                                         message: "The Mac signed out of the account this phone was paired with")
         if !ids.isEmpty { append(.info, "Revoked \(ids.count) paired device(s) after an account change") }
@@ -1644,7 +1708,7 @@ final class MobileControlManager {
     private func pushMacStatusIfPaired() async {
         guard mobileClientPaired else { return }
         if let status = await buildMacStatus() {
-            await server?.send(status)
+            await emit(status)
         }
     }
 
@@ -1725,7 +1789,7 @@ final class MobileControlManager {
     /// that case is skipped rather than answered twice.
     private func notifyStoppedOnMac(_ commandId: String) async {
         guard !isMobileCommandCancelled(commandId) else { return }
-        await server?.send(CommandError(commandId: commandId, message: "Stopped on the Mac"))
+        await emit(CommandError(commandId: commandId, message: "Stopped on the Mac"))
     }
 
     private func handleLlmIdeCancel(data: Data) {
@@ -1745,62 +1809,56 @@ final class MobileControlManager {
     private func handleLlmIdeChatHistoryList(data: Data) async {
         struct LimitEnvelope: Decodable { let limit: Int? }
         let limit = max((try? decoder.decode(LimitEnvelope.self, from: data))?.limit ?? 50, 0)
-        guard let api, let config, let projectStore else {
-            reply(CommandError(commandId: "llmide_chat_history", message: "Backend not configured"))
-            return
+        switch await quickChatHistory(limit: limit) {
+        case .unavailable(let message):
+            if message == Self.chatMissingMessage {
+                replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history")
+            } else {
+                reply(CommandError(commandId: "llmide_chat_history", message: message))
+            }
+        case .lines(let lines):
+            // Tool-result rows are internal turn bookkeeping (`conversationLines` already filters them);
+            // no project open is an empty transcript, not an error.
+            reply(LlmIdeChatHistoryReply(messages: lines.map { ChatTurn(role: $0.role, content: $0.content) }))
         }
-        guard let chatHost else {
-            replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history")
-            return
-        }
-        guard let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else {
-            // No project open → no `.quick` session to read; an empty
-            // transcript rather than an error, since "no history yet" is a
-            // legitimate state (unlike `handleChat`'s no-project decline,
-            // this isn't answering a question the user asked).
-            reply(LlmIdeChatHistoryReply(messages: []))
-            return
-        }
-        // Tool-result rows are internal turn bookkeeping, not part of the
-        // simple back-and-forth the phone renders — `conversationLines`
-        // filters them the same way the retired `/kb/agent/ask/history`
-        // table (user/assistant rows only) implicitly was.
-        let turns = quick.engine.conversationLines
-            .suffix(limit)
-            .map { ChatTurn(role: $0.role, content: $0.content) }
-        reply(LlmIdeChatHistoryReply(messages: turns))
     }
 
-    /// Route the phone's "clear" onto the quick engine's `clearCurrentChat()` — the same
-    /// header-trash action the LLM Chat sheet/menu bar use, which also
-    /// forgets the chat's server-side session memory. The retired
-    /// `clearAgentAskHistory()` wiped the wrong (unread) table.
+    /// Quick-chat transcript for the phone (v2) and Host API v1 `chat.snapshot`: the `.quick` engine's own
+    /// transcript is the history. `limit` bounds the size like the retired server-side query parameter.
+    private static let chatMissingMessage = "Chat is not installed on this Mac."
+
+    func quickChatHistory(limit: Int) async -> HostApiQuickChatHistory {
+        guard let api, let config, let projectStore else { return .unavailable("Backend not configured") }
+        guard let chatHost else { return .unavailable(Self.chatMissingMessage) }
+        guard let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else { return .lines([]) }
+        return .lines(Array(quick.engine.conversationLines.suffix(max(limit, 0))))
+    }
+
+    /// Route the phone's "clear" onto the quick engine's `clearCurrentChat()`, behind the default-OFF
+    /// chat-deletion switch (see `Self.chatDeletionAllowed`).
     private func handleLlmIdeChatHistoryClear() async {
-        // Clearing wipes the Mac's quick chat (shared with the menu bar), so it
-        // sits behind the same default-OFF switch as every other phone action
-        // that changes Mac-side chat state — see `Self.chatDeletionAllowed`.
-        guard Self.chatDeletionAllowed({ phoneAccess.isAllowed($0) }) else {
-            reply(CommandError(commandId: "llmide_chat_history_clear",
-                               message: Self.chatDeletionSwitch.deniedMessage))
-            return
-        }
-        guard let api else {
-            reply(CommandError(commandId: "llmide_chat_history_clear", message: "Backend not configured"))
-            return
-        }
-        guard let chatHost else {
-            replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history_clear")
-            return
-        }
-        guard let config, let projectStore,
-              let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else {
-            // No project open → nothing to clear; ack rather than error,
-            // mirroring the history-list's no-project behavior above.
+        switch await clearQuickChat() {
+        case .denied(let message):
+            reply(CommandError(commandId: "llmide_chat_history_clear", message: message))
+        case .unavailable(let message):
+            if message == Self.chatMissingMessage {
+                replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history_clear")
+            } else {
+                reply(CommandError(commandId: "llmide_chat_history_clear", message: message))
+            }
+        case .cleared:
             reply(LlmIdeChatHistoryClearAck(ok: true))
-            return
         }
+    }
+
+    func clearQuickChat() async -> HostApiQuickChatClear {
+        guard Self.chatDeletionAllowed({ phoneAccess.isAllowed($0) }) else { return .denied(Self.chatDeletionSwitch.deniedMessage) }
+        guard let api else { return .unavailable("Backend not configured") }
+        guard let chatHost else { return .unavailable(Self.chatMissingMessage) }
+        guard let config, let projectStore,
+              let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else { return .cleared }
         await quick.engine.clearCurrentChat()
-        reply(LlmIdeChatHistoryClearAck(ok: true))
+        return .cleared
     }
 
     private func handleExploreCancel(data: Data) {
@@ -1836,7 +1894,7 @@ final class MobileControlManager {
 
     private func handleMacStatusList() async {
         if let status = await buildMacStatus() {
-            await server?.send(status)
+            await emit(status)
         } else {
             reply(CommandError(commandId: "mac_status", message: "Mac status unavailable"))
         }

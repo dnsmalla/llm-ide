@@ -242,6 +242,7 @@ if mobileIncluded {
     let mobileTestExcludes: Set<String> = [
         "MobilePairingFrameTests.swift",
         "HostApiV1DeviceStoreTests.swift",
+        "HostApiV1GatewayTests.swift",
         "HostApiV1SessionTests.swift",
         "HostApiV2TranslatorTests.swift",
         "PhoneDesktopApprovalGateTests.swift",
