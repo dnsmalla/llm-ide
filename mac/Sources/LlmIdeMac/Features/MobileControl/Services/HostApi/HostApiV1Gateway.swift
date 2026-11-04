@@ -30,10 +30,9 @@ final class HostApiV1Gateway {
 
     var send: (_ session: Int, _ frame: Data) -> Void = { _, _ in }
     var close: (_ session: Int) -> Void = { _ in }
-    private(set) var rev = 0
 
     private let deps: Dependencies
-    private var sessions: [Int: (state: HostApiV1Session, peer: String)] = [:]
+    private var sessions: [Int: (state: HostApiV1Session, peer: String, rev: Int)] = [:]
     /// internal command id → (session, external id, cancelled by the client)
     private var owned: [String: (session: Int, external: String, cancelled: Bool)] = [:]
     private var throttle = PairingThrottle()
@@ -52,11 +51,11 @@ final class HostApiV1Gateway {
 
     func opened(session: Int, peer: String) {
         guard sessions.count < Self.maxSessions else {
-            send(session, HostApiFrame.error(replyTo: nil, code: "busy", message: "This Mac already has the maximum number of Host API connections.", retryable: true, rev: rev))
+            send(session, HostApiFrame.error(replyTo: nil, code: "busy", message: "This Mac already has the maximum number of Host API connections.", retryable: true, rev: 0))
             close(session)
             return
         }
-        sessions[session] = (HostApiV1Session(), peer)
+        sessions[session] = (HostApiV1Session(), peer, 0)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.authDeadline * 1_000_000_000))
             guard let self, let s = self.sessions[session], s.state.deviceId == nil else { return }
@@ -76,7 +75,7 @@ final class HostApiV1Gateway {
 
     func disconnect(deviceId: String) {
         for (id, s) in sessions where s.state.deviceId == deviceId {
-            send(id, HostApiFrame.error(replyTo: nil, code: "auth_failed", message: "This device was removed on the Mac.", retryable: false, rev: rev))
+            send(id, HostApiFrame.error(replyTo: nil, code: "auth_failed", message: "This device was removed on the Mac.", retryable: false, rev: s.rev))
             close(id)
             closed(session: id)
         }
@@ -88,6 +87,9 @@ final class HostApiV1Gateway {
             closed(session: id)
         }
     }
+
+    /// Each connection has its own monotonic counter (events bump it; responses carry the current value).
+    func rev(for session: Int) -> Int? { sessions[session]?.rev }
 
     func owns(_ internalCommandId: String) -> Bool { owned[internalCommandId] != nil }
 
@@ -241,7 +243,7 @@ final class HostApiV1Gateway {
     }
 
     private func respond<R: Encodable>(_ session: Int, _ replyTo: String, _ command: HostApiCommand, _ result: R) {
-        do { send(session, try HostApiFrame.response(replyTo: replyTo, command: command, result: result, rev: rev)) }
+        do { send(session, try HostApiFrame.response(replyTo: replyTo, command: command, result: result, rev: rev(for: session) ?? 0)) }
         catch {
             deps.log("Host API v1 \(command.rawValue) result failed validation — sent internal")
             fail(session, replyTo, "internal", "The Mac could not build this reply.")
@@ -249,8 +251,8 @@ final class HostApiV1Gateway {
     }
 
     private func sendEvent<P: Encodable>(_ session: Int, _ command: String, payload: P, replyTo: String? = nil) {
-        rev += 1
-        do { send(session, try HostApiFrame.event(command, payload: payload, rev: rev, replyTo: replyTo)) }
+        sessions[session]?.rev += 1
+        do { send(session, try HostApiFrame.event(command, payload: payload, rev: rev(for: session) ?? 0, replyTo: replyTo)) }
         catch { deps.log("Host API v1 \(command) event failed validation — dropped") }
     }
 
@@ -261,6 +263,6 @@ final class HostApiV1Gateway {
     private func fail(_ session: Int, _ replyTo: String?, _ code: String, _ message: String,
                       retryable: Bool = false, retryAfterMs: Int? = nil, hint: String? = nil) {
         send(session, HostApiFrame.error(replyTo: replyTo, code: code, message: message, retryable: retryable,
-                                         retryAfterMs: retryAfterMs, hint: hint, rev: rev))
+                                         retryAfterMs: retryAfterMs, hint: hint, rev: rev(for: session) ?? 0))
     }
 }

@@ -85,7 +85,26 @@ final class HostApiV1GatewayTests {
         #expect(sent.suffix(2).map { $0.1["command"] as? String } == ["chat.delta", "chat.done"])
         #expect(!g.owns("h1.1.c-9"), "a terminal frame ends ownership")
         let revs = sent.compactMap { $0.1["rev"] as? Int }
-        #expect(revs == revs.sorted(), "rev is monotonic")
+        #expect(revs == revs.sorted(), "rev is monotonic per connection")
+    }
+
+    @Test("rev is per connection: another session's events do not advance it")
+    func revPerSession() async {
+        let g = gateway()
+        await paired(g, session: 1)
+        await paired(g, session: 2)
+        #expect(g.rev(for: 1) == 0 && g.rev(for: 2) == 0 && g.rev(for: 9) == nil)
+        await g.receive(session: 1, data: request("c-9", "chat.send", #"{"text":"hello"}"#))
+        let mark = sent.count
+        let a = "h1.1.c-9"
+        g.deliver(v2Frame: try! JSONEncoder().encode(Output(commandId: a, payload: OutputPayload(stream: "x", done: true))), internalCommandId: a)
+        let events = sent[mark...].filter { $0.0 == 1 && $0.1["type"] as? String == "event" }
+        #expect(events.compactMap { $0.1["rev"] as? Int } == [1, 2])
+        #expect(g.rev(for: 1) == 2 && g.rev(for: 2) == 0, "B is untouched")
+        await g.receive(session: 1, data: request("c-p2", "host.ping"))
+        #expect(last["rev"] as? Int == 2)
+        await g.receive(session: 2, data: request("c-p3", "host.ping"))
+        #expect(sent.last?.0 == 2 && last["rev"] as? Int == 0)
     }
 
     @Test("cancel ends the turn as a cancelled done")
