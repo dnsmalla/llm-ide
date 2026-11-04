@@ -4,7 +4,7 @@ import type { ProjectPaths } from "../host.ts";
 import { PATHS_TEXT, folderNote, projectError, syncProviderFor } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { createHostFs } from "../../explorer/fs.ts";
-import { projectIdFor } from "../../docgen/docs-api.ts";
+import { call } from "../core-api.ts";
 import { decodeExportBundle, runProjectExport } from "../export-project.ts";
 import { Button, ErrorText, NeedsHost } from "../ui.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
@@ -71,8 +71,8 @@ export default function PathsSection() {
     setError(null);
     setExportNotice(null);
     try {
-      const id = await projectIdFor(data.root);
-      const raw = await client.request("GET", `/kb/project/${encodeURIComponent(id)}/export`);
+      const id = data.id;
+      const raw = await call(client, "GET", `/kb/project/${encodeURIComponent(id)}/export`);
       const bundle = decodeExportBundle(raw);
       if (!bundle) throw new Error("The core returned an export bundle this app could not read.");
       const fs = createHostFs();

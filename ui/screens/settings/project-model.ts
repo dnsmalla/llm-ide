@@ -19,7 +19,7 @@ export function safeRelativePath(v: unknown): string | null {
 }
 
 export function decodePaths(v: unknown): ProjectPaths | null {
-  if (!isRecord(v) || typeof v.root !== "string" || !Array.isArray(v.folders)) return null;
+  if (!isRecord(v) || typeof v.root !== "string" || typeof v.id !== "string" || !Array.isArray(v.folders)) return null;
   const folders: ProjectFolder[] = [];
   for (const row of v.folders) {
     if (!isRecord(row)) continue;
@@ -28,7 +28,7 @@ export function decodePaths(v: unknown): ProjectPaths | null {
     folders.push({ name, exists: row.exists });
     if (folders.length >= 50) break;
   }
-  return { root: clean(v.root, 4096), folders };
+  return { root: clean(v.root, 4096), id: clean(v.id, 200), folders };
 }
 
 export function decodeMemory(v: unknown): ProjectMemory | null {

@@ -29,6 +29,8 @@ test("decode drops malformed rows and caps", () => {
   assert.equal(b?.meetings.length, 1);
   assert.equal(b?.plans[0]?.tasks.length, 1);
   assert.equal(decodeExportBundle(null), null);
+  assert.equal(decodeExportBundle({ status: 200, body: { meetings: [], plans: [] } }), null, "the HTTP envelope is not a bundle");
+  assert.equal(decodeExportBundle({ meetings: [] }), null, "both arrays are required");
 });
 
 test("slug keeps Unicode and strips unsafe characters", () => {
@@ -60,10 +62,14 @@ test("README badge only touches an LLM-IDE managed README", () => {
 
 class FakeFs {
   files = new Map<string, string>();
-  dirs = new Set<string>();
+  dirs = new Set<string>([""]);
   writes: string[] = [];
   async create(path: string, kind: string) {
-    if (kind === "dir") { if (this.dirs.has(path)) throw { code: "exists", message: "exists" }; this.dirs.add(path); }
+    if (kind !== "dir") return;
+    const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (!this.dirs.has(parent)) throw { code: "not_found", message: "parent missing" };
+    if (this.dirs.has(path)) throw { code: "exists", message: "exists" };
+    this.dirs.add(path);
   }
   async write(path: string, text: string) { this.files.set(path, text); this.writes.push(path); }
   async read(path: string) { return { status: this.files.has(path) ? "ok" : "not_found", text: this.files.get(path) ?? null }; }
@@ -87,8 +93,25 @@ test("the writer produces meetings, plans, index, badge and sync last", async ()
   assert.match(fs.files.get("system/sync.json")!, /"plansExported": 1/);
 });
 
+test("a full export with no meetings still writes a complete empty index and sync", async () => {
+  const fs = new FakeFs();
+  const r = await runProjectExport({ bundle: { exportedAt: "", meetings: [], plans: [] }, projectId: "p", fs: fs as unknown as FsApi, nowIso: NOW });
+  assert.equal(r.meetings, 0);
+  assert.match(fs.files.get("source/_index.json")!, /"count": 0/);
+  assert.equal(fs.writes.at(-1), "system/sync.json");
+});
+
+test("bad dates fall back to the 0000 folder instead of rolling over", async () => {
+  const fs = new FakeFs();
+  const bad = { ...bundle, meetings: [{ ...bundle.meetings[0]!, date: "2026-02-30" }] };
+  await runProjectExport({ bundle: bad, projectId: "p", fs: fs as unknown as FsApi, nowIso: NOW });
+  assert.ok([...fs.files.keys()].some((p) => p.startsWith("source/meetings/0000/00/0000-00-00-")));
+});
+
 test("plans-only writes no meetings or sync and removes a superseded id file", async () => {
   const fs = new FakeFs();
+  fs.dirs.add("llm-doc");
+  fs.dirs.add("llm-doc/plans");
   fs.files.set("llm-doc/plans/2020-01-01-old-title-00004321.md", "old");
   const r = await runProjectExport({ bundle, projectId: "p123", fs: fs as unknown as FsApi, nowIso: NOW, plansOnly: true });
   assert.equal(r.plans, 1);

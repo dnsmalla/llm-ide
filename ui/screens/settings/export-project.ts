@@ -29,7 +29,7 @@ const strings = (v: unknown, max: number): string[] => (Array.isArray(v) ? v.fil
 
 /** Defensive decode of GET /kb/project/:id/export. Bad rows are dropped; a non-object body returns null. */
 export function decodeExportBundle(raw: unknown): ExportBundle | null {
-  if (!isRecord(raw)) return null;
+  if (!isRecord(raw) || !Array.isArray(raw.meetings) || !Array.isArray(raw.plans)) return null;
   const meetings: ExportMeeting[] = [];
   for (const m of Array.isArray(raw.meetings) ? raw.meetings : []) {
     if (!isRecord(m) || typeof m.id !== "string" || !m.id) continue;
@@ -64,7 +64,11 @@ export function decodeExportBundle(raw: unknown): ExportBundle | null {
 
 const yaml = (s: string): string => `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t")}"`;
 const escapeMd = (s: string): string => s.replace(/[\\`*_{}[\]()#+!|]/g, (c) => `\\${c}`);
-const longestBackticks = (s: string): number => Math.max(0, ...Array.from(s.matchAll(/`+/g), (m) => m[0].length));
+function longestBackticks(s: string): number {
+  let max = 0, cur = 0;
+  for (const c of s) { if (c === "`") { cur += 1; if (cur > max) max = cur; } else cur = 0; }
+  return max;
+}
 
 /** Lowercase, whitespace -> hyphen, unsafe/control characters dropped, Unicode letters kept. */
 export function slugify(title: string, id: string, maxLength = 40): string {
@@ -73,12 +77,16 @@ export function slugify(title: string, id: string, maxLength = 40): string {
   s = s.replace(/-+/g, "-").replace(/^-|-$/g, "");
   if (Array.from(s).length > maxLength) s = Array.from(s).slice(0, maxLength).join("").replace(/-+$/g, "");
   if (!s) s = "untitled";
-  return `${s}-${id.slice(-8)}`;
+  const suffix = Array.from(id.slice(-8)).filter((c) => !/[/\\:*?"<>|]/.test(c) && !/[\u0000-\u001f\u007f]/.test(c)).join("") || "unknown";
+  return `${s}-${suffix}`;
 }
 
 function validDate(iso: string | null): Date | null {
-  const d = iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`) : null;
-  return d && Number.isFinite(d.getTime()) ? d : null;
+  if (!iso) return null;
+  const text = iso.slice(0, 10);
+  const d = new Date(`${text}T00:00:00Z`);
+  // Reject rollovers such as 2026-02-30.
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === text ? d : null;
 }
 function datePrefix(iso: string | null): string {
   const d = validDate(iso);
@@ -168,7 +176,11 @@ export function addReadmeBadge(existing: string | null, nowIso: string, meetings
 }
 
 async function ensureDir(fs: FsApi, path: string): Promise<void> {
-  try { await fs.create(path, "dir"); } catch (e) { if ((e as { code?: unknown }).code !== "exists") throw e; }
+  let current = "";
+  for (const part of path.split("/").filter(Boolean)) {
+    current = current ? `${current}/${part}` : part;
+    try { await fs.create(current, "dir"); } catch (e) { if ((e as { code?: unknown }).code !== "exists") throw e; }
+  }
 }
 
 async function writeFile(fs: FsApi, path: string, text: string): Promise<void> {
@@ -211,8 +223,10 @@ export async function runProjectExport({ bundle, projectId, fs, nowIso, plansOnl
   }
   await ensureDir(fs, "source");
   await writeFile(fs, index.path, index.text);
-  const readme = addReadmeBadge(await readMaybe(fs, "README.md"), nowIso, bundle.meetings.length);
-  if (readme !== null) await writeFile(fs, "README.md", readme);
+  try {
+    const readme = addReadmeBadge(await readMaybe(fs, "README.md"), nowIso, bundle.meetings.length);
+    if (readme !== null) await writeFile(fs, "README.md", readme);
+  } catch { /* the Mac treats the badge as best-effort and still writes sync.json */ }
   await ensureDir(fs, "system");
   const sync = { exportedAt: nowIso, meetingsExported: bundle.meetings.length, plansExported: plans, backendExportedAt: bundle.exportedAt };
   await writeFile(fs, "system/sync.json", `${JSON.stringify(sync, null, 2)}\n`);

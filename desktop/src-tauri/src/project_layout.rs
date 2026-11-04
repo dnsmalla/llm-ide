@@ -38,6 +38,8 @@ pub struct Folder {
 #[serde(rename_all = "camelCase")]
 pub struct Paths {
     pub root: String,
+    /// The KB project id from system/project.json (the id meetings/plans are tagged with).
+    pub id: String,
     pub folders: Vec<Folder>,
 }
 
@@ -131,7 +133,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 #[tauri::command]
 pub async fn project_paths() -> Result<Paths, String> {
     let root = active_root()?;
-    Ok(blocking(move || Paths { root: root.to_string_lossy().into_owned(), folders: folders(&root) }).await)
+    Ok(blocking(move || Paths { root: root.to_string_lossy().into_owned(), id: project_meta(&root).id, folders: folders(&root) }).await)
 }
 
 #[tauri::command]

@@ -13,6 +13,7 @@ test("safeRelativePath: project-relative only (no absolute, drive, .., controls)
 test("paths: folders decoded, invalid rows dropped, text cleaned", () => {
   const got = decodePaths({
     root: "/Users/a/proj",
+    id: "proj-1",
     folders: [
       { name: "system", exists: true },
       { name: "llm-doc/plans", exists: false },
@@ -21,10 +22,10 @@ test("paths: folders decoded, invalid rows dropped, text cleaned", () => {
       null,
     ],
   });
-  assert.deepEqual(got, { root: "/Users/a/proj", folders: [{ name: "system", exists: true }, { name: "llm-doc/plans", exists: false }] });
+  assert.deepEqual(got, { root: "/Users/a/proj", id: "proj-1", folders: [{ name: "system", exists: true }, { name: "llm-doc/plans", exists: false }] });
   assert.equal(decodePaths({ root: "/p" }), null);
   assert.equal(decodePaths(null), null);
-  const many = decodePaths({ root: "/p", folders: Array.from({ length: 100 }, (_, i) => ({ name: `d${i}`, exists: true })) });
+  const many = decodePaths({ root: "/p", id: "p", folders: Array.from({ length: 100 }, (_, i) => ({ name: `d${i}`, exists: true })) });
   assert.equal(many?.folders.length, 50);
 });
 

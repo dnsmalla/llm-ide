@@ -57,6 +57,8 @@ export interface ProjectFolder {
 
 export interface ProjectPaths {
   root: string;
+  /** The KB project id from system/project.json (not the DocGen hash). */
+  id: string;
   folders: ProjectFolder[];
 }
 
