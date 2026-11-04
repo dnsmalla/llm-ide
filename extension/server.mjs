@@ -314,7 +314,7 @@ const HOST = config.host;
 //   v104 — iCal feed connector, additive (docs/spec/calendar-ical.md, contract schema/http/calendar-ical.schema.json): five routes under /kb/calendar-ical/* (POST+GET sources, DELETE sources/:id, POST sync, POST options). Read-only Google Calendar via the "Secret address in iCal format" (no OAuth, no Google Cloud project): the URL is a bearer secret, stored only in the vault (key ical.src.<id>.url, not settable through /auth/me/secrets), never returned, logged or audited. Fetch through the pinned fetch, https:443, host allowlist calendar.google.com (+ operator LLMIDE_ICAL_HOSTS), same-host redirects only (2 hops), 5 MiB streamed cap, 20 s deadline, conditional GET. Safe in-repo ICS parser with bounded RRULE expansion. Migration 0060 (ical_sources; connector_sync_state accepts connector 'ical'). No existing route or field changed.
 //   v105 — issues paging and fields (additive; no new route). GET /kb/issues pages in SQL: `offset` (default 0; negative, NaN or empty is 0) with `limit` (default 20, capped at 100), ordered updatedAt descending then id; the answer gains `total` (matches after the provider, repo and state filters), `hasMore` and `nextOffset` (null when there is no further page). Each issue gains `milestone` ({ title, dueOn } or null) and `assignees` (logins, [] when none), and `url` now carries the stored issue URL (it was always empty). An absent offset is the first page, as before, in the new order. The GitHub import (POST /kb/connect-github-issues) pages up to 20 pages of 100 per run, stops at 2 000 rows or 60 s and answers `truncated` and `pages` in addition to the existing fields. Spec docs/spec/api-server.md section 7j.
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
-//   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). POST and DELETE ride the 'kbWrite' rate bucket.
+//   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 const SERVER_API_VERSION = 107;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
@@ -526,6 +526,7 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/calendar-ical/sources') return 'kbWrite';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
+    if (path.startsWith('/host-api/')) return 'kbWrite';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —
@@ -575,8 +576,8 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
-  if (url.startsWith('/bus/'))           return 'kbWrite';
-  if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint        // command bus: enqueue, cancel, approve, deny
+  if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
+  if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).
   if (['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair'].some((p) => url === `/auth/me/extensions/${p}`)) return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
@@ -775,7 +776,11 @@ const server = http.createServer(async (req, res) => {
 
   // Host API v1 pairing PIN and devices (/host-api/*): JWT + bus host proof; 404 HOST_API_DISABLED without LLMIDE_HOST_API_DEV.
   if (isHostApiRoute(req.url || '')) {
-    await handleHostApiRoute(req, res, { hostApi: () => hostApi });
+    try {
+      await handleHostApiRoute(req, res, { hostApi: () => hostApi });
+    } catch (err) {
+      sendError(res, err, { logger: reqLog });
+    }
     return;
   }
 

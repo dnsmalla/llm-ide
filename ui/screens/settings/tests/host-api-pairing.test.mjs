@@ -40,10 +40,26 @@ before(async () => {
 
 test("the card hides on HOST_API_DISABLED and on a missing host proof, and shows the list otherwise", async () => {
   assert.equal(await m.loadDevices(fake({ "GET /host-api/devices": reply("get-host-api-devices-404-disabled") })), null);
-  assert.equal(await m.loadDevices(fake({ "GET /host-api/devices": reply("get-host-api-devices-403-no-proof") })), null);
+  const noProof = fake({ "GET /host-api/devices": reply("get-host-api-devices-403-no-proof") });
+  assert.equal(await m.loadDevices(noProof, { sleep: async () => {} }), null);
+  assert.equal(noProof.calls.length, m.PROOF_RETRY_MS.length + 1, "retried while the proof may still arrive");
+  const disabled = fake({ "GET /host-api/devices": reply("get-host-api-devices-404-disabled") });
+  await m.loadDevices(disabled, { sleep: async () => {} });
+  assert.equal(disabled.calls.length, 1, "a disabled core is not retried");
   const list = await m.loadDevices(fake({ "GET /host-api/devices": reply("get-host-api-devices-200") }));
   assert.deepEqual(list.map((d) => d.name), ["iPhone"]);
   await assert.rejects(m.loadDevices(fake({})), (e) => e.code === "NOT_FOUND", "any other refusal is an error, not a hidden card");
+});
+
+test("a proof that arrives after the first probe still shows the card", async () => {
+  let n = 0;
+  const slept = [];
+  const client = { calls: [], async request() { n++; return n < 3 ? reply("get-host-api-devices-403-no-proof") : reply("get-host-api-devices-200"); } };
+  const list = await m.loadDevices(client, { sleep: async (ms) => { slept.push(ms); } });
+  assert.deepEqual(list.map((d) => d.name), ["iPhone"]);
+  assert.deepEqual(slept, m.PROOF_RETRY_MS.slice(0, 2));
+  n = 0;
+  assert.equal(await m.loadDevices(client, { sleep: async () => {}, alive: () => false }), null, "an unmounted card stops probing");
 });
 
 const view = (over) => renderToStaticMarkup(h(m.HostApiPairingView, {

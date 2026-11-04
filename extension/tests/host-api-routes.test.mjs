@@ -113,3 +113,14 @@ test('a malformed device id is 400; the PIN route without a listener is 503', as
   assert.equal(r.status, 503);
   assert.equal(r.body.error.code, 'HOST_API_UNAVAILABLE');
 });
+
+// Last: it breaks the device table for the rest of this file.
+test('a store failure answers a JSON 500, never a hung request', async () => {
+  state.userId = user();
+  kb.getDb().exec('DROP TABLE host_api_devices');
+  for (const [m, p] of [['GET', '/host-api/devices'], ['DELETE', '/host-api/devices/h1-x']]) {
+    const r = await call(m, p);
+    assert.equal(r.status, 500);
+    assert.equal(typeof r.body.error.code, 'string');
+  }
+});

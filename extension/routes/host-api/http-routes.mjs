@@ -9,6 +9,7 @@
 // Order: proof first (403 HOST_PROOF_REQUIRED), then the flag (404 HOST_API_DISABLED), so an unproven caller learns
 // nothing about the flag. The PIN is returned once and never logged.
 import { send } from '../../server/route-http.mjs';
+import { sendError } from '../../core/errors.mjs';
 import { config } from '../../core/config.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { mintPin } from './pin.mjs';
@@ -23,7 +24,12 @@ export function isHostApiRoute(url) {
 }
 
 /** `hostApi()` returns the running { gateway, listener } or null; `enabled` defaults to config.hostApiDev (test seam). */
-export async function handleHostApiRoute(req, res, { hostApi = () => null, enabled = config.hostApiDev, env = process.env } = {}) {
+export async function handleHostApiRoute(req, res, opts = {}) {
+  // A store failure (listDevices, revokeDevice) must still answer: the standard JSON 500 envelope.
+  try { return await route(req, res, opts); } catch (err) { if (!res.headersSent) sendError(res, err); else res.end(); return true; }
+}
+
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiDev, env = process.env }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');

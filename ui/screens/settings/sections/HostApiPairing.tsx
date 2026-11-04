@@ -5,7 +5,7 @@
 // the card then renders nothing. The PIN lives in component state only: never persisted, logged or sent anywhere.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, call, type CoreClient } from "../core-api.ts";
-import { useEnv } from "../context.tsx";
+import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 
@@ -29,13 +29,22 @@ export function decodeDevices(v: unknown): HostDevice[] {
     && typeof d.pairedAt === "number" && typeof d.lastSeenAt === "number");
 }
 
+/** Retry delays while the core answers HOST_PROOF_REQUIRED: the shell fetches the bus proof from the host
+ *  asynchronously after the core is ready, so the first probe can race it. HOST_API_DISABLED never retries. */
+export const PROOF_RETRY_MS: readonly number[] = [300, 1000, 2000, 4000];
+
 /** The paired devices, or null when this core does not serve the Host API to this UI (the card hides). */
-export async function loadDevices(client: CoreClient): Promise<HostDevice[] | null> {
-  try {
-    return decodeDevices(await call(client, "GET", "/host-api/devices"));
-  } catch (e) {
-    if (e instanceof ApiError && HIDDEN.has(e.code)) return null;
-    throw e;
+export async function loadDevices(client: CoreClient, { retryMs = PROOF_RETRY_MS, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), alive = () => true }: {
+  retryMs?: readonly number[]; sleep?: (ms: number) => Promise<void>; alive?: () => boolean;
+} = {}): Promise<HostDevice[] | null> {
+  for (let i = 0; ; i++) {
+    try {
+      return decodeDevices(await call(client, "GET", "/host-api/devices"));
+    } catch (e) {
+      if (!(e instanceof ApiError) || !HIDDEN.has(e.code)) throw e;
+      if (e.code !== "HOST_PROOF_REQUIRED" || i >= retryMs.length || !alive()) return null;
+    }
+    await sleep(retryMs[i]);
   }
 }
 
@@ -121,11 +130,17 @@ export default function HostApiPairing(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const refresh = useCallback(async () => {
     // A failed first load keeps the card hidden; a later failure keeps the last list and shows why.
-    try { setDevices(await loadDevices(client)); } catch (e) { setError(describeError(e)); }
+    try {
+      const d = await loadDevices(client, { alive: () => alive.current });
+      if (alive.current) setDevices(d);
+    } catch (e) { if (alive.current) setError(describeError(e)); }
   }, [client]);
-  useEffect(() => { void refresh(); }, [refresh]);
+  // On mount and on window focus: a core restarted with the flag, or a proof that arrived late, shows the card.
+  useRefreshOnFocus(() => void refresh());
   useEffect(() => {
     if (!pin) return;
     const t = window.setInterval(() => {
