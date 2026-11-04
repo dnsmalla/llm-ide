@@ -57,12 +57,15 @@ export function messagesOf(lines, limit) {
 export function createGateway(overrides) {
   const deps = { ...defaultDeps(), ...overrides };
   const sessions = new Map(); // handle -> { state, peer, num, queue, timer }
-  const owned = new Map();    // internal id -> { session, external, cancelled, userId, chatSessionId, translator, sdkSessionId, open }
+  // internal id -> { session, external, cancelRequested, started, zombie, userId, chatSessionId, translator, sdkSessionId, open }.
+  // A closed session's in-flight commands stay as zombies (nothing sent) until their turn settles, so a cancel
+  // requested before the turn held the engine lock can be re-issued when its init arrives.
+  const owned = new Map();
   const creatingQuickChat = new Map(); // userId -> Promise<chatSessionId>
   const throttle = new PairingThrottle();
   let rev = 0;
   let nextNum = 0;
-  let lastCapabilities = [];
+  let lastCapabilities = deps.capabilities();
 
   const fail = (s, replyTo, code, message, extra = {}) => deps.send(s, errorFrame({ replyTo, code, message, rev, ...extra }));
   function respond(s, replyTo, command, result) {
@@ -104,11 +107,18 @@ export function createGateway(overrides) {
     const entry = sessions.get(session);
     if (entry) clearTimeout(entry.timer);
     sessions.delete(session);
-    for (const [id, o] of owned) {
-      if (o.session !== session) continue;
-      owned.delete(id);
-      cancelTurn(o);
+    for (const o of owned.values()) {
+      if (o.session !== session || o.zombie) continue;
+      o.zombie = true;
+      requestCancel(o);
     }
+  }
+
+  // cancelChatTurn is chat-wide: call it only for a command that holds the engine lock (its init arrived), so a
+  // not-yet-started command never aborts another session's running turn on the same chat.
+  function requestCancel(o) {
+    o.cancelRequested = true;
+    if (o.started) cancelTurn(o);
   }
 
   function cancelTurn(o) {
@@ -145,7 +155,9 @@ export function createGateway(overrides) {
     if (!entry) return Promise.resolve();
     entry.queue = entry.queue.then(() => handle(session, text)).catch((e) => {
       deps.log(`Host API v1 frame handler failed (${e?.code ?? 'error'})`);
-      if (sessions.has(session)) fail(session, null, 'internal', 'This computer could not handle that request.');
+      let replyTo = null;
+      try { replyTo = JSON.parse(text)?.id ?? null; } catch { /* no id to reply to */ }
+      if (sessions.has(session)) fail(session, typeof replyTo === 'string' ? replyTo : null, 'internal', 'This computer could not handle that request.');
     });
     return entry.queue;
   }
@@ -179,13 +191,13 @@ export function createGateway(overrides) {
 
   function startTurn(s, entry, id, p, chatSessionId) {
     const iid = internalId(entry.num, id);
-    const o = { session: s, external: id, cancelled: false, userId: entry.state.userId, chatSessionId,
+    const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, chatSessionId,
       translator: createTranslator({ external: id }), sdkSessionId: null, open: new Set() };
     owned.set(iid, o);
     respond(s, id, 'chat.send', { accepted: true, requestId: id });
     const push = (ev) => {
-      if (owned.get(iid) !== o) return;
-      const t = o.translator.push(ev, { cancelledByClient: o.cancelled });
+      if (owned.get(iid) !== o || o.zombie) return;
+      const t = o.translator.push(ev, { cancelledByClient: o.cancelRequested });
       if (t.terminal) owned.delete(iid);
       for (const e of t.events) sendEvent(s, e.command, e.payload, id);
     };
@@ -193,10 +205,17 @@ export function createGateway(overrides) {
     const onEvent = (ev) => {
       try {
         if (owned.get(iid) !== o) return;
-        if (ev?.type === 'init' && typeof ev.sessionId === 'string' && ev.sessionId) o.sdkSessionId = ev.sessionId;
+        // The engine registers decisions under the latest session_id its stream reported (engine.mjs), as here.
+        if (typeof ev?.sessionId === 'string' && ev.sessionId) o.sdkSessionId = ev.sessionId;
+        if (ev?.type === 'init' && !o.started) {
+          o.started = true; // init arrives once the turn holds the lock and its abort is registered
+          if (o.cancelRequested) cancelTurn(o);
+        }
+        if (o.zombie) return;
         if (ev?.type === 'approval_request' && typeof ev.requestId === 'string') o.open.add(ev.requestId);
         if (ev?.type === 'approval_resolved') o.open.delete(ev.requestId);
-        push(ev);
+        // Raw engine error text may carry internals; only the gateway's known refusal codes keep theirs.
+        push(ev?.type === 'error' && !KNOWN.has(ev.code) ? { ...ev, message: 'The turn failed on this computer.' } : ev);
       } catch (e) { deps.log(`Host API v1 engine event ${ev?.type ?? '?'} dropped (${e?.code ?? 'error'})`); }
     };
     Promise.resolve()
@@ -211,7 +230,8 @@ export function createGateway(overrides) {
         if (code === 'SESSION_TOKEN_LIMIT' && Number.isFinite(det?.used) && Number.isFinite(det?.limit)) message += ` (${det.used} of ${det.limit} tokens used)`;
         push({ type: 'error', message, retryable: RETRYABLE.has(code) });
       })
-      .catch((e) => deps.log(`Host API v1 turn end failed (${e?.code ?? 'error'})`));
+      .catch((e) => deps.log(`Host API v1 turn end failed (${e?.code ?? 'error'})`))
+      .finally(() => { if (owned.get(iid) === o) owned.delete(iid); });
   }
 
   async function answer(s, entry, id, p, action, extra) {
@@ -307,11 +327,8 @@ export function createGateway(overrides) {
         return startTurn(s, entry, id, p, chatSessionId);
       }
       case 'chat.cancel': {
-        const mine = [...owned.values()].filter((o) => o.session === s);
-        for (const o of mine) {
-          o.cancelled = true;
-          cancelTurn(o);
-        }
+        const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);
+        for (const o of mine) requestCancel(o);
         return respond(s, id, command, { cancelled: mine.length > 0 });
       }
       case 'chat.history.clear': {

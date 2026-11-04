@@ -8,7 +8,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false } = {}) {
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], toolApprovals, pending: [] };
   const tokens = new Map(); // token -> { userId, deviceId }
   let n = 0;
@@ -29,10 +29,10 @@ function harness({ toolApprovals = false, chatClear = false, hold = false } = {}
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
     devices: t.devices,
     quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => 'chat-1' },
-    history: async () => [{ role: 'user', content: 'hi' }, { role: 'tool', content: 'x' }, { role: 'assistant', content: 'yo' }],
+    history: history ?? (async () => [{ role: 'user', content: 'hi' }, { role: 'tool', content: 'x' }, { role: 'assistant', content: 'yo' }]),
     turn: (args) => {
       t.turns.push(args);
-      args.onEvent({ type: 'init', sessionId: 'sdk-1' });
+      if (!skipInit(t.turns.length - 1)) args.onEvent({ type: 'init', sessionId: 'sdk-1' });
       if (hold) return new Promise((resolve) => t.pending.push(resolve));
       args.onEvent({ type: 'delta', text: 'hi' });
       args.onEvent({ type: 'result', subtype: 'success' });
@@ -164,6 +164,9 @@ test('toolApprovals.answer needs its capability; with it, allow_once is an allow
   await t.paired(s);
   await t.g.receive(s, req('c-t', 'toolApprovals.answer', { requestId: 'r2', commandId: 'c-9', decision: 'allow_once' }));
   assert.equal(t.lastError(), 'capability_unavailable');
+  const before = t.sent.length;
+  t.g.capabilitiesChanged();
+  assert.equal(t.sent.length, before, 'no broadcast without a real change');
   t.toolApprovals = true;
   t.g.capabilitiesChanged();
   assert.equal(t.last().command, 'host.capabilities');
@@ -315,4 +318,68 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
   await g2.receive(s3, req('c-1', 'chat.send', { text: 'a' }));
   await flush();
   assert.equal(thrown, null);
+});
+
+test('a session closed before init re-issues the cancel when init arrives', async () => {
+  const t = harness({ hold: true, skipInit: () => true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  t.g.closed(s);
+  assert.deepEqual(t.cancelled, [], 'nothing holds the engine lock yet');
+  const before = t.sent.length;
+  t.turns[0].onEvent({ type: 'init', sessionId: 'sdk-1' });
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  t.turns[0].onEvent({ type: 'delta', text: 'late' });
+  t.pending[0]();
+  await flush();
+  assert.equal(t.sent.length, before, 'a closed session gets nothing');
+});
+
+test('chat.cancel before init aborts the turn at init and ends it cancelled', async () => {
+  const t = harness({ hold: true, skipInit: () => true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  await t.g.receive(s, req('c-x', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: true });
+  assert.deepEqual(t.cancelled, []);
+  t.turns[0].onEvent({ type: 'init', sessionId: 'sdk-1' });
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  t.pending[0]();
+  await flush();
+  assert.equal(t.last().command, 'chat.done');
+  assert.deepEqual(t.last().payload, { requestId: 'c-9', stopReason: 'cancelled' });
+});
+
+test('cancelling a not-started send never aborts another session\'s running turn on the same chat', async () => {
+  const t = harness({ hold: true, skipInit: (i) => i === 1 });
+  const b = { n: 'B' };
+  const a = { n: 'A' };
+  await t.paired(b);
+  await t.paired(a);
+  await t.g.receive(b, req('c-b', 'chat.send', { text: 'b' }));
+  await t.g.receive(a, req('c-a', 'chat.send', { text: 'a' }));
+  await t.g.receive(a, req('c-x', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: true });
+  assert.deepEqual(t.cancelled, []);
+});
+
+test('an in-stream engine error with an unknown code sends a generic message', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
+  t.turns[0].onEvent({ type: 'error', code: 'ENGINE_ERROR', message: 'spawn /secret/path ENOENT', retryable: false });
+  assert.equal(t.last().command, 'chat.error');
+  assert.equal(t.last().payload.message, 'The turn failed on this computer.');
+});
+
+test('a throwing handler answers internal with replyTo', async () => {
+  const t = harness({ history: async () => { throw new Error('db gone'); } });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-s', 'chat.snapshot'));
+  assert.equal(t.lastError(), 'internal');
+  assert.equal(t.last().replyTo, 'c-s');
 });
