@@ -64,7 +64,7 @@ The spec has six independently deliverable subsystems: contract, Mac adapter, de
 **Interfaces:**
 - Produces: `validate(schema, value, { defs }, path)` usage for the envelope; fixtures consumed by Task 4's conformance script.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `extension/tests/host-api-contract.test.mjs`:
 
@@ -93,13 +93,13 @@ test("host-api envelope: missing version, bad id and unknown fields fail", () =>
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL with `ENOENT` for `schema/host-api/v1/envelope.schema.json`.
 
-- [ ] **Step 3: Write the schema and fixtures**
+- [x] **Step 3: Write the schema and fixtures**
 
 `envelope.schema.json`:
 
@@ -237,13 +237,13 @@ Fixtures (exact values):
 {"apiVersion":1,"id":"c-1","type":"request","command":"host.ping","payload":{},"ts":1760000000000,"surprise":true}
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: PASS, 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schema/host-api/v1 extension/tests/host-api-contract.test.mjs
@@ -274,7 +274,7 @@ git commit -m "feat(host-api): add the v1 frame envelope and fixtures"
 **Interfaces:**
 - Produces: `commands.json` entries `{ capability, direction, idempotent, v2Tag, request, result }`; Task 4 and Task 5 read this shape.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `extension/tests/host-api-contract.test.mjs`:
 
@@ -295,13 +295,13 @@ test("host-api command registry: host commands have a capability and exact schem
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL with `ENOENT` for `commands.schema.json`.
 
-- [ ] **Step 3: Write the registry and fixtures**
+- [x] **Step 3: Write the registry and fixtures**
 
 `commands.schema.json`:
 
@@ -465,13 +465,13 @@ Fixtures (exact values):
 {"rev":7,"snapshots":{"chat":{"messages":[]}}}
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schema/host-api/v1 extension/tests/host-api-contract.test.mjs
@@ -502,7 +502,7 @@ git commit -m "feat(host-api): add the host command registry"
 **Interfaces:**
 - Produces: `events.schema.json` with one variant per event; command registry adds `chat.*`, `approvals.answer` and `toolApprovals.answer`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append:
 
@@ -518,13 +518,13 @@ test("host-api chat commands and events decode", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL with `ENOENT` for `events.schema.json`.
 
-- [ ] **Step 3: Write the commands and events**
+- [x] **Step 3: Write the commands and events**
 
 Add to `commands.json` (inside `commands`):
 
@@ -673,13 +673,13 @@ Command fixtures:
 {"accepted":true}
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schema/host-api/v1 extension/tests/host-api-contract.test.mjs
@@ -699,7 +699,7 @@ git commit -m "feat(host-api): add chat and approval commands plus events"
 **Interfaces:**
 - Produces: `node scripts/conformance-host-api.mjs` exits `0` on a valid contract and prints one line per check; `make host-api-check`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append:
 
@@ -712,13 +712,13 @@ test("host-api conformance script passes", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL because `scripts/conformance-host-api.mjs` does not exist.
 
-- [ ] **Step 3: Write the script and Make target**
+- [x] **Step 3: Write the script and Make target**
 
 `scripts/conformance-host-api.mjs` must:
 
@@ -796,7 +796,7 @@ Create `fixtures/invalid/bad-command-shape.json` with a request missing `command
 {"apiVersion":1,"id":"c-1","type":"request","payload":{},"ts":1}
 ```
 
-- [ ] **Step 4: Run the test and the gate**
+- [x] **Step 4: Run the test and the gate**
 
 Run:
 
@@ -808,7 +808,7 @@ make host-api-check
 
 Expected: PASS; `conformance-host-api: ok (11 commands)`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/conformance-host-api.mjs schema/host-api/v1/fixtures/invalid/bad-command-shape.json Makefile extension/tests/host-api-contract.test.mjs
@@ -830,7 +830,7 @@ git commit -m "test(host-api): add the contract conformance gate"
 - Produces: `HOST_API_VERSION`, `HOST_API_COMMANDS` and Swift `HostApi.version` / `HostApi.commands`.
 - Consumes: `commands.json`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append:
 
@@ -841,13 +841,13 @@ test("generated Host API constants match the registry", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL because `scripts/generate-host-api.mjs` does not exist.
 
-- [ ] **Step 3: Write the generator**
+- [x] **Step 3: Write the generator**
 
 `scripts/generate-host-api.mjs`:
 
@@ -894,7 +894,7 @@ Run:
 node scripts/generate-host-api.mjs
 ```
 
-- [ ] **Step 4: Wire the drift check and verify**
+- [x] **Step 4: Wire the drift check and verify**
 
 Add to `scripts/conformance-host-api.mjs` before the final error block:
 
@@ -913,7 +913,7 @@ cd extension && node --test --experimental-strip-types tests/host-api-contract.t
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/generate-host-api.mjs extension/routes/host-api/commands.generated.mjs ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift scripts/conformance-host-api.mjs extension/tests/host-api-contract.test.mjs
@@ -931,7 +931,7 @@ git commit -m "feat(host-api): generate Node and Swift command constants"
 **Interfaces:**
 - Produces: a human-readable coverage map; `make host-api-check` was added in Task 4.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append:
 
@@ -942,13 +942,13 @@ test("host-api README lists every command", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd extension && node --test --experimental-strip-types tests/host-api-contract.test.mjs`
 
 Expected: FAIL with `ENOENT` for `README.md`.
 
-- [ ] **Step 3: Write the README**
+- [x] **Step 3: Write the README**
 
 Create `schema/host-api/v1/README.md` with exactly this content:
 
@@ -999,7 +999,7 @@ issues, Self-Heal, generation, usage, activity) are added by later plans using
 the same envelope and registry machinery.
 ```
 
-- [ ] **Step 4: Run the full gate**
+- [x] **Step 4: Run the full gate**
 
 Run:
 
@@ -1012,7 +1012,7 @@ make contract-gates
 
 Expected: PASS. `make contract-gates` now includes `host-api-check`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schema/host-api/v1/README.md scripts/generate-host-api.mjs Makefile extension/tests/host-api-contract.test.mjs
