@@ -1,0 +1,12 @@
+/* Layout only; colours come from --tok-* via the kit. */
+.web-app { display: flex; flex-direction: column; gap: 12px; max-width: 860px; margin: 0 auto; padding: 16px; box-sizing: border-box; min-height: 100vh; color: var(--tok-text, inherit); }
+.web-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.web-header h1 { font-size: 1.1rem; margin: 0; overflow-wrap: anywhere; }
+.web-form { display: flex; flex-direction: column; gap: 8px; }
+.web-form input { padding: 8px; font: inherit; max-width: 100%; box-sizing: border-box; }
+.web-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.web-msg { overflow-wrap: anywhere; white-space: pre-wrap; }
+.web-assistant { white-space: normal; }
+.web-user { align-self: flex-end; max-width: 85%; }
+.web-summary, .web-path { margin: 4px 0; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.web-actions { display: flex; gap: 8px; }

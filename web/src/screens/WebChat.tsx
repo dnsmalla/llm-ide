@@ -1,0 +1,87 @@
+import { useState } from "react";
+import { Chip, StatusBanner } from "@llmide/ui-kit";
+import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
+import { Composer } from "@llmide/screens/chat/Composer.tsx";
+import { QuestionCard } from "@llmide/screens/chat/approvals/QuestionCard.tsx";
+import "@llmide/screens/chat/chat.css";
+import "@llmide/screens/chat/approvals/approvals.css";
+import type { ConnectionState } from "../host-api/connection.ts";
+import type { HostApiCapability } from "../host-api/types.generated.ts";
+import type { ChatState, WebMessage } from "../chat/store.ts";
+import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
+
+export interface WebChatProps {
+  hostName: string;
+  connection: ConnectionState;
+  capabilities: ReadonlySet<HostApiCapability>;
+  state: ChatState;
+  onSend: (text: string) => void;
+  onStop: () => void;
+  onClear: () => void;
+  onForget: () => void;
+  onAnswer: (requestId: string, answers: Record<string, string>) => void;
+  onDecline: (requestId: string) => void;
+  onTool: (requestId: string, decision: "allow_once" | "deny") => void;
+}
+
+const PAGE = 50;
+const openLink = (href: string) => { if (/^https?:\/\//.test(href)) window.open(href, "_blank", "noopener,noreferrer"); };
+
+function chipLabel(c: ConnectionState) {
+  if (c.kind === "ready") return "Connected";
+  if (c.kind === "reconnecting") return `Reconnecting in ${Math.ceil(c.inMs / 1000)} s`;
+  return "Offline";
+}
+
+function Message({ m }: { m: WebMessage }) {
+  if (m.role === "user") return <li className="web-msg web-user">{m.text}</li>;
+  const status = m.status === "streaming" ? "…" : m.status === "cancelled" ? "Stopped." : m.error;
+  return (
+    <li className="web-msg web-assistant">
+      {m.text && <Markdown text={m.text} onOpenLink={openLink} />}
+      {status && <p className="chat-muted">{status}</p>}
+    </li>
+  );
+}
+
+export function WebChat(p: WebChatProps) {
+  const [draft, setDraft] = useState("");
+  const [shown, setShown] = useState(PAGE);
+  const { state } = p;
+  const msgs = state.messages;
+  const visible = msgs.slice(Math.max(0, msgs.length - shown));
+  const ready = p.connection.kind === "ready";
+  const disabledReason = !ready ? "Not connected" : !p.capabilities.has("chat") ? "This host does not serve chat" : null;
+  const questions = state.approvals.filter((a) => a.kind === "question");
+  return (
+    <main className="web-app">
+      <header className="web-header">
+        <h1>{p.hostName}</h1>
+        <Chip label={chipLabel(p.connection)} />
+        <span className="chat-spacer" />
+        {!state.turn && <button type="button" onClick={p.onClear}>Clear history</button>}
+        <button type="button" onClick={p.onForget}>Forget this host</button>
+      </header>
+      {state.notice && <StatusBanner severity="info" message={state.notice} />}
+      {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
+      {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
+      <ul className="web-list" aria-live="polite">{visible.map((m) => <Message key={m.key} m={m} />)}</ul>
+      {state.approvals.map((a) =>
+        a.kind === "question" ? (
+          <div key={a.requestId}>
+            <QuestionCard
+              approval={{ requestId: a.requestId, kind: "AskUserQuestion", questions: a.questions as never }}
+              ui={{ phase: a.submitting ? "submitting" : "idle", error: a.error, shown: "", confirmingRule: false }}
+              position={questions.indexOf(a) + 1} total={questions.length} turnClosed={false}
+              onAnswer={(answers) => p.onAnswer(a.requestId, answers)} onDecline={() => p.onDecline(a.requestId)} />
+            <p className="chat-muted">Declining stops the reply.</p>
+          </div>
+        ) : p.capabilities.has("tool_approvals") ? (
+          <ToolApprovalCard key={a.requestId} approval={a} onDecide={(d) => p.onTool(a.requestId, d)} />
+        ) : null)}
+      <Composer draft={draft} onDraft={setDraft} busy={state.turn !== null} aborting={false} queue={[]}
+        history={msgs.filter((m) => m.role === "user").map((m) => m.text)}
+        onSend={(t) => { p.onSend(t); setDraft(""); }} onStop={p.onStop} onDropQueued={() => {}} disabledReason={disabledReason} />
+    </main>
+  );
+}
