@@ -2,7 +2,8 @@ import Foundation
 
 /// Host API v1 over one WebSocket (spec "Handshake", "Reconnect after iOS suspends"). It owns hello, auth,
 /// request correlation, a ping watchdog and `rev`-gap detection. It has no reconnect loop: the app's
-/// existing backoff calls `connect` again with the token.
+/// existing backoff calls `connect` again with the token. The owner must call `close()` when done; a client
+/// released without it still cancels its socket in `deinit`, but its owner gets no event.
 @MainActor
 public final class HostApiV1Client: HostConnection {
     public struct Config: Sendable {
@@ -45,6 +46,12 @@ public final class HostApiV1Client: HostConnection {
     /// No reply in time, or the socket failed. It never leaves the client: `send` turns it into `host_unreachable`.
     private struct Silence: Error {}
 
+    nonisolated deinit {
+        readTask?.cancel()
+        pingTask?.cancel()
+        socket?.cancel()
+    }
+
     public init(config: Config, makeSocket: @escaping () -> HostApiSocket) {
         self.config = config
         self.makeSocket = makeSocket
@@ -74,12 +81,12 @@ public final class HostApiV1Client: HostConnection {
         } catch {
             return finish(negotiation.handle(.silent), gen)
         }
+        capabilities = Set(hello.capabilities)
         switch negotiation.handle(.helloAnswered(apiVersion: hello.apiVersion, requiresAuth: hello.requiresAuth)) {
         case .sendAuth: break
         case .ready: return ready(hello, token: nil, gen)
         case let other: return finish(other, gen)
         }
-        capabilities = Set(hello.capabilities)
         do {
             switch credential {
             case .pin(let pin):
@@ -121,6 +128,13 @@ public final class HostApiV1Client: HostConnection {
 
     // MARK: - Internals
 
+    /// A Config value as a sleep: NaN or negative takes `default`, anything over a day is a day, so
+    /// `UInt64(_:)` can never trap.
+    private nonisolated static func nanoseconds(_ seconds: TimeInterval, default fallback: TimeInterval) -> UInt64 {
+        let s = seconds.isNaN || seconds < 0 ? fallback : min(seconds, 86_400)
+        return UInt64(s * 1_000_000_000)
+    }
+
     private func ready(_ hello: HostApiHostHelloResult, token: String?, _ gen: Int) -> ConnectOutcome {
         guard gen == generation, socket != nil else { return Self.superseded }
         state = .connected
@@ -151,6 +165,7 @@ public final class HostApiV1Client: HostConnection {
         pending.removeAll()
         for (_, p) in waiting { p.continuation.resume(throwing: Silence()) }
         revs.reset()
+        capabilities = []
         state = .disconnected
     }
 
@@ -171,7 +186,7 @@ public final class HostApiV1Client: HostConnection {
                 do { try await socket.send(frame) } catch { self?.resolve(id, mine, gen, throwing: Silence()) }
             }
             Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: Self.nanoseconds(timeout, default: 15))
                 self?.resolve(id, mine, gen, throwing: Silence())
             }
         }
@@ -197,7 +212,7 @@ public final class HostApiV1Client: HostConnection {
     private func startPing(generation gen: Int) {
         pingTask = Task { [weak self] in
             while true {
-                try? await Task.sleep(nanoseconds: UInt64((self?.config.pingInterval ?? 10) * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: Self.nanoseconds(self?.config.pingInterval ?? 10, default: 10))
                 guard let self, gen == self.generation, !Task.isCancelled else { return }
                 do { _ = try await self.request(.hostPing, HostApiHostPingRequest(), timeout: self.config.requestTimeout) }
                 catch is Silence { self.socketEnded(gen); return }

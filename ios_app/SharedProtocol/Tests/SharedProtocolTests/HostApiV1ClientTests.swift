@@ -31,7 +31,9 @@ final class FakeHostSocket: HostApiSocket, @unchecked Sendable {
     }
     func push(_ frame: Data) { continuation.yield(frame) }
     func fail() { continuation.finish(throwing: URLError(.networkConnectionLost)) }
-    func cancel() { continuation.finish() }
+    private var _cancelled = false
+    var cancelled: Bool { lock.withLock { _cancelled } }
+    func cancel() { lock.withLock { _cancelled = true }; continuation.finish() }
 }
 
 @MainActor
@@ -211,6 +213,68 @@ struct HostApiV1ClientTests {
             return []
         }
         _ = try await c.send(.hostPing, HostApiHostPingRequest(), id: "c-r", as: HostApiHostPingResult.self)
+    }
+
+    @Test("a no-auth hello serves its capabilities; teardown never leaves a stale set")
+    func capabilitiesFresh() async {
+        let open = HostApiHostHelloResult(apiVersion: 1, apiVersions: [1], capabilities: ["host"],
+                                          hostKind: "mac", hostName: "Open Mac", protocolVersion: 3, requiresAuth: false)
+        socket.reply = { _, id in [try! HostApiFrame.response(replyTo: id, command: .hostHello, result: open, rev: 0)] }
+        let c = client()
+        #expect(await c.connect(.token(Self.token)) == .ready(hello: open, token: nil))
+        #expect(c.capabilities == ["host"])
+        #expect(socket.sentCommands == ["host.hello"])
+        c.close()
+        #expect(c.capabilities.isEmpty)
+
+        // A reconnect that lands on a host with no v1 answer keeps nothing from the last host.
+        let first = FakeHostSocket(), other = FakeHostSocket()
+        happyHost()
+        first.reply = socket.reply
+        var sockets: [FakeHostSocket] = [first, other]
+        let d = HostApiV1Client(config: .init(clientName: "iPhone", clientVersion: "2.0", helloTimeout: 0.2,
+                                              requestTimeout: 0.3, pingInterval: 60),
+                                makeSocket: { sockets.removeFirst() })
+        _ = await d.connect(.token(Self.token))
+        #expect(d.capabilities == ["host", "chat", "approvals"])
+        #expect(await d.connect(.token(Self.token)) == .notV1)
+        #expect(d.capabilities.isEmpty)
+    }
+
+    @Test("an unanswered host.ping drops the connection as host_unreachable and closes the socket")
+    func pingWatchdog() async throws {
+        happyHost()
+        let c = HostApiV1Client(config: .init(clientName: "iPhone", clientVersion: "2.0", helloTimeout: 0.2,
+                                              requestTimeout: 0.1, pingInterval: 0.05),
+                                makeSocket: { [socket] in socket })
+        var events: [HostEvent] = []
+        c.onEvent = { events.append($0) }
+        #expect(await c.connect(.token(Self.token)) == .ready(hello: Self.hello, token: nil))
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(socket.sentCommands.contains("host.ping"))
+        guard case .disconnected(let r) = events.last else { Issue.record("expected disconnected"); return }
+        #expect(r.code == "host_unreachable"); #expect(r.retryable)
+        #expect(c.state == .disconnected)
+        #expect(socket.cancelled)
+    }
+
+    @Test("negative, NaN and infinite timeouts never trap")
+    func badTimeouts() async {
+        happyHost()
+        let c = HostApiV1Client(config: .init(clientName: "iPhone", clientVersion: "2.0", helloTimeout: -1,
+                                              requestTimeout: .nan, pingInterval: .infinity),
+                                makeSocket: { [socket] in socket })
+        #expect(await c.connect(.token(Self.token)) == .ready(hello: Self.hello, token: nil))
+        c.close()
+    }
+
+    @Test("releasing a connected client without close() cancels its socket")
+    func deinitCancels() async {
+        happyHost()
+        var c: HostApiV1Client? = client()
+        _ = await c?.connect(.token(Self.token))
+        c = nil
+        #expect(socket.cancelled)
     }
 
     @Test("send while disconnected throws host_unreachable without touching the socket")
