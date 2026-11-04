@@ -241,7 +241,9 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
         // Read-only lookup of the user's own identity: point git at their real global config.
         match &opts.home {
             Some(h) => {
-                cmd.env("HOME", h).env("USERPROFILE", h).env("XDG_CONFIG_HOME", h.join(".config"));
+                // Git for Windows cannot read `~/.gitconfig` under a `\\?\` home.
+                let h = crate::fsutil::plain_path(h);
+                cmd.env("HOME", &h).env("USERPROFILE", &h).env("XDG_CONFIG_HOME", h.join(".config"));
             }
             None => {
                 for k in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"] {
@@ -258,7 +260,7 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
         cmd.env(k, v);
     }
     if let Some(parent) = root.parent() {
-        cmd.env("GIT_CEILING_DIRECTORIES", parent);
+        cmd.env("GIT_CEILING_DIRECTORIES", crate::fsutil::plain_path(parent));
     }
     for k in ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
         if let Some(v) = std::env::var_os(k) {

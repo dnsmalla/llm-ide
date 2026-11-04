@@ -143,9 +143,39 @@ pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
     Ok(InstanceLock(f))
 }
 
+/// Strips the `\\?\` verbatim prefix `canonicalize` adds on Windows: `\\?\C:\x` -> `C:\x`,
+/// `\\?\UNC\srv\share` -> `\\srv\share`. Pure string form, so it is testable on every host.
+pub fn plain_windows_path(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    p.strip_prefix(r"\\?\").unwrap_or(p).to_string()
+}
+
+/// `p` without the Windows verbatim prefix (unchanged elsewhere). Git (MSYS) and `cmd.exe` cannot use a
+/// `\\?\` path as an argument or working directory; compare canonical paths, then hand out this form.
+pub fn plain_path(p: &Path) -> PathBuf {
+    match p.to_str() {
+        Some(s) if cfg!(windows) => PathBuf::from(plain_windows_path(s)),
+        _ => p.to_path_buf(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_prefixes_are_stripped() {
+        assert_eq!(plain_windows_path(r"\\?\C:\Users\a"), r"C:\Users\a");
+        assert_eq!(plain_windows_path(r"\\?\UNC\srv\share\p"), r"\\srv\share\p");
+        assert_eq!(plain_windows_path(r"C:\x"), r"C:\x");
+        assert_eq!(plain_windows_path("/usr/x"), "/usr/x");
+        let canon = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let plain = plain_path(&canon);
+        assert!(!plain.to_string_lossy().starts_with(r"\\?\"), "{plain:?}");
+        assert_eq!(std::fs::canonicalize(&plain).unwrap(), canon, "same folder");
+    }
 
     #[allow(dead_code)]
     fn scratch(name: &str) -> PathBuf {

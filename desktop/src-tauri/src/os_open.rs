@@ -217,14 +217,6 @@ fn xdg_open() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/usr/bin/xdg-open"))
 }
 
-/// Strips the `\\?\` verbatim prefix canonicalisation adds on Windows.
-fn plain_windows_path(p: &str) -> String {
-    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{rest}");
-    }
-    p.strip_prefix(r"\\?\").unwrap_or(p).to_string()
-}
-
 pub fn open_url_invocation(os: Os, url: &str) -> Invocation {
     match os {
         Os::Mac => Invocation { program: "/usr/bin/open".into(), args: vec![url.into()], raw: false },
@@ -243,7 +235,7 @@ pub fn reveal_invocation(os: Os, abs: &Path, is_root: bool) -> Result<Invocation
     match os {
         Os::Mac => Ok(Invocation { program: "/usr/bin/open".into(), args: vec!["-R".into(), s], raw: false }),
         Os::Windows => {
-            let p = plain_windows_path(&s);
+            let p = crate::fsutil::plain_windows_path(&s);
             if p.contains('"') {
                 return Err(herr("invalid_path", "path contains a forbidden character"));
             }
