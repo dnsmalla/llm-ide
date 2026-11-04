@@ -121,7 +121,22 @@ the "Turned off on the Mac" message and must not advertise the screen.
 
 **S4 exit checklist row:** the phone chat idle-timeout (which sends Cancel) and the sticky approval-pause window in
 `LlmIdeChatStore.swift` are removed when the core's replay/detach (`chat.attach`) replaces them; until then they are
-unchanged and documented as temporary.
+unchanged and documented as temporary. On a Host API v1 connection the idle breaker uses the 960 s window from the start (Plan 4 decision 7).
+
+## Host API v1 from the iPhone app (deferred to the product stage)
+
+User decision 2026-11-04: these are run at the product stage and do not gate Plan 4 or Plan 6. v1 over `wss://` works against a host with TLS on (`LLMIDE_HOST_API_TLS=1` on the desktop, `HostApiV1.tlsEnabled` on the Mac); `ws://` is accepted for loopback only, so the Simulator can still use a DEBUG host started with `LLMIDE_HOST_API_DEV=1` and `LLMIDE_HOST_API_URL=ws://127.0.0.1:3016/host-api/v1` in the Xcode scheme.
+
+| # | Check | Expected |
+|---|---|---|
+| H1 | Fresh pair over v1 with the Mac PIN, or a QR scan | Chat tab only; the Mac log shows a Host API v1 connection; Keychain holds `host-api-token` and the pinned `h1fp`; the PIN is gone |
+| H2 | Send, Stop, clear history, answer a question, Allow once or Deny a tool prompt | Same results as on v2, with no status lines during the turn |
+| H3 | Quit and relaunch the host with v1 off | The phone falls back to v2 within about 3 s only if it was never paired over v1; a v1-paired phone stays on v1 and shows `host_unreachable` |
+| H4 | Background the app for 1 minute, then return | It reconnects by token and the transcript reloads |
+| H5 | Remove the device on the Mac | The phone gets `auth_failed` and returns to pairing |
+| H6 | Release build, or no `LLMIDE_HOST_API_URL` and no v1 port advertised | v2 exactly as before (rows F1-F17) |
+| H7 | Reset the security identity on the Mac, then reconnect | `pin_mismatch`; credentials are kept; only a new QR scan or typed PIN replaces the pin |
+| H8 | Pair over `wss://` and compare the fingerprint with the host's Settings | They match; a host with another certificate is refused before any frame |
 
 ## Security
 

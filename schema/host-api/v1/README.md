@@ -76,9 +76,13 @@ do not repeat it in `result`.
 
 ## Hosts
 
-The desktop host adapter is `extension/routes/host-api/` (gateway, frame codec, session gate, translator) with the listener in `extension/server/host-api-listener.mjs` — development loopback only until TLS lands. The desktop UI mints the pairing PIN and manages paired devices through `POST /host-api/pin`, `GET /host-api/devices` and `DELETE /host-api/devices/:id` (contract `schema/http/host-api.schema.json`).
+The desktop host adapter is `extension/routes/host-api/` (gateway, frame codec, session gate, translator) with the listener in `extension/server/host-api-listener.mjs` — plaintext on loopback in development, pinned WSS when TLS is on (off by default). The desktop UI mints the pairing PIN and manages paired devices through `POST /host-api/pin`, `GET /host-api/devices` and `DELETE /host-api/devices/:id` (contract `schema/http/host-api.schema.json`).
 
 The web client is `web/` (`web/src/host-api/connection.ts`), and its types are generated into `web/src/host-api/types.generated.ts` by `scripts/generate-host-api.mjs`.
+
+## Clients
+
+Swift clients build requests with `HostApiFrame.request` and parse host frames with `HostApiFrame.parseInbound`. Event names are the generated `HostApiEvent`. `HostApiV1Client` is the reference client. The iOS v2 fallback maps the chat slice through `HostApiV2ChatBridge`. The phone pins the host's `h1fp` (`pin_mismatch` / `pin_missing`); see `fixtures/security/`, shared by the Node and Mac tests, for the origin rule and the fingerprint vector.
 
 ## Host differences
 
@@ -90,3 +94,6 @@ The Mac and desktop hosts serve the same commands, codes and shapes. Where they 
 - **Which chat.** The Mac serves its shared quick chat (the same one the iPhone's v2 chat uses); the desktop serves one server-side "Phone chat" per user. On the Mac a chat history that cannot be read answers `capability_unavailable`; the desktop has no such state.
 - **Switches.** `tool_approvals` is served on the desktop only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`, on the Mac per its setting; `chat.history.clear` is `denied` on the desktop unless `LLMIDE_HOST_API_CHAT_CLEAR=1`. The Mac also applies its phone tier gate to `chat.send` and both approval answers (`denied`).
 - **`hello`.** `hostKind` is `mac` or `desktop`; `protocolVersion` is the Mac's v2 protocol version on the Mac and `1` on the desktop.
+- **Upgrade paths.** The desktop refuses an upgrade to any path but `/host-api/v1`. The Mac can't: Network.framework exposes no path.
+- **Peer on refusals.** On the Mac, `origin_refused` has peer `-` (no connection is handed to the request handler), so it is de-duplicated as one row per minute.
+- **Audit.** The desktop writes `audit_log` rows named `host_api.<event>` with an outcome. The Mac writes JSONL rows (`~/Library/Application Support/llm-ide/host-api-audit.jsonl`, mode 0600, rotated at 512 KiB) with no outcome column. Mac-only events: `connection_limit` and `handshake_timeout`. The Mac write cap closes by cancelling the connection; the desktop closes with 1013.

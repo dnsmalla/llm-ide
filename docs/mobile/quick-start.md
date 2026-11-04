@@ -84,7 +84,20 @@ Wi-Fi or Tailscale unencrypted, and the iOS app ships with App Transport Securit
 on a network you trust, revoke a phone you lose, and treat the token like a password. The fix (a
 per-install certificate whose hash is carried in the pairing QR and pinned by the phone) is designed in
 [`2026-10-31-mobile-tls-pinning-design.md`](../superpowers/plans/2026-10-31-mobile-tls-pinning-design.md) and not
-built yet.
+built for v2 yet. The encrypted link is the Host API v1 below.
+
+## Host API v1 (encrypted, preview)
+
+Host API v1 is a second, pinned link. It is **off by default**. A v1 iOS client now exists (Plan 4), but turning TLS on by default is a product-stage decision for you.
+
+- **Mac:** set the `HostApiV1.tlsEnabled` defaults key (or `LLMIDE_HOST_API_TLS=1`). The listener serves `wss://` on port 3016+, with a per-install identity in the Keychain. The pairing QR then carries `h1port` and `h1fp` (and `api=1`), and the Bonjour TXT carries `api=1,2`, `h1port` and `h1fp`.
+- **Desktop:** set `LLMIDE_HOST_API_TLS=1`; pairing is by manual entry, with the fingerprint shown in Settings.
+- **Trust:** the fingerprint in the QR (`sha256:` plus base64url of the SHA-256 of the key) is what the phone trusts. It pins `h1fp` and accepts `wss://` to any host; `ws://` is accepted for loopback only. A mismatch fails with `pin_mismatch` (or `pin_missing`), never clears credentials and never falls back to v2. Only an explicit pairing (a QR scan or a typed PIN) can set or replace a pin.
+- **Reset:** the Mac's Reset security identity button makes a new certificate; every phone must pair again.
+
+### Developer: Host API v1 in the Simulator
+
+Run a DEBUG host with `LLMIDE_HOST_API_DEV=1` and set `LLMIDE_HOST_API_URL=ws://127.0.0.1:3016/host-api/v1` in the Xcode scheme. If the host does not answer `host.hello`, the phone uses v2; once a v1 host has answered, it never falls back. See [the iOS transport plan](../superpowers/plans/2026-11-04-host-api-ios-transport.md).
 
 ## Verify
 
