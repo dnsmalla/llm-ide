@@ -15,7 +15,7 @@ cd web && npm ci && npm run dev          # or: npm run build && npm run preview
 
 ## Moving to your domain
 
-Phase 6 (Host API Plan 6), configuration only:
+Mostly configuration, after Host API Plan 6 adds WSS and widens the allowlist to your https domain:
 
 - Build with `VITE_HOST_API_URL=wss://<host>:<port>/host-api/v1`.
 - Serve `web/dist` over HTTPS, with the same CSP sent as a header.
