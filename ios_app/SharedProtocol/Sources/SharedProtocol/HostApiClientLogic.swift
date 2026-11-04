@@ -12,8 +12,8 @@ public struct HostApiRevTracker: Sendable, Equatable {
     public mutating func observe(event r: Int) -> Decision {
         defer { rev = max(rev ?? r, r) }
         guard let last = rev else { return .gap }
-        // r > last first: r - last cannot overflow then (the rev is untrusted wire input)
-        return r > last && r - last > 1 ? .gap : .inOrder
+        // r > last guarantees r - 1 cannot overflow; r - last could (Int.min baseline). The rev is untrusted input.
+        return r > last && r - 1 > last ? .gap : .inOrder
     }
 
     public mutating func reset() { rev = nil }

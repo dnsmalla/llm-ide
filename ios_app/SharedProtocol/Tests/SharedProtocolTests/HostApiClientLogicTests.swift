@@ -101,6 +101,10 @@ struct HostApiClientLogicHardeningTests {
         var u = HostApiRevTracker(); u.baseline(5)
         #expect(u.observe(event: 5) == .inOrder)
         #expect(u.observe(event: 2) == .inOrder)
+        var n = HostApiRevTracker(); n.baseline(Int.min)
+        #expect(n.observe(event: Int.max) == .gap)
+        var m = HostApiRevTracker(); m.baseline(-1)
+        #expect(m.observe(event: 0) == .inOrder)
     }
 
     @Test("negotiation: a second start is ignored")
