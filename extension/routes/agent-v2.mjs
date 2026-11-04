@@ -25,6 +25,7 @@ import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
+import { clearChatMessages } from '../kb/chat-sessions.mjs';
 import {
   getOrCreateAgentSession,
   markAgentSessionUsed,
@@ -219,11 +220,11 @@ export function listInFlightChatTurns(userId) {
 // turn — the one the retries were waiting to send — was met with a 429 and
 // a half-minute lockout. The early probe below already spares a refused
 // retry the classifier's LLM call; this spares it the token too.
-function sendTurnInProgress(req, res) {
-  req.rateLimitRefund?.();
-  sendJSON(res, 409, {
-    error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
-  });
+function turnInProgressRefusal() {
+  return {
+    code: 'TURN_IN_PROGRESS', status: 409, refund: true,
+    message: 'A turn is already in progress for this chat session',
+  };
 }
 
 
@@ -285,11 +286,10 @@ export function freshTurnHistory(body) {
   return anchor ? [anchor, ...tail] : tail;
 }
 
-export async function handleAgentV2Routes(
-  req,
-  res,
-  deps = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand },
-) {
+// The production seams; tests pass their own (see the header).
+const DEFAULT_DEPS = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand };
+
+export async function handleAgentV2Routes(req, res, deps = DEFAULT_DEPS) {
   const url = req.url || '';
   if (!url.startsWith('/agent/v2')) return false;
 
@@ -333,6 +333,32 @@ export async function handleAgentV2Routes(
   }
 
   sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: `No agent/v2 route for ${req.method} ${url}` } });
+  return true;
+}
+
+// Each refusal is a value ({ code, status, message, refund?, route? }) so the HTTP route answers it as JSON
+// and startHostTurn throws it as a coded error (io.refuse below).
+//
+// While Settings → Claude Agent SDK is installing a new version, the
+// package on disk is being replaced: a turn started now would launch its
+// CLI from a half-installed (or newer) package under this process's old
+// SDK code. Refused plainly instead; the update is minutes at most.
+// Same reasoning for a Claude-plugin update: the plugin tree and hook trust
+// are being rewritten, so a turn started now could see a half-copied plugin.
+function updateRefusal() {
+  if (isSdkUpdating()) return { code: 'SDK_UPDATING', status: 503, message: 'The Claude Agent SDK is being updated — try again in a moment.' };
+  if (isPluginUpdating()) return { code: 'PLUGIN_UPDATING', status: 503, message: 'A plugin is being updated — try again in a moment.' };
+  return null;
+}
+
+// A session-router refusal (402 SESSION_TOKEN_LIMIT, 503 ROUTE_UNAVAILABLE): answered by sendRouteRefusal.
+const routeRefusal = (r) => ({ code: r.code, status: r.status, message: r.message, route: r });
+
+/** The HTTP io.refuse: the JSON answer each refusal always had. */
+function sendRefusal(req, res, r) {
+  if (r.route) { sendRouteRefusal(req, res, r.route); return true; }
+  if (r.refund) req.rateLimitRefund?.();
+  sendJSON(res, r.status, { error: { code: r.code, message: r.message } });
   return true;
 }
 
@@ -431,21 +457,29 @@ async function handleV2Stream(req, res, userId, deps) {
     return true;
   }
   if (gateBypassRequest(req, res, userId, body, chatSessionId, agentContext)) return true;
-  // While Settings → Claude Agent SDK is installing a new version, the
-  // package on disk is being replaced: a turn started now would launch its
-  // CLI from a half-installed (or newer) package under this process's old
-  // SDK code. Refused plainly instead; the update is minutes at most.
-  if (isSdkUpdating()) {
-    sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
-    return true;
-  }
+  return runV2Turn({ userId, chatSessionId, agentContext, message, body, deps, turnStartedAt }, {
+    refuse: (r) => sendRefusal(req, res, r),
+    // SSE framing identical to the legacy /code-assist + spike streams.
+    start: () => res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    }),
+    send: (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`),
+    isGone: () => res.writableEnded,
+    onGone: (fn) => onClientDisconnect(req, res, fn),
+    end: () => { if (!res.writableEnded) res.end(); },
+  });
+}
 
-  // Same reasoning for a Claude-plugin update: the plugin tree and hook trust
-  // are being rewritten, so a turn started now could see a half-copied plugin.
-  if (isPluginUpdating()) {
-    sendJSON(res, 503, { error: { code: 'PLUGIN_UPDATING', message: 'A plugin is being updated — try again in a moment.' } });
-    return true;
-  }
+// One turn from its refusal checks to its end, for the HTTP route and startHostTurn alike. `io` is the
+// only transport-bound part: refuse(refusal) answers a refusal (JSON / a throw), start() fires once the turn
+// is accepted, send(obj) delivers one event, isGone() / onGone(fn) report a dropped client, end() closes.
+// Returns true (the route's "handled").
+async function runV2Turn({ userId, chatSessionId, agentContext, message, body, deps, turnStartedAt }, io) {
+  const updating = updateRefusal();
+  if (updating) return io.refuse(updating);
 
   // Early lock probe — a cheap read only, the authoritative check-and-add
   // is below. The Mac client retries a 409 for a few seconds after Stop
@@ -454,10 +488,7 @@ async function handleV2Stream(req, res, userId, deps) {
   // the "auto" classifier's LLM call below before being refused. The TOCTOU
   // gap between this probe and the real check is absorbed by that check.
   const lockKey = chatSessionLockKey(userId, chatSessionId);
-  if (inFlightChatSessions.has(lockKey)) {
-    sendTurnInProgress(req, res);
-    return true;
-  }
+  if (inFlightChatSessions.has(lockKey)) return io.refuse(turnInProgressRefusal());
   // Session router, early probe: a chat at its cap (or a route store that cannot be read) is refused
   // BEFORE the classifier's model call below. Read-only; the authoritative check runs under the lock.
   if (routerEnabled()) {
@@ -466,9 +497,9 @@ async function handleV2Stream(req, res, userId, deps) {
         db: getDb(), userId, chatSessionId, apply: false, seed: routeSeedFrom(body, userId, getDb()),
         requested: { provider: typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER, model: typeof body.model === 'string' ? body.model : null },
       });
-      if (early.refusal) { sendRouteRefusal(req, res, early.refusal); return true; }
+      if (early.refusal) return io.refuse(routeRefusal(early.refusal));
     } catch (err) {
-      if (err instanceof RouteError) { sendRouteRefusal(req, res, err); return true; }
+      if (err instanceof RouteError) return io.refuse(routeRefusal(err));
       throw err;
     }
   }
@@ -525,10 +556,7 @@ async function handleV2Stream(req, res, userId, deps) {
   let effectiveMessage = message;
   if (message.trim().startsWith('/')) {
     const expansion = deps.expandSlash(message, userId);
-    if (expansion && expansion.error) {
-      sendJSON(res, 400, { error: { code: 'SLASH_COMMAND_FAILED', message: expansion.error } });
-      return true;
-    }
+    if (expansion && expansion.error) return io.refuse({ code: 'SLASH_COMMAND_FAILED', status: 400, message: expansion.error });
     if (expansion) effectiveMessage = expansion.prompt;
   }
 
@@ -537,27 +565,18 @@ async function handleV2Stream(req, res, userId, deps) {
   // spawns, so a turn that reaches recordUsage really ran on this provider.
   const provider = typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER;
 
-  if (inFlightChatSessions.has(lockKey)) {
-    sendTurnInProgress(req, res);
-    return true;
-  }
+  if (inFlightChatSessions.has(lockKey)) return io.refuse(turnInProgressRefusal());
   // Re-checked here because the classifier above can await an LLM call: an
   // SDK or plugin update that started meanwhile saw no active turn (this one
   // is not in inFlightChatSessions yet), so the turn must not start now.
   // Nothing awaits between this check and the add below.
-  if (isSdkUpdating()) {
-    sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
-    return true;
-  }
-  if (isPluginUpdating()) {
-    sendJSON(res, 503, { error: { code: 'PLUGIN_UPDATING', message: 'A plugin is being updated — try again in a moment.' } });
-    return true;
-  }
+  const updatingNow = updateRefusal();
+  if (updatingNow) return io.refuse(updatingNow);
   inFlightChatSessions.add(lockKey);
   inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt, mode });
   emitOsEvent(userId, 'turn-start');
   try {
-    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
+    return await runV2Stream(io, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
     inFlightChatSessions.delete(lockKey);
     inFlightAborts.delete(lockKey);
@@ -572,7 +591,7 @@ const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UN
 
 // The rest of the turn, once this chat session's lock is held — split out so
 // the lock's try/finally above stays a thin wrapper around it.
-async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, requestedModel, requestedProvider, message, body, deps, turnStartedAt = Date.now()) {
+async function runV2Stream(io, userId, chatSessionId, agentContext, mode, requestedModel, requestedProvider, message, body, deps, turnStartedAt = Date.now()) {
   const db = getDb();
   // Session router (K1 P6b), authoritative pass with the chat's lock held and BEFORE the SSE headers:
   // fail closed (503 ROUTE_UNAVAILABLE), the cap (402 SESSION_TOKEN_LIMIT), a pending switch, the pick.
@@ -581,10 +600,10 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   try {
     begin = beginRouteTurn({ db, userId, chatSessionId, apply: true, seed: routeSeedFrom(body, userId, getDb()), requested: { provider: requestedProvider, model: requestedModel } });
   } catch (err) {
-    if (err instanceof RouteError) { sendRouteRefusal(req, res, err); return true; }
+    if (err instanceof RouteError) return io.refuse(routeRefusal(err));
     throw err;
   }
-  if (begin.refusal) { sendRouteRefusal(req, res, begin.refusal); return true; }
+  if (begin.refusal) return io.refuse(routeRefusal(begin.refusal));
   const model = begin.enabled ? (begin.pick.model || requestedModel) : requestedModel;
   const provider = begin.enabled ? (begin.pick.provider || requestedProvider) : requestedProvider;
   // A provider change since the last turn never resumes a Claude SDK session: the turn is seeded like
@@ -612,13 +631,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // Billable tokens left under the chat's cap, handed to the engine as its ceiling (null = none).
   const capRemaining = begin.enabled && begin.capOn && begin.cap.limit !== null ? begin.cap.remaining : null;
 
-  // SSE framing identical to the legacy /code-assist + spike streams.
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
+  io.start();
   const ac = new AbortController();
   // The SDK session THIS turn runs in: the resumed id until the stream
   // reports its own (init carries it first). A dropped stream unparks any
@@ -636,7 +649,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // its own stream drops; without it a dropped stream stops the turn, exactly as before.
   const detachable = body.detach === true;
   let primaryGone = false;
-  onClientDisconnect(req, res, () => {
+  io.onGone(() => {
     if (detachable) { primaryGone = true; return; }
     abortTurn();
   });
@@ -644,9 +657,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   const send = (obj) => {
     if (ac.signal.aborted) return;
     replay.push(obj);
-    if (!primaryGone && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify(obj)}\n\n`);
-    }
+    if (!primaryGone && !io.isGone()) io.send(obj);
   };
   // mode_set rides right after the first init event (spec §4 ordering) —
   // the engine doesn't know its resolved mode is a UI concern.
@@ -853,7 +864,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     const totalMs = Date.now() - turnStartedAt;
     recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
     log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });
-    if (!res.writableEnded) res.end();
+    io.end();
     return true;
   } finally {
     replay.end();
@@ -892,13 +903,18 @@ async function handleV2Cancel(req, res, userId) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'chatSessionId is required' } });
     return true;
   }
+  sendJSON(res, 200, { cancelled: cancelChatTurn(userId, chatSessionId) });
+  return true;
+}
+
+/** Stops this user's in-flight turn on `chatSessionId` (POST /agent/v2/cancel's core). True when one was running. */
+export function cancelChatTurn(userId, chatSessionId) {
   // A Map lookup can only return what runV2Stream stored, but the key is
   // request-derived — so call it only once it is proven to be a function.
   const abort = inFlightAborts.get(chatSessionLockKey(userId, chatSessionId));
   const cancelled = typeof abort === 'function';
   if (cancelled) abort();
-  sendJSON(res, 200, { cancelled });
-  return true;
+  return cancelled;
 }
 
 /**
@@ -988,6 +1004,12 @@ async function handleV2SessionDelete(req, res, userId) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'chatSessionId is required' } });
     return true;
   }
+  sendJSON(res, 200, { ok: true, sdkSessionId: dropAgentSessionState(userId, chatSessionId) });
+  return true;
+}
+
+// DELETE /agent/v2/session's sequence; returns the dropped SDK session id (or null).
+function dropAgentSessionState(userId, chatSessionId) {
   const dropped = deleteAgentSession(getDb(), userId, chatSessionId);
   const sdkSessionId = dropped?.sdkSessionId ?? null;
   deleteSdkTranscripts(userId, sdkSessionId);
@@ -998,6 +1020,36 @@ async function handleV2SessionDelete(req, res, userId) {
   try { deleteSessionMemory(userId, chatSessionId); } catch { /* best-effort, like the transcript cleanup */ }
   // The chat's route row (pick, cap, counters) goes with the chat.
   try { deleteRoute(getDb(), userId, chatSessionId); } catch { /* best-effort */ }
-  sendJSON(res, 200, { ok: true, sdkSessionId });
-  return true;
+  return sdkSessionId;
+}
+
+/**
+ * Clears one server chat in process (the Host API's chat.history.clear): the DELETE /agent/v2/session sequence
+ * plus the chat's stored messages. Refused ({ cleared: false }) while a turn runs on it.
+ */
+export function clearChatSessionState(userId, chatSessionId) {
+  if (isChatTurnInFlight(userId, chatSessionId)) return { cleared: false };
+  dropAgentSessionState(userId, chatSessionId);
+  clearChatMessages(userId, chatSessionId);
+  return { cleared: true };
+}
+
+/**
+ * Runs one Agent v2 turn in process, exactly as POST /agent/v2/stream would for a read-only client (the Host
+ * API gateway): mode auto_read_only, the default provider, the extension chat workspace, no Bypass. Every
+ * event the SSE stream would carry goes to `onEvent`. Resolves when the turn ends; a refusal the route answers
+ * with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT, ROUTE_UNAVAILABLE)
+ * rejects with an Error carrying that `code`.
+ */
+export async function startHostTurn({ userId, chatSessionId, message, files = [], onEvent, deps = {} }) {
+  const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
+  const body = { message, mode: AUTO_READ_ONLY, agentContext, attachments: files };
+  await runV2Turn({ userId, chatSessionId, agentContext, message, body, deps: { ...DEFAULT_DEPS, ...deps }, turnStartedAt: Date.now() }, {
+    refuse: (r) => { throw Object.assign(new Error(r.message), { code: r.code }); },
+    start: () => {},
+    send: onEvent,
+    isGone: () => false,
+    onGone: () => {},
+    end: () => {},
+  });
 }
