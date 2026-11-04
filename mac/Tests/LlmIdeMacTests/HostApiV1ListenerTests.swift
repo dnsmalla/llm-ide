@@ -19,6 +19,21 @@ struct HostApiV1ListenerTests {
         #expect(!HostApiV1Listener.refusesHandshake(headers: [("Host", "127.0.0.1:3016")]))
     }
 
+    @Test("listener events drain in yield order from one stream")
+    func eventOrder() async {
+        let (events, c) = AsyncStream<HostApiV1ListenerEvent>.makeStream()
+        c.yield(.opened(1, "p")); c.yield(.frame(1, Data("a".utf8))); c.yield(.frame(1, Data("b".utf8))); c.yield(.closed(1)); c.finish()
+        var seen: [String] = []
+        for await e in events {
+            switch e {
+            case .opened: seen.append("o")
+            case .frame(_, let d): seen.append(String(decoding: d, as: UTF8.self))
+            case .closed: seen.append("c")
+            }
+        }
+        #expect(seen == ["o", "a", "b", "c"])
+    }
+
     @Test("a loopback client can open a socket and its frames reach the gateway")
     func loopbackRoundTrip() async throws {
         let port = 3016 + Int.random(in: 200...900)

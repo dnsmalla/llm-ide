@@ -6,6 +6,9 @@ import SharedProtocol
 /// with `LLMIDE_HOST_API_DEV=1` (spec "Security": plaintext only behind an explicit development flag;
 /// production builds refuse it). TLS/WSS is spec phase 6. A handshake carrying `Origin` is refused:
 /// there is no web client yet, and a page in the developer's browser must not reach the PIN.
+/// One ordered stream for a listener's open/frame/close callbacks (they all fire on its serial queue).
+enum HostApiV1ListenerEvent: Sendable { case opened(Int, String), frame(Int, Data), closed(Int) }
+
 final class HostApiV1Listener: @unchecked Sendable {
     static var isDebugBuild: Bool {
         #if DEBUG
@@ -33,6 +36,7 @@ final class HostApiV1Listener: @unchecked Sendable {
     private let queue = DispatchQueue(label: "llmide.hostapi.v1")
     private var listener: NWListener?
     private var portIndex = 0
+    private var stopped = false
     private var nextSession = 1
     private var connections: [Int: NWConnection] = [:]
 
@@ -45,10 +49,11 @@ final class HostApiV1Listener: @unchecked Sendable {
         self.onListening = onListening; self.onLog = onLog
     }
 
-    func start() throws { try queue.sync { portIndex = 0; try bind() } }
+    func start() throws { try queue.sync { stopped = false; portIndex = 0; try bind() } }
 
     func stop() {
         queue.async {
+            self.stopped = true
             self.listener?.cancel(); self.listener = nil
             for (_, c) in self.connections { c.stateUpdateHandler = nil; c.cancel() }
             self.connections.removeAll()
@@ -73,6 +78,7 @@ final class HostApiV1Listener: @unchecked Sendable {
     }
 
     private func bind() throws {
+        if stopped { return }
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         ws.maximumMessageSize = HostApi.limits.maxFrameBytes
@@ -98,7 +104,7 @@ final class HostApiV1Listener: @unchecked Sendable {
                 l?.cancel()
                 if case .posix(.EADDRINUSE) = error, self.portIndex + 1 < self.candidates {
                     self.portIndex += 1
-                    try? self.bind()
+                    do { try self.bind() } catch { self.onLog("❌ Host API v1 listener rebind failed — \(error.localizedDescription)") }
                 } else {
                     self.onLog("❌ Host API v1 listener failed — \(error.localizedDescription)")
                 }
@@ -110,6 +116,7 @@ final class HostApiV1Listener: @unchecked Sendable {
     }
 
     private func accept(_ conn: NWConnection) {
+        if stopped { conn.cancel(); return }
         // Defence in depth beside requiredLocalEndpoint: only a loopback peer is served.
         guard case let .hostPort(host, _) = conn.endpoint, Self.isLoopback(host) else { conn.cancel(); return }
         let session = nextSession

@@ -115,7 +115,7 @@ ios_app/MyApp/Services/
 ## Host API v1 (development listener)
 
 - It runs only in a DEBUG build with `LLMIDE_HOST_API_DEV=1`, on 127.0.0.1:3016+, and is never advertised.
-- `HostApiV1Gateway` forwards `chat.send` and both approval answers to `handleInbound` as v2 structs with `h1.<session>.<id>` command ids.
+- `HostApiV1Gateway` forwards `chat.send` and both approval answers to `dispatchInbound` as v2 structs (`handleInbound`, the v2 entry, refuses `h1.` types and ids) with `h1.<session>.<id>` command ids.
 - Every Mac → client frame goes through `emit(_:)`. A new `server?.send` call bypasses v1 routing and is a bug.
 - v2 resets must skip `h1.` ids.
 - Run the manual check with `scripts/mobile/verify-host-api-v1.swift`.
