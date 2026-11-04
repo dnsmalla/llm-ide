@@ -154,6 +154,15 @@ const CoreChip = memo(function CoreChip() {
   );
 });
 
+/** The /health mismatch chip; exported separately so its text/ARIA can be tested without the bar's hooks. */
+export function ServerOutdatedChip({ warning }: { warning: string }) {
+  return (
+    <button type="button" className="sh-statusbar-item sh-warning" title={warning} aria-label={`Server out of date. ${warning} Open Server settings.`} onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" })}>
+      Server out of date
+    </button>
+  );
+}
+
 /** The Mac's "llm-chat" badge: Chat is reachable from every screen. Signed-in only, like the Mac's whole bar. */
 const ChatItem = memo(function ChatItem({ active }: { active: boolean }) {
   return (
@@ -172,6 +181,8 @@ const ChatItem = memo(function ChatItem({ active }: { active: boolean }) {
 });
 
 interface Props {
+  /** `/health` says the core is older than this app; the chip opens the Server settings card. */
+  apiWarning?: string | null;
   /** Status-bar terminal toggle (non-Explorer sections). */
   terminalItem?: ReactNode | null;
   theme: ThemeId;
@@ -180,13 +191,14 @@ interface Props {
   onTheme: (id: ThemeId) => void;
 }
 
-export const StatusBar = memo(function StatusBar({ theme, onTheme, chatActive = false, terminalItem = null }: Props) {
+export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, terminalItem = null }: Props) {
   const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
     <footer className="sh-statusbar" aria-label="Status">
       <ProjectSwitcher />
       <CoreChip />
+      {apiWarning && <ServerOutdatedChip warning={apiWarning} />}
       <span className="sh-spacer" />
       <HomePicker />
       <MenuButton

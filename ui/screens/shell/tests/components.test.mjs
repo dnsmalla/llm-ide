@@ -149,7 +149,7 @@ test("useStoreSelector is exported and selects without extra renders (static che
 });
 
 test("status-bar project menu: Reveal in Finder only with a project open, and it asks the host to reveal the root", async () => {
-  const { projectSwitcherItems } = await load("StatusBar.tsx");
+  const { projectSwitcherItems, ServerOutdatedChip } = await load("StatusBar.tsx");
   const hostMod = await load("host.ts");
   const demo = { name: "Demo", root: "/p/demo" };
   const acts = { openRecent: async () => {}, openFolder: async () => {}, closeProject: async () => {}, reveal: () => {} };
@@ -167,4 +167,14 @@ test("status-bar project menu: Reveal in Finder only with a project open, and it
   }
   assert.deepEqual(calls, [["reveal_in_os", { relPath: "" }]], "the empty relative path is the project root; the host re-checks it");
   await hostMod.host.projectReveal(); // no bridge (browser preview): a quiet no-op, not a throw
+});
+
+
+test("the server-out-of-date chip carries the /health sentence and opens Server settings", async () => {
+  const { ServerOutdatedChip } = await load("StatusBar.tsx");
+  const warning = "The core reports API 109, but this app expects API 110.";
+  const out = html(h(ServerOutdatedChip, { warning }));
+  assert.match(out, /Server out of date/);
+  assert.match(out, /title="The core reports API 109, but this app expects API 110\."/);
+  assert.match(out, /aria-label="Server out of date\. The core reports API 109, but this app expects API 110\. Open Server settings\."/);
 });

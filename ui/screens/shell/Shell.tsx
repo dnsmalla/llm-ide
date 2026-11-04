@@ -246,7 +246,6 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
-          {apiWarning && <StatusBanner severity="warning" message={apiWarning} />}
           {keepSectionNotice(sectionNotice, nav.active) && (
             <div className="sh-notice" role="status" data-testid="section-notice">
               <p>{safeText(sectionNotice!.text, 300)}</p>
@@ -288,6 +287,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         </div>
       </div>
       {gate === "open" ? <StatusBar
+        apiWarning={apiWarning}
         theme={theme}
         onTheme={onTheme}
         chatActive={nav.active === "chat"}
