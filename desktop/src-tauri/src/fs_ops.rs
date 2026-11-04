@@ -244,10 +244,7 @@ fn open_verified(root: &Path, canonical: &Path) -> R<(File, Metadata)> {
                 return err("outside_root", "opened file is outside the project root");
             }
         }
-        None if cfg!(any(target_os = "macos", target_os = "linux")) => {
-            return err("outside_root", "cannot verify the opened file");
-        }
-        None => {}
+        None => return err("outside_root", "cannot verify the opened file"),
     }
     let meta = f.metadata().map_err(|e| io_err("cannot stat file", e))?;
     if !meta.is_file() {

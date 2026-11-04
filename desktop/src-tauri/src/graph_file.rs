@@ -65,11 +65,9 @@ fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, Stri
 
     let file = open_nofollow(&canonical)?;
     // Verify what was actually opened, not the path we resolved a moment ago.
-    if let Some(real) = fd_path(&file) {
-        check_location(&real, &root)?;
-    } else if cfg!(any(target_os = "macos", target_os = "linux")) {
-        return Err("cannot verify the opened file".into());
-    }
+    // Fails closed: no descriptor path, no read.
+    let real = fd_path(&file).ok_or("cannot verify the opened file")?;
+    check_location(&real, &root)?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.is_file() || meta.len() > max {
         return Err("graph.json is not a regular file within the size limit".into());
@@ -132,7 +130,32 @@ pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())).ok()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// The final path of the open handle, in the same `\\?\C:\...` form `std::fs::canonicalize` returns, so it
+/// compares directly with a canonical root.
+#[cfg(windows)]
+pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS};
+    let mut buf = vec![0u16; 512];
+    loop {
+        // SAFETY: the handle is open for as long as `f` lives; `buf` holds `buf.len()` u16s.
+        let n = unsafe { GetFinalPathNameByHandleW(f.as_raw_handle(), buf.as_mut_ptr(), buf.len() as u32, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) } as usize;
+        if n == 0 {
+            return None;
+        }
+        if n < buf.len() {
+            return Some(PathBuf::from(std::ffi::OsString::from_wide(&buf[..n])));
+        }
+        if n > 32_768 {
+            return None;
+        }
+        // Too small: `n` is the size needed, terminating NUL included.
+        buf.resize(n, 0);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub(crate) fn fd_path(_: &std::fs::File) -> Option<PathBuf> {
     None
 }

@@ -330,8 +330,7 @@ fn scan_file(root: &Path, path: &Path, re: &Regex, max_bytes: u64, ctl: &ScanCtl
                 return FileOutcome::Other;
             }
         }
-        None if cfg!(any(target_os = "macos", target_os = "linux")) => return FileOutcome::Other,
-        None => {}
+        None => return FileOutcome::Other,
     }
     let Ok(meta) = f.metadata() else { return FileOutcome::Other };
     if !meta.is_file() || nlink(&meta) > 1 {

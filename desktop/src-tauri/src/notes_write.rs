@@ -247,8 +247,7 @@ fn mkdir_pinned(root: &Path, dir: &Path) -> std::io::Result<()> {
     match crate::graph_file::fd_path(&pf) {
         Some(real) if real.starts_with(root) => {}
         Some(_) => return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "parent is outside the notes folder")),
-        None if cfg!(any(target_os = "macos", target_os = "linux")) => return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cannot verify the parent folder")),
-        None => {}
+        None => return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cannot verify the parent folder")),
     }
     let c = CString::new(name.as_bytes()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     // SAFETY: `pf` is an open directory descriptor and `c` a valid NUL-terminated name.

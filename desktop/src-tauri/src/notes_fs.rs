@@ -207,30 +207,7 @@ fn open_nofollow(p: &Path) -> Result<std::fs::File, String> {
     opts.open(p).map_err(|e| err("io", format!("cannot open: {e}")))
 }
 
-#[cfg(target_os = "macos")]
-fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::ffi::OsStrExt;
-    let mut buf = [0u8; libc::PATH_MAX as usize];
-    // SAFETY: F_GETPATH writes a NUL-terminated path of at most PATH_MAX bytes into buf.
-    let rc = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
-    if rc == -1 {
-        return None;
-    }
-    let len = buf.iter().position(|&b| b == 0)?;
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..len])))
-}
-
-#[cfg(target_os = "linux")]
-fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
-    use std::os::fd::AsRawFd;
-    std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())).ok()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn fd_path(_: &std::fs::File) -> Option<PathBuf> {
-    None
-}
+use crate::graph_file::fd_path;
 
 #[cfg(target_os = "macos")]
 fn is_dataless(m: &std::fs::Metadata) -> bool {
@@ -277,12 +254,10 @@ pub(crate) fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std
     }
     let file = open_nofollow(&canonical)?;
     // Verify what was actually opened, not the path resolved a moment ago.
-    if let Some(real) = fd_path(&file) {
-        if !real.starts_with(&root) {
-            return Err(err("outside_root", "path is outside the notes folder"));
-        }
-    } else if cfg!(any(target_os = "macos", target_os = "linux")) {
-        return Err(err("io", "cannot verify the opened file"));
+    // Fails closed: no descriptor path, no read.
+    let real = fd_path(&file).ok_or_else(|| err("io", "cannot verify the opened file"))?;
+    if !real.starts_with(&root) {
+        return Err(err("outside_root", "path is outside the notes folder"));
     }
     let meta = file.metadata().map_err(|e| err("io", e))?;
     if !meta.is_file() {
