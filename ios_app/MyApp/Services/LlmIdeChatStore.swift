@@ -140,7 +140,12 @@ final class LlmIdeChatStore: ObservableObject {
     private func sendCancel(_ id: String) {
         cancelledCommandIds.insert(id)
         Task { [weak self] in
-            _ = try? await self?.connection?.host.send(.chatCancel, HostApiChatCancelRequest(), as: HostApiChatCancelResult.self)
+            let result = try? await self?.connection?.host.send(.chatCancel, HostApiChatCancelRequest(),
+                                                                 as: HostApiChatCancelResult.self)
+            guard let self, let version = self.connection?.host.apiVersion,
+                  HostApiChatTurn.endsAfterCancel(apiVersion: version, cancelled: result?.cancelled) else { return }
+            self.cancelledCommandIds.remove(id)
+            self.handleChatError(commandId: id)
         }
     }
 

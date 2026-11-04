@@ -149,3 +149,15 @@ struct HostApiPairingSafetyTests {
         }
     }
 }
+
+@Suite("HostApiChatTurn")
+struct HostApiChatTurnTests {
+    @Test("Stop ends a v1 turn locally unless the host cancelled it; v2 waits for the Mac")
+    func endsAfterCancel() {
+        #expect(HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: false))
+        #expect(HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: nil))
+        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: true))
+        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 2, cancelled: false))
+        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 2, cancelled: nil))
+    }
+}

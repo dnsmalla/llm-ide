@@ -101,3 +101,10 @@ public struct HostApiEndpoint: Sendable, Equatable {
         self.url = url
     }
 }
+
+/// When the phone ends a chat turn itself because no host event will (Task 6 review I1).
+public enum HostApiChatTurn {
+    /// After Stop: a v1 host that cancelled nothing (`cancelled: false`) or never answered (nil) emits no
+    /// `chat.error`, so the turn ends locally. v2 keeps waiting for the Mac's answering error frame.
+    public static func endsAfterCancel(apiVersion: Int, cancelled: Bool?) -> Bool { apiVersion == 1 && cancelled != true }
+}

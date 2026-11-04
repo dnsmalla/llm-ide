@@ -372,6 +372,8 @@ final class ConnectionService: ObservableObject {
             guard hostApiVersion == 1 else { return }
             if !reason.retryable { return handleV1Refusal(reason) }
             if errorMessage == nil { errorMessage = "Disconnected from the Mac. Retrying…" }
+            // v1 has no replay: no event for a turn on the old session can arrive, so end them all now.
+            llmIdeStore?.handleChatError()
             invalidateSocket()
             connectionStatus = .disconnected
             scheduleReconnect()
