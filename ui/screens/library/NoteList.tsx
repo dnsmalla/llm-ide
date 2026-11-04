@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "
 import { RefreshIcon, SearchIcon, StatusBanner, WaveIcon, XIcon } from "@llmide/ui-kit";
 import type { LibraryState, LibraryStore } from "./library-store.ts";
 import { isVisible, refusedMessage } from "./hidden-notes.ts";
-import { formatDate, formatDuration, sectionLabel, stepNoteRow, type NoteRecord, type Row } from "./notes-model.ts";
+import { filtersActive, formatDate, formatDuration, sectionLabel, stepNoteRow, type GroupKey, type NoteRecord, type Row, type SortKey } from "./notes-model.ts";
 import { useScroller } from "./use-library.ts";
 
 export const ROW_HEIGHT = 78;
@@ -189,6 +189,7 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
 
   const f = state.filters;
   const search = state.search;
+  const platforms = useMemo(() => [...new Set(state.records.flatMap((r) => (r.platform ? [r.platform] : [])))].sort((a, b) => a.localeCompare(b)), [state.records]);
   const title = state.sectionId === null ? "All notes" : sectionLabel(state.sectionId);
   const visible: ReactNode[] = [];
   for (let i = start; i < end; i++) {
@@ -286,6 +287,42 @@ export function NoteList({ store, state, bulk = null, initialHeight = 600, activ
             </button>
           )}
           {onRefresh ? <button type="button" className="ui-icon-button" aria-label="Refresh library" title="Reload files, plugins and connectors" onClick={onRefresh}><RefreshIcon /></button> : null}
+        </div>
+        <div className="lib-controls" role="group" aria-label="Sort, group and filter notes">
+          <label className="lib-select">Sort
+            <select aria-label="Sort notes" value={state.sort} onChange={(e) => store.setSort(e.target.value as SortKey)}>
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="title">Title</option>
+              <option value="path">Path</option>
+            </select>
+          </label>
+          <label className="lib-select">Group
+            <select aria-label="Group notes" value={state.group} onChange={(e) => store.setGroup(e.target.value as GroupKey)}>
+              <option value="relative">Date</option>
+              <option value="month">Month</option>
+              <option value="folder">Folder</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          {platforms.length > 0 && (
+            <label className="lib-select">Source
+              <select aria-label="Filter notes by source" value={f.platform ?? ""} onChange={(e) => store.setFilters({ platform: e.target.value || null })}>
+                <option value="">All sources</option>
+                {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          )}
+          <label className="lib-select">Date
+            <select aria-label="Filter notes by date" value={f.range} onChange={(e) => store.setFilters({ range: e.target.value as typeof f.range })}>
+              <option value="all">All time</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="year">Last year</option>
+            </select>
+          </label>
+          <button type="button" className="lib-link-btn" aria-pressed={f.hasSummary} onClick={() => store.setFilters({ hasSummary: !f.hasSummary })}>Summaries only</button>
+          {filtersActive(f) ? <button type="button" className="lib-link-btn" onClick={() => store.setFilters({ query: "", platform: null, hasSummary: false, range: "all" })}>Clear filters</button> : null}
         </div>
       </div>
       <SearchResults store={store} state={state} />

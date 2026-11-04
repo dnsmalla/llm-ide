@@ -120,6 +120,22 @@ test("Library is the Mac search bar over one list, with no desktop filter/action
   assert.ok(!out.includes("Select notes"), "no Select notes row in the Mac list");
 });
 
+test("sort, group, source and date controls are real and drive the store", async () => {
+  const { host, store } = await mkStore((hh) => hh.add("source/meetings/a.md", L.meetingText(1)));
+  const out = html(screen(store, host));
+  for (const label of ["Sort notes", "Group notes", "Filter notes by source", "Filter notes by date"]) {
+    assert.match(out, new RegExp(`aria-label="${label}"`), label);
+  }
+  assert.match(out, /Summaries only/);
+  assert.match(out, /value="date-desc"/);
+  store.setSort("title");
+  store.setGroup("folder");
+  store.setFilters({ range: "7d", hasSummary: true });
+  assert.equal(store.getSnapshot().sort, "title");
+  assert.equal(store.getSnapshot().group, "folder");
+  assert.deepEqual(store.getSnapshot().filters, { query: "", platform: null, hasSummary: true, range: "7d" });
+});
+
 test("empty folder and listing states are announced politely", async () => {
   const { host, store } = await mkStore();
   const out = html(screen(store, host));

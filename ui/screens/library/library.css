@@ -163,3 +163,7 @@
 .lib-row[data-hidden="true"] { opacity: 0.55; }
 .lib-hidden-line { display: flex; gap: 10px; align-items: center; font-size: 12px; padding: 2px 0; }
 .lib-group-action { margin-left: 8px; font-size: 11px; }
+/* Sort/group/platform/date controls: the store existed without a way to drive it. */
+.lib-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.lib-controls .lib-select { display: inline-flex; align-items: center; gap: 4px; }
+.lib-controls .lib-link-btn { font-size: inherit; }
