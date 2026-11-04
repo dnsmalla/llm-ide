@@ -106,7 +106,7 @@ enum PhoneTierTable {
         case refuse(code: String, message: String)
     }
 
-    /// The single decision for an inbound frame's `type`. A loopback desktop-class client may use messages
+    /// The single decision for an inbound frame's `type`. A host-granted desktop-class client on loopback may use messages
     /// the phone may not (settings/templates/toggles), but never Mac-to-phone or unknown types.
     static func verdict(for type: String, desktop: Bool = false) -> Verdict {
         guard let tier = tiers[type] else {
@@ -115,7 +115,8 @@ enum PhoneTierTable {
         }
         switch tier {
         case .desktopOnly:
-            if desktop { return .allow(.approvalConfirm) }
+            // Honest label: a D type needs no confirmation for the desktop class; code-writing runs confirm in the bridges.
+            if desktop { return .allow(.desktopOnly) }
             return .refuse(code: MobileRefusalCode.desktopOnly, message: "This is only available on your Mac.")
         case .macToPhone:
             return .refuse(code: MobileRefusalCode.tierRefused, message: "A phone cannot send this message.")

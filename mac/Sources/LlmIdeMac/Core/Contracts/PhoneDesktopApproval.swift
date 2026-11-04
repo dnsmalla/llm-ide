@@ -9,6 +9,11 @@ struct PhoneDesktopApprovalRequest: Equatable {
     let title: String
     /// One fact per line: project, branch and issue ids. Shown verbatim; the phone cannot add to it.
     let lines: [String]
+    /// Who asked, for the dialog's footer ("Requested from …").
+    var requester: String = PhoneDesktopApprovalRequest.phoneRequester
+
+    static let phoneRequester = "your paired iPhone"
+    static let desktopRequester = "the LLM-IDE desktop app on this Mac"
 }
 
 /// What came of asking. Everything except `.approved` is a refusal.

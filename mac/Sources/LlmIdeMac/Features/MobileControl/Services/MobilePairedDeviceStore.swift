@@ -25,7 +25,12 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         /// Host API v1: the capabilities granted at pairing. nil for v2 devices and for v1 devices
         /// paired before scopes existed (a missing key decodes as nil, so old files load).
         var scopes: [String]? = nil
+        /// v2 `:3006` client class. nil = phone (every record paired before classes existed, and every fresh
+        /// pairing). Only `grantDesktopClass` sets `desktop`, after the Mac owner approved it.
+        var clientClass: String? = nil
     }
+
+    static let desktopClientClass = "desktop"
 
     /// What a v1 token without stored scopes may use: never `tool_approvals`.
     static let legacyHostApiScopes = ["host", "chat", "approvals"]
@@ -151,6 +156,22 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
     /// The capabilities `deviceId` was granted at pairing, or `legacyHostApiScopes` when none were stored.
     func scopes(deviceId: String) -> [String] {
         device(id: deviceId)?.scopes ?? Self.legacyHostApiScopes
+    }
+
+    /// The class stored on `deviceId`'s record; nil (phone) when unknown.
+    func clientClass(deviceId: String) -> String? {
+        device(id: deviceId)?.clientClass
+    }
+
+    /// Mark `deviceId` as the desktop app. Called only after the Mac owner approved a loopback desktop pairing.
+    /// False when the record is gone (revoked or replaced meanwhile).
+    @discardableResult
+    func grantDesktopClass(deviceId: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let index = devices.firstIndex(where: { $0.id == deviceId }) else { return false }
+        devices[index].clientClass = Self.desktopClientClass
+        persistLocked()
+        return true
     }
 
     func device(id: String) -> Device? {

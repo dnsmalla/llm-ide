@@ -254,6 +254,7 @@ if mobileIncluded {
         "HostApiV2TranslatorTests.swift",
         "PhoneDesktopApprovalGateTests.swift",
         "PhoneTierTableTests.swift",
+        "DesktopClassGateTests.swift",
         "MobileWebSocketServerBindTests.swift",
         "MobileWebSocketServerRebindTests.swift",
         "MobileWebSocketServerRoutingTests.swift",

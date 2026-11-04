@@ -54,7 +54,7 @@ final class PhoneDesktopApprovalGate {
         alert.alertStyle = .warning
         alert.messageText = request.title
         alert.informativeText = request.lines.joined(separator: "\n")
-            + "\n\nRequested from your paired iPhone. Cancel if you did not just ask for this."
+            + "\n\nRequested from \(request.requester). Cancel if you did not just ask for this."
         let cancel = alert.addButton(withTitle: "Cancel")      // first button = default (Return)
         let allow = alert.addButton(withTitle: "Allow once")
         cancel.keyEquivalent = "\r"

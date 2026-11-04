@@ -62,7 +62,7 @@ final class PhoneTierTableTests: XCTestCase {
         if case .refuse(let code, _) = PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskState) {
             XCTAssertEqual(code, MobileRefusalCode.tierRefused)
         } else { XCTFail("a Mac-to-phone type must be refused inbound") }
-        XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskToggle, desktop: true), .allow(.approvalConfirm),
+        XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskToggle, desktop: true), .allow(.desktopOnly),
                        "the loopback desktop companion may use desktop-only writes")
         XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.autoTaskList), .allow(.read))
         XCTAssertEqual(PhoneTierTable.verdict(for: MobileProtocol.Tag.llmIdeChat), .allow(.command))
@@ -93,5 +93,17 @@ final class PhoneTierTableTests: XCTestCase {
         manager.handleInbound(frame(MobileProtocol.Tag.autoTaskList))
         manager.handleInbound(frame(MobileProtocol.Tag.autoTaskRun))
         XCTAssertEqual(spy.handled, [MobileProtocol.Tag.autoTaskList, MobileProtocol.Tag.autoTaskRun])
+    }
+
+    /// The class travels with each frame: a desktop-class frame gets the D types, the next phone frame does not.
+    func testDesktopOnlyTypesFollowTheFramesOwnClass() {
+        let manager = MobileControlManager()
+        let spy = RecordingBridge()
+        manager.autoTaskBridge = spy
+        manager.handleInbound(frame(MobileProtocol.Tag.autoTaskToggle), clientClass: "desktop")
+        XCTAssertTrue(manager.isDesktopBridge)
+        manager.handleInbound(frame(MobileProtocol.Tag.autoTaskToggle), clientClass: nil)
+        XCTAssertFalse(manager.isDesktopBridge)
+        XCTAssertEqual(spy.handled, [MobileProtocol.Tag.autoTaskToggle], "only the desktop-class frame got through")
     }
 }

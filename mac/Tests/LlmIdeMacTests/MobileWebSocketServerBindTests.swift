@@ -74,7 +74,7 @@ final class MobileWebSocketServerBindTests: XCTestCase {
             portCandidates: 1,
             deviceName: "test",
             validatePin: { _ in true },
-            onInbound: { _ in },
+            onInbound: { _, _ in },
             onLog: { _ in },
             onBindFailed: { error in
                 captured.value = error
@@ -150,7 +150,7 @@ final class MobileWebSocketServerBindTests: XCTestCase {
             port: port,
             deviceName: "test",
             validatePin: { _ in true },
-            onInbound: { _ in },
+            onInbound: { _, _ in },
             onLog: { _ in },
             onListening: { p in
                 boundPort.value = p

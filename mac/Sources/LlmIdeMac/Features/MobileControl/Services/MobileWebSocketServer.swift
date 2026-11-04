@@ -41,9 +41,16 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// The device id of the client that just paired — nil for an older phone
     /// that paired with a bare PIN. Fired just before `onClientPaired`.
     private let onClientIdentified: (String?) -> Void
-    /// The client class this connection declared (`desktop`), only ever set for a loopback peer.
-    private let onClientClass: (String?) -> Void
+    /// deviceId → the class stored on its paired-device record (nil = phone). The desktop class is host-granted
+    /// at pairing (`onDesktopClassRequested` → the owner approves → `grantDesktopClass`), never taken from the frame.
+    private let storedClientClass: (String) -> String?
+    /// A loopback PIN pairing asked for the desktop class and got a token: the Mac owner must approve it.
+    private let onDesktopClassRequested: (String) -> Void
+    /// The paired session's class: `desktop` only for a desktop-class record on a loopback peer. Queue-only;
+    /// passed with every routed frame so the manager never keeps a mirror that could land out of order.
     private(set) var clientClass: String?
+    /// Whether the paired client's REAL peer address is loopback (queue-only).
+    private var clientIsLoopback = false
     /// A PIN pairing just issued a token: the PIN has served its purpose and
     /// the owner should rotate it so a shoulder-surfed or captured PIN can't
     /// be replayed.
@@ -94,7 +101,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private static let maxStartAttempts = 4
     private var startAttempts = 0
 
-    typealias InboundHandler = (Data) -> Void
+    /// (frame, the session's client class at the moment the frame was read).
+    typealias InboundHandler = (Data, String?) -> Void
 
     /// How many consecutive ports a default-configured server may try. Ten
     /// keeps the range small enough to state in an error message while making
@@ -107,11 +115,12 @@ final class MobileWebSocketServer: @unchecked Sendable {
          validatePin: @escaping (String) -> Bool,
          authenticateToken: @escaping (String, String) -> Bool = { _, _ in false },
          issueToken: @escaping (String, String) -> String? = { _, _ in nil },
+         storedClientClass: @escaping (String) -> String? = { _ in nil },
          onInbound: @escaping InboundHandler,
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
          onClientIdentified: @escaping (String?) -> Void = { _ in },
-         onClientClass: @escaping (String?) -> Void = { _ in },
+         onDesktopClassRequested: @escaping (String) -> Void = { _ in },
          onPinConsumed: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
@@ -133,7 +142,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
         self.onLog = onLog
         self.onClientPaired = onClientPaired
         self.onClientIdentified = onClientIdentified
-        self.onClientClass = onClientClass
+        self.storedClientClass = storedClientClass
+        self.onDesktopClassRequested = onDesktopClassRequested
         self.onPinConsumed = onPinConsumed
         self.onClientDisconnected = onClientDisconnected
         self.onBindFailed = onBindFailed
@@ -423,7 +433,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
                     self.paired = false
                     self.clientDeviceId = nil
                     self.clientClass = nil
-                    self.onClientClass(nil)
+                    self.clientIsLoopback = false
                     self.onClientDisconnected()
                 }
                 // Break the conn → handler → conn retain cycle.
@@ -521,8 +531,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             return
         }
         let deviceId = Self.cleanDeviceId(pairing.deviceId)
-        // A desktop-class hint is honoured only for a peer on this Mac; a phone on the LAN cannot claim it.
-        let requestedClass = pairing.clientClass == "desktop" && Self.isLoopback(host) ? "desktop" : nil
+        // The REAL peer address, never the throttle key (which is a /64 for IPv6).
+        let loopback = Self.peerIsLoopback(conn)
         // Token auth: a phone that paired before. The token stands in for the
         // PIN entirely — no PIN is examined, so a rotated PIN changes nothing
         // for an already-paired phone. A stale or revoked token is a plain
@@ -540,7 +550,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 return
             }
             tokenThrottle.registerSuccess(host: host)
-            admit(conn, deviceId: deviceId, clientClass: requestedClass, reply: makeConnected())
+            // The class comes from the record that authenticated, never from `pairing.clientClass`.
+            admit(conn, deviceId: deviceId, loopback: loopback,
+                  clientClass: Self.sessionClass(stored: storedClientClass(deviceId), peerIsLoopback: loopback),
+                  reply: makeConnected())
             return
         }
         switch Self.pinAttempt(pairing.pin, host: host, throttle: pinThrottle, validate: validatePin, now: now) {
@@ -558,8 +571,13 @@ final class MobileWebSocketServer: @unchecked Sendable {
             if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
                 reply = makeConnected(token: token, deviceId: deviceId)
             }
-            admit(conn, deviceId: reply.token != nil ? deviceId : nil, clientClass: requestedClass, reply: reply)
+            // A fresh record is a phone. A loopback peer asking for desktop gets it only once the owner approves.
+            admit(conn, deviceId: reply.token != nil ? deviceId : nil, loopback: loopback, clientClass: nil, reply: reply)
             onPinConsumed()
+            if pairing.clientClass == MobilePairedDeviceStore.desktopClientClass, loopback,
+               reply.token != nil, let deviceId {
+                onDesktopClassRequested(deviceId)
+            }
         case .wrong:
             // Diagnostic: show the received candidate's shape (not its value)
             // so a lingering mismatch — typo, non-digit, wrong length — is
@@ -605,11 +623,45 @@ final class MobileWebSocketServer: @unchecked Sendable {
                          capabilities: caps.isEmpty ? nil : caps)
     }
 
-    private static func isLoopback(_ host: String) -> Bool {
-        host == "127.0.0.1" || host == "::1" || host.lowercased() == "localhost"
+    /// Loopback on the peer's real address: 127.0.0.0/8, ::1 and ::ffff:127.x. Everything else (link-local
+    /// `fe80::1%lo0`, LAN, a host name) is refused. Pure; pinned by `DesktopClassGateTests`.
+    nonisolated static func isLoopback(_ host: NWEndpoint.Host) -> Bool {
+        switch host {
+        case .ipv4(let a):
+            return a.rawValue.first == 127
+        case .ipv6(let a):
+            if a == .loopback { return true }
+            let b = [UInt8](a.rawValue)
+            // IPv4-mapped ::ffff:a.b.c.d with a loopback IPv4.
+            return b.count == 16 && b[0..<10].allSatisfy { $0 == 0 } && b[10] == 0xff && b[11] == 0xff && b[12] == 127
+        case .name:
+            return false
+        @unknown default:
+            return false
+        }
     }
 
-    private func admit(_ conn: NWConnection, deviceId: String?, clientClass: String?, reply: Connected) {
+    private static func peerIsLoopback(_ conn: NWConnection) -> Bool {
+        guard case let .hostPort(host, _) = conn.endpoint else { return false }
+        return isLoopback(host)
+    }
+
+    /// The session's class: desktop only for a desktop-class record on a loopback peer; otherwise a phone (nil).
+    nonisolated static func sessionClass(stored: String?, peerIsLoopback: Bool) -> String? {
+        stored == MobilePairedDeviceStore.desktopClientClass && peerIsLoopback ? MobilePairedDeviceStore.desktopClientClass : nil
+    }
+
+    /// The owner approved the desktop class for `deviceId` (already stored on its record): upgrade the live session
+    /// too, but only if it is still that device on a loopback peer and the record still says desktop.
+    func grantDesktopClass(deviceId: String) {
+        queue.async {
+            guard self.client != nil, self.paired, self.clientDeviceId == deviceId else { return }
+            self.clientClass = Self.sessionClass(stored: self.storedClientClass(deviceId),
+                                                 peerIsLoopback: self.clientIsLoopback)
+        }
+    }
+
+    private func admit(_ conn: NWConnection, deviceId: String?, loopback: Bool, clientClass: String?, reply: Connected) {
         // NOW the incumbent may be replaced — after proven credentials, never
         // before. Its handler is cleared first so the cancellation below can't
         // race the `client` reassignment through the state handler. It is told
@@ -632,9 +684,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
         paired = true
         clientDeviceId = deviceId
         self.clientClass = clientClass
+        clientIsLoopback = loopback
         onLog(deviceId == nil ? "Client paired (PIN only)" : "Client paired (device \(deviceId!.prefix(8))…)")
         onClientIdentified(deviceId)
-        onClientClass(clientClass)
         onClientPaired()
         // Directly to THIS connection, synchronously on the queue — not via
         // `send`, which (a) targets whoever `client` is by the time its Task
@@ -685,7 +737,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
             self.paired = false
             self.clientDeviceId = nil
             self.clientClass = nil
-            self.onClientClass(nil)
+            self.clientIsLoopback = false
             self.onClientDisconnected()
             self.queue.asyncAfter(deadline: .now() + 0.2) { conn.cancel() }
         }
@@ -750,6 +802,6 @@ final class MobileWebSocketServer: @unchecked Sendable {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }
-        onInbound(data)
+        onInbound(data, clientClass)
     }
 }

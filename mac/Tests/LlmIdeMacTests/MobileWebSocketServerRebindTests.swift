@@ -48,7 +48,7 @@ final class MobileWebSocketServerRebindTests: XCTestCase {
             portCandidates: 1,
             deviceName: "test-device",
             validatePin: { _ in false },
-            onInbound: { _ in },
+            onInbound: { _, _ in },
             onLog: onLog,
             onClientPaired: {},
             onClientDisconnected: {},

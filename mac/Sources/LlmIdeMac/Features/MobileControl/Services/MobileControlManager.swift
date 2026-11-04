@@ -253,7 +253,8 @@ final class MobileControlManager {
     /// Device id of the phone currently connected; nil when none is, or when a
     /// legacy phone paired with a bare PIN and has no id.
     private(set) var connectedDeviceId: String?
-    /// The class the paired peer declared. Only a loopback peer may claim `desktop`.
+    /// The class of the session the frame being handled came from (`desktop` only for a Mac-granted desktop
+    /// record on a loopback peer; see `MobileWebSocketServer.sessionClass`). Set from each frame, never mirrored.
     private(set) var connectedClientClass: String?
     var isDesktopBridge: Bool { connectedClientClass == "desktop" }
     /// Bumped on every successful pairing (including a replacement and a
@@ -399,9 +400,12 @@ final class MobileControlManager {
             issueToken: { [pairedDeviceStore] deviceId, deviceName in
                 pairedDeviceStore.issueToken(deviceId: deviceId, name: deviceName)
             },
-            onInbound: { [weak self] data in
+            storedClientClass: { [pairedDeviceStore] deviceId in
+                pairedDeviceStore.clientClass(deviceId: deviceId)
+            },
+            onInbound: { [weak self] data, clientClass in
                 Task(priority: .userInitiated) { @MainActor in
-                    self?.handleInbound(data)
+                    self?.handleInbound(data, clientClass: clientClass)
                 }
             },
             onLog: { [weak self] line in
@@ -416,8 +420,8 @@ final class MobileControlManager {
                     self?.refreshPairedDevices()
                 }
             },
-            onClientClass: { [weak self] cls in
-                Task { @MainActor [weak self] in self?.connectedClientClass = cls }
+            onDesktopClassRequested: { [weak self] deviceId in
+                Task { @MainActor [weak self] in await self?.confirmDesktopClass(deviceId: deviceId) }
             },
             onPinConsumed: { [weak self] in
                 // Retire the PIN HERE, synchronously on the server's queue, so
@@ -791,7 +795,8 @@ final class MobileControlManager {
     /// 2c Task 1 — see `MobileFeatureBridge.swift`). Tag strings come from the
     /// single source of truth in `MobileProtocol.Tag`. Unknown types log and
     /// drop.
-    func handleInbound(_ data: Data) {
+    func handleInbound(_ data: Data, clientClass: String? = nil) {
+        connectedClientClass = clientClass
         // A v2 phone picks its own command ids; it must never be able to name a Host API v1 one
         // (it could cancel or answer a v1 client's command, or have v1 frames routed to it).
         if Self.refusesV1CommandId(data) {
@@ -800,7 +805,30 @@ final class MobileControlManager {
             reply(CommandError(commandId: "invalid_command_id", message: "Invalid command id", code: "invalid_command_id"))
             return
         }
-        dispatchInbound(data)
+        dispatchInbound(data, desktop: isDesktopBridge)
+    }
+
+    /// The desktop app paired from loopback and asked for the desktop class: the owner decides, in the same native
+    /// confirmation as a phone's code-writing run (default Cancel, timeout denies). Only an approval stores the class.
+    func confirmDesktopClass(deviceId: String) async {
+        let outcome = await desktopApproval.request(PhoneDesktopApprovalRequest(
+            title: "Allow the LLM-IDE desktop app on this Mac to control Auto Tasks?",
+            lines: ["It can turn Auto Tasks on or off, edit their settings and templates, and start runs.",
+                    "Runs that write code still ask you here first."],
+            requester: PhoneDesktopApprovalRequest.desktopRequester))
+        guard outcome == .approved else {
+            append(.info, "Desktop app pairing: Auto Tasks control not allowed (\(outcome))")
+            if connectedDeviceId == deviceId {
+                reply(CommandError(commandId: "pairing",
+                                   message: "Your Mac did not allow Auto Tasks control. Pair again from Settings → Mobile Bridge to allow Auto Tasks control.",
+                                   code: MobileRefusalCode.desktopDenied))
+            }
+            return
+        }
+        guard pairedDeviceStore.grantDesktopClass(deviceId: deviceId) else { return }
+        server?.grantDesktopClass(deviceId: deviceId)
+        refreshPairedDevices()
+        append(.info, "Desktop app pairing: Auto Tasks control allowed")
     }
 
     /// True when a v2 frame names a Host API v1 command id in its `commandId` or its `type` (pure; pinned by tests).
@@ -819,7 +847,7 @@ final class MobileControlManager {
     }
 
     /// The v2 dispatch itself. The Host API v1 gateway forwards here, past the v1-id refusal above.
-    func dispatchInbound(_ data: Data) {
+    func dispatchInbound(_ data: Data, desktop: Bool = false) {
         struct Envelope: Decodable { let type: String }
         guard let env = try? decoder.decode(Envelope.self, from: data) else {
             // Never the frame itself: it is phone-controlled and up to 8 MiB.
@@ -832,7 +860,7 @@ final class MobileControlManager {
 
         // THE tier gate: one table, one place, before any bridge sees the frame. Unknown types, Mac-to-phone
         // types and desktop-only types are refused here with a typed code (never a crash, never silent).
-        if case .refuse(let code, let message) = PhoneTierTable.verdict(for: env.type, desktop: isDesktopBridge) {
+        if case .refuse(let code, let message) = PhoneTierTable.verdict(for: env.type, desktop: desktop) {
             append(.stderr, "Tier gate refused '\(MobileLogPolicy.typeLabel(env.type))' (\(code))")
             reply(CommandError(commandId: MobileLogPolicy.typeLabel(env.type), message: message, code: code))
             return
