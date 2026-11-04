@@ -201,6 +201,27 @@ final class HostApiV1AuditRateTests {
         #expect((last["error"] as? [String: Any])?["code"] as? String == "auth_failed")
     }
 
+    @Test("9 wrong PINs from different addresses in one IPv6 /64 hit the per-peer lockout")
+    func throttleKeyedBySlash64() async {
+        let g = gateway()
+        func attempt(_ n: Int, _ pinTried: String) async {
+            g.opened(session: n, peer: "2001:db8:1:2::\(n)")
+            await g.receive(session: n, data: request("c-h", "host.hello", Self.hello))
+            await g.receive(session: n, data: request("c-p", "host.auth.pair", #"{"pin":"\#(pinTried)"}"#))
+            g.closed(session: n)
+            clock = clock.addingTimeInterval(200)   // past every escalating delay (cap 120 s)
+        }
+        for n in 1...8 { await attempt(n, "000000") }
+        #expect(events("pair_failed").count == 8)
+        await attempt(9, "000000")
+        #expect(lastError?["message"] as? String == "Too many wrong PINs — locked out for 15 minutes.")
+        #expect(events("pair_throttled").last.map { [$0[1], $0[3], $0[4]] } == ["2001:db8:1:2::9", "lockedOut", "2001:db8:1:2::/64"])
+        // Even the right PIN from another address in the same /64 is refused.
+        await attempt(10, pin)
+        #expect(lastError?["message"] as? String == "Too many wrong PINs — locked out for 15 minutes.")
+        #expect(store.all.isEmpty)
+    }
+
     // MARK: - Pre-auth slots (ruling 4)
 
     @Test("pre-auth: a peer (IPv6 /64) holds at most 2 unauthenticated sessions; a third is busy and closed")

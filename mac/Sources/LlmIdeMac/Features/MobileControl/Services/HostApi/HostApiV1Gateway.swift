@@ -191,11 +191,11 @@ final class HostApiV1Gateway {
             guard let p = payload(HostApiHostAuthPairRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.pair payload.") }
             if throttled(session, id, entry.peer, pairThrottle, "pair_throttled") { return }
             guard deps.validatePin(p.pin) else {
-                pairThrottle.registerFailure(host: entry.peer, now: deps.now())
+                pairThrottle.registerFailure(host: PairingThrottle.peerKey(entry.peer), now: deps.now())
                 deps.audit("pair_failed", entry.peer, nil, nil, nil)
                 return fail(session, id, "auth_failed", "Wrong PIN.")
             }
-            pairThrottle.registerSuccess(host: entry.peer)
+            pairThrottle.registerSuccess(host: PairingThrottle.peerKey(entry.peer))
             guard case .awaitingAuth(let name) = entry.state.phase else {
                 return fail(session, id, "denied", "This connection is not waiting to pair.")
             }
@@ -211,11 +211,11 @@ final class HostApiV1Gateway {
             guard let p = payload(HostApiHostAuthTokenRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.token payload.") }
             if throttled(session, id, entry.peer, tokenThrottle, "token_throttled") { return }
             guard let deviceId = deps.authenticate(p.token) else {
-                tokenThrottle.registerFailure(host: entry.peer, now: deps.now())
+                tokenThrottle.registerFailure(host: PairingThrottle.peerKey(entry.peer), now: deps.now())
                 deps.audit("token_failed", entry.peer, nil, nil, nil)
                 return fail(session, id, "auth_failed", "This device is no longer paired with this Mac — pair again with the current PIN.")
             }
-            tokenThrottle.registerSuccess(host: entry.peer)
+            tokenThrottle.registerSuccess(host: PairingThrottle.peerKey(entry.peer))
             sessions[session]?.state.authenticated(deviceId: deviceId)
             respond(session, id, .hostAuthToken, HostApiHostAuthTokenResult(capabilities: grant(session, deps.scopes(deviceId))))
         case .hostAuthRevoke:
@@ -311,8 +311,10 @@ final class HostApiV1Gateway {
     }
 
     /// Consults one pairing throttle; true means the attempt was refused (and audited, de-duplicated per peer).
+    /// Every throttle call keys by `peerKey` (IPv6 /64, IPv4-mapped → IPv4), as the desktop's throttle does.
     private func throttled(_ session: Int, _ id: String, _ peer: String, _ throttle: PairingThrottle, _ event: String) -> Bool {
-        let d = throttle.decision(for: peer, now: deps.now())
+        let key = PairingThrottle.peerKey(peer)
+        let d = throttle.decision(for: key, now: deps.now())
         switch d {
         case .allow: return false
         case .wait(let s): fail(session, id, "auth_failed", "Too many attempts — wait a moment and try again.", retryable: true, retryAfterMs: Int(s * 1000))
@@ -321,7 +323,7 @@ final class HostApiV1Gateway {
         }
         let kind: String
         switch d { case .wait: kind = "wait"; case .lockedOut: kind = "lockedOut"; default: kind = "serverThrottled" }
-        deps.audit(event, peer, nil, kind, peer)
+        deps.audit(event, peer, nil, kind, key)
         return true
     }
 
