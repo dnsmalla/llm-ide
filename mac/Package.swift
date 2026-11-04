@@ -243,6 +243,7 @@ if mobileIncluded {
         "MobilePairingFrameTests.swift",
         "HostApiV1DeviceStoreTests.swift",
         "HostApiV1SessionTests.swift",
+        "HostApiV2TranslatorTests.swift",
         "PhoneDesktopApprovalGateTests.swift",
         "PhoneTierTableTests.swift",
         "MobileWebSocketServerBindTests.swift",
