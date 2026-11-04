@@ -285,6 +285,8 @@ export class HostConnection implements HostLink {
       }
       this.#pending.delete(id);
       p.reject(unreachable("The host did not answer in time."));
+      // a silent host while "ready" is likely a half-open socket (e.g. after sleep): close it so #lost reconnects
+      if (this.#state.kind === "ready" && this.#socket?.readyState === 1) this.#socket.close();
     }, this.#o.timeoutMs);
   }
 

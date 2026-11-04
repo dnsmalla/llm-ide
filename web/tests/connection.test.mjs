@@ -107,6 +107,18 @@ test("timeouts resend an idempotent command once and never a non-idempotent one"
   await assert.rejects(snap.done, (e) => e.code === "host_unreachable");
 });
 
+test("a request timeout while ready closes a half-open socket so the client reconnects", async () => {
+  const h = harness({ token: "k".repeat(40), script: { "chat.snapshot": () => null } });
+  await h.conn.connect();
+  const snap = h.conn.send("chat.snapshot", { limit: 10 });
+  h.runTimers(); // resent once
+  h.runTimers(); // gives up
+  await assert.rejects(snap.done, (e) => e.code === "host_unreachable");
+  assert.equal(h.sockets[0].readyState, 3);
+  await h.tick();
+  assert.equal(h.conn.state.kind, "reconnecting");
+});
+
 test("events are delivered, a rev gap triggers resync, host.capabilities updates the set first", async () => {
   const h = harness({ token: "k".repeat(40) });
   await h.conn.connect();

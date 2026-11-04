@@ -84,10 +84,12 @@ export function WebChat(p: WebChatProps) {
         <h1>{p.hostName}</h1>
         <Chip label={chipLabel(p.connection)} />
         <span className="chat-spacer" />
-        {!state.turn && <button type="button" onClick={p.onClear} disabled={disabledReason !== null} title={disabledReason ?? undefined}>Clear history</button>}
+        <button type="button" onClick={p.onClear} disabled={disabledReason !== null || state.turn !== null}
+          title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : undefined)}>Clear history</button>
         <button type="button" onClick={p.onForget}>Forget this host</button>
       </header>
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
+      {p.connection.kind === "reconnecting" && <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />}
       {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
       {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
       <p className="web-status" role="status" aria-live="polite">{state.turn ? "The assistant is replying…" : ""}</p>

@@ -77,3 +77,8 @@ test("clear history is disabled while offline or without chat", () => {
   assert.match(html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: { kind: "idle" } }))), /<button[^>]*disabled[^>]*>Clear history/);
   assert.doesNotMatch(html(h(UI.WebChat, chatProps(UI.initialChatState, { capabilities: caps("chat") }))), /<button[^>]*disabled[^>]*>Clear history/);
 });
+
+test("clear history stays mounted but disabled during a turn", () => {
+  const s = UI.reduce(UI.initialChatState, { type: "sent", commandId: "c-1", text: "hi" });
+  assert.match(html(h(UI.WebChat, chatProps(s))), /<button[^>]*disabled[^>]*>Clear history/);
+});

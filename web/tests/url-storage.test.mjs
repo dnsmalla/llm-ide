@@ -18,6 +18,10 @@ test("everything else is refused with a reason", () => {
     "ws://u:p@127.0.0.1:3016/host-api/v1": /user, query or fragment/,
     "ws://127.0.0.1:3016/host-api/v1?t=1": /user, query or fragment/,
     "not a url": /ws:\/\/ or wss:\/\//,
+    "ws://127.0.0.1.evil.com:3016/host-api/v1": /only to this computer/,
+    "ws://127.0.0.1:3016/host-api/v1?x=1": /user, query or fragment/,
+    "ws://127.0.0.1:3016/host-api/v1#f": /user, query or fragment/,
+    "ws://127.0.0.1:3016/host-api/v1/": /\/host-api\/v1/,
   };
   for (const [u, re] of Object.entries(bad)) {
     const r = checkHostUrl(u, "http:");
