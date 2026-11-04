@@ -14,8 +14,7 @@ import Foundation
 /// means one attacker can never lock out the real phone.
 ///
 /// Pure value type with an injected clock so the policy is unit-testable without
-/// sleeping; `MobileWebSocketServer` owns the instance and touches it only on its
-/// serial queue.
+/// sleeping; shared across threads through `LockedPairingThrottle`.
 struct PairingThrottle {
 
     enum Decision: Equatable {
@@ -155,4 +154,17 @@ struct PairingThrottle {
         let exponent = Double(min(count - 1, 20))
         return min(baseDelay * pow(2, exponent), delayCap)
     }
+}
+
+/// A `PairingThrottle` behind a lock. `MobileControlManager` owns ONE for PINs and hands it to both the
+/// v2 server (its serial queue) and the Host API v1 gateway (main actor), so a guesser gets one budget.
+final class LockedPairingThrottle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var inner = PairingThrottle()
+
+    func decision(for host: String, now: Date) -> PairingThrottle.Decision {
+        lock.withLock { inner.decision(for: host, now: now) }
+    }
+    func registerFailure(host: String, now: Date) { lock.withLock { inner.registerFailure(host: host, now: now) } }
+    func registerSuccess(host: String) { lock.withLock { inner.registerSuccess(host: host) } }
 }

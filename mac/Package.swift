@@ -270,6 +270,7 @@ if mobileIncluded {
         "PhoneFilesTests.swift",
         "PhoneIssuesTests.swift",
         "PairingThrottleTests.swift",
+        "SharedPinThrottleTests.swift",
         "MobilePairedDeviceStoreTests.swift",
         "MobileExploreIndexStoreTests.swift",
         "MobileModuleTests.swift",

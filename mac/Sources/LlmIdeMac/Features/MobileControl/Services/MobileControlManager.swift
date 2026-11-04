@@ -240,6 +240,9 @@ final class MobileControlManager {
     /// Phones that completed PIN pairing and hold a per-device token — the
     /// registry token auth checks against, and what Settings lists/revokes.
     private let pairedDeviceStore: MobilePairedDeviceStore
+    /// The ONE PIN-guess throttle: the v2 server and the Host API v1 gateway both get this instance,
+    /// so wrong PINs on either path spend one budget. Token throttles stay per path.
+    @ObservationIgnored let pinThrottle = LockedPairingThrottle()
     /// Host API v1 audit log (Plan 6 Task 8); tests inject one on a temp file.
     private let hostApiAuditOverride: HostApiV1AuditLog?
     @ObservationIgnored private lazy var hostApiAudit: HostApiV1AuditLog = hostApiAuditOverride
@@ -440,7 +443,8 @@ final class MobileControlManager {
             onBindFailed: { [weak self] error in
                 Task { @MainActor [weak self] in self?.reportMobileBindFailure(error) }
             },
-            capabilities: { [capabilityBox] in capabilityBox.value }
+            capabilities: { [capabilityBox] in capabilityBox.value },
+            pinThrottle: pinThrottle
         )
         do {
             try server.start()
@@ -706,7 +710,8 @@ final class MobileControlManager {
             certificateFingerprint: { fingerprint },
             audit: { [hostApiAudit] e, peer, device, detail, key in
                 hostApiAudit.record(e, peer: peer, deviceId: device, detail: detail, dedupeKey: key)
-            })
+            },
+            pinThrottle: pinThrottle)
     }
 
     /// Tear down the native server and Bonjour advertisement. Idempotent —

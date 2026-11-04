@@ -79,8 +79,11 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private static let maxChallengers = 2
     /// How long an unpaired peer may hold a slot before it is dropped.
     private static let handshakeDeadline: TimeInterval = 10
-    /// Per-host brute-force defence for the 6-digit PIN. Serial-queue only.
-    private var throttle = PairingThrottle()
+    /// Per-host brute-force defence for the 6-digit PIN, shared with the Host API v1 gateway
+    /// (the manager injects one instance into both, so a guesser gets one budget).
+    private let pinThrottle: LockedPairingThrottle
+    /// Token reconnects (and only those) keep their own bucket on this path.
+    private let tokenThrottle = LockedPairingThrottle()
     /// Run intent: true between start() and stop(). Gates the EADDRINUSE
     /// retry so a stop() during a pending retry doesn't rebind after the user
     /// asked to stop. All access on the serial `queue`.
@@ -113,8 +116,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
          onBindFailed: @escaping (Error) -> Void = { _ in },
-         capabilities: @escaping () -> [String] = { [] }) {
+         capabilities: @escaping () -> [String] = { [] },
+         pinThrottle: LockedPairingThrottle = LockedPairingThrottle()) {
         self.capabilities = capabilities
+        self.pinThrottle = pinThrottle
         self.basePort = port
         // Never slide past 65535: a base of 65527+ with the port busy used to
         // reach 65536 and trap in `UInt16(currentPort)` on the listener queue.
@@ -355,10 +360,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
         switch host {
         case .ipv4(let addr): return "\(addr)"
         case .ipv6(let addr):
-            // Key on the /64, not the full address: an on-link attacker owns a
-            // whole /64 and would otherwise get a fresh failure counter for
-            // every guess simply by picking a new source address.
-            return PairingThrottle.ipv6PrefixKey("\(addr)")
+            // `peerKey`, as the v1 gateway keys the shared throttle: the /64, not the full
+            // address (an on-link attacker owns a whole /64), and IPv4-mapped → the IPv4.
+            return PairingThrottle.peerKey("\(addr)")
         case .name(let name, _): return name
         @unknown default: return String(describing: host)
         }
@@ -487,13 +491,90 @@ final class MobileWebSocketServer: @unchecked Sendable {
         }
     }
 
+    enum PinAttempt: Equatable { case ok, wrong, throttled(PairingThrottle.Decision) }
+
+    /// One PIN check against the (shared) PIN throttle. Rate-limits BEFORE inspecting the PIN: a 6-digit
+    /// secret is only a secret while guesses are expensive (see PairingThrottle).
+    static func pinAttempt(_ pin: String, host: String, throttle: LockedPairingThrottle,
+                           validate: (String) -> Bool, now: Date) -> PinAttempt {
+        let decision = throttle.decision(for: host, now: now)
+        guard decision == .allow else { return .throttled(decision) }
+        guard validate(pin) else {
+            throttle.registerFailure(host: host, now: now)
+            return .wrong
+        }
+        throttle.registerSuccess(host: host)
+        return .ok
+    }
+
     private func handlePairing(data: Data, from conn: NWConnection) {
         let host = Self.hostKey(for: conn)
-        // Rate-limit BEFORE inspecting the PIN: a 6-digit secret is only a
-        // secret while guesses are expensive (see PairingThrottle).
-        switch throttle.decision(for: host, now: Date()) {
+        let now = Date()
+        guard Self.isPairingFrame(data),
+              let pairing = try? decoder.decode(Pairing.self, from: data) else {
+            // Not a pairing attempt: costs a PIN-throttle failure, as before the split.
+            let decision = pinThrottle.decision(for: host, now: now)
+            if decision != .allow { return rejectThrottled(conn, host: host, decision) }
+            onLog("First frame was not a Pairing message — closing")
+            pinThrottle.registerFailure(host: host, now: now)
+            reject(conn, message: "Expected a pairing message", retryable: false)
+            return
+        }
+        let deviceId = Self.cleanDeviceId(pairing.deviceId)
+        // A desktop-class hint is honoured only for a peer on this Mac; a phone on the LAN cannot claim it.
+        let requestedClass = pairing.clientClass == "desktop" && Self.isLoopback(host) ? "desktop" : nil
+        // Token auth: a phone that paired before. The token stands in for the
+        // PIN entirely — no PIN is examined, so a rotated PIN changes nothing
+        // for an already-paired phone. A stale or revoked token is a plain
+        // refusal (not retryable): the phone must pair again with the current
+        // PIN. It still costs a (token-)throttle failure so tokens can't be ground
+        // any faster than PINs.
+        if let token = pairing.token, !token.isEmpty {
+            let decision = tokenThrottle.decision(for: host, now: now)
+            if decision != .allow { return rejectThrottled(conn, host: host, decision) }
+            guard let deviceId, authenticateToken(deviceId, token) else {
+                tokenThrottle.registerFailure(host: host, now: now)
+                onLog("Rejected token auth — unknown device or a stale/revoked token")
+                reject(conn, message: "This device is no longer paired with this Mac — pair again with the current PIN",
+                       retryable: false)
+                return
+            }
+            tokenThrottle.registerSuccess(host: host)
+            admit(conn, deviceId: deviceId, clientClass: requestedClass, reply: makeConnected())
+            return
+        }
+        switch Self.pinAttempt(pairing.pin, host: host, throttle: pinThrottle, validate: validatePin, now: now) {
+        case .throttled(let decision):
+            rejectThrottled(conn, host: host, decision)
+        case .ok:
+            // A phone that identifies itself gets a token and never needs the
+            // PIN again. Either way the PIN is one-time: it rotates after EVERY
+            // successful use (`onPinConsumed`), so a PIN that was read over a
+            // shoulder, captured, or presented by a client that deliberately
+            // omits `deviceId` (and so never shows up in Settings) cannot be
+            // reused. A legacy phone still pairs — with the PIN shown at that
+            // moment — and has to re-pair next time.
+            var reply = makeConnected()
+            if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
+                reply = makeConnected(token: token, deviceId: deviceId)
+            }
+            admit(conn, deviceId: reply.token != nil ? deviceId : nil, clientClass: requestedClass, reply: reply)
+            onPinConsumed()
+        case .wrong:
+            // Diagnostic: show the received candidate's shape (not its value)
+            // so a lingering mismatch — typo, non-digit, wrong length — is
+            // visible in the Mobile Control log pane without leaking the PIN.
+            let received = pairing.pin
+            let digits = !received.isEmpty && received.allSatisfy { ("0"..."9").contains($0) }
+            onLog("Wrong PIN — rejecting (received \(received.count) char\(received.count == 1 ? "" : "s")\(digits ? ", all digits" : ", has non-digits"))")
+            reject(conn, message: "Wrong PIN", retryable: false)
+        }
+    }
+
+    private func rejectThrottled(_ conn: NWConnection, host: String, _ decision: PairingThrottle.Decision) {
+        switch decision {
         case .allow:
-            break
+            return
         case .wait(let seconds):
             onLog("Pairing from \(host) too soon — \(Int(seconds.rounded()))s penalty left")
             // retryable: the PIN was never even examined, so the phone must
@@ -512,59 +593,6 @@ final class MobileWebSocketServer: @unchecked Sendable {
             reject(conn, message: "Your Mac is refusing new pairings for a few minutes after too many failed attempts. Try again shortly.",
                    retryable: true)
             return
-        }
-        guard Self.isPairingFrame(data),
-              let pairing = try? decoder.decode(Pairing.self, from: data) else {
-            onLog("First frame was not a Pairing message — closing")
-            throttle.registerFailure(host: host, now: Date())
-            reject(conn, message: "Expected a pairing message", retryable: false)
-            return
-        }
-        let deviceId = Self.cleanDeviceId(pairing.deviceId)
-        // A desktop-class hint is honoured only for a peer on this Mac; a phone on the LAN cannot claim it.
-        let requestedClass = pairing.clientClass == "desktop" && Self.isLoopback(host) ? "desktop" : nil
-        // Token auth: a phone that paired before. The token stands in for the
-        // PIN entirely — no PIN is examined, so a rotated PIN changes nothing
-        // for an already-paired phone. A stale or revoked token is a plain
-        // refusal (not retryable): the phone must pair again with the current
-        // PIN. It still costs a throttle failure so tokens can't be ground
-        // any faster than PINs.
-        if let token = pairing.token, !token.isEmpty {
-            guard let deviceId, authenticateToken(deviceId, token) else {
-                throttle.registerFailure(host: host, now: Date())
-                onLog("Rejected token auth — unknown device or a stale/revoked token")
-                reject(conn, message: "This device is no longer paired with this Mac — pair again with the current PIN",
-                       retryable: false)
-                return
-            }
-            throttle.registerSuccess(host: host)
-            admit(conn, deviceId: deviceId, clientClass: requestedClass, reply: makeConnected())
-            return
-        }
-        if validatePin(pairing.pin) {
-            throttle.registerSuccess(host: host)
-            // A phone that identifies itself gets a token and never needs the
-            // PIN again. Either way the PIN is one-time: it rotates after EVERY
-            // successful use (`onPinConsumed`), so a PIN that was read over a
-            // shoulder, captured, or presented by a client that deliberately
-            // omits `deviceId` (and so never shows up in Settings) cannot be
-            // reused. A legacy phone still pairs — with the PIN shown at that
-            // moment — and has to re-pair next time.
-            var reply = makeConnected()
-            if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
-                reply = makeConnected(token: token, deviceId: deviceId)
-            }
-            admit(conn, deviceId: reply.token != nil ? deviceId : nil, clientClass: requestedClass, reply: reply)
-            onPinConsumed()
-        } else {
-            throttle.registerFailure(host: host, now: Date())
-            // Diagnostic: show the received candidate's shape (not its value)
-            // so a lingering mismatch — typo, non-digit, wrong length — is
-            // visible in the Mobile Control log pane without leaking the PIN.
-            let received = pairing.pin
-            let digits = !received.isEmpty && received.allSatisfy { ("0"..."9").contains($0) }
-            onLog("Wrong PIN — rejecting (received \(received.count) char\(received.count == 1 ? "" : "s")\(digits ? ", all digits" : ", has non-digits"))")
-            reject(conn, message: "Wrong PIN", retryable: false)
         }
     }
 

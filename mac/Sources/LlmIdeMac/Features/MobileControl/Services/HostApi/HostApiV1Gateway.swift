@@ -29,6 +29,8 @@ final class HostApiV1Gateway {
         /// Audit sink (`HostApiV1AuditLog.record`). Never pass a token, PIN or frame text.
         var audit: (_ event: String, _ peer: String, _ deviceId: String?, _ detail: String?, _ dedupeKey: String?) -> Void = { _, _, _, _, _ in }
         var now: () -> Date = { Date() }
+        /// The PIN throttle; the manager passes the one its v2 server uses, so both paths share one budget.
+        var pinThrottle = LockedPairingThrottle()
     }
 
     static let maxSessions = 4
@@ -44,8 +46,9 @@ final class HostApiV1Gateway {
     /// internal command id → (session, external id, cancelled by the client)
     private var owned: [String: (session: Int, external: String, cancelled: Bool)] = [:]
     // Separate buckets: a wrong PIN must not delay a token reconnect from the same peer, nor the reverse.
-    private var pairThrottle = PairingThrottle()
-    private var tokenThrottle = PairingThrottle()
+    // The PIN bucket is shared with the v2 link (deps.pinThrottle); the token bucket is v1's own.
+    private var pairThrottle: LockedPairingThrottle { deps.pinThrottle }
+    private let tokenThrottle = LockedPairingThrottle()
     private var rate = HostApiV1RateLimiter()
     /// Per authed session: the capabilities its token was granted, and the effective list it was last sent.
     private var grants: [Int: Set<String>] = [:]
@@ -312,7 +315,7 @@ final class HostApiV1Gateway {
 
     /// Consults one pairing throttle; true means the attempt was refused (and audited, de-duplicated per peer).
     /// Every throttle call keys by `peerKey` (IPv6 /64, IPv4-mapped → IPv4), as the desktop's throttle does.
-    private func throttled(_ session: Int, _ id: String, _ peer: String, _ throttle: PairingThrottle, _ event: String) -> Bool {
+    private func throttled(_ session: Int, _ id: String, _ peer: String, _ throttle: LockedPairingThrottle, _ event: String) -> Bool {
         let key = PairingThrottle.peerKey(peer)
         let d = throttle.decision(for: key, now: deps.now())
         switch d {
