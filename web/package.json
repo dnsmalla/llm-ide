@@ -9,7 +9,9 @@
     "build": "tsc --noEmit -p . && vite build",
     "preview": "vite preview",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
-    "test:e2e": "node --test --experimental-strip-types tests/e2e/*.test.mjs"
+    "test:e2e": "node --test --experimental-strip-types tests/e2e/*.test.mjs",
+    "start": "node scripts/serve.mjs",
+    "serve": "node scripts/serve.mjs"
   },
   "dependencies": {
     "react": "19.3.1",

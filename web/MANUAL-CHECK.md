@@ -1,0 +1,50 @@
+# Web client — manual check
+
+Run this once before calling the web client shipped. The automated tests cover
+the protocol, UI render and origin policy; this covers the actual browser.
+
+## 1. Start the desktop host
+
+```bash
+LLMIDE_HOST_API_DEV=1 \
+LLMIDE_HOST_API_WEB_ORIGINS=http://127.0.0.1:5180 \
+npm --prefix desktop run tauri dev
+```
+
+In the desktop app: **Settings → Host API pairing → Show pairing PIN**. Keep
+the six digits, port and fingerprint/URL on screen.
+
+## 2. Build and serve the web client
+
+```bash
+cd web
+npm ci
+npm run build
+npm start
+```
+
+Open <http://127.0.0.1:5180>.
+
+## 3. Check
+
+- [ ] The page loads with no console errors and no CSP violations.
+- [ ] Enter the host URL shown by the desktop, then the PIN; pairing succeeds.
+- [ ] Send a message; the reply streams and **Stop** cancels it.
+- [ ] Clear history asks first, then the empty state returns.
+- [ ] An AskUserQuestion renders its options; answering clears the card.
+- [ ] If the host grants `tool_approvals`, a tool request shows **Allow once** /
+      **Deny** and the answer clears the card.
+- [ ] Reload the page: it reconnects with the stored token, without the PIN.
+- [ ] Desktop **Revoke** on that browser: the page returns to pairing with the
+      revoked notice.
+- [ ] **Forget this host** returns to pairing and the token is gone.
+- [ ] Resize to phone width; the composer and cards remain usable.
+
+## 4. Domain check (later)
+
+Build with `VITE_HOST_API_URL=wss://<host>:<port>/host-api/v1`, serve `dist`
+over HTTPS, add the exact `https://<domain>` origin to the host's
+`LLMIDE_HOST_API_WEB_ORIGINS`, and repeat the checks above. The browser must
+trust the host's certificate; a self-signed certificate needs a manual trust
+step. Chromium's Private Network Access rules may also block an HTTPS page
+from reaching a LAN/loopback host.
