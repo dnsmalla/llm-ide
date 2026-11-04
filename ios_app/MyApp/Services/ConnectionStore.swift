@@ -75,7 +75,9 @@ final class ConnectionStore: ObservableObject {
     ///
     /// `hostApiOffer` is what the QR or the Bonjour TXT offered for v1. Only a fresh pairing (a PIN) may change
     /// the stored pin; without a PIN the offer is ignored, so a spoofed TXT can never re-pin the phone.
-    func save(ip: String, port: Int, pin: String, hostApiOffer: HostApiPairingOffer? = nil) {
+    /// `freshPairing` is true only for a QR scan or a PIN the user typed. A one-tap reconnect with a saved PIN
+    /// keeps the stored pin (and never creates one); its TXT may only move the port (`refreshHostApiPort`).
+    func save(ip: String, port: Int, pin: String, hostApiOffer: HostApiPairingOffer? = nil, freshPairing: Bool = false) {
         deviceIP   = ip
         devicePort = port
         devicePIN  = pin
@@ -84,6 +86,7 @@ final class ConnectionStore: ObservableObject {
         CredentialKeychain.save(pin, account: .pin)
         guard !pin.isEmpty else { return }
         clearToken()
+        guard freshPairing else { return refreshHostApiPort(host: ip, offer: hostApiOffer) }
         let newPin = HostApiPinning.pinAfterOffer(stored: hostApiPin, offered: hostApiOffer?.fingerprint, freshPairing: true)
         // A pin the Keychain refused is dropped: v1 is then not dialled, never dialled unpinned.
         if let newPin, CredentialKeychain.save(newPin, account: .hostApiPin) { hostApiPin = newPin } else {

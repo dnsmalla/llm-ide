@@ -85,6 +85,15 @@ struct HostApiPinningTests {
         #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: "junk", freshPairing: true) == nil)
     }
 
+    @Test("only an explicit pairing sets or replaces the pin; a saved-PIN reconnect never does")
+    func explicitPairingOnly() throws {
+        let fp = try Self.vector().fingerprint
+        let other = "sha256:" + String(repeating: "C", count: 43)
+        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: true) == other, "QR / typed PIN")
+        #expect(HostApiPinning.pinAfterOffer(stored: fp, offered: other, freshPairing: false) == fp, "saved-PIN tap")
+        #expect(HostApiPinning.pinAfterOffer(stored: nil, offered: other, freshPairing: false) == nil, "no pin created")
+    }
+
     @Test("a TXT may move only the v1 port, and only when its h1fp is the stored pin")
     func portFollowsMatchingTXT() throws {
         let fp = try Self.vector().fingerprint

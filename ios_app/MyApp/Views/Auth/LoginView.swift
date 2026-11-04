@@ -136,7 +136,8 @@ struct ConnectView: View {
             QRScannerSheet { info in
                 errorMessage = nil
                 connectAttempted = true
-                connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer)
+                connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer,
+                                     freshPairing: true)
                 connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
             }
         }
@@ -163,7 +164,7 @@ struct ConnectView: View {
                     isKnown: connectionStore.deviceIP == device.host,
                     isConnecting: isConnecting,
                     savedPIN: connectionStore.devicePIN,
-                    onConnect: { resolvedPIN in
+                    onConnect: { resolvedPIN, typed in
                         errorMessage = nil
                         connectAttempted = true
                         // `device.port` is what Bonjour resolved for THIS Mac;
@@ -173,7 +174,7 @@ struct ConnectView: View {
                             ? device.port
                             : (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
                         connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN,
-                                             hostApiOffer: device.hostApiOffer)
+                                             hostApiOffer: device.hostApiOffer, freshPairing: typed)
                         connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
                     }
                 )
@@ -234,7 +235,7 @@ struct ConnectView: View {
                 connectAttempted = true
                 let port = enteredPort
                     ?? (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
-                connectionStore.save(ip: host, port: port, pin: code)
+                connectionStore.save(ip: host, port: port, pin: code, freshPairing: true)
                 connection.connectDirect(ip: host, port: port, pin: code)
             } label: {
                 HStack(spacing: DesignSystem.Spacing.sm) {
@@ -291,7 +292,8 @@ private struct DiscoveredDeviceCard: View {
     let isKnown: Bool          // IP matches saved connection
     let isConnecting: Bool
     let savedPIN: String
-    let onConnect: (String) -> Void
+    /// The PIN, and whether the user typed it (a fresh pairing) rather than reusing the saved one.
+    let onConnect: (String, Bool) -> Void
 
     @State private var pinEntry: String = ""
     @State private var showPINField: Bool = false
@@ -320,7 +322,7 @@ private struct DiscoveredDeviceCard: View {
                 if isKnown && !savedPIN.isEmpty {
                     // Already paired — one tap to connect
                     Button {
-                        onConnect(savedPIN)
+                        onConnect(savedPIN, false)
                     } label: {
                         Text(isConnecting ? "Connecting…" : "Connect")
                             .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
@@ -360,7 +362,7 @@ private struct DiscoveredDeviceCard: View {
                         .cornerRadius(DesignSystem.Layout.cornerRadiusS)
                     Button {
                         guard !pinEntry.isEmpty else { return }
-                        onConnect(pinEntry)
+                        onConnect(pinEntry, true)
                     } label: {
                         Image(systemName: "arrow.right.circle.fill")
                             .font(.system(size: 32))
