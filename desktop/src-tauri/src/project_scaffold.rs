@@ -215,6 +215,9 @@ fn parent_is_system_tree(real_parent: &str) -> bool {
     // Without the verbatim prefix (`\\?\D:\` on Windows), so a drive root reads as one `d:` segment.
     let w = crate::project::normalise(real_parent).to_lowercase();
     let segs: Vec<&str> = w.split('/').filter(|s| !s.is_empty()).collect();
+    if w.starts_with("//") && segs.len() <= 2 {
+        return true; // a UNC server or share root (`\\srv\share`), the network twin of a drive root
+    }
     match segs.as_slice() {
         [] => true,
         [drive] if drive.len() == 2 && drive.ends_with(':') => true,

@@ -128,10 +128,10 @@ fn an_existing_symlink_is_refused_and_a_symlinked_parent_resolves_first() {
 
 #[test]
 fn drive_roots_are_system_trees_in_any_spelling() {
-    for p in ["/", r"D:\", r"\\?\D:\", "d:/", "/etc", r"\\?\C:\"] {
+    for p in ["/", r"D:\", r"\\?\D:\", "d:/", "/etc", r"\\?\C:\", r"\\srv\share", r"\\?\UNC\srv\share\", r"\\srv"] {
         assert!(parent_is_system_tree(p), "{p}");
     }
-    for p in [r"D:\work", r"\\?\D:\work", "/Users/me/code"] {
+    for p in [r"D:\work", r"\\?\D:\work", "/Users/me/code", r"\\srv\share\work", r"\\?\UNC\srv\share\work"] {
         assert!(!parent_is_system_tree(p), "{p}");
     }
 }
