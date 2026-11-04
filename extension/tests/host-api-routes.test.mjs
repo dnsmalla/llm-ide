@@ -24,19 +24,19 @@ const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const dev = await import('../kb/host-api-devices.mjs');
 const pins = await import('../routes/host-api/pin.mjs');
-const { handleHostApiRoute } = await import('../routes/host-api/http-routes.mjs');
+const { handleHostApiRoute, pairingAddresses } = await import('../routes/host-api/http-routes.mjs');
 
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `r-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' }).id;
 
-const state = { userId: null, enabled: true, logger: undefined, listenerUp: true };
+const state = { userId: null, enabled: true, logger: undefined, listenerUp: true, interfaces: () => ({}) };
 const disconnects = [];
 const audited = [];
 const audit = () => ({ record: (event, f) => audited.push([event, f.userId, f.deviceId]) });
 const hostApi = { listener: { port: 3016 }, gateway: { disconnectDevice: (u, d) => disconnects.push([u, d]) } };
 const server = http.createServer((req, res) => {
   req.user = { id: state.userId };
-  void handleHostApiRoute(req, res, { hostApi: () => (state.listenerUp ? hostApi : null), enabled: state.enabled, env, logger: state.logger, audit });
+  void handleHostApiRoute(req, res, { hostApi: () => (state.listenerUp ? hostApi : null), enabled: state.enabled, env, logger: state.logger, audit, interfaces: () => state.interfaces() });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -94,6 +94,33 @@ test('the PIN carries the certificate fingerprint: null for the dev listener, sh
     assert.match(r.body.fingerprint, /^sha256:[A-Za-z0-9_-]{43}$/);
     assert.equal(r.body.fingerprint, hostApi.fingerprint);
   } finally { delete hostApi.fingerprint; }
+});
+
+const IFACES = {
+  lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }, { address: '::1', family: 'IPv6', internal: true }],
+  docker0: [{ address: '172.17.0.1', family: 'IPv4', internal: false }],
+  en0: [{ address: 'fe80::1', family: 'IPv6', internal: false }, { address: '192.168.1.20', family: 'IPv4', internal: false }],
+  en5: [{ address: '169.254.3.4', family: 'IPv4', internal: false }],
+  utun4: [{ address: '100.101.102.103', family: 'IPv4', internal: false }],
+  utun5: [{ address: '100.200.0.1', family: 'IPv4', internal: false }],
+};
+
+test('pairingAddresses: Tailscale first, then LAN IPv4, virtual bridges last; no loopback, link-local or IPv6', () => {
+  assert.deepEqual(pairingAddresses(IFACES), ['100.101.102.103', '192.168.1.20', '100.200.0.1', '172.17.0.1']);
+  assert.deepEqual(pairingAddresses({ en0: [{ address: '10.0.0.5', family: 4, internal: false }] }), ['10.0.0.5'], 'Node 18.0 numeric family');
+  assert.deepEqual(pairingAddresses({}), []);
+});
+
+test('the PIN carries the LAN addresses in TLS mode only', async () => {
+  state.userId = user();
+  state.interfaces = () => IFACES;
+  try {
+    assert.deepEqual((await call('POST', '/host-api/pin')).body.addresses, [], 'dev mode: never an address');
+    hostApi.fingerprint = 'sha256:' + 'A'.repeat(43);
+    const r = await call('POST', '/host-api/pin');
+    assert.deepEqual(r.body.addresses, ['100.101.102.103', '192.168.1.20', '100.200.0.1', '172.17.0.1']);
+    assert.equal(r.body.port, 3016);
+  } finally { delete hostApi.fingerprint; state.interfaces = () => ({}); }
 });
 
 test('config.hostApiMode: tls wins over dev, dev never in production, else off', () => {

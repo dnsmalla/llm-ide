@@ -5,6 +5,10 @@
     "pin": "042917",
     "expiresAt": 1793750400000,
     "port": 3016,
-    "fingerprint": "sha256:3m0bQ1fZ9yT2vK8xN4cL7pR5sW6hJ1aE0uG3iO9dY2k"
+    "fingerprint": "sha256:3m0bQ1fZ9yT2vK8xN4cL7pR5sW6hJ1aE0uG3iO9dY2k",
+    "addresses": [
+      "100.101.102.103",
+      "192.168.1.20"
+    ]
   }
 }

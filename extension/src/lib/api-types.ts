@@ -4795,6 +4795,8 @@ export type PostHostApiPinResponse200 = {
   port?: number;
   /** TLS mode: sha256: + unpadded base64url SHA-256 of the certificate's DER SubjectPublicKeyInfo, which the client pins; null for the plaintext dev listener */
   fingerprint?: string | null;
+  /** TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener */
+  addresses?: string[];
 };
 
 export type PostHostApiPinResponse403 = CommonError;

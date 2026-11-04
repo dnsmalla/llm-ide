@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 108
+  x-api-version: 109
 servers:
   - url: "https://{host}"
     variables:
@@ -5195,6 +5195,11 @@ paths:
                       - "string"
                       - "null"
                     description: "TLS mode: sha256: + unpadded base64url SHA-256 of the certificate's DER SubjectPublicKeyInfo, which the client pins; null for the plaintext dev listener"
+                  addresses:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener"
         "403":
           description: "Forbidden"
           content:
