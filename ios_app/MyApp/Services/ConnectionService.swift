@@ -347,11 +347,12 @@ final class ConnectionService: ObservableObject {
         disconnect(clearDirect: true)
     }
 
-    /// Transport events → app state and stores. Task 6 adds the chat store routing.
+    /// Transport events → app state and the chat store.
     private func route(_ event: HostEvent) {
         switch event {
         case .capabilities(let caps):
             macCapabilities = caps
+            llmIdeStore?.handle(event)
         case .disconnected(let reason):
             guard hostApiVersion == 1 else { return }
             if !reason.retryable { return handleV1Refusal(reason) }
@@ -360,7 +361,7 @@ final class ConnectionService: ObservableObject {
             connectionStatus = .disconnected
             scheduleReconnect()
         case .event, .progress, .resync:
-            break
+            llmIdeStore?.handle(event)
         }
     }
 
@@ -759,6 +760,7 @@ final class ConnectionService: ObservableObject {
             // The Mac's Phone access switches changed mid-session.
             if let update = try? JSONDecoder().decode(MacCapabilities.self, from: data) {
                 macCapabilities = Set(update.capabilities)
+                llmIdeStore?.handle(.capabilities(macCapabilities ?? []))
             }
         case "files_listing", "files_file":
             filesStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
@@ -779,19 +781,19 @@ final class ConnectionService: ObservableObject {
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
-            llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+            v2Host.receive(type: json["type"] as? String ?? "", json: json, data: data)
         case "approval_request", "approval_cleared", "tool_approval_request":
             // Both surfaces can be parked on a question; each store checks the
             // frame's commandId against its own, exactly as with `output`.
             let type = json["type"] as? String ?? ""
-            llmIdeStore?.handleInbound(type: type, data: data)
+            v2Host.receive(type: type, json: json, data: data)
             explorerStore?.handleInbound(type: type, data: data)
         case "output":
             let commandId = json["commandId"] as? String
+            // Each store independently checks commandId membership; only the
+            // owning store appends/resets. (commandId is in at most one set.)
+            v2Host.receive(type: "output", json: json, data: data)
             if let payload = json["payload"] as? [String: Any] {
-                // Each store independently checks commandId membership; only the
-                // owning store appends/resets. (commandId is in at most one set.)
-                llmIdeStore?.handleOutput(commandId: commandId, payload: payload)
                 explorerStore?.handleOutput(commandId: commandId, payload: payload)
             }
         case "error":
@@ -810,12 +812,12 @@ final class ConnectionService: ObservableObject {
                         errorMessage = err.message
                     }
                 }
-                if let cid, llmIdeStore?.ownsCommand(cid) == true {
-                    llmIdeStore?.handleChatError(commandId: cid)
-                } else if let cid, explorerStore?.ownsCommand(cid) == true {
+                // The chat slice ends its own turns (V2HostConnection → chat.error; the store checks ownership).
+                // The explorer branches are the old chain's other two arms, unchanged.
+                v2Host.receive(type: MobileProtocol.Tag.error, json: json, data: data)
+                if let cid, llmIdeStore?.ownsCommand(cid) != true, explorerStore?.ownsCommand(cid) == true {
                     explorerStore?.handleChatError(commandId: cid)
                 } else if cid == nil {
-                    llmIdeStore?.handleChatError()
                     explorerStore?.handleChatError()
                 }
             }

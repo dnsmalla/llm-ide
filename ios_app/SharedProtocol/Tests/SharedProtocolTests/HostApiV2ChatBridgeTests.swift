@@ -55,6 +55,15 @@ struct HostApiV2ChatBridgeTests {
                 == [.event(.chatDone, payload: try enc.encode(HostApiChatDoneEvent(requestId: "u-1")), replyTo: "u-1")])
     }
 
+    @Test("a v2 done chunk larger than a v1 frame stays one whole delta (v1 caps never apply to v2)")
+    func largeDelta() throws {
+        let big = String(repeating: "x", count: HostApi.limits.maxFrameBytes * 2)
+        let events = try inbound(Output(commandId: "u-1", payload: .init(stream: big, done: true)), type: "output")
+        guard case .event(.chatDelta, let payload, "u-1")? = events.first else { Issue.record("no delta"); return }
+        #expect(try JSONDecoder().decode(HostApiChatDeltaEvent.self, from: payload).text == big)
+        #expect(events.count == 2)
+    }
+
     @Test("error frames become chat.error, with or without a command id")
     func errors() throws {
         let owned = try inbound(CommandError(commandId: "u-1", message: "Boom"), type: "error")
