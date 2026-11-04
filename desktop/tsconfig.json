@@ -20,6 +20,7 @@
       "@tauri-apps/api/event": ["./node_modules/@tauri-apps/api/event.d.ts"],
       "graphology": ["./node_modules/graphology"],
       "sigma": ["./node_modules/sigma"],
+      "qrcode-generator": ["./node_modules/qrcode-generator"],
       "react": ["./node_modules/@types/react"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
       "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime"]

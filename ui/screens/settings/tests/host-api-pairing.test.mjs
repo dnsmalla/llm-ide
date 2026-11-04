@@ -91,6 +91,25 @@ test("a TLS PIN shows the certificate fingerprint; a dev PIN shows none", async 
   assert.throws(() => m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: "md5:x" }), /BAD_RESPONSE/);
 });
 
+test("a TLS PIN with an address shows the llmide://pair QR, its payload and alt text; a dev PIN or no address shows none", async () => {
+  const tls = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200-tls") }));
+  assert.deepEqual(tls.addresses, ["100.101.102.103", "192.168.1.20"]);
+  const payload = `llmide://pair?ip=100.101.102.103&pin=${tls.pin}&h1port=3016&h1fp=${tls.fingerprint}&api=1`;
+  assert.equal(m.pairingPayload(tls), payload, "Tailscale first, no v2 port (the phone then dials only v1)");
+  const html = view({ pin: tls, now: tls.expiresAt - 1000 });
+  assert.match(html, /<svg[^>]*role="img"[^>]*aria-label="Pairing QR code for this computer"/);
+  assert.match(html, /<path d="M\d/, "dark modules drawn");
+  assert.ok(html.includes(payload.replaceAll("&", "&amp;")), "payload shown as copyable text");
+  const dev = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200") }));
+  assert.equal(m.pairingPayload(dev), null);
+  assert.doesNotMatch(view({ pin: dev, now: dev.expiresAt - 1000 }), /<svg|llmide:\/\/pair/);
+  const noAddr = { ...tls, addresses: [] };
+  assert.equal(m.pairingPayload(noAddr), null);
+  assert.doesNotMatch(view({ pin: noAddr, now: tls.expiresAt - 1000 }), /<svg/);
+  assert.deepEqual(m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: null }).addresses, [], "an older core without addresses");
+  assert.throws(() => m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: null, addresses: ["evil.example/x"] }), /BAD_RESPONSE/);
+});
+
 test("Revoke asks first (Cancel focused first), then deletes the device", async () => {
   const devices = m.decodeDevices(reply("get-host-api-devices-200").body);
   assert.doesNotMatch(view({ devices }), /alertdialog/);

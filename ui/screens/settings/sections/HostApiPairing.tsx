@@ -4,23 +4,28 @@
 // LLMIDE_HOST_API_TLS=1 or LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
 // the card then renders nothing. The PIN lives in component state only: never persisted, logged or sent anywhere.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import qrcode from "qrcode-generator";
 import { ApiError, call, type CoreClient } from "../core-api.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 
-/** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener. */
-export interface HostPin { pin: string; expiresAt: number; port: number; fingerprint: string | null }
+/** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener.
+ *  `addresses`: this computer's IPv4s for the pairing QR, best first; [] for the dev listener (or an older core). */
+export interface HostPin { pin: string; expiresAt: number; port: number; fingerprint: string | null; addresses: string[] }
 export interface HostDevice { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const IPV4_RE = /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$/;
 const HIDDEN = new Set(["HOST_API_DISABLED", "HOST_PROOF_REQUIRED"]);
 
 export function decodePin(v: unknown): HostPin {
   if (isRecord(v) && typeof v.pin === "string" && /^[0-9]{6}$/.test(v.pin) && Number.isInteger(v.expiresAt)
     && Number.isInteger(v.port) && (v.port as number) > 0 && (v.port as number) < 65536
-    && (v.fingerprint == null || (typeof v.fingerprint === "string" && /^sha256:[A-Za-z0-9_-]{43}$/.test(v.fingerprint)))) {
-    return { pin: v.pin, expiresAt: v.expiresAt as number, port: v.port as number, fingerprint: (v.fingerprint as string | undefined) ?? null };
+    && (v.fingerprint == null || (typeof v.fingerprint === "string" && /^sha256:[A-Za-z0-9_-]{43}$/.test(v.fingerprint)))
+    && (v.addresses === undefined || (Array.isArray(v.addresses) && v.addresses.every((a) => typeof a === "string" && IPV4_RE.test(a))))) {
+    return { pin: v.pin, expiresAt: v.expiresAt as number, port: v.port as number, fingerprint: (v.fingerprint as string | undefined) ?? null,
+      addresses: (v.addresses as string[] | undefined) ?? [] };
   }
   throw new ApiError(0, "BAD_RESPONSE");
 }
@@ -48,6 +53,32 @@ export async function loadDevices(client: CoreClient, { retryMs = PROOF_RETRY_MS
     }
     await sleep(retryMs[i]);
   }
+}
+
+/** The phone's pairing QR (same items as the Mac's `MobileConnectionInfo.qrPayload`), or null unless the PIN came from
+ *  a TLS listener with an address. No `port`: this host has no v2 link, and a QR-pinned phone dials only v1. Every
+ *  value is validated by decodePin (digits, dotted IPv4, base64url + `sha256:`), so none needs escaping. */
+export function pairingPayload(p: HostPin): string | null {
+  if (!p.fingerprint || p.addresses.length === 0) return null;
+  return `llmide://pair?ip=${p.addresses[0]}&pin=${p.pin}&h1port=${p.port}&h1fp=${p.fingerprint}&api=1`;
+}
+
+/** The payload as an inline SVG: dark modules on a fixed white field (with the 4-module quiet zone), so a dark theme
+ *  never inverts it into a code the camera cannot read. */
+function PairingQr({ payload }: { payload: string }): ReactNode {
+  const qr = qrcode(0, "M");
+  qr.addData(payload);
+  qr.make();
+  const n = qr.getModuleCount();
+  let d = "";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + 4} ${r + 4}h1v1h-1z`;
+  return (
+    <svg role="img" aria-label="Pairing QR code for this computer" viewBox={`0 0 ${n + 8} ${n + 8}`} width={208} height={208}
+      shapeRendering="crispEdges" style={{ background: "#fff", borderRadius: 4 }}>
+      <rect width={n + 8} height={n + 8} fill="#fff" />
+      <path d={d} fill="#000" />
+    </svg>
+  );
 }
 
 export const mintPin = async (client: CoreClient): Promise<HostPin> => decodePin(await call(client, "POST", "/host-api/pin"));
@@ -90,6 +121,7 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
   onRevoke: (deviceId: string) => void;
 }): ReactNode {
   const live = pin && pin.expiresAt > now ? pin : null;
+  const qr = live ? pairingPayload(live) : null;
   return (
     <div className="st-stack" role="group" aria-label="Host API pairing">
       <span className="st-label">Pair a phone or web client with this desktop</span>
@@ -97,6 +129,13 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
         <div className="st-stack" role="status">
           <p className="st-pre" aria-label="Pairing PIN"><strong>{live.pin}</strong></p>
           <p className="st-hint">{live.fingerprint ? "wss://<this computer>" : "ws://127.0.0.1"}:{live.port}/host-api/v1 · expires in {remaining(live.expiresAt - now)} · one use</p>
+          {qr ? (
+            <>
+              <PairingQr payload={qr} />
+              <p className="st-hint">Scan with the LLM-IDE iPhone app. The phone pins the certificate fingerprint below.</p>
+              <p className="st-pre" aria-label="Pairing link" style={{ userSelect: "text", wordBreak: "break-all" }}>{qr}</p>
+            </>
+          ) : null}
           {live.fingerprint
             ? <p className="st-pre" aria-label="Certificate fingerprint" style={{ userSelect: "text" }}>Fingerprint: {live.fingerprint}</p>
             : <p className="st-hint">Development only: the listener is plaintext on 127.0.0.1 and serves this computer alone.</p>}

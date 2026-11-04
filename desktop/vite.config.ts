@@ -64,8 +64,9 @@ export default defineConfig(({ mode }) => ({
       { find: /^three\/examples\/jsm\/(.*)$/, replacement: fileURLToPath(new URL("../mac/LocalPackages/graph-kit/web/node_modules/three/examples/jsm/", import.meta.url)) + "$1" },
       { find: /^three$/, replacement: fileURLToPath(new URL("../mac/LocalPackages/graph-kit/web/node_modules/three/build/three.module.js", import.meta.url)) },
     ],
-    // graphology and sigma are imported by ui/screens/graph (outside desktop/): resolve them from here too.
-    dedupe: ["react", "react-dom", "graphology", "sigma", "three"],
+    // graphology and sigma (ui/screens/graph) and qrcode-generator (ui/screens/settings) are imported outside desktop/:
+    // resolve them from here too.
+    dedupe: ["react", "react-dom", "graphology", "sigma", "three", "qrcode-generator"],
   },
   optimizeDeps: {
     esbuildOptions: {
