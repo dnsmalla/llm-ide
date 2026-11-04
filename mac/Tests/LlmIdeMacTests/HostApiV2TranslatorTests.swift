@@ -61,6 +61,41 @@ struct HostApiV2TranslatorTests {
         #expect(ev.truncated && ev.oldString?.utf16.count == 20_000 && ev.commandId == "c-1")
     }
 
+    @Test("a question with no options is dropped and the valid one is kept")
+    func zeroOptionQuestion() {
+        let bad = MobileApprovalQuestion(question: "No options", header: nil, options: [], multiSelect: false)
+        let good = MobileApprovalQuestion(question: "Pick", header: nil, options: [MobileApprovalOption(label: "Yes", description: nil)], multiSelect: false)
+        let r = HostApiV2Translator.translate(v2(ApprovalRequest(commandId: "h1.1.c-1", requestId: "r-1", questions: [bad, good])), external: "c-1", cancelledByClient: false)
+        let ev = decode(HostApiApprovalRequestEvent.self, r.events[0])
+        #expect(ev.questions.map(\.question) == ["Pick"])
+    }
+
+    @Test("when every question is invalid nothing is emitted")
+    func allInvalid() {
+        let emptyQ = MobileApprovalQuestion(question: "", header: nil, options: [MobileApprovalOption(label: "Yes", description: nil)], multiSelect: false)
+        let emptyLabel = MobileApprovalQuestion(question: "Pick", header: nil, options: [MobileApprovalOption(label: "", description: nil)], multiSelect: false)
+        let r = HostApiV2Translator.translate(v2(ApprovalRequest(commandId: "h1.1.c-1", requestId: "r-1", questions: [emptyQ, emptyLabel])), external: "c-1", cancelledByClient: false)
+        #expect(r == HostApiV1Translation(events: [], terminal: false))
+    }
+
+    @Test("an empty tool name becomes \"tool\"")
+    func emptyToolName() {
+        let req = ToolApprovalRequest(commandId: "h1.1.c-1", requestId: "r-2", toolName: "", summary: nil, filePath: nil,
+                                      oldString: nil, newString: nil, contentPreview: nil, command: nil, truncated: false, replaceAll: nil, overwrites: nil)
+        let t = HostApiV2Translator.translate(v2(req), external: "c-1", cancelledByClient: false)
+        #expect(decode(HostApiToolApprovalRequestEvent.self, t.events[0]).toolName == "tool")
+    }
+
+    @Test("a request id longer than 64 units is refused, never truncated")
+    func overlongRequestId() {
+        let longId = String(repeating: "r", count: 65)
+        let r = HostApiV2Translator.translate(v2(ApprovalRequest(commandId: "h1.1.c-1", requestId: longId, questions: [])), external: "c-1", cancelledByClient: false)
+        #expect(r == HostApiV1Translation(events: [], terminal: false))
+        let q = MobileApprovalQuestion(question: "Pick", header: nil, options: [MobileApprovalOption(label: "Yes", description: nil)], multiSelect: false)
+        let r2 = HostApiV2Translator.translate(v2(ApprovalRequest(commandId: "h1.1.c-1", requestId: longId, questions: [q])), external: "c-1", cancelledByClient: false)
+        #expect(r2 == HostApiV1Translation(events: [], terminal: false))
+    }
+
     @Test("frames v1 has no event for are dropped")
     func unknown() {
         #expect(HostApiV2Translator.translate(Data(#"{"type":"mac_capabilities","capabilities":[]}"#.utf8), external: "c-1", cancelledByClient: false).events.isEmpty)

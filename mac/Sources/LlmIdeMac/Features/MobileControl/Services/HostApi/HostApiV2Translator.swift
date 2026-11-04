@@ -34,29 +34,33 @@ enum HostApiV2Translator {
             let text = HostApiFrame.clamp(message.isEmpty ? "The Mac could not finish this request." : message, maxUTF16: 2_000)
             return .init(events: [event("chat.error", HostApiChatErrorEvent(message: text, retryable: false))], terminal: true)
         case MobileProtocol.Tag.approvalRequest:
-            guard let r = try? decoder.decode(ApprovalRequest.self, from: v2Frame), !r.questions.isEmpty else { return none }
-            let questions = r.questions.prefix(10).map { q in
-                HostApiApprovalRequestEventQuestionsItem(
+            guard let r = try? decoder.decode(ApprovalRequest.self, from: v2Frame), let rid = canonicalId(r.requestId) else { return none }
+            // Schema needs minLength:1 text and minItems:1 options, so drop what cannot be rendered. If no
+            // question survives, emit nothing: the Mac user still answers it at the desk.
+            let questions = r.questions.compactMap { q -> HostApiApprovalRequestEventQuestionsItem? in
+                let options = q.options.filter { !$0.label.isEmpty }.prefix(20).map { opt in
+                    HostApiApprovalRequestEventQuestionsItemOptionsItem(
+                        description: opt.description.map { HostApiFrame.clamp($0, maxUTF16: 500) },
+                        label: HostApiFrame.clamp(opt.label, maxUTF16: 200))
+                }
+                guard !q.question.isEmpty, !options.isEmpty else { return nil }
+                return HostApiApprovalRequestEventQuestionsItem(
                     header: q.header.map { HostApiFrame.clamp($0, maxUTF16: 12) },
                     multiSelect: q.multiSelect,
-                    options: q.options.prefix(20).map { opt in
-                        HostApiApprovalRequestEventQuestionsItemOptionsItem(
-                            description: opt.description.map { HostApiFrame.clamp($0, maxUTF16: 500) },
-                            label: HostApiFrame.clamp(opt.label, maxUTF16: 200))
-                    },
+                    options: Array(options),
                     question: HostApiFrame.clamp(q.question, maxUTF16: 2_000))
-            }
-            let ev = HostApiApprovalRequestEvent(commandId: commandId, questions: Array(questions),
-                                                 requestId: HostApiFrame.clamp(r.requestId, maxUTF16: 64))
+            }.prefix(10)
+            guard !questions.isEmpty else { return none } // v2 never sends zero questions; an unrenderable approval stays parked for the Mac user.
+            let ev = HostApiApprovalRequestEvent(commandId: commandId, questions: Array(questions), requestId: rid)
             return .init(events: [event("approval.request", ev)], terminal: false)
         case MobileProtocol.Tag.approvalCleared:
-            guard let c = try? decoder.decode(ApprovalCleared.self, from: v2Frame) else { return none }
+            guard let c = try? decoder.decode(ApprovalCleared.self, from: v2Frame), let rid = canonicalId(c.requestId) else { return none }
             let ev = HostApiApprovalClearedEvent(commandId: commandId,
                                                  reason: c.reason.map { HostApiFrame.clamp($0, maxUTF16: 500) },
-                                                 requestId: HostApiFrame.clamp(c.requestId, maxUTF16: 64))
+                                                 requestId: rid)
             return .init(events: [event("approval.cleared", ev)], terminal: false)
         case MobileProtocol.Tag.toolApprovalRequest:
-            guard let t = try? decoder.decode(ToolApprovalRequest.self, from: v2Frame) else { return none }
+            guard let t = try? decoder.decode(ToolApprovalRequest.self, from: v2Frame), let rid = canonicalId(t.requestId) else { return none }
             // Caps are the events.schema.json maxLength values for toolApproval.request.
             var clamped = false
             func cap(_ s: String?, _ n: Int) -> String? {
@@ -65,7 +69,7 @@ enum HostApiV2Translator {
                 if c != s { clamped = true }
                 return c
             }
-            let toolName = cap(t.toolName, 200) ?? "tool"
+            let toolName = cap(t.toolName.isEmpty ? "tool" : t.toolName, 200) ?? "tool"
             let summary = cap(t.summary, 2_000)
             let filePath = cap(t.filePath, 2_000)
             let oldString = cap(t.oldString, 20_000)
@@ -75,7 +79,7 @@ enum HostApiV2Translator {
             let ev = HostApiToolApprovalRequestEvent(
                 command: command, commandId: commandId, contentPreview: contentPreview, filePath: filePath,
                 newString: newString, oldString: oldString, overwrites: t.overwrites, replaceAll: t.replaceAll,
-                requestId: HostApiFrame.clamp(t.requestId, maxUTF16: 64), summary: summary, toolName: toolName,
+                requestId: rid, summary: summary, toolName: toolName,
                 truncated: t.truncated || clamped)
             return .init(events: [event("toolApproval.request", ev)], terminal: false)
         default:
@@ -93,6 +97,11 @@ enum HostApiV2Translator {
         }
         if !current.isEmpty { out.append(current) }
         return out
+    }
+
+    /// The id as the schema accepts it (1–64 UTF-16 units), or nil: a truncated id would name a different request.
+    private static func canonicalId(_ s: String) -> String? {
+        (1...64).contains(s.utf16.count) ? s : nil
     }
 
     private static func event<P: Encodable>(_ command: String, _ payload: P) -> HostApiV1EventOut {
