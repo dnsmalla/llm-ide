@@ -98,6 +98,29 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         return true
     }
 
+    /// Host API v1 device ids are host-minted with this prefix (v1 pairing carries no device id).
+    static let hostApiDevicePrefix = "h1-"
+
+    /// The device whose live token `token` is, or nil. Every record's hash is compared, in constant
+    /// time, so the lookup does not leak which position matched. Same idle expiry and `lastSeenAt` stamp
+    /// as `authenticate(deviceId:token:now:)`.
+    func authenticate(token: String, now: Date = Date()) -> String? {
+        guard !token.isEmpty else { return nil }
+        let candidate = Self.hash(token)
+        lock.lock(); defer { lock.unlock() }
+        var match: Int?
+        for (i, d) in devices.enumerated() where Self.constantTimeEqual(d.tokenHash, candidate) { match = i }
+        guard let index = match else { return nil }
+        if now.timeIntervalSince(devices[index].lastSeenAt) > Self.maxIdleInterval {
+            devices.remove(at: index)
+            persistLocked()
+            return nil
+        }
+        devices[index].lastSeenAt = now
+        persistLocked()
+        return devices[index].id
+    }
+
     /// Forget a device. Its token is refused from the next frame on; the
     /// caller is responsible for dropping a live connection it may hold.
     func revoke(id: String) {
