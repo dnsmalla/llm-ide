@@ -27,6 +27,11 @@ const swiftCase = (name) =>
     .map((part, i) => (i === 0 ? part : part[0].toUpperCase() + part.slice(1)))
     .join("");
 
+// Read before the js template: the envelope and event schemas are embedded in the Node output.
+const readSchema = (f) => JSON.parse(readFileSync(join(ROOT, "schema/host-api/v1", f), "utf8"));
+const envelopeSchema = readSchema("envelope.schema.json");
+const eventsSchema = readSchema("events.schema.json");
+
 const js = `${header}
 export const HOST_API_VERSION = ${registry.version};
 export const HOST_API_LIMITS = Object.freeze(${JSON.stringify(registry.limits)});
@@ -36,6 +41,9 @@ ${names.map((n) => `  ${JSON.stringify(n)}: Object.freeze({ capability: ${JSON.s
 export const HOST_API_SCHEMAS = Object.freeze({
 ${names.map((n) => `  ${JSON.stringify(n)}: Object.freeze({ request: ${JSON.stringify(registry.commands[n].request)}, result: ${JSON.stringify(registry.commands[n].result)} })`).join(",\n")}
 });
+
+export const HOST_API_ENVELOPE = Object.freeze(${JSON.stringify(envelopeSchema)});
+export const HOST_API_EVENTS = Object.freeze(${JSON.stringify(eventsSchema)});
 `;
 
 const swift = `${header}
@@ -77,7 +85,6 @@ ${names.map((n) => `        ${JSON.stringify(n)}: .${swiftCase(n)}`).join(",\n")
 `;
 
 // The schema tables let Swift judge frames exactly like the Node gate (HostApiSchemaValidator).
-const readSchema = (f) => JSON.parse(readFileSync(join(ROOT, "schema/host-api/v1", f), "utf8"));
 const schemaTable = {
   envelope: readSchema("envelope.schema.json"),
   events: readSchema("events.schema.json"),
