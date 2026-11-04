@@ -138,7 +138,8 @@ fn open_nofollow(p: &Path) -> std::io::Result<File> {
 /// file only. Returns the descriptor and its size.
 fn open_picked(path: &Path) -> Result<(File, u64), &'static str> {
     let real = std::fs::canonicalize(path).map_err(|_| "unreadable")?;
-    let f = open_nofollow(&real).map_err(|_| "unreadable")?;
+    // Windows cannot open a folder as a file at all; it is still a folder, not an unreadable file.
+    let f = open_nofollow(&real).map_err(|_| if real.is_dir() { "not_regular" } else { "unreadable" })?;
     let meta = f.metadata().map_err(|_| "unreadable")?;
     if !meta.is_file() {
         return Err("not_regular");
