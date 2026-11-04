@@ -25,7 +25,7 @@ final class HostApiV1Gateway {
         var cancel: (_ internalCommandId: String) -> Void
         var log: (String) -> Void
         /// The pinned TLS identity's fingerprint; nil on the plaintext development listener (field omitted).
-        var certificateFingerprint: () -> String? = { nil }
+        var certificateFingerprint: () -> String?
     }
 
     static let maxSessions = 4

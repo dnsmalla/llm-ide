@@ -34,6 +34,13 @@ struct HostApiV1OriginsTests {
         }
     }
 
+    @Test("more than one Origin header is refused even when each is listed (Node parity)")
+    func duplicateOrigin() {
+        let list = ["http://localhost:5173", "https://app.example.com"]
+        #expect(HostApiV1Origins.refused(headers: [("Origin", "http://localhost:5173")], allowlist: list) == false)
+        #expect(HostApiV1Origins.refused(headers: [("Origin", "http://localhost:5173"), ("origin", "https://app.example.com")], allowlist: list))
+    }
+
     @Test("configured prefers the env value over UserDefaults, and is empty when neither is set")
     func configured() throws {
         let suite = "h6-test-\(UUID())"

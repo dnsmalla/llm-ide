@@ -32,8 +32,10 @@ enum HostApiV1Origins {
         return out
     }
 
+    /// More than one `Origin` header is refused outright, like Node (which joins them into a never-listed "a, b").
     static func refused(headers: [(name: String, value: String)], allowlist: [String]) -> Bool {
-        headers.contains { $0.name.lowercased() == "origin" && !allowlist.contains($0.value.lowercased()) }
+        let origins = headers.filter { $0.name.lowercased() == "origin" }
+        return origins.count > 1 || (origins.count == 1 && !allowlist.contains(origins[0].value.lowercased()))
     }
 
     private static func normalise(_ entry: String) -> String? {

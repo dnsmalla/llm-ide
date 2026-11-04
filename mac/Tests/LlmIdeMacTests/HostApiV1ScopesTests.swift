@@ -28,7 +28,8 @@ final class HostApiV1ScopesTests {
             history: { _ in .lines([]) },
             clear: { .cleared },
             cancel: { _ in },
-            log: { _ in }))
+            log: { _ in },
+            certificateFingerprint: { nil }))
         g.send = { [unowned self] s, d in self.sent.append((s, try! JSONSerialization.jsonObject(with: d) as! [String: Any])) }
         return g
     }

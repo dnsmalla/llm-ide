@@ -47,8 +47,11 @@ struct HostApiV1TLSListenerTests {
     static let ping = #"{"apiVersion":1,"id":"c-1","type":"request","command":"host.ping","payload":{},"ts":1}"#
     static func port() -> Int { 3016 + Int.random(in: 1000...1900) }
 
-    static func tlsListener(_ id: HostApiV1Identity.Loaded, frames: FrameBox, events: EventBox, allowlist: [String] = []) -> HostApiV1Listener {
+    static func tlsListener(_ id: HostApiV1Identity.Loaded, frames: FrameBox, events: EventBox, allowlist: [String] = [],
+                            maxConnections: Int = HostApiV1Listener.maxConnections,
+                            handshakeTimeout: TimeInterval = HostApiV1Listener.handshakeTimeout) -> HostApiV1Listener {
         HostApiV1Listener(basePort: port(), candidates: 5, transport: .tls(id.identity), originAllowlist: allowlist,
+                          maxConnections: maxConnections, handshakeTimeout: handshakeTimeout,
                           onRefused: { e, p, d in events.refused(e, p, d) },
                           onOpen: { _, _ in events.opened() }, onFrame: { s, d in frames.add(s, d) }, onClose: { _ in },
                           onListening: { frames.bound($0) }, onLog: { _ in })
@@ -146,6 +149,67 @@ struct HostApiV1TLSListenerTests {
         // Network.framework still moves a rejected server connection to .ready, then cancels it, so onOpen
         // may fire for it; what matters is that it never carries a frame.
         #expect(frames.count == 1)
+    }
+
+    /// A raw TCP client that never speaks TLS; resolves true once the server closes it (EOF or error), false after `within`.
+    static func closedByServer(_ conn: NWConnection, queue: DispatchQueue, within: TimeInterval) async -> Bool {
+        let once = Once()
+        return await withCheckedContinuation { (k: CheckedContinuation<Bool, Never>) in
+            conn.stateUpdateHandler = { state in
+                if case .ready = state {
+                    conn.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
+                        if (isComplete || error != nil) && once.fire() { k.resume(returning: true) }
+                    }
+                }
+            }
+            conn.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + within) { if once.fire() { k.resume(returning: false) } }
+        }
+    }
+
+    static func rawTCP(_ port: Int) -> NWConnection {
+        NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(port))!, using: .tcp)
+    }
+
+    @Test("the production limits match the desktop LISTENER_LIMITS")
+    func limits() {
+        #expect(HostApiV1Listener.maxConnections == 32)
+        #expect(HostApiV1Listener.handshakeTimeout == 10)
+    }
+
+    @Test("an idle TCP connection that never completes TLS is cancelled at the handshake deadline")
+    func handshakeTimeout() async throws {
+        let id = try HostApiV1Identity.loadOrCreate(hostName: "Mac", backend: InMemoryKeychainAccess())
+        let frames = FrameBox(), events = EventBox()
+        let listener = Self.tlsListener(id, frames: frames, events: events, handshakeTimeout: 0.5)
+        try listener.start()
+        defer { listener.stop() }
+        let bound = try await frames.waitForBind()
+        let q = DispatchQueue(label: "t.idle")
+        let idle = Self.rawTCP(bound)
+        defer { idle.cancel() }
+        #expect(await Self.closedByServer(idle, queue: q, within: 5))
+        #expect(events.openCount == 0)
+    }
+
+    @Test("connections over the cap are refused with connection_limit")
+    func connectionCap() async throws {
+        let id = try HostApiV1Identity.loadOrCreate(hostName: "Mac", backend: InMemoryKeychainAccess())
+        let frames = FrameBox(), events = EventBox()
+        let listener = Self.tlsListener(id, frames: frames, events: events, maxConnections: 2)
+        try listener.start()
+        defer { listener.stop() }
+        let bound = try await frames.waitForBind()
+        let q = DispatchQueue(label: "t.cap")
+        let held = [Self.rawTCP(bound), Self.rawTCP(bound)]
+        defer { held.forEach { $0.cancel() } }
+        for c in held { c.start(queue: q) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(events.refusals.isEmpty)
+        let third = Self.rawTCP(bound)
+        defer { third.cancel() }
+        #expect(await Self.closedByServer(third, queue: q, within: 3))
+        #expect(events.refusals.filter { $0[0] == "connection_limit" }.count == 1)
     }
 
     @Test("the dev plaintext listener still binds loopback only")

@@ -572,7 +572,8 @@ final class MobileControlManager {
             onOpen: { s, peer in continuation.yield(.opened(s, peer)) },
             onFrame: { s, d in continuation.yield(.frame(s, d)) },
             onClose: { s in continuation.yield(.closed(s)) },
-            onListening: { [weak self] port in Task { @MainActor [weak self] in self?.hostApiPort = port } },
+            // The fingerprint is published only once the listener is actually serving (bind failures are async).
+            onListening: { [weak self] port in Task { @MainActor [weak self] in self?.hostApiPort = port; self?.hostApiFingerprint = fingerprint } },
             onLog: { [weak self] line in Task { @MainActor [weak self] in self?.append(.info, line) } })
         gateway.send = { [weak listener] s, d in listener?.send(s, d) }
         gateway.close = { [weak listener] s in listener?.close(s) }
@@ -587,7 +588,7 @@ final class MobileControlManager {
             }
         }
         hostApiEvents = continuation
-        do { try listener.start(); hostApiGateway = gateway; hostApiListener = listener; hostApiFingerprint = fingerprint }
+        do { try listener.start(); hostApiGateway = gateway; hostApiListener = listener }
         catch {
             continuation.finish(); hostApiDrain?.cancel(); hostApiDrain = nil; hostApiEvents = nil
             append(.stderr, "Host API v1 listener did not start: \(error.localizedDescription)")

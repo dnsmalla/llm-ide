@@ -59,7 +59,14 @@ final class HostApiV1Listener: @unchecked Sendable {
         return params
     }
 
+    /// The desktop twin's `LISTENER_LIMITS` (extension/server/host-api-listener.mjs): an unpaired LAN peer
+    /// must not hold sockets open by never finishing TLS, nor open them without bound.
+    static let maxConnections = 32
+    static let handshakeTimeout: TimeInterval = 10
+
     private let basePort: Int
+    private let maxConnections: Int
+    private let handshakeTimeout: TimeInterval
     private let transport: Transport
     private let originAllowlist: [String]
     private let onRefused: (_ event: String, _ peer: String, _ detail: String) -> Void
@@ -77,10 +84,12 @@ final class HostApiV1Listener: @unchecked Sendable {
     private var connections: [Int: NWConnection] = [:]
 
     init(basePort: Int = 3016, candidates: Int = 10, transport: Transport, originAllowlist: [String],
+         maxConnections: Int = HostApiV1Listener.maxConnections, handshakeTimeout: TimeInterval = HostApiV1Listener.handshakeTimeout,
          onRefused: @escaping (_ event: String, _ peer: String, _ detail: String) -> Void,
          onOpen: @escaping (Int, String) -> Void, onFrame: @escaping (Int, Data) -> Void,
          onClose: @escaping (Int) -> Void, onListening: @escaping (Int) -> Void, onLog: @escaping (String) -> Void) {
         self.basePort = basePort
+        self.maxConnections = maxConnections; self.handshakeTimeout = handshakeTimeout
         self.transport = transport; self.originAllowlist = originAllowlist; self.onRefused = onRefused
         self.candidates = max(1, min(candidates, 65_535 - basePort + 1))
         self.onOpen = onOpen; self.onFrame = onFrame; self.onClose = onClose
@@ -167,6 +176,10 @@ final class HostApiV1Listener: @unchecked Sendable {
             onRefused("plaintext_refused", "\(host)", "")
             conn.cancel(); return
         }
+        guard connections.count < maxConnections else {
+            onRefused("connection_limit", "\(host)", "")
+            conn.cancel(); return
+        }
         let session = nextSession
         nextSession += 1
         connections[session] = conn
@@ -183,6 +196,12 @@ final class HostApiV1Listener: @unchecked Sendable {
             }
         }
         conn.start(queue: queue)
+        // TLS + WebSocket handshake deadline; the .cancelled branch above then drops the entry.
+        queue.asyncAfter(deadline: .now() + handshakeTimeout) { [weak self] in
+            guard let self, self.connections[session] === conn else { return }
+            if case .ready = conn.state { return }
+            conn.cancel()
+        }
     }
 
     private func receive(_ session: Int, _ conn: NWConnection) {
