@@ -160,6 +160,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /kb/calendar-ical/sources/:id", "no Mac caller (iCal feed connector, API 104: served to the Tauri UI; the Mac app has no client for /kb/calendar-ical/*)"),
     ("POST /kb/calendar-ical/sync", "no Mac caller (iCal feed connector, API 104: served to the Tauri UI; the Mac app has no client for /kb/calendar-ical/*)"),
     ("POST /kb/calendar-ical/options", "no Mac caller (iCal feed connector, API 104: served to the Tauri UI; the Mac app has no client for /kb/calendar-ical/*)"),
+    ("POST /kb/repos/check-token", "no Mac caller (Settings > Repositories on the desktop verifies the saved provider token; the Mac app has no client for this route)"),
     ("POST /host-api/pin", "no Mac caller (Host API v1 desktop pairing, API 107: served to the Tauri UI behind the bus host proof; the Mac app is its own Host API host)"),
     ("GET /host-api/devices", "no Mac caller (Host API v1 desktop pairing, API 107: served to the Tauri UI behind the bus host proof; the Mac app is its own Host API host)"),
     ("DELETE /host-api/devices/:id", "no Mac caller (Host API v1 desktop pairing, API 107: served to the Tauri UI behind the bus host proof; the Mac app is its own Host API host)"),
