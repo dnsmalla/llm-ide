@@ -201,8 +201,9 @@ async function writePlans(fs: FsApi, bundle: ExportBundle, nowIso: string): Prom
     const target = planPath(plan);
     const name = target.slice(target.lastIndexOf("/") + 1);
     const suffix = `-${plan.id.slice(-8)}.md`;
-    for (const old of existing) if (old.endsWith(suffix) && old !== name) { try { await fs.remove(`llm-doc/plans/${old}`); } catch { /* best effort */ } }
     await writeFile(fs, target, planMarkdown(plan, nowIso));
+    // Remove a renamed plan's old file only once its new copy is safely written.
+    for (const old of existing) if (old.endsWith(suffix) && old !== name) { try { await fs.remove(`llm-doc/plans/${old}`); } catch { /* best effort */ } }
     written += 1;
   }
   return written;
