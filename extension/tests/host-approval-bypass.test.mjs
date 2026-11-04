@@ -214,6 +214,7 @@ test('stream bypass with host key: phone, extension, relay and remote origins ar
     ['relay-bridge', { headers: { 'x-llmide-client': 'relay-bridge' } }],
     ['extension surface', { surface: 'extension' }],
     ['phone surface', { surface: 'phone' }],
+    ['host-api surface', { surface: 'host-api' }],
     ['remote peer', { remoteAddress: '203.0.113.9' }],
     // M2: no client header at all, or desktop-ui WITHOUT the host proof, is not the desktop
     ['no x-llmide-client header', { desktop: false, headers: { [H.BUS_PROOF_HEADER]: BUS_PROOF } }],

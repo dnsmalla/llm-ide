@@ -110,7 +110,7 @@ export function verifyRequestApproval(req, { env = process.env, verifier = hostA
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const CAPPED_SURFACES = new Set(['extension', 'phone', 'mobile', 'ios', 'ios-native', 'phone-pwa', 'web']);
+const CAPPED_SURFACES = new Set(['extension', 'phone', 'mobile', 'ios', 'ios-native', 'phone-pwa', 'web', 'host-api']);
 
 /**
  * Origins that may never use Bypass, token or not: a declared client class other than `desktop-ui` (the phone, the

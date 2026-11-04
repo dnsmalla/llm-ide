@@ -1044,8 +1044,14 @@ export function clearChatSessionState(userId, chatSessionId) {
 export async function startHostTurn({ userId, chatSessionId, message, files = [], onEvent, deps = {} }) {
   const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
   const body = { message, mode: AUTO_READ_ONLY, agentContext, attachments: files };
+  // A non-Bypass turn ends the chat's Bypass grant, as gateBypassRequest does on HTTP.
+  if (hostApprovalEnabled()) bypassGrants.revoke(userId, chatSessionId);
   await runV2Turn({ userId, chatSessionId, agentContext, message, body, deps: { ...DEFAULT_DEPS, ...deps }, turnStartedAt: Date.now() }, {
-    refuse: (r) => { throw Object.assign(new Error(r.message), { code: r.code }); },
+    refuse: (r) => {
+      // The same details.used/limit the HTTP 402 body carries (sendRouteRefusal).
+      const details = r.route?.used !== undefined ? { details: { used: r.route.used, limit: r.route.limit } } : {};
+      throw Object.assign(new Error(r.message), { code: r.code, ...details });
+    },
     start: () => {},
     send: onEvent,
     isGone: () => false,

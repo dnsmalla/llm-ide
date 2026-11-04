@@ -89,3 +89,33 @@ test('clearChatSessionState refuses while a turn runs and clears afterwards', as
   assert.equal(getChatSession(userId, chatId).messages.length, 0);
   assert.equal(getOrCreateAgentSession(getDb(), userId, chatId).sdk_session_id, null, 'the SDK mapping is dropped');
 });
+
+test('a host turn ends the chat\'s Bypass grant when host approval is enabled (like a non-Bypass HTTP turn)', async () => {
+  const H = await import('../core/host-approval.mjs');
+  const userId = await makeUser();
+  const prev = process.env.LLMIDE_HOST_APPROVAL_KEY;
+  process.env.LLMIDE_HOST_APPROVAL_KEY = 'ab'.repeat(32);
+  try {
+    H.bypassGrants.grant(userId, 'c-host-grant');
+    assert.equal(H.bypassGrants.has(userId, 'c-host-grant'), true);
+    await v2.startHostTurn({ userId, chatSessionId: 'c-host-grant', message: 'hi', onEvent: () => {}, deps: { classifyMode, runTurn: fakeRun([]) } });
+    assert.equal(H.bypassGrants.has(userId, 'c-host-grant'), false);
+  } finally {
+    if (prev === undefined) delete process.env.LLMIDE_HOST_APPROVAL_KEY; else process.env.LLMIDE_HOST_APPROVAL_KEY = prev;
+  }
+});
+
+test('a chat at its token cap rejects with SESSION_TOKEN_LIMIT and the same used/limit details as the HTTP 402', async () => {
+  const { putRoute } = await import('../kb/chat-route.mjs');
+  const userId = await makeUser();
+  process.env.LLMIDE_ROUTER = 'on'; process.env.LLMIDE_ROUTER_CAP = 'on';
+  try {
+    putRoute(getDb(), userId, 'c-host-cap', { tokenLimit: 100, tokensUsed: 100 });
+    let ran = false;
+    await assert.rejects(
+      v2.startHostTurn({ userId, chatSessionId: 'c-host-cap', message: 'hi', onEvent: () => {}, deps: { classifyMode, runTurn: async () => { ran = true; return {}; } } }),
+      (e) => e.code === 'SESSION_TOKEN_LIMIT' && e.details?.used === 100 && e.details?.limit === 100,
+    );
+    assert.equal(ran, false);
+  } finally { delete process.env.LLMIDE_ROUTER; delete process.env.LLMIDE_ROUTER_CAP; }
+});
