@@ -178,16 +178,33 @@ pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Res
     run_command_with(root, command, timeout_secs, None)
 }
 
+/// The shell a saved stage command runs in: `/bin/sh -lc`, like the Mac app's Loop. Windows has no `/bin/sh`, so
+/// there it is the system `cmd.exe /D /S /C` (`/D` skips AutoRun hooks; `/S` takes the quoted command verbatim).
+#[cfg(not(windows))]
+fn stage_shell(command: &str) -> Command {
+    let mut c = Command::new("/bin/sh");
+    c.arg("-lc").arg(command);
+    c
+}
+
+#[cfg(windows)]
+fn stage_shell(command: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let root = std::env::var_os("SystemRoot").filter(|s| !s.is_empty()).unwrap_or_else(|| "C:\\Windows".into());
+    let mut c = Command::new(std::path::PathBuf::from(root).join("System32").join("cmd.exe"));
+    c.raw_arg(format!("/D /S /C \"{command}\""));
+    c
+}
+
 pub fn run_command_with(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
     if CANCEL.load(Ordering::SeqCst) {
         return Ok(StageRun { exit_code: None, stdout: String::new(), stderr: String::new(), timed_out: false, cancelled: true, duration_ms: 0 });
     }
-    let mut child = Command::new("/bin/sh")
-        .arg("-lc")
-        .arg(command)
-        .current_dir(work_root(root))
+    let mut child = stage_shell(command)
+        // cmd.exe cannot start in a `\\?\` folder (it falls back to the Windows folder).
+        .current_dir(crate::fsutil::plain_path(&work_root(root)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -335,7 +352,7 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
             return Err(format!("unsafe path: {p}"));
         }
     }
-    let listed = Command::new("git").arg("--literal-pathspecs").arg("-C").arg(work).args(["ls-files", "-z", "--"]).args(paths).output()
+    let listed = Command::new("git").arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).args(["ls-files", "-z", "--"]).args(paths).output()
         .map_err(|e| format!("cannot run git ls-files: {e}"))?;
     if !listed.status.success() { return Err("git ls-files failed; nothing was reverted".into()); }
     let tracked: HashSet<String> = String::from_utf8_lossy(&listed.stdout).split('\0').map(|s| s.to_string()).collect();
@@ -353,7 +370,7 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
     }
     if !tracked_paths.is_empty() {
         let mut cmd = Command::new("git");
-        cmd.arg("--literal-pathspecs").arg("-C").arg(work).arg("checkout").arg("--");
+        cmd.arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).arg("checkout").arg("--");
         for p in &tracked_paths { cmd.arg(p.as_str()); }
         let out = cmd.output().map_err(|e| format!("cannot run git checkout: {e}"))?;
         if !out.status.success() {
@@ -387,7 +404,7 @@ const MAX_CHANGED_PATHS: usize = 20_000;
 /// back exactly as the agent run reports them). Both sides of a rename/copy are listed. Errors when git cannot answer
 /// or the list is too long, so a caller never reads "unknown" as "clean" (the revert snapshot depends on that).
 pub fn changed_paths_in(work: &Path) -> Result<Vec<String>, String> {
-    let out = Command::new("git").arg("-C").arg(work).args(["status", "--porcelain", "-z"]).output()
+    let out = Command::new("git").arg("-C").arg(crate::fsutil::plain_path(work)).args(["status", "--porcelain", "-z"]).output()
         .map_err(|e| format!("cannot run git status: {e}"))?;
     if !out.status.success() { return Err("git status failed; the changed paths are unknown".into()); }
     let text = String::from_utf8_lossy(&out.stdout);
@@ -461,6 +478,12 @@ pub async fn loop_run_fault_verify(rel: String, timeout_secs: Option<u64>) -> Re
 mod tests {
     use super::*;
 
+    /// A stage command for the host's stage shell: `printf` under `/bin/sh`, `echo` under `cmd.exe` (whose output
+    /// then ends in CRLF, so tests compare `trim_end`).
+    fn cmd(s: &str) -> String {
+        if cfg!(windows) { s.replace("printf ", "echo ") } else { s.to_string() }
+    }
+
     fn project(name: &str, command: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("llmide-loop-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -471,12 +494,12 @@ mod tests {
 
     #[test]
     fn only_saved_shell_stages_run_and_output_is_captured() {
-        let root = project("ok", "printf hello; printf err >&2; exit 3");
-        let cmd = stage_command(&root, "s1").unwrap();
-        assert_eq!(cmd, "printf hello; printf err >&2; exit 3");
+        let line = if cfg!(windows) { "echo hello& echo err>&2& exit 3" } else { "printf hello; printf err >&2; exit 3" };
+        let root = project("ok", line);
+        assert_eq!(stage_command(&root, "s1").unwrap(), line);
         let r = run_stage(&root, "s1", Some(10)).unwrap();
-        assert_eq!(r.stdout, "hello");
-        assert_eq!(r.stderr, "err");
+        assert_eq!(r.stdout.trim_end(), "hello");
+        assert_eq!(r.stderr.trim_end(), "err");
         assert_eq!(r.exit_code, Some(3));
         assert!(!r.timed_out);
         assert!(stage_command(&root, "missing").is_err());
@@ -486,13 +509,13 @@ mod tests {
     #[test]
     fn loop_runs_shell_stages_in_order_and_stops_at_blocking_failure() {
         let root = project("loop", "printf one");
-        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"maxIterations":2,"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"printf one","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"maxIterations":2,"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"printf one","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
         let r = run_loop(&root, "l1", Some(10)).unwrap();
         assert!(r.passed);
         assert_eq!(r.stages.len(), 2);
-        assert_eq!(r.stages[0].run.stdout, "one");
-        assert_eq!(r.stages[1].run.stdout, "two");
-        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"exit 1","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        assert_eq!(r.stages[0].run.stdout.trim_end(), "one");
+        assert_eq!(r.stages[1].run.stdout.trim_end(), "two");
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"exit 1","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
         let r = run_loop(&root, "l1", Some(10)).unwrap();
         assert!(!r.passed);
         assert_eq!(r.stages.len(), 1);
@@ -513,12 +536,12 @@ mod tests {
     #[test]
     fn regression_stage_with_no_fixed_faults_is_a_honest_noop() {
         let root = project("regression-empty", "printf test");
-        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l","name":"R","config":{"stages":[{"id":"s1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Test","kind":"shellCommand","command":"printf ok","enabled":true,"severity":"blocking","order":1}]}}]}"#).unwrap();
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l","name":"R","config":{"stages":[{"id":"s1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Test","kind":"shellCommand","command":"printf ok","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
         let r = run_loop(&root, "l", Some(10)).unwrap();
         assert!(r.passed);
         assert_eq!(r.stages.len(), 2);
         assert_eq!(r.stages[0].run.exit_code, Some(0));
-        assert_eq!(r.stages[1].run.stdout, "ok");
+        assert_eq!(r.stages[1].run.stdout.trim_end(), "ok");
         std::fs::create_dir_all(root.join("system/faults")).unwrap();
         std::fs::write(root.join("system/faults/f.md"), "---\nstatus: fixed\n---\n").unwrap();
         assert!(run_loop(&root, "l", Some(10)).is_err());
@@ -529,9 +552,9 @@ mod tests {
     fn fault_verify_reads_the_saved_command_only() {
         let root = std::fs::canonicalize(project("fault", "printf ok")).unwrap();
         std::fs::create_dir_all(root.join("system/faults")).unwrap();
-        std::fs::write(root.join("system/faults/f.md"), "---\nverify: \"printf verified\"\nstatus: fixed\n---\nnotes\n").unwrap();
+        std::fs::write(root.join("system/faults/f.md"), cmd("---\nverify: \"printf verified\"\nstatus: fixed\n---\nnotes\n")).unwrap();
         let r = run_fault_verify(&root, "system/faults/f.md", Some(5)).unwrap();
-        assert_eq!(r.stdout, "verified");
+        assert_eq!(r.stdout.trim_end(), "verified");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -670,7 +693,7 @@ mod tests {
 
     #[test]
     fn timeout_kills_the_stage() {
-        let root = project("timeout", "sleep 5");
+        let root = project("timeout", if cfg!(windows) { "ping -n 6 127.0.0.1 >nul" } else { "sleep 5" });
         let r = run_stage(&root, "s1", Some(1)).unwrap();
         assert!(r.timed_out);
         let _ = std::fs::remove_dir_all(&root);
