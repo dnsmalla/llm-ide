@@ -9,11 +9,12 @@
     "limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["maxFrameBytes", "defaultListItems", "maxListItems"],
+      "required": ["maxFrameBytes", "defaultListItems", "maxListItems", "maxListBytes"],
       "properties": {
         "maxFrameBytes": { "type": "integer", "const": 1048576 },
         "defaultListItems": { "type": "integer", "const": 100 },
-        "maxListItems": { "type": "integer", "const": 500 }
+        "maxListItems": { "type": "integer", "const": 500 },
+        "maxListBytes": { "type": "integer", "const": 786432 }
       }
     },
     "capabilities": {

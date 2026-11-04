@@ -50,9 +50,20 @@ function defaultDeps() {
 }
 
 export function messagesOf(lines, limit) {
-  return lines.filter((m) => m?.role === 'user' || m?.role === 'assistant')
+  const recent = lines.filter((m) => m?.role === 'user' || m?.role === 'assistant')
     .slice(-Math.min(Math.max(limit, 1), HOST_API_LIMITS.maxListItems))
     .map((m) => ({ role: m.role, content: clamp(typeof m.content === 'string' ? m.content : '', 100_000) }));
+  // Newest first within maxListBytes (UTF-8 JSON), so the frame stays under maxFrameBytes. The newest message
+  // always goes in: clamped to 100k characters it is at most ~600 KB even fully escaped, under the budget.
+  let bytes = 0;
+  let start = recent.length;
+  while (start > 0) {
+    const size = Buffer.byteLength(JSON.stringify(recent[start - 1])) + 1;
+    if (start < recent.length && bytes + size > HOST_API_LIMITS.maxListBytes) break;
+    bytes += size;
+    start -= 1;
+  }
+  return recent.slice(start);
 }
 
 export function createGateway(overrides) {

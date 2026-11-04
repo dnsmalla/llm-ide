@@ -265,9 +265,21 @@ final class HostApiV1Gateway {
     // MARK: - Helpers
 
     static func messages(_ lines: [MobileChatLine], limit: Int) -> [HostApiChatSnapshotResultMessagesItem] {
-        lines.filter { $0.role == "user" || $0.role == "assistant" }
+        let recent = lines.filter { $0.role == "user" || $0.role == "assistant" }
             .suffix(min(max(limit, 1), HostApi.limits.maxListItems))
             .map { HostApiChatSnapshotResultMessagesItem(content: HostApiFrame.clamp($0.content, maxUTF16: 100_000), role: $0.role) }
+        // Newest first within maxListBytes (UTF-8 JSON), so the frame stays under maxFrameBytes. The newest message
+        // always goes in: clamped to 100k UTF-16 units it is at most ~600 KB even fully escaped, under the budget.
+        var bytes = 0
+        var start = recent.count
+        let encoder = JSONEncoder()
+        while start > 0 {
+            let size = ((try? encoder.encode(recent[start - 1]))?.count ?? 0) + 1
+            if start < recent.count && bytes + size > HostApi.limits.maxListBytes { break }
+            bytes += size
+            start -= 1
+        }
+        return Array(recent[start...])
     }
 
     private func respond<R: Encodable>(_ session: Int, _ replyTo: String, _ command: HostApiCommand, _ result: R) {

@@ -54,11 +54,13 @@ public struct HostApiLimits: Sendable {
     public let maxFrameBytes: Int
     public let defaultListItems: Int
     public let maxListItems: Int
+    public let maxListBytes: Int
 
-    public init(maxFrameBytes: Int, defaultListItems: Int, maxListItems: Int) {
+    public init(maxFrameBytes: Int, defaultListItems: Int, maxListItems: Int, maxListBytes: Int) {
         self.maxFrameBytes = maxFrameBytes
         self.defaultListItems = defaultListItems
         self.maxListItems = maxListItems
+        self.maxListBytes = maxListBytes
     }
 }
 
@@ -80,7 +82,7 @@ ${names.map((n) => `        case .${swiftCase(n)}: return ${registry.commands[n]
 
 public enum HostApi {
     public static let version = ${registry.version}
-    public static let limits = HostApiLimits(maxFrameBytes: ${registry.limits.maxFrameBytes}, defaultListItems: ${registry.limits.defaultListItems}, maxListItems: ${registry.limits.maxListItems})
+    public static let limits = HostApiLimits(maxFrameBytes: ${registry.limits.maxFrameBytes}, defaultListItems: ${registry.limits.defaultListItems}, maxListItems: ${registry.limits.maxListItems}, maxListBytes: ${registry.limits.maxListBytes})
     public static let commands: [String: HostApiCommand] = [
 ${names.map((n) => `        ${JSON.stringify(n)}: .${swiftCase(n)}`).join(",\n")}
     ]

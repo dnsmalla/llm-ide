@@ -11,6 +11,7 @@ fixtures. The Mac host adapter is `mac/Sources/LlmIdeMac/Features/MobileControl/
 - `apiVersion` is always `1`.
 - A frame is at most 1,048,576 bytes.
 - Lists default to 100 items, maximum 500.
+- A list result is at most `maxListBytes` (786,432 bytes = 768 KiB, measured as UTF-8 JSON of its items), which leaves headroom for the envelope under the frame cap. A host trims a snapshot's message list from the oldest end until it fits; `limit` stays the upper bound on count, so a client gets "the recent N that fit". The newest message is always included, never cut further: its text is already clamped to 100,000 characters, at most ~600 KB even fully escaped, so it always fits the budget alone. No wire field says a list was trimmed.
 - Error messages are at most 500 characters.
 - Payload objects are closed: unknown fields are rejected with `invalid_payload`.
 - Schema `pattern`s must end in `$` and avoid `\d`, `\w`, `\s` and `.`: the Swift validator rewrites only a trailing `$` to end-of-input and otherwise uses ICU semantics, which differ from JS for those classes.

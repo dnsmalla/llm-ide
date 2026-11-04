@@ -219,6 +219,28 @@ test('snapshot serves chat only, user and assistant lines only', async () => {
   assert.deepEqual(t.last().result, { messages: [{ role: 'assistant', content: 'yo' }] });
 });
 
+test('a long chat snapshot stays under the frame cap and keeps the newest messages', async () => {
+  // 20 lines of 90k two-byte characters (~3.6 MB) — far past one frame.
+  const long = Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `${i}:${'é'.repeat(90_000)}` }));
+  const t = harness({ history: async () => long });
+  const s = {};
+  await t.paired(s);
+  for (const [id, command, payload] of [['c-l1', 'chat.snapshot', { limit: 20 }], ['c-l2', 'host.snapshot', { topics: ['chat'] }]]) {
+    await t.g.receive(s, req(id, command, payload));
+    const frame = t.last();
+    assert.equal(frame.type, 'response', JSON.stringify(frame.error));
+    assert.ok(Buffer.byteLength(JSON.stringify(frame)) < 1_048_576);
+    const messages = frame.result.messages ?? frame.result.snapshots.chat.messages;
+    assert.ok(messages.length >= 1 && messages.length < 20);
+    assert.deepEqual(messages, long.slice(-messages.length));
+  }
+  // One newest message alone is always served, whole (within the 100k clamp).
+  const t2 = harness({ history: async () => [{ role: 'user', content: 'old' }, { role: 'assistant', content: '\u0001'.repeat(100_000) }] });
+  await t2.paired(s);
+  await t2.g.receive(s, req('c-l3', 'chat.snapshot', { limit: 2 }));
+  assert.equal(t2.last().result.messages.at(-1).content.length, 100_000);
+});
+
 test('self-revoke: another token is denied; its own token revokes and closes every session of the device', async () => {
   const t = harness();
   const s1 = { n: 1 };

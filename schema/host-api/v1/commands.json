@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "limits": { "maxFrameBytes": 1048576, "defaultListItems": 100, "maxListItems": 500 },
+  "limits": { "maxFrameBytes": 1048576, "defaultListItems": 100, "maxListItems": 500, "maxListBytes": 786432 },
   "capabilities": ["host", "chat", "approvals", "tool_approvals"],
   "commands": {
     "host.hello": {

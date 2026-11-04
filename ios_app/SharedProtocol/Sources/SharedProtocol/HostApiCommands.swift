@@ -3,11 +3,13 @@ public struct HostApiLimits: Sendable {
     public let maxFrameBytes: Int
     public let defaultListItems: Int
     public let maxListItems: Int
+    public let maxListBytes: Int
 
-    public init(maxFrameBytes: Int, defaultListItems: Int, maxListItems: Int) {
+    public init(maxFrameBytes: Int, defaultListItems: Int, maxListItems: Int, maxListBytes: Int) {
         self.maxFrameBytes = maxFrameBytes
         self.defaultListItems = defaultListItems
         self.maxListItems = maxListItems
+        self.maxListBytes = maxListBytes
     }
 }
 
@@ -62,7 +64,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
 
 public enum HostApi {
     public static let version = 1
-    public static let limits = HostApiLimits(maxFrameBytes: 1048576, defaultListItems: 100, maxListItems: 500)
+    public static let limits = HostApiLimits(maxFrameBytes: 1048576, defaultListItems: 100, maxListItems: 500, maxListBytes: 786432)
     public static let commands: [String: HostApiCommand] = [
         "approvals.answer": .approvalsAnswer,
         "chat.cancel": .chatCancel,

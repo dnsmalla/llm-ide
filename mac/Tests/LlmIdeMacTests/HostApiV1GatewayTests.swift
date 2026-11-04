@@ -15,6 +15,7 @@ final class HostApiV1GatewayTests {
     var scopes: [String: [String]] = [:] // deviceId -> granted capabilities
     var pinRotations = 0
     var toolApprovals = false
+    var historyLines = [MobileChatLine(role: "user", content: "hi")]
 
     func gateway() -> HostApiV1Gateway {
         let g = HostApiV1Gateway(dependencies: .init(
@@ -28,7 +29,7 @@ final class HostApiV1GatewayTests {
             capabilities: { [unowned self] in HostApiV1Gateway.capabilities(chatInstalled: true, toolApprovals: self.toolApprovals) },
             tierRefusal: { _ in nil },
             forward: { [unowned self] in self.forwarded.append(try! JSONSerialization.jsonObject(with: $0) as! [String: Any]) },
-            history: { _ in .lines([MobileChatLine(role: "user", content: "hi")]) },
+            history: { [unowned self] _ in .lines(self.historyLines) },
             clear: { .cleared },
             cancel: { [unowned self] in self.cancelled.append($0) },
             log: { _ in }))
@@ -151,6 +152,30 @@ final class HostApiV1GatewayTests {
         #expect(((last["result"] as! [String: Any])["snapshots"] as! [String: Any])["chat"] != nil)
         await g.receive(session: 1, data: request("c-s2", "host.snapshot", #"{"topics":["chat","loop"]}"#))
         #expect(lastError == "capability_unavailable")
+    }
+
+    @Test("a long chat snapshot stays under the frame cap and keeps the newest messages")
+    func longSnapshot() async {
+        // 20 lines of 90k two-byte characters (~3.6 MB) — far past one frame.
+        historyLines = (0..<20).map { MobileChatLine(role: $0 % 2 == 0 ? "user" : "assistant", content: "\($0):" + String(repeating: "é", count: 90_000)) }
+        var frames: [Data] = []
+        let g = gateway()
+        let record = g.send
+        g.send = { s, d in frames.append(d); record(s, d) }
+        await paired(g)
+        for (id, command, payload) in [("c-l1", "chat.snapshot", #"{"limit":20}"#), ("c-l2", "host.snapshot", #"{"topics":["chat"]}"#)] {
+            await g.receive(session: 1, data: request(id, command, payload))
+            #expect(last["type"] as? String == "response")
+            #expect(frames.last!.count < HostApi.limits.maxFrameBytes)
+            let result = last["result"] as! [String: Any]
+            let messages = (result["messages"] ?? (result["snapshots"] as! [String: Any])["chat"].flatMap { ($0 as! [String: Any])["messages"] }) as! [[String: Any]]
+            #expect(!messages.isEmpty && messages.count < 20)
+            #expect(messages.map { $0["content"] as! String } == historyLines.suffix(messages.count).map(\.content))
+        }
+        // One newest message alone is always served, whole (within the 100k clamp).
+        let one = HostApiV1Gateway.messages([MobileChatLine(role: "user", content: "old"),
+                                             MobileChatLine(role: "assistant", content: String(repeating: "\u{1}", count: 100_000))], limit: 2)
+        #expect(one.last?.content.utf16.count == 100_000)
     }
 
     @Test("self-revoke works only with the session's own token, then closes it")
