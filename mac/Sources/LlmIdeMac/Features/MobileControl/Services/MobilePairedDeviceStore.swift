@@ -22,7 +22,13 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         let tokenHash: String
         let pairedAt: Date
         var lastSeenAt: Date
+        /// Host API v1: the capabilities granted at pairing. nil for v2 devices and for v1 devices
+        /// paired before scopes existed (a missing key decodes as nil, so old files load).
+        var scopes: [String]? = nil
     }
+
+    /// What a v1 token without stored scopes may use: never `tool_approvals`.
+    static let legacyHostApiScopes = ["host", "chat", "approvals"]
 
     static let tokenByteCount = 32
     /// Anyone who holds the PIN can add a record, so the registry is bounded:
@@ -62,10 +68,10 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
     /// the same device id again replaces the previous record, so the old token
     /// stops working the moment the new one is issued. Returns the token to
     /// hand to the phone — the only time it exists in plain text on the Mac.
-    func issueToken(deviceId: String, name: String, now: Date = Date()) -> String {
+    func issueToken(deviceId: String, name: String, scopes: [String]? = nil, now: Date = Date()) -> String {
         let token = Self.randomToken()
         let record = Device(id: deviceId, name: Self.cleanName(name),
-                            tokenHash: Self.hash(token), pairedAt: now, lastSeenAt: now)
+                            tokenHash: Self.hash(token), pairedAt: now, lastSeenAt: now, scopes: scopes)
         lock.lock(); defer { lock.unlock() }
         devices.removeAll { $0.id == deviceId }
         devices.append(record)
@@ -140,6 +146,11 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         devices.removeAll()
         persistLocked()
         return ids
+    }
+
+    /// The capabilities `deviceId` was granted at pairing, or `legacyHostApiScopes` when none were stored.
+    func scopes(deviceId: String) -> [String] {
+        device(id: deviceId)?.scopes ?? Self.legacyHostApiScopes
     }
 
     func device(id: String) -> Device? {

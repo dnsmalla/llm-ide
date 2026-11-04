@@ -12,6 +12,7 @@ final class HostApiV1GatewayTests {
     var cancelled: [String] = []
     var pin = "123456"
     var tokens: [String: String] = [:]   // token -> deviceId
+    var scopes: [String: [String]] = [:] // deviceId -> granted capabilities
     var pinRotations = 0
     var toolApprovals = false
 
@@ -20,8 +21,9 @@ final class HostApiV1GatewayTests {
             hostName: { "Test Mac" },
             validatePin: { [unowned self] in $0 == self.pin },
             pinConsumed: { [unowned self] in self.pinRotations += 1; self.pin = "654321" },
-            issueToken: { [unowned self] id, _ in let t = "tok-\(id)-0123456789"; self.tokens[t] = id; return t },
+            issueToken: { [unowned self] id, _, scopes in let t = "tok-\(id)-0123456789"; self.tokens[t] = id; self.scopes[id] = scopes; return t },
             authenticate: { [unowned self] in self.tokens[$0] },
+            scopes: { [unowned self] in self.scopes[$0] ?? MobilePairedDeviceStore.legacyHostApiScopes },
             revoke: { [unowned self] id in self.tokens = self.tokens.filter { $0.value != id } },
             capabilities: { [unowned self] in HostApiV1Gateway.capabilities(chatInstalled: true, toolApprovals: self.toolApprovals) },
             tierRefusal: { _ in nil },
@@ -126,10 +128,13 @@ final class HostApiV1GatewayTests {
         #expect(lastError == "not_found" && forwarded.isEmpty)
     }
 
-    @Test("tool approvals need their capability; a capability change pushes host.capabilities")
+    @Test("tool approvals need their capability served; a capability change pushes host.capabilities")
     func capabilities() async {
+        toolApprovals = true // paired while served, so it is granted
         let g = gateway()
         await paired(g)
+        toolApprovals = false
+        g.capabilitiesChanged()
         await g.receive(session: 1, data: request("c-t", "toolApprovals.answer", #"{"requestId":"r","commandId":"c-9","decision":"deny"}"#))
         #expect(lastError == "capability_unavailable")
         toolApprovals = true

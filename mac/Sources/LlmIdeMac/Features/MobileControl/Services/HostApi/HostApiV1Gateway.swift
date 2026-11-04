@@ -13,8 +13,9 @@ final class HostApiV1Gateway {
         var hostName: () -> String
         var validatePin: (String) -> Bool
         var pinConsumed: () -> Void
-        var issueToken: (_ deviceId: String, _ name: String) -> String
+        var issueToken: (_ deviceId: String, _ name: String, _ scopes: [String]) -> String
         var authenticate: (_ token: String) -> String?
+        var scopes: (_ deviceId: String) -> [String]
         var revoke: (_ deviceId: String) -> Void
         var capabilities: () -> [String]
         var tierRefusal: (_ v2Type: String) -> String?
@@ -36,7 +37,9 @@ final class HostApiV1Gateway {
     /// internal command id → (session, external id, cancelled by the client)
     private var owned: [String: (session: Int, external: String, cancelled: Bool)] = [:]
     private var throttle = PairingThrottle()
-    private var lastCapabilities: [String] = []
+    /// Per authed session: the capabilities its token was granted, and the effective list it was last sent.
+    private var grants: [Int: Set<String>] = [:]
+    private var lastSent: [Int: [String]] = [:]
 
     init(dependencies: Dependencies) { self.deps = dependencies }
 
@@ -67,6 +70,8 @@ final class HostApiV1Gateway {
 
     func closed(session: Int) {
         sessions.removeValue(forKey: session)
+        grants.removeValue(forKey: session)
+        lastSent.removeValue(forKey: session)
         for (id, o) in owned where o.session == session {
             owned.removeValue(forKey: id)
             deps.cancel(id)
@@ -102,11 +107,24 @@ final class HostApiV1Gateway {
         if t.terminal { owned.removeValue(forKey: internalCommandId) }
     }
 
+    /// A session's capabilities: served ∩ granted, in served order.
+    private func effective(_ session: Int) -> [String] {
+        deps.capabilities().filter { grants[session]?.contains($0) == true }
+    }
+
+    /// `host` is always granted, so the effective list is never empty (schema `minItems: 1`).
+    private func grant(_ session: Int, _ scopes: [String]) -> [String] {
+        grants[session] = Set(scopes).union(["host"])
+        let caps = effective(session)
+        lastSent[session] = caps
+        return caps
+    }
+
     func capabilitiesChanged() {
-        let caps = deps.capabilities()
-        guard caps != lastCapabilities else { return }
-        lastCapabilities = caps
         for (id, s) in sessions where s.state.deviceId != nil {
+            let caps = effective(id)
+            guard caps != lastSent[id] else { continue }
+            lastSent[id] = caps
             sendEvent(id, "host.capabilities", payload: HostApiHostCapabilitiesEvent(capabilities: caps))
         }
     }
@@ -120,7 +138,15 @@ final class HostApiV1Gateway {
         case .success(let r): request = r
         case .failure(let f): return fail(session, f.replyTo, f.code, f.message)
         }
-        let served = Set(deps.capabilities())
+        var served = Set(deps.capabilities())
+        if entry.state.deviceId != nil {
+            let capability = request.command.capability
+            if served.contains(capability) && grants[session]?.contains(capability) != true {
+                deps.log("Host API v1 connection \(session) refused \(capability) (not granted)")
+                return fail(session, request.id, "denied", "This device was not granted \(capability) — pair again to grant it.")
+            }
+            served = Set(effective(session))
+        }
         if case .refuse(let code, let message) = entry.state.gate(request.command, served: served) {
             return fail(session, request.id, code, message)
         }
@@ -154,10 +180,12 @@ final class HostApiV1Gateway {
                 return fail(session, id, "denied", "This connection is not waiting to pair.")
             }
             let deviceId = MobilePairedDeviceStore.hostApiDevicePrefix + UUID().uuidString
-            let token = deps.issueToken(deviceId, name)
+            // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
+            let scopes = deps.capabilities()
+            let token = deps.issueToken(deviceId, name, scopes)
             deps.pinConsumed()
             sessions[session]?.state.authenticated(deviceId: deviceId)
-            respond(session, id, .hostAuthPair, HostApiHostAuthPairResult(capabilities: deps.capabilities(), token: token))
+            respond(session, id, .hostAuthPair, HostApiHostAuthPairResult(capabilities: grant(session, scopes), token: token))
         case .hostAuthToken:
             guard let p = payload(HostApiHostAuthTokenRequest.self) else { return fail(session, id, "invalid_payload", "Bad host.auth.token payload.") }
             guard let deviceId = deps.authenticate(p.token) else {
@@ -166,7 +194,7 @@ final class HostApiV1Gateway {
             }
             throttle.registerSuccess(host: entry.peer)
             sessions[session]?.state.authenticated(deviceId: deviceId)
-            respond(session, id, .hostAuthToken, HostApiHostAuthTokenResult(capabilities: deps.capabilities()))
+            respond(session, id, .hostAuthToken, HostApiHostAuthTokenResult(capabilities: grant(session, deps.scopes(deviceId))))
         case .hostAuthRevoke:
             guard let p = payload(HostApiHostAuthRevokeRequest.self), let mine = entry.state.deviceId,
                   deps.authenticate(p.token) == mine else { return fail(session, id, "denied", "Only this connection's own token can be revoked here.") }

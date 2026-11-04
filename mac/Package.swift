@@ -245,6 +245,7 @@ if mobileIncluded {
         "HostApiV1GatewayTests.swift",
         "HostApiV1IdentityTests.swift",
         "HostApiV1ListenerTests.swift",
+        "HostApiV1ScopesTests.swift",
         "HostApiV1SessionTests.swift",
         "HostApiV2TranslatorTests.swift",
         "PhoneDesktopApprovalGateTests.swift",
