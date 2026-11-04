@@ -78,3 +78,13 @@ public enum HostApi {
         "toolApprovals.answer": .toolApprovalsAnswer
     ]
 }
+
+public enum HostApiEvent: String, CaseIterable, Sendable {
+    case approvalCleared = "approval.cleared"
+    case approvalRequest = "approval.request"
+    case chatDelta = "chat.delta"
+    case chatDone = "chat.done"
+    case chatError = "chat.error"
+    case hostCapabilities = "host.capabilities"
+    case toolApprovalRequest = "toolApproval.request"
+}

@@ -32,6 +32,8 @@ const swiftCase = (name) =>
 const readSchema = (f) => JSON.parse(readFileSync(join(ROOT, "schema/host-api/v1", f), "utf8"));
 const envelopeSchema = readSchema("envelope.schema.json");
 const eventsSchema = readSchema("events.schema.json");
+// Event names, for the Swift client's HostApiEvent (sorted, so --check stays a byte comparison).
+const eventNames = eventsSchema.oneOf.map((v) => v.properties.command.const).sort();
 
 const js = `${header}
 export const HOST_API_VERSION = ${registry.version};
@@ -82,6 +84,10 @@ public enum HostApi {
     public static let commands: [String: HostApiCommand] = [
 ${names.map((n) => `        ${JSON.stringify(n)}: .${swiftCase(n)}`).join(",\n")}
     ]
+}
+
+public enum HostApiEvent: String, CaseIterable, Sendable {
+${eventNames.map((n) => `    case ${swiftCase(n)} = ${JSON.stringify(n)}`).join("\n")}
 }
 `;
 
