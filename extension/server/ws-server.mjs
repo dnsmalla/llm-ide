@@ -7,6 +7,8 @@ import { EventEmitter } from 'node:events';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 export const MAX_MESSAGE_BYTES = 1048576;
+const MAX_FRAGMENTS = 1024; // bounds parts[] even when fragments carry few bytes
+const CLOSE_GRACE_MS = 1000; // peer gets this long to answer our close before the socket is destroyed
 
 export class WsError extends Error {
   constructor(code) { super(`websocket close ${code}`); this.code = code; }
@@ -17,23 +19,26 @@ export function acceptKey(key) {
 }
 
 export function handshakeRefusal(req) {
+  if (req.method !== 'GET') return 405;
   if (String(req.headers.upgrade || '').toLowerCase() !== 'websocket') return 400;
+  const tokens = String(req.headers.connection || '').split(',').map((t) => t.trim().toLowerCase());
+  if (!tokens.includes('upgrade')) return 400;
   if (req.headers['sec-websocket-version'] !== '13') return 426;
   const key = req.headers['sec-websocket-key'];
   if (typeof key !== 'string' || Buffer.from(key, 'base64').length !== 16) return 400;
   return null;
 }
 
-export function readFrame(buf) {
+// Validates a frame header. Returns null while the header itself is incomplete; throws on protocol errors
+// as soon as they are visible, so an oversize or malformed frame is refused before its body is buffered.
+function frameLayout(buf) {
   if (buf.length < 2) return null;
-  const fin = (buf[0] & 0x80) !== 0;
-  const rsv = buf[0] & 0x70;
-  const opcode = buf[0] & 0x0f;
-  const masked = (buf[1] & 0x80) !== 0;
-  let len = buf[1] & 0x7f;
+  const b0 = buf[0];
+  const b1 = buf[1];
+  if (b0 & 0x70) throw new WsError(1002);
+  if (!(b1 & 0x80)) throw new WsError(1002);
+  let len = b1 & 0x7f;
   let off = 2;
-  if (rsv) throw new WsError(1002);
-  if (!masked) throw new WsError(1002);
   if (len === 126) {
     if (buf.length < 4) return null;
     len = buf.readUInt16BE(2); off = 4;
@@ -44,12 +49,21 @@ export function readFrame(buf) {
     len = Number(big); off = 10;
   }
   if (len > MAX_MESSAGE_BYTES) throw new WsError(1009);
-  if (opcode >= 8 && (len > 125 || !fin)) throw new WsError(1002);
-  if (buf.length < off + 4 + len) return null;
-  const key = buf.subarray(off, off + 4);
-  const payload = Buffer.allocUnsafe(len);
-  for (let i = 0; i < len; i++) payload[i] = buf[off + 4 + i] ^ key[i & 3];
-  return { fin, opcode, payload, size: off + 4 + len };
+  const opcode = b0 & 0x0f;
+  if (opcode >= 8 && (len > 125 || !(b0 & 0x80))) throw new WsError(1002);
+  return { fin: (b0 & 0x80) !== 0, opcode, off, len, total: off + 4 + len };
+}
+
+function unmask(buf, h) {
+  const key = buf.subarray(h.off, h.off + 4);
+  const payload = Buffer.allocUnsafe(h.len);
+  for (let i = 0; i < h.len; i++) payload[i] = buf[h.off + 4 + i] ^ key[i & 3];
+  return { fin: h.fin, opcode: h.opcode, payload, size: h.total };
+}
+
+export function readFrame(buf) {
+  const h = frameLayout(buf);
+  return h && buf.length >= h.total ? unmask(buf, h) : null;
 }
 
 export function encodeFrame(opcode, payload) {
@@ -61,18 +75,28 @@ export function encodeFrame(opcode, payload) {
   return Buffer.concat([head, payload]);
 }
 
-const utf8 = new TextDecoder('utf-8', { fatal: true });
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+// Close codes a peer may legally send (RFC 6455 section 7.4).
+function validPeerCloseCode(c) {
+  return (c >= 1000 && c <= 1003) || (c >= 1007 && c <= 1011) || (c >= 3000 && c <= 4999);
+}
 
 export class WsConnection extends EventEmitter {
+  #closeTimer = null;
+
   constructor(socket) {
     super();
     this.socket = socket;
-    this.buffer = Buffer.alloc(0);
-    this.parts = [];
+    this.chunks = [];   // unparsed input; concatenated only once `need` bytes have arrived
+    this.pending = 0;
+    this.need = 0;
+    this.parts = [];    // fragments of the message being assembled
     this.partBytes = 0;
     this.closed = false;
     socket.on('data', (chunk) => this.#onData(chunk));
-    socket.on('close', () => this.#finish(1006));
+    socket.on('end', () => socket.destroy());
+    socket.on('close', () => { clearTimeout(this.#closeTimer); this.#finish(1006); });
     socket.on('error', () => this.#finish(1006));
   }
 
@@ -83,10 +107,15 @@ export class WsConnection extends EventEmitter {
 
   close(code = 1000) {
     if (this.closed) return;
-    const body = Buffer.alloc(2); body.writeUInt16BE(code, 0);
+    // 1005/1006/1015 are reserved for local reporting and must never be put on the wire.
+    const wire = code === 1005 || code === 1006 || code === 1015 ? 1000 : code;
+    const body = Buffer.alloc(2); body.writeUInt16BE(wire, 0);
     this.socket.write(encodeFrame(8, body));
     this.socket.end();
-    this.#finish(code);
+    this.chunks = []; this.pending = 0; this.need = 0; this.parts = []; this.partBytes = 0;
+    this.#closeTimer = setTimeout(() => this.socket.destroy(), CLOSE_GRACE_MS);
+    this.#closeTimer.unref();
+    this.#finish(wire);
   }
 
   #finish(code) {
@@ -96,13 +125,23 @@ export class WsConnection extends EventEmitter {
   }
 
   #onData(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
+    if (this.closed) return;
+    this.chunks.push(chunk);
+    this.pending += chunk.length;
+    if (this.pending < this.need) return;
+    let buf = this.chunks.length === 1 ? this.chunks[0] : Buffer.concat(this.chunks, this.pending);
+    this.chunks = []; this.pending = 0; this.need = 0;
     try {
       for (;;) {
-        const f = readFrame(this.buffer);
-        if (!f) return;
-        this.buffer = this.buffer.subarray(f.size);
-        this.#onFrame(f);
+        const h = frameLayout(buf);
+        if (!h || buf.length < h.total) {
+          this.need = h ? h.total : 2;
+          if (buf.length) { this.chunks.push(buf); this.pending = buf.length; }
+          return;
+        }
+        const frame = unmask(buf, h);
+        buf = buf.subarray(h.total);
+        this.#onFrame(frame);
         if (this.closed) return;
       }
     } catch (err) {
@@ -111,26 +150,35 @@ export class WsConnection extends EventEmitter {
   }
 
   #onFrame({ fin, opcode, payload }) {
+    if (opcode === 8) return this.#onPeerClose(payload);
     if (opcode === 9) { this.socket.write(encodeFrame(10, payload)); return; }
     if (opcode === 10) return;
-    if (opcode === 8) { this.close(1000); return; }
     if (opcode === 2) throw new WsError(1003);
-    if (opcode === 1) {
-      if (this.parts.length) throw new WsError(1002);
-    } else if (opcode === 0) {
-      if (!this.parts.length) throw new WsError(1002);
-    } else {
-      throw new WsError(1002);
-    }
+    if (opcode !== 0 && opcode !== 1) throw new WsError(1002);
+    // A new message may start only when none is pending; a continuation only when one is.
+    if ((opcode === 1) === (this.parts.length > 0)) throw new WsError(1002);
+    // Empty non-final fragments carry no bytes, so they are refused rather than counted.
+    if (!fin && payload.length === 0) throw new WsError(1002);
+    if (this.parts.length >= MAX_FRAGMENTS) throw new WsError(1009);
     this.partBytes += payload.length;
     if (this.partBytes > MAX_MESSAGE_BYTES) throw new WsError(1009);
     this.parts.push(payload);
     if (!fin) return;
-    const whole = Buffer.concat(this.parts);
+    const whole = this.parts.length === 1 ? payload : Buffer.concat(this.parts, this.partBytes);
     this.parts = []; this.partBytes = 0;
     let text;
     try { text = utf8.decode(whole); } catch { throw new WsError(1007); }
     this.emit('message', text);
+  }
+
+  #onPeerClose(payload) {
+    if (payload.length === 1) throw new WsError(1002);
+    let code = 1000;
+    if (payload.length >= 2) {
+      code = payload.readUInt16BE(0);
+      if (!validPeerCloseCode(code)) throw new WsError(1002);
+    }
+    this.close(code);
   }
 }
 
