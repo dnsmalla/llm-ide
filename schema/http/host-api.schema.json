@@ -1,0 +1,115 @@
+{
+  "description": "Host API v1 desktop pairing (schema/host-api/v1/README.md): the host-only HTTP routes the desktop Settings card uses to mint a pairing PIN and manage paired devices. Rows: POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id. Served by extension/routes/host-api/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce (core/host-approval.mjs verifyBusHostProof), checked first: without it 403 HOST_PROOF_REQUIRED. Then, unless the core runs with LLMIDE_HOST_API_DEV=1 (never in production), 404 HOST_API_DISABLED. The PIN is six digits, one use, valid 10 minutes, one live PIN per user (a new one replaces the old); it is returned once and never logged. port is the bound port of the loopback v1 listener (3016 or the next free one); 503 HOST_API_UNAVAILABLE while it is not up. A device token is never returned. User-scoped: another user's device id answers revoked:false. Fixtures are transcribed from the handler (tests/host-api-routes.test.mjs); ids and timestamps are example values.",
+  "$defs": {
+    "Device": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "description": "host-minted, h1-<uuid>"
+        },
+        "name": {
+          "type": "string",
+          "description": "the client name given at pairing, at most 120 characters"
+        },
+        "pairedAt": {
+          "type": "integer",
+          "description": "ms since epoch"
+        },
+        "lastSeenAt": {
+          "type": "integer",
+          "description": "ms since epoch, updated on each token sign-in"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /host-api/pin": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string",
+              "description": "six digits"
+            },
+            "expiresAt": {
+              "type": "integer",
+              "description": "ms since epoch, 10 minutes after minting"
+            },
+            "port": {
+              "type": "integer",
+              "description": "the v1 listener's bound port (ws://127.0.0.1:<port>/host-api/v1)"
+            }
+          }
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /host-api/devices": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "devices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Device"
+              },
+              "description": "most recently seen first"
+            }
+          }
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /host-api/devices/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "revoked": {
+              "type": "boolean",
+              "description": "false for an unknown or another user's device"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

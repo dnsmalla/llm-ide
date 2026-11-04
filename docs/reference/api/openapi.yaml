@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 106
+  x-api-version: 107
 servers:
   - url: "https://{host}"
     variables:
@@ -27,6 +27,7 @@ tags:
   - name: "extensions"
   - name: "google"
   - name: "health-auth"
+  - name: "host-api"
   - name: "index"
   - name: "kb-sources"
   - name: "lifecycle"
@@ -5100,6 +5101,113 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Health"
+  /host-api/devices:
+    get:
+      tags:
+        - "host-api"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  devices:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Device"
+                    description: "most recently seen first"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /host-api/devices/{id}:
+    delete:
+      tags:
+        - "host-api"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  revoked:
+                    type: "boolean"
+                    description: "false for an unknown or another user's device"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /host-api/pin:
+    post:
+      tags:
+        - "host-api"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  pin:
+                    type: "string"
+                    description: "six digits"
+                  expiresAt:
+                    type: "integer"
+                    description: "ms since epoch, 10 minutes after minting"
+                  port:
+                    type: "integer"
+                    description: "the v1 listener's bound port (ws://127.0.0.1:<port>/host-api/v1)"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Service Unavailable"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/activity:
     get:
       summary: "List the authenticated user's activity feed"
@@ -16461,6 +16569,21 @@ components:
         folderRemoved:
           type: "boolean"
           description: "True when the folder was empty after the template or command file was removed and was removed too. False when user files remain in it."
+    Device:
+      type: "object"
+      properties:
+        deviceId:
+          type: "string"
+          description: "host-minted, h1-<uuid>"
+        name:
+          type: "string"
+          description: "the client name given at pairing, at most 120 characters"
+        pairedAt:
+          type: "integer"
+          description: "ms since epoch"
+        lastSeenAt:
+          type: "integer"
+          description: "ms since epoch, updated on each token sign-in"
     Discovery:
       type: "object"
       required:

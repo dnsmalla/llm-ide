@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /host-api/devices/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "h1-0b0c2e7a-1f3d-4c5e-9a8b-7d6c5b4a3f21"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_API_DISABLED",
+      "message": "Host API is not enabled on this core"
+    }
+  }
+}

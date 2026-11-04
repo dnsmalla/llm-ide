@@ -1,0 +1,10 @@
+{
+  "endpoint": "POST /host-api/pin",
+  "status": 503,
+  "response": {
+    "error": {
+      "code": "HOST_API_UNAVAILABLE",
+      "message": "The Host API listener is not running"
+    }
+  }
+}

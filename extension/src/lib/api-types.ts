@@ -1149,6 +1149,17 @@ export type PluginRows = {
   plugins: Record<string, unknown>[];
 };
 
+export type Device = {
+  /** host-minted, h1-<uuid> */
+  deviceId?: string;
+  /** the client name given at pairing, at most 120 characters */
+  name?: string;
+  /** ms since epoch */
+  pairedAt?: number;
+  /** ms since epoch, updated on each token sign-in */
+  lastSeenAt?: number;
+};
+
 export type Note = {
   /** Relative path under the project root, forward slashes. No leading slash, no .. segments. */
   noteKey: string;
@@ -4771,6 +4782,54 @@ export type DeleteAuthMeConnectorsIdResponse200 = {
 };
 
 export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
+
+/** Request parts for `POST /host-api/pin` (schema/http/host-api.schema.json). */
+export type PostHostApiPinRequest = Record<string, never>;
+
+export type PostHostApiPinResponse200 = {
+  /** six digits */
+  pin?: string;
+  /** ms since epoch, 10 minutes after minting */
+  expiresAt?: number;
+  /** the v1 listener's bound port (ws://127.0.0.1:<port>/host-api/v1) */
+  port?: number;
+};
+
+export type PostHostApiPinResponse403 = CommonError;
+
+export type PostHostApiPinResponse404 = CommonError;
+
+export type PostHostApiPinResponse503 = CommonError;
+
+/** Request parts for `GET /host-api/devices` (schema/http/host-api.schema.json). */
+export type GetHostApiDevicesRequest = Record<string, never>;
+
+export type GetHostApiDevicesResponse200 = {
+  /** most recently seen first */
+  devices?: Device[];
+};
+
+export type GetHostApiDevicesResponse403 = CommonError;
+
+export type GetHostApiDevicesResponse404 = CommonError;
+
+/** Request parts for `DELETE /host-api/devices/:id` (schema/http/host-api.schema.json). */
+export type DeleteHostApiDevicesIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteHostApiDevicesIdResponse200 = {
+  /** false for an unknown or another user's device */
+  revoked?: boolean;
+};
+
+export type DeleteHostApiDevicesIdResponse400 = CommonError;
+
+export type DeleteHostApiDevicesIdResponse403 = CommonError;
+
+export type DeleteHostApiDevicesIdResponse404 = CommonError;
 
 /** Request parts for `POST /kb/index/notes` (schema/http/index.schema.json). */
 export type PostKbIndexNotesRequest = {
@@ -9070,6 +9129,32 @@ export interface ApiEndpoints {
     responses: {
       200: DeleteAuthMeConnectorsIdResponse200;
       401: DeleteAuthMeConnectorsIdResponse401;
+    };
+  };
+  "POST /host-api/pin": {
+    request: PostHostApiPinRequest;
+    responses: {
+      200: PostHostApiPinResponse200;
+      403: PostHostApiPinResponse403;
+      404: PostHostApiPinResponse404;
+      503: PostHostApiPinResponse503;
+    };
+  };
+  "GET /host-api/devices": {
+    request: GetHostApiDevicesRequest;
+    responses: {
+      200: GetHostApiDevicesResponse200;
+      403: GetHostApiDevicesResponse403;
+      404: GetHostApiDevicesResponse404;
+    };
+  };
+  "DELETE /host-api/devices/:id": {
+    request: DeleteHostApiDevicesIdRequest;
+    responses: {
+      200: DeleteHostApiDevicesIdResponse200;
+      400: DeleteHostApiDevicesIdResponse400;
+      403: DeleteHostApiDevicesIdResponse403;
+      404: DeleteHostApiDevicesIdResponse404;
     };
   };
   "POST /kb/index/notes": {

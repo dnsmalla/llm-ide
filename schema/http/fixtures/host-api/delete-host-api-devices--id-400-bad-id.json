@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /host-api/devices/:id",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid device id"
+    }
+  }
+}

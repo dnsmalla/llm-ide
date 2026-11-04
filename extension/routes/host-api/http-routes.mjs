@@ -1,0 +1,55 @@
+// Host-only HTTP routes of the Host API v1 desktop adapter (contract schema/http/host-api.schema.json). Registered by
+// server.mjs after authenticate and the rate limiter; nothing else imports it. Every route needs the JWT (req.user) AND
+// the bus host proof, so only the desktop UI the Tauri host spawned this core for can mint a PIN or manage devices.
+//
+//   POST   /host-api/pin           { pin, expiresAt, port }   mint the user's one-use 10-minute pairing PIN
+//   GET    /host-api/devices       { devices: [...] }         the user's paired devices (never a token)
+//   DELETE /host-api/devices/:id   { revoked }                revoke one device and drop its live sessions
+//
+// Order: proof first (403 HOST_PROOF_REQUIRED), then the flag (404 HOST_API_DISABLED), so an unproven caller learns
+// nothing about the flag. The PIN is returned once and never logged.
+import { send } from '../../server/route-http.mjs';
+import { config } from '../../core/config.mjs';
+import { verifyBusHostProof } from '../../core/host-approval.mjs';
+import { mintPin } from './pin.mjs';
+import { listDevices, revokeDevice } from '../../kb/host-api-devices.mjs';
+
+const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const fail = (res, status, code, message) => { send(res, status, { error: { code, message } }); return true; };
+
+export function isHostApiRoute(url) {
+  const path = String(url || '').split('?')[0];
+  return path === '/host-api' || path.startsWith('/host-api/');
+}
+
+/** `hostApi()` returns the running { gateway, listener } or null; `enabled` defaults to config.hostApiDev (test seam). */
+export async function handleHostApiRoute(req, res, { hostApi = () => null, enabled = config.hostApiDev, env = process.env } = {}) {
+  const path = String(req.url || '').split('?')[0];
+  const userId = req.user?.id;
+  if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  if (!enabled) return fail(res, 404, 'HOST_API_DISABLED', 'Host API is not enabled on this core');
+  if (!userId) return fail(res, 401, 'UNAUTHORIZED', 'Sign in first');
+
+  if (req.method === 'POST' && path === '/host-api/pin') {
+    const port = hostApi()?.listener?.port;
+    if (!port) return fail(res, 503, 'HOST_API_UNAVAILABLE', 'The Host API listener is not running');
+    const { pin, expiresAt } = mintPin(userId);
+    send(res, 200, { pin, expiresAt, port });
+    return true;
+  }
+  if (req.method === 'GET' && path === '/host-api/devices') {
+    send(res, 200, { devices: listDevices(userId) });
+    return true;
+  }
+  if (req.method === 'DELETE' && path.startsWith('/host-api/devices/')) {
+    let id;
+    try { id = decodeURIComponent(path.slice('/host-api/devices/'.length)); } catch { id = ''; }
+    if (!DEVICE_ID_RE.test(id)) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid device id');
+    const revoked = revokeDevice(userId, id);
+    // Drop live sessions either way: disconnectDevice is per user, so another user's id closes nothing.
+    try { hostApi()?.gateway?.disconnectDevice(userId, id); } catch { /* best effort */ }
+    send(res, 200, { revoked });
+    return true;
+  }
+  return fail(res, 404, 'NOT_FOUND', 'No such Host API route');
+}

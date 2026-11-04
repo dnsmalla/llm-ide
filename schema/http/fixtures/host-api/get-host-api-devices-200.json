@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /host-api/devices",
+  "status": 200,
+  "response": {
+    "devices": [
+      {
+        "deviceId": "h1-0b0c2e7a-1f3d-4c5e-9a8b-7d6c5b4a3f21",
+        "name": "iPhone",
+        "pairedAt": 1793749800000,
+        "lastSeenAt": 1793750100000
+      }
+    ]
+  }
+}

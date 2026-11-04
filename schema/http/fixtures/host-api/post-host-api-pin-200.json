@@ -1,0 +1,9 @@
+{
+  "endpoint": "POST /host-api/pin",
+  "status": 200,
+  "response": {
+    "pin": "042917",
+    "expiresAt": 1793750400000,
+    "port": 3016
+  }
+}

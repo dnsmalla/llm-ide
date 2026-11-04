@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /host-api/devices",
+  "status": 200,
+  "response": {
+    "devices": []
+  }
+}
