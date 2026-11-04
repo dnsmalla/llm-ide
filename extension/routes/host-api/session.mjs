@@ -1,5 +1,5 @@
 // Per-connection v1 phase gate and canonical command ids — the Node twin of the Mac's
-// HostApiV1Session.swift / HostApiV1CommandIds.swift..
+// HostApiV1Session.swift / HostApiV1CommandIds.swift.
 import { HOST_API_COMMANDS } from './commands.generated.mjs';
 
 const refuse = (code, message) => ({ allow: false, code, message });
@@ -20,6 +20,7 @@ export class HostApiSession {
   get userId() { return this.phase.kind === 'authed' ? this.phase.userId : null; }
 
   gate(command, served) {
+    if (!Object.hasOwn(HOST_API_COMMANDS, command)) return refuse('unknown_command', 'This host does not serve that command.');
     switch (this.phase.kind) {
       case 'awaitingHello':
         return command === 'host.hello' ? ALLOW : refuse('auth_failed', 'Send host.hello first.');
@@ -30,14 +31,14 @@ export class HostApiSession {
       default: {
         if (command === 'host.auth.pair' || command === 'host.auth.token') return refuse('denied', 'This connection is already authenticated.');
         if (command === 'host.hello') return refuse('denied', 'This connection already sent host.hello.');
-        const capability = HOST_API_COMMANDS[command]?.capability;
-        return capability && served.has(capability) ? ALLOW : refuse('capability_unavailable', `This Mac does not serve ${capability ?? command} right now.`);
+        const { capability } = HOST_API_COMMANDS[command];
+        return served.has(capability) ? ALLOW : refuse('capability_unavailable', `This computer does not serve ${capability} right now.`);
       }
     }
   }
 }
 
-export const helloRefusal = (apiVersions) => (apiVersions.includes(1) ? null : 'This Mac speaks Host API version 1 only.');
+export const helloRefusal = (apiVersions) => (apiVersions.includes(1) ? null : 'This computer speaks Host API version 1 only.');
 
 const PREFIX = 'h1.';
 export const internalId = (session, external) => `${PREFIX}${session}.${external}`;

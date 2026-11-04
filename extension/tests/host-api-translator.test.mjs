@@ -47,3 +47,25 @@ test('approvals map with the external command id, are filtered and capped, and n
   assert.deepEqual(t.push({ type: 'approval_resolved', requestId: 'r-1', outcome: 'answer' }, {}).events[0],
     { command: 'approval.cleared', payload: { requestId: 'r-1', commandId: 'c-1', reason: 'answer' } });
 });
+
+test('an error after deltas emits only chat.error; later events emit nothing', () => {
+  const t = createTranslator({ external: 'c-1' });
+  t.push({ type: 'delta', text: 'partial' }, {});
+  const r = t.push({ type: 'error', message: 'boom' }, {});
+  assert.deepEqual(r.events.map((e) => e.command), ['chat.error']);
+  assert.deepEqual(t.push({ type: 'result' }, {}), { events: [], terminal: true });
+});
+
+test('a chunk boundary on a surrogate pair keeps the pair whole', () => {
+  const t = createTranslator({ external: 'c-1' });
+  t.push({ type: 'delta', text: `${'a'.repeat(99_999)}😀b` }, {});
+  const d = t.push({ type: 'result' }, {}).events.filter((e) => e.command === 'chat.delta').map((e) => e.payload.text);
+  assert.equal(d[0].length, 99_999);
+  assert.ok(d[1].startsWith('😀'));
+});
+
+test('an AskUserQuestion whose questions all filter out emits nothing', () => {
+  const t = createTranslator({ external: 'c-1' });
+  assert.deepEqual(t.push({ type: 'approval_request', kind: 'AskUserQuestion', requestId: 'r-1', questions: [{ question: '', options: [{ label: 'x' }] }] }, {}),
+    { events: [], terminal: false });
+});

@@ -40,8 +40,8 @@ function questionsOf(raw) {
 
 export function createTranslator({ external }) {
   let reply = '';
-  return {
-    push(e, { cancelledByClient } = {}) {
+  let ended = false;
+  const step = (e, cancelledByClient) => {
       switch (e?.type) {
         case 'delta':
           reply += str(e.text);
@@ -74,6 +74,13 @@ export function createTranslator({ external }) {
         default:
           return none;
       }
+  };
+  return {
+    push(e, { cancelledByClient } = {}) {
+      if (ended) return { events: [], terminal: true };
+      const r = step(e, cancelledByClient);
+      ended = r.terminal;
+      return r;
     },
   };
 }

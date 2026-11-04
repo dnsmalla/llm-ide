@@ -35,9 +35,9 @@ test('once authenticated, auth commands are refused and others need their capabi
   assert.deepEqual(s.gate('host.auth.pair', all), again);
   assert.deepEqual(s.gate('host.auth.token', all), again);
   assert.deepEqual(s.gate('host.auth.revoke', all), { allow: true });
-  assert.deepEqual(s.gate('chat.send', new Set(['host'])), refuse('capability_unavailable', 'This Mac does not serve chat right now.'));
+  assert.deepEqual(s.gate('chat.send', new Set(['host'])), refuse('capability_unavailable', 'This computer does not serve chat right now.'));
   assert.deepEqual(s.gate('toolApprovals.answer', new Set(['host', 'chat', 'approvals'])),
-    refuse('capability_unavailable', 'This Mac does not serve tool_approvals right now.'));
+    refuse('capability_unavailable', 'This computer does not serve tool_approvals right now.'));
   assert.deepEqual(s.gate('chat.send', all), { allow: true });
 });
 
@@ -49,7 +49,7 @@ test('authenticated is a no-op before hello', () => {
 
 test('hello must offer API version 1', () => {
   assert.equal(helloRefusal([1, 2]), null);
-  assert.equal(helloRefusal([2]), 'This Mac speaks Host API version 1 only.');
+  assert.equal(helloRefusal([2]), 'This computer speaks Host API version 1 only.');
 });
 
 test('internal command ids round-trip and never look like a v2 UUID', () => {
@@ -61,4 +61,9 @@ test('internal command ids round-trip and never look like a v2 UUID', () => {
     assert.equal(parseId(bad), null, bad);
   }
   assert.equal(isV1Id('llmide_chat_history'), false);
+});
+
+test('an unknown command is refused as unknown_command in every phase', () => {
+  const s = new HostApiSession();
+  assert.deepEqual(s.gate('nope.nothing', all), refuse('unknown_command', 'This host does not serve that command.'));
 });
