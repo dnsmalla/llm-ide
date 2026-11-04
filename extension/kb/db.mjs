@@ -1047,6 +1047,8 @@ export function deleteUserCascade(userId) {
       'google_accounts', 'connector_sync_state',
       // migration 0060 — iCal feed sources (the feed URLs live in the vault, deleted with user_secrets)
       'ical_sources',
+      // migration 0061 — Host API paired devices (hashed tokens) and the phone chat id
+      'host_api_devices', 'host_api_quick_chat',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
