@@ -182,13 +182,13 @@ Detail: [`knowledge-base.md` §4](knowledge-base.md#4-tenancy-contract).
 
 ### Stale-server detection
 
-`SERVER_API_VERSION = 106` (`server.mjs:316`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 108` (`server.mjs:316`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
 
 Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and stale-server detection).
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0060` (`0060_ical_sources.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0062` (`0062_host_api_security.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 

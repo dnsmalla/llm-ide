@@ -112,9 +112,14 @@ ios_app/MyApp/Services/
 └── DeviceDiscovery.swift        # Bonjour browser
 ```
 
-## Host API v1 (development listener)
+## Host API v1 (TLS and development listeners)
 
-- It runs only in a DEBUG build with `LLMIDE_HOST_API_DEV=1`, on 127.0.0.1:3016+, and is never advertised.
+- **Three modes:** `tls` (the `HostApiV1.tlsEnabled` defaults key or `LLMIDE_HOST_API_TLS=1`, release builds too; pinned WSS on all interfaces, identity in the Keychain; off by default), `dev` (DEBUG + `LLMIDE_HOST_API_DEV=1`, loopback only) and `off`. TLS wins.
+- **Defaults keys:** `HostApiV1.tlsEnabled`, and `HostApiV1.webOrigins` (exact web origins; the non-TLS listener keeps only loopback `http://`).
+- **Advertising (TLS only):** the QR carries `h1port`, `h1fp` and `api=1`; the Bonjour TXT carries `api=1,2`, `h1port` and `h1fp`. The Reset security identity button makes a new certificate and every phone must pair again. A failed identity read never regenerates it.
+- **Limits:** 32 connections, 10 s handshake and header/request timeouts, at most 2 unauthenticated sessions per peer, 4 MiB write cap, per-session frame/turn buckets, separate PIN and token throttles.
+- **Audit file:** `~/Library/Application Support/llm-ide/host-api-audit.jsonl` (mode 0600, rotated to `.1` at 512 KiB; `HostApiV1AuditLog`). Events as on the desktop plus `connection_limit` and `handshake_timeout`; `origin_refused` has peer `-`. No PIN, token, key or frame content is written.
+- The `dev` listener runs only in a DEBUG build with `LLMIDE_HOST_API_DEV=1`, on 127.0.0.1:3016+, and is never advertised. The notes below apply to every mode.
 - `HostApiV1Gateway` forwards `chat.send` and both approval answers to `dispatchInbound` as v2 structs (`handleInbound`, the v2 entry, refuses `h1.` types and ids) with `h1.<session>.<id>` command ids.
 - Every Mac → client frame goes through `emit(_:)`. A new `server?.send` call bypasses v1 routing and is a bug.
 - v2 resets must skip `h1.` ids.
