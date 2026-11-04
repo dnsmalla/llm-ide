@@ -138,3 +138,14 @@ public enum HostApiChatSendPolicy {
         return .send(request)
     }
 }
+
+/// The phone's reconnect delay: immediate first, then 2 s × 1.5ⁿ up to 30 s. A host's `retryAfterMs` (a PIN
+/// lockout, a throttle) stretches it, capped at 5 minutes so a bad value cannot park the phone (final M1).
+public enum HostApiBackoff {
+    public static func delayMs(attempt: Int, retryAfterMs: Int? = nil) -> Int {
+        // The exponent is clamped: an unbounded one overflowed Int after ~100 failed attempts.
+        let backoff = attempt <= 0 ? 0 : min(2_000 * Int(pow(1.5, Double(min(attempt - 1, 10)))), 30_000)
+        guard let wait = retryAfterMs, wait > 0 else { return backoff }
+        return max(backoff, min(wait, 300_000))
+    }
+}

@@ -210,3 +210,26 @@ struct HostApiChatSendPolicyTests {
         #expect(P.request(text: "hi", files: Array(repeating: .init(name: "f", text: full), count: 10)) == .refuse(P.fileTooLarge))
     }
 }
+
+@Suite("HostApiBackoff")
+struct HostApiBackoffTests {
+    @Test("the existing schedule is unchanged (2 s × Int(1.5ⁿ)), capped at 30 s, and never overflows")
+    func schedule() {
+        #expect(HostApiBackoff.delayMs(attempt: 0) == 0)
+        #expect(HostApiBackoff.delayMs(attempt: 1) == 2_000)
+        #expect(HostApiBackoff.delayMs(attempt: 2) == 2_000)
+        #expect(HostApiBackoff.delayMs(attempt: 3) == 4_000)
+        #expect(HostApiBackoff.delayMs(attempt: 4) == 6_000)
+        #expect(HostApiBackoff.delayMs(attempt: 9) == 30_000)
+        #expect(HostApiBackoff.delayMs(attempt: 10_000) == 30_000)
+    }
+
+    @Test("retryAfterMs stretches the delay, capped at 5 minutes; zero or nil changes nothing")
+    func retryAfter() {
+        #expect(HostApiBackoff.delayMs(attempt: 1, retryAfterMs: 60_000) == 60_000)
+        #expect(HostApiBackoff.delayMs(attempt: 1, retryAfterMs: 900_000) == 300_000)
+        #expect(HostApiBackoff.delayMs(attempt: 9, retryAfterMs: 500) == 30_000)
+        #expect(HostApiBackoff.delayMs(attempt: 1, retryAfterMs: 0) == 2_000)
+        #expect(HostApiBackoff.delayMs(attempt: 0, retryAfterMs: 5_000) == 5_000)
+    }
+}

@@ -284,4 +284,18 @@ struct HostApiV1ClientTests {
         }
         #expect(socket.sentCommands.isEmpty)
     }
+
+    @Test("close() during the handshake ends connect at once and cancels the socket (final review I3)")
+    func closeDuringHandshake() async {
+        let c = client(helloTimeout: 30)   // the host never answers hello
+        let started = Date()
+        async let outcome = c.connect(.pin("123456"))
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        c.close()
+        guard case .refused(let r) = await outcome else { Issue.record("expected refused"); return }
+        #expect(r.code == "host_unreachable")
+        #expect(Date().timeIntervalSince(started) < 5)
+        #expect(socket.cancelled)
+        #expect(c.state == .disconnected)
+    }
 }

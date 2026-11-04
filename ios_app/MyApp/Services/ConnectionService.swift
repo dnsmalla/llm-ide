@@ -138,6 +138,8 @@ final class ConnectionService: ObservableObject {
         return h
     }()
     private var v1Client: HostApiV1Client?
+    /// The v1 client still in hello/auth, so a Disconnect, Forget or new connect can close it (final review I3).
+    private var connectingV1: HostApiV1Client?
 
     /// Whether to offer a feature. Optimistic until the first handshake so tabs don't flicker
     /// in after launch; after it, exactly what the Mac advertised.
@@ -309,8 +311,10 @@ final class ConnectionService: ObservableObject {
         client.onEvent = { [weak self] in self?.route($0) }
         let token = connectionStore?.hostApiToken ?? ""
         let credential: HostCredential = token.isEmpty ? .pin(pin) : .token(token)
+        connectingV1 = client
         Task { @MainActor [weak self] in
             let outcome = await client.connect(credential)
+            if self?.connectingV1 === client { self?.connectingV1 = nil }
             guard let self, generation == self.connectionGeneration else { client.close(); return }
             switch outcome {
             case .ready(let hello, let newToken):
@@ -371,7 +375,7 @@ final class ConnectionService: ObservableObject {
             reconnectAttempt = max(reconnectAttempt, 1)
             invalidateSocket()
             connectionStatus = .disconnected
-            scheduleReconnect()
+            scheduleReconnect(retryAfterMs: r.retryAfterMs)
             return
         }
         guard HostApiNegotiation.clearsCredentials(r) else { return closeConnection() }
@@ -394,7 +398,7 @@ final class ConnectionService: ObservableObject {
             llmIdeStore?.handleChatError()
             invalidateSocket()
             connectionStatus = .disconnected
-            scheduleReconnect()
+            scheduleReconnect(retryAfterMs: reason.retryAfterMs)
         case .event, .progress, .resync:
             llmIdeStore?.handle(event)
         }
@@ -515,6 +519,8 @@ final class ConnectionService: ObservableObject {
         webSocketTask = nil
         v1Client?.close()
         v1Client = nil
+        connectingV1?.close()
+        connectingV1 = nil
         hostApiVersion = 2
         v2Host.connectionEnded()
     }
@@ -879,7 +885,7 @@ final class ConnectionService: ObservableObject {
         }
     }
 
-    private func scheduleReconnect() {
+    private func scheduleReconnect(retryAfterMs: Int? = nil) {
         // Only the address is required: after the first pairing the PIN is
         // gone (the Mac rotated it) and the token in `ConnectionStore` is the
         // credential `connectDirect` presents. Requiring `directPIN` here
@@ -891,9 +897,7 @@ final class ConnectionService: ObservableObject {
         connectionStatus = .connecting
         let port = directPort
         // First retry is immediate, then back off.
-        let delay = reconnectAttempt == 0
-            ? 0
-            : min(2_000 * Int(pow(1.5, Double(reconnectAttempt - 1))), 30_000)
+        let delay = HostApiBackoff.delayMs(attempt: reconnectAttempt, retryAfterMs: retryAfterMs)
         reconnectAttempt += 1
         reconnectTask = Task { @MainActor in
             if delay > 0 {
