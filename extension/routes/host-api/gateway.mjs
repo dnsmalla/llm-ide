@@ -13,6 +13,7 @@ import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId
 
 export const MAX_SESSIONS = 4;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
+const TOP_LEVEL_ID = /^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})"/;
 export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every MAX_SESSIONS slot before auth
 // Refusals that clear by themselves; SESSION_TOKEN_LIMIT and SLASH_COMMAND_FAILED do not.
 const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
@@ -123,8 +124,10 @@ export function createGateway(overrides) {
   function opened(session, peer) {
     const key = peerKey(peer);
     const pending = [...sessions.values()].filter((e) => !e.state.deviceId && peerKey(e.peer) === key).length;
-    if (sessions.size >= MAX_SESSIONS || pending >= MAX_UNAUTHENTICATED_PER_PEER) {
-      fail(session, null, 'busy', 'This computer already has the maximum number of Host API connections.', { retryable: true });
+    const why = sessions.size >= MAX_SESSIONS ? 'This computer already has the maximum number of Host API connections.'
+      : pending >= MAX_UNAUTHENTICATED_PER_PEER ? 'This device already has connections waiting to sign in — finish or close one first.' : null;
+    if (why) {
+      fail(session, null, 'busy', why, { retryable: true });
       deps.close(session);
       return;
     }
@@ -209,9 +212,10 @@ export function createGateway(overrides) {
     return entry.queue;
   }
 
-  // The request id from the frame's head only, never a full parse.
+  // The top-level request id from the frame's head, never a full parse: only scalar envelope members may precede
+  // "id", so a payload's nested "id" never matches (null then).
   function cheapId(text) {
-    const m = /"id"\s*:\s*"([^"\\]{1,128})"/.exec(String(text).slice(0, 512));
+    const m = TOP_LEVEL_ID.exec(String(text).slice(0, 512));
     return m ? m[1] : null;
   }
 

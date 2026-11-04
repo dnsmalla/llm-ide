@@ -17,7 +17,9 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { getDb } = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { TokenBucket, createRateLimiter, RATE_LIMITS } = await import('../routes/host-api/rate.mjs');
-const { createAuditSink } = await import('../routes/host-api/audit.mjs');
+const { createAuditSink, listenerRefusalAuditor, identityEventAuditor, AUDIT_EVENT_CAP_PER_MINUTE } = await import('../routes/host-api/audit.mjs');
+const { upgradeRefusal } = await import('../server/host-api-listener.mjs');
+const { loadOrCreateHostIdentity, resetHostIdentity } = await import('../server/host-identity.mjs');
 const { createGateway, MAX_UNAUTHENTICATED_PER_PEER } = await import('../routes/host-api/gateway.mjs');
 
 const HELLO = { clientName: 'Phone', clientVersion: '1', platform: 'web', apiVersions: [1] };
@@ -225,4 +227,67 @@ test('node: rows land in audit_log as host_api.<event>; pair_failed has a NULL u
   ]);
   assert.equal(rows[2].outcome, 'denied');
   assert.equal(JSON.parse(rows[2].detail).reason.length, 200);
+});
+
+const countAction = (db, action) => db.prepare('SELECT COUNT(*) AS n FROM audit_log WHERE action = ?').get(action).n;
+
+test('listener refusals: de-dup per peer (IPv6 per /64), never per origin; the mapping and detail', () => {
+  let clock = 5_000_000;
+  const db = getDb();
+  const rows = [];
+  const onRefused = listenerRefusalAuditor({ record: (event, f) => rows.push({ event, ...f }) });
+  onRefused('origin_refused', '10.3.3.3', 'https://a.example');
+  onRefused('plaintext_refused', '192.168.1.20', '');
+  assert.deepEqual(rows, [
+    { event: 'origin_refused', peer: '10.3.3.3', detail: 'https://a.example', dedupeKey: '10.3.3.3' },
+    { event: 'plaintext_refused', peer: '192.168.1.20', detail: undefined, dedupeKey: '192.168.1.20' },
+  ]);
+  const before = countAction(db, 'host_api.origin_refused');
+  const real = listenerRefusalAuditor(createAuditSink({ db, now: () => clock }));
+  for (let i = 0; i < 500; i++) real('origin_refused', '10.3.3.4', `https://o${i}.example`);
+  for (let i = 0; i < 50; i++) real('origin_refused', `2001:db8:1:2::${i.toString(16)}`, `https://v6-${i}.example`);
+  assert.equal(countAction(db, 'host_api.origin_refused') - before, 2, 'one row for the IPv4 peer, one for the IPv6 /64');
+});
+
+test('a flood with a different Origin on each upgrade from many peers writes at most the per-event cap', () => {
+  assert.equal(AUDIT_EVENT_CAP_PER_MINUTE, 60);
+  let clock = 9_000_000;
+  const db = getDb();
+  const before = countAction(db, 'host_api.plaintext_refused');
+  const onRefused = listenerRefusalAuditor(createAuditSink({ db, now: () => clock }));
+  for (let i = 0; i < 5000; i++) { onRefused('plaintext_refused', `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, `https://x${i}.example`); clock += 1; }
+  assert.equal(countAction(db, 'host_api.plaintext_refused') - before, AUDIT_EVENT_CAP_PER_MINUTE);
+  // The next window writes one summary row of what was dropped.
+  clock += 60_000;
+  onRefused('plaintext_refused', '10.250.0.1', '');
+  const summary = db.prepare("SELECT detail FROM audit_log WHERE action = 'host_api.plaintext_refused_suppressed'").all();
+  assert.equal(summary.length, 1);
+  assert.match(JSON.parse(summary[0].detail).reason, /^4940 more plaintext_refused rows dropped/);
+});
+
+test('the plaintext listener honours only loopback http origins; https entries are TLS-only', () => {
+  const allowlist = ['http://127.0.0.1:5180', 'https://app.example'];
+  const req = (origin) => ({ url: '/host-api/v1', socket: { remoteAddress: '127.0.0.1' }, headers: { origin } });
+  assert.equal(upgradeRefusal(req('http://127.0.0.1:5180'), { tls: false, allowlist }), null);
+  assert.deepEqual(upgradeRefusal(req('https://app.example'), { tls: false, allowlist }), { status: 403, event: 'origin_refused', detail: 'https://app.example' });
+  assert.equal(upgradeRefusal(req('https://app.example'), { tls: true, allowlist }), null);
+});
+
+test('the identity onEvent writes identity_created through the sink', () => {
+  const db = getDb();
+  resetHostIdentity(db);
+  loadOrCreateHostIdentity(db, { hostName: 't', onEvent: identityEventAuditor(createAuditSink({ db })) });
+  const row = db.prepare("SELECT user_id, ip, outcome FROM audit_log WHERE action = 'host_api.identity_created'").get();
+  assert.deepEqual(row, { user_id: null, ip: null, outcome: 'success' });
+});
+
+test('a rate refusal replies to the top-level id only, never a payload id', async () => {
+  const t = harness();
+  const s = {};
+  t.g.opened(s, '127.0.0.1');
+  for (let i = 0; i < 40; i++) t.g.receive(s, 'x');
+  t.g.receive(s, JSON.stringify({ apiVersion: 1, type: 'request', command: 'host.ping', payload: { id: 'nested' }, id: 'outer' }));
+  assert.equal('replyTo' in t.sent.at(-1)[1], false);
+  t.g.receive(s, JSON.stringify({ apiVersion: 1, id: 'top', type: 'request', command: 'host.ping', payload: { id: 'nested' } }));
+  assert.equal(t.sent.at(-1)[1].replyTo, 'top');
 });

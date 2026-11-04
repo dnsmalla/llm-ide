@@ -16,6 +16,7 @@ import { logger } from '../../core/logger.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { mintPin } from './pin.mjs';
 import { listDevices, revokeDevice } from '../../kb/host-api-devices.mjs';
+import { sharedAuditSink } from './audit.mjs';
 
 const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const fail = (res, status, code, message) => { send(res, status, { error: { code, message } }); return true; };
@@ -37,7 +38,7 @@ export async function handleHostApiRoute(req, res, opts = {}) {
   }
 }
 
-async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env }) {
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env, audit = sharedAuditSink }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
@@ -61,7 +62,7 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
     try { id = decodeURIComponent(path.slice('/host-api/devices/'.length)); } catch { id = ''; }
     if (!DEVICE_ID_RE.test(id)) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid device id');
     const revoked = revokeDevice(userId, id);
-    if (revoked) hostApi()?.audit?.record('revoke_host', { peer: req.socket?.remoteAddress, userId, deviceId: id });
+    if (revoked) audit().record('revoke_host', { peer: req.socket?.remoteAddress, userId, deviceId: id });
     // Drop live sessions either way: disconnectDevice is per user, so another user's id closes nothing.
     try { hostApi()?.gateway?.disconnectDevice(userId, id); } catch { /* best effort */ }
     send(res, 200, { revoked });

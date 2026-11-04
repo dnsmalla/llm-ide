@@ -299,9 +299,9 @@ Endpoints with no client caller (71):
 | `/bus/approvals` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:186` | - | - | tests only |
 | `/bus/kinds` | ALL_ENDPOINTS | GET | token | core | `extension/routes/bus/bus-routes.mjs:163` | - | - | tests only |
 | `/bus/kinds/:kind` | ALL_ENDPOINTS | PUT | token | core | `extension/routes/bus/bus-routes.mjs:172` | - | - | tests only |
-| `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:47` | - | - | tests only |
-| `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:55` | - | - | tests only |
-| `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:59` | - | - | tests only |
+| `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:48` | - | - | tests only |
+| `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:56` | - | - | tests only |
+| `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:60` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:808` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
@@ -387,7 +387,7 @@ Endpoints with no client caller (71):
 
 ## Consistency
 
-Checked: 258 roster entries, 775 Swift files, 52 extension source files.
+Checked: 258 roster entries, 777 Swift files, 52 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

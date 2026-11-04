@@ -26,8 +26,10 @@ function refuse(socket, status, text) {
 }
 
 /** The refusal for an upgrade request before the WebSocket handshake check, or null. `event` names the audit
- *  event (null for a wrong path). Plaintext refuses every non-loopback peer; TLS accepts any peer that pinned it. */
+ *  event (null for a wrong path). Plaintext refuses every non-loopback peer; TLS accepts any peer that pinned it.
+ *  The plaintext listener honours only the loopback http:// entries: https:// entries exist for the TLS listener. */
 export function upgradeRefusal(req, { tls, allowlist }) {
+  if (!tls) allowlist = allowlist.filter((o) => o.startsWith('http://'));
   if ((req.url ?? '').split('?')[0] !== PATH) return { status: 404, event: null, detail: '' };
   if (!tls && !LOOPBACK.has(req.socket?.remoteAddress)) return { status: 403, event: 'plaintext_refused', detail: '' };
   if (originRefused(req.headers, allowlist)) {

@@ -29,12 +29,14 @@ const { handleHostApiRoute } = await import('../routes/host-api/http-routes.mjs'
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `r-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' }).id;
 
-const state = { userId: null, enabled: true, logger: undefined };
+const state = { userId: null, enabled: true, logger: undefined, listenerUp: true };
 const disconnects = [];
+const audited = [];
+const audit = () => ({ record: (event, f) => audited.push([event, f.userId, f.deviceId]) });
 const hostApi = { listener: { port: 3016 }, gateway: { disconnectDevice: (u, d) => disconnects.push([u, d]) } };
 const server = http.createServer((req, res) => {
   req.user = { id: state.userId };
-  void handleHostApiRoute(req, res, { hostApi: () => hostApi, enabled: state.enabled, env, logger: state.logger });
+  void handleHostApiRoute(req, res, { hostApi: () => (state.listenerUp ? hostApi : null), enabled: state.enabled, env, logger: state.logger, audit });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -117,13 +119,16 @@ test('GET lists the device, DELETE revokes it and disconnects; another user gets
   assert.ok(!JSON.stringify(list.body).includes(token));
 
   state.userId = other;
+  audited.length = 0;
   assert.deepEqual((await call('DELETE', `/host-api/devices/${deviceId}`)).body, { revoked: false });
   assert.ok(dev.authenticateDeviceToken(token), 'still paired');
+  assert.deepEqual(audited, [], 'a revoke that revoked nothing is not audited');
 
   state.userId = u;
   disconnects.length = 0;
   assert.deepEqual((await call('DELETE', `/host-api/devices/${deviceId}`)).body, { revoked: true });
   assert.deepEqual(disconnects, [[u, deviceId]]);
+  assert.deepEqual(audited, [['revoke_host', u, deviceId]]);
   assert.equal(dev.authenticateDeviceToken(token), null);
   assert.deepEqual((await call('GET', '/host-api/devices')).body, { devices: [] });
 });
@@ -137,6 +142,18 @@ test('a malformed device id is 400; the PIN route without a listener is 503', as
   hostApi.listener = saved;
   assert.equal(r.status, 503);
   assert.equal(r.body.error.code, 'HOST_API_UNAVAILABLE');
+});
+
+test('a host revoke is audited as revoke_host even while the v1 listener is down', async () => {
+  const u = user();
+  const { deviceId } = dev.issueDeviceToken(u, 'iPhone');
+  state.userId = u;
+  state.listenerUp = false;
+  audited.length = 0;
+  try {
+    assert.deepEqual((await call('DELETE', `/host-api/devices/${deviceId}`)).body, { revoked: true });
+    assert.deepEqual(audited, [['revoke_host', u, deviceId]]);
+  } finally { state.listenerUp = true; }
 });
 
 // Last: it breaks the device table for the rest of this file.
