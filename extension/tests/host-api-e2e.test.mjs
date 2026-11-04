@@ -107,9 +107,7 @@ test('hello (desktop), pair, chat.send gives delta then done, snapshot, revoke',
   c.ws.close();
 });
 
-// Known gap (found by this test): the gateway never writes the phone chat's turns to kb chat_messages, so
-// chat.snapshot / host.snapshot answer an empty list. Flips to a pass once the gateway persists them.
-test('chat.snapshot carries the user and assistant lines of a finished turn', { skip, todo: 'gateway does not persist phone chat messages yet' }, async () => {
+test('chat.snapshot carries the user and assistant lines of a finished turn', { skip }, async () => {
   const { pin, port } = await mintPin();
   const c = client(`ws://127.0.0.1:${port}/host-api/v1`);
   await c.open;
@@ -121,6 +119,7 @@ test('chat.snapshot carries the user and assistant lines of a finished turn', { 
     const snap = await c.call('chat.snapshot');
     assert.deepEqual(snap.result.messages.slice(-2).map((m) => m.role), ['user', 'assistant']);
     assert.equal(snap.result.messages.at(-2).content, 'snapshot me');
+    assert.match(snap.result.messages.at(-1).content, /^(ok )+/, 'the bench-fake canned reply');
   } finally {
     await c.call('host.auth.revoke', { token });
     c.ws.close();

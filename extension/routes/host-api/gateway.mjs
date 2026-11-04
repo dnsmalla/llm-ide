@@ -36,6 +36,7 @@ function defaultDeps() {
       if (!id) return [];
       return (await chatSessions()).getChatSession(userId, id, { messageLimit: limit })?.messages ?? [];
     },
+    append: async (userId, chatSessionId, line) => (await chatSessions()).appendChatMessage(userId, chatSessionId, line),
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
@@ -192,8 +193,13 @@ export function createGateway(overrides) {
   function startTurn(s, entry, id, p, chatSessionId) {
     const iid = internalId(entry.num, id);
     const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, chatSessionId,
-      translator: createTranslator({ external: id }), sdkSessionId: null, open: new Set() };
+      translator: createTranslator({ external: id }), sdkSessionId: null, open: new Set(), reply: '', saved: Promise.resolve() };
     owned.set(iid, o);
+    // The phone chat's lines go to chat_messages (what the snapshots read), in order, even for a closed session.
+    const save = (role, content) => {
+      o.saved = o.saved.then(() => deps.append(o.userId, chatSessionId, { role, content }))
+        .catch((e) => deps.log(`Host API v1 ${role} line not saved (${e?.code ?? 'error'})`));
+    };
     respond(s, id, 'chat.send', { accepted: true, requestId: id });
     const push = (ev) => {
       if (owned.get(iid) !== o || o.zombie) return;
@@ -209,8 +215,11 @@ export function createGateway(overrides) {
         if (typeof ev?.sessionId === 'string' && ev.sessionId) o.sdkSessionId = ev.sessionId;
         if (ev?.type === 'init' && !o.started) {
           o.started = true; // init arrives once the turn holds the lock and its abort is registered
+          save('user', p.text); // only after init: a refused turn never stores its line
           if (o.cancelRequested) cancelTurn(o);
         }
+        if (ev?.type === 'delta' && typeof ev.text === 'string') o.reply += ev.text;
+        if (ev?.type === 'result' && o.started && o.reply) { save('assistant', o.reply); o.reply = ''; }
         if (o.zombie) return;
         if (ev?.type === 'approval_request' && typeof ev.requestId === 'string') o.open.add(ev.requestId);
         if (ev?.type === 'approval_resolved') o.open.delete(ev.requestId);

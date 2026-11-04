@@ -9,7 +9,7 @@ const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersion
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
 function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], toolApprovals, pending: [] };
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, pending: [] };
   const tokens = new Map(); // token -> { userId, deviceId }
   let n = 0;
   let quick = null;
@@ -41,6 +41,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     cancel: (userId, chatSessionId) => { t.cancelled.push([userId, chatSessionId]); return true; },
     clear: (userId, chatSessionId) => { t.cleared.push([userId, chatSessionId]); return { cleared: true }; },
     decide: (args) => { t.decided.push(args); return { ok: true }; },
+    append: (userId, chatSessionId, line) => { t.saved.push([userId, chatSessionId, line]); },
   });
   t.last = () => t.sent.at(-1)[1];
   t.lastError = () => t.last().error?.code;
@@ -106,6 +107,8 @@ test('chat.send runs a turn on the quick chat and routes delta + done', async ()
   const revs = t.sent.map(([, f]) => f.rev);
   assert.deepEqual(revs, [...revs].sort((a, b) => a - b));
   assert.equal(t.g.rev, 2);
+  await flush();
+  assert.deepEqual(t.saved, [['u1', 'chat-1', { role: 'user', content: 'hello' }], ['u1', 'chat-1', { role: 'assistant', content: 'hi' }]]);
   // Ownership ended at the terminal frame: the same id may run again.
   await t.g.receive(s, req('c-9', 'chat.send', { text: 'again' }));
   assert.equal(t.last().type === 'error', false);
@@ -136,6 +139,7 @@ test('cancel ends the turn as a cancelled done', async () => {
   await flush();
   assert.equal(t.last().command, 'chat.done');
   assert.deepEqual(t.last().payload, { requestId: 'c-9', stopReason: 'cancelled' });
+  assert.deepEqual(t.saved, [['u1', 'chat-1', { role: 'user', content: 'hello' }]], 'a cancelled turn keeps only the user line');
   await t.g.receive(s, req('c-y', 'chat.cancel'));
   assert.deepEqual(t.last().result, { cancelled: false });
 });
@@ -289,6 +293,7 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
     pins: { consumePin: () => 'u1' }, devices: t.devices,
     quickChat: { get: () => 'chat-1', set: () => {}, create: () => 'chat-1' },
     turn: () => Promise.reject(Object.assign(new Error('Busy.'), { code })),
+    append: (...a) => t.saved.push(a),
   });
   const s2 = {};
   g.opened(s2, '127.0.0.1');
@@ -303,6 +308,7 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
   await flush();
   assert.equal(t.last().command, 'chat.error');
   assert.equal(t.last().payload.retryable, false);
+  assert.deepEqual(t.saved, [], 'a refused turn stores nothing');
   // onEvent swallows a send failure rather than throwing into the engine.
   let thrown = null;
   const g2 = createGateway({
