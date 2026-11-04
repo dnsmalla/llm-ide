@@ -8,6 +8,7 @@ final class PhoneBridgeSpyHost: MobileBridgeHosting {
     var config: AppConfig?
     var projectStore: ProjectStore?
     var mobileClientPaired = true
+    var isDesktopBridge = false
     var allowed: Set<String> = []
     var autoTaskRequest: MobileAutoTaskRequest?
     var loopRequest: MobileLoopRequest?

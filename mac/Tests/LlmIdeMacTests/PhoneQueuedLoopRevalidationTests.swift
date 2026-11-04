@@ -30,4 +30,22 @@ final class PhoneQueuedLoopRevalidationTests: XCTestCase {
         XCTAssertEqual(message, "denied")
         XCTAssertFalse(service.hasScheduledRun)
     }
+
+    /// Security review I2: a desktop-class client's loop start still needs the Mac's confirmation, and a denial
+    /// starts nothing (it used to `return true` before asking).
+    func testDesktopLoopStartStillAsksTheMacAndADenialRefuses() async {
+        let suite = UserDefaults(suiteName: "desktop-loop-confirm-\(UUID().uuidString)")!
+        let (service, _, _) = PhoneBridgeFixtures.autoTaskService(suite: suite)
+        let host = PhoneBridgeSpyHost()
+        host.isDesktopBridge = true
+        host.approvalOutcomes = [.denied]
+        let bridge = MobileLoopBridge(host: host, loopLane: service)
+        let ok = await bridge.confirmOnMac(title: "Start the loop?", lines: ["Loop: x"], stopGeneration: 0,
+                                           projectAtReceipt: nil, label: "loop_start")
+        XCTAssertFalse(ok)
+        XCTAssertEqual(host.approvalRequests.count, 1)
+        XCTAssertEqual(host.approvalRequests.first?.requester, "the LLM-IDE desktop app on this Mac")
+        guard case .ack(let accepted, _)? = host.loopReplies.last else { return XCTFail("no reply") }
+        XCTAssertFalse(accepted)
+    }
 }

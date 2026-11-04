@@ -168,4 +168,65 @@ final class PhoneAutoTaskApprovalFlowTests: XCTestCase {
         XCTAssertTrue(service.hasScheduledRun)
         service.cancel()
     }
+
+    // MARK: - Desktop-class client (security review I2): code-writing runs still need the Mac's confirmation
+
+    func testDesktopImplementAndReviewMergeNeedTheConfirmationAndADenialRunsNothing() async {
+        for id in ["implementIssues", "reviewMerge"] {
+            let (bridge, host, service, _) = make()
+            host.isDesktopBridge = true
+            host.allowed = []   // the Phone-access switch does not apply to the desktop class
+            host.approvalOutcomes = [.denied]
+            host.autoTaskRequest = .run(.init(task: id))
+            XCTAssertTrue(bridge.handle(type: "auto_task_run", data: nil))
+            XCTAssertFalse(service.hasScheduledRun, "\(id): nothing starts before the Mac answers")
+            await waitForAcks(host, 2)
+            XCTAssertEqual(host.approvalRequests.count, 1, id)
+            XCTAssertTrue(host.approvalRequests[0].title.contains("desktop app"), host.approvalRequests[0].title)
+            XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.desktopDenied, id)
+            XCTAssertFalse(service.hasScheduledRun, id)
+        }
+    }
+
+    func testDesktopApprovedImplementStarts() async {
+        let (bridge, host, service, _) = make()
+        host.isDesktopBridge = true
+        host.allowed = []
+        host.approvalOutcomes = [.approved]
+        host.autoTaskRequest = .run(.init(task: "implementIssues"))
+        _ = bridge.handle(type: "auto_task_run", data: nil)
+        for _ in 0..<400 where !service.hasScheduledRun && host.autoTaskReplies.count < 2 {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(service.hasScheduledRun || host.autoTaskReplies.count >= 2)
+        XCTAssertNotEqual(host.lastAck?.code, MobileRefusalCode.desktopDenied)
+        XCTAssertEqual(host.approvalRequests.count, 1)
+        service.cancel()
+    }
+
+    func testDesktopRunAllWithACodeWritingTaskEnabledNeedsTheConfirmation() async {
+        let (bridge, host, service, _) = make()   // implement + review-merge are enabled
+        host.isDesktopBridge = true
+        host.approvalOutcomes = [.denied]
+        host.autoTaskRequest = .run(.init(task: nil))
+        _ = bridge.handle(type: "auto_task_run", data: nil)
+        await waitForAcks(host, 2)
+        XCTAssertEqual(host.approvalRequests.count, 1)
+        XCTAssertEqual(host.lastAck?.code, MobileRefusalCode.desktopDenied)
+        XCTAssertFalse(service.hasScheduledRun)
+    }
+
+    func testDesktopReadOnlyRunAndToggleNeedNoConfirmation() {
+        let (bridge, host, service, settings) = make()
+        host.isDesktopBridge = true
+        settings.setEnabled(true, task: .reviewCode)
+        host.autoTaskRequest = .run(.init(task: "reviewCode"))
+        _ = bridge.handle(type: "auto_task_run", data: nil)
+        XCTAssertTrue(service.hasScheduledRun)
+        service.cancel()
+        host.autoTaskRequest = .toggle(.init(task: "reviewCode", enabled: false))
+        _ = bridge.handle(type: "auto_task_toggle", data: nil)
+        XCTAssertFalse(settings.isEnabled(task: .reviewCode))
+        XCTAssertTrue(host.approvalRequests.isEmpty)
+    }
 }

@@ -74,13 +74,15 @@ final class MobileLoopBridge: MobileFeatureBridge {
 
     /// Registry loop.run is T1: ask the person at the Mac, then re-check the Stop generation, the Phone
     /// access switch and the project. Replies with the refusal and returns false unless all hold.
-    private func confirmOnMac(title: String, lines: [String], stopGeneration: Int,
-                              projectAtReceipt: String?, label: String) async -> Bool {
-        if host?.isDesktopBridge == true { return true }
+    /// The desktop class asks too: a loop edits files, so every remote start is confirmed on the Mac.
+    func confirmOnMac(title: String, lines: [String], stopGeneration: Int,
+                      projectAtReceipt: String?, label: String) async -> Bool {
         // Tier from PhoneApprovalPolicy (loopStart / loopStartStage are T1, pinned to the registry by a test).
         assert(PhoneApprovalPolicy.tier(forKey: PhoneApprovalPolicy.loopStart).needsDesktopApproval)
         guard let host else { return false }
-        let outcome = await host.requestDesktopApproval(PhoneDesktopApprovalRequest(title: title, lines: lines))
+        let outcome = await host.requestDesktopApproval(PhoneDesktopApprovalRequest(
+            title: title, lines: lines,
+            requester: host.isDesktopBridge ? PhoneDesktopApprovalRequest.desktopRequester : PhoneDesktopApprovalRequest.phoneRequester))
         let refusal: String?
         switch outcome {
         case .approved:  refusal = nil
@@ -189,7 +191,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 // Registry loop.run is T1: the person at the Mac confirms the loop and project first,
                 // then everything is re-checked (a Stop or project switch may have landed meanwhile).
                 guard await self.confirmOnMac(
-                    title: "Start the \"\(primary.name)\" loop from your iPhone?",
+                    title: "Start the \"\(primary.name)\" loop from \(self.requestedFrom)?",
                     lines: ["Project: \(self.host?.projectStore?.activeProject?.bundle.displayName ?? "none open")",
                             "Loop: \(primary.name)",
                             "The loop can edit files within its declared scope and run its verify commands."],
@@ -251,7 +253,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
                     return
                 }
                 guard await self.confirmOnMac(
-                    title: "Run the \"\(stage.name)\" loop stage from your iPhone?",
+                    title: "Run the \"\(stage.name)\" loop stage from \(self.requestedFrom)?",
                     lines: ["Project: \(self.host?.projectStore?.activeProject?.bundle.displayName ?? "none open")",
                             "Stage: \(stage.name)",
                             "The stage can edit files within the loop's declared scope and run its verify commands."],
@@ -308,8 +310,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// Stop is deliberately ungated so a phone can always halt a run. Fails
     /// closed: no host means no switch to consult.
     private var loopControlAllowed: Bool {
+        // Phone-access switches govern phones; the desktop class is host-granted and still confirms each start.
         host?.isDesktopBridge == true || host?.isPhoneAccessAllowed(.loopControl) == true
     }
+
+    private var requestedFrom: String { host?.isDesktopBridge == true ? "the LLM-IDE desktop app" : "your iPhone" }
 
     private var loopControlDeniedMessage: String {
         host?.phoneAccessDeniedMessage(.loopControl) ?? ""
