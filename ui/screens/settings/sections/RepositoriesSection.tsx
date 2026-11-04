@@ -30,8 +30,8 @@ import { PartialNote } from "./NoticeSections.tsx";
  * per-provider automation allow-list, and the saved repositories. Everything except the token is local app config
  * (the Mac uses AppConfig); tokens go to the core vault and are never rendered back, only their names.
  *
- * Honest desktop gaps, stated in the card: the Mac's Save & verify and Clone need provider HTTP and a git clone
- * host; this card stores the token and the repository entry but does not verify or clone.
+ * Tokens are stored write-only; Check token verifies the saved one through the core. Clone goes through the host.
+ * The remaining gaps (pull/re-sync, the Mac's resolve step) are stated in the card.
  */
 export default function RepositoriesSection() {
   const { client, host } = useEnv();
@@ -95,6 +95,8 @@ export default function RepositoriesSection() {
 
   const provider = REPO_PROVIDERS.find((p) => p.id === tab)!;
   const connected = secrets?.has(provider.tokenKey) ?? false;
+  const gitlabHost = hostOf(cfg.gitlabBaseUrl);
+  const checkSupported = provider.id === "github" || gitlabHost === "gitlab.com" || gitlabHost === "www.gitlab.com";
   const both = (secrets?.has("gitlab.token") ?? false) && (secrets?.has("github.token") ?? false);
   const saved = cfg.saved[provider.id];
   const ops = cfg.operations[provider.id];
@@ -321,7 +323,7 @@ export default function RepositoriesSection() {
               <Button onClick={() => setVisible((v) => !v)}>{visible ? "Hide" : "Show"}</Button>
             ) : null}
             <Button tone="primary" disabled={busy || draft.trim() === ""} onClick={() => void saveToken()}>{busy ? "Saving…" : "Save token"}</Button>
-            {connected ? <Button disabled={busy || checking} onClick={() => void checkToken()}>{checking ? "Checking…" : "Check token"}</Button> : null}
+            {connected ? <Button disabled={busy || checking || !checkSupported} label={checkSupported ? "Check token" : "Token check is only available for gitlab.com; the saved host is custom"} onClick={() => void checkToken()}>{checking ? "Checking…" : "Check token"}</Button> : null}
             {connected ? <Button tone="danger" disabled={busy || checking} onClick={() => void clearToken()}>Clear token</Button> : null}
           </div>
           <span className="st-hint">

@@ -15,9 +15,9 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 23 | 39 | 13 | 75 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen, none GUI-verified; CI green on macOS and Linux, Windows red only in `cargo test` (22) |
 | Mobile (iPhone native, PWA) | 12 | 5 | 10 | 27 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 7 | 3 | 6 | 16 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 7 | 3 | 6 | 16 | Host API web client built (pairing, chat, approvals) with a production static server and local/domain docs; no relay code yet |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 20 | 4 | 2 | 26 | API 109, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
+| Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning and the `:3006` desktop-class review in place; relay, signing and Tauri scoping not started |

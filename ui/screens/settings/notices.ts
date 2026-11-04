@@ -25,12 +25,6 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Pair and manage iPhones from the Mac app; the desktop app does not host the phone link yet.",
     blockedBy: "Mobile Control hosting is Swift (WebSocket server, Bonjour, PIN cache). Needs a desktop host service and host commands before any control can be real.",
   },
-  "loop-defaults": {
-    mac: "App-wide Loop defaults: how repairs that edit protected paths are handled, default stage timeouts, whether runs write a summary note, and the starting templates.",
-    status: "Planned",
-    meanwhile: "Set these per Loop when you create it; the Mac app's defaults do not carry over to the desktop.",
-    blockedBy: "Needs the Loop screen on the desktop and a host preference store for the defaults (the Mac keeps them in UserDefaults).",
-  },
   "self-heal": {
     mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
     status: "Managed in the Mac app",

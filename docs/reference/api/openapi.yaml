@@ -13195,6 +13195,72 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/repos/check-token:
+    post:
+      tags:
+        - "kb-sources"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "provider"
+              properties:
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+                  description: "Which vault token to verify."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "login"
+                  - "name"
+                  - "scopes"
+                properties:
+                  ok:
+                    const: true
+                  login:
+                    type: "string"
+                  name:
+                    type: "string"
+                  scopes:
+                    type: "array"
+                    items:
+                      type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/review/approve:
     post:
       summary: "Execute an approved review item (re-runs guardrails)"

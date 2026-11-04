@@ -581,6 +581,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
+  if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).

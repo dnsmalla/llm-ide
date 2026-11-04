@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/repos/check-token",
+  "status": 502,
+  "request": {
+    "body": {
+      "provider": "github"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_UNREACHABLE",
+      "message": "The GitHub API could not be reached."
+    }
+  }
+}
