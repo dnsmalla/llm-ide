@@ -55,6 +55,34 @@ struct HostApiV1IdentityTests {
         _ = corrupt.write(account: HostApiV1Identity.account, service: "com.llmide.macapp", data: Data("junk".utf8))
         #expect(throws: HostApiV1Identity.Failure.corrupt) { try HostApiV1Identity.loadOrCreate(hostName: "Mac", backend: corrupt) }
     }
+
+    /// Same field names as HostApiV1Identity's private `Material`.
+    struct StoredMaterial: Codable { let key: Data; let cert: Data; let notAfter: Date }
+
+    @Test("a well-formed stored identity whose certificate is for another key is corrupt")
+    func mismatchedCertificate() throws {
+        let key = P256.Signing.PrivateKey(), other = P256.Signing.PrivateKey()
+        let notAfter = Date(timeIntervalSince1970: 1_900_000_000)
+        let cert = try HostApiV1Certificate.selfSigned(key: other, commonName: "LLM-IDE Mac", notBefore: Date(timeIntervalSince1970: 1_760_000_000),
+                                                        notAfter: notAfter, serial: Data([0x01]))
+        let backend = InMemoryKeychainAccess()
+        _ = backend.write(account: HostApiV1Identity.account, service: "com.llmide.macapp",
+                          data: try JSONEncoder().encode(StoredMaterial(key: key.rawRepresentation, cert: cert, notAfter: notAfter)))
+        #expect(throws: HostApiV1Identity.Failure.corrupt) { try HostApiV1Identity.loadOrCreate(hostName: "Mac", backend: backend) }
+    }
+
+    @Test("dates from 2050 are GeneralizedTime, earlier ones UTCTime, and the certificate still parses")
+    func generalizedTimeFrom2050() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let notBefore = try #require(cal.date(from: DateComponents(year: 2049, month: 6, day: 1)))
+        let notAfter = try #require(cal.date(from: DateComponents(year: 2051, month: 1, day: 1)))
+        let der = try HostApiV1Certificate.selfSigned(key: P256.Signing.PrivateKey(), commonName: "LLM-IDE Test",
+                                                       notBefore: notBefore, notAfter: notAfter, serial: Data([0x01]))
+        #expect(SecCertificateCreateWithData(nil, der as CFData) != nil)
+        let validity = HostApiV1Certificate.seq(Data([0x17, 13]) + Data("490601000000Z".utf8),
+                                                Data([0x18, 15]) + Data("20510101000000Z".utf8))
+        #expect(der.range(of: validity) != nil)
+    }
 }
 
 /// Outer SEQUENCE → (tbs TLV bytes, signature DER without the BIT STRING's unused-bits byte).
@@ -76,8 +104,8 @@ enum HostApiV1CertificateTestDER {
             guard let (h, n) = header(b, i), i + h + n <= b.count else { return nil }
             parts.append(b[i..<(i + h + n)]); i += h + n
         }
-        let bits = parts[2], (bh, _) = header(Array(bits), 0)!
-        guard bits.first == 0x03 else { return nil }
+        let bits = parts[2]
+        guard bits.first == 0x03, let (bh, _) = header(Array(bits), 0) else { return nil }
         return (Data(parts[0]), Data(bits.dropFirst(bh + 1)))
     }
 }

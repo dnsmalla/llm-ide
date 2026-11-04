@@ -49,13 +49,14 @@ enum HostApiV1Identity {
 
     private static func build(key: P256.Signing.PrivateKey, cert der: Data, notAfter: Date, created: Bool) throws -> Loaded {
         guard let cert = SecCertificateCreateWithData(nil, der as CFData) else { throw Failure.corrupt }
+        // Checked before SecIdentityCreate, which also rejects a key/cert mismatch but as an opaque nil.
+        guard let fp = fingerprint(certificate: cert), fp == fingerprint(spkiDER: key.publicKey.derRepresentation) else { throw Failure.corrupt }
         let attrs: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPrivate, kSecAttrKeySizeInBits: 256]
         var err: Unmanaged<CFError>?
         guard let secKey = SecKeyCreateWithData(key.x963Representation as CFData, attrs as CFDictionary, &err) else {
             throw Failure.securityFramework(String(describing: err?.takeRetainedValue()))
         }
         guard let identity = SecIdentityCreate(nil, cert, secKey) else { throw Failure.securityFramework("SecIdentityCreate returned nil") }
-        guard let fp = fingerprint(certificate: cert), fp == fingerprint(spkiDER: key.publicKey.derRepresentation) else { throw Failure.corrupt }
         return Loaded(identity: identity, certificateDER: der, fingerprint: fp, notAfter: notAfter, created: created)
     }
 }

@@ -22,18 +22,19 @@ enum HostApiV1Certificate {
         if let f = b.first, f & 0x80 != 0 { b.insert(0, at: 0) }
         return tlv(0x02, Data(b))
     }
-    static func utcTime(_ date: Date) -> Data {
+    /// RFC 5280 §4.1.2.5: UTCTime (0x17) for years before 2050, GeneralizedTime (0x18) from 2050.
+    static func time(_ date: Date) -> Data {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let generalized = cal.component(.year, from: date) >= 2050
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian); f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyMMddHHmmss'Z'"
-        return tlv(0x17, Data(f.string(from: date).utf8))
+        f.calendar = cal; f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = cal.timeZone; f.dateFormat = generalized ? "yyyyMMddHHmmss'Z'" : "yyMMddHHmmss'Z'"
+        return tlv(generalized ? 0x18 : 0x17, Data(f.string(from: date).utf8))
     }
 
     static let ecdsaWithSHA256: [UInt8] = [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02]
 
     static func selfSigned(key: P256.Signing.PrivateKey, commonName: String, notBefore: Date, notAfter: Date, serial: Data) throws -> Data {
-        // UTCTime covers years < 2050; a 5-year certificate minted before 2045 never needs GeneralizedTime.
-        precondition(Calendar(identifier: .gregorian).component(.year, from: notAfter) < 2050)
         let name = seq(tlv(0x31, seq(oid([0x55, 0x04, 0x03]), tlv(0x0C, Data(commonName.utf8)))))
         let alg = seq(oid(ecdsaWithSHA256))
         let extensions = tlv(0xA3, seq(
@@ -42,7 +43,7 @@ enum HostApiV1Certificate {
             seq(oid([0x55, 0x1D, 0x25]), tlv(0x04, seq(oid([0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01]))))  // extKeyUsage serverAuth
         ))
         let tbs = seq(tlv(0xA0, int(Data([2]))), int(serial), alg, name,
-                      seq(utcTime(notBefore), utcTime(notAfter)), name, key.publicKey.derRepresentation, extensions)
+                      seq(time(notBefore), time(notAfter)), name, key.publicKey.derRepresentation, extensions)
         let signature = try key.signature(for: tbs).derRepresentation
         return seq(tbs, alg, tlv(0x03, Data([0]) + signature))
     }
