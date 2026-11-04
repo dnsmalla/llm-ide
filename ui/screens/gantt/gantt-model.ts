@@ -152,7 +152,7 @@ export function estimateSpanDays(est: number, anchor: "start" | "due"): number {
 /** Shift a row's inclusive bar span by whole days. Returns null for a zero shift or a row with no span. */
 export function shiftSchedule(row: Pick<GanttRow, "start" | "end">, days: number): { startDate: string; dueDate: string } | null {
   if (!Number.isInteger(days) || days === 0 || row.start === null || row.end === null) return null;
-  return { startDate: dayString(row.start + days), dueDate: dayString(row.end + days) };
+  return { startDate: dayString(row.start + days), dueDate: dayString(row.end + days + 1) };
 }
 
 /** The PUT body for a drag/keyboard shift; null when the row cannot be scheduled or the shift is zero. */

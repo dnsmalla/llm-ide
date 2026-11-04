@@ -77,6 +77,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const abortRef = useRef<AbortController | null>(null);
   const [detail, setDetail] = useState<Issue | null>(null);
   const [nestedNote, setNestedNote] = useState(false);
+  const shiftingRef = useRef(false);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -127,14 +128,17 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   /** Drag/keyboard shift: save the moved dates through the existing schedule overlay route. */
   const shiftRow = useCallback(async (row: GanttRow, days: number) => {
     const body = shiftScheduleBody(row, days);
-    if (body === null) return;
+    if (body === null || shiftingRef.current) return;
+    shiftingRef.current = true;
     try {
       const r = await deps.request("PUT", "/kb/issue-schedule", body);
       if (r.status !== 200) { setNotice(`The schedule could not be moved (${r.status}).`); return; }
       setNotice(`Moved ${issueLabel(row.issue)} ${days > 0 ? "+" : ""}${days} day${Math.abs(days) === 1 ? "" : "s"}.`);
       await load();
     } catch { setNotice("The core is not reachable right now."); }
+    finally { shiftingRef.current = false; }
   }, [deps, load]);
+  const onShift = useCallback((row: GanttRow, days: number) => { void shiftRow(row, days); }, [shiftRow]);
 
   const pageNote = phase === "loading"
     ? pagingNote({ stop: null, loaded: progress?.loaded ?? 0, total: progress?.total ?? null })
@@ -261,7 +265,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
             today={today}
             selectedId={selected?.issue.id}
             onActivate={rowAction}
-            onShift={(row, days) => void shiftRow(row, days)}
+            onShift={onShift}
             scrollRef={scrollRef}
           />
 

@@ -527,9 +527,9 @@ test("an older core (before API 106) answers 400 for a nested key: one request, 
 
 
 test("shiftSchedule moves both inclusive bar days and refuses zero/no-span shifts", () => {
-  const row = { start: dayNumber("2026-01-05")!, end: dayNumber("2026-01-07")! };
-  assert.deepEqual(shiftSchedule(row, 1), { startDate: "2026-01-06", dueDate: "2026-01-08" });
-  assert.deepEqual(shiftSchedule(row, -2), { startDate: "2026-01-03", dueDate: "2026-01-05" });
+  const row = span(sched({ startDate: "2026-01-05", dueDate: "2026-01-08" }));
+  assert.deepEqual(shiftSchedule(row, 1), { startDate: "2026-01-06", dueDate: "2026-01-09" });
+  assert.deepEqual(shiftSchedule(row, -2), { startDate: "2026-01-03", dueDate: "2026-01-06" });
   assert.equal(shiftSchedule(row, 0), null);
   assert.equal(shiftSchedule({ start: null, end: row.end }, 1), null);
   assert.equal(shiftSchedule(row, 1.5), null);
@@ -540,11 +540,11 @@ test("shiftScheduleBody preserves estimate/dependencies and refuses numberless r
   const row = {
     issue: issue({ number: 7, provider: "gitlab", repo: "acme/web" }),
     schedule: sched({ estimateDays: 3, dependsOn: [2] }),
-    start: dayNumber("2026-02-02")!, end: dayNumber("2026-02-04")!, dependsOn: [2],
+    ...span(sched({ startDate: "2026-02-02", dueDate: "2026-02-05" })), dependsOn: [2],
   };
   assert.deepEqual(shiftScheduleBody(row, 2), {
     provider: "gitlab", repo: "acme/web", issueNumber: 7,
-    startDate: "2026-02-04", dueDate: "2026-02-06", estimateDays: 3, dependsOn: [2],
+    startDate: "2026-02-04", dueDate: "2026-02-07", estimateDays: 3, dependsOn: [2],
   });
   assert.equal(shiftScheduleBody({ ...row, issue: issue({ number: null }) }, 1), null);
   assert.equal(shiftScheduleBody(row, 0), null);

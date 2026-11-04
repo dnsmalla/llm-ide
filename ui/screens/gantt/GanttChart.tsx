@@ -140,7 +140,7 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
           title={`${row.issue.title}\n${barDates(row)}\n${canShift ? "Drag to move; Alt+Left/Right for one day" : "Edit schedule"}`}
           onFocus={() => onFocusRow(index)}
           onPointerDown={(e) => {
-            if (!canShift || e.button !== 0) return;
+            if (!canShift || e.button !== 0 || drag.current !== null) return;
             drag.current = { x: e.clientX, moved: false };
             suppressClick.current = false;
             e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -148,12 +148,14 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
           onPointerMove={(e) => {
             const d = drag.current;
             if (!d) return;
+            if (e.buttons === 0) { drag.current = null; setDx(0); return; }
             const delta = e.clientX - d.x;
             if (Math.abs(delta) >= 3) d.moved = true;
             setDx(d.moved ? Math.round(delta / dayWidth) * dayWidth : 0);
           }}
           onPointerUp={(e) => finish(e.clientX)}
           onPointerCancel={() => { drag.current = null; setDx(0); }}
+          onLostPointerCapture={() => { drag.current = null; setDx(0); }}
           onKeyDown={(e) => {
             if (!canShift || !e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
             e.preventDefault();
