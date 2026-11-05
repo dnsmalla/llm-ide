@@ -1,0 +1,102 @@
+// Inbox consumer at the fixed read-only ceiling (design 6; relay design 5.2, D2). Every inbox file is untrusted:
+// size, then signature by the REGISTERED device key, then a closed schema; record-before-execute; the turn runs only
+// through startHostTurn (auto_read_only, phone chat, extension workspace) and an approval request is never answered
+// from here. Nothing decrypted is logged.
+import { createPublicKey } from 'node:crypto';
+import { open, seal, deviceKeys } from '../../core/sync-envelope.mjs';
+import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
+import { getSyncState, listSyncDevices, recordRequest, finishRequest, countRequestsSince, nextSeq } from '../../kb/sync-state.mjs';
+import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
+import { ensureSyncKeys } from './keys.mjs';
+
+export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAgeMs: 86_400_000, maxSkewMs: 600_000, perDrain: 5, perDay: 50, turnMs: 600_000, outboxDays: 7 });
+const NAME_RE = /^([0-9]{13})-([A-Za-z0-9_-]{22})\.bin$/;
+const ID_RE = /^[A-Za-z0-9_-]{22}$/;
+const REQUEST_KEYS = ['class', 'requestId', 'text', 'v'];
+
+export function parseRequest(plain) {
+  let o;
+  try { o = JSON.parse(Buffer.from(plain).toString('utf8')); } catch { return null; }
+  if (!o || typeof o !== 'object' || Object.keys(o).sort().join() !== REQUEST_KEYS.join()) return null;
+  if (o.v !== 1 || o.class !== 'chat.send' || !ID_RE.test(o.requestId)) return null;
+  if (typeof o.text !== 'string' || o.text.length < 1 || o.text.length > LIMITS.maxText) return null;
+  return { requestId: o.requestId, text: o.text };
+}
+
+const defaultDeps = {
+  turn: async (args) => (await import('../agent-v2.mjs')).startHostTurn(args),
+  cancel: async (userId, id) => (await import('../agent-v2.mjs')).cancelChatTurn(userId, id),
+  phoneChatId: async (userId) => {
+    const have = getQuickChatId(userId);
+    if (have) return have;
+    const id = (await import('../../kb/chat-sessions.mjs')).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent' }).id;
+    setQuickChatId(userId, id);
+    return id;
+  },
+};
+
+async function runTurn(userId, text, deps) {
+  const chatSessionId = await deps.phoneChatId(userId);
+  let reply = '';
+  let failure = null;
+  const timer = setTimeout(() => { failure ??= 'turn_failed'; deps.cancel(userId, chatSessionId); }, LIMITS.turnMs);
+  timer.unref?.();
+  try {
+    await deps.turn({ userId, chatSessionId, message: text, onEvent: (e) => {
+      if (e?.type === 'delta' && typeof e.text === 'string') reply += e.text;
+      else if (e?.type === 'approval_request') { failure ??= 'needs_approval'; deps.cancel(userId, chatSessionId); }
+      else if (e?.type === 'error') failure ??= 'turn_failed';
+    } });
+  } catch { failure ??= 'turn_failed'; } finally { clearTimeout(timer); }
+  return failure ? { ok: false, code: failure } : { ok: true, text: redactSecretsForStorage(reply).slice(0, 100_000) };
+}
+
+export async function drainOnce({ userId, store, now = Date.now(), deps = defaultDeps }) {
+  const out = { ran: 0, refused: 0, replied: 0 };
+  const state = getSyncState(userId);
+  if (!state?.enabled) return out;
+  const keys = ensureSyncKeys(userId);
+  for (const dev of listSyncDevices(userId)) {
+    const base = `${state.syncId}/d/${dev.dir}`;
+    const dk = deviceKeys(keys.root, { userId, desktopId: state.syncId, deviceId: dev.deviceId }, keys.epoch);
+    const verifyKey = createPublicKey({ key: dev.signingSpki, format: 'der', type: 'spki' });
+    const writeReply = async (requestId, body) => {
+      const env = seal({ header: { purpose: 'reply', userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq: nextSeq(userId, now), issuedAt: now, tier: '' },
+        key: dk.reply, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, ...body })), signingKey: keys.signingKey });
+      await store.put(`${base}/out/${requestId}.bin`, Buffer.from(JSON.stringify(env)));
+      out.replied += 1;
+    };
+    const files = (await store.list(`${base}/in`)).sort((a, b) => (a.name < b.name ? -1 : 1));
+    let taken = 0;
+    for (const f of files) {
+      const path = `${base}/in/${f.name}`;
+      const m = NAME_RE.exec(f.name);
+      if (!m || f.size > LIMITS.maxFileBytes) { await store.remove(path); out.refused += 1; continue; }
+      if (taken >= LIMITS.perDrain) break;
+      const bytes = await store.get(path);
+      let env; let req = null;
+      try {
+        env = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        req = parseRequest(open({ env, key: dk.request, verifyKey, expect: { purpose: 'request', userId, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch: keys.epoch } }));
+      } catch { req = null; }
+      if (!req || req.requestId !== m[2]) { await store.remove(path); out.refused += 1; continue; }
+      const fresh = recordRequest(userId, dev.deviceId, req.requestId, now);
+      await store.remove(path);
+      if (!fresh) continue; // replay: already answered or failed, never re-run
+      taken += 1;
+      if (env.issuedAt < now - LIMITS.maxAgeMs || env.issuedAt > now + LIMITS.maxSkewMs) {
+        await writeReply(req.requestId, { ok: false, code: 'expired' }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue;
+      }
+      if (countRequestsSince(userId, dev.deviceId, now - 86_400_000) > LIMITS.perDay) {
+        await writeReply(req.requestId, { ok: false, code: 'quota' }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue;
+      }
+      const result = await runTurn(userId, req.text, deps);
+      out.ran += 1;
+      await writeReply(req.requestId, result.ok ? { ok: true, text: result.text, finishedAt: now } : { ok: false, code: result.code });
+      finishRequest(userId, dev.deviceId, req.requestId, result.ok ? 'done' : 'failed');
+    }
+    const cutoff = now - LIMITS.outboxDays * 86_400_000;
+    for (const f of await store.list(`${base}/out`)) if (f.mtimeMs < cutoff) await store.remove(`${base}/out/${f.name}`);
+  }
+  return out;
+}
