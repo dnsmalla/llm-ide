@@ -108,6 +108,7 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       } catch (e) {
         const code = String(e?.code || '');
         if (code === 'SYNC_OFF' || code.startsWith('ENROLL_')) return fail(res, 409, code, 'Enrollment is not possible now');
+        if (code === 'SYNC_BUSY') return fail(res, 409, code, 'Sync is busy, try again');
         return fail(res, 502, code.startsWith('SYNC_') ? code : 'SYNC_IO', 'Sync store error');
       }
     }

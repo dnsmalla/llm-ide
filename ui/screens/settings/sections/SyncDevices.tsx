@@ -6,7 +6,7 @@ import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { PairingQr } from "./HostApiPairing.tsx";
-import { startEnroll, pollEnroll, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, describeSyncError,
+import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
 
 export default function SyncDevices({ status, onStatus }: { status: SyncStatus; onStatus: (s: SyncStatus) => void }): ReactNode {
@@ -25,8 +25,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   }, []);
   useEffect(() => {
     if (!start) return;
-    const t = window.setInterval(() => { void pollEnroll(client).then(setPoll, (e) => setError(describeError(e))); }, 2000);
-    return () => window.clearInterval(t);
+    return pollEnrollSerially(client, setPoll, (e) => setError(describeError(e)));
   }, [client, start]);
   useEffect(() => () => { if (active.current) void cancelEnroll(client).catch(() => {}); }, [client]);
   const stop = () => { setStart(null); setPoll(null); };

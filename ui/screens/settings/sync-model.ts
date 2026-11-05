@@ -37,6 +37,7 @@ const SYNC_ERROR_TEXT: Record<string, string> = {
   SYNC_QUOTA: "The MEGA account is over its storage or transfer quota.",
   SYNC_UNREACHABLE: "MEGA could not be reached. Check the network; sync retries by itself.",
   SYNC_IO: "A MEGA operation failed. Sync retries by itself.",
+  SYNC_BUSY: "Sync is finishing a cycle. Try again in a moment.",
 };
 export const syncErrorText = (code: string): string | null => SYNC_ERROR_TEXT[code] ?? null;
 export const describeSyncError = (e: unknown): string | null => (e instanceof ApiError ? syncErrorText(e.code) : null);
@@ -77,6 +78,17 @@ export const enrollFailureText = (code: string | null): string => ENROLL_FAILURE
 export const startEnroll = async (client: CoreClient, tier: "web" | "ios") => decodeEnrollStart(await call(client, "POST", "/kb/sync/devices/enroll", { tier }));
 export const pollEnroll = async (client: CoreClient) => decodeEnrollPoll(await call(client, "POST", "/kb/sync/devices/enroll/poll", {}));
 export const confirmEnroll = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/devices/enroll/confirm", {}));
+/** Poll one at a time: the next poll starts intervalMs after the previous one settled, never overlapping (review C1). */
+export function pollEnrollSerially(client: CoreClient, onPoll: (p: EnrollPoll) => void, onError: (e: unknown) => void, intervalMs = 2000): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = async () => {
+    try { const p = await pollEnroll(client); if (!stopped) onPoll(p); } catch (e) { if (!stopped) onError(e); }
+    if (!stopped) timer = setTimeout(() => { void tick(); }, intervalMs);
+  };
+  timer = setTimeout(() => { void tick(); }, intervalMs);
+  return () => { stopped = true; clearTimeout(timer); };
+}
 export const cancelEnroll = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/devices/enroll/cancel", {}); };
 export const revokeSyncDevice = async (client: CoreClient, deviceId: string) => decodeSyncStatus(await call(client, "DELETE", `/kb/sync/devices/${encodeURIComponent(deviceId)}`));
 export const rotateSyncKeys = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/rotate", {}));

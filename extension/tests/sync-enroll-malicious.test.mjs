@@ -210,3 +210,63 @@ test('storage hides the claim until the window closes: expired, nothing register
   assert.equal((await pollEnrollment(u, { now: T + ENROLL.claimMs + 1 })).phase, 'expired');
   registryEmpty(u);
 });
+
+// Review 2026-11-06 C1: a held ack upload while a second poll runs must not leave the desktop holding one claim and
+// showing the SAS of another (QR photographer + storage, two overlapping polls).
+function holdFirstAckPut(store) {
+  const h = { puts: 0, release: null, held: null };
+  const put = store.put;
+  store.put = async (p, b) => {
+    if (p.endsWith('/ack.bin') && h.puts++ === 0) { h.held = b; await new Promise((r) => { h.release = r; }); }
+    return put(p, b);
+  };
+  return h;
+}
+
+test('two overlapping polls with a held ack upload: one take, one ack, the attacker is never registered', async () => {
+  const { u, store, sid } = setup();
+  const { qr } = await startEnrollment(u, { store, tier: 'ios', now: T });
+  const pair = E.parsePair(qr);
+  const slot = `${sid}/e/${pair.slot}`;
+  const dev = createReferenceDevice();
+  await dev.scanAndClaim(store, qr, { now: T });
+  const realName = `${dev.claimName}.bin`;
+  const sig = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const ecdh = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const atkName = `${E.newId22()}.bin`;
+  await store.inner.put(`${slot}/${atkName}`, B(E.sealClaim({ pair, tier: 'ios', name: dev.name, ecdhSpki: spki(ecdh), signingSpki: spki(sig), signingKey: sig.privateKey, issuedAt: T })));
+  const atkId = E.deviceIdOf(spki(sig));
+  let lists = 0;
+  store.onList = (d, l) => { if (d !== slot) return l; const keep = lists++ === 0 ? realName : atkName; return l.filter((f) => f.name === 'ack.bin' || f.name === keep); };
+  const h = holdFirstAckPut(store);
+  const pA = pollEnrollment(u, { now: T + 1000 });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(h.release, 'the first poll is held in its ack upload');
+  const vB = await pollEnrollment(u, { now: T + 3000 });
+  assert.equal(vB.sas, null, 'no code while the first poll is pinning');
+  h.release();
+  const vA = await pA;
+  assert.equal(h.puts, 1, 'exactly one ack was uploaded');
+  store.onGet = (p, b) => (p.endsWith('/ack.bin') ? h.held : b);
+  const phoneSas = await dev.readAck(store).catch(() => null);
+  if (vA.phase === 'confirm') assert.equal(vA.sas, phoneSas, 'the code shown is for the pinned claim');
+  await confirmEnrollment(u, { now: T + 5000 }).catch(() => {});
+  const reg = st.listSyncDevices(u).map((d) => d.deviceId);
+  assert.ok(!reg.includes(atkId), 'the attacker is never registered');
+});
+
+test('a poll in flight never revives a killed slot to confirm', async () => {
+  const { u, store } = setup();
+  const { qr } = await startEnrollment(u, { store, tier: 'ios', now: T });
+  await createReferenceDevice().scanAndClaim(store, qr, { now: T });
+  const h = holdFirstAckPut(store);
+  const pA = pollEnrollment(u, { now: T + 1000 });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(h.release);
+  await cancelEnrollment(u);
+  h.release();
+  const v = await pA;
+  assert.notEqual(v.phase, 'confirm'); assert.equal(v.sas, null);
+  await assert.rejects(confirmEnrollment(u, { now: T + 2000 }), (e) => e.code === 'ENROLL_NOT_READY');
+  registryEmpty(u);
+});

@@ -58,3 +58,18 @@ test('enrollment decoders are strict and the calls hit the device routes', async
   assert.match(m.enrollFailureText("contested"), /Two devices/);
   assert.match(m.enrollFailureText("claim_invalid"), /could not be verified/);
 });
+
+test("enrollment polls one at a time: a slow poll is never overlapped", async () => {
+  let inFlight = 0; let maxInFlight = 0; let polls = 0;
+  const POLL = { phase: "waiting", sas: null, name: null, code: null };
+  const c = { async request() { inFlight++; polls++; maxInFlight = Math.max(maxInFlight, inFlight); await new Promise((r) => setTimeout(r, 30)); inFlight--; return { status: 200, body: POLL }; } };
+  const seen = [];
+  const stop = m.pollEnrollSerially(c, (p) => seen.push(p.phase), () => {}, 5);
+  await new Promise((r) => setTimeout(r, 200));
+  stop();
+  const after = polls;
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(polls >= 2, "it keeps polling"); assert.equal(maxInFlight, 1, "never two polls at once");
+  assert.ok(polls <= after + 1, "stop ends the loop");
+  assert.ok(seen.every((p) => p === "waiting"));
+});
