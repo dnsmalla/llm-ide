@@ -1,6 +1,7 @@
 import { memo, useState, type ReactNode } from "react";
 import { ChatBubbleIcon, ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { ActivityBell } from "./ActivityBell";
+import { BusInbox } from "./approvals/BusInbox";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { host, type ProjectInfo } from "./host";
@@ -212,6 +213,7 @@ export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onT
         </span>
       </MenuButton>
       {terminalItem}
+      <BusInbox />
       <ActivityBell />
       {signedIn && <ChatItem active={chatActive} />}
     </footer>

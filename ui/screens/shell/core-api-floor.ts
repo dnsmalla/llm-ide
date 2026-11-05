@@ -2,7 +2,7 @@
 // `APP_API_VERSION` must match `SERVER_API_VERSION` in extension/server.mjs (a drift test pins it). A source checkout
 // or an adopted core can be older than the app; `/health` reports its `apiVersion`, and a lower number gets a warning.
 
-export const APP_API_VERSION = 110;
+export const APP_API_VERSION = 111;
 
 /**
  * The warning for a core whose /health reports an API older than this app, or null when it is current or newer.

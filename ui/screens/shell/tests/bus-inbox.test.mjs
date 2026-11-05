@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { load } from "./helpers.mjs";
+import { load, React, renderToStaticMarkup } from "./helpers.mjs";
 
 const api = await load("approvals/bus-api.ts");
 const sum = await load("approvals/summary.ts");
@@ -137,4 +137,33 @@ test("inbox: notifies once per new pending id with our own kind title; a 403 is 
   const denied = inbox.createInboxStore({ approvals: async () => { throw new api.BusCallError(403, "TIER_DENIED"); }, notify: () => assert.fail("no notification") });
   await denied.refresh();
   assert.deepEqual(denied.getSnapshot(), { items: [], error: "TIER_DENIED" });
+});
+
+const ui = await load("approvals/BusInbox.tsx");
+const h = React.createElement;
+const names = { "gcal:aaaaaaaaaaaa": "me@example.com" };
+
+test("PendingList: what it will do, who asked, Approve and Deny; T2 needs the confirm box; no nonce in the markup", () => {
+  const html = renderToStaticMarkup(h(ui.PendingList, { items: [item()], names, busy: null, onApprove() {}, onDeny() {} }));
+  assert.match(html, /Sync connected sources/);
+  assert.match(html, /your iPhone/);
+  assert.match(html, /Google Calendar: me@example\.com/);
+  assert.match(html, />Approve</); assert.match(html, />Deny</);
+  assert.ok(!html.includes(NONCE), "the nonce is never rendered");
+  const t2 = renderToStaticMarkup(h(ui.PendingList, { items: [item({ kind: "issues.implement", tier: "T2", args: { projectId: "p1", issueIds: ["1"] } })], names: {}, busy: null, onApprove() {}, onDeny() {} }));
+  assert.match(t2, /I checked the project and issue ids above/);
+  assert.equal(renderToStaticMarkup(h(ui.PendingList, { items: [], names, busy: null, onApprove() {}, onDeny() {} })).includes("Nothing is waiting"), true);
+});
+
+test("ScheduleList and ScheduleForm state the scope and the approval mode in words", () => {
+  const nowMs = Date.parse("2026-11-05T13:00:00Z");
+  const list = renderToStaticMarkup(h(ui.ScheduleList, { items: [schedule(), schedule({ id: "5a1b2c3d-0000-4000-8000-0000000000b2", standing: false, standingUntil: null, args: {} })], names, nowMs, busy: null, onDelete() {} }));
+  assert.match(list, /every 6 hours/);
+  assert.match(list, /Runs without asking until/);
+  assert.match(list, /Asks you on each run/);
+  assert.match(list, /Every connected Google Calendar/);
+  assert.match(list, /Delete \(revokes\)/);
+  const form = renderToStaticMarkup(h(ui.ScheduleForm, { names, onCreate: async () => {} }));
+  assert.match(form, /Run without asking for/);
+  assert.match(form, /only the sources ticked above/);
 });

@@ -129,3 +129,11 @@
 .sh-quick-list { list-style: none; margin: var(--tok-space-sm) 0; padding: 0; max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
 .sh-quick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; }
 .sh-quick-row .sh-muted { font-size: var(--tok-type-caption-size); }
+
+.sh-inbox { width: 400px; }
+.sh-inbox-list { list-style: none; margin: 0; padding: 0 12px; }
+.sh-inbox-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--tok-color-border); }
+.sh-inbox-lines { margin: 2px 0 0; padding-left: 16px; font-size: 12px; }
+.sh-inbox-actions { display: flex; gap: 8px; margin-top: 4px; }
+.sh-inbox-confirm { font-size: 12px; }
+.sh-inbox-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; font-size: 12px; }
