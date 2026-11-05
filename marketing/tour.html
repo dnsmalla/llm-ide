@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product tour — LLM-IDE</title><meta name="description" content="A short interactive tour of capture, Library, chat, issues, graph and automation in LLM-IDE.">
+<link rel="stylesheet" href="styles.css"></head><body>
+<header class="site"><div class="wrap nav"><a class="brand" href="index.html">LLM<span>-IDE</span></a><ul>
+<li><a href="features.html">Features</a></li><li><a href="guide.html">Guide</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="why.html">Why LLM-IDE</a></li><li><a href="security.html">Security</a></li></ul>
+<a class="cta" href="/app/">Open web app</a> <a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div></header>
+<main class="section"><div class="wrap tour-shell" id="tour">
+<div class="tour-top"><a href="guide.html">← Back to guide</a><span class="muted" id="tour-label">Step 1</span></div>
+<div class="tour-card">
+<div class="tour-body" data-tour-step>
+<div><p class="eyebrow">One workspace</p><h2>Meetings, code and knowledge together.</h2><p class="lead">Stop moving the same project between a notes app, a chat box, an issue tracker and an editor. LLM-IDE keeps the context together.</p><p class="muted">The workspace runs on your computer. Your project data is not uploaded to the account service.</p></div>
+<div class="tour-mock"><div class="mock-tag">Project · Acme</div><div class="mock-bar a"></div><div class="mock-bar b"></div><div class="mock-grid"><div class="mock-box">Meeting notes</div><div class="mock-box">Source files</div><div class="mock-box">Issues</div><div class="mock-box">Documents</div></div><div class="mock-bar c"></div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Capture</p><h2>Turn a meeting into project memory.</h2><p class="lead">Meet, Teams and Zoom captions become live notes. Decisions and action items land in the Library instead of a forgotten transcript.</p><p class="muted">Review the notes, then send action items into Issues.</p></div>
+<div class="tour-mock"><div class="mock-tag">Live · Google Meet</div><div class="mock-box">“We will ship the onboarding fix on Friday.”</div><div class="mock-box">Action · Update the release checklist</div><div class="mock-box">Decision · Keep the current pricing</div><div class="mock-bar b"></div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Chat and code</p><h2>Ask with the project in context.</h2><p class="lead">Chat is grounded in the Library and code. When the assistant proposes a code change, you see the diff and approve it explicitly.</p><p class="muted">Protected paths and tool permissions are enforced by the local host, not just the prompt.</p></div>
+<div class="tour-mock"><div class="mock-box">You · What calls the billing webhook?</div><div class="mock-box">Assistant · Two handlers; one is deprecated.</div><div class="mock-tag">Approval required · 2 files</div><div class="mock-bar a"></div><div class="mock-bar c"></div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Library</p><h2>One searchable hub.</h2><p class="lead">Meetings, notes, documents, imported sources and code share one searchable project. Search before asking; attach only what matters.</p><p class="muted">The Library is the project’s memory, not another file browser.</p></div>
+<div class="tour-mock"><div class="mock-bar b"></div><div class="mock-box">Search · “pricing decision”</div><div class="mock-box">Meeting · 12 Sep · Pricing review</div><div class="mock-box">Note · Decision log</div><div class="mock-box">Source · Product brief.pdf</div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Plan</p><h2>From decision to delivery.</h2><p class="lead">Turn action items into issues, then schedule them on the Gantt timeline. The board shows what is next; the timeline shows when.</p><p class="muted">Use milestones and dependencies to keep delivery honest.</p></div>
+<div class="tour-mock"><div class="mock-tag">Issues · 3 open</div><div class="mock-box">Onboarding fix · In progress · Fri</div><div class="mock-grid"><div class="mock-box">Billing review</div><div class="mock-box">Release notes</div></div><div class="mock-bar a"></div><div class="mock-bar b"></div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Understand</p><h2>See the system, not just files.</h2><p class="lead">Code Graph shows dependencies and architecture. Doc Gen turns project sources into documents; Visual creates diagrams and images.</p><p class="muted">Both use the same local project as their source of truth.</p></div>
+<div class="tour-mock"><div class="mock-tag">Code Graph</div><div class="mock-grid"><div class="mock-box">api / routes</div><div class="mock-box">core / billing</div><div class="mock-box">ui / checkout</div><div class="mock-box">tests</div></div><div class="mock-bar c"></div></div>
+</div>
+<div class="tour-body" data-tour-step hidden>
+<div><p class="eyebrow">Automate</p><h2>Repeat the work you already trust.</h2><p class="lead">Loop runs staged workflows with verification and repair. Auto Tasks run reviews and maintenance on a schedule, with logs and limits.</p><p class="muted">Start small: one Review task, read its log, then schedule it.</p></div>
+<div class="tour-mock"><div class="mock-tag">Auto Tasks · Review</div><div class="mock-box">Review docs · completed · 42s</div><div class="mock-box">Review code · scheduled · next 02:00</div><div class="mock-bar b"></div></div>
+</div>
+<div class="tour-foot"><button class="tour-btn ghost" id="tour-back" type="button">Back</button><span class="muted">Arrow keys work too</span><button class="tour-btn" id="tour-next" type="button">Next</button></div>
+</div>
+<div class="tour-progress" id="tour-progress" aria-label="Tour progress"></div>
+<div class="actions" style="justify-content:center;margin-top:22px"><a class="button secondary" href="guide.html">Read the full guide</a></div>
+</div></main>
+<footer class="site"><div class="wrap foot"><div><strong>LLM-IDE</strong><br><span class="fine">Local-first AI workspace.</span></div><div><a href="features.html">Features</a> · <a href="guide.html">Guide</a> · <a href="security.html">Security</a> · <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></div></div></footer>
+<script src="site.js"></script></body></html>
