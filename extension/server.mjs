@@ -20,6 +20,7 @@ import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
 import { handleHostApiRoute, isHostApiRoute } from './routes/host-api/http-routes.mjs';
+import { handleSyncRoute, isSyncRoute } from './routes/sync/http-routes.mjs';
 import { createBus, busEnabled } from './routes/bus/executor.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
 import { purgeOldAuditRows } from './server/audit.mjs';
@@ -317,11 +318,12 @@ const HOST = config.host;
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 //   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
+//   v112 — encrypted sync, additive: GET /kb/sync/status, POST /kb/sync/mega { email, password, folder? }, POST /kb/sync/test, POST /kb/sync/enabled { enabled }, POST /kb/sync/publish. JWT + bus host proof (403 HOST_PROOF_REQUIRED first). Never returns the MEGA password or full email, a private key, root key or folder capability. Status, mega and enabled ride 'kbWrite'; test and publish ride 'dispatch'.
 //   v109 — Host API v1 pairing QR, additive (no new route): POST /host-api/pin also returns addresses (string[]): in TLS mode this computer's IPv4s best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6), so the desktop Settings card can show the llmide://pair QR; always [] for the dev listener.
 //   v110 — additive: POST /kb/repos/check-token { provider } verifies the vault's github.token / gitlab.token
 //          against the provider's /user endpoint and answers { ok, login, name, scopes? }; no token is returned.
 //   v111 — command bus desktop schedules, additive (spec docs/spec/command-bus.md section 9, migration 0063): GET /bus/schedules → { items: BusSchedule[] } (desktop-ui and ios-native; else 403 TIER_DENIED); POST /bus/schedules { kind: 'sources.update', args, intervalHours 1-168, standing?, standingDays? 1-90 } → 201 { schedule } (desktop-ui only; 400 INVALID_ARGS, 429 QUOTA_EXCEEDED at 10); DELETE /bus/schedules/:id → { deleted: true } | 404 (desktop-ui only; revokes its standing approval). POST /bus/commands/:id/approve takes an optional scheduleId: with the nonce it approves a desktop-enqueued run on that schedule's live standing approval (same kind and args, idem sched:<id>:, T1, at most one per half interval), else 403 STANDING_APPROVAL_INVALID { reason }. No server timer.
-const SERVER_API_VERSION = 111;
+const SERVER_API_VERSION = 112;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -504,6 +506,11 @@ const ALL_ENDPOINTS = [
   '/host-api/pin',
   '/host-api/devices',
   '/host-api/devices/:id',
+  '/kb/sync/status',
+  '/kb/sync/mega',
+  '/kb/sync/test',
+  '/kb/sync/enabled',
+  '/kb/sync/publish',
 ];
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 // The command bus executor (routes/bus/executor.mjs), created and started after listen; null while LLMIDE_BUS=off.
@@ -550,6 +557,8 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/slack/conversations') return 'dispatch';
     // The Google pickers each make an outbound Google API call.
     if (path === '/kb/google/calendars' || path === '/kb/google/drive/folders') return 'dispatch';
+    if (path === '/kb/sync/test' || path === '/kb/sync/publish') return 'dispatch';
+    if (path.startsWith('/kb/sync/')) return 'kbWrite';
     if (path === '/kb/calendar-ical/sources') return 'kbWrite';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
@@ -606,6 +615,8 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
+  if (url === '/kb/sync/test' || url === '/kb/sync/publish') return 'dispatch';
+  if (url.startsWith('/kb/sync/'))       return 'kbWrite';
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).
   if (['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair'].some((p) => url === `/auth/me/extensions/${p}`)) return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
@@ -799,6 +810,12 @@ const server = http.createServer(async (req, res) => {
   // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
   if (isBusRoute(req.url || '')) {
     await handleBusRoute(req, res, { bus });
+    return;
+  }
+
+  // Encrypted sync settings (/kb/sync/*): JWT + bus host proof.
+  if (isSyncRoute(req.url || '')) {
+    try { await handleSyncRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 
@@ -1192,6 +1209,7 @@ process.on('unhandledRejection', (reason) => {
 // timeout protects against a stuck Claude CLI subprocess holding the
 // process open forever.
 let shuttingDown = false;
+let syncScheduler = null; // routes/sync/scheduler.mjs, started after listen; its stop() logs the MEGA sessions out
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1201,6 +1219,7 @@ function shutdown(signal) {
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
   stopBackgroundOutcomePoller();
+  const syncStopped = syncScheduler ? syncScheduler.stop().catch(() => {}) : Promise.resolve();
   if (hostApi) { try { hostApi.gateway.closeAll(); void hostApi.listener?.close(); } catch { /* best-effort */ } }
   // Command bus: end open event streams (server.close waits for them) and abort running jobs (their process groups).
   closeBusStreams();
@@ -1215,6 +1234,7 @@ function shutdown(signal) {
   hardTimeout.unref();
   server.close(async () => {
     await busStopped;
+    await Promise.race([syncStopped, new Promise((r) => setTimeout(r, 2000))]);
     // Save rate-limit state before closing the DB so the next startup
     // inherits current bucket levels.
     try { saveBuckets(getDb({ logger })); } catch (err) { logger.warn('shutdown_save_buckets_failed', { error: err.message }); }
@@ -1505,6 +1525,9 @@ server.listen(PORT, HOST, () => {
   // either. Never throws — a failure is logged and the first turn retries.
   if (config.enginePrewarm) {
     setImmediate(() => { void prewarmAgentEngine(); });
+  }
+  if (process.env.NODE_ENV !== 'test') {
+    void import('./routes/sync/scheduler.mjs').then((m) => { syncScheduler = m.startSyncScheduler({ logger }); }).catch((e) => logger.warn('sync_scheduler_failed', { message: e.message }));
   }
   // Host API v1 listener ('tls' pinned on every interface, or 'dev' plaintext loopback): dynamic imports keep the
   // gateway (and agent-v2) off the boot path when the mode is 'off'.

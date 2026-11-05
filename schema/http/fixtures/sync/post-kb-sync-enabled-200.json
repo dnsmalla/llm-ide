@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/sync/enabled",
+  "status": 200,
+  "response": {
+    "configured": true,
+    "enabled": true,
+    "storeKind": "mega",
+    "store": {
+      "folder": "llmide-sync",
+      "account": "l***@example.com"
+    },
+    "syncId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "epoch": 1,
+    "signingFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "devices": [],
+    "lastPublishAt": 1762300000000,
+    "lastError": null
+  },
+  "request": {
+    "body": {
+      "enabled": true
+    }
+  }
+}

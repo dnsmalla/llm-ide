@@ -2055,6 +2055,26 @@ export type ReviewOk = {
   ok: true;
 };
 
+export type EncryptedSyncStatus = {
+  configured?: boolean;
+  enabled?: boolean;
+  /** mega | memory (sftp | box in later sub-projects) */
+  storeKind?: string | null;
+  /** mega: { folder, account }, account = masked email */
+  store?: {
+    folder?: string;
+    account?: string;
+  } | null;
+  syncId?: string | null;
+  epoch?: number | null;
+  /** base64url SHA-256 of the desktop signing SPKI */
+  signingFingerprint?: string | null;
+  devices?: unknown[];
+  lastPublishAt?: number | null;
+  /** an error code only */
+  lastError?: string | null;
+};
+
 /** Request parts for `GET /kb/storage` (schema/http/agent-history.schema.json). */
 export type GetKbStorageRequest = Record<string, never>;
 
@@ -7998,6 +8018,54 @@ export type PostKbReviewDeleteResponse401 = CommonError;
 
 export type PostKbReviewDeleteResponse429 = CommonError;
 
+/** Request parts for `GET /kb/sync/status` (schema/http/sync.schema.json). */
+export type GetKbSyncStatusRequest = Record<string, never>;
+
+export type GetKbSyncStatusResponse200 = EncryptedSyncStatus;
+
+/** Request parts for `POST /kb/sync/mega` (schema/http/sync.schema.json). */
+export type PostKbSyncMegaRequest = {
+  body: {
+    email: string;
+    password: string;
+    folder?: string;
+  };
+};
+
+export type PostKbSyncMegaResponse200 = EncryptedSyncStatus;
+
+/** Request parts for `POST /kb/sync/test` (schema/http/sync.schema.json). */
+export type PostKbSyncTestRequest = Record<string, never>;
+
+export type PostKbSyncTestResponse200 = {
+  ok?: boolean;
+};
+
+/** Request parts for `POST /kb/sync/enabled` (schema/http/sync.schema.json). */
+export type PostKbSyncEnabledRequest = {
+  body: {
+    enabled: boolean;
+  };
+};
+
+export type PostKbSyncEnabledResponse200 = EncryptedSyncStatus;
+
+/** Request parts for `POST /kb/sync/publish` (schema/http/sync.schema.json). */
+export type PostKbSyncPublishRequest = Record<string, never>;
+
+export type PostKbSyncPublishResponse200 = {
+  publish?: {
+    devices?: number;
+    blobs?: number;
+    manifests?: number;
+  } | null;
+  drain?: {
+    ran?: number;
+    refused?: number;
+    replied?: number;
+  };
+};
+
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
   "GET /kb/storage": {
@@ -10311,6 +10379,36 @@ export interface ApiEndpoints {
       200: PostKbReviewDeleteResponse200;
       401: PostKbReviewDeleteResponse401;
       429: PostKbReviewDeleteResponse429;
+    };
+  };
+  "GET /kb/sync/status": {
+    request: GetKbSyncStatusRequest;
+    responses: {
+      200: GetKbSyncStatusResponse200;
+    };
+  };
+  "POST /kb/sync/mega": {
+    request: PostKbSyncMegaRequest;
+    responses: {
+      200: PostKbSyncMegaResponse200;
+    };
+  };
+  "POST /kb/sync/test": {
+    request: PostKbSyncTestRequest;
+    responses: {
+      200: PostKbSyncTestResponse200;
+    };
+  };
+  "POST /kb/sync/enabled": {
+    request: PostKbSyncEnabledRequest;
+    responses: {
+      200: PostKbSyncEnabledResponse200;
+    };
+  };
+  "POST /kb/sync/publish": {
+    request: PostKbSyncPublishRequest;
+    responses: {
+      200: PostKbSyncPublishResponse200;
     };
   };
 }

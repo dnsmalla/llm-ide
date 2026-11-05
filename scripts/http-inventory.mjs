@@ -41,6 +41,7 @@ const HANDLER_FILES_REL = [
   ...listDir('extension/routes', (f) => f.endsWith('.mjs')),
   ...listDir('extension/routes/bus', (f) => f === 'bus-routes.mjs'),
   ...listDir('extension/routes/host-api', (f) => f === 'http-routes.mjs'),
+  ...listDir('extension/routes/sync', (f) => f === 'http-routes.mjs'),
   ...listDir('extension/server', (f) => f.endsWith('-routes.mjs')),
   SERVER_REL,
 ];

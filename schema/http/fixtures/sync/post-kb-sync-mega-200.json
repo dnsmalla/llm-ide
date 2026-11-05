@@ -1,0 +1,26 @@
+{
+  "endpoint": "POST /kb/sync/mega",
+  "status": 200,
+  "response": {
+    "configured": true,
+    "enabled": false,
+    "storeKind": "mega",
+    "store": {
+      "folder": "llmide-sync",
+      "account": "l***@example.com"
+    },
+    "syncId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "epoch": 1,
+    "signingFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "devices": [],
+    "lastPublishAt": null,
+    "lastError": null
+  },
+  "request": {
+    "body": {
+      "email": "llmide-sync@example.com",
+      "password": "a long dedicated password",
+      "folder": "llmide-sync"
+    }
+  }
+}

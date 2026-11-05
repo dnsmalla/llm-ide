@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 111
+  x-api-version: 112
 servers:
   - url: "https://{host}"
     variables:
@@ -38,6 +38,7 @@ tags:
   - name: "provider-catalog"
   - name: "providers-usage"
   - name: "review"
+  - name: "sync"
 paths:
   /:
     get:
@@ -14293,6 +14294,112 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/sync/enabled:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "enabled"
+              properties:
+                enabled:
+                  type: "boolean"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/mega:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "email"
+                - "password"
+              properties:
+                email:
+                  type: "string"
+                password:
+                  type: "string"
+                folder:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/publish:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  publish:
+                    type:
+                      - "object"
+                      - "null"
+                    properties:
+                      devices:
+                        type: "integer"
+                      blobs:
+                        type: "integer"
+                      manifests:
+                        type: "integer"
+                  drain:
+                    type: "object"
+                    properties:
+                      ran:
+                        type: "integer"
+                      refused:
+                        type: "integer"
+                      replied:
+                        type: "integer"
+  /kb/sync/status:
+    get:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/test:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
   /kb/system/status:
     get:
       summary: "Unified system status — KB stats, active captures, agent runs, pending reviews, outcome summary"
@@ -16924,6 +17031,52 @@ components:
           type: "boolean"
         truncated:
           type: "boolean"
+    EncryptedSyncStatus:
+      type: "object"
+      properties:
+        configured:
+          type: "boolean"
+        enabled:
+          type: "boolean"
+        storeKind:
+          type:
+            - "string"
+            - "null"
+          description: "mega | memory (sftp | box in later sub-projects)"
+        store:
+          type:
+            - "object"
+            - "null"
+          properties:
+            folder:
+              type: "string"
+            account:
+              type: "string"
+          description: "mega: { folder, account }, account = masked email"
+        syncId:
+          type:
+            - "string"
+            - "null"
+        epoch:
+          type:
+            - "integer"
+            - "null"
+        signingFingerprint:
+          type:
+            - "string"
+            - "null"
+          description: "base64url SHA-256 of the desktop signing SPKI"
+        devices:
+          type: "array"
+        lastPublishAt:
+          type:
+            - "integer"
+            - "null"
+        lastError:
+          type:
+            - "string"
+            - "null"
+          description: "an error code only"
     Entity:
       type: "object"
       required:

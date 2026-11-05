@@ -1,0 +1,181 @@
+{
+  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO.",
+  "$defs": {
+    "EncryptedSyncStatus": {
+      "type": "object",
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "storeKind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "mega | memory (sftp | box in later sub-projects)"
+        },
+        "store": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "folder": {
+              "type": "string"
+            },
+            "account": {
+              "type": "string"
+            }
+          },
+          "description": "mega: { folder, account }, account = masked email"
+        },
+        "syncId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "epoch": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signingFingerprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "base64url SHA-256 of the desktop signing SPKI"
+        },
+        "devices": {
+          "type": "array"
+        },
+        "lastPublishAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "an error code only"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/sync/status": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      }
+    },
+    "POST /kb/sync/mega": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "email",
+            "password"
+          ],
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      }
+    },
+    "POST /kb/sync/test": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/sync/enabled": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      }
+    },
+    "POST /kb/sync/publish": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "publish": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "devices": {
+                  "type": "integer"
+                },
+                "blobs": {
+                  "type": "integer"
+                },
+                "manifests": {
+                  "type": "integer"
+                }
+              }
+            },
+            "drain": {
+              "type": "object",
+              "properties": {
+                "ran": {
+                  "type": "integer"
+                },
+                "refused": {
+                  "type": "integer"
+                },
+                "replied": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

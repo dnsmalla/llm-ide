@@ -70,3 +70,13 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 - **No HTTP inside**: the gateway (`routes/host-api/gateway.mjs`) runs turns in process through `startHostTurn` / `cancelChatTurn` / `clearChatSessionState` from `routes/agent-v2.mjs`, never over HTTP, and never reads UI state.
 - **Phone chat**: one server-side chat per user (`host_api_quick_chat`), run in mode `auto_read_only` in the extension chat workspace, not the open project.
 - **Ordering**: frames of one session are processed in order (one at a time per session).
+
+## Sync (desktop producer)
+
+- **What**: encrypted snapshots (chats, meetings, plans, usage) and a queued-prompt inbox in a user-owned folder, for the phone and web with the desktop off. Design `docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md`, ADR 0020.
+- **Where**: envelope `core/sync-envelope.mjs` (relay v1 bytes + `snapshot`/`manifest`/`syncwrap`; vectors `schema/sync/v1`, check `node scripts/sync-vectors.mjs`); stores `connectors/sync-store/` (memory for tests; MEGA via `megajs` 1.3.10, the first adapter by user decision; SFTP and Box are later sub-projects); state `kb/sync-state.mjs` (migration 0064); producer/consumer/scheduler/routes `routes/sync/`.
+- **Vault**: `sync.rootKey`, `sync.signingKey`, `sync.megaEmail`, `sync.megaPassword` are server-internal — never client-settable, listed or returned.
+- **MEGA**: a dedicated account only; 2FA off on that account (`SYNC_MFA_REQUIRED` otherwise); one session per user cached in `routes/sync/scheduler.mjs` while the core runs, logged out on shutdown, setup change or sync off; a refused login turns sync off instead of retrying. Tests use `tests/helpers/fake-mega.mjs`; the live run is opt-in (`LLMIDE_SYNC_MEGA_IT=1`).
+- **Ceiling**: queued requests are `chat.send` only and run only through `startHostTurn` (`auto_read_only`, phone chat); an approval request cancels the turn and replies `needs_approval`; record-before-execute in `sync_requests`.
+- **Off switch**: `LLMIDE_SYNC=off` starts no scheduler; per user, Settings "Sync on" (`sync_state.enabled`).
+- **Never** log keys, folder names, the MEGA email or password, or decrypted content.

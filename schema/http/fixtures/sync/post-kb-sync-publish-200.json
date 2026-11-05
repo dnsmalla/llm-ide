@@ -1,0 +1,1 @@
+{"endpoint":"POST /kb/sync/publish","status":200,"response":{"publish":{"devices":1,"blobs":4,"manifests":1},"drain":{"ran":0,"refused":0,"replied":0}}}
