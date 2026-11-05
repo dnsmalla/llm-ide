@@ -52,6 +52,7 @@ const BY_CODE: Readonly<Record<string, Failure>> = {
 
 const BY_FS: Readonly<Record<string, string>> = {
   no_project: "Open a project first.",
+  no_destination: "Choose an output folder first.",
   root_too_broad: "That project folder is too broad to use.",
   invalid_path: "That is not a valid path.",
   outside_root: "That path is outside the project.",

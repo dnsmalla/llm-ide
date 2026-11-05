@@ -39,6 +39,10 @@ export interface DocGenScreenProps {
   onExport?: (name: string, text: string) => Promise<void>;
   /** Result of the last out-of-project export (null when none). */
   exportNotice?: { kind: "ok" | "error"; message: string } | null;
+  /** Display name of a host-chosen output folder; null = the project folder. */
+  externalDestination?: string | null;
+  onPickExternal?: () => void;
+  onClearExternal?: () => void;
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
   /** The diagram renderer binding (host builds only). */
@@ -80,6 +84,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const commitFolder = (raw: string) => {
     const clean = normalizeDestination(raw);
     store.setDestination(clean);
+    store.run.setExternalDestination(null);
     setFolderDraft(null);
     try { localStorage.setItem("llmide.docgen.destination", clean); } catch { /* session */ }
   };
@@ -137,8 +142,13 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
                   <label key={d.id} className="dg-inline"><input type="radio" name={`dg-deliver-${store.surface}`} value={d.id} checked={d.id === "local"} disabled={!d.available} onChange={() => undefined} /> {d.label}{d.available ? null : <em className="dg-muted"> Coming soon</em>}</label>
                 ))}
               </div>
-              <label className="dg-field"><span>Output folder</span><input value={folderDraft ?? s.destination} placeholder={GENERATED_DIR} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => commitFolder(folderDraft ?? s.destination)} onKeyDown={(e) => { if (e.key === "Enter") commitFolder(folderDraft ?? s.destination); }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
-              <div className="dg-bar"><button type="button" className="dg-btn" disabled={s.destination === GENERATED_DIR && folderDraft === null} onClick={() => commitFolder(GENERATED_DIR)}>Use default folder</button></div>
+              <label className="dg-field"><span>Output folder</span><input value={folderDraft ?? s.destination} placeholder={GENERATED_DIR} disabled={p.externalDestination !== null && p.externalDestination !== undefined} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => commitFolder(folderDraft ?? s.destination)} onKeyDown={(e) => { if (e.key === "Enter") commitFolder(folderDraft ?? s.destination); }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
+              <div className="dg-bar">
+                <button type="button" className="dg-btn" disabled={p.externalDestination != null || (s.destination === GENERATED_DIR && folderDraft === null)} onClick={() => commitFolder(GENERATED_DIR)}>Use default folder</button>
+                {p.onPickExternal ? <button type="button" className="dg-btn" onClick={p.onPickExternal}>Choose outside folder…</button> : null}
+                {p.externalDestination && p.onClearExternal ? <button type="button" className="dg-btn" onClick={p.onClearExternal}>Use project folder</button> : null}
+              </div>
+              {p.externalDestination ? <p className="dg-muted" role="status">Saving to external folder <strong>{p.externalDestination}</strong>.</p> : null}
             </details>
             <details className="dg-side-collapse" open={isOpen("template")} onToggle={(e) => setSection("template", e.currentTarget.open)}><summary>TEMPLATE &amp; COMMAND</summary><TemplateCommandPanel
               surface={store.surface}
@@ -178,7 +188,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} externalDestination={p.externalDestination ?? null} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
               <HistoryPanel fs={p.env.fs} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}

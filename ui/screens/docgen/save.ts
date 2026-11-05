@@ -7,12 +7,19 @@ import { candidateName, GENERATED_DIR } from "./naming.ts";
 
 export type SaveFs = Pick<FsApi, "create" | "write">;
 
+export interface ExternalSaver {
+  /** Save one sanitized file name in the host-chosen folder; `expectedHash` makes a re-save compare-and-swap. */
+  save(name: string, text: string, expectedHash: string | null): Promise<{ name: string; hash: string; size: number }>;
+}
+
 export interface Saved {
   /** Project-relative path of the file. */
   path: string;
   /** SHA-256 the host reported; the CAS token for the next save of this file. */
   hash: string;
   size: number;
+  /** Written to the host-chosen folder outside the project; `path` is `external:<name>`. */
+  external?: boolean;
 }
 
 const MAX_SUFFIX = 200;
@@ -57,4 +64,27 @@ export async function saveNewDocument(fs: SaveFs, stem: string, text: string, di
 export async function saveRevision(fs: SaveFs, path: string, text: string, expectedHash: string): Promise<Saved> {
   const r = await fs.write(path, normalizeDocument(text), { expected_hash: expectedHash });
   return { path: r.path, hash: r.hash, size: r.size };
+}
+
+
+/** Creates `<stem>.md` / `<stem>-N.md` in the external folder; never overwrites. */
+export async function saveNewExternal(saver: ExternalSaver, stem: string, text: string): Promise<Saved> {
+  const body = normalizeDocument(text);
+  for (let i = 0; i < MAX_SUFFIX; i++) {
+    const name = candidateName(stem, i);
+    try {
+      const r = await saver.save(name, body, null);
+      return { path: `external:${r.name}`, hash: r.hash, size: r.size, external: true };
+    } catch (e) {
+      if (codeOf(e) === "exists") continue;
+      throw e;
+    }
+  }
+  throw Object.assign(new Error("no free file name"), { code: "exists" });
+}
+
+/** Replaces an external document by its previous hash; a changed file is a conflict. */
+export async function saveRevisionExternal(saver: ExternalSaver, name: string, text: string, expectedHash: string): Promise<Saved> {
+  const r = await saver.save(name, normalizeDocument(text), expectedHash);
+  return { path: `external:${r.name}`, hash: r.hash, size: r.size, external: true };
 }

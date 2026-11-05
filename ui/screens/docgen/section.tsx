@@ -3,7 +3,7 @@
 import "@llmide/ui-kit/styles.css";
 import "../library/library.css";
 import "./docgen.css";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { core, host as shellHost, invokeHost, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
 import { createHostFs } from "../explorer/fs";
@@ -20,6 +20,7 @@ import type { Surface } from "./model.ts";
 import { safeRelativePath } from "../shell/bus";
 import { REVEAL_FAILED } from "./reveal.ts";
 import { pickTemplateFile } from "./template-file.ts";
+import type { ExternalSaver } from "./save.ts";
 
 const stores = new Map<Surface, DocGenStore>();
 
@@ -54,6 +55,53 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
   }, [surface]);
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+  const [external, setExternal] = useState<{ name: string } | null>(null);
+  const publishExternal = (name: string | null) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("llmide-docgen-destination", { detail: name }));
+  };
+  const externalSaver = useMemo<ExternalSaver>(() => ({
+    save: async (name, text, expectedHash) => {
+      const raw = await invokeHost<unknown>("docgen_save_external", { name, text, expectedHash });
+      const o = raw && typeof raw === "object" ? raw as { name?: unknown; hash?: unknown; size?: unknown } : {};
+      if (typeof o.name !== "string" || typeof o.hash !== "string" || typeof o.size !== "number") throw new Error("the host returned an unreadable save result");
+      return { name: o.name, hash: o.hash, size: o.size };
+    },
+  }), []);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onChange = (e: Event) => {
+      const name = (e as CustomEvent).detail;
+      setExternal(typeof name === "string" && name ? { name } : null);
+    };
+    window.addEventListener("llmide-docgen-destination", onChange);
+    return () => window.removeEventListener("llmide-docgen-destination", onChange);
+  }, []);
+  useEffect(() => {
+    if (!available) return undefined;
+    let live = true;
+    void invokeHost<unknown>("docgen_destination_status").then((raw) => {
+      if (!live) return;
+      const o = raw && typeof raw === "object" ? raw as { name?: unknown } : null;
+      setExternal(o && typeof o.name === "string" ? { name: o.name } : null);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [available]);
+  useEffect(() => { deps.store.run.setExternalDestination(external?.name ?? null, externalSaver); }, [deps, external, externalSaver]);
+  const pickExternal = useCallback(async () => {
+    try {
+      const raw = await invokeHost<unknown>("docgen_destination_pick");
+      if (raw === null || raw === undefined) return; // native picker cancelled: keep the previous destination
+      const o = raw && typeof raw === "object" ? raw as { name?: unknown } : null;
+      const next = o && typeof o.name === "string" ? { name: o.name } : null;
+      setExternal(next);
+      publishExternal(next?.name ?? null);
+    } catch { setExportNotice({ kind: "error", message: "That output folder could not be used." }); }
+  }, []);
+  const clearExternal = useCallback(async () => {
+    try { await invokeHost("docgen_destination_clear"); setExternal(null); publishExternal(null); }
+    catch { setExportNotice({ kind: "error", message: "The output folder could not be cleared." }); }
+  }, []);
+
   const onReveal = useCallback((path: string) => {
     if (!available) return;
     setRevealNotice(null);
@@ -88,5 +136,5 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} onExport={available ? onExport : undefined} exportNotice={exportNotice} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} onExport={available ? onExport : undefined} exportNotice={exportNotice} externalDestination={external?.name ?? null} onPickExternal={available ? () => void pickExternal() : undefined} onClearExternal={available ? () => void clearExternal() : undefined} />;
 }

@@ -9,7 +9,7 @@ import { describeFailure, isCancel, type Failure } from "./errors.ts";
 import type { DocsApi } from "./docs-api.ts";
 import { buildGenerateBody, estimateFit, fitNotice, MAX_SOURCE_CONTENT, type Selection } from "./model.ts";
 import { documentStem, normalizeDestination } from "./naming.ts";
-import { saveNewDocument, saveRevision, type SaveFs, type Saved } from "./save.ts";
+import { saveNewDocument, saveNewExternal, saveRevision, saveRevisionExternal, type ExternalSaver, type SaveFs, type Saved } from "./save.ts";
 import { collectSources, sendOrder, type SourceItem, type SourceReaders } from "./sources.ts";
 
 export type Phase = "idle" | "reading" | "generating" | "done" | "error";
@@ -87,6 +87,8 @@ export class GenerationRun {
   private preRevision: string | null = null;
   private lastSelection: Selection | null = null;
   private destinationDir = "llm-doc/generated";
+  private externalSaver: ExternalSaver | null = null;
+  private externalName: string | null = null;
   private readonly deps: RunDeps;
 
   constructor(deps: RunDeps) {
@@ -221,10 +223,18 @@ export class GenerationRun {
   /** Project-relative folder for new saves (Mac's Setup destination). Empty/invalid falls back to the default. */
   setDestination(dir: string): void {
     this.destinationDir = normalizeDestination(dir);
+    this.externalName = null;
+  }
+
+  /** Switch Save to the host-chosen folder (display name only), or back to the project folder. */
+  setExternalDestination(name: string | null, saver?: ExternalSaver): void {
+    if (saver) this.externalSaver = saver;
+    this.externalName = name;
   }
 
   /** Writes a chat reply to `<destination>/chat-output.md` (or `-N`). Never touches the document state. */
   async saveChatReply(text: string): Promise<Saved> {
+    if (this.externalName && this.externalSaver) return saveNewExternal(this.externalSaver, "chat-output", text);
     return saveNewDocument(this.deps.fs, "chat-output", text, this.destinationDir);
   }
 
@@ -243,7 +253,16 @@ export class GenerationRun {
     const my = this.token;
     try {
       let saved: Saved & { stem: string };
-      if (s.saved && !opts.asNew) {
+      if (this.externalName && this.externalSaver) {
+        if (s.saved?.external && !opts.asNew) {
+          const stem = s.saved.stem;
+          saved = { ...(await saveRevisionExternal(this.externalSaver, s.saved.path.replace(/^external:/, ""), s.doc, s.saved.hash)), stem };
+        } else {
+          const sel = this.lastSelection;
+          const stem = documentStem({ templateName: sel?.template?.name ?? null, commandName: null, date: (this.deps.today ?? (() => new Date()))() });
+          saved = { ...(await saveNewExternal(this.externalSaver, stem, s.doc)), stem };
+        }
+      } else if (s.saved && !s.saved.external && !opts.asNew) {
         const r = await saveRevision(this.deps.fs, s.saved.path, s.doc, s.saved.hash);
         saved = { ...r, stem: s.saved.stem };
       } else {

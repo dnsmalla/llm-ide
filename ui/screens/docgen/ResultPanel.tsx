@@ -22,6 +22,8 @@ export interface ResultPanelProps {
   onSaveAsNew: () => void;
   /** Native save panel: write a copy anywhere the user chooses (desktop only). */
   onExport?: (name: string, text: string) => void;
+  /** Display name of the external destination, when Save targets one. */
+  externalDestination?: string | null;
   onOpenSaved: (path: string) => void;
   /** Shows the saved file in the OS file manager. Absent outside the desktop app: no Reveal button. */
   onReveal?: (path: string) => void;
@@ -110,7 +112,8 @@ function Done(p: ResultPanelProps): ReactNode {
   const renderFence = useCallback((lang: string, text: string) => (runtime && isMermaidLang(lang) ? <MermaidView source={text} runtime={runtime} /> : null), [runtime]);
   // "Saved" means written and unchanged since. Anything else (never saved, or edited since the last save) is work that
   // "Start another" would throw away, so it asks first, as the Mac does.
-  const saveIsCurrent = r.saved !== null && !r.dirty;
+  const destinationMatches = r.saved !== null && (r.saved.external === true) === (p.externalDestination != null);
+  const saveIsCurrent = r.saved !== null && !r.dirty && destinationMatches;
   const submitRefine = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const text = instruction.trim();
@@ -127,7 +130,7 @@ function Done(p: ResultPanelProps): ReactNode {
       {p.surface === "visual" && !runtime && /```\s*mermaid/i.test(r.doc) && <p className="dg-muted">This output contains a Mermaid diagram. Diagrams are shown as source here until a bundled, sandboxed renderer is added.</p>}
       <div className="dg-bar" role="group" aria-label="Document actions">
         <button type="button" className="dg-btn dg-primary" disabled={r.saving || revising || saveIsCurrent} onClick={p.onSave}>
-          {r.saving ? "Saving…" : saveIsCurrent ? "Saved" : r.saved ? "Save changes" : "Save to llm-doc/generated"}
+          {r.saving ? "Saving…" : saveIsCurrent ? "Saved" : r.saved ? "Save changes" : p.externalDestination ? `Save to ${p.externalDestination}` : "Save to llm-doc/generated"}
         </button>
         {r.saveConflict && (
           <button type="button" className="dg-btn" onClick={p.onSaveAsNew}>
@@ -139,12 +142,12 @@ function Done(p: ResultPanelProps): ReactNode {
             Export…
           </button>
         )}
-        {r.saved && (
+        {r.saved && !r.saved.external && (
           <button type="button" className="dg-btn" onClick={() => p.onOpenSaved(r.saved!.path)}>
             Open in Explorer
           </button>
         )}
-        {r.saved && p.onReveal && (
+        {r.saved && !r.saved.external && p.onReveal && (
           <button type="button" className="dg-btn" title="Show the saved file in the file manager" onClick={() => p.onReveal!(r.saved!.path)}>
             Reveal
           </button>
@@ -176,7 +179,7 @@ function Done(p: ResultPanelProps): ReactNode {
       )}
       {r.saved && (
         <p className="dg-muted" role="status">
-          {r.dirty ? "Unsaved changes. Last saved to" : "Saved to"} <code>{r.saved.path}</code>
+          {r.dirty ? "Unsaved changes. Last saved to" : "Saved to"} <code>{r.saved.external ? r.saved.path.replace(/^external:/, "") : r.saved.path}</code>
         </p>
       )}
       {revising && (
