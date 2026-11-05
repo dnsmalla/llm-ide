@@ -32,6 +32,40 @@ function build() {
   const wrapKey = Buffer.from(hkdfSync('sha256', z, sha(R.enc([ephSpki, devSpki])), R.enc(['llmide/syncwrap/v1', epoch, ids.deviceId, sha(devSpki), sha(deskSpki), 'web']), 32));
   const wrapHeader = { purpose: 'syncwrap', userId: ids.userId, desktopId: ids.desktopId, from: ids.desktopId, to: ids.deviceId, epoch, session: '', seq: 11, issuedAt: 1762300000002, tier: 'web' };
   const syncwrap = R.seal({ header: wrapHeader, key: wrapKey, plaintext: R.enc([k.request, k.reply, k.snapshot, k.manifest]), signingKey, nonce: Buffer.alloc(12, 0x55), extra: ephSpki });
+  // Device -> desktop request and desktop -> device reply (design 4.4), for the device implementations.
+  const reqPlain = '{"v":1,"requestId":"RRRRRRRRRRRRRRRRRRRRRR","class":"chat.send","text":"hello"}';
+  const request = R.seal({ header: { purpose: 'request', userId: ids.userId, desktopId: ids.desktopId, from: ids.deviceId, to: ids.desktopId, epoch, session: '', seq: 1, issuedAt: 1762300000300, tier: '' },
+    key: k.request, plaintext: Buffer.from(reqPlain), signingKey: priv(keys.deviceSigningPkcs8), nonce: Buffer.alloc(12, 0x71) });
+  const replyPlain = '{"v":1,"requestId":"RRRRRRRRRRRRRRRRRRRRRR","ok":true,"text":"hi","finishedAt":1762300000400}';
+  const reply = R.seal({ header: hdr('reply', 13), key: k.reply, plaintext: Buffer.from(replyPlain), signingKey, nonce: Buffer.alloc(12, 0x72) });
+  const other = 'h1-00000000-0000-4000-8000-000000000002';
+  const typedNegatives = [
+    { target: 'snapshot', mutate: { op: 'flip', field: 'ct' }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'flip', field: 'sig' }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'flip', field: 'nonce' }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'truncate', field: 'ct' }, error: 'bad_ciphertext' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'purpose', value: 'manifest' }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'purpose', value: 'wrap' }, error: 'bad_purpose' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'epoch', value: 4 }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'to', value: other }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'eph', value: 'AAAA' }, error: 'bad_signature' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'v', value: 2 }, error: 'bad_version' },
+    { target: 'snapshot', mutate: { op: 'set', field: 'extra', value: 1 }, error: 'bad_envelope' },
+    { target: 'snapshot', mutate: { op: 'key', value: 'manifest' }, error: 'bad_ciphertext' },
+    { target: 'snapshot', mutate: { op: 'expect', field: 'epoch', value: 4 }, error: 'bad_epoch' },
+    { target: 'snapshot', mutate: { op: 'expect', field: 'to', value: other }, error: 'bad_to' },
+    { target: 'manifest', mutate: { op: 'set', field: 'seq', value: 11 }, error: 'bad_signature' },
+    { target: 'manifest', mutate: { op: 'expect', field: 'purpose', value: 'snapshot' }, error: 'bad_purpose' },
+    { target: 'request', mutate: { op: 'flip', field: 'sig' }, error: 'bad_signature' },
+    { target: 'request', mutate: { op: 'expect', field: 'from', value: other }, error: 'bad_from' },
+    { target: 'reply', mutate: { op: 'key', value: 'snapshot' }, error: 'bad_ciphertext' },
+    { target: 'reply', mutate: { op: 'expect', field: 'to', value: other }, error: 'bad_to' },
+    { target: 'syncwrap', mutate: { op: 'set', field: 'to', value: other }, error: 'bad_to' },
+    { target: 'syncwrap', mutate: { op: 'currentEpoch', value: 3 }, error: 'stale_epoch' },
+    { target: 'syncwrap', mutate: { op: 'set', field: 'tier', value: 'ios' }, error: 'bad_signature' },
+    { target: 'syncwrap', mutate: { op: 'set', field: 'purpose', value: 'snapshot' }, error: 'bad_purpose' },
+    { target: 'syncwrap', mutate: { op: 'flip', field: 'ct' }, error: 'bad_signature' },
+  ];
 
   // Enrollment (README "Enrollment"), built independently of extension/core/sync-enroll.mjs.
   const ENR_SALT = sha(Buffer.from('llmide-sync-enroll-v1'));
@@ -79,6 +113,7 @@ function build() {
     desktopSigningFingerprint: sha(deskSpki).toString('base64url'),
     requestKeyHex: hex(k.request), replyKeyHex: hex(k.reply), snapshotKeyHex: hex(k.snapshot), manifestKeyHex: hex(k.manifest),
     snapshot: { plaintext: snapPlain, env: snapshot }, manifest: { plaintext: manPlain, env: manifest }, syncwrap: { env: syncwrap }, enroll,
+    request: { plaintext: reqPlain, env: request }, reply: { plaintext: replyPlain, env: reply }, typedNegatives,
     negatives: ['flip:ct', 'flip:sig', 'truncate:ct', 'purpose=manifest', 'epoch=4', 'to=h1-00000000-0000-4000-8000-000000000002', 'v=2'],
   };
 }
@@ -101,6 +136,7 @@ if (write) {
   });
   const verifyEnv = (e, spki) => verify('sha256', Buffer.concat([Buffer.from(`llmide/${e.purpose}/v1\0`), R.enc([...R.headerFields(e), e.eph ? b(e.eph) : Buffer.alloc(0), b(e.nonce), b(e.ct)])]), { key: pub(spki), dsaEncoding: 'ieee-p1363' }, b(e.sig));
   const enrollOk = !!current.enroll && verifyEnv(current.enroll.claim.env, current.enroll.deviceSigningSpki) && verifyEnv(current.enroll.ack.env, current.keys.desktopSigningSpki);
-  if (!same || !sigOk || !enrollOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
+  const deviceOk = !!current.request && verifyEnv(current.request.env, current.keys.deviceSigningSpki) && verifyEnv(current.reply.env, current.keys.desktopSigningSpki);
+  if (!same || !sigOk || !enrollOk || !deviceOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
   console.log('sync v1 vectors ok');
 }

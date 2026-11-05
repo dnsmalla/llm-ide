@@ -39,3 +39,11 @@ Adding `enroll`/`enrollack` is additive: no existing byte changes, so `v` stays 
   "waiting for the first snapshot" (the desktop publishes up to 60 s after confirm), not "removed"; and the device
   switches to a newer epoch's keys as soon as the newer `wrap.bin` verifies (it is desktop-signed), keeping the old
   reply key for 24 h.
+
+## Typed negatives and device implementations
+
+`vectors/v1.json` → `typedNegatives` lists mutations of the `snapshot`, `manifest`, `request`, `reply` and `syncwrap`
+vectors with the exact `SyncCryptoError` code each must produce (`op`: `flip`, `truncate`, `set` a field, `expect` a
+header value, open with another purpose's `key`, or unwrap with a `currentEpoch`). Every implementation runs the whole
+list: Node `extension/tests/sync-envelope.test.mjs`, Swift `ios_app/SharedProtocol` (`SyncEnvelopeTests`, SP4), and
+WebCrypto (SP3). The `request` and `reply` vectors carry the device's own direction.

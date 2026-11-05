@@ -80,3 +80,30 @@ test('open refuses unknown envelope fields, unknown purposes and an over-cap fra
   assert.throws(() => S.pad(Buffer.alloc(S.MAX_FRAME + 1)), /frame_too_large/);
   assert.equal(S.spkiFingerprint(b(sync.keys.desktopSigningSpki)), sync.desktopSigningFingerprint);
 });
+
+test('sync request and reply vectors open with the per-device keys', () => {
+  const k = S.deviceKeys(hex(sync.rootHex), sync.ids, sync.epoch);
+  assert.equal(S.open({ env: sync.request.env, key: k.request, verifyKey: pub(sync.keys.deviceSigningSpki), expect: { purpose: 'request', from: sync.ids.deviceId, to: sync.ids.desktopId } }).toString(), sync.request.plaintext);
+  assert.equal(S.open({ env: sync.reply.env, key: k.reply, verifyKey: pub(sync.keys.desktopSigningSpki), expect: { purpose: 'reply', to: sync.ids.deviceId } }).toString(), sync.reply.plaintext);
+});
+
+test('sync typed negatives: every mutation fails closed with its stated code', () => {
+  const k = S.deviceKeys(hex(sync.rootHex), sync.ids, sync.epoch);
+  const keyOf = { request: k.request, reply: k.reply, snapshot: k.snapshot, manifest: k.manifest };
+  for (const n of sync.typedNegatives) {
+    const env = structuredClone(sync[n.target].env);
+    const m = n.mutate;
+    let key = keyOf[n.target]; let expect = {}; let currentEpoch = 0;
+    if (m.op === 'flip') { const x = b(env[m.field]); x[0] ^= 1; env[m.field] = x.toString('base64url'); }
+    else if (m.op === 'truncate') env[m.field] = b(env[m.field]).subarray(0, -1).toString('base64url');
+    else if (m.op === 'set') env[m.field] = m.value;
+    else if (m.op === 'expect') expect = { [m.field]: m.value };
+    else if (m.op === 'key') key = keyOf[m.value];
+    else if (m.op === 'currentEpoch') currentEpoch = m.value;
+    const verifyKey = pub(n.target === 'request' ? sync.keys.deviceSigningSpki : sync.keys.desktopSigningSpki);
+    const run = n.target === 'syncwrap'
+      ? () => S.unwrapSync({ env, ecdhPrivate: priv(sync.keys.deviceEcdhPkcs8), deviceEcdhSpki: b(sync.keys.deviceEcdhSpki), desktopSigningSpki: b(sync.keys.desktopSigningSpki), verifyKey, currentEpoch, deviceId: sync.ids.deviceId })
+      : () => S.open({ env, key, verifyKey, expect });
+    assert.throws(run, (e) => e instanceof S.SyncCryptoError && e.code === n.error, `${n.target} ${JSON.stringify(m)} -> ${n.error}`);
+  }
+});
