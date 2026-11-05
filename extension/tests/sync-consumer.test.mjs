@@ -36,6 +36,7 @@ function setup() {
   const store = createMemoryStore();
   const base = `${state.syncId}/d/${dev.dir}`;
   const send = async (body, { issuedAt = NOW, signer = sig.privateKey, requestId = randomBytes(16).toString('base64url'), epoch = keys.epoch } = {}) => {
+    await store.put(`${base}/key.bin`, keys.signingSpki);
     const env = S.seal({ header: { purpose: 'request', userId: u, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch, session: '', seq: 1, issuedAt, tier: '' },
       key: dk.request, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, class: 'chat.send', text: 'hello', ...body })), signingKey: signer });
     await store.put(`${base}/in/${issuedAt}-${requestId}.bin`, Buffer.from(JSON.stringify(env)));
@@ -117,6 +118,7 @@ test('quota: at most perDrain per drain and perDay per device', async () => {
 test('startup sweep answers turn_failed for a request left running by a crash', async () => {
   const t = setup();
   const requestId = 'R'.repeat(22);
+  await t.store.put(`${t.base}/key.bin`, ensureSyncKeys(t.u).signingSpki);
   st.recordRequest(t.u, 'h1-dev-' + n, requestId, NOW - 1000);
   assert.ok((await sweepStuckRequests({ now: NOW, storeFor: () => t.store })).swept >= 1);
   assert.deepEqual(await t.reply(requestId), { v: 1, requestId, ok: false, code: 'turn_failed' });

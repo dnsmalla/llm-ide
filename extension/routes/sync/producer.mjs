@@ -4,7 +4,8 @@
 import { randomBytes } from 'node:crypto';
 import { deviceKeys, seal, makeSyncWrap, sha256 } from '../../core/sync-envelope.mjs';
 import { getSyncState, listSyncDevices, getPublished, setPublished, nextSeq, recordPublish, setDeviceWrapEpoch } from '../../kb/sync-state.mjs';
-import { ensureSyncKeys, syncIdsFor } from './keys.mjs';
+import { ensureSyncKeys, syncIdsFor, rotateKeys } from './keys.mjs';
+import { pruneMissingDevices } from './registry.mjs';
 import { loadKinds as defaultLoadKinds, KINDS } from './kinds.mjs';
 
 export const HEARTBEAT_MS = 15 * 60_000;
@@ -28,6 +29,7 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
   const out = { devices: 0, blobs: 0, manifests: 0 };
   const state = getSyncState(userId);
   if (!state?.enabled) return out;
+  if ((await pruneMissingDevices(userId, { store })).dropped.length) rotateKeys(userId, now);
   const keys = ensureSyncKeys(userId);
   const ids = syncIdsFor(userId, state);
   const frames = loadKinds(userId, now);

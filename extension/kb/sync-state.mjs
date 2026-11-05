@@ -116,3 +116,13 @@ export function countRequestsSince(userId, deviceId, sinceMs) {
   requireUser(userId);
   return getDb().prepare('SELECT COUNT(*) n FROM sync_requests WHERE user_id = ? AND device_id = ? AND received_at >= ?').get(userId, deviceId, sinceMs).n;
 }
+
+/** Revoke (design 5.3): the device row and its published-blob records go together; its request history stays. */
+export function deleteSyncDevice(userId, deviceId) {
+  requireUser(userId);
+  const db = getDb();
+  return db.transaction(() => {
+    db.prepare('DELETE FROM sync_published WHERE user_id = ? AND device_id = ?').run(userId, deviceId);
+    return db.prepare('DELETE FROM sync_devices WHERE user_id = ? AND device_id = ?').run(userId, deviceId).changes === 1;
+  })();
+}

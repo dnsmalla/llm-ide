@@ -9,6 +9,7 @@ import { getSyncState, listSyncDevices, recordRequest, finishRequest, countReque
 import { getDb } from '../../kb/db.mjs';
 import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
 import { ensureSyncKeys, previousRoot } from './keys.mjs';
+import { folderPresent } from './registry.mjs';
 
 export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAgeMs: 86_400_000, maxSkewMs: 600_000, perDrain: 5, perDay: 50, turnMs: 600_000, outboxDays: 7 });
 const NAME_RE = /^([0-9]{13})-([A-Za-z0-9_-]{22})\.bin$/;
@@ -67,9 +68,11 @@ export async function sweepStuckRequests({ now = Date.now(), storeFor } = {}) {
     try {
       const keys = ensureSyncKeys(row.user_id);
       const dk = deviceKeys(keys.root, { userId: row.user_id, desktopId: state.syncId, deviceId: dev.deviceId }, keys.epoch);
+      const base = `${state.syncId}/d/${dev.dir}`;
+      if (!(await folderPresent(store, base))) { finishRequest(row.user_id, row.device_id, row.request_id, 'failed'); continue; }
       const env = seal({ header: { purpose: 'reply', userId: row.user_id, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq: nextSeq(row.user_id, now), issuedAt: now, tier: '' },
         key: dk.reply, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId: row.request_id, ok: false, code: 'turn_failed' })), signingKey: keys.signingKey });
-      await store.put(`${state.syncId}/d/${dev.dir}/out/${row.request_id}.bin`, Buffer.from(JSON.stringify(env)));
+      await store.put(`${base}/out/${row.request_id}.bin`, Buffer.from(JSON.stringify(env)));
       finishRequest(row.user_id, row.device_id, row.request_id, 'failed');
       swept += 1;
     } catch { /* leave it running for the next sweep */ }
@@ -89,6 +92,7 @@ export async function drainOnce({ userId, store, now = Date.now(), deps = defaul
     const verifyKey = createPublicKey({ key: dev.signingSpki, format: 'der', type: 'spki' });
     const prevDk = prev && deviceKeys(prev.root, { userId, desktopId: state.syncId, deviceId: dev.deviceId }, prev.epoch);
     const writeReply = async (requestId, body, { key = dk.reply, epoch = keys.epoch } = {}) => {
+      if (!(await folderPresent(store, base))) return; // revoked or deleted during the turn: never recreate the folder
       const env = seal({ header: { purpose: 'reply', userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch, session: '', seq: nextSeq(userId, now), issuedAt: now, tier: '' },
         key, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, ...body })), signingKey: keys.signingKey });
       await store.put(`${base}/out/${requestId}.bin`, Buffer.from(JSON.stringify(env)));
