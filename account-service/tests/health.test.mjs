@@ -8,7 +8,7 @@ test('GET /health reports the service and the sign-up state', async (t) => {
   t.after(() => app.close());
   const res = await createClient(app.base).call('GET', '/health');
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { ok: true, service: 'account-service', signupOpen: false });
+  assert.deepEqual(res.body, { ok: true, service: 'account-service', signupOpen: false, directSignup: false });
   assert.equal(res.headers['cache-control'], 'no-store');
   assert.equal(res.headers['access-control-allow-origin'], undefined);
 });
