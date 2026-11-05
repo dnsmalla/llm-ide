@@ -45,7 +45,8 @@ export function App({ model: given, sync: givenSync }: { model?: AppModel; sync?
   useEffect(() => { void sync.start(); return sync.dispose; }, [sync]);
   const live = conn?.kind === "ready";
   useEffect(() => { if (live) sync.pause(); else sync.resume(); }, [live, sync]);
-  const hostDown = !s.session || conn?.kind === "reconnecting" || conn?.kind === "failed";
+  // While the first connection attempt is still running the host is not "down" yet: no sync-tier flash before chat.
+  const hostDown = (!s.session && !s.busy) || conn?.kind === "reconnecting" || conn?.kind === "failed";
   if (sy.phase === "pairing" || (sy.phase !== "none" && hostDown)) return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} />;
   if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} />;
   return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)}

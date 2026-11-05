@@ -128,3 +128,11 @@ test("sync: never paired and not linked shows Pairing with the paste-a-link form
   assert.match(out, /Pairing link/);
   assert.match(out, /Pair browser/);
 });
+
+test("sync: while the first connection attempt is running, the sync tier does not flash before the chat", () => {
+  const up = desk({ token: "k".repeat(40) });
+  const m = up.model();
+  m.start(); // attempt in flight: busy, no session yet
+  assert.equal(m.getState().busy, true);
+  assert.doesNotMatch(html(h(UI.App, { model: m, sync: fakeSync("locked") })), /offline sync/);
+});
