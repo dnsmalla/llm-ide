@@ -78,6 +78,8 @@ A LaunchAgent (`com.llmide.hostapi-tunnel`) holds:
 ssh -N -R 127.0.0.1:3016:127.0.0.1:3016 root@72.62.76.92
 ```
 
+Do not turn on `LLMIDE_HOST_API_READ` (chat history and usage over Host API v1) for a host reached through this tunnel yet. Through it, nginx on the VPS terminates TLS and sees tokens and chat text in the clear, every internet client reaches the listener as `127.0.0.1` (one shared pairing throttle, so one client can lock the owner out of pairing, and the audit log loses the real address), and other VPS processes can reach the tunnel port without nginx's Origin check. Wait until the real client address is forwarded and end-to-end encryption to the host exists (the relay design).
+
 Keep that process running; it is what makes the public `wss://` URL reach the Mac. If the host app
 is restarted, the listener keeps port 3016 and the tunnel reconnects.
 
