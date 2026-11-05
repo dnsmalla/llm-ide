@@ -31,7 +31,7 @@ import {
 import { fetchGmail, normalizeGmailOptions } from '../connectors/google/gmail.mjs';
 import { syncCalendars, normalizeCalendarOptions, listCalendars } from '../connectors/google/gcal.mjs';
 import { syncDrive, normalizeDriveOptions, listFolders } from '../connectors/google/gdrive.mjs';
-import { driveContentGranted } from '../connectors/google/google-scopes.mjs';
+import { driveContentGranted, productsEnabledBy } from '../connectors/google/google-scopes.mjs';
 
 const ACCOUNT_ID_RE = /^[a-f0-9]{12}$/;
 const PRODUCTS = new Set(['gmail', 'gcal', 'gdrive']);
@@ -99,6 +99,39 @@ async function guarded(res, userId, product, accountId, fn) {
 function settle(userId, product, accountId, e) {
   const reconnect = e?.code === 'GOOGLE_RECONNECT_NEEDED';
   try { patchSyncState(userId, product, accountId, { status: reconnect ? 'reconnect_needed' : 'error', lastError: reconnect ? 'Reconnect needed' : String(e?.code || 'error'), lastRunAt: nowIso() }); } catch { /* best effort */ }
+}
+
+/**
+ * One Pattern A index run (gcal | gdrive), shared by POST /kb/google/sync and the bus handler for `sources.update`.
+ * Re-checks at call time that the account still exists and the product's scopes are still granted, before any write.
+ * Throws GoogleApiError (GOOGLE_NOT_FOUND, GOOGLE_PRODUCT_NOT_GRANTED, GOOGLE_SYNC_RUNNING, ...); returns the summary.
+ */
+export async function runGoogleSync(userId, accountId, product) {
+  const db = getDb();
+  const acct = getGoogleAccount(userId, accountId);
+  if (!acct) throw new GoogleApiError('GOOGLE_NOT_FOUND', 'Unknown Google account');
+  if (!acct.products.includes(product) || !productsEnabledBy(acct.scopes).includes(product)) {
+    throw new GoogleApiError('GOOGLE_PRODUCT_NOT_GRANTED', 'This product was not granted for the account. Connect it again with that product ticked.');
+  }
+  const k = key(userId, product, accountId);
+  if (running.has(k)) throw new GoogleApiError('GOOGLE_SYNC_RUNNING', 'A sync for this account is already running');
+  running.add(k);
+  try {
+    const state = getSyncState(userId, product, accountId);
+    const session = googleSession(db, userId, accountId);
+    if (product === 'gcal') {
+      const r = await syncCalendars({ session, userId, accountId, cursor: state.cursor, options: state.options });
+      patchSyncState(userId, 'gcal', accountId, { cursor: r.nextCursor, status: r.pending ? 'pending' : 'idle', lastError: null, lastRunAt: nowIso() });
+      safeAudit(db, { userId, action: 'connector.sync', resource: `gcal:${accountId}`, detail: { events: r.events, cancelled: r.cancelled, pending: r.pending } });
+      if (r.events > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Google Calendar: ${r.events} event${r.events === 1 ? '' : 's'} updated`, detail: { connector: 'gcal', count: r.events } }); } catch { /* best effort */ } }
+      return { accountId, product: 'gcal', pending: r.pending, events: r.events, cancelled: r.cancelled, calendars: r.calendars };
+    }
+    const r = await syncDrive({ session, userId, accountId, cursor: state.cursor, options: state.options, contentGranted: driveContentGranted(acct.scopes) });
+    patchSyncState(userId, 'gdrive', accountId, { cursor: r.nextCursor, status: r.pending ? 'pending' : 'idle', lastError: null, lastRunAt: nowIso() });
+    safeAudit(db, { userId, action: 'connector.sync', resource: `gdrive:${accountId}`, detail: { files: r.stats.files, removed: r.stats.removed, withContent: r.stats.withContent, pending: r.pending } });
+    if (r.stats.files > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Google Drive: ${r.stats.files} file${r.stats.files === 1 ? '' : 's'} updated`, detail: { connector: 'gdrive', count: r.stats.files } }); } catch { /* best effort */ } }
+    return { accountId, product: 'gdrive', pending: r.pending, mode: r.mode, stats: r.stats };
+  } catch (e) { settle(userId, product, accountId, e); throw e; } finally { running.delete(k); }
 }
 
 export async function handleGoogleRoutes(req, res, { userId, url }) {
@@ -206,27 +239,9 @@ export async function handleGoogleRoutes(req, res, { userId, url }) {
   if (req.method === 'POST' && path === '/kb/google/sync') {
     const b = await body(req, res); if (!b) return true;
     if (b.product !== 'gcal' && b.product !== 'gdrive') return fail(res, 400, 'VALIDATION_FAILED', 'product must be gcal or gdrive');
-    const acct = account(res, userId, b.accountId, b.product); if (!acct) return true;
-    return guarded(res, userId, b.product, acct.accountId, async () => {
-      const state = getSyncState(userId, b.product, acct.accountId);
-      const session = googleSession(db, userId, acct.accountId);
-      try {
-        if (b.product === 'gcal') {
-          const r = await syncCalendars({ session, userId, accountId: acct.accountId, cursor: state.cursor, options: state.options });
-          patchSyncState(userId, 'gcal', acct.accountId, { cursor: r.nextCursor, status: r.pending ? 'pending' : 'idle', lastError: null, lastRunAt: nowIso() });
-          safeAudit(db, { userId, action: 'connector.sync', resource: `gcal:${acct.accountId}`, detail: { events: r.events, cancelled: r.cancelled, pending: r.pending } });
-          if (r.events > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Google Calendar: ${r.events} event${r.events === 1 ? '' : 's'} updated`, detail: { connector: 'gcal', count: r.events } }); } catch { /* best effort */ } }
-          sendJSON(res, 200, { accountId: acct.accountId, product: 'gcal', pending: r.pending, events: r.events, cancelled: r.cancelled, calendars: r.calendars });
-        } else {
-          const r = await syncDrive({ session, userId, accountId: acct.accountId, cursor: state.cursor, options: state.options, contentGranted: driveContentGranted(acct.scopes) });
-          patchSyncState(userId, 'gdrive', acct.accountId, { cursor: r.nextCursor, status: r.pending ? 'pending' : 'idle', lastError: null, lastRunAt: nowIso() });
-          safeAudit(db, { userId, action: 'connector.sync', resource: `gdrive:${acct.accountId}`, detail: { files: r.stats.files, removed: r.stats.removed, withContent: r.stats.withContent, pending: r.pending } });
-          if (r.stats.files > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Google Drive: ${r.stats.files} file${r.stats.files === 1 ? '' : 's'} updated`, detail: { connector: 'gdrive', count: r.stats.files } }); } catch { /* best effort */ } }
-          sendJSON(res, 200, { accountId: acct.accountId, product: 'gdrive', pending: r.pending, mode: r.mode, stats: r.stats });
-        }
-      } catch (e) { settle(userId, b.product, acct.accountId, e); return googleFail(res, e, `${b.product}.sync`); }
-      return true;
-    });
+    if (typeof b.accountId !== 'string' || !ACCOUNT_ID_RE.test(b.accountId)) return fail(res, 400, 'VALIDATION_FAILED', 'accountId is required');
+    try { sendJSON(res, 200, await runGoogleSync(userId, b.accountId, b.product)); } catch (e) { return googleFail(res, e, `${b.product}.sync`); }
+    return true;
   }
 
   return false;

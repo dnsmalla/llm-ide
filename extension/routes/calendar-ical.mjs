@@ -76,6 +76,41 @@ function publicSource(s, userId) {
   return { sourceId: s.sourceId, name: s.name, calendarIdPrefix: s.idPrefix, host: s.host, status: st.status, lastRunAt: st.lastRunAt, lastError: st.lastError, options: normalizeIcalOptions(st.options) };
 }
 
+/**
+ * One capped feed sync, shared by POST /kb/calendar-ical/sync and the bus handler for `sources.update`. Re-checks at call
+ * time that the feed (row and vault URL) still exists. Throws IcalError (ICAL_NOT_FOUND, ICAL_SYNC_RUNNING, ...).
+ */
+export async function runIcalSync(userId, sourceId) {
+  const db = getDb();
+  const s = typeof sourceId === 'string' && SOURCE_ID_RE.test(sourceId) ? getIcalSource(userId, sourceId) : null;
+  if (!s) throw new IcalError('ICAL_NOT_FOUND', 'Unknown calendar feed');
+  const k = `${userId}\u0000${s.sourceId}`;
+  if (running.has(k)) throw new IcalError('ICAL_SYNC_RUNNING', 'A sync for this calendar feed is already running');
+  running.add(k);
+  try {
+    const state = getSyncState(userId, 'ical', s.sourceId);
+    try {
+      const r = await syncIcalSource({
+        userId, sourceId: s.sourceId, sourceName: s.name, now: clock(), cursor: state.cursor, options: state.options,
+        getUrl: () => { const u = getSecret(db, userId, vaultKey(s.sourceId)); if (!u) throw new IcalError('ICAL_URL_INVALID', 'The stored calendar address is missing. Remove the feed and add it again.'); return u; },
+      });
+      if (r.status === 'revoked') {
+        patchSyncState(userId, 'ical', s.sourceId, { status: 'revoked', lastError: 'ICAL_FEED_REVOKED', lastRunAt: nowIso() });
+        safeAudit(db, { userId, action: 'connector.sync', resource: `ical:${s.sourceId}`, detail: { status: 'revoked' } });
+        throw new IcalError('ICAL_FEED_REVOKED', 'The calendar address no longer works (the secret address was reset or the calendar was removed). Add the new address.');
+      }
+      patchSyncState(userId, 'ical', s.sourceId, { cursor: r.nextCursor, status: 'idle', lastError: null, lastRunAt: nowIso() });
+      safeAudit(db, { userId, action: 'connector.sync', resource: `ical:${s.sourceId}`, detail: { status: r.status, events: r.events, instances: r.instances, cancelled: r.cancelled, removed: r.removed, truncated: r.truncated } });
+      if (r.instances > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Calendar feed: ${r.instances} event${r.instances === 1 ? '' : 's'} updated`, detail: { connector: 'ical', count: r.instances } }); } catch { /* best effort */ } }
+      return { sourceId: s.sourceId, status: r.status, events: r.events, instances: r.instances, cancelled: r.cancelled, removed: r.removed, truncated: r.truncated, warnings: r.warnings };
+    } catch (e) {
+      // The revoked branch already wrote its own status; everything else is an error state.
+      if (e?.code !== 'ICAL_FEED_REVOKED') { try { patchSyncState(userId, 'ical', s.sourceId, { status: 'error', lastError: String(e?.code || 'error'), lastRunAt: nowIso() }); } catch { /* best effort */ } }
+      throw e;
+    }
+  } finally { running.delete(k); }
+}
+
 export async function handleCalendarIcalRoutes(req, res, { userId, url }) {
   const path = url.split('?')[0];
   if (!path.startsWith('/kb/calendar-ical/')) return false;
@@ -137,31 +172,8 @@ export async function handleCalendarIcalRoutes(req, res, { userId, url }) {
   if (req.method === 'POST' && path === '/kb/calendar-ical/sync') {
     const b = await body(req, res); if (!b) return true;
     const s = source(res, userId, b.sourceId); if (!s) return true;
-    const k = `${userId}\u0000${s.sourceId}`;
-    if (running.has(k)) return fail(res, 409, 'ICAL_SYNC_RUNNING', 'A sync for this calendar feed is already running');
-    running.add(k);
-    try {
-      const state = getSyncState(userId, 'ical', s.sourceId);
-      try {
-        const r = await syncIcalSource({
-          userId, sourceId: s.sourceId, sourceName: s.name, now: clock(), cursor: state.cursor, options: state.options,
-          getUrl: () => { const u = getSecret(db, userId, vaultKey(s.sourceId)); if (!u) throw new IcalError('ICAL_URL_INVALID', 'The stored calendar address is missing. Remove the feed and add it again.'); return u; },
-        });
-        if (r.status === 'revoked') {
-          patchSyncState(userId, 'ical', s.sourceId, { status: 'revoked', lastError: 'ICAL_FEED_REVOKED', lastRunAt: nowIso() });
-          safeAudit(db, { userId, action: 'connector.sync', resource: `ical:${s.sourceId}`, detail: { status: 'revoked' } });
-          return fail(res, 409, 'ICAL_FEED_REVOKED', 'The calendar address no longer works (the secret address was reset or the calendar was removed). Add the new address.');
-        }
-        patchSyncState(userId, 'ical', s.sourceId, { cursor: r.nextCursor, status: 'idle', lastError: null, lastRunAt: nowIso() });
-        safeAudit(db, { userId, action: 'connector.sync', resource: `ical:${s.sourceId}`, detail: { status: r.status, events: r.events, instances: r.instances, cancelled: r.cancelled, removed: r.removed, truncated: r.truncated } });
-        if (r.instances > 0) { try { recordActivity({ userId, kind: 'knowledge_updated', title: `Calendar feed: ${r.instances} event${r.instances === 1 ? '' : 's'} updated`, detail: { connector: 'ical', count: r.instances } }); } catch { /* best effort */ } }
-        sendJSON(res, 200, { sourceId: s.sourceId, status: r.status, events: r.events, instances: r.instances, cancelled: r.cancelled, removed: r.removed, truncated: r.truncated, warnings: r.warnings });
-      } catch (e) {
-        try { patchSyncState(userId, 'ical', s.sourceId, { status: 'error', lastError: String(e?.code || 'error'), lastRunAt: nowIso() }); } catch { /* best effort */ }
-        return icalFail(res, e, 'sync');
-      }
-      return true;
-    } finally { running.delete(k); }
+    try { sendJSON(res, 200, await runIcalSync(userId, s.sourceId)); } catch (e) { return icalFail(res, e, 'sync'); }
+    return true;
   }
 
   return false;
