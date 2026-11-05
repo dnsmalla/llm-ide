@@ -14,7 +14,6 @@ function Chat({ session, onForget }: { session: Session; onForget: () => void })
   const [conn, setConn] = useState<ConnectionState>(c.state);
   useEffect(() => c.onState(setConn), [c]);
   const capabilities = state.capabilities ?? c.capabilities;
-  useEffect(() => { if (conn.kind === "ready") void read.refresh(); }, [read, conn.kind]);
   return (
     <div className="web-shell">
       <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}

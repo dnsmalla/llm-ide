@@ -74,3 +74,9 @@ test('usageOf: numbers and labels only, no limit configuration, bounded', () => 
   assert.deepEqual(r.providers[1].models[0], { model: 'm0', state: 'ok', unit: 'runs', window: 'daily', used: 0, limit: 0, resetAt: 0 });
   valid('usage.get', r);
 });
+
+test('usageOf: a provider whose name redacts to nothing still validates', () => {
+  const r = usageOf({ providers: { '': { active: {}, models: [] } } });
+  assert.equal(r.providers[0].provider, 'unknown');
+  valid('usage.get', r);
+});

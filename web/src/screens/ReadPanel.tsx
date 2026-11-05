@@ -59,7 +59,7 @@ export function ReadPanel(p: ReadPanelProps) {
           {state.sessions.map((c) => (
             <li key={c.id}>
               {c.phoneChat
-                ? <span>{c.title} (this device)</span>
+                ? <span>{c.title} (live chat)</span>
                 : <button type="button" onClick={() => p.onOpen(c.id, c.title)}>{c.title}</button>}
             </li>
           ))}

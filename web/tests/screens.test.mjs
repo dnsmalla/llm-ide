@@ -99,7 +99,7 @@ test("read panel: usage numbers, chat list with the phone chat marked, host text
   const out = html(h(UI.ReadPanel, readProps(state)));
   assert.match(out, /Sonnet: 42 of 100 runs · daily/);
   assert.match(out, /m2: 5 tokens · monthly, no cap/);
-  assert.match(out, /Phone chat \(this device\)/);
+  assert.match(out, /Phone chat \(live chat\)/);
   assert.doesNotMatch(out, /<img/);
   assert.match(out, /More chats/);
 });

@@ -51,7 +51,7 @@ export function usageOf(summary) {
     const active = p?.active ?? {};
     const activeModel = text(active.model, 200);
     return {
-      provider: text(provider, 64),
+      provider: text(provider, 64) || 'unknown',
       status: STATUSES.has(active.status) ? active.status : 'unconfigured',
       ...(activeModel ? { activeModel } : {}),
       models: (Array.isArray(p?.models) ? p.models : []).slice(0, READ_LIMITS.modelsMax).map((m) => {
