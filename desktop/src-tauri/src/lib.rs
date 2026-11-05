@@ -8,6 +8,7 @@ mod chat_store;
 mod confirm;
 mod crash_report;
 mod export_note;
+mod docgen_dest;
 mod core_env;
 mod core_host;
 mod core_log;
@@ -343,6 +344,10 @@ macro_rules! product_handlers {
                 crash_report::crash_report_latest,
                 crash_report::crash_report_dismiss,
                 export_note::export_note,
+                docgen_dest::docgen_destination_status,
+                docgen_dest::docgen_destination_pick,
+                docgen_dest::docgen_destination_clear,
+                docgen_dest::docgen_save_external,
                 git_scm::git_commit_files,
                 git_scm::git_commit_diff,
                 git_scm::git_branch_delete,
