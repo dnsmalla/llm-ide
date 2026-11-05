@@ -7,8 +7,8 @@ epochs, threat model) and the relay v1 envelope (`schema/relay/v1`, reviewed in
 [relay review](../reviews/2026-11-05-relay-review.md) batch 1 "Holds up"). The first implementation plan is
 [desktop producer](../plans/2026-11-05-box-sync-desktop-producer.md).
 
-The filename keeps the approved name "box". The first adapter is the user's own server (SFTP). ADR 0020
-gives the ruling.
+The filename keeps the approved name "box". **The first adapter is MEGA (user decision, 2026-11-05).** The
+user's own server over SFTP and Box follow as later sub-projects (§14). ADR 0020 records the order.
 
 ## 1. Goals and non-goals
 
@@ -193,7 +193,8 @@ desktop starts a new epoch.
 |---|---|---|
 | `K_root[epoch]` (32 random bytes) | core vault `sync.rootKey` (internal key) | until rotation |
 | Desktop signing key (ECDSA P-256, PKCS8) | core vault `sync.signingKey` | until "Reset sync" (devices re-pair) |
-| SSH key (ed25519, OpenSSH) for the own-server adapter | core vault `sync.sshKey` | until "Replace key" |
+| MEGA sync-account email and password (MEGA adapter, SP1) | core vault `sync.megaEmail`, `sync.megaPassword` (internal keys) | until changed in Settings |
+| SSH key (ed25519, OpenSSH) for the own-server adapter (later sub-project SP5) | core vault `sync.sshKey` | until "Replace key" |
 | Per-device request/reply/snapshot/manifest keys | derived; sent to the device in its `syncwrap` | per epoch |
 | Device ECDH and ECDSA P-256 pairs | device: iOS Keychain / Secure Enclave where possible; PWA non-extractable `CryptoKey` in IndexedDB | until revoke |
 
@@ -302,14 +303,16 @@ The PIN for Host API v1 is untouched. One QR serves both: the Host API fields (`
   Prompts from two devices go into the one phone chat in drain order. Each reply goes only to its
   sender's `out/`.
 - `put` is atomic per file. The SFTP adapter writes a temporary file then uses `posix-rename`. Box
-  uploads a new version. MEGA uploads a new node, then deletes the old one, and the manifest names the
-  node.
+  uploads a new version. MEGA uploads a new node with the same name, then deletes the old one
+  permanently. Until the delete lands, a reader takes the newest node of that name.
 - A device that sends the same `requestId` twice gets one execution. The second file is deleted
   without a turn, and its reply is the first one's.
 
 ## 8. Adapters
 
-### 8.1 Own server over SFTP (first adapter)
+### 8.1 Own server over SFTP (later sub-project SP5)
+
+Written first as the first adapter; the user then chose MEGA first (2026-11-05). The design below stands for SP5.
 
 **Desktop library.** The Node core uses `ssh2` 1.17.0 (npm, MIT, published 2025-08-20). It is pure
 JavaScript, and its optional native `cpu-features`/`nan` only speed it up. Its SFTP client provides
@@ -330,7 +333,7 @@ IPC for every file, and they would touch `desktop/src-tauri`, which another work
   `SHA256:` plus the unpadded base64 of SHA-256 over the key blob. There is never trust-on-first-use. A
   mismatch later is a hard stop with "The server's identity changed", and the setup must be redone.
 
-**Server setup** (once, as root; `deploy/vps/sync-sftp.md` in sub-project 1):
+**Server setup** (once, as root; `deploy/vps/sync-sftp.md` in SP5):
 
 ```bash
 useradd --system --no-create-home --shell /usr/sbin/nologin llmidesync
@@ -415,7 +418,7 @@ narrow, because nginx exposes one folder. SFTP from the phone would need Citadel
 (Apache-2.0), a per-device SSH key added to the server, and either a per-device Unix account or access
 to the whole chroot. That is more code and a wider scope for the same function.
 
-### 8.2 Box (second adapter)
+### 8.2 Box (later sub-project SP6)
 
 **Desktop: CCG first, one-time consent as the fallback.** This is grounded in
 `extension/connectors/box.mjs`. Today the connector authenticates with a Client Credentials Grant
@@ -466,14 +469,14 @@ developer console:
 - Change signal: Box user-event long polling (`GET /events` with `stream_position`) works from both the
   CCG and the OAuth session (`watch` in the adapter). Polling is the fallback.
 
-### 8.3 MEGA (third adapter, opt-in)
+### 8.3 MEGA (first adapter, user decision 2026-11-05)
 
 Facts, checked 2026-11-05:
 
 | Topic | Finding |
 |---|---|
 | Official SDK | `meganz/sdk`, C++, **BSD-2-Clause**, active (last push 2026-10-30). `fastLogin(session)` resumes from `dumpSession()`; `multiFactorAuthLogin(email, password, pin)`; `killSession(handle)`; needs an app key (`API_EAPPKEY`). Bindings exist for iOS (Objective-C, usable from Swift); there is **no Node binding**. |
-| JS library | `megajs` (npm), **MIT**, **unofficial**, latest 1.3.10 and `next` 1.3.13-next.1 (2026-04-20), one maintainer, runs in Node and browsers (fetch-based), handles MEGA's `X-Hashcash` challenge, supports `secondFactorCode`. Its `login()` refuses to start a session without email and password ("starting a session without credentials isn't supported"). It has **no session resume**. |
+| JS library | `megajs` (npm), **MIT**, **unofficial**, latest 1.3.10 (published 2026-04-20) and `next` 1.3.13-next.1, one maintainer, repository `qgustavor/mega` last pushed 2026-04-20 and not archived. Runs in Node and browsers (fetch-based, no native code); dependencies `pumpify` and `stream-skip` (MIT). It handles MEGA's `X-Hashcash` challenge and supports `secondFactorCode`. Its `login()` refuses to start a session without email and password ("starting a session without credentials isn't supported"). **Correction (read in the 1.3.10 package):** `Storage#toJSON()` / `Storage.fromJSON()` do resume a session without the password, but the JSON carries the session id **and the account master key**, so it is as powerful as the password. |
 | OAuth / app tokens | None found. Third-party clients log in with email + password (+ 2FA code) and get a session. Absence is not confirmed by an official statement. |
 | Session secret | A MEGA session that a client can resume (SDK `dumpSession`, MEGAcmd `session`) carries the session id **and the account key material**. Holding it gives full read and write to the whole account until it is killed (`killSession`, or "close other sessions" in the MEGA web app). |
 | CORS | `g.api.mega.co.nz` answers a cross-origin preflight with `Access-Control-Allow-Origin: *` (checked with curl). A PWA can call the API. |
@@ -489,11 +492,11 @@ setup, but it is the account password.
 1. **A separate MEGA account used only for LLM-IDE.** It holds nothing but our ciphertext, so its
    compromise exposes no personal files and no plaintext. The user's own MEGA account is never
    connected.
-2. Desktop: megajs cannot resume, so the dedicated account's password is stored in the vault
-   (`sync.megaPassword`), which is keychain-rooted. The secret in custody is then that account's
-   password and nothing else. A later upgrade to the official SDK through a native bridge could store
-   only a `dumpSession()` string, but that string is just as powerful. The gain is that a password
-   change revokes it.
+2. Desktop: the dedicated account's email and password are stored in the vault (`sync.megaEmail`,
+   `sync.megaPassword`), which is keychain-rooted. The secret in custody is then that account's
+   password and nothing else. A megajs `toJSON()` session, or the official SDK's `dumpSession()`, is
+   not stored instead: it holds the master key, so it is just as powerful, and an expired session
+   needs the password anyway.
 3. 2FA: an unattended re-login needs a fresh TOTP every time, so 2FA is **off on the dedicated
    account**. 2FA stays on the user's personal account, which is never connected. Our own E2E envelope
    means a stolen dedicated account yields ciphertext only. Its worst case is deletion or freeze, which
@@ -504,6 +507,24 @@ setup, but it is the account password.
    session lives in memory only.
 6. MEGA's own E2E encryption stays on and is not relied on: defence in depth, one format for every
    backend.
+
+**Desktop adapter choices (SP1).** Marked **[user]** where the user decided; the rest is design.
+
+| Topic | Choice |
+|---|---|
+| Order | **[user]** MEGA is the first adapter, for now. SFTP (SP5) and Box (SP6) come later. |
+| Library | `megajs` **1.3.10, exact pin** in `extension/package.json`, with a justification comment. Every newly locked transitive package must be MIT or ISC. |
+| Account | **[user]** A dedicated MEGA account for LLM-IDE, recommended in plain words on the Settings card. |
+| Credential custody | **[user]** Email and password only in the core vault (internal keys `sync.megaEmail`, `sync.megaPassword`). They are never logged. No route returns them: status shows the masked email (`l***@example.com`) and the folder only. The webview sends the password once, on Save, and clears the field. |
+| 2FA | Not supported for the sync account. The adapter never sends a code. MEGA's `EMFAREQUIRED (-26)` becomes `SYNC_MFA_REQUIRED`, and the card tells the user to use a dedicated account with two-factor off. A refused login (`SYNC_AUTH_FAILED`, `SYNC_MFA_REQUIRED`) turns sync off instead of retrying, so MEGA never sees repeated failed logins. |
+| Session | One logged-in megajs `Storage` per user, cached by the scheduler and reused while the core runs (`keepalive: true` keeps the file tree current). It is logged out on shutdown, on a setup change and when sync is turned off. A listener on `storage.api` `error` (a dead keepalive poll) drops the session; without one, Node would crash the core. |
+| Expiry | `ESID (-15)` → drop the session, log in again once, retry the operation once. A second `ESID` is `SYNC_AUTH_FAILED`. |
+| Rate limits | megajs already retries `EAGAIN (-3)` 4 times (2 to 16 s). The adapter then retries `EAGAIN`, `ERATELIMIT (-4)`, `ETOOMANY (-6)`, `ETEMPUNAVAIL (-18)` and `ETOOMANYCONNECTIONS (-19)` twice more (2 s, 8 s) and surfaces `SYNC_RATE_LIMITED`. The scheduler's exponential back-off (60 s doubling to 15 min) takes over from there. Operations on one store run one at a time. |
+| Quota | `EOVERQUOTA (-17)`, `EGOINGOVERQUOTA (-24)` and an HTTP 509 on download → `SYNC_QUOTA`. |
+| Folder | `llmide-sync` by default (editable, one path segment), at the root of the account's Cloud Drive, created on first use, which is the Test that runs right after Save. |
+| Writes | Only sealed sync v1 envelopes are uploaded, on top of MEGA's own encryption. The one exception is the Settings probe, two bytes `ok` under a random `syncId`, deleted at once. Replace = upload a new node, then delete the old one. Every delete is permanent (`delete(true)`, no rubbish bin). |
+| Watch | `watch(dir, onChange)` uses megajs's `add`/`update`/`delete` events. It is optional: the scheduler still polls. |
+| Tests | The `SyncStore` contract suite runs against the memory adapter and a fake MEGA client (`tests/helpers/fake-mega.mjs`), with no network in CI. An opt-in manual run uses a real throwaway account: `LLMIDE_SYNC_MEGA_IT=1` plus `LLMIDE_SYNC_MEGA_IT_EMAIL` and `LLMIDE_SYNC_MEGA_IT_PASSWORD`. |
 
 ### 8.4 Comparison
 
@@ -545,7 +566,7 @@ setup, but it is the account password.
 | Worst case, 3 devices, all 4 kinds changing | ~ 30 calls/min, far under Box's 1000/min. SFTP has no limit; one SSH connection per cycle, closed after. |
 | Storage | ≤ 4 MiB per device (4 kinds × ≤ 1 MiB) + inbox ≤ 200 × 64 KiB + outbox (7 days) |
 | Box free | 10 GB, 250 MB per upload, 240 uploads/min/user: unaffected |
-| Back-off | 429/`Retry-After` (Box), `-3`/`-4` (MEGA), SSH connect failure: exponential back-off up to 15 min; never blocks desktop work |
+| Back-off | 429/`Retry-After` (Box); `-3`/`-4`/`-6`/`-18`/`-19` (MEGA: two in-adapter retries at 2 s and 8 s, then the scheduler); SSH connect failure: exponential back-off up to 15 min; never blocks desktop work |
 
 ## 11. Privacy and metadata
 
@@ -556,7 +577,7 @@ setup, but it is the account password.
   traffic, as relay §9 T15 states).
 - The heartbeat is on a fixed schedule (relay D5), so activity timing leaks only at 60-second
   resolution.
-- The desktop never logs decrypted content, folder capabilities, `es`, keys or the SSH key. The logger
+- The desktop never logs decrypted content, folder capabilities, `es`, keys, the SSH key or the MEGA login. The logger
   records counts and error codes only.
 
 ## 12. Failure behaviour
@@ -565,6 +586,7 @@ setup, but it is the account password.
 |---|---|
 | Storage unreachable, auth refused | back off; Settings shows the last error code and last successful publish; desktop work never waits on sync |
 | Host key mismatch (SFTP) | stop, show "The server's identity changed", no retry until the setup is redone |
+| MEGA login refused or 2FA required | sync turns off, Settings shows the code with guidance, no retry until the user saves the setup again (no lockout from repeated logins) |
 | Disk full / quota | publish fails, the old manifest stays valid until `validUntil`; error shown |
 | Desktop crash mid-publish | new blobs may be orphaned; the next publish lists `s/` and removes names the manifest does not reference |
 | Crash after recording a request, before the reply | reply `turn_failed` on the next drain; never re-run |
@@ -587,9 +609,10 @@ setup, but it is the account password.
   The relay v1 vectors must keep passing in the Node port, which proves the shared primitives are the
   same bytes.
 - **`SyncStore` contract suite:** atomic replace, absent-file `null`, list shape, path validation (`..`,
-  `/`, empty, over-long), `removeTree`. It runs against memory, SFTP (a fake SFTP object over a temp
-  directory, plus an opt-in live run with `LLMIDE_SYNC_SFTP_IT=user@host:port`), Box (fetch stubs as in
-  `tests/box-connector.test.mjs`) and MEGA (stub).
+  `/`, empty, over-long), `removeTree`. In SP1 it runs against memory and MEGA (a fake MEGA client,
+  plus an opt-in live run against a throwaway account with `LLMIDE_SYNC_MEGA_IT=1`). Later it runs
+  against SFTP (a fake SFTP object over a temp directory, plus an opt-in live run with
+  `LLMIDE_SYNC_SFTP_IT=user@host:port`, SP5) and Box (fetch stubs as in `tests/box-connector.test.mjs`, SP6).
 - **Producer:** decrypt everything a test device would read. Check that the manifest hash binds the
   blobs, `manifestSeq` is monotonic, the size cap and truncation hold, old blobs are deleted after the
   manifest, and the store holds no plaintext marker (relay blindness test).
@@ -601,7 +624,7 @@ setup, but it is the account password.
 - **Enrollment** (sub-project 2): a malicious-store test. A fake store substitutes device keys, the
   wrap, `key.bin` and the slot contents at every step. Assert that the SAS differs, nothing enters the
   registry, and the device rejects the forged wrap.
-- **nginx:** a curl script for the user (sub-project 1 docs). GET outside the allow-list → 404; PUT to
+- **nginx:** a curl script for the user (SP5 docs). GET outside the allow-list → 404; PUT to
   `manifest.bin` → 403/405; PUT larger than 64 KiB → 413; no `/sync/` lines in the access log.
 - No regression: `make test`, `make regression`, `cd desktop && npm test`.
 
@@ -609,12 +632,12 @@ setup, but it is the account password.
 
 | # | Sub-project | Depends on | Delivers |
 |---|---|---|---|
-| **SP1** | Desktop producer: `SyncStore` + memory + **SFTP adapter**, sync v1 envelope + vectors, keys in the vault, snapshot producer, inbox consumer at the ceiling, Settings card, server setup doc | — | **plan written**; testable with a fake device |
+| **SP1** | Desktop producer: `SyncStore` + memory + **MEGA adapter** (**[user]** MEGA first, 2026-11-05; desktop megajs, dedicated account), sync v1 envelope + vectors, keys in the vault, snapshot producer, inbox consumer at the ceiling, Settings card | — | **plan written**; testable with a fake device and a fake MEGA client |
 | SP2 | Enrollment and device registry: QR sync fields, slot flow with SAS, `wrap.bin`, revoke, rotate, missing-folder detection | SP1 | devices can be added and removed |
-| SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP | SP2 | web works with the desktop off |
-| SP4 | iPhone sync tier: SharedProtocol envelope in Swift, URLSession store client, read views + queue | SP2 | iPhone works with the desktop off |
-| SP5 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users without a server |
-| SP6 | MEGA adapter: desktop megajs adapter (dedicated account), PWA megajs, iOS MEGA SDK | SP1; clients after SP3/SP4 | MEGA users |
+| SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP; **MEGA client in the browser (megajs, password per app session)** | SP2 | web works with the desktop off |
+| SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (MEGA iOS SDK, Keychain session)** | SP2 | iPhone works with the desktop off |
+| SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server |
+| SP6 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users of Box |
 | SP7 | Direct reads: Box documents and GitLab code in the PWA and the iPhone app (GitLab OAuth PKCE) | SP3/SP4 shells | docs and code with the desktop off |
 | SP8 | Park and retire: ADR 0019 header "superseded by 0020", production refusal for `ACCOUNTS_RELAY` and the account service, nginx accounts vhost off, MASTER-PLAN Q-WEB-1/2, docs | — | one design in the docs |
 
@@ -622,14 +645,14 @@ setup, but it is the account password.
 
 | # | Question | Default |
 |---|---|---|
-| Q1 | First adapter: own server (ruling in ADR 0020) or Box? | Own server first; Box second |
+| Q1 | First adapter? | **[user, 2026-11-05]** MEGA first, for now; own server (SFTP) next, then Box |
 | Q2 | Which kinds sync? Transcripts? | chats, meetings (extracted notes, no transcript), plans/tasks, usage; transcripts off |
 | Q3 | Which requests may be queued? | chat prompt only |
 | Q4 | Snapshot depth | 20 chats × 30 messages, 50 meetings, 30 plans |
 | Q5 | Sync endpoint origin for the PWA | same origin `https://llm-ide.com/sync/` (no CORS) |
 | Q6 | Box desktop auth | CCG with subject = user; one-time OAuth consent counts as setup, not login |
 | Q7 | Box client secret on phone/web | the user's own Box app, secret in the enrollment bundle and device secure storage; no VPS exchange shim |
-| Q8 | MEGA custody | opt-in; a dedicated MEGA account; password in the vault; 2FA off on that account only; PWA asks per session |
+| Q8 | MEGA custody | **[user]** a dedicated MEGA account; email + password in the vault only; 2FA off on that account only (the adapter refuses 2FA accounts with guidance); PWA asks per session |
 | Q9 | Scheduled key rotation | none; manual "Rotate keys" and after any suspected compromise |
 | Q10 | Desktop-off revoke | delete the device folder on the storage; the desktop drops the device on its next start |
 | Q11 | Box doc reads scope when Box is not the sync backend | `root_readonly` |
@@ -649,6 +672,11 @@ setup, but it is the account password.
   swift-nio-ssh Apache-2.0, `megajs` 1.3.10 MIT, `meganz/sdk` BSD-2-Clause.
 - megajs login code; MEGA SDK `fastLogin`, `dumpSession`, `killSession` and `multiFactorAuthLogin` in
   `megaapi.h`.
+- megajs 1.3.10 package contents (npm tarball, `dist/main.node-es.mjs`, `types/es.d.ts`): the `ERRORS`
+  table and message format, its own 4 `EAGAIN` retries, keepalive `error` events on `storage.api`,
+  `delete(permanent)`, `upload({ name, size }, buffer).complete`, `toJSON`/`fromJSON` content, and the
+  `Storage` ESM export. Registry facts: version, `latest`/`next` tags, MIT, one maintainer, publish
+  dates; GitHub API: last push 2026-04-20, not archived.
 
 **Not verified:**
 
@@ -658,6 +686,10 @@ setup, but it is the account password.
   ciphertext is stored.
 - MEGA terms for third-party clients, the free transfer quota number, and the official absence of
   OAuth.
+- That MEGA's server-command channel delivers a session's own deletes back to it. The MEGA adapter
+  does not depend on it: it hides the nodes it deleted until the packet arrives.
+- Whether MEGA locks an account after repeated failed logins. The design avoids the case: a refused
+  login turns sync off.
 - The `russh-sftp` license.
 - The `ssh2` npm license field is empty in registry metadata. The repository states MIT; confirm before
   adding the dependency.

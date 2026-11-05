@@ -4,28 +4,29 @@
 
 **Goal:** The desktop core publishes end-to-end-encrypted snapshots of chats, meetings, plans and usage into a
 user-owned folder, and runs queued phone and web chat prompts from that folder's inbox at the fixed read-only
-ceiling. The storage sits behind a `SyncStore` interface, and the first real adapter is SFTP to the user's own
-server.
+ceiling. The storage sits behind a `SyncStore` interface, and the first real adapter is MEGA (a dedicated MEGA
+account used only for LLM-IDE).
 
 **Architecture:** The envelope library is `extension/core/sync-envelope.mjs`, a byte-for-byte port of relay v1
 plus the purposes `snapshot`, `manifest` and `syncwrap`. Storage adapters live in
-`extension/connectors/sync-store/` (memory for tests, SFTP over `ssh2`). Durable state is in the new tables of
+`extension/connectors/sync-store/` (memory for tests, MEGA over `megajs`). Durable state is in the new tables of
 migration 0064 (`extension/kb/sync-state.mjs`). Keys live in the core vault. The producer, the consumer, the
 scheduler and the HTTP routes live under `extension/routes/sync/`. The consumer calls `startHostTurn`, which is
 in the routes layer. Settings gets one card in the shared UI. **No Rust change:** another agent is editing
 `desktop/src-tauri`, and the vault master key is already in the OS keychain (`secrets.rs`).
 
-**Tech Stack:** Node 22 core (pure `node:http`, `node:crypto`, better-sqlite3), `ssh2` 1.17.0 (new, exact pin),
+**Tech Stack:** Node 22 core (pure `node:http`, `node:crypto`, better-sqlite3), `megajs` 1.3.10 (new, exact pin),
 React 19 + TypeScript Settings card, Node test runner.
 
 **Spec:** [docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md](../specs/2026-11-05-box-encrypted-sync-design.md)
 (ADR: [docs/decisions/0020-box-encrypted-sync.md](../../decisions/0020-box-encrypted-sync.md)).
 
-> **Ruling, recorded:** the plan's filename keeps the approved "box" name. The first adapter is the user's own
-> server over SFTP, per the ruling in ADR 0020 (narrower device scope, no OAuth client secret in the PWA, no
-> 60-day token expiry, $0 on the VPS the user already runs). The Box adapter is sub-project SP5 and has its own
-> plan. The MEGA adapter is SP6 and has its own plan: it adds an unofficial dependency (`megajs`) and a
-> credential-custody decision (spec §8.3, Q8), so it is not small enough to be this plan's last task.
+> **User decision, 2026-11-05:** MEGA is the first storage adapter, for now. The plan's filename keeps the approved
+> "box" name. The user's own server over SFTP (with its nginx endpoint and sshd setup) is a later sub-project with
+> its own plan (spec §14, SP5), and Box after it (SP6). The credential custody for MEGA is spec §8.3 and Q8: a
+> dedicated MEGA account, email and password in the core vault only, two-factor login off on that account only.
+> The desktop's MEGA client is `megajs` (MIT, unofficial). This plan writes only the desktop side; the PWA and
+> iPhone MEGA clients belong to SP3 and SP4.
 
 ## Global Constraints
 
@@ -46,9 +47,19 @@ React 19 + TypeScript Settings card, Node test runner.
 - Every kb helper takes `userId` first. Every multi-step write uses `db.transaction()`. Migrations are append-only (`0064`).
 - ESLint layers (`extension/eslint.config.mjs`): `core` imports nothing internal; `kb` imports only `core`;
   `connectors` import L0 to L2; routes may import any Node layer; nothing imports a route except `server.mjs`. No exemptions.
-- Never log keys, `es`, folder names (`dir`), decrypted content or the SSH private key. Logs carry counts and codes only.
+- Never log keys, `es`, folder names (`dir`), decrypted content, or the MEGA email or password. Logs carry counts and codes only.
+  The MEGA password never leaves the core: no route returns it, and the Settings webview only sends it once on Save.
 - Bump `SERVER_API_VERSION` to 112 and add the new paths to `ALL_ENDPOINTS`.
-- New dependency: `ssh2` exactly `1.17.0`, with a justification comment. No other new dependency.
+- New dependency: `megajs` exactly `1.3.10` (npm `latest`, MIT, published 2026-04-20, one maintainer, repository
+  `qgustavor/mega` last pushed 2026-04-20, not archived), with a justification comment. Its transitive packages
+  (`pumpify`, `stream-skip` and their own dependencies) must all be MIT or ISC. No other new dependency.
+- MEGA: one dedicated account, recommended in the UI; email and password only in the vault (`sync.megaEmail`,
+  `sync.megaPassword`, internal keys); two-factor login is not supported for the sync account (MEGA's `EMFAREQUIRED`
+  becomes `SYNC_MFA_REQUIRED` with guidance); one logged-in session per user is reused while the core runs, logged out
+  on shutdown or when the setup changes; an expired session (`ESID`) re-logs in once; `EAGAIN`/`ERATELIMIT`/
+  `ETEMPUNAVAIL` are retried twice (2 s, 8 s) and then surface as `SYNC_RATE_LIMITED`, which the scheduler backs off;
+  the sync folder (default `llmide-sync`) sits at the root of the account's Cloud Drive and is created on first use;
+  deletes are permanent (no rubbish bin); only sealed sync v1 envelopes are uploaded, on top of MEGA's own encryption.
 - Tests: `cd extension && node --test tests/<file>`. Each test file sets `LLMIDE_DB_PATH` to its own `_…-test.db`,
   as `tests/host-api-devices.test.mjs` does.
 - Commit on `main` (user rule), Conventional Commits, one concern per commit, with this trailer:
@@ -68,13 +79,14 @@ React 19 + TypeScript Settings card, Node test runner.
 | `extension/kb/migrations/0064_sync.sql` | create | `sync_state`, `sync_devices`, `sync_published`, `sync_requests` |
 | `extension/kb/sync-state.mjs` | create | the durable sync state helpers |
 | `extension/tests/sync-state.test.mjs` | create | |
-| `extension/server/vault.mjs` | **modify (shared)** | allow internal keys `sync.rootKey`, `sync.signingKey`, `sync.sshKey` |
+| `extension/server/vault.mjs` | **modify (shared)** | allow internal keys `sync.rootKey`, `sync.signingKey`, `sync.megaEmail`, `sync.megaPassword` |
 | `extension/connectors/sync-store/index.mjs` | create | `checkPath`, `MAX_FILE_BYTES`, `createMemoryStore` |
 | `extension/tests/helpers/sync-store-contract.mjs` | create | the contract suite every adapter runs |
 | `extension/tests/sync-store-memory.test.mjs` | create | |
-| `extension/connectors/sync-store/sftp.mjs` | create | the SFTP adapter, host-key pinning, key generation |
-| `extension/tests/sync-store-sftp.test.mjs` | create | contract suite on a fake SFTP over a temp dir, plus an opt-in live run |
-| `extension/package.json`, `extension/package-lock.json` | **modify (shared)** | `ssh2` 1.17.0 |
+| `extension/connectors/sync-store/mega.mjs` | create | the MEGA adapter: login and session reuse, error mapping, retry, folder, watch |
+| `extension/tests/helpers/fake-mega.mjs` | create | an in-memory stand-in for the `megajs` `Storage` surface the adapter uses |
+| `extension/tests/sync-store-mega.test.mjs` | create | contract suite on the fake MEGA client, unit tests, plus an opt-in live run |
+| `extension/package.json`, `extension/package-lock.json` | **modify (shared)** | `megajs` 1.3.10 |
 | `extension/routes/sync/kinds.mjs` | create | snapshot kinds: load, redact, clamp, fit |
 | `extension/tests/sync-kinds.test.mjs` | create | |
 | `extension/routes/sync/keys.mjs` | create | root/signing keys in the vault, ids |
@@ -91,13 +103,11 @@ React 19 + TypeScript Settings card, Node test runner.
 | `ui/screens/settings/sections/SyncSection.tsx` | create | the Settings card |
 | `ui/screens/settings/sections/MobileBridge.tsx` | **modify (shared)** | render `<SyncSection />` |
 | `ui/screens/settings/tests/sync-section.test.mjs` | create | |
-| `deploy/vps/sync-sftp.md`, `deploy/vps/sshd-llmidesync.conf`, `deploy/vps/llm-ide-sync.nginx.inc`, `deploy/vps/sync-check.sh` | create | server setup the user runs once |
-| `deploy/vps/llm-ide.com.nginx` | **modify (shared)** | one `include` line + `limit_req_zone` |
 | `extension/CLAUDE.md` | **modify (shared)** | a "Sync (desktop producer)" section |
 
 **Shared-file edits (coordinate with other agents):** `extension/server.mjs`, `extension/server/vault.mjs`,
-`extension/package.json`/`package-lock.json`, `ui/screens/settings/sections/MobileBridge.tsx`,
-`deploy/vps/llm-ide.com.nginx`, `extension/CLAUDE.md`, the generated `schema/http/INVENTORY.md`, types and openapi.
+`extension/package.json`/`package-lock.json`, `ui/screens/settings/sections/MobileBridge.tsx`, `extension/CLAUDE.md`,
+the generated `schema/http/INVENTORY.md`, types and openapi. Nothing under `deploy/` changes: MEGA needs no server.
 **No file under `desktop/src-tauri/` is touched.**
 
 ---
@@ -484,7 +494,7 @@ git commit -m "feat(sync): sync v1 envelope on relay v1 bytes with shared vector
   - `recordRequest(userId, deviceId, requestId, now): boolean` (true = first time)
   - `finishRequest(userId, deviceId, requestId, state: 'done'|'failed'): void`
   - `countRequestsSince(userId, deviceId, sinceMs): number`
-  - Vault internal keys `sync.rootKey`, `sync.signingKey`, `sync.sshKey` (readable through `getSecret`/`setSecret`, never client-settable or listed)
+  - Vault internal keys `sync.rootKey`, `sync.signingKey`, `sync.megaEmail`, `sync.megaPassword` (readable through `getSecret`/`setSecret`, never client-settable or listed)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -515,7 +525,7 @@ const user = () => users.registerUser(kb.getDb(), { email: `sync-${Date.now()}-$
 test('ensureSyncState mints one syncId and keeps it across store changes', () => {
   const u = user();
   assert.equal(st.getSyncState(u), null);
-  const a = st.ensureSyncState(u, { storeKind: 'sftp', storeConfig: { host: 'h.example', port: 22 } });
+  const a = st.ensureSyncState(u, { storeKind: 'mega', storeConfig: { folder: 'llmide-sync' } });
   assert.match(a.syncId, /^[A-Za-z0-9_-]{22}$/);
   assert.equal(a.enabled, false);
   assert.equal(a.epoch, 1);
@@ -554,7 +564,7 @@ test('sync vault keys are internal: storable by the server, not client-settable'
   const u = user();
   vault.setSecret(kb.getDb(), u, 'sync.rootKey', 'x'.repeat(43));
   assert.equal(vault.getSecret(kb.getDb(), u, 'sync.rootKey'), 'x'.repeat(43));
-  for (const k of ['sync.rootKey', 'sync.signingKey', 'sync.sshKey']) {
+  for (const k of ['sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword']) {
     assert.equal(vault.isUserSettableVaultKey(k), false);
     assert.ok(!vault.VAULT_KEYS.includes(k));
   }
@@ -571,8 +581,9 @@ Expected: FAIL with `Cannot find module '…/kb/sync-state.mjs'`.
 ```sql
 -- extension/kb/migrations/0064_sync.sql
 -- Encrypted sync through user-owned storage (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
--- Additive, N-1 safe. No key or secret is stored here: keys live in the vault (sync.rootKey, sync.signingKey,
--- sync.sshKey). store_config is non-secret (host, port, username, host-key fingerprint).
+-- Additive, N-1 safe. No key or secret is stored here: keys and the MEGA login live in the vault (sync.rootKey,
+-- sync.signingKey, sync.megaEmail, sync.megaPassword). store_config is non-secret (MEGA: the folder name only).
+-- 'sftp' and 'box' are listed now so the later adapters (spec section 14) need no table rebuild.
 CREATE TABLE IF NOT EXISTS sync_state (
   user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   sync_id         TEXT NOT NULL,
@@ -736,20 +747,20 @@ export function countRequestsSince(userId, deviceId, sinceMs) {
 
 - [ ] **Step 5: Add the vault keys**
 
-In `extension/server/vault.mjs`, add three entries at the end of the `ALLOWED_KEYS` set (after `'email.imapPasswordHost'`), and extend `INTERNAL_KEYS`:
+In `extension/server/vault.mjs`, add four entries at the end of the `ALLOWED_KEYS` set (after `'email.imapPasswordHost'`), and extend `INTERNAL_KEYS`:
 
 ```js
-  // Encrypted sync (routes/sync/keys.mjs): the per-epoch root key, the desktop ECDSA P-256 signing key (PKCS8) and
-  // the ed25519 SSH key for the own-server adapter, and its public authorized_keys line (not secret, but no client may
-  // overwrite it). Server-internal: never client-settable, never listed.
+  // Encrypted sync (routes/sync/keys.mjs, routes/sync/http-routes.mjs): the per-epoch root key, the desktop ECDSA
+  // P-256 signing key (PKCS8), and the dedicated MEGA account's email and password for the MEGA adapter.
+  // Server-internal: never client-settable through /kb/vault, never listed, never returned by a route.
   'sync.rootKey',
   'sync.signingKey',
-  'sync.sshKey',
-  'sync.sshPublic',
+  'sync.megaEmail',
+  'sync.megaPassword',
 ```
 
 ```js
-const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.sshKey', 'sync.sshPublic']);
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword']);
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -902,263 +913,532 @@ git commit -m "feat(sync): SyncStore contract with path rules and memory adapter
 
 ---
 
-### Task 4: SFTP adapter (own server) with host-key pinning
+### Task 4: MEGA adapter (dedicated account) with session reuse and rate-limit back-off
 
 **Files:**
-- Create: `extension/connectors/sync-store/sftp.mjs`
-- Modify: `extension/package.json` (dependency), `extension/package-lock.json`
-- Test: `extension/tests/sync-store-sftp.test.mjs`
+- Create: `extension/connectors/sync-store/mega.mjs`
+- Create: `extension/tests/helpers/fake-mega.mjs`
+- Modify: `extension/package.json` (dependency + justification), `extension/package-lock.json`
+- Test: `extension/tests/sync-store-mega.test.mjs`
 
 **Interfaces:**
-- Consumes: `checkPath`, `checkSize` (Task 3).
+- Consumes: `checkPath`, `checkSize`, `MAX_FILE_BYTES` (Task 3); `runSyncStoreContract` (Task 3).
 - Produces:
-  - `hostKeyFingerprint(keyBlob: Buffer): string`, which gives `SHA256:<unpadded base64>`, the same as `ssh-keygen -lf`
-  - `generateSshKey(comment: string): { privateKey: string, publicLine: string }`
-  - `validateSftpConfig(cfg): string|null` (null = valid; otherwise the field name)
-  - `createSftpStore({ host, port, username, hostKeySha256 }, { privateKey }, { connect? }): SyncStore`, with errors that carry `code` in `SYNC_HOST_KEY_MISMATCH | SYNC_AUTH_FAILED | SYNC_UNREACHABLE | SYNC_IO`
+  - `DEFAULT_MEGA_FOLDER = 'llmide-sync'`
+  - `validateMegaConfig({ email, password, folder }): string|null` (null = valid; otherwise the field name `email | password | folder`)
+  - `maskEmail(email: string): string`, for example `'l***@example.com'`
+  - `classifyMegaError(e: Error, { duringLogin?: boolean }): string`, one of `SYNC_SESSION_EXPIRED | SYNC_MFA_REQUIRED | SYNC_RATE_LIMITED | SYNC_QUOTA | SYNC_AUTH_FAILED | SYNC_UNREACHABLE | SYNC_IO`
+  - `createMegaStore({ folder }, { email, password }, { login?, sleep? }): SyncStore & { watch(dir, onChange): () => void, close(): Promise<void> }`.
+    Errors carry `code` in `SYNC_AUTH_FAILED | SYNC_MFA_REQUIRED | SYNC_RATE_LIMITED | SYNC_QUOTA | SYNC_UNREACHABLE | SYNC_IO`,
+    plus `SYNC_BAD_PATH | SYNC_TOO_LARGE` from Task 3. `describe()` returns `{ kind: 'mega', root: <folder>, account: <masked email> }`.
+    `watch` returns its `stop` function.
+  - Test helper `createFakeMega({ email, password })` with `login`, `root`, `failNext(op, message)`, `loseSessions()`,
+    `flush()`, and the counters `logins`, `logouts`, `permanentDeletes`, `uploads`.
 
-- [ ] **Step 1: Add the dependency**
+**Facts this task relies on** (read from the `megajs@1.3.10` package, `dist/main.node-es.mjs` and `types/es.d.ts`, on 2026-11-05):
+
+- ESM entry `import { Storage } from 'megajs'`. `new Storage({ email, password, keepalive, autoload, userAgent })` logs in at
+  once. `storage.ready` resolves when it is logged in and, with `autoload: true`, has loaded the whole file tree.
+  `secondFactorCode` is the only 2FA input, and this adapter never sets it.
+- `storage.root` is the Cloud Drive. A node has `nodeId`, `name`, `directory`, `size`, `timestamp` (seconds), `parent` and
+  `children`. `node.mkdir(name)` returns the new folder. `node.upload({ name, size }, buffer).complete` resolves to the new
+  file. `file.downloadBuffer({})` resolves to a `Buffer`. `node.delete(true)` deletes permanently; without `true` it moves the
+  node to the rubbish bin.
+- `storage.close()` logs the session out (`sml`).
+- MEGA errors are plain `Error`s whose message starts with `"ENAME (-n): …"`, for example
+  `"ERATELIMIT (-4): You have exceeded your command weight per time quota…"`, `"ESID (-15): Invalid or expired user session, please relogin"`,
+  and `"EMFAREQUIRED (-26): Multi-Factor Authentication Required"`. The library retries `EAGAIN (-3)` 4 times on its own
+  (2, 4, 8 and 16 s) before it reports it. It also answers MEGA's `X-Hashcash` login challenge on its own.
+- With `keepalive: true` the library long-polls MEGA's server-command channel. It applies remote changes to the tree and
+  emits `add`, `update` and `delete` on the storage. A failed poll emits `error` on `storage.api`. **An `error` event with no
+  listener throws and would crash the core, so the adapter always attaches one.** A delete reaches the local tree only
+  when its server packet arrives, so the adapter hides the nodes it deleted itself until then.
+- `Storage#toJSON()` serialises the session id **and the account master key**. The adapter never persists it, because it
+  is as powerful as the password (spec §8.3).
+
+- [ ] **Step 1: Add the dependency and check its licenses**
 
 ```bash
-cd extension && npm install --save-exact ssh2@1.17.0
+cd extension && npm install --save-exact megajs@1.3.10
 ```
 
-In `extension/package.json`, add the justification next to the dependency list, under a `"//"` key, as the comment the
-Global Constraints require (JSON has no comments):
+In `extension/package.json`, add a `"//"` key next to `"dependencies"` (JSON has no comments, and the file has no `"//"`
+key yet):
 
 ```json
-  "//": "ssh2 1.17.0: SFTP for the own-server sync adapter (connectors/sync-store/sftp.mjs); pure JS, MIT; optional native cpu-features only speeds it up. No other SSH code in the repo.",
+  "//": "megajs 1.3.10 (exact): MEGA client for the first encrypted-sync adapter (connectors/sync-store/mega.mjs), user decision 2026-11-05. MEGA ships no Node SDK and no OAuth; megajs is MIT, unofficial, fetch-based, no native code. Exact pin because it handles the sync account's password. No other MEGA code in the repo.",
 ```
 
-Run: `cd extension && node -e "import('ssh2').then(m => console.log(typeof m.default.Client))"`
-Expected: `function`. Confirm the license with `npm view ssh2@1.17.0 license` (expected `MIT`). If it prints nothing,
-read `node_modules/ssh2/LICENSE`.
+Run:
 
-- [ ] **Step 2: Write the failing test**
+```bash
+cd extension && node -e "import('megajs').then(m => console.log(typeof m.Storage))"
+npm view megajs@1.3.10 license
+git diff -U0 package-lock.json | grep -o '"node_modules/[^"]*": {' | sed 's/": {//; s/"//g' | sort -u | while read p; do node -p "'$p ' + require('./$p/package.json').license"; done
+```
+
+Expected: `function`, then `MIT`, then one line per newly locked package, each ending in `MIT` or `ISC`. Packages the
+lockfile already had (`once`, `readable-stream`, …) do not appear. If any line shows another license, stop and report it.
+Do not add the package.
+
+- [ ] **Step 2: Write the fake MEGA client**
 
 ```js
-// extension/tests/sync-store-sftp.test.mjs
-// The adapter runs the SyncStore contract on a fake SFTP session backed by a temp dir (same method surface ssh2's
-// SFTPWrapper exposes). A live run against a real server is opt-in: LLMIDE_SYNC_SFTP_IT=user@host:port plus
-// LLMIDE_SYNC_SFTP_IT_KEY=<path to OpenSSH private key> and LLMIDE_SYNC_SFTP_IT_HOSTKEY=SHA256:...
+// extension/tests/helpers/fake-mega.mjs
+// An in-memory stand-in for the part of megajs 1.3.10's Storage that connectors/sync-store/mega.mjs uses: storage.root (the
+// Cloud Drive); node.nodeId/name/directory/size/timestamp/parent/children; node.mkdir(name); node.upload({ name, size },
+// buffer).complete; node.downloadBuffer({}); node.delete(permanent); storage.on('add'|'update'|'delete'); storage.close().
+// As with the real client, a delete reaches the local tree only when the server's packet arrives (here: flush()), and
+// errors are plain Errors carrying megajs's "ENAME (-n): ..." message. No network.
+import { EventEmitter } from 'node:events';
+
+const ENOENT = 'ENOENT (-9): Object (typically, node or user) not found. Wrong password?';
+
+export function createFakeMega({ email, password }) {
+  const queued = [];          // [{ op, message }]: the next call of `op` fails with `message`
+  const sessions = new Set(); // live fake Storage objects
+  const pendingDeletes = [];  // deleted nodes still in the tree until flush()
+  let ids = 0;
+  const emit = (event, node) => { for (const s of sessions) s.emit(event, node); };
+  const gate = async (op) => {
+    const i = queued.findIndex((q) => q.op === op);
+    if (i >= 0) throw new Error(queued.splice(i, 1)[0].message);
+  };
+  const fake = {
+    logins: 0, logouts: 0, permanentDeletes: 0, uploads: [],
+    failNext(op, message) { queued.push({ op, message }); },
+    loseSessions() { for (const s of [...sessions]) s.lose(); },
+    flush() {
+      for (const n of pendingDeletes.splice(0)) {
+        n.parent.children.splice(n.parent.children.indexOf(n), 1);
+        emit('delete', n);
+      }
+    },
+  };
+  const makeNode = ({ name, directory, parent, data = null }) => {
+    const n = {
+      nodeId: `n${++ids}`, name, directory, parent, data, deleted: false,
+      size: data ? data.length : 0, timestamp: Math.floor(Date.now() / 1000), children: directory ? [] : undefined,
+      async mkdir(opt) {
+        await gate('mkdir');
+        const c = makeNode({ name: typeof opt === 'string' ? opt : opt.name, directory: true, parent: n });
+        n.children.push(c);
+        emit('add', c);
+        return c;
+      },
+      upload(opt, source) {
+        return { complete: (async () => {
+          await gate('upload');
+          if (!Buffer.isBuffer(source) || source.length !== opt.size) throw new Error('Specified data size does not match');
+          const c = makeNode({ name: opt.name, directory: false, parent: n, data: Buffer.from(source) });
+          n.children.push(c);
+          fake.uploads.push(Buffer.from(source));
+          emit('add', c);
+          return c;
+        })() };
+      },
+      async downloadBuffer() {
+        await gate('download');
+        if (n.deleted) throw new Error(ENOENT);
+        return Buffer.from(n.data);
+      },
+      async delete(permanent) {
+        await gate('delete');
+        if (permanent !== true) throw new Error('fake-mega: sync deletes must be permanent (no rubbish bin)');
+        if (n.deleted) throw new Error(ENOENT);
+        n.deleted = true;
+        fake.permanentDeletes++;
+        pendingDeletes.push(n);
+      },
+    };
+    return n;
+  };
+  fake.root = makeNode({ name: 'Cloud Drive', directory: true, parent: null });
+  fake.login = async (creds, { onLost } = {}) => {
+    fake.logins++;
+    await gate('login');
+    if (creds.email !== email || creds.password !== password) throw new Error(ENOENT);
+    const s = new EventEmitter();
+    s.root = fake.root;
+    s.lose = () => { sessions.delete(s); onLost?.(new Error('ESID (-15): Invalid or expired user session, please relogin')); };
+    s.close = async () => { sessions.delete(s); fake.logouts++; };
+    sessions.add(s);
+    return s;
+  };
+  return fake;
+}
+```
+
+- [ ] **Step 3: Write the failing test**
+
+```js
+// extension/tests/sync-store-mega.test.mjs
+// The MEGA adapter runs the SyncStore contract on a fake MEGA client (tests/helpers/fake-mega.mjs): no network in CI.
+// A live run against a real THROWAWAY MEGA account is opt-in and manual:
+//   LLMIDE_SYNC_MEGA_IT=1 LLMIDE_SYNC_MEGA_IT_EMAIL=... LLMIDE_SYNC_MEGA_IT_PASSWORD=... node --test tests/sync-store-mega.test.mjs
+// Never point it at a personal account: it writes and deletes under the Cloud Drive folder "llmide-sync-it".
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { createSftpStore, hostKeyFingerprint, generateSshKey, validateSftpConfig } from '../connectors/sync-store/sftp.mjs';
+import { createMegaStore, validateMegaConfig, maskEmail, classifyMegaError, DEFAULT_MEGA_FOLDER } from '../connectors/sync-store/mega.mjs';
+import { createFakeMega } from './helpers/fake-mega.mjs';
 import { runSyncStoreContract } from './helpers/sync-store-contract.mjs';
 
-function fakeSftp(root) {
-  const p = (x) => path.join(root, x);
-  const wrap = (fn) => (...args) => { const cb = args.pop(); fn(...args).then((v) => cb(null, v), (e) => cb(Object.assign(e, { code: e.code === 'ENOENT' ? 2 : 4 }))); };
-  return {
-    readFile: wrap(async (f) => fs.promises.readFile(p(f))),
-    writeFile: wrap(async (f, data) => fs.promises.writeFile(p(f), data)),
-    readdir: wrap(async (d) => (await fs.promises.readdir(p(d), { withFileTypes: true })).map((e) => {
-      const st = fs.statSync(path.join(p(d), e.name));
-      return { filename: e.name, attrs: { size: st.size, mtime: Math.floor(st.mtimeMs / 1000), isDirectory: () => e.isDirectory() } };
-    })),
-    stat: wrap(async (f) => { const st = await fs.promises.stat(p(f)); return { size: st.size, isDirectory: () => st.isDirectory() }; }),
-    mkdir: wrap(async (d) => fs.promises.mkdir(p(d))),
-    unlink: wrap(async (f) => fs.promises.unlink(p(f))),
-    rmdir: wrap(async (d) => fs.promises.rmdir(p(d))),
-    ext_openssh_rename: wrap(async (a, b) => fs.promises.rename(p(a), p(b))),
-  };
+const CREDS = { email: 'llmide-sync@example.com', password: 'a long dedicated password' };
+const CFG = { folder: DEFAULT_MEGA_FOLDER };
+function make(fake = createFakeMega(CREDS)) {
+  const sleeps = [];
+  const store = createMegaStore(CFG, CREDS, { login: fake.login, sleep: async (ms) => { sleeps.push(ms); } });
+  return { fake, store, sleeps };
 }
 
-const CFG = { host: 'sync.example.com', port: 22, username: 'llmidesync', hostKeySha256: 'SHA256:' + 'A'.repeat(43) };
+runSyncStoreContract(test, assert, async () => make().store, 'mega (fake client)');
 
-runSyncStoreContract(test, assert, async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sftp-store-'));
-  return createSftpStore(CFG, { privateKey: 'unused' }, { connect: async () => ({ sftp: fakeSftp(root), end() {} }) });
-}, 'sftp (fake session)');
-
-test('hostKeyFingerprint matches the ssh-keygen SHA256 form', () => {
-  const blob = Buffer.from('fake-host-key-blob');
-  assert.equal(hostKeyFingerprint(blob), 'SHA256:' + createHash('sha256').update(blob).digest('base64').replace(/=+$/, ''));
+test('one login serves every operation; close logs out', async () => {
+  const { fake, store } = make();
+  await store.put('a/x.bin', Buffer.from('1'));
+  await store.get('a/x.bin');
+  await store.list('a');
+  await store.remove('a/x.bin');
+  assert.equal(fake.logins, 1);
+  await store.close();
+  assert.equal(fake.logouts, 1);
 });
 
-test('generateSshKey makes an ed25519 key and an authorized_keys line', () => {
-  const k = generateSshKey('llmide-sync-test');
-  assert.match(k.privateKey, /BEGIN OPENSSH PRIVATE KEY/);
-  assert.match(k.publicLine, /^ssh-ed25519 [A-Za-z0-9+/=]+ llmide-sync-test$/);
+test('the sync folder is created once, at the Cloud Drive root, with the configured name', async () => {
+  const fake = createFakeMega(CREDS);
+  await make(fake).store.put('a.bin', Buffer.from('1'));
+  await make(fake).store.put('b.bin', Buffer.from('2'));
+  assert.deepEqual(fake.root.children.filter((c) => c.directory).map((d) => d.name), ['llmide-sync']);
+  await createMegaStore({ folder: 'other-sync' }, CREDS, { login: fake.login }).put('c.bin', Buffer.from('3'));
+  assert.deepEqual(fake.root.children.filter((c) => c.directory).map((d) => d.name).sort(), ['llmide-sync', 'other-sync']);
 });
 
-test('validateSftpConfig names the bad field', () => {
-  assert.equal(validateSftpConfig(CFG), null);
-  assert.equal(validateSftpConfig({ ...CFG, host: 'bad host' }), 'host');
-  assert.equal(validateSftpConfig({ ...CFG, port: 70000 }), 'port');
-  assert.equal(validateSftpConfig({ ...CFG, username: 'Root;' }), 'username');
-  assert.equal(validateSftpConfig({ ...CFG, hostKeySha256: 'MD5:aa' }), 'hostKeySha256');
+test('replace uploads exactly the given bytes, then deletes the old copy permanently', async () => {
+  const { fake, store } = make();
+  await store.put('d/manifest.bin', Buffer.from('old'));
+  await store.put('d/manifest.bin', Buffer.from('new'));
+  assert.deepEqual(fake.uploads.map((b) => b.toString()), ['old', 'new'], 'the adapter adds nothing to the bytes');
+  assert.equal(fake.permanentDeletes, 1);
+  fake.flush();
+  const dir = fake.root.children[0].children.find((c) => c.name === 'd');
+  assert.deepEqual(dir.children.map((c) => c.data.toString()), ['new']);
+  assert.equal(Buffer.from(await store.get('d/manifest.bin')).toString(), 'new');
 });
 
-test('a connect failure surfaces a coded error and never a key', async () => {
-  const s = createSftpStore(CFG, { privateKey: 'SECRET-KEY' }, { connect: async () => { throw Object.assign(new Error('x'), { code: 'SYNC_HOST_KEY_MISMATCH' }); } });
-  await assert.rejects(() => s.get('a.bin'), (e) => e.code === 'SYNC_HOST_KEY_MISMATCH' && !String(e.message).includes('SECRET-KEY'));
+test('an expired session logs in again once; a lost keepalive session is replaced', async () => {
+  const { fake, store } = make();
+  await store.put('e/x.bin', Buffer.from('1'));
+  fake.failNext('download', 'ESID (-15): Invalid or expired user session, please relogin');
+  assert.equal(Buffer.from(await store.get('e/x.bin')).toString(), '1');
+  assert.equal(fake.logins, 2);
+  fake.loseSessions();
+  await store.list('e');
+  assert.equal(fake.logins, 3);
 });
 
-const IT = process.env.LLMIDE_SYNC_SFTP_IT;
-test('live SFTP server (opt-in)', { skip: !IT }, async () => {
-  const [username, hostPort] = IT.split('@');
-  const [host, port] = hostPort.split(':');
-  const s = createSftpStore({ host, port: Number(port || 22), username, hostKeySha256: process.env.LLMIDE_SYNC_SFTP_IT_HOSTKEY },
-    { privateKey: fs.readFileSync(process.env.LLMIDE_SYNC_SFTP_IT_KEY, 'utf8') });
-  await s.put('it-probe/x.bin', Buffer.from('ok'));
-  assert.equal(Buffer.from(await s.get('it-probe/x.bin')).toString(), 'ok');
-  await s.removeTree('it-probe');
-  await s.close();
+test('MEGA rate limits are retried twice (2 s, 8 s), then surface as SYNC_RATE_LIMITED', async () => {
+  const { fake, store, sleeps } = make();
+  fake.failNext('upload', 'ERATELIMIT (-4): You have exceeded your command weight per time quota.');
+  await store.put('r/1.bin', Buffer.from('1'));
+  assert.deepEqual(sleeps, [2000]);
+  for (let i = 0; i < 3; i++) fake.failNext('download', 'EAGAIN (-3): A temporary congestion or server malfunction prevented your request from being processed.');
+  await assert.rejects(() => store.get('r/1.bin'), (e) => e.code === 'SYNC_RATE_LIMITED');
+  assert.deepEqual(sleeps, [2000, 2000, 8000]);
+});
+
+test('a wrong password and a two-factor account give codes that never carry the credentials', async () => {
+  const fake = createFakeMega(CREDS);
+  const wrong = createMegaStore(CFG, { ...CREDS, password: 'nope-nope' }, { login: fake.login });
+  await assert.rejects(() => wrong.get('a.bin'), (e) => e.code === 'SYNC_AUTH_FAILED'
+    && !e.message.includes('nope-nope') && !e.message.includes(CREDS.email));
+  fake.failNext('login', 'EMFAREQUIRED (-26): Multi-Factor Authentication Required');
+  const mfa = createMegaStore(CFG, CREDS, { login: fake.login });
+  await assert.rejects(() => mfa.get('a.bin'), (e) => e.code === 'SYNC_MFA_REQUIRED');
+});
+
+test('classifyMegaError maps quota, network, login and unknown errors', () => {
+  assert.equal(classifyMegaError(new Error('EOVERQUOTA (-17): Request over quota')), 'SYNC_QUOTA');
+  assert.equal(classifyMegaError(new Error('MEGA returned a 509 status code')), 'SYNC_QUOTA');
+  assert.equal(classifyMegaError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })), 'SYNC_UNREACHABLE');
+  assert.equal(classifyMegaError(new Error('ETEMPUNAVAIL (-18): Resource temporarily not available, please try again later')), 'SYNC_RATE_LIMITED');
+  assert.equal(classifyMegaError(new Error('ENOENT (-9): Object (typically, node or user) not found. Wrong password?'), { duringLogin: true }), 'SYNC_AUTH_FAILED');
+  assert.equal(classifyMegaError(new Error('ENOENT (-9): Object (typically, node or user) not found. Wrong password?')), 'SYNC_IO');
+  assert.equal(classifyMegaError(new Error('something else')), 'SYNC_IO');
+});
+
+test('validateMegaConfig names the bad field; maskEmail hides the local part', () => {
+  assert.equal(validateMegaConfig({ ...CREDS, folder: 'llmide-sync' }), null);
+  assert.equal(validateMegaConfig({ ...CREDS, email: 'not-an-email', folder: 'x' }), 'email');
+  assert.equal(validateMegaConfig({ ...CREDS, password: '', folder: 'x' }), 'password');
+  assert.equal(validateMegaConfig({ ...CREDS, folder: '../up' }), 'folder');
+  assert.equal(validateMegaConfig({ ...CREDS, folder: '..' }), 'folder');
+  assert.equal(maskEmail('llmide-sync@example.com'), 'l***@example.com');
+});
+
+test('watch signals files added to its folder, survives a re-login, and stops', async () => {
+  const { fake, store } = make();
+  let hits = 0;
+  const stop = store.watch('w/in', () => { hits++; });
+  await store.put('w/in/1.bin', Buffer.from('1'));
+  await store.put('w/other.bin', Buffer.from('2'));
+  assert.equal(hits, 1);
+  fake.loseSessions();
+  await store.put('w/in/2.bin', Buffer.from('3'));
+  assert.equal(hits, 2);
+  stop();
+  await store.put('w/in/3.bin', Buffer.from('4'));
+  assert.equal(hits, 2);
+});
+
+const IT = process.env.LLMIDE_SYNC_MEGA_IT === '1';
+test('live MEGA account (opt-in, throwaway account only)', { skip: !IT }, async () => {
+  const s = createMegaStore({ folder: 'llmide-sync-it' },
+    { email: process.env.LLMIDE_SYNC_MEGA_IT_EMAIL, password: process.env.LLMIDE_SYNC_MEGA_IT_PASSWORD });
+  const dir = `probe-${Date.now()}`;
+  try {
+    await s.put(`${dir}/x.bin`, Buffer.from('one'));
+    await s.put(`${dir}/x.bin`, Buffer.from('two'));
+    assert.equal(Buffer.from(await s.get(`${dir}/x.bin`)).toString(), 'two');
+    assert.deepEqual((await s.list(dir)).map((e) => e.name), ['x.bin']);
+    await s.remove(`${dir}/x.bin`);
+    assert.equal(await s.get(`${dir}/x.bin`), null);
+  } finally {
+    await s.removeTree(dir);
+    await s.close();
+  }
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [ ] **Step 4: Run the test to verify it fails**
 
-Run: `cd extension && node --test tests/sync-store-sftp.test.mjs`
-Expected: FAIL with `Cannot find module '…/connectors/sync-store/sftp.mjs'`.
+Run: `cd extension && node --test tests/sync-store-mega.test.mjs`
+Expected: FAIL with `Cannot find module '…/connectors/sync-store/mega.mjs'`.
 
-- [ ] **Step 4: Write the implementation**
+- [ ] **Step 5: Write the implementation**
 
 ```js
-// extension/connectors/sync-store/sftp.mjs
-// SyncStore over SFTP to the user's own server (design 8.1). The host key is pinned to the fingerprint the user pasted
-// from `ssh-keygen -lf` on the server: never trust-on-first-use. One connection is reused while busy and closed after
-// IDLE_MS. Writes are atomic: temp file, then posix-rename. The private key is never logged or put in an error.
-import { createHash, randomBytes } from 'node:crypto';
-import ssh2 from 'ssh2';
+// extension/connectors/sync-store/mega.mjs
+// SyncStore over MEGA (design 8.3): the first adapter, by user decision 2026-11-05. It talks to a dedicated MEGA account
+// used only for LLM-IDE and stores only sealed sync v1 envelopes; MEGA's own encryption sits underneath and is not relied
+// on. One logged-in session is reused while the core runs (megajs keepalive keeps its file tree current). An expired
+// session logs in again once. EAGAIN / ERATELIMIT / ETEMPUNAVAIL are retried twice (2 s, 8 s), then surface as
+// SYNC_RATE_LIMITED for the scheduler's back-off. Operations run one at a time per store, so two callers never race to
+// create the same folder. Deletes are permanent. The email and password never appear in a log line or an error.
+import { Storage } from 'megajs';
 import { checkPath, checkSize, MAX_FILE_BYTES } from './index.mjs';
 
-const { Client, utils } = ssh2;
-const IDLE_MS = 20_000;
-const READY_TIMEOUT_MS = 15_000;
-const NO_SUCH_FILE = 2;
-const HOST_RE = /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
-const USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
-const FP_RE = /^SHA256:[A-Za-z0-9+/]{43}$/;
+export const DEFAULT_MEGA_FOLDER = 'llmide-sync';
+const RETRY_DELAYS_MS = [2_000, 8_000];
+const RATE_LIMITED = new Set([-3, -4, -6, -18, -19]); // EAGAIN, ERATELIMIT, ETOOMANY, ETEMPUNAVAIL, ETOOMANYCONNECTIONS
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
+const FOLDER_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+const NETWORK_RE = /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR/;
+const MESSAGES = {
+  SYNC_AUTH_FAILED: 'MEGA refused the sync account login',
+  SYNC_MFA_REQUIRED: 'The sync account has two-factor login on; use a dedicated MEGA account with it off',
+  SYNC_RATE_LIMITED: 'MEGA asked LLM-IDE to slow down',
+  SYNC_QUOTA: 'The MEGA account is over its storage or transfer quota',
+  SYNC_UNREACHABLE: 'MEGA not reachable',
+  SYNC_SESSION_EXPIRED: 'MEGA session expired',
+  SYNC_TOO_LARGE: 'Sync file too large',
+  SYNC_IO: 'MEGA operation failed',
+};
 
-const coded = (code, message) => Object.assign(new Error(message), { code });
+const coded = (code) => Object.assign(new Error(MESSAGES[code] ?? MESSAGES.SYNC_IO), { code });
 
-export function hostKeyFingerprint(keyBlob) {
-  return 'SHA256:' + createHash('sha256').update(keyBlob).digest('base64').replace(/=+$/, '');
+/** megajs reports API errors as plain Errors whose message reads "ENAME (-n): ..." (its ERRORS table). */
+export function megaErrorNumber(e) {
+  const m = /\((-\d+)\)/.exec(String(e?.message ?? ''));
+  return m ? Number(m[1]) : null;
 }
 
-export function generateSshKey(comment) {
-  const k = utils.generateKeyPairSync('ed25519', { comment });
-  return { privateKey: k.private, publicLine: k.public.trim() };
+export function classifyMegaError(e, { duringLogin = false } = {}) {
+  const n = megaErrorNumber(e);
+  const text = `${e?.message ?? ''} ${e?.cause?.code ?? ''}`;
+  if (n === -15) return 'SYNC_SESSION_EXPIRED';
+  if (n === -26) return 'SYNC_MFA_REQUIRED';
+  if (RATE_LIMITED.has(n) || /maybe caused by rate limit/.test(text)) return 'SYNC_RATE_LIMITED';
+  if (n === -17 || n === -24 || /returned a 509 status/.test(text)) return 'SYNC_QUOTA';
+  if (n === -16) return 'SYNC_AUTH_FAILED'; // EBLOCKED
+  if (duringLogin && (n === -9 || /invalid credentials|Account version not supported/.test(text))) return 'SYNC_AUTH_FAILED';
+  if (n === null && NETWORK_RE.test(text)) return 'SYNC_UNREACHABLE';
+  return 'SYNC_IO';
 }
 
-export function validateSftpConfig(c) {
-  if (!c || typeof c.host !== 'string' || !HOST_RE.test(c.host)) return 'host';
-  if (!Number.isInteger(c.port) || c.port < 1 || c.port > 65535) return 'port';
-  if (typeof c.username !== 'string' || !USER_RE.test(c.username)) return 'username';
-  if (typeof c.hostKeySha256 !== 'string' || !FP_RE.test(c.hostKeySha256)) return 'hostKeySha256';
+const asCoded = (e, opts) => (String(e?.code ?? '').startsWith('SYNC_') ? e : coded(classifyMegaError(e, opts)));
+
+export function validateMegaConfig(c) {
+  if (!c || typeof c.email !== 'string' || !EMAIL_RE.test(c.email)) return 'email';
+  if (typeof c.password !== 'string' || c.password.length < 1 || c.password.length > 1024) return 'password';
+  if (typeof c.folder !== 'string' || !FOLDER_RE.test(c.folder) || c.folder === '.' || c.folder === '..') return 'folder';
   return null;
 }
 
-function realConnect({ host, port, username, hostKeySha256 }, { privateKey }) {
-  return new Promise((resolve, reject) => {
-    const conn = new Client();
-    let mismatch = false;
-    conn.on('ready', () => conn.sftp((err, sftp) => (err ? (conn.end(), reject(coded('SYNC_IO', 'SFTP subsystem refused'))) : resolve({ sftp, end: () => conn.end() }))));
-    conn.on('error', (e) => reject(mismatch ? coded('SYNC_HOST_KEY_MISMATCH', 'The server identity changed')
-      : e?.level === 'client-authentication' ? coded('SYNC_AUTH_FAILED', 'The server refused the key')
-      : coded('SYNC_UNREACHABLE', 'Server not reachable')));
-    conn.connect({
-      host, port, username, privateKey, readyTimeout: READY_TIMEOUT_MS, keepaliveInterval: 0,
-      hostVerifier: (key) => { const ok = hostKeyFingerprint(key) === hostKeySha256; mismatch = !ok; return ok; },
-    });
-  });
+export function maskEmail(email) {
+  const s = String(email ?? '');
+  const at = s.lastIndexOf('@');
+  return at > 0 ? `${s[0]}***${s.slice(at)}` : '***';
 }
 
-const call = (sftp, method, ...args) => new Promise((resolve, reject) => sftp[method](...args, (e, v) => (e ? reject(e) : resolve(v))));
-const missing = (e) => e?.code === NO_SUCH_FILE;
+function realLogin({ email, password }, { onLost }) {
+  // A fresh options object each time: megajs deletes options.password once it has derived the key. autoload reads the
+  // whole tree, which is small because the dedicated account holds only sync files. 2FA is never sent (spec 8.3).
+  const storage = new Storage({ email, password, keepalive: true, autoload: true, userAgent: 'LLM-IDE-sync' });
+  // The keepalive poll reports a dead session as an 'error' event on storage.api. Without a listener Node would throw
+  // and take the core down; with it, the next operation logs in again.
+  storage.api.on('error', onLost);
+  return storage.ready.catch((e) => { try { storage.api.close(); } catch { /* already closed */ } throw e; });
+}
 
-export function createSftpStore(config, secrets, { connect = realConnect } = {}) {
-  let session = null; // Promise<{ sftp, end }>
-  let idle = null;
-  const drop = () => { const s = session; session = null; s?.then((x) => x.end(), () => {}); };
-  async function sftp() {
-    clearTimeout(idle);
-    session ??= connect(config, secrets).catch((e) => { session = null; throw e.code ? e : coded('SYNC_UNREACHABLE', 'Server not reachable'); });
-    const s = await session;
-    idle = setTimeout(drop, IDLE_MS);
-    idle.unref?.();
-    return s.sftp;
-  }
-  const io = async (fn) => {
-    try { return await fn(await sftp()); } catch (e) {
-      if (String(e.code || '').startsWith('SYNC_')) throw e;
-      drop();
-      throw coded('SYNC_IO', 'SFTP operation failed');
+export function createMegaStore(config, secrets, { login = realLogin, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const folderName = config?.folder || DEFAULT_MEGA_FOLDER;
+  const gone = new Set();     // nodeIds this store deleted; hidden until MEGA's delete packet reaches the tree
+  const watchers = new Set(); // { dir, onChange }
+  let session = null;         // Promise<Storage> for the one live login
+  let chain = Promise.resolve();
+
+  const byAge = (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0); // stable sort: same second keeps upload order
+  const live = (node) => (node?.children ?? []).filter((c) => !gone.has(c.nodeId));
+  const filesNamed = (node, name) => live(node).filter((c) => !c.directory && c.name === name).sort(byAge); // last = newest
+  const folderNamed = (node, name) => live(node).find((c) => c.directory && c.name === name) ?? null;
+
+  /** 'a/b' for a folder below the sync folder; null outside it. */
+  function pathBelowSyncFolder(node, cloudRoot) {
+    const names = [];
+    for (let n = node; n; n = n.parent) {
+      if (n.parent === cloudRoot && n.name === folderName) return names.reverse().join('/');
+      names.push(n.name);
     }
-  };
-  async function mkdirp(s, segs) {
-    for (let i = 1; i <= segs.length; i++) {
-      const dir = segs.slice(0, i).join('/');
-      try { await call(s, 'stat', dir); } catch (e) { if (!missing(e)) throw e; await call(s, 'mkdir', dir, {}); }
+    return null;
+  }
+  function notify(st, file) {
+    if (!watchers.size || !file) return;
+    const dir = pathBelowSyncFolder(file.parent, st.root);
+    for (const w of watchers) {
+      if (w.dir === dir) { try { w.onChange(); } catch { /* a watcher's bug never breaks sync */ } }
     }
   }
-  async function rmTree(s, dir) {
-    let entries;
-    try { entries = await call(s, 'readdir', dir); } catch (e) { if (missing(e)) return; throw e; }
-    for (const e of entries) {
-      const child = `${dir}/${e.filename}`;
-      if (e.attrs.isDirectory()) await rmTree(s, child); else await call(s, 'unlink', child);
-    }
-    await call(s, 'rmdir', dir);
+  function attach(st) {
+    st.on('add', (f) => notify(st, f));
+    st.on('update', (f) => notify(st, f));
+    st.on('delete', (f) => { gone.delete(f?.nodeId); notify(st, f); });
   }
+
+  function storage() {
+    if (!session) {
+      const p = login({ email: secrets.email, password: secrets.password }, { onLost: () => { if (session === p) session = null; } })
+        .then((st) => { attach(st); return st; })
+        .catch((e) => { if (session === p) session = null; throw asCoded(e, { duringLogin: true }); });
+      session = p;
+    }
+    return session;
+  }
+  function drop() {
+    const old = session;
+    session = null;
+    old?.then((st) => st.close(), () => {}).catch(() => {});
+  }
+  async function attempt(fn) {
+    let relogged = false;
+    let retry = 0;
+    for (;;) {
+      try { return await fn(await storage()); } catch (e) {
+        const err = asCoded(e);
+        if (err.code === 'SYNC_SESSION_EXPIRED' && !relogged) { relogged = true; drop(); continue; }
+        if (err.code === 'SYNC_RATE_LIMITED' && retry < RETRY_DELAYS_MS.length) { await sleep(RETRY_DELAYS_MS[retry++]); continue; }
+        throw err.code === 'SYNC_SESSION_EXPIRED' ? coded('SYNC_AUTH_FAILED') : err;
+      }
+    }
+  }
+  const serial = (fn) => { const run = chain.then(() => attempt(fn)); chain = run.catch(() => {}); return run; };
+
+  async function walk(st, segs, create) {
+    let node = folderNamed(st.root, folderName) ?? await st.root.mkdir(folderName); // the sync folder: created on first use
+    for (const name of segs) {
+      const next = folderNamed(node, name);
+      if (next) node = next;
+      else if (create) node = await node.mkdir(name);
+      else return null;
+    }
+    return node;
+  }
+
   return {
     async put(path, bytes) {
       const segs = checkPath(path); checkSize(bytes);
-      await io(async (s) => {
-        await mkdirp(s, segs.slice(0, -1));
-        const tmp = `${path}.tmp-${randomBytes(6).toString('hex')}`;
-        await call(s, 'writeFile', tmp, Buffer.from(bytes));
-        await call(s, 'ext_openssh_rename', tmp, path);
+      const data = Buffer.from(bytes);
+      await serial(async (st) => {
+        const dir = await walk(st, segs.slice(0, -1), true);
+        const name = segs.at(-1);
+        const older = filesNamed(dir, name);
+        await dir.upload({ name, size: data.length }, data).complete; // readers see the old copy or the new one, never a mix
+        for (const f of older) { await f.delete(true); gone.add(f.nodeId); }
       });
     },
     async get(path) {
-      checkPath(path);
-      return io(async (s) => {
-        try {
-          const st = await call(s, 'stat', path);
-          if (st.size > MAX_FILE_BYTES) throw coded('SYNC_TOO_LARGE', 'Sync file too large');
-          return await call(s, 'readFile', path);
-        } catch (e) { if (missing(e)) return null; throw e; }
+      const segs = checkPath(path);
+      return serial(async (st) => {
+        const dir = await walk(st, segs.slice(0, -1), false);
+        const f = dir && filesNamed(dir, segs.at(-1)).at(-1);
+        if (!f) return null;
+        if ((f.size ?? 0) > MAX_FILE_BYTES) throw coded('SYNC_TOO_LARGE');
+        return f.downloadBuffer({});
       });
     },
     async list(dir) {
-      checkPath(dir);
-      return io(async (s) => {
-        try {
-          return (await call(s, 'readdir', dir)).filter((e) => !e.attrs.isDirectory() && !e.filename.includes('.tmp-'))
-            .map((e) => ({ name: e.filename, size: e.attrs.size, mtimeMs: e.attrs.mtime * 1000 }));
-        } catch (e) { if (missing(e)) return []; throw e; }
+      const segs = checkPath(dir);
+      return serial(async (st) => {
+        const node = await walk(st, segs, false);
+        if (!node) return [];
+        const newest = new Map();
+        for (const c of live(node).filter((x) => !x.directory).sort(byAge)) newest.set(c.name, c);
+        return [...newest.values()].map((c) => ({ name: c.name, size: c.size ?? 0, mtimeMs: (c.timestamp ?? 0) * 1000 }));
       });
     },
     async remove(path) {
-      checkPath(path);
-      await io(async (s) => { try { await call(s, 'unlink', path); } catch (e) { if (!missing(e)) throw e; } });
+      const segs = checkPath(path);
+      await serial(async (st) => {
+        const dir = await walk(st, segs.slice(0, -1), false);
+        for (const f of dir ? filesNamed(dir, segs.at(-1)) : []) { await f.delete(true); gone.add(f.nodeId); }
+      });
     },
-    async removeTree(dir) { checkPath(dir); await io((s) => rmTree(s, dir)); },
-    describe() { return { kind: 'sftp', root: `${config.username}@${config.host}:${config.port}` }; },
-    async close() { clearTimeout(idle); drop(); },
+    async removeTree(dir) {
+      const segs = checkPath(dir);
+      await serial(async (st) => {
+        const node = await walk(st, segs, false);
+        if (node) { await node.delete(true); gone.add(node.nodeId); }
+      });
+    },
+    watch(dir, onChange) {
+      const w = { dir: checkPath(dir).join('/'), onChange };
+      watchers.add(w);
+      void serial(async () => {}).catch(() => {}); // make sure a session, and so the change feed, exists
+      return () => { watchers.delete(w); };
+    },
+    describe() { return { kind: 'mega', root: folderName, account: maskEmail(secrets.email) }; },
+    async close() {
+      watchers.clear();
+      const old = session;
+      session = null;
+      if (old) await old.then((st) => st.close(), () => {}).catch(() => {});
+    },
   };
 }
 ```
 
-The SFTP session's working directory is `/data` (`ForceCommand internal-sftp -d /data`), so every path is relative to it.
+`watch` is the optional `SyncStore.watch` from spec §2.1. The scheduler in Task 8 still polls, so watch is not on the
+critical path, but SP3 and SP4 can use the same change feed to drain the inbox sooner.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `cd extension && node --test tests/sync-store-sftp.test.mjs`
-Expected: PASS (contract 4 + 4 unit; the live test is SKIPPED).
+Run: `cd extension && node --test tests/sync-store-mega.test.mjs tests/sync-store-memory.test.mjs`
+Expected: PASS. The MEGA file has 4 contract tests and 9 unit tests, and the live test is SKIPPED. The memory file is unchanged at 5.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add extension/connectors/sync-store/sftp.mjs extension/tests/sync-store-sftp.test.mjs extension/package.json extension/package-lock.json
-git commit -m "feat(sync): SFTP SyncStore adapter with pinned host key" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add extension/connectors/sync-store/mega.mjs extension/tests/helpers/fake-mega.mjs extension/tests/sync-store-mega.test.mjs extension/package.json extension/package-lock.json
+git commit -m "feat(sync): MEGA SyncStore adapter for a dedicated account" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1814,21 +2094,26 @@ git commit -m "feat(sync): inbox consumer at the fixed read-only ceiling" -m "Co
 - Create: `extension/routes/sync/scheduler.mjs`, `extension/routes/sync/http-routes.mjs`, `schema/http/sync.schema.json`
 - Modify: `extension/server.mjs`: the import block (top), `SERVER_API_VERSION` (line 324) plus a `v112` comment line, `ALL_ENDPOINTS`
   (after the `/host-api/*` entries near line 506), the rate-bucket function (near line 553, next to `/kb/calendar-ical/sources`),
-  the dispatch block (right after the Host API block near line 806) and the post-listen block (near line 1507)
+  the dispatch block (right after the Host API block near line 806), the post-listen block (near line 1507) and `shutdown()`
+  (near line 1195)
+- Modify: `extension/CLAUDE.md` (a new section after "Host API v1 (desktop)")
 - Regenerate: `schema/http/INVENTORY.md`, generated API types, openapi
 - Test: `extension/tests/sync-routes.test.mjs`
 
 **Interfaces:**
 - Consumes: Tasks 2, 4, 6, 7; `verifyBusHostProof` (`core/host-approval.mjs`); `send`, `readJson` (`server/route-http.mjs`); `getSecret`/`setSecret`.
 - Produces:
-  - `storeFor(userId): SyncStore | null` (scheduler.mjs)
-  - `startSyncScheduler({ logger, env = process.env }): { stop(): void }` (does nothing when `LLMIDE_SYNC=off`)
+  - `storeFor(userId): SyncStore | null` (scheduler.mjs). It caches one MEGA store per user, so one logged-in session is reused while the core runs.
+  - `dropStore(userId): Promise<void>` (logs that user's session out; called when the setup changes or sync is turned off)
+  - `closeSyncStores(): Promise<void>` (logs every session out; called on shutdown)
+  - `recordCycleFailure(userId, err, { now, backoff }): number` (records the code, returns the back-off in ms; turns sync off on `SYNC_AUTH_FAILED` or `SYNC_MFA_REQUIRED`)
+  - `startSyncScheduler({ logger, env = process.env }): { stop(): Promise<void> }` (does nothing when `LLMIDE_SYNC=off`)
   - `syncCycle(userId, { now }): Promise<{ publish, drain }>`
   - `isSyncRoute(url): boolean`, `handleSyncRoute(req, res, opts): Promise<true>`
   - HTTP (JWT + bus host proof, 403 `HOST_PROOF_REQUIRED` first):
-    - `GET /kb/sync/status` → `{ configured, enabled, storeKind, store, publicKey, syncId, epoch, signingFingerprint, devices: [{ deviceId, name, tier, addedAt }], lastPublishAt, lastError }`
-    - `POST /kb/sync/sftp { host, port, username, hostKeySha256 }` → status (creates the SSH key once; 400 `VALIDATION_FAILED` with `details.field`)
-    - `POST /kb/sync/test` → `{ ok: true }` | 502 `{ error: { code: SYNC_HOST_KEY_MISMATCH|SYNC_AUTH_FAILED|SYNC_UNREACHABLE|SYNC_IO } }` | 409 `SYNC_NOT_SET_UP`
+    - `GET /kb/sync/status` → `{ configured, enabled, storeKind, store, syncId, epoch, signingFingerprint, devices: [{ deviceId, name, tier, addedAt }], lastPublishAt, lastError }`, where `store` is `{ folder, account }` for MEGA and `account` is the masked email
+    - `POST /kb/sync/mega { email, password, folder? }` → status (stores the login in the vault; 400 `VALIDATION_FAILED` with `details.field`)
+    - `POST /kb/sync/test` → `{ ok: true }` | 502 `{ error: { code: SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO } }` | 409 `SYNC_NOT_SET_UP`
     - `POST /kb/sync/enabled { enabled: boolean }` → status | 409 `SYNC_NOT_SET_UP`
     - `POST /kb/sync/publish` → `{ publish: {devices, blobs, manifests}, drain: {ran, refused, replied} }` | 409 | 502
 
@@ -1854,7 +2139,9 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
+const st = await import('../kb/sync-state.mjs');
 const { handleSyncRoute, isSyncRoute } = await import('../routes/sync/http-routes.mjs');
+const { recordCycleFailure } = await import('../routes/sync/scheduler.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
 const PROOF = busHostProof();
 
@@ -1871,7 +2158,7 @@ async function call(method, url, { userId, body, proof = true, deps } = {}) {
   await handleSyncRoute(req, res, deps ? { deps } : {});
   return { status, body: payload ? JSON.parse(payload) : null };
 }
-const SFTP = { host: 'sync.example.com', port: 22, username: 'llmidesync', hostKeySha256: 'SHA256:' + 'A'.repeat(43) };
+const MEGA = { email: 'llmide-sync@example.com', password: 'a long dedicated password', folder: 'llmide-sync' };
 
 test('routes need the bus host proof, then a user', async () => {
   assert.ok(isSyncRoute('/kb/sync/status'));
@@ -1880,25 +2167,27 @@ test('routes need the bus host proof, then a user', async () => {
   assert.equal((await call('GET', '/kb/sync/status', {})).status, 401);
 });
 
-test('SFTP setup validates, creates one SSH key, returns only the public line, never secrets', async () => {
+test('MEGA setup validates, keeps the login only in the vault, and never returns it', async () => {
   const u = user();
-  const bad = await call('POST', '/kb/sync/sftp', { userId: u, body: { ...SFTP, port: 0 } });
-  assert.equal(bad.status, 400); assert.equal(bad.body.error.details.field, 'port');
-  const a = await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
+  const bad = await call('POST', '/kb/sync/mega', { userId: u, body: { ...MEGA, email: 'not-an-email' } });
+  assert.equal(bad.status, 400); assert.equal(bad.body.error.details.field, 'email');
+  const badFolder = await call('POST', '/kb/sync/mega', { userId: u, body: { ...MEGA, folder: '../up' } });
+  assert.equal(badFolder.body.error.details.field, 'folder');
+  const a = await call('POST', '/kb/sync/mega', { userId: u, body: { email: MEGA.email, password: MEGA.password } });
   assert.equal(a.status, 200);
-  assert.match(a.body.publicKey, /^ssh-ed25519 /);
+  assert.equal(a.body.storeKind, 'mega');
+  assert.deepEqual(a.body.store, { folder: 'llmide-sync', account: 'l***@example.com' }, 'the default folder name applies');
   assert.equal(a.body.enabled, false);
-  const b = await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
-  assert.equal(b.body.publicKey, a.body.publicKey, 'the key is created once');
-  const raw = JSON.stringify(b.body);
-  assert.ok(!raw.includes('PRIVATE KEY'));
-  assert.ok(!raw.includes(vault.getSecret(kb.getDb(), u, 'sync.sshKey').slice(40, 80)));
+  const raw = JSON.stringify(a.body);
+  assert.ok(!raw.includes(MEGA.password)); assert.ok(!raw.includes(MEGA.email));
+  assert.equal(vault.getSecret(kb.getDb(), u, 'sync.megaPassword'), MEGA.password);
+  assert.deepEqual(st.getSyncState(u).storeConfig, { folder: 'llmide-sync' }, 'the database holds the folder name only');
 });
 
 test('enable needs a configured store; status reflects it', async () => {
   const u = user();
   assert.equal((await call('POST', '/kb/sync/enabled', { userId: u, body: { enabled: true } })).status, 409);
-  await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
+  await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
   const on = await call('POST', '/kb/sync/enabled', { userId: u, body: { enabled: true } });
   assert.equal(on.body.enabled, true);
   assert.equal((await call('POST', '/kb/sync/enabled', { userId: u, body: { enabled: 'yes' } })).status, 400);
@@ -1906,10 +2195,24 @@ test('enable needs a configured store; status reflects it', async () => {
 
 test('test and publish surface coded store errors', async () => {
   const u = user();
-  await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
-  const failing = { storeFor: () => ({ put: async () => { throw Object.assign(new Error('x'), { code: 'SYNC_HOST_KEY_MISMATCH' }); }, get: async () => null, remove: async () => {}, close: async () => {} }) };
+  await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+  const failing = { storeFor: () => ({ put: async () => { throw Object.assign(new Error('x'), { code: 'SYNC_MFA_REQUIRED' }); }, get: async () => null, remove: async () => {} }) };
   const r = await call('POST', '/kb/sync/test', { userId: u, deps: failing });
-  assert.equal(r.status, 502); assert.equal(r.body.error.code, 'SYNC_HOST_KEY_MISMATCH');
+  assert.equal(r.status, 502); assert.equal(r.body.error.code, 'SYNC_MFA_REQUIRED');
+});
+
+test('a refused login turns sync off instead of retrying (no account lockout); rate limits back off', () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'mega', storeConfig: { folder: 'llmide-sync' } });
+  st.setSyncEnabled(u, true);
+  const backoff = new Map();
+  const ms = recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_RATE_LIMITED' }), { now: 1000, backoff });
+  assert.equal(ms, 60_000);
+  assert.equal(st.getSyncState(u).enabled, true);
+  assert.equal(st.getSyncState(u).lastError, 'SYNC_RATE_LIMITED');
+  recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_AUTH_FAILED' }), { now: 2000, backoff });
+  assert.equal(st.getSyncState(u).enabled, false);
+  assert.equal(st.getSyncState(u).lastError, 'SYNC_AUTH_FAILED');
 });
 ```
 
@@ -1923,36 +2226,71 @@ Expected: FAIL with `Cannot find module '…/routes/sync/http-routes.mjs'`.
 ```js
 // extension/routes/sync/scheduler.mjs
 // Timers for every user with sync on: producer every 60 s +/- 15 s, consumer every 30 s; one cycle per user at a time;
-// failures back off exponentially up to 15 min and are recorded as a code only. LLMIDE_SYNC=off starts nothing.
+// failures back off exponentially up to 15 min and are recorded as a code only. A refused login (SYNC_AUTH_FAILED,
+// SYNC_MFA_REQUIRED) turns sync off instead of retrying, so a changed password never locks the MEGA account. One MEGA
+// store (one logged-in session) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
-import { getSyncState, listEnabledSyncUsers, recordPublish } from '../../kb/sync-state.mjs';
-import { createSftpStore } from '../../connectors/sync-store/sftp.mjs';
+import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
+import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { publishOnce } from './producer.mjs';
 import { drainOnce } from './consumer.mjs';
 
 const PRODUCE_MS = 60_000;
 const DRAIN_MS = 30_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
+const SETUP_ERRORS = new Set(['SYNC_AUTH_FAILED', 'SYNC_MFA_REQUIRED']);
+const stores = new Map(); // userId -> SyncStore
 
 export function storeFor(userId) {
+  const cached = stores.get(userId);
+  if (cached) return cached;
   const state = getSyncState(userId);
-  if (state?.storeKind !== 'sftp') return null;
-  const privateKey = getSecret(getDb(), userId, 'sync.sshKey');
-  return privateKey ? createSftpStore(state.storeConfig, { privateKey }) : null;
+  if (state?.storeKind !== 'mega') return null;
+  const db = getDb();
+  const email = getSecret(db, userId, 'sync.megaEmail');
+  const password = getSecret(db, userId, 'sync.megaPassword');
+  if (!email || !password) return null;
+  const store = createMegaStore(state.storeConfig, { email, password });
+  stores.set(userId, store);
+  return store;
+}
+
+export async function dropStore(userId) {
+  const s = stores.get(userId);
+  stores.delete(userId);
+  await s?.close?.();
+}
+
+export async function closeSyncStores() {
+  const all = [...stores.values()];
+  stores.clear();
+  await Promise.allSettled(all.map((s) => s.close?.()));
 }
 
 export async function syncCycle(userId, { now = Date.now(), produce = true, store = storeFor(userId) } = {}) {
   if (!store) throw Object.assign(new Error('Sync is not set up'), { code: 'SYNC_NOT_SET_UP' });
-  try {
-    const publish = produce ? await publishOnce({ userId, store, now }) : null;
-    const drain = await drainOnce({ userId, store, now });
-    return { publish, drain };
-  } finally { await store.close?.(); }
+  const publish = produce ? await publishOnce({ userId, store, now }) : null;
+  const drain = await drainOnce({ userId, store, now });
+  return { publish, drain };
+}
+
+export function recordCycleFailure(userId, e, { now, backoff }) {
+  const code = String(e?.code || 'SYNC_FAILED');
+  recordPublish(userId, { at: now, error: code });
+  if (SETUP_ERRORS.has(code)) {
+    setSyncEnabled(userId, false);
+    backoff.delete(userId);
+    void dropStore(userId);
+    return 0;
+  }
+  const ms = Math.min(MAX_BACKOFF_MS, (backoff.get(userId)?.ms ?? 30_000) * 2);
+  backoff.set(userId, { until: now + ms, ms });
+  return ms;
 }
 
 export function startSyncScheduler({ logger, env = process.env } = {}) {
-  if (env.LLMIDE_SYNC === 'off') return { stop() {} };
+  if (env.LLMIDE_SYNC === 'off') return { async stop() {} };
   const busy = new Set();
   const backoff = new Map(); // userId -> { until, ms }
   let lastProduce = 0;
@@ -1967,17 +2305,14 @@ export function startSyncScheduler({ logger, env = process.env } = {}) {
         await syncCycle(userId, { now, produce });
         backoff.delete(userId);
       } catch (e) {
-        const ms = Math.min(MAX_BACKOFF_MS, (backoff.get(userId)?.ms ?? 30_000) * 2);
-        backoff.set(userId, { until: now + ms, ms });
-        const code = String(e?.code || 'SYNC_FAILED');
-        recordPublish(userId, { at: now, error: code });
-        logger?.warn?.('sync_cycle_failed', { code, backoffMs: ms });
+        const ms = recordCycleFailure(userId, e, { now, backoff });
+        logger?.warn?.('sync_cycle_failed', { code: String(e?.code || 'SYNC_FAILED'), backoffMs: ms });
       } finally { busy.delete(userId); }
     }
   };
   const timer = setInterval(() => { void tick(); }, DRAIN_MS);
   timer.unref?.();
-  return { stop() { clearInterval(timer); } };
+  return { async stop() { clearInterval(timer); await closeSyncStores(); } };
 }
 ```
 
@@ -1985,16 +2320,16 @@ export function startSyncScheduler({ logger, env = process.env } = {}) {
 
 ```js
 // extension/routes/sync/http-routes.mjs
-// /kb/sync/* for the desktop Settings card: JWT + bus host proof (desktop UI only), per user. Never returns a private
-// key, root key or folder capability; errors carry codes, never secrets.
+// /kb/sync/* for the desktop Settings card: JWT + bus host proof (desktop UI only), per user. Never returns the MEGA
+// password, the full MEGA email, a private key, the root key or a folder capability; errors carry codes, never secrets.
 import { send, readJson } from '../../server/route-http.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices } from '../../kb/sync-state.mjs';
-import { generateSshKey, validateSftpConfig } from '../../connectors/sync-store/sftp.mjs';
+import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { ensureSyncKeys } from './keys.mjs';
-import { storeFor as defaultStoreFor, syncCycle } from './scheduler.mjs';
+import { storeFor as defaultStoreFor, dropStore, syncCycle } from './scheduler.mjs';
 
 const fail = (res, status, code, message, details) => { send(res, status, { error: { code, message, ...(details ? { details } : {}) } }); return true; };
 
@@ -2005,12 +2340,10 @@ export function isSyncRoute(url) {
 
 function status(userId) {
   const s = getSyncState(userId);
-  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, publicKey: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], lastPublishAt: null, lastError: null };
-  const db = getDb();
+  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], lastPublishAt: null, lastError: null };
   return {
     configured: true, enabled: s.enabled, storeKind: s.storeKind,
-    store: s.storeKind === 'sftp' ? { host: s.storeConfig.host, port: s.storeConfig.port, username: s.storeConfig.username, hostKeySha256: s.storeConfig.hostKeySha256 } : null,
-    publicKey: getSecret(db, userId, 'sync.sshPublic') ?? null,
+    store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : null,
     syncId: s.syncId, epoch: s.epoch, signingFingerprint: ensureSyncKeys(userId).fingerprint,
     devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt })),
     lastPublishAt: s.lastPublishAt, lastError: s.lastError,
@@ -2025,18 +2358,16 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
   if (!userId) return fail(res, 401, 'UNAUTHORIZED', 'Sign in first');
   try {
     if (req.method === 'GET' && path === '/kb/sync/status') { send(res, 200, status(userId)); return true; }
-    if (req.method === 'POST' && path === '/kb/sync/sftp') {
+    if (req.method === 'POST' && path === '/kb/sync/mega') {
       const b = await readJson(req, 4096);
-      const cfg = { host: String(b.host ?? '').trim(), port: Number(b.port), username: String(b.username ?? '').trim(), hostKeySha256: String(b.hostKeySha256 ?? '').trim() };
-      const field = validateSftpConfig(cfg);
+      const cfg = { email: String(b.email ?? '').trim(), password: typeof b.password === 'string' ? b.password : '', folder: String(b.folder ?? DEFAULT_MEGA_FOLDER).trim() || DEFAULT_MEGA_FOLDER };
+      const field = validateMegaConfig(cfg);
       if (field) return fail(res, 400, 'VALIDATION_FAILED', `Invalid ${field}`, { field });
-      ensureSyncState(userId, { storeKind: 'sftp', storeConfig: cfg });
       const db = getDb();
-      if (!getSecret(db, userId, 'sync.sshKey')) {
-        const k = generateSshKey(`llmide-sync-${getSyncState(userId).syncId}`);
-        setSecret(db, userId, 'sync.sshKey', k.privateKey);
-        setSecret(db, userId, 'sync.sshPublic', k.publicLine);
-      }
+      setSecret(db, userId, 'sync.megaEmail', cfg.email);
+      setSecret(db, userId, 'sync.megaPassword', cfg.password);
+      ensureSyncState(userId, { storeKind: 'mega', storeConfig: { folder: cfg.folder } });
+      await dropStore(userId); // the next use logs in with the new login
       send(res, 200, status(userId)); return true;
     }
     if (req.method === 'POST' && path === '/kb/sync/enabled') {
@@ -2044,6 +2375,7 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       if (typeof b.enabled !== 'boolean') return fail(res, 400, 'VALIDATION_FAILED', 'enabled must be a boolean', { field: 'enabled' });
       if (!getSyncState(userId)) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
       setSyncEnabled(userId, b.enabled);
+      if (!b.enabled) await dropStore(userId); // log the MEGA session out while sync is off
       send(res, 200, status(userId)); return true;
     }
     if (req.method === 'POST' && (path === '/kb/sync/test' || path === '/kb/sync/publish')) {
@@ -2052,6 +2384,7 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       if (!store) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
       try {
         if (path === '/kb/sync/test') {
+          // Logs in, creates the sync folder on first use, then a write/read/delete round trip.
           const probe = `${state.syncId}/probe.bin`;
           await store.put(probe, Buffer.from('ok'));
           const back = await store.get(probe);
@@ -2063,7 +2396,7 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       } catch (e) {
         const code = String(e?.code || '').startsWith('SYNC_') ? e.code : 'SYNC_IO';
         return fail(res, code === 'SYNC_NOT_SET_UP' ? 409 : 502, code, 'Sync store error');
-      } finally { await store.close?.(); }
+      }
     }
     return fail(res, 404, 'NOT_FOUND', 'No such sync route');
   } catch (e) {
@@ -2072,8 +2405,9 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
 }
 ```
 
-The public line is stored as the vault entry `sync.sshPublic`, which Task 2 already allowed as an internal key. It is
-not secret, but no client may overwrite it.
+The store is not closed after a route call: the cached session belongs to the scheduler and stays logged in while the
+core runs. The `/kb/sync/test` probe file is the only plaintext the store ever sees: the two bytes `ok` under a random
+`syncId`, deleted at once.
 
 - [ ] **Step 5: Wire `extension/server.mjs`**
 
@@ -2086,7 +2420,7 @@ import { handleSyncRoute, isSyncRoute } from './routes/sync/http-routes.mjs';
 Bump the version and record the wire change (line 324, with a comment line above it like the others):
 
 ```js
-//   v112 — encrypted sync, additive (design docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md, migration 0064, contract schema/http/sync.schema.json): GET /kb/sync/status, POST /kb/sync/sftp { host, port, username, hostKeySha256 }, POST /kb/sync/test, POST /kb/sync/enabled { enabled }, POST /kb/sync/publish. JWT + bus host proof (403 HOST_PROOF_REQUIRED first). Never returns a private key, root key or folder capability. Status, sftp and enabled ride 'kbWrite'; test and publish ride 'dispatch'.
+//   v112 — encrypted sync, additive (design docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md, migration 0064, contract schema/http/sync.schema.json): GET /kb/sync/status, POST /kb/sync/mega { email, password, folder? }, POST /kb/sync/test, POST /kb/sync/enabled { enabled }, POST /kb/sync/publish. JWT + bus host proof (403 HOST_PROOF_REQUIRED first). Never returns the MEGA password or full email, a private key, root key or folder capability. Status, mega and enabled ride 'kbWrite'; test and publish ride 'dispatch'.
 const SERVER_API_VERSION = 112;
 ```
 
@@ -2094,7 +2428,7 @@ Add to `ALL_ENDPOINTS` after `'/host-api/devices/:id',`:
 
 ```js
   '/kb/sync/status',
-  '/kb/sync/sftp',
+  '/kb/sync/mega',
   '/kb/sync/test',
   '/kb/sync/enabled',
   '/kb/sync/publish',
@@ -2117,28 +2451,46 @@ Add the dispatch right after the Host API block (after line 812):
   }
 ```
 
+Declare the scheduler handle next to `let shuttingDown = false;` (near line 1194):
+
+```js
+let syncScheduler = null; // routes/sync/scheduler.mjs, started after listen; its stop() logs the MEGA sessions out
+```
+
 Start the scheduler next to the engine prewarm (line 1507), never in tests:
 
 ```js
     if (process.env.NODE_ENV !== 'test') {
-      void import('./routes/sync/scheduler.mjs').then((m) => m.startSyncScheduler({ logger })).catch((e) => logger.warn('sync_scheduler_failed', { message: e.message }));
+      void import('./routes/sync/scheduler.mjs').then((m) => { syncScheduler = m.startSyncScheduler({ logger }); }).catch((e) => logger.warn('sync_scheduler_failed', { message: e.message }));
     }
+```
+
+In `shutdown()`, after `stopBackgroundOutcomePoller();`:
+
+```js
+  // Encrypted sync: stop the timers and log each MEGA session out (best-effort, at most 2 s of the shutdown budget).
+  const syncStopped = syncScheduler ? syncScheduler.stop().catch(() => {}) : Promise.resolve();
+```
+
+and inside the `server.close(async () => {` callback, right after `await busStopped;`:
+
+```js
+    await Promise.race([syncStopped, new Promise((r) => setTimeout(r, 2000))]);
 ```
 
 - [ ] **Step 6: Contract file and generated artefacts**
 
 ```json
 {
-  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_HOST_KEY_MISMATCH|SYNC_AUTH_FAILED|SYNC_UNREACHABLE|SYNC_IO.",
+  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO.",
   "$defs": {
     "Status": {
       "type": "object",
       "properties": {
         "configured": { "type": "boolean" },
         "enabled": { "type": "boolean" },
-        "storeKind": { "type": ["string", "null"], "description": "sftp | box | mega | memory" },
-        "store": { "type": ["object", "null"], "description": "sftp: { host, port, username, hostKeySha256 }" },
-        "publicKey": { "type": ["string", "null"], "description": "the ssh-ed25519 authorized_keys line" },
+        "storeKind": { "type": ["string", "null"], "description": "mega | memory (sftp | box in later sub-projects)" },
+        "store": { "type": ["object", "null"], "description": "mega: { folder, account }, account = masked email" },
         "syncId": { "type": ["string", "null"] },
         "epoch": { "type": ["integer", "null"] },
         "signingFingerprint": { "type": ["string", "null"], "description": "base64url SHA-256 of the desktop signing SPKI" },
@@ -2150,7 +2502,7 @@ Start the scheduler next to the engine prewarm (line 1507), never in tests:
   },
   "endpoints": {
     "GET /kb/sync/status": { "responses": { "200": { "$ref": "#/$defs/Status" } } },
-    "POST /kb/sync/sftp": { "request": { "type": "object", "required": ["host", "port", "username", "hostKeySha256"] }, "responses": { "200": { "$ref": "#/$defs/Status" } } },
+    "POST /kb/sync/mega": { "request": { "type": "object", "required": ["email", "password"], "properties": { "email": { "type": "string" }, "password": { "type": "string" }, "folder": { "type": "string" } } }, "responses": { "200": { "$ref": "#/$defs/Status" } } },
     "POST /kb/sync/test": { "responses": { "200": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } },
     "POST /kb/sync/enabled": { "request": { "type": "object", "required": ["enabled"] }, "responses": { "200": { "$ref": "#/$defs/Status" } } },
     "POST /kb/sync/publish": { "responses": { "200": { "type": "object", "properties": { "publish": { "type": ["object", "null"] }, "drain": { "type": "object" } } } } }
@@ -2169,22 +2521,39 @@ make contract-gates
 Expected: each command exits 0. If `conformance-http.mjs` names a missing fixture or a schema keyword, add exactly what
 it names, following `schema/http/host-api.schema.json` and `schema/http/fixtures/host-api/`, and run it again.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 7: Add the `extension/CLAUDE.md` section** (after "Host API v1 (desktop)")
+
+```markdown
+## Sync (desktop producer)
+
+- **What**: encrypted snapshots (chats, meetings, plans, usage) and a queued-prompt inbox in a user-owned folder, for the phone and web with the desktop off. Design `docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md`, ADR 0020.
+- **Where**: envelope `core/sync-envelope.mjs` (relay v1 bytes + `snapshot`/`manifest`/`syncwrap`; vectors `schema/sync/v1`, check `node scripts/sync-vectors.mjs`); stores `connectors/sync-store/` (memory for tests; MEGA via `megajs` 1.3.10, the first adapter by user decision; SFTP and Box are later sub-projects); state `kb/sync-state.mjs` (migration 0064); vault keys `sync.rootKey`, `sync.signingKey`, `sync.megaEmail`, `sync.megaPassword` (all internal); producer/consumer/scheduler/routes `routes/sync/`.
+- **MEGA**: a dedicated account only; 2FA off on that account (`SYNC_MFA_REQUIRED` otherwise); one session per user cached in `routes/sync/scheduler.mjs` while the core runs, logged out on shutdown, setup change or sync off; a refused login turns sync off instead of retrying. Tests use `tests/helpers/fake-mega.mjs`; the live run is opt-in (`LLMIDE_SYNC_MEGA_IT=1`).
+- **Ceiling**: queued requests are `chat.send` only and run only through `startHostTurn` (`auto_read_only`, phone chat); an approval request cancels the turn and replies `needs_approval`; record-before-execute in `sync_requests`.
+- **Off switch**: `LLMIDE_SYNC=off` starts no scheduler; per user, Settings "Sync on" (`sync_state.enabled`).
+- **Never** log keys, folder names, `es`, the MEGA email or password, or decrypted content.
+```
+
+- [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `cd extension && node --test tests/sync-routes.test.mjs tests/server-features-health.test.mjs tests/lazy-engine.test.mjs`
 Expected: PASS. The lazy-engine test proves the scheduler import is not on the boot path; `consumer.mjs` imports
-`agent-v2.mjs` only inside its deps.
+`agent-v2.mjs` only inside its deps. `http-routes.mjs` imports `connectors/sync-store/mega.mjs`, which imports `megajs`
+at module load. That is on the request path for `/kb/sync/*` only if `server.mjs` imports `http-routes.mjs` statically,
+which Step 5 does. If `lazy-engine.test.mjs` or a boot-time budget test flags `megajs`, change the Step 5 import to a lazy
+`await import('./routes/sync/http-routes.mjs')` inside the dispatch block, and keep `isSyncRoute` as the inline check
+`p === '/kb/sync' || p.startsWith('/kb/sync/')`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add extension/routes/sync/scheduler.mjs extension/routes/sync/http-routes.mjs extension/tests/sync-routes.test.mjs extension/server.mjs extension/server/vault.mjs schema/http
+git add extension/routes/sync/scheduler.mjs extension/routes/sync/http-routes.mjs extension/tests/sync-routes.test.mjs extension/server.mjs extension/CLAUDE.md schema/http
 git commit -m "feat(server): sync settings routes and background scheduler (API v112)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 9: Settings card
+### Task 9: Settings card (MEGA setup) and full verification
 
 **Files:**
 - Create: `ui/screens/settings/sync-model.ts`, `ui/screens/settings/sections/SyncSection.tsx`
@@ -2193,13 +2562,14 @@ git commit -m "feat(server): sync settings routes and background scheduler (API 
 
 **Interfaces:**
 - Consumes: `call`, `ApiError`, `CoreClient` (`../core-api.ts`); `useEnv` (`../context.tsx`); `Button`, `ErrorText` (`../ui.tsx`); the Task 8 routes.
-- Produces: `decodeSyncStatus(v: unknown): SyncStatus`, `loadSyncStatus(client)`, `saveSftp(client, cfg)`, `testSync(client)`, `setSyncEnabled(client, enabled)`, `publishNow(client)`, and the default export `SyncSection`.
+- Produces: `decodeSyncStatus(v: unknown): SyncStatus`, `loadSyncStatus(client)`, `saveMega(client, cfg)`, `testSync(client)`, `setSyncEnabled(client, enabled)`, `publishNow(client)`, `syncErrorText(code: string): string | null`, `describeSyncError(e: unknown): string | null`, and the default export `SyncSection`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```js
 // ui/screens/settings/tests/sync-section.test.mjs
-// Sync card model: strict decoding of /kb/sync/status, and the calls the card makes. The card hides on HOST_PROOF_REQUIRED.
+// Sync card model: strict decoding of /kb/sync/status, the calls the card makes, and the MEGA error texts. The card
+// hides on HOST_PROOF_REQUIRED.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -2218,21 +2588,28 @@ before(async () => {
   m = await import(pathToFileURL(out).href);
 });
 const fake = (routes) => { const calls = []; return { calls, async request(method, path, body) { calls.push(`${method} ${path} ${body ? JSON.stringify(body) : ""}`.trim()); return routes[`${method} ${path}`] ?? { status: 404, body: { error: { code: "NOT_FOUND", message: "x" } } }; } }; };
-const STATUS = { configured: true, enabled: false, storeKind: "sftp", store: { host: "llm-ide.com", port: 22, username: "llmidesync", hostKeySha256: "SHA256:" + "A".repeat(43) },
-  publicKey: "ssh-ed25519 AAAAC3Nza llmide-sync-x", syncId: "B".repeat(22), epoch: 1, signingFingerprint: "C".repeat(43), devices: [], lastPublishAt: null, lastError: null };
+const STATUS = { configured: true, enabled: false, storeKind: "mega", store: { folder: "llmide-sync", account: "l***@example.com" },
+  syncId: "B".repeat(22), epoch: 1, signingFingerprint: "C".repeat(43), devices: [], lastPublishAt: null, lastError: null };
 
-test("decodeSyncStatus accepts the route shape and rejects junk", () => {
-  assert.equal(m.decodeSyncStatus(STATUS).store.host, "llm-ide.com");
+test("decodeSyncStatus accepts the route shape, rejects junk, and never keeps a password", () => {
+  assert.equal(m.decodeSyncStatus(STATUS).store.folder, "llmide-sync");
   assert.throws(() => m.decodeSyncStatus({ ...STATUS, enabled: "no" }));
-  assert.throws(() => m.decodeSyncStatus({ ...STATUS, publicKey: "-----BEGIN OPENSSH PRIVATE KEY-----" }), "a private key is never shown");
+  const leaked = m.decodeSyncStatus({ ...STATUS, store: { ...STATUS.store, password: "secret" } });
+  assert.deepEqual(leaked.store, { folder: "llmide-sync", account: "l***@example.com" });
 });
 
 test("calls go to the sync routes with the typed body", async () => {
-  const c = fake({ "POST /kb/sync/sftp": { status: 200, body: STATUS }, "POST /kb/sync/enabled": { status: 200, body: { ...STATUS, enabled: true } }, "GET /kb/sync/status": { status: 403, body: { error: { code: "HOST_PROOF_REQUIRED", message: "x" } } } });
-  await m.saveSftp(c, { host: "llm-ide.com", port: 22, username: "llmidesync", hostKeySha256: STATUS.store.hostKeySha256 });
+  const c = fake({ "POST /kb/sync/mega": { status: 200, body: STATUS }, "POST /kb/sync/enabled": { status: 200, body: { ...STATUS, enabled: true } }, "GET /kb/sync/status": { status: 403, body: { error: { code: "HOST_PROOF_REQUIRED", message: "x" } } } });
+  await m.saveMega(c, { email: "llmide-sync@example.com", password: "pw", folder: "llmide-sync" });
   assert.equal((await m.setSyncEnabled(c, true)).enabled, true);
   assert.equal(await m.loadSyncStatus(c), null, "hidden without the host proof");
-  assert.ok(c.calls[0].startsWith("POST /kb/sync/sftp"));
+  assert.ok(c.calls[0].startsWith("POST /kb/sync/mega"));
+});
+
+test("MEGA error codes read as guidance", () => {
+  assert.match(m.syncErrorText("SYNC_MFA_REQUIRED"), /two-factor/);
+  assert.match(m.syncErrorText("SYNC_AUTH_FAILED"), /email or password/);
+  assert.equal(m.syncErrorText("SOMETHING_ELSE"), null);
 });
 ```
 
@@ -2245,13 +2622,15 @@ Expected: FAIL (esbuild cannot resolve `sync-model.ts`).
 
 ```ts
 // Settings → Phone and web sync: the model for the /kb/sync/* routes (schema/http/sync.schema.json). Strict decoding;
-// the card hides when the core does not serve these routes to this UI (no bus host proof).
+// the card hides when the core does not serve these routes to this UI (no bus host proof). The MEGA password is sent
+// once, on Save, and is never read back: no route returns it, and the decoder keeps only folder + masked account.
 import { ApiError, call, type CoreClient } from "./core-api.ts";
 
-export interface SftpConfig { host: string; port: number; username: string; hostKeySha256: string }
+export interface MegaSetup { email: string; password: string; folder: string }
+export interface MegaStore { folder: string; account: string }
 export interface SyncDevice { deviceId: string; name: string; tier: "web" | "ios"; addedAt: number }
 export interface SyncStatus {
-  configured: boolean; enabled: boolean; storeKind: string | null; store: SftpConfig | null; publicKey: string | null;
+  configured: boolean; enabled: boolean; storeKind: string | null; store: MegaStore | null;
   syncId: string | null; epoch: number | null; signingFingerprint: string | null; devices: SyncDevice[];
   lastPublishAt: number | null; lastError: string | null;
 }
@@ -2262,24 +2641,33 @@ const intOrNull = (v: unknown) => v === null || Number.isInteger(v);
 
 export function decodeSyncStatus(v: unknown): SyncStatus {
   if (!isRecord(v) || typeof v.configured !== "boolean" || typeof v.enabled !== "boolean" || !strOrNull(v.storeKind)
-    || !(v.publicKey === null || (typeof v.publicKey === "string" && /^ssh-ed25519 [A-Za-z0-9+/=]+( \S+)?$/.test(v.publicKey)))
     || !strOrNull(v.syncId) || !intOrNull(v.epoch) || !strOrNull(v.signingFingerprint) || !Array.isArray(v.devices)
     || !intOrNull(v.lastPublishAt) || !strOrNull(v.lastError)) throw new ApiError(0, "BAD_RESPONSE");
   const s = v.store;
-  const store = isRecord(s) && typeof s.host === "string" && Number.isInteger(s.port) && typeof s.username === "string" && typeof s.hostKeySha256 === "string"
-    ? { host: s.host, port: s.port as number, username: s.username, hostKeySha256: s.hostKeySha256 } : null;
+  const store = isRecord(s) && typeof s.folder === "string" && typeof s.account === "string" ? { folder: s.folder, account: s.account } : null;
   const devices = (v.devices as unknown[]).filter((d): d is SyncDevice => isRecord(d) && typeof d.deviceId === "string" && typeof d.name === "string"
     && (d.tier === "web" || d.tier === "ios") && typeof d.addedAt === "number");
-  return { configured: v.configured, enabled: v.enabled, storeKind: v.storeKind as string | null, store, publicKey: v.publicKey as string | null,
+  return { configured: v.configured, enabled: v.enabled, storeKind: v.storeKind as string | null, store,
     syncId: v.syncId as string | null, epoch: v.epoch as number | null, signingFingerprint: v.signingFingerprint as string | null, devices,
     lastPublishAt: v.lastPublishAt as number | null, lastError: v.lastError as string | null };
 }
+
+const SYNC_ERROR_TEXT: Record<string, string> = {
+  SYNC_AUTH_FAILED: "MEGA refused the email or password. Check them, then Save again. Sync was turned off so MEGA does not lock the account.",
+  SYNC_MFA_REQUIRED: "This MEGA account has two-factor login on. The desktop logs in by itself, so use a separate MEGA account with two-factor off (keep it on for your personal account).",
+  SYNC_RATE_LIMITED: "MEGA asked LLM-IDE to slow down. Sync retries by itself in a few minutes.",
+  SYNC_QUOTA: "The MEGA account is over its storage or transfer quota.",
+  SYNC_UNREACHABLE: "MEGA could not be reached. Check the network; sync retries by itself.",
+  SYNC_IO: "A MEGA operation failed. Sync retries by itself.",
+};
+export const syncErrorText = (code: string): string | null => SYNC_ERROR_TEXT[code] ?? null;
+export const describeSyncError = (e: unknown): string | null => (e instanceof ApiError ? syncErrorText(e.code) : null);
 
 export async function loadSyncStatus(client: CoreClient): Promise<SyncStatus | null> {
   try { return decodeSyncStatus(await call(client, "GET", "/kb/sync/status")); }
   catch (e) { if (e instanceof ApiError && e.code === "HOST_PROOF_REQUIRED") return null; throw e; }
 }
-export const saveSftp = async (client: CoreClient, cfg: SftpConfig) => decodeSyncStatus(await call(client, "POST", "/kb/sync/sftp", cfg));
+export const saveMega = async (client: CoreClient, cfg: MegaSetup) => decodeSyncStatus(await call(client, "POST", "/kb/sync/mega", cfg));
 export const testSync = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/test", {}); };
 export const setSyncEnabled = async (client: CoreClient, enabled: boolean) => decodeSyncStatus(await call(client, "POST", "/kb/sync/enabled", { enabled }));
 export const publishNow = async (client: CoreClient) => call(client, "POST", "/kb/sync/publish", {});
@@ -2293,50 +2681,62 @@ as `HostApiPairing.tsx` relies on. Also confirm that a fake `{ request(method, p
 - [ ] **Step 4: Write `ui/screens/settings/sections/SyncSection.tsx`**
 
 ```tsx
-// Settings → Phone and web sync (desktop off): the own-server (SFTP) store setup, connection test, on/off and "Publish
-// now". Shows the public key to install on the server and the host-key fingerprint the user pasted; never a private key.
+// Settings → Phone and web sync (desktop off): MEGA store setup (a dedicated account), connection test, on/off and
+// "Publish now". The password field is write-only: it is cleared after Save and never filled from the core.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
-import { loadSyncStatus, saveSftp, testSync, setSyncEnabled, publishNow, type SyncStatus } from "../sync-model.ts";
+import { loadSyncStatus, saveMega, testSync, setSyncEnabled, publishNow, syncErrorText, describeSyncError, type SyncStatus } from "../sync-model.ts";
 
 export default function SyncSection(): ReactNode {
   const { client } = useEnv();
   const [status, setStatus] = useState<SyncStatus | null | undefined>(undefined);
-  const [form, setForm] = useState({ host: "", port: "22", username: "llmidesync", hostKeySha256: "" });
+  const [form, setForm] = useState({ email: "", password: "", folder: "llmide-sync" });
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const run = useCallback(async (fn: () => Promise<unknown>, ok?: string) => {
     setError(null); setNote(null);
-    try { await fn(); setStatus(await loadSyncStatus(client)); if (ok) setNote(ok); } catch (e) { setError(describeError(e)); }
+    try { await fn(); if (ok) setNote(ok); } catch (e) { setError(describeSyncError(e) ?? describeError(e)); }
+    try { setStatus(await loadSyncStatus(client)); } catch { /* keep the last status */ }
   }, [client]);
   useEffect(() => { void loadSyncStatus(client).then((s) => {
     setStatus(s);
-    if (s?.store) setForm({ host: s.store.host, port: String(s.store.port), username: s.store.username, hostKeySha256: s.store.hostKeySha256 });
+    if (s?.store) setForm((f) => ({ ...f, folder: s.store!.folder }));
   }, (e) => setError(describeError(e))); }, [client]);
   if (status === null) return null;
-  const field = (name: keyof typeof form, label: string) => (
-    <label className="st-field">{label}
-      <input value={form[name]} onChange={(e) => setForm({ ...form, [name]: e.target.value })} aria-label={label} spellCheck={false} />
-    </label>
-  );
+  const save = () => run(async () => {
+    await saveMega(client, { email: form.email.trim(), password: form.password, folder: form.folder.trim() || "llmide-sync" });
+    setForm((f) => ({ ...f, password: "" }));
+    await testSync(client); // logs in and creates the folder on first use
+  }, "Saved. MEGA connection works.");
   return (
     <section className="st-card" aria-labelledby="sync-title">
       <h3 id="sync-title">Phone and web sync</h3>
-      <p>With the desktop off, the phone and web app read an encrypted copy of your chats, meetings, plans and usage from your own server, and queue chat prompts that run when the desktop is back. The server only stores ciphertext.</p>
-      {field("host", "Server")}{field("port", "SSH port")}{field("username", "Sync account")}
-      {field("hostKeySha256", "Server host key (SHA256:… from ssh-keygen -lf on the server)")}
-      <Button onClick={() => run(() => saveSftp(client, { host: form.host.trim(), port: Number(form.port), username: form.username.trim(), hostKeySha256: form.hostKeySha256.trim() }), "Saved.")}>Save</Button>
-      {status?.publicKey && (
+      <p>With the desktop off, the phone and web app read an encrypted copy of your chats, meetings, plans and usage from a MEGA folder, and queue chat prompts that run when the desktop is back. MEGA only ever stores ciphertext.</p>
+      <div className="st-stack" role="note">
+        <p><strong>Use a separate MEGA account made only for LLM-IDE</strong>, never your personal one. It will hold nothing but encrypted sync files, so a leak of its password exposes nothing readable.</p>
+        <p>Turn off two-factor login on that account: the desktop logs in by itself in the background. Keep two-factor on for your personal account.</p>
+        <p>The email and password are kept in this computer's encrypted vault and are never shown again.</p>
+      </div>
+      <label className="st-field">MEGA email
+        <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} aria-label="MEGA email" autoComplete="off" spellCheck={false} />
+      </label>
+      <label className="st-field">MEGA password
+        <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} aria-label="MEGA password" autoComplete="new-password" />
+      </label>
+      <label className="st-field">Folder name
+        <input value={form.folder} onChange={(e) => setForm({ ...form, folder: e.target.value })} aria-label="Folder name" spellCheck={false} />
+      </label>
+      <Button onClick={save} disabled={!form.email.trim() || !form.password}>Save and test</Button>
+      {status?.store && (
         <div className="st-stack">
-          <p>Add this line once to <code>/etc/ssh/authorized_keys/{form.username || "llmidesync"}</code> on the server (see deploy/vps/sync-sftp.md):</p>
-          <pre className="st-code" aria-label="Public key">{`restrict ${status.publicKey}`}</pre>
+          <p>Connected account <code>{status.store.account}</code>, folder <code>{status.store.folder}</code> in its Cloud Drive.</p>
           <p>Desktop signing key fingerprint: <code>{status.signingFingerprint}</code></p>
-          <Button onClick={() => run(() => testSync(client), "Connection works.")}>Test connection</Button>
+          <Button onClick={() => run(() => testSync(client), "MEGA connection works.")}>Test connection</Button>
           <label className="st-toggle"><input type="checkbox" checked={status.enabled} onChange={(e) => run(() => setSyncEnabled(client, e.target.checked))} /> Sync on</label>
           <Button onClick={() => run(() => publishNow(client), "Published.")} disabled={!status.enabled}>Publish now</Button>
-          <p aria-live="polite">{status.lastError ? `Last error: ${status.lastError}` : status.lastPublishAt ? `Last published ${new Date(status.lastPublishAt).toLocaleString()}` : "Not published yet."} · {status.devices.length} device(s)</p>
+          <p aria-live="polite">{status.lastError ? `Last error: ${syncErrorText(status.lastError) ?? status.lastError}` : status.lastPublishAt ? `Last published ${new Date(status.lastPublishAt).toLocaleString()}` : "Not published yet."} · {status.devices.length} device(s)</p>
         </div>
       )}
       {note && <p aria-live="polite">{note}</p>}
@@ -2347,7 +2747,7 @@ export default function SyncSection(): ReactNode {
 ```
 
 Before writing this step, check that `useEnv()` exposes `client` and that `describeError` exists in `../errors.ts`; both
-are used by `HostApiPairing.tsx`. If the class names `st-card`, `st-field`, `st-toggle` or `st-code` do not exist in
+are used by `HostApiPairing.tsx`. If the class names `st-card`, `st-field`, `st-toggle` or `st-stack` do not exist in
 `settings.css`, use the classes `HostApiPairing.tsx` uses.
 
 - [ ] **Step 5: Render it in Mobile Control**
@@ -2372,189 +2772,26 @@ Expected: PASS; no type errors.
 
 ```bash
 git add ui/screens/settings/sync-model.ts ui/screens/settings/sections/SyncSection.tsx ui/screens/settings/sections/MobileBridge.tsx ui/screens/settings/tests/sync-section.test.mjs
-git commit -m "feat(ui): phone and web sync card in Settings" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(ui): phone and web sync card in Settings (MEGA)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
----
+- [ ] **Step 8: Full verification**
 
-### Task 10: Server setup files, check script and docs
+Run: `cd extension && npm test`, then `make contract-gates`, then `cd desktop && npm test`.
+Expected: all green, and no network access is needed: every MEGA test uses `tests/helpers/fake-mega.mjs`.
 
-**Files:**
-- Create: `deploy/vps/sync-sftp.md`, `deploy/vps/sshd-llmidesync.conf`, `deploy/vps/llm-ide-sync.nginx.inc`, `deploy/vps/sync-check.sh`
-- Modify: `deploy/vps/llm-ide.com.nginx` (include + `limit_req_zone`), `extension/CLAUDE.md` (a new section)
-- Test: `deploy/vps/sync-check.sh`, which the user runs against the server
-
-**Interfaces:**
-- Consumes: the folder layout (Global Constraints), the sshd and nginx blocks from spec §8.1.
-- Produces: a server the desktop can reach as `llmidesync@llm-ide.com:22`, and the `/sync/` HTTPS location for SP3 and SP4.
-
-- [ ] **Step 1: Write `deploy/vps/sshd-llmidesync.conf`**
-
-```text
-# /etc/ssh/sshd_config.d/50-llmidesync.conf: SFTP-only, chrooted, key-only account for LLM-IDE encrypted sync.
-# Design: docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md section 8.1. Only ciphertext lands here.
-Match User llmidesync
-    AuthorizedKeysFile /etc/ssh/authorized_keys/%u
-    AuthenticationMethods publickey
-    PubkeyAuthentication yes
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    ChrootDirectory /srv/llmide-sync
-    ForceCommand internal-sftp -d /data -u 0007
-    AllowTcpForwarding no
-    AllowStreamLocalForwarding no
-    AllowAgentForwarding no
-    PermitTunnel no
-    X11Forwarding no
-    PermitTTY no
-    PermitUserRC no
-```
-
-- [ ] **Step 2: Write `deploy/vps/llm-ide-sync.nginx.inc`**
-
-```nginx
-# Included inside the llm-ide.com server {} block. Each device can read only its own folder and write only new request
-# files into its own inbox. The 22-character folder name is the capability, so access logs are off here.
-location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/d/(?<dir>[A-Za-z0-9_-]{22})/(?<f>key\.bin|wrap\.bin|manifest\.bin|s/[0-9a-f]{32}\.bin|out/[A-Za-z0-9_-]{22}\.bin)$" {
-    limit_except GET { deny all; }
-    alias /srv/llmide-sync/data/$sid/d/$dir/$f;
-    access_log off;
-    error_log /var/log/nginx/error.log crit;
-    add_header Cache-Control "no-store" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    default_type application/octet-stream;
-    limit_req zone=llmidesync burst=40 nodelay;
-}
-location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/(?<f>d/[A-Za-z0-9_-]{22}/in/[0-9]{13}-[A-Za-z0-9_-]{22}\.bin|e/[A-Za-z0-9_-]{22}/[A-Za-z0-9_-]{22}\.bin)$" {
-    limit_except PUT { deny all; }
-    alias /srv/llmide-sync/data/$sid/$f;
-    dav_methods PUT;
-    create_full_put_path off;
-    dav_access group:rw;
-    client_max_body_size 64k;
-    access_log off;
-    error_log /var/log/nginx/error.log crit;
-    limit_req zone=llmidesync burst=10 nodelay;
-}
-location ^~ /sync/ { access_log off; return 404; }
-```
-
-In `deploy/vps/llm-ide.com.nginx`, add `limit_req_zone $binary_remote_addr zone=llmidesync:1m rate=2r/s;` at the top of the
-file (http context, outside `server {}`) and `include /etc/nginx/snippets/llm-ide-sync.nginx.inc;` inside the TLS `server {}` block.
-
-- [ ] **Step 3: Write `deploy/vps/sync-check.sh`**
+The opt-in live check is run by hand, by the user, against a **throwaway** MEGA account with two-factor off. It is never
+run in CI and never against a personal account:
 
 ```bash
-#!/usr/bin/env bash
-# Checks the /sync/ location from outside: no listing, no writes outside an inbox, size cap, unknown paths 404.
-# Usage: deploy/vps/sync-check.sh https://llm-ide.com
-set -euo pipefail
-B="${1:?base url}"
-S=$(printf 'A%.0s' {1..22}); D=$(printf 'B%.0s' {1..22}); R=$(printf 'C%.0s' {1..22})
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-fail=0
-expect() { local want=$1 got=$2 what=$3; if [[ "$got" != "$want" ]]; then echo "FAIL $what: got $got want $want"; fail=1; else echo "ok   $what ($got)"; fi; }
-expect 404 "$(code "$B/sync/")" "no listing at /sync/"
-expect 404 "$(code "$B/sync/$S/d/$D/")" "no listing of a device folder"
-expect 404 "$(code "$B/sync/$S/d/$D/manifest.bin")" "absent manifest is 404"
-expect 405 "$(code -X PUT --data x "$B/sync/$S/d/$D/manifest.bin")" "no PUT on manifest"
-expect 404 "$(code -X PUT --data x "$B/sync/$S/d/$D/in/../wrap.bin")" "no traversal"
-expect 413 "$(code -X PUT --data-binary @<(head -c 70000 /dev/zero) "$B/sync/$S/d/$D/in/1762300000000-$R.bin")" "64 KiB cap"
-expect 404 "$(code "$B/sync/$S/other.bin")" "unknown path 404"
-exit $fail
+cd extension && LLMIDE_SYNC_MEGA_IT=1 LLMIDE_SYNC_MEGA_IT_EMAIL='…' LLMIDE_SYNC_MEGA_IT_PASSWORD='…' node --test tests/sync-store-mega.test.mjs
 ```
 
-`limit_except GET` answers 403 for a PUT in nginx unless DAV methods are enabled. If the first run prints `got 403 want 405` for
-"no PUT on manifest", change that expectation to 403: both mean refused. Record the observed value in `sync-sftp.md`.
-
-- [ ] **Step 4: Write `deploy/vps/sync-sftp.md`**
-
-````markdown
-# Encrypted sync on your own server (SFTP + nginx)
-
-Design: [docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md](../../docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md) §8.1.
-Only ciphertext is ever stored here. The desktop connects as `llmidesync` with a key it generated; phones and the web app
-read and write only their own folder through `https://llm-ide.com/sync/`.
-
-## 1. Account and folders (root)
-
-```bash
-useradd --system --no-create-home --shell /usr/sbin/nologin llmidesync
-install -d -m 755 -o root -g root /srv/llmide-sync
-install -d -m 2770 -o llmidesync -g llmidesync /srv/llmide-sync/data
-usermod -aG llmidesync www-data
-install -d -m 755 /etc/ssh/authorized_keys
-```
-
-## 2. The desktop's key
-
-In the desktop app: Settings → Mobile Control → Phone and web sync. Enter the server, port 22, account `llmidesync`, and the
-host key fingerprint printed by:
-
-```bash
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub   # copy the SHA256:… part
-```
-
-Save, then copy the `restrict ssh-ed25519 …` line the card shows into the server:
-
-```bash
-printf '%s\n' 'restrict ssh-ed25519 AAAA… llmide-sync-…' > /etc/ssh/authorized_keys/llmidesync
-chmod 644 /etc/ssh/authorized_keys/llmidesync
-```
-
-## 3. sshd
-
-```bash
-cp deploy/vps/sshd-llmidesync.conf /etc/ssh/sshd_config.d/50-llmidesync.conf
-sshd -t && systemctl reload ssh
-```
-
-## 4. nginx
-
-```bash
-nginx -V 2>&1 | grep -o http_dav_module          # must print http_dav_module
-cp deploy/vps/llm-ide-sync.nginx.inc /etc/nginx/snippets/llm-ide-sync.nginx.inc
-# add the limit_req_zone line and the include to the llm-ide.com vhost (see deploy/vps/llm-ide.com.nginx)
-nginx -t && systemctl reload nginx
-deploy/vps/sync-check.sh https://llm-ide.com
-```
-
-## 5. Check from the desktop
-
-Settings → Test connection → "Connection works." Then turn Sync on.
-`ssh llmidesync@llm-ide.com` must be refused a shell; `sftp llmidesync@llm-ide.com` lands in `/data`.
-
-## Revoke without the desktop
-
-`rm -r /srv/llmide-sync/data/<syncId>/d/<folder>`. The desktop drops that device on its next start (sub-project SP2).
-To cut the desktop off: empty `/etc/ssh/authorized_keys/llmidesync`.
-````
-
-- [ ] **Step 5: Add the `extension/CLAUDE.md` section** (after "Host API v1 (desktop)")
-
-```markdown
-## Sync (desktop producer)
-
-- **What**: encrypted snapshots (chats, meetings, plans, usage) and a queued-prompt inbox in a user-owned folder, for the phone and web with the desktop off. Design `docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md`, ADR 0020.
-- **Where**: envelope `core/sync-envelope.mjs` (relay v1 bytes + `snapshot`/`manifest`/`syncwrap`; vectors `schema/sync/v1`, check `node scripts/sync-vectors.mjs`); stores `connectors/sync-store/` (memory, SFTP via `ssh2`); state `kb/sync-state.mjs` (migration 0064); keys in the vault (`sync.rootKey`, `sync.signingKey`, `sync.sshKey`, `sync.sshPublic`, all internal); producer/consumer/scheduler/routes `routes/sync/`.
-- **Ceiling**: queued requests are `chat.send` only and run only through `startHostTurn` (`auto_read_only`, phone chat); an approval request cancels the turn and replies `needs_approval`; record-before-execute in `sync_requests`.
-- **Off switch**: `LLMIDE_SYNC=off` starts no scheduler; per user, Settings "Sync on" (`sync_state.enabled`).
-- **Never** log keys, folder names, `es` or decrypted content.
-```
-
-- [ ] **Step 6: Verify**
-
-Run: `cd extension && npm test` (all extension tests), then `make contract-gates`. The user runs
-`deploy/vps/sync-check.sh https://llm-ide.com` after Steps 1 to 4 of `sync-sftp.md` and, optionally,
-`LLMIDE_SYNC_SFTP_IT=llmidesync@llm-ide.com:22 LLMIDE_SYNC_SFTP_IT_KEY=… LLMIDE_SYNC_SFTP_IT_HOSTKEY=SHA256:… node --test tests/sync-store-sftp.test.mjs`.
-Expected: all green; the check script prints only `ok` lines; the live SFTP test passes.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add deploy/vps/sync-sftp.md deploy/vps/sshd-llmidesync.conf deploy/vps/llm-ide-sync.nginx.inc deploy/vps/sync-check.sh deploy/vps/llm-ide.com.nginx extension/CLAUDE.md
-git commit -m "docs(deploy): own-server SFTP and nginx setup for encrypted sync" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-```
+Expected: the live test passes and leaves only an empty `llmide-sync-it` folder in that account's Cloud Drive. Then, in
+the desktop app (Settings → Mobile Control → Phone and web sync), Save and test with the same account, turn Sync on,
+press Publish now, and check in the MEGA web app that the `llmide-sync` folder exists and that everything under it is a
+`.bin` file of random bytes. With no device paired yet (enrollment is SP2), a publish writes no device folders, so an empty
+folder is the expected result. Nothing is committed in this step.
 
 ---
 
@@ -2565,7 +2802,8 @@ git commit -m "docs(deploy): own-server SFTP and nginx setup for encrypted sync"
 | Spec requirement | Task |
 |---|---|
 | `SyncStore` interface, path rules, contract suite (§2.1) | 3 |
-| SFTP adapter, host key pinned, never TOFU, desktop-generated ed25519 key (§8.1) | 4, 8 |
+| MEGA adapter: dedicated account, vault-only login, no 2FA, session reuse, re-login on expiry, rate-limit retry, folder on first use, permanent deletes, optional watch (§8.3) | 4, 8 |
+| Contract suite on memory and on a fake MEGA client; opt-in live run with a throwaway account (§13) | 3, 4, 9 |
 | sync v1 envelope = relay v1 + purposes, shared vectors (§4.1, §13) | 1 |
 | Keys held by the desktop in the vault (§5.1) | 2, 6 |
 | Folder layout, per-device copies, one writer per file (§3, §7) | 6, 7 |
@@ -2573,30 +2811,32 @@ git commit -m "docs(deploy): own-server SFTP and nginx setup for encrypted sync"
 | Manifest with `manifestSeq`, `validUntil`, hash binding; heartbeat (§4.3) | 6 |
 | Hybrid counter (§4.5) | 2 |
 | Inbox at the read-only ceiling: closed schema, signature, age, record-before-execute, quota, approval → `needs_approval`, outbox 7 days (§4.4, §6) | 7 |
-| Failure behaviour: back-off, coded errors, orphan clean-up (§12) | 4, 6, 8 |
-| Settings controls (setup, test, on/off, publish now, status) | 8, 9 |
-| Server setup: sshd Match block, nginx location, check script (§8.1) | 10 |
+| Failure behaviour: back-off, coded errors, orphan clean-up, refused login turns sync off (§12) | 4, 6, 8 |
+| Settings controls (MEGA email, password, folder, separate-account guidance, test, on/off, publish now, status) | 8, 9 |
 | Blindness test (§13) | 6 |
 
 Not covered here, by design, because they belong to later sub-projects:
 
 - enrollment, slot, SAS, revoke and rotate (SP2);
-- the PWA and iOS readers (SP3, SP4);
-- Box (SP5) and MEGA (SP6);
+- the PWA and iOS readers, including their MEGA clients (SP3, SP4);
+- the own-server SFTP adapter with its nginx and sshd setup (SP5) and Box (SP6);
 - direct reads (SP7);
 - parking ADR 0019 (SP8).
 
 The `memory` store kind exists only for tests and is never offered in Settings.
 
-**Placeholder scan:** Three steps check an existing helper's signature (`core-api.ts` `call`, `useEnv`, CSS class names) and
-one step reads a gate's output (`conformance-http.mjs`). Each says exactly what to check and what to do. No step reads
-"TBD" or "add error handling".
+**Placeholder scan:** Three steps check an existing helper's signature (`core-api.ts` `call`, `useEnv`, CSS class names),
+one step reads a gate's output (`conformance-http.mjs`), and Task 8 Step 8 says exactly what to change if a boot-path
+test flags the `megajs` import. Each says what to check and what to do. No step reads "TBD" or "add error handling".
 
 **Type consistency:**
 
 - `deviceKeys()` returns `{ request, reply, snapshot, manifest }` in Tasks 1, 6 and 7.
 - `ensureSyncKeys()` returns `{ root, epoch, signingKey, signingSpki, fingerprint }` in Tasks 6, 7 and 8.
-- `SyncStore` methods (`put/get/list/remove/removeTree/describe`, plus `close` on SFTP) match Tasks 3, 4, 6, 7 and 8.
+- `SyncStore` methods (`put/get/list/remove/removeTree/describe`, plus `watch` and `close` on MEGA) match Tasks 3, 4, 6, 7 and 8.
 - `listSyncDevices()` fields (`deviceId, dir, tier, name, ecdhSpki, signingSpki, addedAt, wrapEpoch`) match Tasks 2, 6, 7 and 8.
-- The vault key `sync.sshPublic` (used in Task 8) is allowed in Task 2.
-````
+- The vault keys `sync.megaEmail` and `sync.megaPassword` (used in Task 8) are allowed in Task 2.
+- `createMegaStore(config, secrets, deps)`, `validateMegaConfig`, `maskEmail` and `DEFAULT_MEGA_FOLDER` (Task 4) are the
+  names Task 8 imports. The status `store` shape `{ folder, account }` matches Tasks 8 and 9.
+- The error codes `SYNC_AUTH_FAILED | SYNC_MFA_REQUIRED | SYNC_RATE_LIMITED | SYNC_QUOTA | SYNC_UNREACHABLE | SYNC_IO` match
+  Task 4, the Task 8 routes and schema, and the Task 9 texts.

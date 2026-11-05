@@ -11,7 +11,7 @@ amends: "0018 (decision 4); relay design sections 2, 4.5, 4.6, 7.2, D4, D6, X1"
 **Status:** Proposed. The user approved the direction on 2026-11-05: Box as the sync medium, phone and
 web working as far as possible with the desktop off, no desktop login, no money spent. Later the same
 day the user asked for MEGA and the user's own server over SSH as more adapters behind one interface.
-The first adapter is the user's own server (SFTP). That ordering is a ruling in this ADR, explained below.
+The first adapter is MEGA, by user decision on 2026-11-05; the own server (SFTP) and Box follow (see below).
 **Date:** 2026-11-05
 **Design:** [Box encrypted sync design](../superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
 **Research:** [offline desktop memo](../superpowers/research/2026-11-05-offline-desktop-research.md).
@@ -46,8 +46,9 @@ published snapshot and queue requests that run when the desktop is back** (resea
    times, and the design keeps those to a minimum.
 2. **One small storage interface (`SyncStore`) with one adapter per backend.** The interface is
    put, get, list and delete of opaque files under validated relative paths, plus an optional watch.
-   Nothing in the encryption, snapshot, manifest or inbox format depends on the backend. The adapters,
-   in build order:
+   Nothing in the encryption, snapshot, manifest or inbox format depends on the backend.
+   **Build order (user decision, 2026-11-05): MEGA first, for now**, with a dedicated MEGA account whose
+   email and password sit only in the core vault; then the own server, then Box. The adapters:
    1. **The user's own server over SFTP.** This is the existing VPS. The desktop uses an SSH key it
       generates. The server account is chrooted and SFTP-only. Phones and browsers reach their own
       per-device folder through a small nginx HTTPS location.
@@ -81,6 +82,9 @@ published snapshot and queue requests that run when the desktop is back** (resea
    "desktop on" path, and the only path that gives the phone live AI.
 
 ### Ruling: the own-server adapter comes before Box
+
+> Superseded for the build order by the user decision of 2026-11-05: MEGA comes first. The comparison
+> below still holds between the own server and Box, and it is why SFTP is the next adapter after MEGA.
 
 The user approved Box. The coordinator then asked for SFTP to the user's own server and allowed
 reordering if grounding showed SFTP to be simpler and safer for this user. It does:
@@ -140,6 +144,10 @@ design keep the approved name.
   or MEGA credentials. The setup is documented, but it is real work for a user who is not technical.
 - **Negative:** each adapter is a new external dependency surface: `ssh2`, the Box API and the
   unofficial `megajs`.
+- **Trade-off (MEGA first, user decision):** MEGA has no OAuth, so the desktop holds a MEGA password in
+  its vault, and that password opens the whole MEGA account. A dedicated account that holds only
+  ciphertext limits the damage to deletion or freeze. Two-factor login must be off on that account,
+  because the desktop logs in unattended.
 
 ## Risks
 
