@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { applyTheme } from "@llmide/ui-kit";
 import { App } from "./App.tsx";
 
-applyTheme(globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark");
+applyTheme("dark");
 createRoot(document.getElementById("root")!).render(<App />);
 
 // Production only: the dev server's module graph is not a stable shell, and a stale worker would hide edits.
