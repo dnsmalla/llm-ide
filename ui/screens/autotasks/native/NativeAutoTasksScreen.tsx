@@ -16,6 +16,7 @@ import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } fr
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
+import { releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
 import { decideRun, resolvePath, type Resolve } from "./usage.ts";
 import { guardedAgentCall, type AgentWrites } from "../../loop/native/agent-call.ts";
@@ -57,7 +58,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [customDraft, setCustomDraft] = useState({ name: "", prompt: "", mode: "review" as CustomTaskMode, cron: "", enabled: true });
   const [customError, setCustomError] = useState<string | null>(null);
   const [customRunning, setCustomRunning] = useState(false);
-  const [customRuns, setCustomRuns] = useState<CustomTaskRun[]>(readCustomRuns);
+  const [customRuns, setCustomRuns] = useState<CustomTaskRun[]>(() => readCustomRuns(undefined, projectRoot ?? undefined));
   const [folderPick, setFolderPick] = useState<null | "inputPath" | "outputPath">(null);
   const [folderList, setFolderList] = useState<LibraryFolder[] | null>(null);
   const [folderFilter, setFolderFilter] = useState("");
@@ -86,7 +87,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     setCustomEdit(null);
   }, [projectRoot]);
   useEffect(() => {
-    const onRuns = (e: Event) => setCustomRuns((e as CustomEvent).detail as CustomTaskRun[] ?? readCustomRuns());
+    const onRuns = (e: Event) => {
+      const all = (e as CustomEvent).detail as CustomTaskRun[] | undefined;
+      setCustomRuns((all ?? readCustomRuns()).filter((r) => !projectRoot || r.projectRoot === projectRoot));
+    };
     window.addEventListener(CUSTOM_RUNS_EVENT, onRuns);
     return () => window.removeEventListener(CUSTOM_RUNS_EVENT, onRuns);
   }, []);
@@ -139,6 +143,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     if (inputPath === null || outputPath === null) { setNotice("Input and output must be folders inside the project (relative, no “..”)."); return; }
     const skillId = c.skillName ? skillRunId(c.skillName) : null;
     if (c.skillName && !skillId) { setNotice(`“${c.skillName}” cannot run in an Auto Task (code-applying or not a plain skill name).`); return; }
+    if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
     setRunning(true);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
@@ -184,7 +189,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       setLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(e instanceof Error ? e.message : "The task could not run.");
-    } finally { setRunning(false); }
+    } finally { setRunning(false); releaseAutoTask(); }
   };
 
   const openCustom = (task?: CustomAutoTask) => {
@@ -197,7 +202,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       setCustomDraft({ name: "", prompt: "", mode: "review", cron: "", enabled: true });
     }
   };
-  const persistCustom = (list: CustomAutoTask[]) => { setCustomTasks(list); if (projectRoot) saveCustomTasks(list, undefined, projectRoot); };
+  const persistCustom = (list: CustomAutoTask[]) => { setCustomTasks(list); if (projectRoot) saveCustomTasks(list, projectRoot); };
   const saveCustom = () => {
     if (!projectRoot) { setCustomError("Open a project first."); return; }
     const error = validateCustomTask(customDraft) ?? (customDraft.cron.trim() && !validateCron(customDraft.cron) ? "Use a valid five-field cron expression, or leave it empty." : null);
@@ -226,6 +231,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     if (customRunning) return;
     if (!customTaskRunnable(task)) { setNotice(CUSTOM_IMPLEMENT_MESSAGE); return; }
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
+    if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
     setCustomRunning(true);
     const started = new Date();
     try {
@@ -236,16 +242,17 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
       });
       if (result.warning) setLog((l) => [...l, result.warning!]);
+      if (result.writes.length) setLog((l) => [...l, `left behind: ${result.writes.join(", ")}`]);
       appendCustomRun({
-        id: crypto.randomUUID(), taskId: task.id, task: task.name, at: started.toISOString(), ok: result.ok,
+        id: crypto.randomUUID(), taskId: task.id, task: task.name, projectRoot: projectRoot ?? "", at: started.toISOString(), ok: result.ok,
         summary: result.reply.trim().split("\n")[0]?.slice(0, 300) || result.error || (result.ok ? "completed" : "failed"),
         trigger: "manual",
       });
       setNotice(result.ok ? `${task.name} completed.` : `${task.name} did not complete: ${result.error ?? "failed"}`);
     } catch (e) {
-      appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", trigger: "manual" });
+      appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, projectRoot: projectRoot ?? "", at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", trigger: "manual" });
       setNotice(e instanceof Error ? e.message : "The custom task could not run.");
-    } finally { setCustomRunning(false); }
+    } finally { setCustomRunning(false); releaseAutoTask(); }
   };
 
   const openFolderPicker = (field: "inputPath" | "outputPath") => {

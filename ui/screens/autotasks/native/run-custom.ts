@@ -10,7 +10,7 @@ import { decideRun, resolvePath } from "./usage.ts";
 export type CustomAgentReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string };
 
 export interface CustomRunDeps {
-  request<T>(path: string, init: { method: string; body: unknown }): Promise<T>;
+  request<T>(path: string, init?: { method?: "GET" | "POST"; body?: unknown }): Promise<T>;
   workRoot(): Promise<string>;
   changedPaths(): Promise<string[] | null>;
   revert(paths: string[], created: string[]): Promise<void>;
@@ -28,7 +28,7 @@ export interface CustomRunResult {
 /** The model-cap check; a failure does not block (same policy as the built-in runner). */
 async function modelDecision(deps: CustomRunDeps): Promise<{ proceed: boolean; model?: string; notice?: string; warning?: string }> {
   try {
-    const decision = await decideRun(() => deps.request<Resolve>(resolvePath("anthropic"), { method: "GET", body: null }));
+    const decision = await decideRun(() => deps.request<Resolve>(resolvePath("anthropic"), { method: "GET" }));
     if (!decision.proceed) return { proceed: false, notice: decision.notice };
     return { proceed: true, model: decision.model, warning: decision.warning };
   } catch (e) {
@@ -52,7 +52,8 @@ export async function runCustomTask(task: CustomAutoTask, deps: CustomRunDeps): 
     check: readOnlyCheck(async (paths, created) => { await deps.revert(paths, created); }),
   });
   if (g.result === null) {
-    return { ok: false, reply: "", writes: g.writes, error: g.error ?? "the agent run failed", warning: decision.warning };
+    const error = `${g.error ?? "the agent run failed"}${g.violation ? `; ${g.violation}` : ""}`;
+    return { ok: false, reply: "", writes: g.violation === null ? [] : g.writes, error, warning: decision.warning };
   }
   const r = g.result;
   const ok = agentRunSucceeded(r) && g.violation === null;

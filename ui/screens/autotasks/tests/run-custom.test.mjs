@@ -25,8 +25,12 @@ test("custom runner: Review sends the prompt, reverts agent writes and reports s
     workRoot: async () => "/p", changedPaths: async () => [], revert: async (paths, created) => { reverted.push([paths, created]); },
   });
   assert.equal(r.ok, true); assert.equal(r.reply, "looks good"); assert.deepEqual(reverted, [[["src/a.ts"], []]]);
-  assert.equal(calls.some(([p]) => p === "/kb/loop/agent-run"), true);
-  assert.deepEqual(calls.find(([p]) => p === "/kb/loop/agent-run")[1].body.repoRoot, "/p");
+  const agent = calls.find(([p]) => p === "/kb/loop/agent-run");
+  assert.ok(agent);
+  assert.deepEqual(agent[1].body.repoRoot, "/p");
+  assert.equal(agent[1].body.message, "Review the build");
+  const resolve = calls.find(([p]) => p.startsWith("/kb/usage/resolve"));
+  assert.equal(resolve?.[1]?.body, undefined, "GET resolve must not send a body");
 });
 
 test("custom runner: a paused model chain does not call the agent", async () => {
@@ -47,4 +51,19 @@ test("custom runner: a failed agent call with a changed tree is reported as not 
     workRoot: async () => "/p", changedPaths: async () => ["src/a.ts"], revert: async () => {},
   });
   assert.equal(r.ok, false); assert.match(r.error, /timeout/); assert.deepEqual(r.writes, [], "successfully reverted writes are not reported as left behind");
+});
+
+
+test("custom runner: a failed revert is reported and its writes are left behind", async () => {
+  const r = await runCustomTask(base, {
+    request: async (path) => {
+      if (path.startsWith("/kb/usage/resolve")) return { provider: "anthropic", model: null, status: "ok" };
+      throw new Error("timeout");
+    },
+    workRoot: async () => "/p", changedPaths: (() => { let n = 0; return async () => (n++ === 0 ? [] : ["src/a.ts"]); })(), revert: async () => { throw new Error("disk full"); },
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /timeout/);
+  assert.match(r.error, /revert failed/);
+  assert.deepEqual(r.writes, ["src/a.ts"]);
 });

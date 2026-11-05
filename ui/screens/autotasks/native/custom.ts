@@ -53,7 +53,7 @@ export function loadCustomTasks(projectRoot: string, storage: Storage | undefine
   } catch { return []; }
 }
 
-export function saveCustomTasks(tasks: readonly CustomAutoTask[], storage: Storage | undefined = globalThis.localStorage, projectRoot = tasks[0]?.projectRoot ?? ""): void {
+export function saveCustomTasks(tasks: readonly CustomAutoTask[], projectRoot: string, storage: Storage | undefined = globalThis.localStorage): void {
   if (!storage) return;
   try {
     const all = JSON.parse(storage.getItem(KEY) ?? "[]") as unknown;
@@ -95,6 +95,7 @@ export function createCustomTask(projectRoot: string, draft: CustomTaskDraft, id
 }
 
 export function updateCustomTask(task: CustomAutoTask, patch: Partial<CustomTaskDraft>): CustomAutoTask {
+  if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") throw new Error("enabled must be a boolean.");
   const next = { ...task, ...patch, name: (patch.name ?? task.name).trim(), prompt: (patch.prompt ?? task.prompt).trim(), cron: (patch.cron ?? task.cron).trim() };
   const error = validateCustomTask(next);
   if (error) throw new Error(error);

@@ -63,4 +63,4 @@
 .atn-custom h3 { margin: 0 0 6px; }
 .atn-custom ul { list-style: none; margin: 0; padding: 0; }
 .atn-custom .atn-history { margin-top: 6px; }
-.atn-custom-editor { width: min(640px, 94vw); }
+.atn-custom-editor { width: min(640px, 94vw); max-height: 88vh; overflow: auto; }

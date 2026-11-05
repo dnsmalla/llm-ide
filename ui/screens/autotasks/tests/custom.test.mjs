@@ -23,17 +23,17 @@ test("custom task: create, update, enable and per-project isolation", () => {
   const one = createCustomTask(ROOT, { name: " Nightly ", prompt: " Check the build ", mode: "review", cron: "0 2 * * *" }, "custom-one", new Date("2026-11-05T00:00:00Z"));
   assert.equal(one.name, "Nightly");
   assert.equal(one.prompt, "Check the build");
-  saveCustomTasks([one], s);
+  saveCustomTasks([one], ROOT, s);
   assert.equal(loadCustomTasks(ROOT, s).length, 1);
   assert.equal(loadCustomTasks("/p/two", s).length, 0, "another project never sees it");
   const two = createCustomTask("/p/two", { name: "Other", prompt: "p", mode: "review", cron: "" }, "custom-two", new Date("2026-11-05T00:00:00Z"));
-  saveCustomTasks([two], s);
+  saveCustomTasks([two], "/p/two", s);
   assert.equal(loadCustomTasks(ROOT, s).length, 1);
   assert.equal(loadCustomTasks("/p/two", s).length, 1);
   const updated = updateCustomTask(one, { enabled: false, name: "Nightly 2" });
-  saveCustomTasks([updated], s);
+  saveCustomTasks([updated], ROOT, s);
   assert.deepEqual(loadCustomTasks(ROOT, s).map((t) => [t.name, t.enabled]), [["Nightly 2", false]]);
-  saveCustomTasks([], s, ROOT);
+  saveCustomTasks([], ROOT, s);
   assert.equal(loadCustomTasks(ROOT, s).length, 0, "deleting removes only this project's rows");
   assert.equal(loadCustomTasks("/p/two", s).length, 1);
 });
@@ -61,4 +61,14 @@ test("custom task: ids are filesystem/ARIA-safe", () => {
   const id = newCustomTaskId("../../bad id!!");
   assert.match(id, /^custom-[A-Za-z0-9_-]+$/);
   assert.ok(id.length <= 55);
+});
+
+test("custom task: Implement is excluded from due and status branches are honest", () => {
+  const at = new Date("2026-11-05T02:00:10");
+  const t = (over = {}) => ({ id: "x", projectRoot: ROOT, name: "x", prompt: "p", mode: "review", cron: "0 * * * *", enabled: true, createdAt: "x", ...over });
+  assert.equal(dueCustomTasks([t({ mode: "implement" })], true, at).length, 0);
+  assert.match(customTaskStatus(t({ cron: "" }), true, at), /Manual only/);
+  assert.match(customTaskStatus(t(), false, at), /paused/);
+  assert.match(customTaskStatus(t({ enabled: false }), true, at), /disabled/);
+  assert.match(customTaskStatus(t(), true, at), /Scheduled · next/);
 });
