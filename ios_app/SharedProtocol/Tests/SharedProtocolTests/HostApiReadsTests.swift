@@ -172,9 +172,10 @@ struct HostApiReadControllerTests {
         let r = Task { await c.older() }
         await host.waitForCalls(4)
         c.close()
-        host.answer(3, HostApiChatHistoryResult(messages: lines(1...4)))
+        // A late FAILURE for the closed chat: only close()'s ticket bump can drop its error.
+        host.fail(3, "late")
         await r.value
-        #expect(c.state.open == nil && c.state.error == nil)
+        #expect(c.state.open == nil && c.state.error == nil && !c.state.loading)
     }
 
     @Test("a host error is shown, clamped; reset drops an in-flight reply")
@@ -192,5 +193,29 @@ struct HostApiReadControllerTests {
         host.answer(1, HostApiChatSessionsResult(sessions: sessions(0..<3)))
         await u.value
         #expect(c.state == HostApiReadState())
+    }
+
+    @Test("reset during a hanging \"more\" does not leave more blocked after reconnect")
+    func resetUnblocksMore() async {
+        let c = controller()
+        let t = Task { await c.refresh() }
+        await host.waitForCalls(1)
+        host.answer(0, HostApiChatSessionsResult(nextOffset: 50, sessions: sessions(0..<50)))
+        await t.value
+        let hung = Task { await c.moreSessions() }
+        await host.waitForCalls(2)
+        c.reset()                                   // the old "more" (call 1) never answers before reconnect
+        let again = Task { await c.refresh() }
+        await host.waitForCalls(3)
+        host.answer(2, HostApiChatSessionsResult(nextOffset: 50, sessions: sessions(0..<50)))
+        await again.value
+        let more = Task { await c.moreSessions() }
+        await host.waitForCalls(4)                  // a new "more" is sent: the flag was not stuck
+        host.answer(3, HostApiChatSessionsResult(sessions: sessions(50..<60)))
+        await more.value
+        #expect(c.state.sessions.count == 60)
+        host.answer(1, HostApiChatSessionsResult(sessions: sessions(90..<99)))  // the stale one lands last
+        await hung.value
+        #expect(c.state.sessions.count == 60, "a reply from before reset never writes")
     }
 }

@@ -79,7 +79,10 @@ public final class HostApiReadController {
     public func moreSessions() async {
         guard let offset = state.nextOffset, !moreBusy else { return }
         moreBusy = true
-        defer { moreBusy = false }
+        // Only this generation's request may clear the flag: a request left hanging by reset() must not
+        // unblock (or block) "more" after a reconnect.
+        let gen = generation
+        defer { if gen == generation { moreBusy = false } }
         await run(.chatSessions, HostApiChatSessionsRequest(limit: Self.sessionsPage, offset: offset),
                   as: HostApiChatSessionsResult.self) { s, r in
             let seen = Set(s.sessions.map(\.id))
@@ -121,6 +124,7 @@ public final class HostApiReadController {
     public func reset() {
         generation += 1
         ticket += 1
+        moreBusy = false
         state = HostApiReadState()
     }
 
