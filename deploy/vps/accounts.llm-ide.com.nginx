@@ -19,7 +19,7 @@ server {
 
     access_log /var/log/nginx/llm-ide-accounts.access.log llmide_accounts;
     # The default error log can keep client IPs/URIs; rotate this one within the 72-hour retention window.
-    error_log /var/log/nginx/llm-ide-accounts.error.log warn;
+    error_log /var/log/llmide-accounts/error.log warn;
 
     root /var/www/llm-ide-accounts;
     index index.html;

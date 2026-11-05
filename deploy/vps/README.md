@@ -68,10 +68,11 @@ It never runs the core, AI or agents.
 | Service | `llmide-accounts.service`, user `llmide-accounts`, `127.0.0.1:3470` |
 | Data | `/var/lib/llmide-accounts/accounts.db` |
 | Config | `/etc/llm-ide/accounts.env` (`0600`, root-owned) |
-| nginx | [accounts.llm-ide.com.nginx](accounts.llm-ide.com.nginx), log without IPs |
+| nginx | [accounts.llm-ide.com.nginx](accounts.llm-ide.com.nginx); access log has no IPs, error log kept 3 days |
 
 ```bash
 useradd --system --home /var/lib/llmide-accounts --shell /usr/sbin/nologin llmide-accounts
+install -d -m 700 -o root -g root /etc/llm-ide
 install -d -m 700 -o llmide-accounts -g llmide-accounts /var/lib/llmide-accounts
 install -d -m 755 /var/www/llm-ide-accounts
 cd /srv/llm-ide/repo && git pull --ff-only
@@ -100,8 +101,10 @@ chmod 600 /etc/llm-ide/accounts.env
 cp deploy/vps/llmide-accounts.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now llmide-accounts
 certbot certonly --webroot -w /var/www/llm-ide-accounts -d accounts.llm-ide.com
+install -d -m 700 -o root -g root /var/log/llmide-accounts
 cp deploy/vps/accounts.llm-ide.com.nginx /etc/nginx/sites-available/accounts.llm-ide.com
 ln -s /etc/nginx/sites-available/accounts.llm-ide.com /etc/nginx/sites-enabled/
+cp deploy/vps/llmide-accounts.logrotate /etc/logrotate.d/llmide-accounts
 nginx -t && systemctl reload nginx
 ```
 
