@@ -45,4 +45,27 @@ final class SyncTestDesktop {
         return try SyncCrypto.seal(header: header, key: key, plaintext: SyncEnc.enc([.bytes(k.request), .bytes(k.reply), .bytes(k.snapshot), .bytes(k.manifest)]),
                                    signer: sign, nonce: nonce, extra: ephSpki)
     }
+    /// openClaim (core/sync-enroll.mjs): the desktop's checks on a claim, ported for tests and the malicious suite.
+    static func openClaim(_ env: SyncEnvelope, pair: SyncPair, tier: String, keys: SyncEnrollKeys) throws -> SyncClaimFields {
+        guard tier == "ios" || tier == "web" else { throw SyncCryptoError("bad_tier") }
+        guard let e = env.eph, let spki = SyncB64.decode(e) else { throw SyncCryptoError("bad_envelope") }
+        let verify = try SyncSpki.signingKey(spki)
+        let pt = try SyncCrypto.open(env, key: keys.enroll, verifyKey: verify, expect: [
+            ("purpose", "enroll"), ("userId", ""), ("desktopId", .s(pair.sid)), ("to", .s(pair.sid)), ("epoch", 0),
+            ("session", .s(pair.slot)), ("seq", 0), ("tier", ""),
+        ])
+        let p = try SyncEnc.decode(pt, count: 4)
+        guard p[1] == spki else { throw SyncCryptoError("bad_key") }
+        _ = try SyncSpki.ecdhKey(p[0])
+        guard let name = String(data: p[2], encoding: .utf8), SyncEnroll.validName(name), Data(name.utf8) == p[2] else {
+            throw SyncCryptoError("bad_name")
+        }
+        let c = SyncClaimFields(deviceId: SyncEnroll.deviceId(signingSpki: p[1]), ecdhSpki: p[0], signingSpki: p[1], name: name)
+        guard env.from == c.deviceId else { throw SyncCryptoError("bad_from") }
+        guard SyncCrypto.equal(p[3], SyncEnroll.claimMac(bindKey: keys.bind, pair: pair, tier: tier, claim: c)) else {
+            throw SyncCryptoError("bad_mac")
+        }
+        return c
+    }
+
 }
