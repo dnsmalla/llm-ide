@@ -5,6 +5,7 @@ import { describeError } from "../errors.ts";
 import { accountLine, SIGN_OUT_TEXT } from "../misc-model.ts";
 import { SecretField } from "../secret-field.ts";
 import { useEnv, useModel, useRefreshOnFocus } from "../context.tsx";
+import { mintPin } from "./HostApiPairing.tsx";
 import { invokeHost } from "../../shell/host";
 import { Button, ErrorText, Field, NeedsHost, SecretInput } from "../ui.tsx";
 
@@ -45,6 +46,7 @@ function decodeLinkRequests(v: unknown): LinkRequest[] {
 }
 
 function LinkRequests() {
+  const { client } = useEnv();
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,12 @@ function LinkRequests() {
   const act = async (request: LinkRequest, action: "approve" | "deny" | "confirm") => {
     setBusy(`${request.requestId}:${action}`); setError(null);
     try {
-      await invokeHost(`account_link_${action}`, { requestId: request.requestId });
+      if (action === "confirm") {
+        const { pin } = await mintPin(client);
+        await invokeHost("account_link_confirm", { requestId: request.requestId, sas: request.sas, pin });
+      } else {
+        await invokeHost(`account_link_${action}`, { requestId: request.requestId });
+      }
       load();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }

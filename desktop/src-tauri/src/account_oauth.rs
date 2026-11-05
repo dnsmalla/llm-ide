@@ -233,6 +233,27 @@ fn b64(bytes: &[u8]) -> String { URL_SAFE_NO_PAD.encode(bytes) }
 
 fn hex(bytes: &[u8]) -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() }
 
+/// The desktop signing key and its SPKI, for relay wraps. Private half stays in the OS store.
+pub(crate) fn desktop_signing() -> Result<(SigningKey, String), String> {
+    let backend = store()?;
+    let keys = device_keys(backend.as_ref())?;
+    let der = URL_SAFE_NO_PAD.decode(&keys.signing_secret).map_err(|_| "stored desktop keys are unreadable".to_string())?;
+    let signing = SigningKey::from(SecretKey::from_pkcs8_der(&der).map_err(|_| "stored desktop keys are unreadable".to_string())?);
+    Ok((signing, keys.signing_public))
+}
+
+pub(crate) fn relay_access_token() -> Result<String, String> {
+    let o = origin()?;
+    let backend = store()?;
+    access_token(&o, backend.as_ref())
+}
+
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() { return false; }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// The registration proof of possession; must match `desktopProofMessage` in
 /// account-service/src/devices.mjs (pinned by account-service/tests/fixtures/desktop-proof-vector.json).
 fn proof_message(access_token: &str, signing_public: &str, ecdh_public: &str) -> String {
@@ -341,11 +362,14 @@ fn hostname_label() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct LinkRequest {
     pub request_id: String,
+    pub device_id: String,
     pub state: String,
     pub kind: String,
     pub label: String,
     pub sas: Option<String>,
     pub commitment_ok: Option<bool>,
+    pub signing_key: Option<String>,
+    pub ecdh_key: Option<String>,
 }
 
 fn b64url_bytes(value: &str) -> Result<Vec<u8>, String> {
@@ -432,11 +456,14 @@ fn link_requests_blocking() -> Result<Vec<LinkRequest>, String> {
         }
         out.push(LinkRequest {
             request_id: get("requestId").unwrap_or_default(),
+            device_id: get("deviceId").unwrap_or_default(),
             state: if state == "unlinked" { "unlinked".into() } else { state },
             kind: get("kind").unwrap_or_default(),
             label: get("label").unwrap_or_default(),
             sas,
             commitment_ok,
+            signing_key: signing,
+            ecdh_key: ecdh,
         });
     }
     Ok(out)
@@ -476,10 +503,45 @@ pub async fn account_link_deny(request_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn account_link_confirm(request_id: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || link_action_blocking(request_id, "confirm"))
+pub async fn account_link_confirm(request_id: String, sas: String, pin: String, host: tauri::State<'_, crate::core_host::CoreHost>) -> Result<(), String> {
+    let core = host.verified_url().filter(|_| host.status().trust == "spawned").ok_or("Relay needs the core this app started.")?;
+    tauri::async_runtime::spawn_blocking(move || link_confirm_blocking(request_id, sas, pin, core))
         .await
         .map_err(|e| format!("account task failed: {e}"))?
+}
+
+fn link_confirm_blocking(request_id: String, sas: String, pin: String, core: String) -> Result<(), String> {
+    let r = link_requests_blocking()?.into_iter().find(|r| r.request_id == request_id).ok_or("This request is gone.")?;
+    if r.state != "keys" || !r.commitment_ok.unwrap_or(false) { return Err("The device's keys do not match its commitment.".into()); }
+    let expected = r.sas.clone().ok_or("The device has not revealed its keys yet.")?;
+    if !ct_eq(&expected, &sas) { return Err("The code you confirmed is not this device's code.".into()); }
+    link_action_blocking(request_id.clone(), "confirm")?;
+    let tier = if r.kind == "ios" { "ios" } else { "web" };
+    let token = crate::relay::bridge::pair(&core, tier, &r.label, &pin)
+        .map_err(|e| format!("Linked, but this computer could not finish setup ({e}). Revoke the device and link again."))?;
+    let backend = store()?;
+    let mut reg = crate::relay::registry::load(backend.as_ref())?;
+    if reg.desktop_id.is_empty() {
+        let o = origin()?;
+        let acct = account_json(&o, "v1/desktop/account", "GET", &access_token(&o, backend.as_ref())?, None)?;
+        reg.user_id = acct["id"].as_str().unwrap_or_default().to_string();
+        reg.desktop_id = acct["desktopId"].as_str().ok_or("Register this desktop first.")?.to_string();
+    }
+    reg.ensure_root();
+    let (signer, signing_spki) = desktop_signing()?;
+    let root = reg.root_bytes()?;
+    let device_id = r.device_id.clone();
+    let (rq, rp) = crate::relay::crypto::device_keys(&root, &reg.user_id, &reg.desktop_id, &device_id, reg.epoch);
+    let ecdh = b64url_bytes(r.ecdh_key.as_deref().ok_or("missing device key")?)?;
+    let wrap = crate::relay::crypto::make_wrap(&crate::relay::crypto::WrapInput {
+        user_id: &reg.user_id, desktop_id: &reg.desktop_id, device_id: &device_id, epoch: reg.epoch, tier, seq: now_secs(), issued_at: now_secs() * 1000,
+        device_ecdh_spki: &ecdh, desktop_signing_spki: &b64url_bytes(&signing_spki)?, request: &rq, reply: &rp, host_api_token: &token,
+    }, &signer, None, None).map_err(|e| format!("could not build the device key ({e})"))?;
+    reg.add(crate::relay::registry::Device {
+        device_id, label: r.label.clone(), tier: tier.into(), signing_key: r.signing_key.clone().unwrap_or_default(), ecdh_key: r.ecdh_key.clone().unwrap_or_default(),
+        linked_at: now_secs(), confirmed: false, host_api_token: token, wrap_sig: wrap.sig.clone(), wrap: Some(serde_json::to_string(&wrap).map_err(|e| e.to_string())?), reply_count: 0,
+    });
+    crate::relay::registry::save(backend.as_ref(), &reg)
 }
 
 #[tauri::command]
