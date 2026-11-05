@@ -153,7 +153,7 @@ Setup: the desktop host with `LLMIDE_HOST_API_READ=1` (plus the DEBUG setup in t
 | F25 | After reading chat B, send a message from the Chat tab | It goes to the phone chat (visible on the host's phone chat), never to B |
 | F26 | Usage strip and Settings → Usage & limits on v1 | Up to 3 meters on the strip, all on the full screen; no permission row or chip; numbers match the web client's Usage |
 | F27 | Turn `read` off on the host (restart without the switch) while History is open; also lose the network | History content clears and the app returns to Chat; on reconnect without `read` the tab stays hidden |
-| F28 | VoiceOver on: History list, usage strip, a chat; then Settings → Accessibility → Larger Text at the largest size | Each row is read as one element (title + time, meter name + detail, "You:" / "Assistant:" + text, "title, read-only"); text grows and wraps with no clipping |
+| F28 | VoiceOver on: History list, usage strip, a chat; then Settings → Accessibility → Larger Text at the largest size | Each row is read as one element (title + time, meter name + detail, "You:" / "Assistant:" + text, "title, read-only"); message text grows and wraps with no clipping; chat titles may truncate (2 lines in the list, 1 in the header) |
 
 ## Security
 
