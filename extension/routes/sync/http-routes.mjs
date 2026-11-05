@@ -6,7 +6,7 @@ import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish } from '../../kb/sync-state.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
-import { ensureSyncKeys, existingSigningFingerprint } from './keys.mjs';
+import { existingSigningFingerprint } from './keys.mjs';
 import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending, withUserLock } from './scheduler.mjs';
 import { randomBytes } from 'node:crypto';
 import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } from './enroll.mjs';
