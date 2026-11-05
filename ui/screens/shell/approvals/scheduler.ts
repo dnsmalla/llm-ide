@@ -26,6 +26,11 @@ export async function runSchedulesOnce(d: SchedulerDeps): Promise<{ enqueued: st
   let pending: PendingApproval[] | null = null;
   for (const s of await d.schedules()) {
     try {
+      // The core refuses a standing approval within half an interval of the last run (`too_soon`). Wait for that
+      // window to pass before enqueueing at all: otherwise every tick re-asks, writing a denied audit row and an
+      // "approval needed" notice for a run that later goes through on its own.
+      const standingLive = s.standing && s.standingUntil !== null && Date.parse(s.standingUntil) > now;
+      if (standingLive && s.lastRunAt !== null && now - Date.parse(s.lastRunAt) < (s.intervalHours * HOUR) / 2) continue;
       const res = await d.enqueue({ kind: s.kind, args: s.args, idem: idemFor(s, now), ttlMs: Math.min(s.intervalHours * HOUR, 24 * HOUR) });
       const cmd = rec(res) && rec(res.command) ? res.command : null;
       if (!cmd || typeof cmd.id !== "string") continue;

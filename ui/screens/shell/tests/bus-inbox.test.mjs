@@ -109,6 +109,21 @@ test("scheduler: never approves without a live standing approval, a different or
   }
 });
 
+test("scheduler: a standing schedule inside half an interval of its last run is not re-asked every tick", async () => {
+  const now = Date.parse("2026-11-05T13:00:00Z");
+  const recent = schedule({ lastRunAt: new Date(now - 2 * H).toISOString() }); // 2 h ago, half of 6 h is 3 h
+  const f = fakeBus();
+  const out = await sch.runSchedulesOnce(f.deps([recent], now));
+  assert.deepEqual(out, { enqueued: [], approved: [], errors: [] });
+  assert.equal(f.log.length, 0, "no enqueue, no approve, so no denied audit row and no notice");
+  const later = fakeBus();
+  const out2 = await sch.runSchedulesOnce(later.deps([recent], now + 1.5 * H)); // 3.5 h after the last run
+  assert.deepEqual(out2.approved, [recent.id], "runs once the half interval has passed");
+  const ask = fakeBus();
+  const out3 = await sch.runSchedulesOnce(ask.deps([schedule({ standing: false, standingUntil: null, lastRunAt: new Date(now - 2 * H).toISOString() })], now));
+  assert.equal(out3.enqueued.length, 1, "an ask-each-run schedule still enqueues its slot for a click");
+});
+
 test("scheduler: one failing schedule does not stop the others; errors carry the code only", async () => {
   const now = Date.parse("2026-11-05T13:00:00Z");
   const { BusCallError } = api;
