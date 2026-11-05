@@ -1,3 +1,5 @@
+import { normalizeEmail } from './validate.mjs';
+
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const flag = (env, name) => /^(1|true|yes|on)$/i.test(env[name] ?? '');
 
@@ -31,6 +33,20 @@ export function loadConfig(env = process.env) {
   if (transport === 'smtp' && !smtpUrl.startsWith('smtps://')) throw new Error('ACCOUNTS_SMTP_URL must be an smtps:// URL');
   const retryMs = Number(env.ACCOUNTS_MAIL_RETRY_MS ?? 2000);
   if (!Number.isFinite(retryMs) || retryMs < 1) throw new Error('ACCOUNTS_MAIL_RETRY_MS must be a positive number');
+  const directSignup = flag(env, 'ACCOUNTS_DIRECT_SIGNUP');
+  // Direct sign-up has no proof of email ownership: off a localhost origin (or in production) it may
+  // only create the exact addresses the operator names.
+  let directSignupEmails = null;
+  if (env.ACCOUNTS_DIRECT_SIGNUP_EMAILS?.trim()) {
+    try {
+      directSignupEmails = Object.freeze(new Set(env.ACCOUNTS_DIRECT_SIGNUP_EMAILS.split(',').map(normalizeEmail)));
+    } catch {
+      throw new Error('ACCOUNTS_DIRECT_SIGNUP_EMAILS must be a comma-separated list of email addresses');
+    }
+  }
+  if (directSignup && !directSignupEmails && (prod || !LOOPBACK_HOSTS.has(url.hostname.replace(/^\[|\]$/g, '')))) {
+    throw new Error('ACCOUNTS_DIRECT_SIGNUP outside localhost needs ACCOUNTS_DIRECT_SIGNUP_EMAILS (the exact addresses allowed)');
+  }
   return Object.freeze({
     prod,
     origin,
@@ -40,7 +56,8 @@ export function loadConfig(env = process.env) {
     port,
     dbPath: env.ACCOUNTS_DB_PATH ?? './data/accounts.db',
     signupOpen,
-    directSignup: flag(env, 'ACCOUNTS_DIRECT_SIGNUP'),
+    directSignup,
+    directSignupEmails,
     trustProxy: flag(env, 'ACCOUNTS_TRUST_PROXY'),
     secureCookies: url.protocol === 'https:',
     mail: Object.freeze({

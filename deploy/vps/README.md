@@ -93,6 +93,11 @@ ACCOUNTS_MAIL_TRANSPORT=none
 # ACCOUNTS_SMTP_URL=smtps://<user>:<password>@<provider-host>:465
 ACCOUNTS_MAIL_FROM=LLM-IDE <no-reply@llm-ide.com>
 # Do NOT set ACCOUNTS_SIGNUP_OPEN=1 before sub-project 5 (external review, legal gates).
+# Direct sign-up (no email link) proves nothing about the address, so in production the service
+# refuses to start with ACCOUNTS_DIRECT_SIGNUP=1 unless ACCOUNTS_DIRECT_SIGNUP_EMAILS names the exact
+# addresses allowed (comma-separated, case-insensitive). Leave both unset once the first account exists.
+# ACCOUNTS_DIRECT_SIGNUP=1
+# ACCOUNTS_DIRECT_SIGNUP_EMAILS=you@example.com
 ```
 
 ```bash

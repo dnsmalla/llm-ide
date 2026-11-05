@@ -35,3 +35,17 @@ test('refuses a non-loopback bind, a non-bare origin and a foreign RP ID', () =>
   assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_RP_ID: 'evil.com' }), /RP_ID/);
   assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_RP_ID: 'llm-ide.com' }), /RP_ID/);
 });
+
+test('N1: direct sign-up outside localhost needs an allowlist of exact addresses', () => {
+  const prod = { NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' };
+  assert.throws(() => loadConfig(prod), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
+  assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'http://accounts.example.com', ACCOUNTS_DIRECT_SIGNUP: '1' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
+  assert.throws(() => loadConfig({ NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://localhost', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
+  assert.throws(() => loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP_EMAILS: 'not-an-address' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
+  const c = loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP_EMAILS: ' Ada@Example.com, bob@example.com ' });
+  assert.equal(c.directSignup, true);
+  assert.deepEqual([...c.directSignupEmails], ['ada@example.com', 'bob@example.com']);
+  // Localhost development may run without a list (open to any address).
+  assert.equal(loadConfig({ ACCOUNTS_DIRECT_SIGNUP: '1' }).directSignupEmails, null);
+  assert.equal(loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP: '0' }).directSignup, false);
+});

@@ -1,3 +1,4 @@
+import { isIPv4, isIPv6 } from 'node:net';
 import { HttpError } from './http.mjs';
 
 export const HOUR = 60 * 60_000;
@@ -33,4 +34,19 @@ export function createRateLimiter({ now = Date.now, maxKeys = 100_000 } = {}) {
 export function limitMailTo(limiter, email) {
   limiter.hit(`mail-hour:${email}`, 3, HOUR);
   limiter.hit(`mail-day:${email}`, 10, DAY);
+}
+
+// One rate-limit bucket per IPv4 address or IPv6 /64 (a single host usually holds a whole /64,
+// so per-address IPv6 limits are trivially rotated).
+export function ipBucket(ip) {
+  const addr = String(ip).split('%')[0];
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(addr);
+  if (mapped) return mapped[1];
+  if (!isIPv6(addr)) return addr;
+  const [head, tail] = addr.split('::');
+  const h = head ? head.split(':') : [];
+  const tl = tail === undefined ? [] : tail ? tail.split(':') : [];
+  if (isIPv4(tl.at(-1) ?? '') || isIPv4(h.at(-1) ?? '')) return addr; // rare embedded-IPv4 forms: whole address
+  const groups = tail === undefined ? h : [...h, ...Array(8 - h.length - tl.length).fill('0'), ...tl];
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
 }

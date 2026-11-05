@@ -28,7 +28,37 @@ test('direct signup is off by default and refuses an existing active account', a
   t.after(() => app.close());
   assert.equal((await app.client().call('POST', '/v1/signup/direct', form)).status, 201);
   app.db.prepare("UPDATE users SET status = 'active'").run();
-  assert.deepEqual((await app.client().call('POST', '/v1/signup/direct', form)).body, { error: 'account_exists' });
+  // N1: no enumeration. An existing account gets the same answer as a fresh sign-up, but no session.
+  const again = app.client();
+  const res = await again.call('POST', '/v1/signup/direct', form);
+  assert.equal(res.status, 201);
+  assert.deepEqual(res.body, { status: 'add_passkey' });
+  assert.equal(again.cookie, '');
+});
+
+test('N1: with an allowlist, only the named addresses may sign up directly, whether or not they exist', async (t) => {
+  const app = await startApp({ env: { ACCOUNTS_DIRECT_SIGNUP: '1', ACCOUNTS_DIRECT_SIGNUP_EMAILS: ' Ada@Example.com ,bob@example.com' } });
+  t.after(() => app.close());
+  assert.equal((await app.client().call('POST', '/v1/signup/direct', { ...form, email: 'ADA@example.com' })).status, 201);
+  insertUser(app.db, { id: 'u-eve', email: 'eve@example.com' });
+  const unknown = await app.client().call('POST', '/v1/signup/direct', { ...form, email: 'mallory@example.com' });
+  const existing = await app.client().call('POST', '/v1/signup/direct', { ...form, email: 'eve@example.com' });
+  assert.equal(unknown.status, 403);
+  assert.deepEqual(unknown.body, { error: 'direct_signup_disabled' });
+  assert.deepEqual([existing.status, existing.body], [unknown.status, unknown.body]);
+});
+
+test('N1: direct sign-up is limited per IPv6 /64 and per IPv4 address', async (t) => {
+  const app = await startApp({ env: { ACCOUNTS_DIRECT_SIGNUP: '1', ACCOUNTS_TRUST_PROXY: '1' } });
+  t.after(() => app.close());
+  const from = (ip, i) => app.client().call('POST', '/v1/signup/direct', { ...form, email: `u${i}@example.com` }, { 'x-real-ip': ip });
+  for (let i = 0; i < 10; i += 1) assert.equal((await from(`2001:db8:1:2::${(i + 1).toString(16)}`, i)).status, 201);
+  assert.equal((await from('2001:db8:1:2:ffff:ffff:ffff:ffff', 10)).status, 429);
+  assert.equal((await from('2001:0db8:0001:0002:0:0:0:abcd', 11)).status, 429);
+  assert.equal((await from('2001:db8:1:3::1', 12)).status, 201);
+  for (let i = 0; i < 10; i += 1) assert.equal((await from('203.0.113.7', 20 + i)).status, 201);
+  assert.equal((await from('::ffff:203.0.113.7', 30)).status, 429);
+  assert.equal((await from('203.0.113.8', 31)).status, 201);
 });
 
 async function addPasskey(client, id) {

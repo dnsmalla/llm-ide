@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { newId } from '../db.mjs';
 import { HttpError, readJson, send } from '../http.mjs';
 import { alreadyRegisteredMail, signupMail } from '../mail-templates.mjs';
-import { HOUR, limitMailTo } from '../rate-limit.mjs';
+import { HOUR, ipBucket, limitMailTo } from '../rate-limit.mjs';
 import { getUserByEmail } from '../users.mjs';
 import { displayName, language, normalizeEmail, onlyKeys, timeZone } from '../validate.mjs';
 
@@ -11,10 +11,12 @@ export function signupRoutes(routes, ctx) {
   // setup. No email is sent. Disabled by default and independent of ACCOUNTS_SIGNUP_OPEN.
   routes.set('POST /v1/signup/direct', async (req, res) => {
     if (!ctx.config.directSignup) throw new HttpError(403, 'direct_signup_disabled');
-    ctx.limiter.hit(`direct-ip:${req.clientIp}`, 10, HOUR);
+    ctx.limiter.hit(`direct-ip:${ipBucket(req.clientIp)}`, 10, HOUR);
     const body = await readJson(req);
     onlyKeys(body, ['email', 'displayName', 'language', 'timeZone']);
     const email = normalizeEmail(body.email);
+    // Checked before any lookup, so the answer never depends on whether the address has an account.
+    if (ctx.config.directSignupEmails && !ctx.config.directSignupEmails.has(email)) throw new HttpError(403, 'direct_signup_disabled');
     const profile = {
       displayName: displayName(body.displayName),
       language: language(body.language ?? 'en'),
@@ -25,7 +27,6 @@ export function signupRoutes(routes, ctx) {
       const t = ctx.now();
       // Never hand out a session for an account someone else may hold: an active one, or a pending one
       // with a live session. A pending row nobody holds any more (abandoned) is reset and reused.
-      if (existing?.status === 'active') throw new HttpError(409, 'account_exists');
       if (existing && (existing.status !== 'pending_passkey' || ctx.sessions.hasLive(existing.id))) return null;
       if (existing) {
         ctx.sessions.revokeOthers(existing.id, null);

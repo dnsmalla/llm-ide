@@ -101,7 +101,10 @@ async function signup(event) {
     register.focus();
     setStatus('Account created. Click “Register passkey” to add this device.');
   } catch (e) {
-    setStatus(e.message || String(e), true);
+    // Direct sign-up answers the same for an existing address but opens no session for it.
+    setStatus(e.message === 'unauthenticated'
+      ? 'This address cannot be signed up here. If it already has an account, sign in with your passkey or use account recovery.'
+      : e.message || String(e), true);
     button.disabled = false;
   }
 }
