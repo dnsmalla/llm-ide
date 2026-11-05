@@ -1,6 +1,6 @@
 # Issues and Gantt into the Node core (work-kit K1) for the Tauri app and the command bus
 
-Status: **plan, nothing built.** Date: 2026-10-31, at `main`. Parents: [work-kit map](../../kits/work-kit.md) (decisions W1 to W6), [Tauri Phase 5 plan](2026-10-31-tauri-phase5-macos-plan.md) section 6 (P5-I; this plan refines it and keeps its slice names I1 to I5 as the screen-side slices), [command bus spec](2026-10-31-command-bus-spec.md), [kit-by-kit migration](2026-10-27-kit-by-kit-migration.md).
+Status (checked 2026-11-05): **plan, core not built.** The desktop Issues and Gantt screens exist (`ui/screens/issues`, `ui/screens/gantt`) and write the existing `/kb/issue-schedule` overlay (`extension/routes/issue-schedule.mjs`). No issue list, write, cache or provider routes exist under `extension/` (no `/kb/issues*` match). MASTER-PLAN lists work-kit K1 as open. Written 2026-10-31, at `main`. Parents: [work-kit map](../../kits/work-kit.md) (decisions W1 to W6), [Tauri Phase 5 plan](2026-10-31-tauri-phase5-macos-plan.md) section 6 (P5-I; this plan refines it and keeps its slice names I1 to I5 as the screen-side slices), [command bus spec](2026-10-31-command-bus-spec.md), [kit-by-kit migration](2026-10-27-kit-by-kit-migration.md).
 
 Everything below cites a path read on 2026-10-31. Counts are lines as stated by the parent docs; nothing was run. Standard (user): "do the best, SECURE, usable for BIG projects"; macOS first; Auto Tasks are phone-commandable.
 

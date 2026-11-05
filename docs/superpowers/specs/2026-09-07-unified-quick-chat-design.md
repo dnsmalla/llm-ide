@@ -1,7 +1,7 @@
 # Unified quick chat — design
 
 **Date:** 2026-09-07
-**Status:** design approved, implementation not started
+**Status:** shipped (checked 2026-11-05). Evidence: `AgentAskTransport` deleted (`f11154fd`); the Mac client no longer calls `/kb/agent/ask` (`LlmIdeAPIClient+Agent.swift`); the quick chat sheet uses the shared `.quick` ChatEngine (`Features/Chat/Views/Quick/LlmChatSheet.swift`); the phone chat moved onto the project chat (`72643f02`). Project-memory wiring: unverified.
 **Scope:** Mac menu-bar chat, Mac LLM Chat sheet, iPhone global chat
 
 ## Problem

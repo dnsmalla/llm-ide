@@ -1,6 +1,6 @@
 # Graph as contract — design
 
-**Date:** 2026-09-29 · **Status:** approved for Phase A + B planning · **Owner:** dnsmalla
+**Date:** 2026-09-29 · **Status:** shipped (checked 2026-11-05). Phases A to D merged to main on 2026-09-29 (`7db1f7d7`, `6b3350b6`, `bce7f0d3`, `e08b8ee7`). Outcomes not re-measured. · **Owner:** dnsmalla
 
 ## Problem
 

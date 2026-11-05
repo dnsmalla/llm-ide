@@ -1,6 +1,6 @@
 # Chat + Claude-linker restructure
 
-Status: proposed · Date: 2026-09-10 · Scope: `mac/Sources/LlmIdeMac`, `extension/llm_agent`, `extension/providers`
+Status: partly shipped (checked 2026-11-05). Done: Chat is one folder, `Features/Chat/` (`b940abe0`); linker layers hold the Claude SDK/CLI code (`37624164`, `ClaudeLink/`); the feature-boundary gate (`8b60800f`). Phases 2 to 6 (splits, conformance runner, behaviour fixes, cleanup): unverified · Date: 2026-09-10 · Scope: `mac/Sources/LlmIdeMac`, `extension/llm_agent`, `extension/providers`
 
 ## 1. Problem
 

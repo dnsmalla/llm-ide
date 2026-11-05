@@ -1,6 +1,6 @@
 # LLM sources: per-item selection + update-and-repair (design)
 
-**Date:** 2026-09-25 · **Status:** approved · **Branch:** `feat/llm-source-items`
+**Date:** 2026-09-25 · **Status:** shipped (checked 2026-11-05). Per-item selection saved and applied (`4e58ccbd`, `cc165eb0`); LLM Sources switches and update confirmation on desktop (`8860a87a`, `3b7bbd28`); repair of per-user state in `extension/llm-sources/` (registry.mjs). Update flow not run. · **Branch:** `feat/llm-source-items`
 
 ## Goal
 

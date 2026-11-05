@@ -1,6 +1,6 @@
 # Mobile link TLS with certificate pinning: design
 
-Status: **design only, no code.** Date: 2026-10-31, at `main`. Closes requirement R-SEC-1 of the [command bus spec](2026-10-31-command-bus-spec.md) (section 7.1 finding 1, slice S6 and its optional interim fix in S2). Implementation is a separate task and needs the user's decisions in section 10.
+Status (checked 2026-11-05): **partly built.** Host API v1 is pinned: Mac TLS identity and listener (`HostApiV1Listener.swift`), phone `wss://` pinning from the QR (`1f9a20c9`, `b71320b6`, `fe874634`), one PIN throttle for v2 and v1 (`61e81ac6`). The `:3006` link this design targets is still plaintext (`MobileWebSocketServer.swift` uses `tls: nil`). The on-device pinned-pairing check is open. Date: 2026-10-31, at `main`. Closes requirement R-SEC-1 of the [command bus spec](2026-10-31-command-bus-spec.md) (section 7.1 finding 1, slice S6 and its optional interim fix in S2). Implementation is a separate task and needs the user's decisions in section 10.
 
 ## 1. The problem, as the code has it today
 

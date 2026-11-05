@@ -1,6 +1,6 @@
 # App Forge — full app generation skill (design)
 
-**Date:** 2026-09-25 · **Status:** approved design, pending plan · **Home:** `.skills` kit (dnsmalla/agent-kit)
+**Date:** 2026-09-25 · **Status:** shipped (checked 2026-11-05) as the `app-forge` skill in the `.skills` kit (`.skills/CATALOG.md`, line 31). · **Home:** `.skills` kit (dnsmalla/agent-kit)
 
 ## Goal
 

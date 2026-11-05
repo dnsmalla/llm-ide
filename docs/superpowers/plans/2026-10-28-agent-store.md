@@ -1,6 +1,6 @@
 # Agent store: a separate `agent.db` for agent history, with rollups, retention and a Storage hub
 
-Status: plan, not started. Branch: `main`. Date: 2026-10-28.
+Status (checked 2026-11-05): **partly built.** Stage 1 core built: `agent.db`, its migrations (`extension/kb/agent-migrations/`), `extension/kb/agent-store.mjs` (`a95fa7d6`). Stage 2a usage shadow built (`249b51fd`, `84b35166`). Stage 2b (move the ledger and budget reads) not built and only if the user asks (section 0.1). Clear, Compact and Phase 4 UI: unverified. Earlier status: plan, not started. Branch: `main`. Date: 2026-10-28.
 Research basis: read-only pass over `extension/` and `mac/` at `e2b41022`. Every
 `path:line` below was read in that pass. Items marked **(confirm T0)** were not
 read in full and must be checked in task T0.1 before code depends on them.
