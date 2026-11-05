@@ -1,3 +1,5 @@
+> **Status: implemented and verified 2026-11-05** (`cee52c7a`..`e0e6ac75`); SharedProtocol 95/95 tests and unsigned iOS build pass. The manual F19-F28 device checks remain a user-run gate.
+
 # Host API v1 Reads on iOS Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -62,7 +64,7 @@
   - `public enum HostApiReadGate { public static func isOn(apiVersion: Int, capabilities: Set<String>?) -> Bool }`
   - `public enum HostApiReadMapping { public static func usageState(_ r: HostApiUsageGetResult) -> UsageState }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `ios_app/SharedProtocol/Tests/SharedProtocolTests/HostApiReadsTests.swift`:
 
@@ -120,12 +122,12 @@ struct HostApiReadMappingTests {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `cd /Users/dinsmallade/llm-ide/ios_app/SharedProtocol && swift test --filter HostApiReadMappingTests`
 Expected: FAIL to compile with "cannot find 'HostApiReadGate' in scope". (If `swift build` reports "Invalid manifest" or "Operation not permitted", that is the command sandbox, not the code: rerun unsandboxed.)
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 Create `ios_app/SharedProtocol/Sources/SharedProtocol/HostApiReads.swift`:
 
@@ -169,12 +171,12 @@ public enum HostApiReadMapping {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /Users/dinsmallade/llm-ide/ios_app/SharedProtocol && swift test --filter HostApiReadMappingTests`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/dinsmallade/llm-ide
@@ -199,7 +201,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `public struct HostApiReadState: Equatable, Sendable { sessions: [HostApiChatSessionsResultSessionsItem]; nextOffset: Int?; open: HostApiOpenChat?; loading: Bool; error: String? }` with `public init()`
   - `@MainActor public final class HostApiReadController` with `init(host: @escaping () -> HostConnection?)`, `var state: HostApiReadState { get }`, `var onChange: ((HostApiReadState) -> Void)?`, `func refresh() async`, `func moreSessions() async`, `func open(id: String, title: String) async`, `func older() async`, `func close()`, `func reset()`, statics `maxSessions = 500`, `maxOpenMessages = 2000`, `sessionsPage = 50`, `historyPage = 100`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `HostApiReadsTests.swift`:
 
@@ -350,12 +352,12 @@ struct HostApiReadControllerTests {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `cd /Users/dinsmallade/llm-ide/ios_app/SharedProtocol && swift test --filter HostApiReadControllerTests`
 Expected: FAIL to compile with "cannot find 'HostApiReadController' in scope".
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 Append to `HostApiReads.swift`:
 
@@ -477,17 +479,17 @@ public final class HostApiReadController {
 }
 ```
 
-- [ ] **Step 4: Run the whole package**
+- [x] **Step 4: Run the whole package**
 
 Run: `cd /Users/dinsmallade/llm-ide && make test-shared-protocol`
 Expected: `generate-host-api.mjs --check` OK, `swift build` OK, all suites PASS including `HostApiReadControllerTests` (6 tests) and `HostApiReadMappingTests` (3 tests). On a Command-Line-Tools-only toolchain the Makefile skips `swift test`; then run `cd ios_app/SharedProtocol && swift test` on a machine with full Xcode (CI does).
 
-- [ ] **Step 5: Check the Mac still builds against the package**
+- [x] **Step 5: Check the Mac still builds against the package**
 
 Run: `cd /Users/dinsmallade/llm-ide/mac && swift build 2>&1 | tail -5`
 Expected: `Build complete!` (no Mac source changed; this proves the additive SharedProtocol types do not collide).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/dinsmallade/llm-ide
@@ -514,7 +516,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 No MyApp test target exists; the logic these lines call is tested in Tasks 1-2. This task's check is the unsigned device build CI runs, plus the v2 rows in Task 4.
 
-- [ ] **Step 1: ConnectionService: state, controller, gate**
+- [x] **Step 1: ConnectionService: state, controller, gate**
 
 After the `connectingV1` declaration (line ~142) add:
 
@@ -530,7 +532,7 @@ After the `connectingV1` declaration (line ~142) add:
     var servesV1Read: Bool { HostApiReadGate.isOn(apiVersion: hostApiVersion, capabilities: macCapabilities) }
 ```
 
-- [ ] **Step 2: ConnectionService: reset on revoke and disconnect, refresh on resync**
+- [x] **Step 2: ConnectionService: reset on revoke and disconnect, refresh on resync**
 
 In `route(_:)` change the `.capabilities` and `.event, .progress, .resync` cases to:
 
@@ -555,7 +557,7 @@ In `invalidateSocket()` after `hostApiVersion = 2` add:
         reads.reset()
 ```
 
-- [ ] **Step 3: UsageStore: `usage.get` on v1**
+- [x] **Step 3: UsageStore: `usage.get` on v1**
 
 Replace `refresh()` and `resetForNewDevice()` in `UsageStore.swift` with:
 
@@ -607,7 +609,7 @@ Replace `refresh()` and `resetForNewDevice()` in `UsageStore.swift` with:
 
 (The v2 branch is the old body unchanged; on v1 without `read`, `supports("usage")` is false as before, so nothing is sent.)
 
-- [ ] **Step 4: UsageView: no permission row when the mode is unknown**
+- [x] **Step 4: UsageView: no permission row when the mode is unknown**
 
 In `UsageView.swift` wrap the first `Section { permissionRow(s.permissionMode) } footer: { … }` (lines 13-17):
 
@@ -623,7 +625,7 @@ In `UsageView.swift` wrap the first `Section { permissionRow(s.permissionMode) }
 
 (`ContextBar`'s chip already hides: `UsageStore.permissionLabel("")` returns nil.)
 
-- [ ] **Step 5: Settings link and RootTabView refresh rules**
+- [x] **Step 5: Settings link and RootTabView refresh rules**
 
 `SettingsView.swift:104`:
 
@@ -653,7 +655,7 @@ Replace the body of `refreshMacData()`'s first lines:
 
 (the rest of the function is unchanged).
 
-- [ ] **Step 6: Build the app the way ios-ci does**
+- [x] **Step 6: Build the app the way ios-ci does**
 
 Run:
 ```bash
@@ -663,7 +665,7 @@ cd /Users/dinsmallade/llm-ide/ios_app && xcodebuild -project MyApp.xcodeproj -ta
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/dinsmallade/llm-ide
@@ -687,7 +689,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: `ConnectionService.readState`, `.reads`, `.servesV1Read` (Task 3); `UsageStore.state`; `UsageView`; `ChatBubble(message:)` and `ChatMessage(historyIndex:role:text:)` (`ConnectionService.swift:33`); `Date(epochSeconds:)` / `relativeTimeShort()` (`Views/Shared/ViewExtensions.swift:22,31`).
 - Produces: `struct ReadChatsView: View`, `struct ReadChatHistoryView: View`, `RootTabView.Tab.history`.
 
-- [ ] **Step 1: Write the view file**
+- [x] **Step 1: Write the view file**
 
 Create `ios_app/MyApp/Views/Control/ReadChatsView.swift`:
 
@@ -831,7 +833,7 @@ struct ReadChatHistoryView: View {
 }
 ```
 
-- [ ] **Step 2: Add the file to the Xcode project**
+- [x] **Step 2: Add the file to the Xcode project**
 
 First check the ids are free: `grep -c "C2E0A1B2C3D4E5F6000000" /Users/dinsmallade/llm-ide/ios_app/MyApp.xcodeproj/project.pbxproj` → `0`.
 
@@ -854,7 +856,7 @@ In `ios_app/MyApp.xcodeproj/project.pbxproj` insert, each directly after the mat
 				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
 ```
 
-- [ ] **Step 3: Add the History tab to RootTabView**
+- [x] **Step 3: Add the History tab to RootTabView**
 
 `Tab` enum (line 23):
 
@@ -881,7 +883,7 @@ After the existing `.onChange(of: connection.macCapabilities) { … }` modifier 
         }
 ```
 
-- [ ] **Step 4: Build the app the way ios-ci does**
+- [x] **Step 4: Build the app the way ios-ci does**
 
 Run:
 ```bash
@@ -891,7 +893,7 @@ cd /Users/dinsmallade/llm-ide/ios_app && xcodebuild -project MyApp.xcodeproj -ta
 ```
 Expected: `** BUILD SUCCEEDED **`. If it fails with "cannot find 'ReadChatsView' in scope", a pbxproj entry from Step 2 is missing.
 
-- [ ] **Step 5: Append the manual F-rows to `docs/mobile/verification.md`**
+- [x] **Step 5: Append the manual F-rows to `docs/mobile/verification.md`**
 
 Insert before `## Security`:
 
@@ -914,12 +916,12 @@ Setup: the desktop host with `LLMIDE_HOST_API_READ=1` (plus the DEBUG setup in t
 | F28 | VoiceOver on: History list, usage strip, a chat; then Settings → Accessibility → Larger Text at the largest size | Each row is read as one element (title + time, meter name + detail, "You:" / "Assistant:" + text, "title, read-only"); text grows and wraps with no clipping |
 ```
 
-- [ ] **Step 6: Run every gate once more**
+- [x] **Step 6: Run every gate once more**
 
 Run: `cd /Users/dinsmallade/llm-ide && make test-shared-protocol && (cd mac && swift build 2>&1 | tail -1)`
 Expected: package tests PASS; Mac `Build complete!`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/dinsmallade/llm-ide
