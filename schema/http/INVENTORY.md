@@ -319,17 +319,17 @@ Endpoints with no client caller (85):
 | `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:67` | - | - | tests only |
 | `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:78` | - | - | tests only |
 | `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:82` | - | - | tests only |
-| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:41` | - | - | tests only |
-| `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:42` | - | - | tests only |
-| `/kb/sync/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:66` | - | - | tests only |
-| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:58` | - | - | tests only |
-| `/kb/sync/publish` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:66` | - | - | comments/docs only |
-| `/kb/sync/devices/enroll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:87` | - | - | tests only |
-| `/kb/sync/devices/enroll/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:95` | - | - | tests only |
-| `/kb/sync/devices/enroll/confirm` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:96` | - | - | tests only |
-| `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:101` | - | - | tests only |
+| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:42` | - | - | tests only |
+| `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:43` | - | - | tests only |
+| `/kb/sync/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:67` | - | - | tests only |
+| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:59` | - | - | tests only |
+| `/kb/sync/publish` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:67` | - | - | comments/docs only |
+| `/kb/sync/devices/enroll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:88` | - | - | tests only |
+| `/kb/sync/devices/enroll/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:96` | - | - | tests only |
+| `/kb/sync/devices/enroll/confirm` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:97` | - | - | tests only |
+| `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:102` | - | - | tests only |
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
-| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:108` | - | - | tests only |
+| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:109` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:860` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
