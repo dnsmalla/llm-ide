@@ -13,17 +13,18 @@ const read = (p) => readFileSync(join(ROOT, p), "utf8");
 test("the manifest is installable and every icon exists", () => {
   const m = JSON.parse(read("public/manifest.webmanifest"));
   assert.equal(m.display, "standalone");
-  assert.equal(m.start_url, "/");
-  assert.equal(m.scope, "/");
+  // Relative, so the same build works at / and under a base path such as /app/.
+  assert.equal(m.start_url, "./");
+  assert.equal(m.scope, "./");
   assert.ok(m.icons.some((i) => i.sizes === "192x192" && i.type === "image/png"));
   assert.ok(m.icons.some((i) => i.sizes === "512x512" && i.type === "image/png"));
   assert.ok(m.icons.some((i) => i.purpose === "maskable"));
-  for (const i of m.icons) assert.ok(existsSync(join(ROOT, "public", i.src.replace(/^\//, ""))), i.src);
+  for (const i of m.icons) assert.ok(existsSync(join(ROOT, "public", i.src.replace(/^\.?\//, ""))), i.src);
 });
 
 test("the page declares the manifest and iOS install metadata", () => {
   const html = read("index.html");
-  assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(html, /rel="manifest" href="\.\/manifest\.webmanifest"/);
   assert.match(html, /name="theme-color"/);
   assert.match(html, /rel="apple-touch-icon"/);
 });
@@ -34,16 +35,16 @@ test("the worker caches only the shell, only GET, and never the Host API", () =>
   assert.match(sw, /url\.origin !== self\.location\.origin/);
   assert.match(sw, /url\.pathname\.startsWith\("\/host-api\/"\)/);
   assert.match(sw, /req\.mode === "navigate"/);
-  assert.match(sw, /caches\.match\("\/"\)/);
+  assert.match(sw, /caches\.match\("\.\/"\)/);
   assert.match(sw, /CACHE = "llmide-shell-__SW_BUILD__"/);
-  assert.match(sw, /importScripts\("\/sw-prune\.js"\)/);
+  assert.match(sw, /importScripts\("sw-prune\.js"\)/);
   assert.match(sw, /pruneOldAssets/);
 });
 
 test("service-worker registration is production-only", () => {
   const main = read("src/main.tsx");
   assert.match(main, /import\.meta\.env\.PROD && "serviceWorker" in navigator/);
-  assert.match(main, /register\("\/sw\.js"\)/);
+  assert.match(main, /register\(`\$\{import\.meta\.env\.BASE_URL\}sw\.js`\)/);
 });
 
 
@@ -63,6 +64,13 @@ test("old hashed assets are pruned against the current index, leaving shell entr
     ["https://app.example/assets/index-old.js", "https://app.example/assets/index-old.css"],
   );
   assert.deepEqual([...staleAssetPaths([], [])], []);
+  // Built under a base path (VITE_BASE=/app/): /app/assets/... is still recognised and pruned.
+  const appHtml = '<script src="/app/assets/index-new.js"></script>';
+  assert.deepEqual([...assetsInIndex(appHtml)], ["/app/assets/index-new.js"]);
+  assert.deepEqual(
+    [...staleAssetPaths(["https://x.example/app/assets/index-old.js", "https://x.example/app/assets/index-new.js", "https://x.example/app/index.html"], assetsInIndex(appHtml))],
+    ["https://x.example/app/assets/index-old.js"],
+  );
 });
 
 
