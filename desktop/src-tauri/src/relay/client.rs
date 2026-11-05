@@ -352,3 +352,88 @@ pub fn start(cfg: ClientConfig) -> RelayHandle {
     std::thread::spawn(move || run_loop(cfg, s, st));
     RelayHandle { stop, status }
 }
+
+#[cfg(test)]
+mod socket_tests {
+    use super::*;
+    use p256::pkcs8::EncodePublicKey;
+    #[test]
+    fn socket_loop_authenticates_and_pumps_a_frame_through_the_bridge() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        use tungstenite::Message;
+
+        let desk = SigningKey::random(&mut OsRng);
+        let dev = SigningKey::random(&mut OsRng);
+        let mut reg = crate::relay::registry::Registry { enabled: true, user_id: "u1".into(), desktop_id: "dk1".into(), ..Default::default() };
+        reg.ensure_root();
+        let spki = |k: &SigningKey| URL_SAFE_NO_PAD.encode(k.verifying_key().to_public_key_der().unwrap().as_bytes());
+        reg.add(crate::relay::registry::Device { device_id: "dv1".into(), label: "P".into(), tier: "web".into(), signing_key: spki(&dev), ecdh_key: String::new(),
+            linked_at: 0, confirmed: true, host_api_token: "t".into(), wrap: None, wrap_sig: String::new(), reply_count: 0 });
+        let (rq, rp) = crypto::device_keys(&reg.root_bytes().unwrap(), "u1", "dk1", "dv1", reg.epoch);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let open = crypto::seal(&Header { purpose: "open".into(), user_id: "u1".into(), desktop_id: "dk1".into(), from: "dv1".into(), to: "dk1".into(), epoch: 1, session: String::new(), seq: 0, issued_at: now, tier: String::new() }, &rq, &[7u8; 16], &dev, &[], None).unwrap();
+        // The fake relay builds the request with the session id from the opened envelope, not a guess.
+
+        let relay = TcpListener::bind("127.0.0.1:0").unwrap(); let relay_port = relay.local_addr().unwrap().port();
+        let core = TcpListener::bind("127.0.0.1:0").unwrap(); let core_port = core.local_addr().unwrap().port();
+        let (done_tx, done_rx) = channel::<String>();
+        let desk2 = desk.clone();
+        let dev2 = dev.clone();
+        std::thread::spawn(move || {
+            let (stream, _) = relay.accept().unwrap(); stream.set_read_timeout(Some(Duration::from_millis(500))).ok();
+            let mut ws = tungstenite::accept(stream).unwrap();
+            ws.send(Message::text(serde_json::json!({ "t": "challenge", "nonce": "Y2hhbGxlbmdlLWNoYWxsZW5nZS1jaGFsbGVuZ2UtMDA" }).to_string())).unwrap();
+            let auth: serde_json::Value = serde_json::from_str(ws.read().unwrap().to_text().unwrap()).unwrap();
+            if auth["proof"] != auth_proof(&desk2, "Y2hhbGxlbmdlLWNoYWxsZW5nZS1jaGFsbGVuZ2UtMDA", auth["token"].as_str().unwrap()) { return; }
+            ws.send(Message::text(serde_json::json!({ "t": "ready", "role": "desktop", "userId": "u1", "deviceId": "dk1", "desktopId": "dk1" }).to_string())).unwrap();
+            ws.send(Message::text(serde_json::json!({ "t": "env", "env": open }).to_string())).unwrap();
+            let mut sent_request = false;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                match ws.read() {
+                    Ok(Message::Text(t)) => {
+                        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                        let Some(e) = v.get("env") else { continue };
+                        match e["purpose"].as_str() {
+                            Some("opened") if !sent_request => {
+                                let sid = e["session"].as_str().unwrap_or_default().to_string();
+                                let request = crypto::seal(&Header { purpose: "request".into(), user_id: "u1".into(), desktop_id: "dk1".into(), from: "dv1".into(), to: "dk1".into(), epoch: 1, session: sid, seq: 1, issued_at: now, tier: String::new() }, &rq, b"{\"x\":1}", &dev2, &[], None).unwrap();
+                                ws.send(Message::text(serde_json::json!({ "t": "env", "env": request }).to_string())).unwrap(); sent_request = true;
+                            }
+                            Some("reply") => { let env: Envelope = serde_json::from_value(e.clone()).unwrap(); if let Ok(pt) = crypto::open(&env, &rp, desk2.verifying_key()) { let _ = done_tx.send(String::from_utf8_lossy(&pt).into_owned()); return; } }
+                            _ => {}
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+                    Err(_) => return,
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            let (stream, _) = core.accept().unwrap(); stream.set_read_timeout(Some(Duration::from_millis(500))).ok();
+            let mut ws = tungstenite::accept(stream).unwrap();
+            loop {
+                match ws.read() {
+                    Ok(Message::Text(t)) => { ws.send(Message::text(t)).unwrap(); }
+                    Ok(Message::Close(_)) | Err(_) => return,
+                    Ok(_) => {}
+                }
+            }
+        });
+
+        let store = Box::new(crate::secrets::MemoryBackend::default());
+        crate::relay::registry::save(store.as_ref(), &reg).unwrap();
+        let cfg = ClientConfig { relay_url: format!("ws://127.0.0.1:{relay_port}/relay/v1"), core_url: format!("http://127.0.0.1:{core_port}/"),
+            store, token: std::sync::Arc::new(|| Ok("tok-0123456789abcdef0123456789".to_string())), signer: desk.clone(),
+            signing_spki: desk.verifying_key().to_public_key_der().unwrap().as_bytes().to_vec() };
+        let handle = start(cfg);
+        let got = done_rx.recv_timeout(Duration::from_secs(6)).unwrap();
+        assert_eq!(got, "{\"x\":1}");
+        handle.stop();
+    }
+
+}
