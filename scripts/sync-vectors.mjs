@@ -2,7 +2,7 @@
 // node scripts/sync-vectors.mjs --write  regenerate it
 // Built on the independent reference (scripts/relay-reference.mjs), never on extension/core/sync-envelope.mjs.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { createHash, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, verify } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, verify } from 'node:crypto';
 import * as R from './relay-reference.mjs';
 
 const RELAY = JSON.parse(readFileSync(new URL('../schema/relay/v1/vectors/v1.json', import.meta.url)));
@@ -32,12 +32,53 @@ function build() {
   const wrapKey = Buffer.from(hkdfSync('sha256', z, sha(R.enc([ephSpki, devSpki])), R.enc(['llmide/syncwrap/v1', epoch, ids.deviceId, sha(devSpki), sha(deskSpki), 'web']), 32));
   const wrapHeader = { purpose: 'syncwrap', userId: ids.userId, desktopId: ids.desktopId, from: ids.desktopId, to: ids.deviceId, epoch, session: '', seq: 11, issuedAt: 1762300000002, tier: 'web' };
   const syncwrap = R.seal({ header: wrapHeader, key: wrapKey, plaintext: R.enc([k.request, k.reply, k.snapshot, k.manifest]), signingKey, nonce: Buffer.alloc(12, 0x55), extra: ephSpki });
+
+  // Enrollment (README "Enrollment"), built independently of extension/core/sync-enroll.mjs.
+  const ENR_SALT = sha(Buffer.from('llmide-sync-enroll-v1'));
+  const es = Buffer.alloc(16, 0x77);
+  const pair = { sid: ids.desktopId, sfp: sha(deskSpki).toString('base64url'), dir: 'D'.repeat(22), slot: 'E'.repeat(22), es: es.toString('base64url'), st: 'mega:llmide-sync' };
+  const query = `sv=1&sid=${pair.sid}&sfp=${pair.sfp}&dir=${pair.dir}&slot=${pair.slot}&es=${pair.es}&st=${encodeURIComponent(pair.st)}`;
+  const ek = (label) => Buffer.from(hkdfSync('sha256', es, ENR_SALT, R.enc([label, pair.sid, pair.slot]), 32));
+  const devSig = b(keys.deviceSigningSpki);
+  const deviceId = sha(devSig).subarray(0, 16).toString('base64url');
+  const tier = 'ios'; const name = 'Test iPhone'; const userId = ids.userId;
+  const B = [pair.sid, pair.slot, pair.dir, b(pair.sfp), tier, deviceId, devSpki, devSig, name];
+  const mac = createHmac('sha256', ek('bind')).update(R.enc(B)).digest();
+  const claimHash = sha(R.enc(['llmide/sync-claim/v1', deviceId, devSpki, devSig, name]));
+  const nD = Buffer.alloc(16, 0x6e);
+  const sasH = createHmac('sha256', ek('sas')).update(R.enc([...B, nD])).digest();
+  const sas = String(sasH.readUInt32BE(0) % 1_000_000).padStart(6, '0');
+  const claimEnv = R.seal({ header: { purpose: 'enroll', userId: '', desktopId: pair.sid, from: deviceId, to: pair.sid, epoch: 0, session: pair.slot, seq: 0, issuedAt: 1762300000100, tier: '' },
+    key: ek('enroll'), plaintext: R.enc([devSpki, devSig, name, mac]), signingKey: priv(keys.deviceSigningPkcs8), nonce: Buffer.alloc(12, 0x61), extra: devSig });
+  const ackEnv = R.seal({ header: { purpose: 'enrollack', userId, desktopId: pair.sid, from: pair.sid, to: deviceId, epoch: 0, session: pair.slot, seq: 12, issuedAt: 1762300000200, tier },
+    key: ek('enrollack'), plaintext: R.enc([nD, claimHash]), signingKey, nonce: Buffer.alloc(12, 0x62) });
+  const enroll = {
+    pair, tier, name, userId, iosUrl: `llmide://pair?${query}`, webUrl: `https://llm-ide.com/#pair=${encodeURIComponent(query)}`,
+    deviceSigningSpki: keys.deviceSigningSpki, deviceId,
+    enrollKeyHex: hex(ek('enroll')), enrollackKeyHex: hex(ek('enrollack')), bindKeyHex: hex(ek('bind')), sasKeyHex: hex(ek('sas')),
+    macHex: hex(mac), claimHashHex: hex(claimHash), nDHex: hex(nD), sas,
+    claim: { name: 'F'.repeat(22), nonceHex: hex(Buffer.alloc(12, 0x61)), env: claimEnv }, ack: { nonceHex: hex(Buffer.alloc(12, 0x62)), env: ackEnv },
+    negatives: [
+      { target: 'claim', mutate: { op: 'flip', field: 'ct' }, error: 'bad_signature' },
+      { target: 'claim', mutate: { op: 'expect', field: 'es', value: Buffer.alloc(16, 0x78).toString('base64url') }, error: 'bad_ciphertext' },
+      { target: 'claim', mutate: { op: 'expect', field: 'tier', value: 'web' }, error: 'bad_mac' },
+      { target: 'claim', mutate: { op: 'expect', field: 'dir', value: 'G'.repeat(22) }, error: 'bad_mac' },
+      { target: 'claim', mutate: { op: 'expect', field: 'sfp', value: 'H'.repeat(43) }, error: 'bad_mac' },
+      { target: 'claim', mutate: { op: 'set', field: 'session', value: 'G'.repeat(22) }, error: 'bad_session' },
+      { target: 'ack', mutate: { op: 'flip', field: 'sig' }, error: 'bad_signature' },
+      { target: 'ack', mutate: { op: 'verifyKey' }, error: 'bad_signature' },
+      { target: 'ack', mutate: { op: 'expect', field: 'name', value: 'Attacker phone' }, error: 'ack_mismatch' },
+      { target: 'ack', mutate: { op: 'expect', field: 'tier', value: 'web' }, error: 'bad_tier' },
+      { target: 'ack', mutate: { op: 'set', field: 'session', value: 'G'.repeat(22) }, error: 'bad_session' },
+    ],
+  };
+
   return {
     v: 1, ids, epoch, rootHex: hex(root),
-    keys: { desktopSigningPkcs8: keys.desktopSigningPkcs8, desktopSigningSpki: keys.desktopSigningSpki, deviceEcdhPkcs8: keys.deviceEcdhPkcs8, deviceEcdhSpki: keys.deviceEcdhSpki, ephPkcs8: keys.ephPkcs8, ephSpki: keys.ephSpki },
+    keys: { desktopSigningPkcs8: keys.desktopSigningPkcs8, desktopSigningSpki: keys.desktopSigningSpki, deviceEcdhPkcs8: keys.deviceEcdhPkcs8, deviceEcdhSpki: keys.deviceEcdhSpki, deviceSigningPkcs8: keys.deviceSigningPkcs8, deviceSigningSpki: keys.deviceSigningSpki, ephPkcs8: keys.ephPkcs8, ephSpki: keys.ephSpki },
     desktopSigningFingerprint: sha(deskSpki).toString('base64url'),
     requestKeyHex: hex(k.request), replyKeyHex: hex(k.reply), snapshotKeyHex: hex(k.snapshot), manifestKeyHex: hex(k.manifest),
-    snapshot: { plaintext: snapPlain, env: snapshot }, manifest: { plaintext: manPlain, env: manifest }, syncwrap: { env: syncwrap },
+    snapshot: { plaintext: snapPlain, env: snapshot }, manifest: { plaintext: manPlain, env: manifest }, syncwrap: { env: syncwrap }, enroll,
     negatives: ['flip:ct', 'flip:sig', 'truncate:ct', 'purpose=manifest', 'epoch=4', 'to=h1-00000000-0000-4000-8000-000000000002', 'v=2'],
   };
 }
@@ -58,6 +99,8 @@ if (write) {
     const extra = e.eph ? b(e.eph) : Buffer.alloc(0);
     return verify('sha256', Buffer.concat([Buffer.from(`llmide/${e.purpose}/v1\0`), R.enc([...R.headerFields(e), extra, b(e.nonce), b(e.ct)])]), { key: pub(current.keys.desktopSigningSpki), dsaEncoding: 'ieee-p1363' }, b(e.sig));
   });
-  if (!same || !sigOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
+  const verifyEnv = (e, spki) => verify('sha256', Buffer.concat([Buffer.from(`llmide/${e.purpose}/v1\0`), R.enc([...R.headerFields(e), e.eph ? b(e.eph) : Buffer.alloc(0), b(e.nonce), b(e.ct)])]), { key: pub(spki), dsaEncoding: 'ieee-p1363' }, b(e.sig));
+  const enrollOk = !!current.enroll && verifyEnv(current.enroll.claim.env, current.enroll.deviceSigningSpki) && verifyEnv(current.enroll.ack.env, current.keys.desktopSigningSpki);
+  if (!same || !sigOk || !enrollOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
   console.log('sync v1 vectors ok');
 }

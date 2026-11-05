@@ -6,7 +6,7 @@ import { createCipheriv, createDecipheriv, createHash, createPublicKey, diffieHe
 export const VERSION = 1;
 export const BUCKETS = Object.freeze([1024, 4096, 16384, 65536, 262144, 1048576]);
 export const MAX_FRAME = BUCKETS.at(-1) - 4;
-export const PURPOSES = Object.freeze(['request', 'reply', 'snapshot', 'manifest', 'syncwrap']);
+export const PURPOSES = Object.freeze(['request', 'reply', 'snapshot', 'manifest', 'syncwrap', 'enroll', 'enrollack']);
 const ID_KEYS = ['purpose', 'userId', 'desktopId', 'from', 'to', 'epoch', 'session', 'seq', 'issuedAt', 'tier'];
 const ENV_KEYS = new Set(['v', ...ID_KEYS, 'nonce', 'ct', 'sig', 'eph']);
 const B64U = /^[A-Za-z0-9_-]*$/;

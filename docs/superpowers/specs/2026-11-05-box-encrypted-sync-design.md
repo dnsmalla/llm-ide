@@ -217,6 +217,7 @@ and `history.replaceState` before any other code runs.
 | `dir` | the new device's folder name |
 | `slot` | enrollment slot id (16 random bytes) |
 | `es` | enrollment secret (16 random bytes), in the QR only, never stored by the storage or logged |
+| `sv` | payload version, `1` |
 | `st` | store descriptor: `sftp-https:<base URL>` / `box:<root folder id>` / `mega:<root node handle>` (non-secret) |
 
 The flow follows relay §4.5, without a relay and without the v1 commitment flaws:
@@ -224,18 +225,20 @@ The flow follows relay §4.5, without a relay and without the v1 commitment flaw
 1. On an explicit click, the desktop opens slot `e/<slot>/` and device folder `d/<dir>/`, writes
    `d/<dir>/key.bin`, and shows the QR for 2 minutes. The window is excluded from screen capture where
    the OS allows it.
-2. The device generates its two key pairs. It writes `e/<slot>/<rand>.bin`, an `enroll` envelope signed
-   by its own new signing key. The `mac` is `HMAC-SHA-256(HKDF(es, "bind"), enc([sid, slot, dir,
-   ecdhSpki, signingSpki, name]))`.
-3. The desktop reads the slot and checks: one claim only (a second claim kills the slot and raises an
-   alert), the MAC, and the 2-minute window by the desktop clock. Both screens then show a 6-digit code,
-   `HMAC(HKDF(es, "sas"), enc([ecdhSpki, signingSpki, slot]))`. The user confirms on the desktop that
-   the codes match.
-4. The desktop records the device in its **local registry**, the only registry. It writes
-   `d/<dir>/wrap.bin` (a signed `syncwrap`, epoch strictly greater than the device's current epoch,
-   which is 0 for a new device) and publishes. Then it deletes the slot.
-5. The device fetches `key.bin` and checks that its SHA-256 equals `sfp` **from the QR**. It verifies
-   `wrap.bin` against that key, unwraps, and from then on reads only its own folder.
+2. The device checks `key.bin` against `sfp` from the QR and pins it. It generates its two key pairs;
+   `deviceId = b64u(SHA-256(signingSpki)[0..16])`. It writes `e/<slot>/<rand>.bin`, an `enroll` envelope signed by
+   its new signing key (`eph` = its signing SPKI), with `mac = HMAC(E("bind"), enc([sid, slot, dir, sfp, tier,
+   deviceId, ecdhSpki, signingSpki, name]))`.
+3. The desktop reads the slot and **pins the first claim it sees; it never fetches it again**. It checks one claim
+   only (a second kills the slot and raises an alert), the MAC and the 2-minute window by its own clock. It then
+   writes one `e/<slot>/ack.bin` (`enrollack`, signed, under `E("enrollack")`) carrying a fresh 16-byte `nD` and
+   `claimHash` of the pinned claim. The device accepts only an ack for its own claim. Both screens show
+   `SAS = HMAC(E("sas"), enc([sid, slot, dir, sfp, tier, deviceId, ecdhSpki, signingSpki, name, nD]))` as 6 digits.
+   `nD` is chosen after the claim is committed, so a QR photographer who also controls storage cannot grind keys
+   to match the phone's code. The tier is the one the user picked on the desktop.
+4. On "Codes match", the desktop records the device in its local registry, writes `d/<dir>/wrap.bin`, publishes, then deletes the slot.
+5. The device verifies `wrap.bin` with the pinned key (tier = its own, epoch > 0), unwraps, erases `es`, and from
+   then on reads only its own folder. Full contract: `schema/sync/v1/README.md` "Enrollment".
 
 Why the storage cannot sit in the middle: it never sees `es`, so it cannot compute the MAC or the SAS
 for keys of its choosing. It does not hold the desktop signing key, whose fingerprint came through the
