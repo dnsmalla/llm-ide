@@ -121,3 +121,20 @@ test("scheduler: one failing schedule does not stop the others; errors carry the
   assert.deepEqual(out.errors, [`${schedule().id}:QUOTA_EXCEEDED`]);
   assert.deepEqual(out.enqueued, [good.id]);
 });
+
+const inbox = await load("approvals/inbox-store.ts");
+
+test("inbox: notifies once per new pending id with our own kind title; a 403 is a quiet error", async () => {
+  let list = [item()];
+  const notes = [];
+  const s = inbox.createInboxStore({ approvals: async () => list, notify: (d) => { notes.push(d); } });
+  await s.refresh(); await s.refresh();
+  assert.deepEqual(notes, ["Sync connected sources"], "once per id");
+  list = [item(), item({ id: "7c1d2e3f-0000-4000-8000-0000000000b9", kind: "evil‮" }), item({ id: "7c1d2e3f-0000-4000-8000-0000000000c9" })];
+  await s.refresh();
+  assert.deepEqual(notes, ["Sync connected sources", "2 jobs"]);
+  assert.equal(s.getSnapshot().items.length, 3);
+  const denied = inbox.createInboxStore({ approvals: async () => { throw new api.BusCallError(403, "TIER_DENIED"); }, notify: () => assert.fail("no notification") });
+  await denied.refresh();
+  assert.deepEqual(denied.getSnapshot(), { items: [], error: "TIER_DENIED" });
+});
