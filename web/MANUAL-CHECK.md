@@ -51,3 +51,9 @@ over HTTPS, add the exact `https://<domain>` origin to the host's
 trust the host's certificate; a self-signed certificate needs a manual trust
 step. Chromium's Private Network Access rules may also block an HTTPS page
 from reaching a LAN/loopback host.
+
+## Read views (desktop core started with LLMIDE_HOST_API_READ=1, browser paired AFTER the switch)
+- The panel shows Usage (one line per model) and Chats; the phone chat reads "(this device)".
+- Opening a chat shows "Read-only", no composer; Show older pages back; Back returns to the phone chat.
+- A browser paired before the switch shows no panel (it must re-pair).
+- While a past chat is open, a running reply's approval cards appear only after Back.
