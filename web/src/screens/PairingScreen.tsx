@@ -28,6 +28,24 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
   return (
     <main className="web-app">
       <h1>LLM-IDE Web</h1>
+      <section className="web-guide" aria-label="What LLM-IDE does">
+        <h2>Your local-first AI workspace</h2>
+        <p className="chat-muted">
+          Meetings, code, chats and project data stay on your desktop. You sign in with a passkey here, then pair
+          this browser to your desktop. AI runs on the desktop with your own Claude login or API key.
+        </p>
+        <div className="web-features">
+          <section><h3>Capture &amp; Library</h3><p>Meeting captions, notes, documents and sources become one searchable knowledge base.</p></section>
+          <section><h3>Chat &amp; Code</h3><p>Ask across the project, draft code changes and approve tool actions from the browser.</p></section>
+          <section><h3>Issues &amp; Gantt</h3><p>Turn action items into tracked work, schedule it and review delivery in one place.</p></section>
+          <section><h3>Graph, Doc Gen, Loop</h3><p>Explore the code graph, generate documents and run repeatable agent workflows.</p></section>
+        </div>
+        <p className="chat-muted">
+          <a href="https://accounts.llm-ide.com/" target="_blank" rel="noreferrer">Create or sign in to your LLM-IDE account</a>
+          {" · "}
+          <a href="https://accounts.llm-ide.com/account.html" target="_blank" rel="noreferrer">Account &amp; passkeys</a>
+        </p>
+      </section>
       <form className="web-form" onSubmit={submit}>
         {revokedNotice && <StatusBanner severity="info" message={revokedNotice} />}
         {shown && <StatusBanner severity="error" message={shown} />}
