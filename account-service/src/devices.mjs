@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { newId } from './db.mjs';
 import { HttpError } from './http.mjs';
+import { revokeDesktopSignIns } from './oauth.mjs';
 import { FRESH_MS } from './sessions.mjs';
 
 // Sub-project 2 registers only the account's desktop (design 4.4 step 5). The relay connection and
@@ -86,8 +87,7 @@ export function replaceDesktop(db, now, { token, ...desktop }) {
     const unlinked = db.prepare(
       "UPDATE devices SET status = 'unlinked', updated_at = ? WHERE user_id = ? AND kind <> 'desktop' AND status IN ('pending', 'linked')",
     ).run(t, desktop.userId).changes;
-    db.prepare('UPDATE desktop_tokens SET revoked_at = ? WHERE user_id = ? AND family <> ? AND revoked_at IS NULL')
-      .run(t, desktop.userId, token.family);
+    revokeDesktopSignIns(db, t, desktop.userId, token.family);
     return { id: insertDesktop(db, t, desktop), replacedId: old?.id ?? null, unlinked };
   })();
   return { ...result, device: db.prepare('SELECT * FROM devices WHERE id = ?').get(result.id) };
@@ -97,11 +97,18 @@ export function listDevices(db, userId) {
   return db.prepare('SELECT * FROM devices WHERE user_id = ? ORDER BY created_at').all(userId).map(publicDevice);
 }
 
+// Revoking the desktop also signs it out (design 4.6: the token is blocked at once), so a lost or stolen
+// desktop cannot re-register with the tokens it still holds. Device rows carry no token family, so every
+// desktop family of the account goes.
 export function revokeDevice(db, now, { userId, id }) {
-  const row = db.prepare('SELECT * FROM devices WHERE id = ? AND user_id = ?').get(id, userId);
-  if (!row) return false;
-  if (row.status === 'revoked') return true;
-  db.prepare("UPDATE devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-    .run(now(), now(), id, userId);
-  return true;
+  const t = now();
+  return db.transaction(() => {
+    const row = db.prepare('SELECT * FROM devices WHERE id = ? AND user_id = ?').get(id, userId);
+    if (!row) return false;
+    if (row.status === 'revoked') return true;
+    db.prepare("UPDATE devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+      .run(t, t, id, userId);
+    if (row.kind === 'desktop') revokeDesktopSignIns(db, t, userId);
+    return true;
+  })();
 }

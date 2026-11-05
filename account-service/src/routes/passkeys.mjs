@@ -1,5 +1,6 @@
 import { HttpError, readJson, send } from '../http.mjs';
 import { passkeyAddedMail } from '../mail-templates.mjs';
+import { revokeDesktopSignIns } from '../oauth.mjs';
 import { getUser } from '../users.mjs';
 
 function requirePasskeySession(req, ctx) {
@@ -90,6 +91,7 @@ export function passkeyRoutes(routes, ctx) {
           if (viaRecovery) {
             ctx.db.prepare('UPDATE users SET recovered_at = ? WHERE id = ?').run(t, user.id);
             ctx.sessions.revokeOthers(user.id, null); // every session, this setup session included
+            revokeDesktopSignIns(ctx.db, t, user.id); // "every other session" includes the desktop (4.3)
           }
           ctx.sessions.revokeSetup(user.id); // every setup session, not only this one
         }

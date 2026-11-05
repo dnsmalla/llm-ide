@@ -41,6 +41,15 @@ function pkceMatches(verifier, challenge) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+// Signs the account out of every desktop: revokes all desktop token families and drops pending sign-in
+// codes. Callers run it inside their own transaction (recovery, device revoke). keepFamily spares the
+// caller's own family (replace).
+export function revokeDesktopSignIns(db, t, userId, keepFamily = null) {
+  db.prepare('UPDATE desktop_tokens SET revoked_at = ? WHERE user_id = ? AND family IS NOT ? AND revoked_at IS NULL')
+    .run(t, userId, keepFamily);
+  db.prepare('DELETE FROM oauth_codes WHERE user_id = ? AND used_at IS NULL').run(userId);
+}
+
 export function createOAuth(db, now) {
   const insertCode = db.prepare(
     `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, code_challenge_method, created_at, expires_at, auth_at)

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp, signUpAndRegister, waitForMail, linkToken } from './helpers.mjs';
+import { DESKTOP_CLIENT, DESKTOP_REDIRECT, authorize, pkcePair, rawRequest, signInDesktop, startApp, signUpAndRegister, tokenRequest, waitForMail, linkToken } from './helpers.mjs';
 
 test('no enumeration: known and unknown addresses get the same answer; only known gets mail', async (t) => {
   const app = await startApp();
@@ -69,4 +69,30 @@ test('recovery verify issues a setup-scope session marked via recovery', async (
   await c.call('POST', '/v1/recovery/verify', { token: linkToken(await waitForMail(app.mailer, before + 1)) });
   const session = app.db.prepare("SELECT scope, via FROM sessions WHERE via = 'recovery'").get();
   assert.deepEqual({ ...session }, { scope: 'setup', via: 'recovery' });
+});
+
+test('recovery signs out the desktop too: its tokens and pending sign-in codes stop working', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const { web, tokens } = await signInDesktop(app);
+  const pending = pkcePair();
+  const auth = await authorize(app, web, { challenge: pending.challenge });
+  assert.equal(auth.status, 302);
+  const code = new URL(auth.headers.location).searchParams.get('code');
+
+  const phone = app.client();
+  const sentBefore = app.mailer.sent.length;
+  await phone.call('POST', '/v1/recovery', { email: 'ada@example.com' });
+  await phone.call('POST', '/v1/recovery/verify', { token: linkToken(await waitForMail(app.mailer, sentBefore + 1)) });
+  const opts = await phone.call('POST', '/v1/passkeys/options', {});
+  const added = await phone.call('POST', '/v1/passkeys/verify', { ceremonyId: opts.body.ceremonyId, response: { id: 'cred-new', challenge: opts.body.options.challenge } });
+  assert.equal(added.status, 201);
+
+  const profile = await rawRequest(app.base, 'GET', '/v1/desktop/account', undefined, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(profile.status, 401);
+  const refresh = await tokenRequest(app, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: DESKTOP_CLIENT });
+  assert.equal(refresh.status, 400);
+  const exchange = await tokenRequest(app, { grant_type: 'authorization_code', code, redirect_uri: DESKTOP_REDIRECT, client_id: DESKTOP_CLIENT, code_verifier: pending.verifier });
+  assert.equal(exchange.status, 400);
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM desktop_tokens WHERE revoked_at IS NULL').pluck().get(), 0);
 });

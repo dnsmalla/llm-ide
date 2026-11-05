@@ -4,10 +4,13 @@ import { generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   DESKTOP_CLIENT,
+  DESKTOP_REDIRECT,
   ORIGIN,
+  authorize,
   desktopBody,
   desktopKeys,
   desktopProof,
+  pkcePair,
   rawRequest,
   signInDesktop,
   startApp,
@@ -193,6 +196,8 @@ test('replace desktop (4.7): fresh sign-in only, revokes the old desktop and its
   // A new computer signs in (fresh passkey proof) and gets 409, then chooses Replace.
   const second = await signInDesktop(app, { reuse: first.web });
   assert.equal((await register(app, second.tokens.access_token)).status, 409);
+  const pending = pkcePair();
+  const pendingCode = new URL((await authorize(app, first.web, { challenge: pending.challenge })).headers.location).searchParams.get('code');
   const replaced = await register(app, second.tokens.access_token, desktopBody(second.tokens.access_token, desktopKeys(), 'New Mac'), {}, '/v1/desktop/replace');
   assert.equal(replaced.status, 201);
   assert.equal(replaced.body.status, 'desktop_replaced');
@@ -207,6 +212,9 @@ test('replace desktop (4.7): fresh sign-in only, revokes the old desktop and its
   assert.equal(oldRefresh.status, 400);
   const newRefresh = await tokenRequest(app, { grant_type: 'refresh_token', refresh_token: second.tokens.refresh_token, client_id: DESKTOP_CLIENT });
   assert.equal(newRefresh.status, 200);
+  // A sign-in code issued before the replace cannot mint tokens afterwards.
+  const late = await tokenRequest(app, { grant_type: 'authorization_code', code: pendingCode, redirect_uri: DESKTOP_REDIRECT, client_id: DESKTOP_CLIENT, code_verifier: pending.verifier });
+  assert.equal(late.status, 400);
   assert.equal(app.db.prepare("SELECT COUNT(*) FROM audit_events WHERE event = 'desktop_replaced'").pluck().get(), 1);
   for (let i = 0; i < 400 && app.mailer.sent.length === mails; i += 1) await new Promise((r) => setTimeout(r, 5));
   assert.match(app.mailer.sent.at(-1).subject, /desktop was replaced/i);
