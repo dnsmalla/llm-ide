@@ -106,7 +106,11 @@ export function createMegaStore(config, secrets, { login = realLogin, sleep = (m
 
   function storage() {
     if (!session) {
-      const p = login({ email: secrets.email, password: secrets.password }, { onLost: () => { if (session === p) session = null; } })
+      const p = login({ email: secrets.email, password: secrets.password }, { onLost: () => {
+        if (session !== p) return;
+        session = null;
+        p.then((st) => st.close()).catch(() => {});
+      } })
         .then((st) => { attach(st); return st; })
         .catch((e) => { if (session === p) session = null; throw asCoded(e, { duringLogin: true }); });
       session = p;

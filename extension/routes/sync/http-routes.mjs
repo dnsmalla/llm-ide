@@ -6,8 +6,9 @@ import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish } from '../../kb/sync-state.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
-import { ensureSyncKeys } from './keys.mjs';
+import { ensureSyncKeys, existingSigningFingerprint } from './keys.mjs';
 import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending, withUserLock } from './scheduler.mjs';
+import { randomBytes } from 'node:crypto';
 import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } from './enroll.mjs';
 import { revokeDevice } from './registry.mjs';
 
@@ -25,7 +26,7 @@ function status(userId) {
   return {
     configured: true, enabled: s.enabled, storeKind: s.storeKind,
     store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : null,
-    syncId: s.syncId, epoch: s.epoch, signingFingerprint: ensureSyncKeys(userId).fingerprint,
+    syncId: s.syncId, epoch: s.epoch, signingFingerprint: existingSigningFingerprint(userId),
     devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: d.dir.slice(0, 6) })),
     rotationPending: rotationPending(userId), lastPublishAt: s.lastPublishAt, lastError: s.lastError,
   };
@@ -69,7 +70,7 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       if (!store) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
       try {
         if (path === '/kb/sync/test') {
-          const probe = `${state.syncId}/probe.bin`;
+          const probe = `${state.syncId}/probe-${randomBytes(8).toString('hex')}.bin`;
           await store.put(probe, Buffer.from('ok'));
           const back = await store.get(probe);
           await store.remove(probe);

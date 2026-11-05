@@ -46,3 +46,11 @@ export function previousRoot(userId, now = Date.now()) {
     return Number.isSafeInteger(p.epoch) && p.until > now ? { epoch: p.epoch, root: Buffer.from(p.key, 'base64url') } : null;
   } catch { return null; }
 }
+
+/** The signing fingerprint if the key already exists; a status read must not mint keys. */
+export function existingSigningFingerprint(userId) {
+  const raw = getSecret(getDb(), userId, 'sync.signingKey');
+  if (!raw) return null;
+  const signing = createPrivateKey({ key: Buffer.from(raw, 'base64url'), format: 'der', type: 'pkcs8' });
+  return spkiFingerprint(createPublicKey(signing).export({ type: 'spki', format: 'der' }));
+}

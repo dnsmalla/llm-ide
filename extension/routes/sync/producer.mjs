@@ -3,7 +3,7 @@
 // cleans up after a crash mid-publish). Unchanged kinds are not rewritten; the manifest is refreshed on the heartbeat.
 import { randomBytes } from 'node:crypto';
 import { deviceKeys, seal, makeSyncWrap, sha256 } from '../../core/sync-envelope.mjs';
-import { getSyncState, listSyncDevices, getPublished, setPublished, nextSeq, recordPublish, setDeviceWrapEpoch } from '../../kb/sync-state.mjs';
+import { getSyncState, listSyncDevices, getPublished, setPublishedMany, nextSeq, recordPublish, setDeviceWrapEpoch } from '../../kb/sync-state.mjs';
 import { ensureSyncKeys, syncIdsFor, rotateKeys } from './keys.mjs';
 import { pruneMissingDevices } from './registry.mjs';
 import { loadKinds as defaultLoadKinds, KINDS } from './kinds.mjs';
@@ -30,12 +30,14 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
   const state = getSyncState(userId);
   if (!state?.enabled) return out;
   if ((await pruneMissingDevices(userId, { store })).dropped.length) rotateKeys(userId, now);
+  const devices = listSyncDevices(userId);
+  if (!devices.length) return out;
   const keys = ensureSyncKeys(userId);
   const ids = syncIdsFor(userId, state);
   const frames = loadKinds(userId, now);
   const heartbeatDue = !state.lastPublishAt || now - state.lastPublishAt >= HEARTBEAT_MS;
   let wroteManifest = false;
-  for (const dev of listSyncDevices(userId)) {
+  for (const dev of devices) {
     out.devices += 1;
     const base = `${state.syncId}/d/${dev.dir}`;
     const dk = deviceKeys(keys.root, { ...ids, deviceId: dev.deviceId }, keys.epoch);
@@ -59,7 +61,7 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
     await store.put(`${base}/manifest.bin`, envBytes(seal({ header: header('manifest', manifestSeq), key: dk.manifest, plaintext: Buffer.from(JSON.stringify(manifest)), signingKey: keys.signingKey })));
     out.manifests += 1;
     wroteManifest = true;
-    for (const kind of changed) setPublished(userId, dev.deviceId, kind, entries[kind]);
+    setPublishedMany(userId, dev.deviceId, Object.fromEntries(changed.map((kind) => [kind, entries[kind]])));
     const keep = new Set(Object.values(entries).map((e) => e.file.slice(2)));
     for (const f of await store.list(`${base}/s`)) if (!keep.has(f.name)) await store.remove(`${base}/s/${f.name}`);
   }

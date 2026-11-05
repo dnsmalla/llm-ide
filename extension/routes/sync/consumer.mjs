@@ -41,15 +41,16 @@ async function runTurn(userId, text, deps) {
   const chatSessionId = await deps.phoneChatId(userId);
   let reply = '';
   let failure = null;
-  const timer = setTimeout(() => { failure ??= 'turn_failed'; deps.cancel(userId, chatSessionId); }, LIMITS.turnMs);
+  const timer = setTimeout(() => { failure ??= 'turn_failed'; void deps.cancel(userId, chatSessionId); }, LIMITS.turnMs);
   timer.unref?.();
   try {
     await deps.turn({ userId, chatSessionId, message: text, onEvent: (e) => {
       if (e?.type === 'delta' && typeof e.text === 'string') reply += e.text;
-      else if (e?.type === 'approval_request') { failure ??= 'needs_approval'; deps.cancel(userId, chatSessionId); }
+      else if (e?.type === 'approval_request') { failure ??= 'needs_approval'; void deps.cancel(userId, chatSessionId); }
       else if (e?.type === 'error') failure ??= 'turn_failed';
     } });
   } catch { failure ??= 'turn_failed'; } finally { clearTimeout(timer); }
+  if (failure) await deps.cancel(userId, chatSessionId).catch?.(() => {});
   return failure ? { ok: false, code: failure } : { ok: true, text: redactSecretsForStorage(reply).slice(0, 100_000) };
 }
 
@@ -106,14 +107,20 @@ export async function drainOnce({ userId, store, now = Date.now(), deps = defaul
       if (!m || f.size > LIMITS.maxFileBytes) { await store.remove(path); out.refused += 1; continue; }
       if (taken >= LIMITS.perDrain) break;
       const bytes = await store.get(path);
-      let env; let req = null; let stale = false;
+      let env; let req = null; let stale = false; let opened = false;
       try {
         env = JSON.parse(Buffer.from(bytes).toString('utf8'));
         stale = !!prevDk && env?.epoch === prev.epoch;
-        req = parseRequest(open({ env, key: stale ? prevDk.request : dk.request, verifyKey,
-          expect: { purpose: 'request', userId, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch: stale ? prev.epoch : keys.epoch } }));
+        const pt = open({ env, key: stale ? prevDk.request : dk.request, verifyKey,
+          expect: { purpose: 'request', userId, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch: stale ? prev.epoch : keys.epoch } });
+        opened = true;
+        req = parseRequest(pt);
       } catch { req = null; }
-      if (!req || req.requestId !== m[2]) { await store.remove(path); out.refused += 1; continue; }
+      if (!req || req.requestId !== m[2]) {
+        // A request that opened under the registered key but has a bad schema gets a refusal; a forged one gets silence.
+        if (opened) await writeReply(m[2], { ok: false, code: 'refused' }, stale ? { key: prevDk.reply, epoch: prev.epoch } : {}).catch(() => {});
+        await store.remove(path); out.refused += 1; continue;
+      }
       const fresh = recordRequest(userId, dev.deviceId, req.requestId, now);
       await store.remove(path);
       if (!fresh) continue; // replay: already answered or failed, never re-run

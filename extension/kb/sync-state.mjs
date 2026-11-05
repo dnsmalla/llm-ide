@@ -126,3 +126,10 @@ export function deleteSyncDevice(userId, deviceId) {
     return db.prepare('DELETE FROM sync_devices WHERE user_id = ? AND device_id = ?').run(userId, deviceId).changes === 1;
   })();
 }
+
+/** Publish records for one device in one transaction, so a crash cannot leave half a manifest's kinds recorded. */
+export function setPublishedMany(userId, deviceId, entries) {
+  requireUser(userId);
+  const db = getDb();
+  db.transaction(() => { for (const [kind, e] of Object.entries(entries)) setPublished(userId, deviceId, kind, e); })();
+}
