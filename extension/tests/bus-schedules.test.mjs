@@ -195,3 +195,63 @@ test('executor: the T1 execution check from 4e9ad5e1 still holds for a standing 
   assert.equal(bstore.getCommand(u, id).error, 'tier_denied');
   assert.equal(ran.length, before);
 });
+
+const audit = (u, action) => db.prepare('SELECT * FROM audit_log WHERE user_id = ? AND action = ? ORDER BY id').all(u, action);
+
+test('routes: only the desktop creates and deletes; the native phone reads; lower classes get 403', async () => {
+  const u = mkUser(); const other = mkUser();
+  const body = { kind: 'sources.update', args: ARGS, intervalHours: 6, standing: true };
+  for (const client of ['ios-native', 'extension', 'phone-pwa']) {
+    const r = await call('POST', '/bus/schedules', body, { user: u, client });
+    assert.equal(r.status, 403, client); assert.equal(r.body.error.code, 'TIER_DENIED');
+  }
+  const c = await call('POST', '/bus/schedules', body, { user: u });
+  assert.equal(c.status, 201);
+  const sch = c.body.schedule;
+  assert.deepEqual(Object.keys(sch).sort(), ['args', 'createdAt', 'id', 'intervalHours', 'kind', 'lastRunAt', 'standing', 'standingUntil']);
+  assert.equal(sch.intervalHours, 6); assert.equal(sch.standing, true);
+  assert.equal((await call('GET', '/bus/schedules', undefined, { user: u, client: 'ios-native' })).body.items.length, 1);
+  for (const client of ['extension', 'phone-pwa']) assert.equal((await call('GET', '/bus/schedules', undefined, { user: u, client })).status, 403);
+  assert.deepEqual((await call('GET', '/bus/schedules', undefined, { user: other })).body.items, [], 'per user');
+  assert.equal((await call('DELETE', `/bus/schedules/${sch.id}`, undefined, { user: other })).status, 404, 'another user');
+  assert.equal((await call('DELETE', `/bus/schedules/${sch.id}`, undefined, { user: u, client: 'ios-native' })).status, 403);
+  const d = await call('DELETE', `/bus/schedules/${sch.id}`, undefined, { user: u });
+  assert.equal(d.status, 200); assert.deepEqual(d.body, { deleted: true });
+  assert.equal((await call('DELETE', `/bus/schedules/${sch.id}`, undefined, { user: u })).status, 404);
+  const created = audit(u, 'bus.schedule_create');
+  assert.equal(created.length, 1);
+  assert.deepEqual(JSON.parse(created[0].detail), { kind: 'sources.update', client: 'desktop-ui', intervalHours: 6, standing: true, standingUntil: sch.standingUntil, sources: 1 });
+  assert.equal(audit(u, 'bus.schedule_delete').length, 1);
+});
+
+test('routes: invalid schedules are 400 INVALID_ARGS; the quota is 429', async () => {
+  const u = mkUser();
+  const r = await call('POST', '/bus/schedules', { kind: 'sources.update', args: {}, intervalHours: 6, standing: true }, { user: u });
+  assert.equal(r.status, 400); assert.equal(r.body.error.code, 'INVALID_ARGS');
+  assert.equal((await call('POST', '/bus/schedules', { kind: 'issues.implement', args: { projectId: 'p', issueIds: ['1'] }, intervalHours: 6 }, { user: u })).status, 400);
+  for (let i = 0; i < sched.SCHEDULE_LIMITS.maxPerUser; i++) assert.equal((await call('POST', '/bus/schedules', { kind: 'sources.update', args: {}, intervalHours: 6 }, { user: u })).status, 201);
+  const q = await call('POST', '/bus/schedules', { kind: 'sources.update', args: {}, intervalHours: 6 }, { user: u });
+  assert.equal(q.status, 429); assert.equal(q.body.error.code, 'QUOTA_EXCEEDED');
+});
+
+test('routes: approve with scheduleId runs on the standing approval and is audited with via: standing; a refusal is audited denied', async () => {
+  const u = mkUser();
+  const sch = (await call('POST', '/bus/schedules', { kind: 'sources.update', args: ARGS, intervalHours: 6, standing: true }, { user: u })).body.schedule;
+  const enq = await call('POST', '/bus/commands', { v: 1, kind: 'sources.update', idem: `sched:${sch.id}:1`, args: sch.args }, { user: u });
+  assert.equal(enq.status, 202); assert.equal(enq.body.command.state, 'awaiting_approval');
+  const pending = (await call('GET', '/bus/approvals', undefined, { user: u })).body.items;
+  const item = pending.find((p) => p.id === enq.body.command.id);
+  const ok = await call('POST', `/bus/commands/${item.id}/approve`, { nonce: item.nonce, scheduleId: sch.id }, { user: u });
+  assert.equal(ok.status, 200);
+  const rows = audit(u, 'bus.approve');
+  assert.deepEqual(JSON.parse(rows.at(-1).detail), { kind: 'sources.update', tier: 'T1', client: 'desktop-ui', via: 'standing', scheduleId: sch.id });
+  const enq2 = await call('POST', '/bus/commands', { v: 1, kind: 'sources.update', idem: `sched:${sch.id}:2`, args: sch.args }, { user: u });
+  const item2 = (await call('GET', '/bus/approvals', undefined, { user: u })).body.items.find((p) => p.id === enq2.body.command.id);
+  const refused = await call('POST', `/bus/commands/${item2.id}/approve`, { nonce: item2.nonce, scheduleId: sch.id }, { user: u });
+  assert.equal(refused.status, 403);
+  assert.deepEqual(refused.body.error, { code: 'STANDING_APPROVAL_INVALID', message: 'no live standing approval covers this command; approve it with a click', details: { reason: 'too_soon' } });
+  const last = audit(u, 'bus.approve').at(-1);
+  assert.equal(last.outcome, 'denied');
+  assert.equal(JSON.parse(last.detail).reason, 'STANDING_APPROVAL_INVALID');
+  assert.ok(!JSON.stringify(audit(u, 'bus.approve')).includes(item.nonce), 'no nonce in the audit');
+});

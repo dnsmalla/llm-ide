@@ -10,6 +10,9 @@
 //   POST /bus/commands/:id/approve          desktop-class only, with the per-command nonce
 //   POST /bus/commands/:id/deny             desktop-class only
 //   GET  /bus/approvals                     desktop-class only: pending commands WITH their nonce
+//   GET    /bus/schedules                  desktop + native phone: the user's schedules (no secret in them)
+//   POST   /bus/schedules                  desktop-class only: create (optionally with a standing approval)
+//   DELETE /bus/schedules/:id              desktop-class only: delete, which also revokes its standing approval
 //   GET  /bus/kinds                         the registry as this caller sees it
 //   PUT  /bus/kinds/:kind                   desktop-class only: the user's enable flag for a kind
 import { send, readJson } from '../../server/route-http.mjs';
@@ -23,6 +26,8 @@ import { resolveClient } from './client.mjs';
 import { BusError, approvalNonce, busEnabled } from './executor.mjs';
 import { engineStatusList } from './engines.mjs';
 import { recordAudit } from '../../server/audit.mjs';
+import { createSchedule, listSchedules, deleteSchedule } from '../../kb/bus-schedules.mjs';
+import { parseScheduleBody } from './schedules.mjs';
 
 export function isBusRoute(url) {
   const path = String(url || '').split('?')[0];
@@ -50,6 +55,11 @@ function auditBus(req, userId, action, resource, outcome, detail) {
   } catch { /* an audit failure must never fail the call */ }
 }
 const outcomeOf = (e) => (e.status === 403 || e.status === 401 ? 'denied' : 'failure');
+
+const shapeSchedule = (s) => ({
+  id: s.id, kind: s.kind, args: s.args, intervalHours: s.intervalMs / 3_600_000, standing: s.standing,
+  standingUntil: s.standingUntil, createdAt: s.createdAt, lastRunAt: s.lastRunAt,
+});
 
 function shapeCommand(userId, c, { withResult = false } = {}) {
   const term = c.state === 'queued' || c.state === 'running' || c.state === 'awaiting_approval' ? null : terminalEvent(userId, c.id);
@@ -182,6 +192,38 @@ export async function handleBusRoute(req, res, { bus } = {}) {
       return;
     }
 
+    // ---- schedules (docs/spec/command-bus.md section 9): records only; the desktop enqueues each run ----
+    if (path === '/bus/schedules' && req.method === 'GET') {
+      if (!readsAll(client)) { fail(res, 403, 'TIER_DENIED', 'only the desktop and the native phone can read schedules', { client }); return; }
+      send(res, 200, { items: listSchedules(userId).map(shapeSchedule) });
+      return;
+    }
+    if (path === '/bus/schedules' && req.method === 'POST') {
+      if (!mayApprove(client)) { fail(res, 403, 'TIER_DENIED', 'only the desktop can create a schedule', { client }); return; }
+      let body;
+      try { body = await readJson(req, 8192); } catch { fail(res, 400, 'VALIDATION_FAILED', 'Body must be valid JSON'); return; }
+      const parsed = parseScheduleBody(body);
+      if (!parsed.ok) { fail(res, 400, 'INVALID_ARGS', parsed.message, parsed.details); return; }
+      let s;
+      try { s = createSchedule(userId, parsed.value); }
+      catch (e) { if (e.code === 'QUOTA_EXCEEDED') { fail(res, 429, 'QUOTA_EXCEEDED', e.message); return; } throw e; }
+      auditBus(req, userId, 'bus.schedule_create', s.id, 'success', {
+        kind: s.kind, client, intervalHours: s.intervalMs / 3_600_000, standing: s.standing, standingUntil: s.standingUntil,
+        sources: Array.isArray(s.args.sourceIds) ? s.args.sourceIds.length : 'all',
+      });
+      send(res, 201, { schedule: shapeSchedule(s) });
+      return;
+    }
+    if (path === '/bus/schedules') { fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET or POST only'); return; }
+    if (path.startsWith('/bus/schedules/') && req.method === 'DELETE') {
+      if (!mayApprove(client)) { fail(res, 403, 'TIER_DENIED', 'only the desktop can delete a schedule', { client }); return; }
+      const id = decodeURIComponent(path.slice('/bus/schedules/'.length));
+      if (!ID_RE.test(id) || !deleteSchedule(userId, id)) { fail(res, 404, 'NOT_FOUND', 'schedule not found'); return; }
+      auditBus(req, userId, 'bus.schedule_delete', id, 'success', { client });
+      send(res, 200, { deleted: true });
+      return;
+    }
+
     // ---- approvals (desktop only) ----
     if (path === '/bus/approvals' && req.method === 'GET') {
       if (!mayApprove(client)) { fail(res, 403, 'TIER_DENIED', 'only the desktop can list approvals', { client }); return; }
@@ -237,12 +279,14 @@ export async function handleBusRoute(req, res, { bus } = {}) {
         let body;
         try { body = await readJson(req, 8192); } catch { fail(res, 400, 'VALIDATION_FAILED', 'Body must be valid JSON'); return; }
         const before = getCommand(userId, id);
+        // Only a well-formed id goes into the audit row; anything else still reaches approve and is refused there.
+        const via = body.scheduleId === undefined ? {} : { via: 'standing', ...(typeof body.scheduleId === 'string' && ID_RE.test(body.scheduleId) ? { scheduleId: body.scheduleId } : {}) };
         try {
-          const cmd = bus.approve(userId, id, { client, nonce: body.nonce, confirm: body.confirm });
-          auditBus(req, userId, 'bus.approve', id, 'success', { kind: cmd.kind, tier: cmd.tier, client });
+          const cmd = bus.approve(userId, id, { client, nonce: body.nonce, confirm: body.confirm, scheduleId: body.scheduleId });
+          auditBus(req, userId, 'bus.approve', id, 'success', { kind: cmd.kind, tier: cmd.tier, client, ...via });
           send(res, 200, { command: shapeCommand(userId, cmd) });
         } catch (e) {
-          if (e instanceof BusError) auditBus(req, userId, 'bus.approve', id, outcomeOf(e), { kind: before?.kind, client, reason: e.code });
+          if (e instanceof BusError) auditBus(req, userId, 'bus.approve', id, outcomeOf(e), { kind: before?.kind, client, reason: e.code, ...via });
           throw e;
         }
         return;
