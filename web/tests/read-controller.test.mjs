@@ -79,3 +79,31 @@ test("an error is shown, not thrown; a resync refreshes", async () => {
   assert.ok(link.calls.filter((c) => c.command === "usage.get").length >= 2);
   r.dispose();
 });
+
+test("more stops at the memory cap and two quick clicks append the page once", async () => {
+  const { MAX_SESSIONS } = await import("../src/read/controller.ts");
+  const page = (offset) => Array.from({ length: 50 }, (_, i) => ({ id: `s${offset + i}`, title: "t", updatedAt: 1 }));
+  const link = fakeLink({ "chat.sessions": (p) => ({ sessions: page(p.offset ?? 0), nextOffset: (p.offset ?? 0) + 50 }), "usage.get": { providers: [] } });
+  const r = createReadController(link);
+  await r.refresh();
+  await Promise.all([r.moreSessions(), r.moreSessions()]);
+  assert.equal(r.getState().sessions.length, 100, "the second click while the first is in flight is ignored");
+  assert.equal(new Set(r.getState().sessions.map((s) => s.id)).size, 100, "no duplicates");
+  while (r.getState().nextOffset !== null) await r.moreSessions();
+  assert.equal(r.getState().sessions.length, MAX_SESSIONS);
+  const sent = link.calls.length;
+  await r.moreSessions();
+  assert.equal(link.calls.length, sent, "nothing more is fetched at the cap");
+});
+
+test("a failed reply for a chat the user already left shows no error", async () => {
+  let failA;
+  const link = fakeLink({ "chat.history": (p) => (p.sessionId === "a" ? new Promise((_, rej) => { failA = rej; }) : { messages: [] }) });
+  const r = createReadController(link);
+  const first = r.open("a", "A");
+  await r.open("b", "B");
+  failA(new Error("boom"));
+  await first;
+  assert.equal(r.getState().open?.id, "b");
+  assert.equal(r.getState().error, null);
+});

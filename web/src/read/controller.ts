@@ -20,14 +20,16 @@ const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.s
 export function createReadController(link: HostLink) {
   let state = initialReadState;
   let ticket = 0; // the open chat's request generation: a reply for an older open() is dropped
+  let moreBusy = false; // one "more" page at a time, so two quick clicks never append the same page twice
   const subs = new Set<() => void>();
   const set = (p: Partial<ReadState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
 
-  async function run<T>(go: () => Promise<T>, apply: (r: T) => Partial<ReadState> | null) {
+  // `current` false = the reply belongs to a chat the user already left: drop its error too, not only its data.
+  async function run<T>(go: () => Promise<T>, apply: (r: T) => Partial<ReadState> | null, current: () => boolean = () => true) {
     if (!link.capabilities.has("read")) return;
     set({ loading: true, error: null });
     try { const p = apply(await go()); set({ ...(p ?? {}), loading: false }); }
-    catch (e) { set({ loading: false, error: messageOf(e) }); }
+    catch (e) { set(current() ? { loading: false, error: messageOf(e) } : { loading: false }); }
   }
 
   const refresh = async () => {
@@ -42,25 +44,35 @@ export function createReadController(link: HostLink) {
     getState: () => state,
     subscribe: (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn); }; },
     refresh,
-    moreSessions: () => {
+    moreSessions: async () => {
       const offset = state.nextOffset;
-      if (offset == null) return Promise.resolve();
-      return run(() => link.send("chat.sessions", { limit: PAGE, offset }).done,
-        (r) => ({ sessions: [...state.sessions, ...r.sessions].slice(0, MAX_SESSIONS), nextOffset: r.nextOffset ?? null }));
+      if (offset == null || moreBusy) return;
+      moreBusy = true;
+      try {
+        await run(() => link.send("chat.sessions", { limit: PAGE, offset }).done, (r) => {
+          const seen = new Set(state.sessions.map((x) => x.id));
+          const sessions = [...state.sessions, ...r.sessions.filter((x) => !seen.has(x.id))].slice(0, MAX_SESSIONS);
+          // At the memory cap there is nothing more to show, so "more" goes away.
+          return { sessions, nextOffset: sessions.length >= MAX_SESSIONS ? null : r.nextOffset ?? null };
+        });
+      } finally { moreBusy = false; }
     },
     open: (id: string, title: string) => {
       const mine = ++ticket;
       return run(() => link.send("chat.history", { sessionId: id, limit: HISTORY_PAGE }).done,
-        (r) => (mine === ticket ? { open: { id, title, messages: r.messages, nextBeforeSeq: r.nextBeforeSeq ?? null } } : null));
+        (r) => (mine === ticket ? { open: { id, title, messages: r.messages, nextBeforeSeq: r.nextBeforeSeq ?? null } } : null),
+        () => mine === ticket);
     },
     older: () => {
       const o = state.open;
-      if (!o || o.nextBeforeSeq == null) return Promise.resolve();
+      const beforeSeq = o?.nextBeforeSeq;
+      if (!o || beforeSeq == null) return Promise.resolve();
       const mine = ticket;
-      return run(() => link.send("chat.history", { sessionId: o.id, beforeSeq: o.nextBeforeSeq!, limit: HISTORY_PAGE }).done,
+      return run(() => link.send("chat.history", { sessionId: o.id, beforeSeq, limit: HISTORY_PAGE }).done,
         (r) => (mine === ticket && state.open?.id === o.id
           ? { open: { ...o, messages: [...r.messages, ...o.messages].slice(-MAX_OPEN_MESSAGES), nextBeforeSeq: r.nextBeforeSeq ?? null } }
-          : null));
+          : null),
+        () => mine === ticket);
     },
     close: () => { ticket += 1; set({ open: null }); },
     dispose() { for (const off of offs) off(); subs.clear(); },
