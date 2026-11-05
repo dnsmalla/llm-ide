@@ -65,7 +65,9 @@ struct AppTerminationAsyncHooksTests {
             hook("never") { log.add("never") },
         ], cap: 0.3)
         let elapsed = Date().timeIntervalSince(started)
-        #expect(elapsed < 2, "cap respected: \(elapsed)s")
+        // Far below the slow hook's 30 s: the phase runs on the main actor, which parallel suites hold for ~2 s on CI
+        // (red at 2.08 s on 2026-11-05, like the stuck-hook test above).
+        #expect(elapsed < 10, "cap respected: \(elapsed)s")
         #expect(report.capReached)
         #expect(report.notStarted == ["never"])
         #expect(log.all.isEmpty)
