@@ -88,3 +88,59 @@ Core relay bridge with tier caps, desktop envelope crypto, device registry and b
 5. The registry overwrite.
 6. The real-network blockers: timeouts, WouldBlock handling, a rustls crypto provider.
 7. M-2, then the Medium items.
+
+## Round 3: the fixes in `caa3cebf`, `0ba14755`
+
+Tests: `account-service` 132/132, `cargo test relay` 12/12, `cargo test account` 6/6, `web` 82/82.
+
+**Verdict: a malicious account service can still take over a link.** Reproduced in review with a script modelling a malicious service against the desktop's checks at `0ba14755`: about 525,000 tries, about 1.1 s; the commitment check, the nonce check and the SAS all pass, and the service's key is registered as the user's device. It then decrypts the sealed Host API token and subkeys, passes keyconfirm and drives the core, at the uncapped tier.
+
+### How it still works
+
+- **C1, only partly fixed:** the desktop now keeps its own nonce, but not the commitment it saw before approving. At confirm, `link_confirm_blocking` fetches the request again and checks the device keys against whatever commitment the service returns then (`desktop/src-tauri/src/account_oauth.rs:463-467`, `:545`). The service waits until it has the desktop nonce and the browser's SAS, picks its own keys, grinds a nonce until the codes match, and serves a matching commitment.
+- **The new signing-key proofs do not stop it:** the real desktop signs approve and confirm itself, and the confirm message binds only the request id.
+- **The signed wrap does not stop it:** `make_wrap` seals to the device ECDH key the service supplied (`account_oauth.rs:566-575`).
+- **The tier comes from the service:** the desktop takes it from the service-reported `kind` (`account_oauth.rs:550`); a service that reports `ios` gets no cap.
+- **C2 alone is enough:** even with C1 fixed, the service can grind the desktop nonce it shows the browser after the browser reveals its keys (`account-service/public/link.js:71-79`, `:89-94`, untouched since `11b26493`).
+
+### Fix (all of these, then a test)
+
+1. Desktop: pin the device commitment **next to its own nonce at approve**, and at confirm check the revealed keys against the pinned commitment only, never one fetched again.
+2. Browser: pin the desktop key and nonce **before** revealing its own keys, and compute the SAS only from pinned values.
+3. Put every SAS input, including the desktop ECDH key (I1), into the confirm proof the desktop signs.
+4. Hard-code tier `web` on the desktop for this flow; never take it from the service.
+5. Add a **malicious-service test**: a fake service that substitutes keys, nonces and commitments at every step, asserting the two SAS values differ and nothing enters the registry.
+
+### Status per item at `0ba14755`
+
+- **C1:** partly (own nonce kept, `account_oauth.rs:468-471`; commitment and device keys still taken from the service at confirm). Attack reproduced.
+- **C2:** still open (`link.js:71-79`, `:89-94`).
+- **I1:** still open (`account_oauth.rs:404-407`, `linking.mjs:16-17`).
+- **I2:** fixed against stolen tokens and web sessions (`routes/linking.mjs:18-27`, `:190`, `:221`; tests `linking.test.mjs:254-279`); no defence against the service itself.
+- **I3:** partly. Revoke now unlinks link requests (`devices.mjs:113`, `:117`), but `replaceDesktop` (`devices.mjs:78-95`) leaves requests in `keys`, confirm checks only for `revoked` (`linking.mjs:218`) and the update at `:225` has no status guard, so a request left in `keys` can be confirmed after a replace and bring back a device the replace unlinked.
+- **I4:** still open (`link.js:42-43`).
+- **I5:** partly (the test fixture still hashes the base64url string, `tests/linking.test.mjs:29-33`).
+- **I-A:** fixed for its scope (migration 0006 unlinks v1 links; new links need the desktop proof); `relay/auth.mjs:35` still trusts any linked row, so C1 and C2 still feed it.
+- **I-B:** fixed on the service (`devices.mjs:114-119`, `routes/desktop.mjs:55-62`, `hub.mjs:164-168`); no test.
+- **M-1:** still open (`relay/ws.mjs:108`).
+- **M-2:** **still open, though the commit says fixed**: `web/src/relay/socket.ts:62` still drops a skewed envelope before the wrap branch at `:66`; the change only added a second check at `:73`. No test.
+- **Self-declared tier:** partly (the service accepts only `web`, `linking.mjs:8`, `:104`; the desktop still takes the tier from the service, `account_oauth.rs:550`).
+- **Registry overwrite:** partly (a device linked mid-connection now survives, `client.rs:286-296`, `:318-323`; see the new Medium below).
+- **50 ms timeout and WouldBlock:** fixed (`client.rs:228`, `:262`, `:355`); not run over a real network, and the initial connect still has no timeout.
+- **wss panic:** fixed by reading (`Cargo.toml:44`, `client.rs:226`); no live wss run.
+- **Desktop revoke:** still open (`Registry::remove`, `registry.rs:56`, has no caller; `CloseDevice` is never produced).
+- **Kill-switch race:** still open (`client.rs:268`, `:320`; `stop()` does not join the thread, `:193`; window up to 1.5 s).
+- **Bridge thread leak:** still open (`bridge.rs` untouched).
+- **Sessions never expire:** still open (`client.rs:66-72`).
+- **SAS check at confirm proves nothing:** still open (`account_oauth.rs:537`, `:548`).
+- **Crate justification comments:** still open, including the new rustls line (`Cargo.toml:42-45`).
+
+### New
+
+- **Medium:** three writers read, change and save the registry with no lock: the loop's merge (`client.rs:318-322`), `link_confirm_blocking` (`account_oauth.rs:554-575`) and `relay_set_enabled` (`relay/mod.rs:30`, which loads before `stop()`); updates can be lost.
+- **Medium:** the merge re-adds every device the loop holds in memory, which will undo the planned desktop revoke.
+- **Medium:** every incoming envelope does a keychain read and write.
+- **Low:** the desktop nonce lives only in memory; a desktop restart between approve and confirm, or a failed confirm call, makes the link unconfirmable with a misleading "keys do not match its commitment" error. Persist it with the pinned commitment (fix 1).
+- **Low:** each connection sends pending wraps twice; the browser ignores the duplicate as `stale_epoch`.
+
+**Checked and fine:** migration 0006 is append-only, transactional and uses allowed statuses (no test runs it on existing data); revoke touches only the right rows; accepting stale wraps does not enable replay, because a wrap still needs a higher epoch (`crypto.ts:53`).
