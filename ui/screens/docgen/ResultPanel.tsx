@@ -112,7 +112,8 @@ function Done(p: ResultPanelProps): ReactNode {
   const renderFence = useCallback((lang: string, text: string) => (runtime && isMermaidLang(lang) ? <MermaidView source={text} runtime={runtime} /> : null), [runtime]);
   // "Saved" means written and unchanged since. Anything else (never saved, or edited since the last save) is work that
   // "Start another" would throw away, so it asks first, as the Mac does.
-  const saveIsCurrent = r.saved !== null && !r.dirty;
+  const destinationMatches = r.saved !== null && (r.saved.external === true) === (p.externalDestination != null);
+  const saveIsCurrent = r.saved !== null && !r.dirty && destinationMatches;
   const submitRefine = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const text = instruction.trim();

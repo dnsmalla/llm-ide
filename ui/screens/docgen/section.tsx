@@ -56,6 +56,9 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
   const [external, setExternal] = useState<{ name: string } | null>(null);
+  const publishExternal = (name: string | null) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("llmide-docgen-destination", { detail: name }));
+  };
   const externalSaver = useMemo<ExternalSaver>(() => ({
     save: async (name, text, expectedHash) => {
       const raw = await invokeHost<unknown>("docgen_save_external", { name, text, expectedHash });
@@ -64,6 +67,15 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
       return { name: o.name, hash: o.hash, size: o.size };
     },
   }), []);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onChange = (e: Event) => {
+      const name = (e as CustomEvent).detail;
+      setExternal(typeof name === "string" && name ? { name } : null);
+    };
+    window.addEventListener("llmide-docgen-destination", onChange);
+    return () => window.removeEventListener("llmide-docgen-destination", onChange);
+  }, []);
   useEffect(() => {
     if (!available) return undefined;
     let live = true;
@@ -78,12 +90,15 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
   const pickExternal = useCallback(async () => {
     try {
       const raw = await invokeHost<unknown>("docgen_destination_pick");
+      if (raw === null || raw === undefined) return; // native picker cancelled: keep the previous destination
       const o = raw && typeof raw === "object" ? raw as { name?: unknown } : null;
-      setExternal(o && typeof o.name === "string" ? { name: o.name } : null);
+      const next = o && typeof o.name === "string" ? { name: o.name } : null;
+      setExternal(next);
+      publishExternal(next?.name ?? null);
     } catch { setExportNotice({ kind: "error", message: "That output folder could not be used." }); }
   }, []);
   const clearExternal = useCallback(async () => {
-    try { await invokeHost("docgen_destination_clear"); setExternal(null); }
+    try { await invokeHost("docgen_destination_clear"); setExternal(null); publishExternal(null); }
     catch { setExportNotice({ kind: "error", message: "The output folder could not be cleared." }); }
   }, []);
 

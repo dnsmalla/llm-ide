@@ -887,7 +887,7 @@ pub fn create(root: &Path, req: &CreateReq) -> R<String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
     let a = CString::new(from.as_os_str().as_bytes()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -927,7 +927,7 @@ fn link_unlink(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
     // std::fs::rename on Windows fails if the destination exists (a directory) or replaces it (a file),
     // so check first.
     if std::fs::symlink_metadata(to).is_ok() {

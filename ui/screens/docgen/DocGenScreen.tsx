@@ -144,7 +144,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               </div>
               <label className="dg-field"><span>Output folder</span><input value={folderDraft ?? s.destination} placeholder={GENERATED_DIR} disabled={p.externalDestination !== null && p.externalDestination !== undefined} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => commitFolder(folderDraft ?? s.destination)} onKeyDown={(e) => { if (e.key === "Enter") commitFolder(folderDraft ?? s.destination); }} /><em className="dg-muted">Where generated files are saved, relative to the project.</em></label>
               <div className="dg-bar">
-                <button type="button" className="dg-btn" disabled={s.destination === GENERATED_DIR && folderDraft === null} onClick={() => commitFolder(GENERATED_DIR)}>Use default folder</button>
+                <button type="button" className="dg-btn" disabled={p.externalDestination != null || (s.destination === GENERATED_DIR && folderDraft === null)} onClick={() => commitFolder(GENERATED_DIR)}>Use default folder</button>
                 {p.onPickExternal ? <button type="button" className="dg-btn" onClick={p.onPickExternal}>Choose outside folder…</button> : null}
                 {p.externalDestination && p.onClearExternal ? <button type="button" className="dg-btn" onClick={p.onClearExternal}>Use project folder</button> : null}
               </div>

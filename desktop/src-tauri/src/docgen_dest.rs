@@ -3,7 +3,9 @@
 //! The webview never supplies an absolute path. The chosen directory is stored in the app's private data dir
 //! (0600) and every save is a single, sanitized filename inside it. A save never follows a symlink and never
 //! overwrites a file without the hash returned by the previous write.
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,7 @@ const FILE: &str = "docgen-destination.json";
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 static DIR: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+static TMP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +59,7 @@ fn state() -> &'static Mutex<Option<PathBuf>> {
 fn current() -> Option<PathBuf> {
     let mut slot = state().lock().ok()?;
     if slot.is_none() { *slot = load(); }
+    if slot.as_ref().is_some_and(|p| !p.is_dir()) { *slot = None; return None; }
     slot.clone()
 }
 
@@ -68,7 +72,13 @@ fn set_current(path: Option<&Path>) -> Result<(), String> {
             *slot = Some(p.to_path_buf());
         }
         None => {
-            if let Some(file) = config_path() { let _ = std::fs::remove_file(file); }
+            if let Some(file) = config_path() {
+                match std::fs::remove_file(&file) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(format!("cannot clear the output folder: {e}")),
+                }
+            }
             *slot = None;
         }
     }
@@ -76,21 +86,27 @@ fn set_current(path: Option<&Path>) -> Result<(), String> {
 }
 
 fn name_of(path: &Path) -> String {
-    path.file_name().and_then(|n| n.to_str()).map(str::to_string).unwrap_or_else(|| path.to_string_lossy().into_owned())
+    path.file_name().and_then(|n| n.to_str()).map(str::to_string).unwrap_or_else(|| "Folder".into())
 }
 
 fn safe_name(raw: &str) -> Result<String, FsError> {
     let mut out: String = raw.chars().filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':').collect();
     out = out.trim().trim_start_matches('.').trim().to_string();
     if out.is_empty() { out = "document".into(); }
+    out = out.chars().take(150).collect();
     if !out.to_ascii_lowercase().ends_with(".md") { out.push_str(".md"); }
-    let out: String = out.chars().take(160).collect();
-    if out == "." || out == ".." { return Err(FsError { code: "invalid_path", message: "invalid file name".into() }); }
+    let stem = out.trim_end_matches(".md").to_ascii_lowercase();
+    if matches!(stem.as_str(), "con" | "prn" | "aux" | "nul" | "com1" | "com2" | "com3" | "com4" | "com5" | "com6" | "com7" | "com8" | "com9" | "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5" | "lpt6" | "lpt7" | "lpt8" | "lpt9") {
+        out.push_str(".md");
+    }
     Ok(out)
 }
 
 fn hash_file(path: &Path) -> Result<String, FsError> {
-    let bytes = std::fs::read(path).map_err(|e| FsError { code: "io", message: format!("cannot read {path:?}: {e}") })?;
+    if std::fs::metadata(path).map(|m| m.len() > MAX_BYTES as u64).unwrap_or(true) {
+        return Err(FsError { code: "conflict", message: "the saved file is missing or unreadable".into() });
+    }
+    let bytes = std::fs::read(path).map_err(|_| FsError { code: "conflict", message: "the saved file is missing or unreadable".into() })?;
     let mut h = Sha256::new(); h.update(&bytes); Ok(h.finish_hex())
 }
 
@@ -104,12 +120,44 @@ fn write_one(dir: &Path, name: &str, text: &str, expected_hash: Option<&str>) ->
         if expected_hash.is_none() { return Err(FsError { code: "exists", message: "a file with that name exists".into() }); }
     }
     if let Some(expected) = expected_hash {
+        if !target.is_file() { return Err(FsError { code: "conflict", message: "the saved file is missing or changed".into() }); }
         let actual = hash_file(&target)?;
         if actual != expected { return Err(FsError { code: "conflict", message: "the file changed on disk".into() }); }
     }
-    let partial = target.with_extension("md.partial");
-    std::fs::write(&partial, text.as_bytes()).map_err(|e| FsError { code: "io", message: format!("cannot write the document: {e}") })?;
-    std::fs::rename(&partial, &target).map_err(|e| FsError { code: "io", message: format!("cannot install the document: {e}") })?;
+    // Unique hidden sibling, created with create_new and O_NOFOLLOW: a planted temp symlink/hard link cannot
+    // redirect the write, and two writers cannot share one temp name.
+    let seq = TMP.fetch_add(1, Ordering::Relaxed);
+    let partial = dir.join(format!(".{}.llmide-{}-{seq}.tmp", name.chars().take(100).collect::<String>(), std::process::id()));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)] {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
+    }
+    let fail = |e: std::io::Error| FsError { code: "io", message: format!("cannot write the document: {e}") };
+    let mut f = opts.open(&partial).map_err(fail)?;
+    if let Err(e) = f.write_all(text.as_bytes()).and_then(|_| f.sync_all()) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(fail(e));
+    }
+    drop(f);
+    // Re-check the CAS immediately before install, after the (possibly long) write.
+    if let Some(expected) = expected_hash {
+        let actual = hash_file(&target)?;
+        if actual != expected {
+            let _ = std::fs::remove_file(&partial);
+            return Err(FsError { code: "conflict", message: "the file changed while saving".into() });
+        }
+        std::fs::rename(&partial, &target).map_err(|e| { let _ = std::fs::remove_file(&partial); fail(e) })?;
+    } else {
+        crate::fs_ops::rename_noreplace(&partial, &target).map_err(|e| {
+            let _ = std::fs::remove_file(&partial);
+            let code = if e.kind() == std::io::ErrorKind::AlreadyExists { "exists" } else { "io" };
+            FsError { code, message: "cannot install the document".into() }
+        })?;
+    }
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) { let _ = d.sync_all(); }
     let hash = hash_file(&target)?;
     Ok(ExternalSaved { name, hash, size: text.len() })
 }
@@ -166,6 +214,9 @@ mod tests {
         let b = write_one(&d, "x", "two", Some(&a.hash)).unwrap();
         assert_ne!(a.hash, b.hash);
         assert!(write_one(&d, "x", "three", Some(&a.hash)).is_err(), "stale hash is a conflict");
+        let missing = write_one(&d, "missing", "x", Some("gone")).unwrap_err();
+        assert_eq!(missing.code, "conflict");
+        assert!(!missing.message.contains(d.to_string_lossy().as_ref()), "error never carries the external path");
         assert_eq!(fs::read_to_string(d.join("x.md")).unwrap(), "two");
         fs::remove_dir_all(&d).unwrap();
     }

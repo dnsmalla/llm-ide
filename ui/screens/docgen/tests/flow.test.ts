@@ -4,7 +4,7 @@ import { GenerationRun, REVISION_SOURCE_NAME, type RunDeps } from "../run.ts";
 import { collectSources, fileItem, noteItem, SourceSelection, sendOrder, MAX_PASTE_CHARS } from "../sources.ts";
 import { walkFolder } from "../project-files.ts";
 import { loadHistory } from "../history.ts";
-import { saveNewDocument, saveNewExternal, saveRevision } from "../save.ts";
+import { saveNewDocument, saveNewExternal, saveRevision, saveRevisionExternal } from "../save.ts";
 import { MAX_BODY_CHARS, MAX_SELECTED_SOURCES, MAX_SOURCE_CONTENT, type DocTemplate } from "../model.ts";
 import { controllableApi, FsErr, MemFs, okResult, readersFrom, tick } from "./fakes.ts";
 
@@ -296,6 +296,9 @@ test("external save creates a free name and re-saves by hash", async () => {
   const b = await saveNewExternal(saver, "doc", "two");
   assert.equal(b.path, "external:doc-2.md");
   await assert.rejects(() => saveNewExternal({ save: async () => { throw new FsErr("exists"); } }, "x", "t"), (e: { code: string }) => e.code === "exists");
+  const c = await saveRevisionExternal({ save: async (name, text, expected) => { if (expected !== "h1") throw new FsErr("conflict"); return { name, hash: "h2", size: text.length }; } }, "doc.md", "two", "h1");
+  assert.equal(c.path, "external:doc.md");
+  await assert.rejects(() => saveRevisionExternal({ save: async () => { throw new FsErr("conflict"); } }, "doc.md", "x", "h1"), (e: { code: string }) => e.code === "conflict");
 });
 
 test("a run with an external destination saves there and hides the project path", async () => {
