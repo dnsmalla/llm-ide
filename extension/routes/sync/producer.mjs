@@ -12,6 +12,18 @@ export const VALID_FOR_MS = 45 * 60_000;
 const hex = (b) => Buffer.from(b).toString('hex');
 const envBytes = (env) => Buffer.from(JSON.stringify(env));
 
+/** key.bin + a signed syncwrap for one device at the current epoch (design 5.2 step 4; used by enrollment and publish). */
+export async function writeDeviceWrap({ userId, store, state, keys, dev, now }) {
+  const base = `${state.syncId}/d/${dev.dir}`;
+  const ids = syncIdsFor(userId, state);
+  await store.put(`${base}/key.bin`, keys.signingSpki);
+  const dk = deviceKeys(keys.root, { ...ids, deviceId: dev.deviceId }, keys.epoch);
+  const wrap = makeSyncWrap({ ids: { ...ids, deviceId: dev.deviceId }, epoch: keys.epoch, tier: dev.tier, deviceEcdhSpki: dev.ecdhSpki,
+    desktopSigningSpki: keys.signingSpki, keys: dk, signingKey: keys.signingKey, seq: nextSeq(userId, now), issuedAt: now });
+  await store.put(`${base}/wrap.bin`, envBytes(wrap));
+  setDeviceWrapEpoch(userId, dev.deviceId, keys.epoch);
+}
+
 export async function publishOnce({ userId, store, now = Date.now(), loadKinds = defaultLoadKinds }) {
   const out = { devices: 0, blobs: 0, manifests: 0 };
   const state = getSyncState(userId);
@@ -26,13 +38,7 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
     const base = `${state.syncId}/d/${dev.dir}`;
     const dk = deviceKeys(keys.root, { ...ids, deviceId: dev.deviceId }, keys.epoch);
     const header = (purpose, seq) => ({ purpose, userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq, issuedAt: now, tier: '' });
-    if (dev.wrapEpoch !== keys.epoch) {
-      await store.put(`${base}/key.bin`, keys.signingSpki);
-      const wrap = makeSyncWrap({ ids: { ...ids, deviceId: dev.deviceId }, epoch: keys.epoch, tier: dev.tier, deviceEcdhSpki: dev.ecdhSpki,
-        desktopSigningSpki: keys.signingSpki, keys: dk, signingKey: keys.signingKey, seq: nextSeq(userId, now), issuedAt: now });
-      await store.put(`${base}/wrap.bin`, envBytes(wrap));
-      setDeviceWrapEpoch(userId, dev.deviceId, keys.epoch);
-    }
+    if (dev.wrapEpoch !== keys.epoch) await writeDeviceWrap({ userId, store, state, keys, dev, now });
     const published = getPublished(userId, dev.deviceId);
     const changed = KINDS.filter((k) => published[k]?.plainSha256 !== hex(sha256(frames[k])) || published[k]?.epoch !== keys.epoch);
     if (!changed.length && !heartbeatDue) continue;
