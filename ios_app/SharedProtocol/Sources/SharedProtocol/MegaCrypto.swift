@@ -266,9 +266,3 @@ struct MegaBigUInt: Equatable {
 
 }
 
-@MainActor public final class MegaClient {
-    public enum Failure: Error, Equatable, Sendable {
-        case authFailed, mfaRequired, sessionExpired, accountVersion, rateLimited, quota, tooLarge, badResponse
-        case http(Int), api(Int)
-    }
-}
