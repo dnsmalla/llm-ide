@@ -31,3 +31,17 @@ export function registerDesktop(db, now, { userId, label, signingKey, ecdhKey })
   })();
   return db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
 }
+
+
+export function listDevices(db, userId) {
+  return db.prepare('SELECT * FROM devices WHERE user_id = ? ORDER BY created_at').all(userId).map(publicDevice);
+}
+
+export function revokeDevice(db, now, { userId, id }) {
+  const row = db.prepare('SELECT * FROM devices WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!row) return false;
+  if (row.status === 'revoked') return true;
+  db.prepare("UPDATE devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+    .run(now(), now(), id, userId);
+  return true;
+}

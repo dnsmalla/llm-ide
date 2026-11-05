@@ -15,9 +15,9 @@ import { signinRoutes } from './routes/signin.mjs';
 import { recoveryRoutes } from './routes/recovery.mjs';
 import { accountRoutes } from './routes/account.mjs';
 import { oauthRoutes } from './routes/oauth.mjs';
-import { desktopRoutes } from './routes/desktop.mjs';
+import { desktopRoutes, deviceRoutes } from './routes/desktop.mjs';
 
-const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes];
+const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes, deviceRoutes];
 
 export function createApp({ config, db, mailer = null, webauthn = null, now = Date.now }) {
   const ctx = { config, db, mailer, webauthn, now };
@@ -41,7 +41,8 @@ export function createApp({ config, db, mailer = null, webauthn = null, now = Da
 async function handle(req, res, routes, ctx) {
   const path = new URL(req.url, 'http://localhost').pathname;
   try {
-    const handler = routes.get(`${req.method} ${path}`);
+    const handler = routes.get(`${req.method} ${path}`)
+      ?? (req.method === 'DELETE' && path.startsWith('/v1/devices/') ? routes.get('DELETE /v1/devices/:id') : undefined);
     if (!handler) throw new HttpError(404, 'not_found');
     req.clientIp = clientIp(req, ctx.config);
     ctx.limiter.hit(`ip:${req.clientIp}`, 120, 60_000);
