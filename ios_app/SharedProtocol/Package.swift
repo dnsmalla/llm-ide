@@ -18,7 +18,8 @@ let package = Package(
         .testTarget(
             name: "SharedProtocolTests",
             dependencies: ["SharedProtocol"],
-            path: "Tests/SharedProtocolTests"
+            path: "Tests/SharedProtocolTests",
+            exclude: ["Fixtures"]
         ),
     ]
 )

@@ -14,6 +14,7 @@ enum SV {
     }
     static let sync = load("schema/sync/v1/vectors/v1.json")
     static let relay = load("schema/relay/v1/vectors/v1.json")
+    static let mega = load("ios_app/SharedProtocol/Tests/SharedProtocolTests/Fixtures/mega-client.json")
     static var keys: [String: Any] { d(sync["keys"]) }
 
     static func d(_ x: Any?) -> [String: Any] { x as! [String: Any] }
