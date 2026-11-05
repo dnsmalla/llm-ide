@@ -146,7 +146,7 @@ test('storage forges or replays ack.bin: the device refuses', async () => {
   const dev = createReferenceDevice();
   await dev.scanAndClaim(store, second.qr, { now: T });
   await store.put(`${sid}/e/${pair.slot}/ack.bin`, oldAck);
-  await assert.rejects(dev.readAck(store), (e) => e instanceof S.SyncCryptoError);
+  await assert.rejects(dev.readAck(store), (e) => e.code === 'bad_to', 'an ack for another slot names another device');
   const evilSig = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const keys = E.enrollKeys(Buffer.from(pair.es, 'base64url'), pair.sid, pair.slot);
   const forged = E.sealAck({ userId: 'x', pair, tier: 'ios', claim: { deviceId: dev.deviceId, ecdhSpki: dev.ecdhSpki, signingSpki: dev.signingSpki, name: dev.name },
@@ -172,7 +172,7 @@ test('storage swaps wrap.bin (forged, or another device\'s): the device takes no
   const b = await enroll('B');
   const aWrap = await store.inner.get(`${sid}/d/${a.pair.dir}/wrap.bin`);
   store.onGet = (p, x) => (p === `${sid}/d/${b.pair.dir}/wrap.bin` ? aWrap : x);
-  await assert.rejects(b.readWrap(store), (e) => e instanceof S.SyncCryptoError, "A's wrap is not for B");
+  await assert.rejects(b.readWrap(store), (e) => e.code === 'bad_to', "A's wrap is not for B");
   const evilSig = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const real = J(await store.inner.get(`${sid}/d/${b.pair.dir}/wrap.bin`));
   const forged = S.makeSyncWrap({ ids: { userId: real.userId, desktopId: sid, deviceId: b.deviceId }, epoch: real.epoch + 5, tier: 'ios', deviceEcdhSpki: b.ecdhSpki,
@@ -197,7 +197,7 @@ test('tier is the desktop\'s: a browser answering an iPhone slot is refused; sto
   await pollEnrollment(u, { now: T + 500 });
   const ack = J(await store.inner.get(`${sid}/e/${pair.slot}/ack.bin`));
   store.onGet = (p, x) => (p.endsWith('/ack.bin') ? B({ ...ack, tier: 'web' }) : x);
-  await assert.rejects(ok.readAck(store), (e) => e instanceof S.SyncCryptoError);
+  await assert.rejects(ok.readAck(store), (e) => e.code === 'bad_tier');
   await cancelEnrollment(u);
   registryEmpty(u);
 });

@@ -1,12 +1,13 @@
 // Reference device for the sync v1 device contract (schema/sync/v1/README.md "Enrollment"; design 4.3-4.4). SP3
-// (WebCrypto) and SP4 (Swift) implement these same steps; tests drive this one against the desktop. Node crypto only.
-import { generateKeyPairSync } from 'node:crypto';
-import * as S from '../../core/sync-envelope.mjs';
-import * as E from '../../core/sync-enroll.mjs';
+// (WebCrypto) and SP4 (Swift) implement these same steps; tests drive this one against the desktop. Built on the
+// independent reference (./sync-reference.mjs), never on core/sync-*.mjs, so a bug shared with the desktop cannot pass.
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import * as S from './sync-reference.mjs';
 
 const spkiOf = (k) => k.publicKey.export({ type: 'spki', format: 'der' });
 const J = (bytes) => JSON.parse(Buffer.from(bytes).toString('utf8'));
-const failWith = (code) => { throw new S.SyncCryptoError(code); };
+const failWith = S.fail;
+const newId22 = () => randomBytes(16).toString('base64url');
 
 export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {}) {
   const ecdh = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -15,27 +16,27 @@ export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {
     tier, name, ecdhSpki: spkiOf(ecdh), signingSpki: spkiOf(sig), ecdhPrivate: ecdh.privateKey, signingKey: sig.privateKey,
     pair: null, keys: null, desktop: null, claimName: null, userId: null, epoch: 0, wrapKeys: null, prevReply: null, manifestSeq: 0,
   };
-  d.deviceId = E.deviceIdOf(d.signingSpki);
+  d.deviceId = S.deviceIdOf(d.signingSpki);
   const base = () => `${d.pair.sid}/d/${d.pair.dir}`;
   const claim = () => ({ deviceId: d.deviceId, ecdhSpki: d.ecdhSpki, signingSpki: d.signingSpki, name: d.name });
 
   return Object.assign(d, {
     async scanAndClaim(store, qr, { now = Date.now() } = {}) {
-      d.pair = E.parsePair(qr);
+      d.pair = S.parsePair(qr);
       const spki = await store.get(`${base()}/key.bin`);
-      if (!spki || S.spkiFingerprint(spki) !== d.pair.sfp) failWith('bad_desktop_key');
-      d.desktop = { spki: Buffer.from(spki), verifyKey: E.p256Spki(spki) };
-      d.keys = E.enrollKeys(Buffer.from(d.pair.es, 'base64url'), d.pair.sid, d.pair.slot);
-      d.claimName ??= E.newId22();
-      const env = E.sealClaim({ pair: d.pair, tier, name, ecdhSpki: d.ecdhSpki, signingSpki: d.signingSpki, signingKey: d.signingKey, issuedAt: now });
+      if (!spki || S.fingerprint(spki) !== d.pair.sfp) failWith('bad_desktop_key');
+      d.desktop = { spki: Buffer.from(spki), verifyKey: S.verifyKeyOf(spki) };
+      d.keys = S.enrollKeys(d.pair);
+      d.claimName ??= newId22();
+      const env = S.sealClaim({ pair: d.pair, tier, claim: claim(), keys: d.keys, signingKey: d.signingKey, issuedAt: now });
       await store.put(`${d.pair.sid}/e/${d.pair.slot}/${d.claimName}.bin`, Buffer.from(JSON.stringify(env)));
     },
     async readAck(store) {
       const bytes = await store.get(`${d.pair.sid}/e/${d.pair.slot}/ack.bin`);
       if (!bytes) return null;
-      const { userId, nD } = E.openAck({ env: J(bytes), pair: d.pair, tier, claim: claim(), keys: d.keys, desktopVerifyKey: d.desktop.verifyKey });
+      const { userId, nD } = S.openAck({ env: J(bytes), pair: d.pair, tier, claim: claim(), keys: d.keys, verifyKey: d.desktop.verifyKey });
       d.userId = userId;
-      return E.sasCode(d.keys.sas, { ...d.pair, tier, ...claim(), nD });
+      return S.sas(d.keys, d.pair, tier, claim(), nD);
     },
     async readWrap(store) {
       const bytes = await store.get(`${base()}/wrap.bin`);
@@ -43,7 +44,7 @@ export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {
       const env = J(bytes);
       if (env.tier !== tier || env.from !== d.pair.sid || env.desktopId !== d.pair.sid || env.userId !== d.userId) failWith('bad_wrap');
       if (!(env.epoch > d.epoch)) return false;
-      const keys = S.unwrapSync({ env, ecdhPrivate: d.ecdhPrivate, deviceEcdhSpki: d.ecdhSpki, desktopSigningSpki: d.desktop.spki,
+      const keys = S.unwrapSync({ env, ecdhPrivate: d.ecdhPrivate, deviceEcdhSpki: d.ecdhSpki, desktopSpki: d.desktop.spki,
         verifyKey: d.desktop.verifyKey, currentEpoch: d.epoch, deviceId: d.deviceId });
       if (d.wrapKeys) d.prevReply = { epoch: d.epoch, key: d.wrapKeys.reply };
       d.wrapKeys = keys;
@@ -70,7 +71,7 @@ export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {
       return { manifest: m, kinds };
     },
     async sendRequest(store, text, { now = Date.now(), epoch = d.epoch, key = d.wrapKeys.request } = {}) {
-      const requestId = E.newId22();
+      const requestId = newId22();
       const env = S.seal({ header: { purpose: 'request', userId: d.userId, desktopId: d.pair.sid, from: d.deviceId, to: d.pair.sid, epoch, session: '', seq: 1, issuedAt: now, tier: '' },
         key, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, class: 'chat.send', text })), signingKey: d.signingKey });
       await store.put(`${base()}/in/${String(now).padStart(13, '0')}-${requestId}.bin`, Buffer.from(JSON.stringify(env)));
