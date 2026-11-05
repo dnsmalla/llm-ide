@@ -22,6 +22,8 @@ const FORBIDDEN_PREFIX = /^(fs|shell|opener|http|dialog|process|os|updater|globa
 const toKebab = (s) => s.replaceAll('_', '-');
 // The only `core:` permissions the product window may hold.
 export const ALLOWED_CORE = new Set([
+  'core:event:allow-listen',
+  'core:event:allow-unlisten',
   'core:window:allow-start-dragging',
   'core:window:allow-toggle-maximize',
   'core:window:allow-internal-toggle-maximize',

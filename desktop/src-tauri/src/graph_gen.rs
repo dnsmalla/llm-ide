@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::Manager;
@@ -197,15 +198,71 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     Ok(GraphGenerated { path: rel.into(), nodes, edges })
 }
 
+/// The repo the Graph screen picks by default: the only `code/<child>`, or None when there are zero/many.
+pub fn default_auto_target(root: &Path) -> Option<String> {
+    let mut dirs: Vec<String> = std::fs::read_dir(root.join("code")).ok()?
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    dirs.sort();
+    (dirs.len() == 1).then(|| format!("code/{}", dirs[0]))
+}
+
+/// True when a timer tick should run: off at 0, otherwise at or past the interval.
+pub fn auto_due(minutes: u32, elapsed_secs: u64) -> bool {
+    minutes > 0 && elapsed_secs >= u64::from(minutes) * 60
+}
+
+/// Background timer for Settings → Code Graph. It runs immediately on project open/switch and then every N
+/// minutes, regenerating the code graph (the screen's default mode). File-watch debouncing and the memory
+/// graph stay Mac-only for now.
+pub fn start_auto(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_root: Option<String> = None;
+        let mut last_minutes = u32::MAX;
+        let mut last_run = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let launch = crate::prefs::launch();
+            let enabled = launch.features.is_empty() || launch.features.iter().any(|f| f == "code_graph_3d");
+            let minutes = crate::prefs::stored().graph_auto_update_minutes;
+            if minutes != last_minutes { last_minutes = minutes; last_run = Instant::now(); }
+            if minutes == 0 || !enabled { last_root = None; continue; }
+            let root = crate::project::active_root().map(|p| p.to_string_lossy().into_owned());
+            let changed = root != last_root;
+            if changed { last_root = root.clone(); last_run = Instant::now(); }
+            if root.is_none() { continue; }
+            if !changed && !auto_due(minutes, last_run.elapsed().as_secs()) { continue; }
+            if RUNNING.load(Ordering::SeqCst) { continue; }
+            let target = root.as_ref().and_then(|r| default_auto_target(Path::new(r)));
+            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("code".into()), target));
+            last_run = Instant::now();
+            match result {
+                Ok(_) => { let _ = tauri::Emitter::emit(&app, "graph-auto-updated", serde_json::json!({})); }
+                Err(e) => eprintln!("graph auto-update: {e}"),
+            }
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>) -> Result<GraphGenerated, String> {
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("a graph generation is already running".into());
-    }
     let mode = mode.unwrap_or_else(|| "code".into());
-    let result = tauri::async_runtime::spawn_blocking(move || generate(&app, &mode, target.as_deref())).await
-        .map_err(|e| format!("graph task failed: {e}"));
-    RUNNING.store(false, Ordering::SeqCst);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        // A manual/loop request waits for an in-flight auto run instead of failing the caller. The wait is
+        // bounded so a wedged scan cannot queue requests forever.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if !RUNNING.swap(true, Ordering::SeqCst) { break; }
+            if Instant::now() >= deadline { return Err("a graph generation is still running".into()); }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let result = generate(&app, &mode, target.as_deref());
+        RUNNING.store(false, Ordering::SeqCst);
+        result
+    }).await.map_err(|e| format!("graph task failed: {e}"));
     result?
 }
 
@@ -228,5 +285,25 @@ mod tests {
         assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
         assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
         assert!(!Path::new(graph_rel("code")).is_absolute());
+    }
+
+    #[test]
+    fn auto_due_honours_off_and_the_interval() {
+        assert!(!auto_due(0, 99_999));
+        assert!(!auto_due(5, 299));
+        assert!(auto_due(5, 300));
+    }
+
+    #[test]
+    fn the_auto_target_matches_the_screen_default() {
+        let dir = std::env::temp_dir().join(format!("llmide-graph-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("code/b")).unwrap();
+        std::fs::create_dir_all(dir.join("code/a")).unwrap();
+        assert_eq!(default_auto_target(&dir), None, "two repos need the screen's choice");
+        std::fs::remove_dir_all(dir.join("code/b")).unwrap();
+        assert_eq!(default_auto_target(&dir).as_deref(), Some("code/a"));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(default_auto_target(&dir), None);
     }
 }

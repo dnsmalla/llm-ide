@@ -35,6 +35,9 @@ const num = (n: number) => n.toLocaleString("en-US");
 export function GraphScreen({ store, active, projectRoot, openFile, createView, onGenerate, onCancel }: GraphScreenProps) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const loadedFor = useRef<string | null | undefined>(undefined);
+  const staleWhileHidden = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const camera = useRef<ViewCamera | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [mode, setMode] = useState<"code" | "memory" | "all">("code");
@@ -62,6 +65,24 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     loadedFor.current = key;
     camera.current = null;
     setFatal(null);
+    void store.load(projectRoot, graphCandidates(mode));
+  }, [active, projectRoot, mode, store]);
+  // The host timer writes graph-code.json in the background. Stay subscribed while hidden, remember the
+  // refresh, and reload when this section becomes visible again (the shell keeps sections mounted).
+  useEffect(() => {
+    let live = true;
+    let un: (() => void) | null = null;
+    void import("@tauri-apps/api/event").then(({ listen }) => listen("graph-auto-updated", () => {
+      if (!activeRef.current) { staleWhileHidden.current = true; return; }
+      loadedFor.current = null;
+      void store.load(projectRoot, graphCandidates(mode));
+    })).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
+    return () => { live = false; un?.(); };
+  }, [projectRoot, mode, store]);
+  useEffect(() => {
+    if (!active || !staleWhileHidden.current) return;
+    staleWhileHidden.current = false;
+    loadedFor.current = null;
     void store.load(projectRoot, graphCandidates(mode));
   }, [active, projectRoot, mode, store]);
   useEffect(() => () => store.cancel(), [store]);

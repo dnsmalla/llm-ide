@@ -75,6 +75,8 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         setExtraPrefs: async (p) => { await writePrefs(p); },
         getLoopDefaults: async () => (await readPrefs()).stored.loopDefaults,
         setLoopDefaults: async (loopDefaults) => { const p = (await writePrefs({ loopDefaults })).stored; return p.loopDefaults; },
+        getGraphAutoUpdate: async () => (await readPrefs()).stored.graphAutoUpdateMinutes,
+        setGraphAutoUpdate: async (graphAutoUpdateMinutes) => (await writePrefs({ graphAutoUpdateMinutes })).stored.graphAutoUpdateMinutes,
         async pickFolder(title) {
           const choice = decodePickedChoice(await d.invoke<unknown>("pick_folder", { title }));
           if (!choice) return null;

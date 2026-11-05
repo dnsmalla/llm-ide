@@ -31,18 +31,14 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Use the Mac app on a source checkout.",
     blockedBy: "Swift-only (incident store and worktree repair). No desktop equivalent is planned.",
   },
-  "code-graph": {
-    mac: "The Code Graph auto-update interval and the banner shown when an upload was truncated.",
-    status: "Planned",
-    meanwhile: "Generate or refresh the graph from the Code Graph screen.",
-    blockedBy: "Needs the graph auto-updater (Swift today) to exist on the desktop, and a host preference for its interval.",
-  },
 };
 
 /** Groups that are only partly implemented keep a short note for the part that is not. */
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   connections:
     "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
+  "code-graph":
+    "The host refreshes the code graph on project open/switch and every configured interval; automatic memory-graph refreshes, file-watch debouncing and the truncation upload banner remain Mac-only.",
   repositories:
     "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones), and Check token verifies the saved one for github.com or the configured public GitLab instance; pull/re-sync and the Mac's resolve step are not available in the desktop yet.",
   paths:

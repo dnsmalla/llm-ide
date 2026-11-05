@@ -505,6 +505,7 @@ pub fn run() {
             }
             // Host prefs are read once, before the core is spawned: they decide its environment.
             prefs::init(fsutil::desktop_data_dir().ok().and_then(|d| fsutil::private_dir(&d).ok()));
+            graph_gen::start_auto(app.handle().clone());
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);
             }
@@ -516,6 +517,7 @@ pub fn run() {
             if let Err(e) = ctrlc::set_handler(move || {
                 let _ = signal_chat.quit_archive(std::time::Duration::from_secs(3));
                 signal_host.shutdown();
+                graph_gen::graph_cancel();
                 pty::kill_all();
                 std::process::exit(0);
             }) {
@@ -547,6 +549,7 @@ pub fn run() {
             pty::kill_all();
             #[cfg(feature = "spike")]
             sse_replay::stop();
+            graph_gen::graph_cancel();
             crash_report::clear_own_on_clean_exit();
         }
         _ => {}

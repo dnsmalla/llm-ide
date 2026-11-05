@@ -40,7 +40,9 @@ test('core permissions outside the allowlist and unknown permissions fail; allow
   const base = ['allow-ping', 'allow-thing-two', 'allow-core-status'];
   const withPerm = (p) => ({ ...ok(), capabilities: { 'a.json': cap([...base, p]) } });
   assert.deepEqual(check(withPerm('core:window:allow-start-dragging')), []);
-  for (const bad of ['core:window:allow-close', 'core:webview:allow-create-webview-window', 'core:event:allow-listen', 'weird:thing']) {
+  assert.deepEqual(check(withPerm('core:event:allow-listen')), []);
+  assert.deepEqual(check(withPerm('core:event:allow-unlisten')), []);
+  for (const bad of ['core:window:allow-close', 'core:webview:allow-create-webview-window', 'weird:thing']) {
     assert.ok(check(withPerm(bad)).length, bad);
   }
 });
