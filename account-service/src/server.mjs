@@ -17,11 +17,12 @@ import { accountRoutes } from './routes/account.mjs';
 import { oauthRoutes } from './routes/oauth.mjs';
 import { desktopRoutes, deviceRoutes } from './routes/desktop.mjs';
 import { linkingRoutes } from './routes/linking.mjs';
+import { attachRelay } from './relay/index.mjs';
 
 const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes, deviceRoutes, linkingRoutes];
 
-export function createApp({ config, db, mailer = null, webauthn = null, now = Date.now }) {
-  const ctx = { config, db, mailer, webauthn, now };
+export function createApp({ config, db, mailer = null, webauthn = null, now = Date.now, relayEnv = undefined }) {
+  const ctx = { config, db, mailer, webauthn, now, relayEnv };
   ctx.limiter = createRateLimiter({ now });
   ctx.audit = createAudit(db, now);
   ctx.tokens = createEmailTokens(db, now);
@@ -34,9 +35,11 @@ export function createApp({ config, db, mailer = null, webauthn = null, now = Da
   ctx.oauth = createOAuth(db, now);
   const routes = new Map();
   for (const register of ROUTE_GROUPS) register(routes, ctx);
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     handle(req, res, routes, ctx).catch((err) => internalError(res, err));
   });
+  if (config.relay.enabled) server.relay = ctx.relay = attachRelay(server, ctx);
+  return server;
 }
 
 async function handle(req, res, routes, ctx) {

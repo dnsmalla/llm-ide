@@ -83,6 +83,7 @@ export function accountRoutes(routes, ctx) {
       ctx.db.prepare('DELETE FROM email_tokens WHERE email = ?').run(user.email);
       ctx.db.prepare('DELETE FROM users WHERE id = ?').run(user.id); // cascades passkeys, sessions, challenges
     })();
+    ctx.relay?.disconnectUser(user.id);
     ctx.audit('account_deleted', { userId: user.id, ip: req.clientIp });
     ctx.mail(accountDeletedMail(ctx.config, user.email));
     send(res, 200, { status: 'deleted' }, { 'set-cookie': ctx.sessions.clearCookie() });

@@ -87,6 +87,7 @@ export function replaceDesktop(db, now, { token, ...desktop }) {
     const unlinked = db.prepare(
       "UPDATE devices SET status = 'unlinked', updated_at = ? WHERE user_id = ? AND kind <> 'desktop' AND status IN ('pending', 'linked')",
     ).run(t, desktop.userId).changes;
+    db.prepare('DELETE FROM relay_wraps WHERE user_id = ?').run(desktop.userId);
     revokeDesktopSignIns(db, t, desktop.userId, token.family);
     return { id: insertDesktop(db, t, desktop), replacedId: old?.id ?? null, unlinked };
   })();
@@ -108,6 +109,7 @@ export function revokeDevice(db, now, { userId, id }) {
     if (row.status === 'revoked') return true;
     db.prepare("UPDATE devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?")
       .run(t, t, id, userId);
+    db.prepare('DELETE FROM relay_wraps WHERE device_id = ?').run(id);
     if (row.kind === 'desktop') revokeDesktopSignIns(db, t, userId);
     return true;
   })();

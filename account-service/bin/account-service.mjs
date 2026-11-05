@@ -27,6 +27,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
       db.close();
       process.exit(0);
     };
+    app.relay?.close();
     app.close(finish);
     // Let in-flight requests drain; only force sockets after a short grace period.
     setTimeout(() => { app.closeAllConnections(); finish(); }, 5_000).unref();

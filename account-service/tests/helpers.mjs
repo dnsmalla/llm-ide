@@ -6,6 +6,7 @@ import { openDb } from '../src/db.mjs';
 import { createApp } from '../src/server.mjs';
 
 export const ORIGIN = 'http://localhost:3470';
+export const WEB_ORIGIN = 'http://app.localhost:5173';
 export const DESKTOP_CLIENT = 'llmide-desktop';
 export const DESKTOP_REDIRECT = 'http://127.0.0.1:49152/auth/callback';
 export const OAUTH_STATE = 'test-state-0123456789';
@@ -69,18 +70,22 @@ export async function startApp({ env = {}, mailer = memoryMailer(), webauthn = f
     ACCOUNTS_SIGNUP_OPEN: '1',
     ACCOUNTS_DB_PATH: ':memory:',
     ACCOUNTS_MAIL_RETRY_MS: '1',
+    ACCOUNTS_RELAY: '1',
+    ACCOUNTS_ALLOWED_WEB_ORIGINS: WEB_ORIGIN,
     ...env,
   });
   let t = startAt;
   const clock = { now: () => t, advance(ms) { t += ms; } };
   const db = openDb(config.dbPath);
-  const app = createApp({ config, db, mailer, webauthn, now: clock.now });
+  const app = createApp({ config, db, mailer, webauthn, now: clock.now, relayEnv: env });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.address().port}`;
   return {
     config, db, clock, mailer, webauthn, base,
     client: () => createClient(base),
+    relay: app.relay,
     async close() {
+      app.relay?.close();
       await new Promise((resolve) => app.close(resolve));
       db.close();
     },

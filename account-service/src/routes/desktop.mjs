@@ -33,6 +33,7 @@ export function desktopRoutes(routes, ctx) {
     const { user, token } = ctx.oauth.requireAccess(req);
     const body = desktopBody(await readJson(req), token);
     const { device, replacedId, unlinked } = replaceDesktop(ctx.db, ctx.now, { userId: user.id, token, ...body });
+    ctx.relay?.disconnectUser(user.id);
     ctx.audit('desktop_replaced', { userId: user.id, ip: req.clientIp, detail: { deviceId: device.id, replacedId, unlinked } });
     ctx.mail(desktopReplacedMail(ctx.config, user.email));
     send(res, 201, { status: 'desktop_replaced', device: publicDevice(device) });
@@ -55,6 +56,7 @@ export function deviceRoutes(routes, ctx) {
       send(res, 404, { error: 'not_found' });
       return;
     }
+    ctx.relay?.disconnect(id);
     ctx.audit('device_revoked', { userId: session.user_id, ip: req.clientIp, detail: { deviceId: id } });
     send(res, 200, { revoked: true });
   });
