@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Link this browser — LLM-IDE</title>
+  <link rel="stylesheet" href="/styles.css?v=5">
+</head>
+<body data-page="link">
+  <main class="card link-card">
+    <h1>Link this browser</h1>
+    <p class="muted">Approve this browser from the LLM-IDE desktop. The desktop keeps the project; this browser gets a scoped device token after you compare a six-digit code.</p>
+    <div class="actions"><button id="start" type="button">Start linking</button><a class="button secondary" href="/account.html">Back to account</a></div>
+    <section id="link-state" hidden aria-live="polite">
+      <p id="link-label" class="muted"></p>
+      <p id="link-code" class="link-code" hidden></p>
+      <p id="link-status" class="status" role="status"></p>
+    </section>
+    <p id="error" class="status error" role="alert"></p>
+    <p class="muted small">Only public keys, a commitment and nonces reach the account service. Private keys stay in this browser.</p>
+  </main>
+  <script src="/link.js?v=1"></script>
+</body>
+</html>
