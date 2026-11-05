@@ -10,7 +10,8 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
 use p256::SecretKey;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
@@ -230,22 +231,41 @@ struct DeviceKeys {
 
 fn b64(bytes: &[u8]) -> String { URL_SAFE_NO_PAD.encode(bytes) }
 
+fn hex(bytes: &[u8]) -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() }
+
+/// The registration proof of possession; must match `desktopProofMessage` in
+/// account-service/src/devices.mjs (pinned by account-service/tests/fixtures/desktop-proof-vector.json).
+fn proof_message(access_token: &str, signing_public: &str, ecdh_public: &str) -> String {
+    format!("llmide/desktop/register/v1\n{}\n{signing_public}\n{ecdh_public}", hex(&Sha256::digest(access_token.as_bytes())))
+}
+
+/// ECDSA P-256 / SHA-256 (RFC 6979, deterministic) over `proof_message`, raw r||s, base64url.
+fn desktop_proof(keys: &DeviceKeys, access_token: &str) -> Result<String, String> {
+    let unreadable = || "stored desktop keys are unreadable".to_string();
+    let der = URL_SAFE_NO_PAD.decode(&keys.signing_secret).map_err(|_| unreadable())?;
+    let signing = SigningKey::from(SecretKey::from_pkcs8_der(&der).map_err(|_| unreadable())?);
+    let signature: Signature = signing.sign(proof_message(access_token, &keys.signing_public, &keys.ecdh_public).as_bytes());
+    Ok(b64(&signature.to_bytes()))
+}
+
 /// Generate once, keep the private halves only in the OS store. The public halves go to the account
 /// service; the relay will use the private halves for signed wraps later.
 fn device_keys(backend: &dyn SecretBackend) -> Result<DeviceKeys, String> {
     if let Some(raw) = backend.get(DEVICE_KEYS_ACCOUNT).map_err(|e| e.to_string())? {
         return serde_json::from_str(&raw).map_err(|_| "stored desktop keys are unreadable".to_string());
     }
-    let signing = SecretKey::random(&mut OsRng);
-    let ecdh = SecretKey::random(&mut OsRng);
-    let keys = DeviceKeys {
+    let keys = keys_from(&SecretKey::random(&mut OsRng), &SecretKey::random(&mut OsRng))?;
+    backend.set(DEVICE_KEYS_ACCOUNT, &serde_json::to_string(&keys).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(keys)
+}
+
+fn keys_from(signing: &SecretKey, ecdh: &SecretKey) -> Result<DeviceKeys, String> {
+    Ok(DeviceKeys {
         signing_secret: b64(signing.to_pkcs8_der().map_err(|e| e.to_string())?.as_bytes()),
         ecdh_secret: b64(ecdh.to_pkcs8_der().map_err(|e| e.to_string())?.as_bytes()),
         signing_public: b64(signing.public_key().to_public_key_der().map_err(|e| e.to_string())?.as_bytes()),
         ecdh_public: b64(ecdh.public_key().to_public_key_der().map_err(|e| e.to_string())?.as_bytes()),
-    };
-    backend.set(DEVICE_KEYS_ACCOUNT, &serde_json::to_string(&keys).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(keys)
+    })
 }
 
 fn access_token(origin: &Url, backend: &dyn SecretBackend) -> Result<String, String> {
@@ -276,8 +296,16 @@ fn access_token(origin: &Url, backend: &dyn SecretBackend) -> Result<String, Str
     Ok(tokens.access_token)
 }
 
-fn register_desktop_blocking() -> Result<AccountStatus, String> {
+/// The UI offers "Replace this account's desktop" when registration fails with this text.
+pub const DESKTOP_EXISTS: &str = "This account already has a desktop.";
+
+/// `replace` is design 4.7: a fresh passkey sign-in first (the service requires one under 5 minutes),
+/// then the service revokes the old desktop and unlinks every device.
+fn register_desktop_blocking(replace: bool) -> Result<AccountStatus, String> {
     let origin = origin()?;
+    if replace {
+        sign_in_blocking()?;
+    }
     let backend = store()?;
     let access = access_token(&origin, backend.as_ref())?;
     let keys = device_keys(backend.as_ref())?;
@@ -285,14 +313,17 @@ fn register_desktop_blocking() -> Result<AccountStatus, String> {
         "label": hostname_label(),
         "signingKey": keys.signing_public,
         "ecdhKey": keys.ecdh_public,
+        "proof": desktop_proof(&keys, &access)?,
     });
-    let response = ureq::post(&format!("{origin}v1/desktop"))
+    let url = if replace { format!("{origin}v1/desktop/replace") } else { format!("{origin}v1/desktop") };
+    let response = ureq::post(&url)
         .set("authorization", &format!("Bearer {access}"))
         .set("content-type", "application/json")
         .send_string(&payload.to_string());
     match response {
         Ok(_) => {}
-        Err(ureq::Error::Status(409, _)) => return Err("This account already has a desktop registered. Replace-desktop is not available yet.".into()),
+        Err(ureq::Error::Status(409, _)) => return Err(format!("{DESKTOP_EXISTS} Replace it to make this computer the account's desktop.")),
+        Err(ureq::Error::Status(403, _)) => return Err("Changing the desktop is held for 72 hours after an email recovery.".into()),
         Err(ureq::Error::Status(_, r)) => return Err(r.into_string().unwrap_or_else(|_| "The account service refused this desktop.".into())),
         Err(e) => return Err(format!("cannot reach the account service: {e}")),
     }
@@ -321,8 +352,8 @@ pub async fn account_sign_in() -> Result<AccountStatus, String> {
 }
 
 #[tauri::command]
-pub async fn account_register_desktop() -> Result<AccountStatus, String> {
-    tauri::async_runtime::spawn_blocking(register_desktop_blocking)
+pub async fn account_register_desktop(replace: Option<bool>) -> Result<AccountStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || register_desktop_blocking(replace.unwrap_or(false)))
         .await
         .map_err(|e| format!("account task failed: {e}"))?
 }
@@ -379,6 +410,25 @@ mod tests {
         assert!(!one.signing_secret.is_empty() && !one.ecdh_secret.is_empty());
         assert_ne!(one.signing_secret, one.ecdh_secret);
         assert!(!serde_json::to_string(&status_from(&b).unwrap()).unwrap().contains(&one.signing_secret));
+    }
+
+    /// Pins the proof format to the service verifier (account-service tests read the same file).
+    #[test]
+    fn proof_matches_the_service_vector() {
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../../account-service/tests/fixtures/desktop-proof-vector.json")).unwrap();
+        let s = |k: &str| v[k].as_str().unwrap().to_string();
+        let keys = keys_from(&SecretKey::from_slice(&[1u8; 32]).unwrap(), &SecretKey::from_slice(&[2u8; 32]).unwrap()).unwrap();
+        let token = s("accessToken");
+        let msg = proof_message(&token, &keys.signing_public, &keys.ecdh_public);
+        let proof = desktop_proof(&keys, &token).unwrap();
+        if std::env::var("PRINT_PROOF_VECTOR").is_ok() {
+            println!("{}", serde_json::json!({ "accessToken": token, "tokenHash": hex(&Sha256::digest(token.as_bytes())), "signingKey": keys.signing_public, "ecdhKey": keys.ecdh_public, "message": msg, "proof": proof }));
+        }
+        assert_eq!(keys.signing_public, s("signingKey"));
+        assert_eq!(keys.ecdh_public, s("ecdhKey"));
+        assert_eq!(hex(&Sha256::digest(token.as_bytes())), s("tokenHash"));
+        assert_eq!(msg, s("message"));
+        assert_eq!(proof, s("proof"));
     }
 
     #[test]

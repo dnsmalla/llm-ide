@@ -1,12 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ORIGIN, rawRequest, signInDesktop, signUpAndRegister, startApp } from './helpers.mjs';
-
-const KEY = `MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE${'a'.repeat(86)}`;
-const body = { label: 'Desk', signingKey: KEY, ecdhKey: KEY };
+import { ORIGIN, desktopBody, rawRequest, signInDesktop, signUpAndRegister, startApp } from './helpers.mjs';
 
 async function registerDesktop(app, token) {
-  return rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(body), {
+  return rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(token)), {
     'content-type': 'application/json', authorization: `Bearer ${token}`,
   });
 }
@@ -37,6 +34,13 @@ test('device list shows the registered desktop and revoke is fresh-checked', asy
   assert.deepEqual(revoked.body, { revoked: true });
   const again = await rawRequest(app.base, 'GET', '/v1/devices', undefined, { cookie: fresh.cookie, origin: ORIGIN });
   assert.equal(again.body.devices[0].status, 'revoked');
+
+  // The one-desktop rule counts only live desktops: after a revoke a new one can register.
+  const second = await registerDesktop(app, tokens.access_token);
+  assert.equal(second.status, 201);
+  const after = await rawRequest(app.base, 'GET', '/v1/devices', undefined, { cookie: fresh.cookie, origin: ORIGIN });
+  assert.deepEqual(after.body.devices.map((d) => d.status), ['revoked', 'linked']);
+  assert.equal((await registerDesktop(app, tokens.access_token)).status, 409);
 });
 
 test('device list is scoped to the signed-in account', async (t) => {

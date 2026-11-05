@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { loadConfig } from '../src/config.mjs';
 import { openDb } from '../src/db.mjs';
 import { createApp } from '../src/server.mjs';
@@ -199,10 +199,16 @@ export function tokenRequest(app, fields, { form = true, headers = {} } = {}) {
   });
 }
 
-// The whole desktop flow: sign in with a passkey, authorize, exchange the code.
-export async function signInDesktop(app, params = {}) {
-  const web = app.client();
-  await signUpAndRegister(app, web);
+// The whole desktop flow: sign in with a passkey, authorize, exchange the code. `reuse` signs in a
+// second desktop for an existing web client; `fresh` first repeats the passkey sign-in on it.
+export async function signInDesktop(app, { reuse = null, fresh = false, ...params } = {}) {
+  const web = reuse ?? app.client();
+  if (!reuse) await signUpAndRegister(app, web);
+  if (fresh) {
+    const opts = await web.call('POST', '/v1/signin/options', {});
+    const done = await web.call('POST', '/v1/signin/verify', { ceremonyId: opts.body.ceremonyId, response: { id: 'cred-ada', challenge: opts.body.options.challenge } });
+    if (done.status !== 200) throw new Error(`signin ${done.status}`);
+  }
   const { verifier, challenge } = pkcePair();
   const auth = await authorize(app, web, { ...params, challenge });
   if (auth.status !== 302) throw new Error(`authorize ${auth.status} ${JSON.stringify(auth.body)}`);
@@ -216,4 +222,25 @@ export async function signInDesktop(app, params = {}) {
   });
   if (token.status !== 200) throw new Error(`token ${token.status} ${JSON.stringify(token.body)}`);
   return { web, verifier, challenge, code, tokens: token.body };
+}
+
+// A desktop key set as account_oauth.rs makes it: P-256, SPKI DER, base64url without padding.
+export function desktopKeys() {
+  const make = () => generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const signing = make();
+  const ecdh = make();
+  const spki = (k) => k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+  return { signing, signingKey: spki(signing), ecdhKey: spki(ecdh) };
+}
+
+// Proof of possession (devices.mjs desktopProofMessage): the signing key signs the keys bound to the
+// SHA-256 of the access token it registers with. ECDSA P-256 / SHA-256, raw r||s, base64url.
+export function desktopProof(accessToken, keys, privateKey = keys.signing.privateKey) {
+  const tokenHash = createHash('sha256').update(accessToken).digest('hex');
+  const message = `llmide/desktop/register/v1\n${tokenHash}\n${keys.signingKey}\n${keys.ecdhKey}`;
+  return sign('sha256', Buffer.from(message), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+}
+
+export function desktopBody(accessToken, keys = desktopKeys(), label = 'Ada Mac') {
+  return { label, signingKey: keys.signingKey, ecdhKey: keys.ecdhKey, proof: desktopProof(accessToken, keys) };
 }

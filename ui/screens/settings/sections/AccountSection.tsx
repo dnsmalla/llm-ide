@@ -8,6 +8,9 @@ import { useEnv, useModel, useRefreshOnFocus } from "../context.tsx";
 import { invokeHost } from "../../shell/host";
 import { Button, ErrorText, Field, NeedsHost, SecretInput } from "../ui.tsx";
 
+// Same text as DESKTOP_EXISTS in desktop/src-tauri/src/account_oauth.rs.
+const DESKTOP_EXISTS = "This account already has a desktop.";
+
 interface CloudAccount { signedIn: boolean; email: string | null }
 
 function decodeCloud(v: unknown): CloudAccount {
@@ -20,6 +23,7 @@ function CloudAccountCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [offerReplace, setOfferReplace] = useState(false);
   useEffect(() => {
     let live = true;
     invokeHost<unknown>("account_status").then((v) => { if (live) setStatus(decodeCloud(v)); }, () => { if (live) setStatus({ signedIn: false, email: null }); });
@@ -31,11 +35,17 @@ function CloudAccountCard() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
-  const register = async () => {
-    setBusy(true); setError(null); setNotice(null);
-    try { setStatus(decodeCloud(await invokeHost("account_register_desktop"))); setNotice("This desktop is registered with your LLM-IDE account."); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); }
+  // replace (design 4.7) signs in again in the browser first; offered only after "already has a desktop".
+  const register = async (replace: boolean) => {
+    setBusy(true); setError(null); setNotice(null); setOfferReplace(false);
+    try {
+      setStatus(decodeCloud(await invokeHost("account_register_desktop", { replace })));
+      setNotice(replace ? "This computer is now your account's desktop. Link your phones and browsers again." : "This desktop is registered with your LLM-IDE account.");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      setOfferReplace(!replace && message.startsWith(DESKTOP_EXISTS));
+    } finally { setBusy(false); }
   };
   const signOut = async () => {
     setBusy(true); setError(null); setNotice(null);
@@ -52,7 +62,13 @@ function CloudAccountCard() {
       {status === null ? <p className="st-hint" role="status">Reading the account…</p> : status.signedIn ? (
         <div className="st-stack">
           <p><span className="st-label">Signed in as </span>{status.email ?? "this account"}</p>
-          <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void register()}>Register this desktop</Button><Button disabled={busy} onClick={() => void signOut()}>Sign out of LLM-IDE</Button></div>
+          <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void register(false)}>Register this desktop</Button><Button disabled={busy} onClick={() => void signOut()}>Sign out of LLM-IDE</Button></div>
+          {offerReplace ? (
+            <div className="st-stack">
+              <p className="st-hint">Replacing signs out the old desktop and unlinks every phone and browser. You sign in with your passkey again first.</p>
+              <div className="st-row"><Button tone="danger" disabled={busy} onClick={() => void register(true)}>Replace this account's desktop</Button></div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void signIn()}>{busy ? "Waiting for the browser…" : "Sign in with a passkey"}</Button></div>

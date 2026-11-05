@@ -3,14 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   DESKTOP_CLIENT,
+  desktopBody,
   rawRequest,
   signInDesktop,
   startApp,
   tokenRequest,
 } from './helpers.mjs';
 
-const SIGNING_KEY = `MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE${'a'.repeat(86)}`;
-const ECDH_KEY = `MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE${'b'.repeat(86)}`;
 const RUST_CLIENT = new URL('../../desktop/src-tauri/src/account_oauth.rs', import.meta.url);
 
 const bearer = (token) => ({ authorization: `Bearer ${token}` });
@@ -26,7 +25,7 @@ test('desktop flow: authorize, PKCE exchange, profile read, registration, sign-o
   assert.equal(profile.body.email, 'ada@example.com');
   assert.equal(profile.headers['set-cookie'], undefined);
 
-  const reg = await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify({ label: 'Ada Mac', signingKey: SIGNING_KEY, ecdhKey: ECDH_KEY }), {
+  const reg = await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(tokens.access_token)), {
     'content-type': 'application/json', ...bearer(tokens.access_token),
   });
   assert.equal(reg.status, 201);
@@ -67,8 +66,13 @@ test('every account path in account_oauth.rs is a served route', async (t) => {
   assert.ok(!paths.includes('/v1/account'), 'the cookie-only web route is not a desktop route');
   for (const path of new Set(paths)) {
     const method = path === '/v1/desktop/account' ? 'GET' : 'POST';
+    // A body-less request: served routes answer 401/415, an unknown path 404.
     const res = await rawRequest(app.base, method, path, undefined, {});
     assert.notEqual(res.status, 404, `${method} ${path}`);
   }
+  // The Settings card offers Replace on exactly the text the Rust client returns for 409 desktop_exists.
+  const ui = readFileSync(new URL('../../ui/screens/settings/sections/AccountSection.tsx', import.meta.url), 'utf8');
+  const exists = /pub const DESKTOP_EXISTS: &str = "([^"]+)";/.exec(src)?.[1];
+  assert.ok(exists && ui.includes(`const DESKTOP_EXISTS = "${exists}";`));
   assert.match(src, /ureq::get\(&format!\("\{origin\}v1\/desktop\/account"\)\)\s*\.set\("authorization", &format!\("Bearer \{\}"/);
 });

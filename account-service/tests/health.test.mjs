@@ -28,6 +28,6 @@ test('migrations create every table once and are idempotent', () => {
   for (const name of ['audit_events', 'desktop_tokens', 'devices', 'email_tokens', 'oauth_codes', 'passkeys', 'schema_migrations', 'sessions', 'users', 'webauthn_challenges']) {
     assert.ok(tables.includes(name), name);
   }
-  assert.equal(db.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get(), 2);
+  assert.equal(db.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get(), 3);
   db.close();
 });

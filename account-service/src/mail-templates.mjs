@@ -75,3 +75,16 @@ export function accountDeletedMail(config, to) {
     text: 'Your LLM-IDE account and its sign-in data were deleted. Data on your own computer is not affected.',
   };
 }
+
+export function desktopReplacedMail(config, to) {
+  return {
+    to,
+    subject: 'Your LLM-IDE desktop was replaced',
+    text: [
+      'A new computer became this account\'s LLM-IDE desktop. The old desktop was signed out and every',
+      'linked phone and browser was unlinked; link them again from the new desktop.',
+      '',
+      `If this was not you, sign in at ${signIn(config)} and secure your passkeys and email account.`,
+    ].join('\n'),
+  };
+}

@@ -52,7 +52,7 @@ export function oauthRoutes(routes, ctx) {
     const state = param('state');
     if (!validState(state)) throw new HttpError(400, 'invalid_request');
 
-    const code = ctx.oauth.issueCode({ userId: session.user_id, redirectUri, challenge });
+    const code = ctx.oauth.issueCode({ userId: session.user_id, redirectUri, challenge, authAt: session.auth_at });
     ctx.audit('oauth_code_issued', { userId: session.user_id, ip: req.clientIp });
     const target = new URL(redirectUri);
     target.searchParams.set('code', code);

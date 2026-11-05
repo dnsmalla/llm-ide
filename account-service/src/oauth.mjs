@@ -43,14 +43,14 @@ function pkceMatches(verifier, challenge) {
 
 export function createOAuth(db, now) {
   const insertCode = db.prepare(
-    `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, code_challenge_method, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, 'S256', ?, ?)`,
+    `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, code_challenge_method, created_at, expires_at, auth_at)
+     VALUES (?, ?, ?, ?, ?, 'S256', ?, ?, ?)`,
   );
   const codeByHash = db.prepare('SELECT * FROM oauth_codes WHERE code_hash = ?');
   const markCodeUsed = db.prepare('UPDATE oauth_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL');
   const insertToken = db.prepare(
-    `INSERT INTO desktop_tokens (id_hash, user_id, family, kind, client_id, code_hash, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO desktop_tokens (id_hash, user_id, family, kind, client_id, code_hash, created_at, expires_at, auth_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const tokenByHash = db.prepare('SELECT * FROM desktop_tokens WHERE id_hash = ?');
   const markTokenUsed = db.prepare('UPDATE desktop_tokens SET used_at = ? WHERE id_hash = ? AND used_at IS NULL');
@@ -58,12 +58,13 @@ export function createOAuth(db, now) {
   // RFC 6749 4.1.2: a replayed code revokes every token previously issued from it.
   const revokeCodeTokens = db.prepare('UPDATE desktop_tokens SET revoked_at = ? WHERE code_hash = ? AND revoked_at IS NULL');
 
-  function issuePair(userId, family, clientId, codeHash) {
+  // authAt: when the passkey proof behind this sign-in happened; rotation keeps it, never refreshes it.
+  function issuePair(userId, family, clientId, codeHash, authAt) {
     const accessToken = randomBytes(32).toString('base64url');
     const refreshToken = randomBytes(32).toString('base64url');
     const t = now();
-    insertToken.run(hash(accessToken), userId, family, 'access', clientId, codeHash, t, t + ACCESS_TTL_MS);
-    insertToken.run(hash(refreshToken), userId, family, 'refresh', clientId, codeHash, t, t + REFRESH_TTL_MS);
+    insertToken.run(hash(accessToken), userId, family, 'access', clientId, codeHash, t, t + ACCESS_TTL_MS, authAt);
+    insertToken.run(hash(refreshToken), userId, family, 'refresh', clientId, codeHash, t, t + REFRESH_TTL_MS, authAt);
     return {
       access_token: accessToken,
       token_type: 'Bearer',
@@ -73,10 +74,10 @@ export function createOAuth(db, now) {
   }
 
   return {
-    issueCode({ userId, redirectUri, challenge }) {
+    issueCode({ userId, redirectUri, challenge, authAt }) {
       const code = randomBytes(32).toString('base64url');
       const t = now();
-      insertCode.run(hash(code), userId, CLIENT_ID, redirectUri, challenge, t, t + CODE_TTL_MS);
+      insertCode.run(hash(code), userId, CLIENT_ID, redirectUri, challenge, t, t + CODE_TTL_MS, authAt);
       return code;
     },
 
@@ -97,7 +98,7 @@ export function createOAuth(db, now) {
       const family = randomBytes(16).toString('base64url');
       const tokens = db.transaction(() => {
         if (markCodeUsed.run(t, codeHash).changes !== 1) throw invalidGrant();
-        return issuePair(row.user_id, family, clientId, codeHash);
+        return issuePair(row.user_id, family, clientId, codeHash, row.auth_at);
       })();
       return { userId: row.user_id, tokens };
     },
@@ -125,7 +126,7 @@ export function createOAuth(db, now) {
       if (row.expires_at <= t) throw invalidGrant();
       const tokens = db.transaction(() => {
         if (markTokenUsed.run(t, row.id_hash).changes !== 1) throw invalidGrant();
-        return issuePair(row.user_id, row.family, clientId, row.code_hash);
+        return issuePair(row.user_id, row.family, clientId, row.code_hash, row.auth_at);
       })();
       return { userId: row.user_id, tokens };
     },

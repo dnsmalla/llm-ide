@@ -1,6 +1,7 @@
 import { nativeClient, readJson, send } from '../http.mjs';
-import { listDevices, publicDevice, registerDesktop, revokeDevice } from '../devices.mjs';
-import { deviceLabel, onlyKeys, publicKeyText } from '../validate.mjs';
+import { listDevices, publicDevice, registerDesktop, replaceDesktop, revokeDevice, verifyDesktopProof } from '../devices.mjs';
+import { desktopReplacedMail } from '../mail-templates.mjs';
+import { deviceLabel, onlyKeys, p256PublicKey } from '../validate.mjs';
 
 export function desktopRoutes(routes, ctx) {
   // The desktop's profile read (design 4.4). Bearer access token only: the cookie is never read here,
@@ -11,22 +12,31 @@ export function desktopRoutes(routes, ctx) {
     send(res, 200, { id: user.id, email: user.email, displayName: user.display_name });
   }));
 
-  // Register-only half of design 4.4 step 5: replace/link/relay are later sub-projects.
+  // Design 4.4 step 5. The body carries a proof of possession of the signing key (devices.mjs).
+  function desktopBody(body, token) {
+    onlyKeys(body, ['label', 'signingKey', 'ecdhKey', 'proof']);
+    const desktop = { label: deviceLabel(body.label), signingKey: p256PublicKey(body.signingKey), ecdhKey: p256PublicKey(body.ecdhKey) };
+    verifyDesktopProof({ tokenHash: token.id_hash, signingKey: desktop.signingKey, ecdhKey: desktop.ecdhKey, proof: body.proof });
+    return desktop;
+  }
+
   routes.set('POST /v1/desktop', nativeClient(async (req, res) => {
-    const { user } = ctx.oauth.requireAccess(req);
-    const body = await readJson(req);
-    onlyKeys(body, ['label', 'signingKey', 'ecdhKey']);
-    const device = registerDesktop(ctx.db, ctx.now, {
-      userId: user.id,
-      label: deviceLabel(body.label),
-      signingKey: publicKeyText(body.signingKey),
-      ecdhKey: publicKeyText(body.ecdhKey),
-    });
+    const { user, token } = ctx.oauth.requireAccess(req);
+    const device = registerDesktop(ctx.db, ctx.now, { userId: user.id, ...desktopBody(await readJson(req), token) });
     ctx.audit('desktop_registered', { userId: user.id, ip: req.clientIp, detail: { deviceId: device.id } });
     send(res, 201, { status: 'desktop_registered', device: publicDevice(device) });
   }));
-}
 
+  // Design 4.7, after 409 desktop_exists: the desktop signs in again (fresh passkey) and replaces.
+  routes.set('POST /v1/desktop/replace', nativeClient(async (req, res) => {
+    const { user, token } = ctx.oauth.requireAccess(req);
+    const body = desktopBody(await readJson(req), token);
+    const { device, replacedId, unlinked } = replaceDesktop(ctx.db, ctx.now, { userId: user.id, token, ...body });
+    ctx.audit('desktop_replaced', { userId: user.id, ip: req.clientIp, detail: { deviceId: device.id, replacedId, unlinked } });
+    ctx.mail(desktopReplacedMail(ctx.config, user.email));
+    send(res, 201, { status: 'desktop_replaced', device: publicDevice(device) });
+  }));
+}
 
 export function deviceRoutes(routes, ctx) {
   // Account-page device list. A full web session is enough to read; revoking needs a fresh passkey proof.
