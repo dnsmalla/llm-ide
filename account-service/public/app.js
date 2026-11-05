@@ -22,9 +22,17 @@ async function api(path, body) {
 }
 const supported = () => window.PublicKeyCredential && navigator.credentials;
 
-async function registerPasskey() {
+let registration = null;
+
+async function loadRegistrationOptions() {
   const options = await api('/v1/passkeys/options', {});
-  const pk = options.options;
+  registration = options;
+}
+
+// Must be called directly from a click: navigator.credentials.create needs transient user activation.
+async function createPasskey() {
+  if (!registration) throw new Error('Registration options are missing. Reload and try again.');
+  const pk = registration.options;
   const publicKey = {
     ...pk,
     challenge: toBytes(pk.challenge),
@@ -41,7 +49,7 @@ async function registerPasskey() {
     },
     clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
   };
-  await api('/v1/passkeys/verify', { ceremonyId: options.ceremonyId, response, name: 'This device' });
+  await api('/v1/passkeys/verify', { ceremonyId: registration.ceremonyId, response, name: 'This device' });
 }
 
 async function signup(event) {
@@ -54,9 +62,12 @@ async function signup(event) {
       email: $('email').value, displayName: $('display-name').value,
       language: $('language').value, timeZone: $('time-zone').value,
     });
-    setStatus('Now register your passkey…');
-    await registerPasskey();
-    location.href = '/account.html';
+    await loadRegistrationOptions();
+    button.hidden = true;
+    const register = $('register');
+    register.hidden = false;
+    register.focus();
+    setStatus('Account created. Click “Register passkey” to add this device.');
   } catch (e) {
     setStatus(e.message || String(e), true);
     button.disabled = false;
@@ -105,6 +116,20 @@ async function account() {
 }
 
 const page = document.body.dataset.page;
-if (page === 'signup') $('signup-form').addEventListener('submit', signup);
+if (page === 'signup') {
+  $('signup-form').addEventListener('submit', signup);
+  $('register').addEventListener('click', async () => {
+    const button = $('register');
+    button.disabled = true;
+    setStatus('Waiting for your passkey…');
+    try {
+      await createPasskey();
+      location.href = '/account.html';
+    } catch (e) {
+      setStatus(e.message || String(e), true);
+      button.disabled = false;
+    }
+  });
+}
 if (page === 'signin') $('signin').addEventListener('click', signin);
 if (page === 'account') account();
