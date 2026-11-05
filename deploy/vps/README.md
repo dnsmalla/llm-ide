@@ -185,3 +185,20 @@ curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
   credentials in a password manager, not in `/root/llm-ide-admin.txt`.
 - DNS was moved from Squarespace; old resolvers may serve the old A records until the 30-minute TTL
   expires. Flush the Mac cache with `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
+
+## Relay (`/relay/v1`, sub-project 3) — NOT PUBLIC
+
+The relay unit runs inside `llmide-accounts` and is **off** (`ACCOUNTS_RELAY` unset). It must stay unreachable
+from the internet until the external security review (relay design D9, gate G-EXT) is complete and its findings are
+resolved or accepted in writing. Do **not** add a `location /relay/` block to `accounts.llm-ide.com.nginx` and do
+not set `ACCOUNTS_RELAY=1` on this host before then. Local and private-network testing only:
+
+    ACCOUNTS_RELAY=1 ACCOUNTS_ALLOWED_WEB_ORIGINS=http://localhost:5173 node bin/account-service.mjs
+
+The relay forwards ciphertext only, makes no LLM call, runs no code and makes no outbound connection. The core's
+loopback bridge is `/host-api/relay-bridge` and is private to the bus host proof.
+
+When G-EXT closes (later slice R8), the nginx block is: `location = /relay/v1 { proxy_pass http://127.0.0.1:3470;
+proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 120s; }`, with
+`ACCOUNTS_ALLOWED_WEB_ORIGINS=https://app.llm-ide.com`.

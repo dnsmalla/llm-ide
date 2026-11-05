@@ -80,7 +80,7 @@ do not repeat it in `result`.
 
 The desktop host adapter is `extension/routes/host-api/` (gateway, frame codec, session gate, translator) with the listener in `extension/server/host-api-listener.mjs` — plaintext on loopback in development, pinned WSS when TLS is on (off by default). The desktop UI mints the pairing PIN and manages paired devices through `POST /host-api/pin`, `GET /host-api/devices` and `DELETE /host-api/devices/:id` (contract `schema/http/host-api.schema.json`).
 
-The web client is `web/` (`web/src/host-api/connection.ts`), and its types are generated into `web/src/host-api/types.generated.ts` by `scripts/generate-host-api.mjs`.
+The desktop also accepts relay-delivered sessions on the core's main port at `/host-api/relay-bridge` (loopback, bus host proof, tier-capped scopes: web = host, chat, read). The web client is `web/` (`web/src/host-api/connection.ts`), and its types are generated into `web/src/host-api/types.generated.ts` by `scripts/generate-host-api.mjs`.
 
 ## Clients
 
