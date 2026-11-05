@@ -2,13 +2,13 @@
 
 Updated 2026-11-05 (written at `e377d3b6`; 318 commits since the 2026-11-02 update at `86bf3874`: Host API v1 Plans 1-6 with the TLS gate, Windows CI green, the `:3006` desktop-class review closed, desktop Waves 1-4, the installable web client and the 2026-11-05 review fixes). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
 
-Current numbers: `SERVER_API_VERSION` 110, migration head 0062 (`host_api_security`; 0061 `host_api_devices`, 0060 `ical_sources`, 0059 `google_connectors`); local `main` is ahead of `origin/main` (check `git rev-list --count origin/main..HEAD`); the HTTP contract and generated types are in `schema/`.
+Current numbers: `SERVER_API_VERSION` 110, migration head 0062 (`host_api_security`; 0061 `host_api_devices`, 0060 `ical_sources`, 0059 `google_connectors`); the HTTP contract and generated types are in `schema/`.
 
 ## Principles (kept at the top on purpose)
 
 - **Professional quality over speed** (user, 2026-10-29). No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green.
 - **Token-affecting changes ship OFF** until you run the bench and say go (user, 2026-10-30). Paid or subscription bench runs are yours to start.
-- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Local `main` was last pushed on 2026-11-02 (compact prompt off by default again; history cap token-neutral); newer commits are local until you say so. No branches: work happens on `main`.
+- **Push only when you say so.** The nightly push job exists (`scripts/nightly-push.sh`) but is not installed. Everything through 2026-11-05 is pushed to `origin/main`; new commits stay local until you say so. No branches: work happens on `main`.
 - **Delegation applies to the open questions.** You said "do the best, secure, usable for big projects" and I decided. Those answers are marked **delegated, revisit if wrong** below; any of them can be reopened by saying so. They are: relay design choices D1-D5 and D7-D9 (tiered clients, no third-party analytics, upload-only files, per-user accounts); sync-kit S1-S6; ui-kit U1-U6 (provisional); Phase 7 defaults D4-D8 (tree-only to cloud models, stop-only, browser profile, audit retention, first-party mount); Issues token migration into the core vault (W2); Mac Auto Tasks moving to the SDK engine for Claude with multi-engine kept.
 - **macOS first and finished, then Windows and Linux.** The Tauri macOS app must reach parity and daily use before the other two OSes get more than CI.
 - **Swift feature freeze is in force** (inferred from the 2026-10-31 acceptance of ADR 0018 for Phase 3; you have not contradicted it). Allowed: security fixes, parity work needed for the shared core, and build/release work. The one planned exception is the Live capture helper (Phase 5 question 2).
@@ -17,7 +17,7 @@ Legend: **[me]** the agent does it, **[you]** needs you, **[wait]** time-gated o
 
 ## 1. Done and pushed
 
-Pushed state is `origin/main`; local `main` is ahead of it (the 2026-11-03 to 11-05 work is not pushed).
+All of this is pushed to `origin/main` (2026-11-05).
 
 **Agent store, data placement, live-then-archive**
 - `agent.db` (runs, tool events, composition, rollups), Storage hub, Agent history card, retention, usage-ledger shadow with daily compare.
@@ -52,7 +52,7 @@ Pushed state is `origin/main`; local `main` is ahead of it (the 2026-11-03 to 11
 
 ## 2. Running or just landed (local, not pushed)
 
-Local, not pushed. The items below were written before 2026-11-02; check each with git before relying on it:
+Pushed. The items below were written before 2026-11-02; check each with git before relying on it:
 
 - **Doc Gen and Visual** (Tauri): request model, sources, run state machine, screen with templates and history, hostile-output tests, shell section, parity rows (`9b2fa3f6`, `392a70ed`, `46dae4df`, `885e6fe6`). Built and unit-tested; checked by you in a real window 2026-11-04.
 - **Google connectors**: server side G1-G5 and the iCal core connector (migration 0060, API 104) and the Tauri Google pane (G6) are built and fixture-tested (source: the header of `plans/2026-10-31-google-connectors-plan.md`). Open: G7 scheduled sync, G8, the catalog flip, Mac screens, a real-account test, and your answers to Q-G1 to Q-G3 (the plan's recommendations are followed meanwhile).
@@ -93,7 +93,7 @@ Open decisions (only the unanswered ones, each with a recommendation) are sectio
 4. **Live capture macOS helper** [me]: after Phase 7 spike 1; the one allowed Swift addition.
 5. **Loop and Auto Tasks core slices** [me, after Y5 evidence]: the desktop screens exist now (native, local); this item is only the move into the core job runner: six job kinds replace the 13 Auto Tasks (`review`, `sources.update`, `issues.from_notes`, `issues.implement`, `loop.run`, `custom.run`).
 6. **Command bus S2, S4, S5** [me]: S2 interim phone fixes and flags, S4 phone client on the job API, S5 remaining kinds; S6 later.
-7. **Mobile TLS with SPKI pinning**: built (`aa9b31f4`, `477090cb`, `3115fd29`); open is your on-device test (Y2) and the shared PIN throttle and desktop QR gate [you].
+7. **Mobile TLS with SPKI pinning**: built (`aa9b31f4`, `477090cb`, `3115fd29`); the shared PIN throttle and the desktop QR are built too; open is your on-device test (Y2, UN-108) [you].
 8. **Relay R0-R9** [me]: R0 spec freeze and external review booking (G-EXT), then gated phases; no relay code before R0 and the review gate.
 9. **Phase 7 spikes** [me]: the 13 research spikes (P7.pre) and an independent re-review before any desktop-control code.
 10. **K1 and K2 kits** [me]: knowledge-kit K1 (needs Q answers), docs-kit K2-K4, other kits in plan order.
