@@ -48,8 +48,7 @@ fn config_path() -> Option<PathBuf> {
 fn load() -> Option<PathBuf> {
     let text = std::fs::read_to_string(config_path()?).ok()?;
     let stored: Stored = serde_json::from_str(&text).ok()?;
-    let path = PathBuf::from(stored.dir);
-    path.is_dir().then_some(path)
+    Some(PathBuf::from(stored.dir))
 }
 
 fn state() -> &'static Mutex<Option<PathBuf>> {
