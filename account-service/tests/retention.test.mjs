@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { purge, IP_RETENTION_MS, PENDING_ACCOUNT_MS } from '../src/retention.mjs';
-import { startApp, signUpAndRegister } from './helpers.mjs';
+import { startApp, signUpAndRegister, linkedPair } from './helpers.mjs';
 
 test('IPs are nulled after 72 hours; rows stay', async (t) => {
   const app = await startApp();
@@ -30,4 +30,16 @@ test('unfinished accounts go after 24 hours; active ones stay; expired tokens an
   assert.deepEqual(emails, ['ada@example.com']);
   assert.equal(app.db.prepare('SELECT COUNT(*) FROM email_tokens').pluck().get(), 0);
   assert.equal(app.db.prepare('SELECT COUNT(*) FROM sessions').pluck().get(), 0);
+});
+
+test('purge drops stored wraps of devices that are no longer linked', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const p = await linkedPair(app);
+  app.db.prepare('INSERT INTO relay_wraps (device_id, user_id, epoch, envelope, created_at) VALUES (?, ?, 1, ?, 0)').run(p.device.deviceId, p.userId, '{}');
+  purge(app.db, app.clock.now);
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM relay_wraps').pluck().get(), 1);
+  app.db.prepare("UPDATE devices SET status = 'unlinked' WHERE id = ?").run(p.device.deviceId);
+  purge(app.db, app.clock.now);
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM relay_wraps').pluck().get(), 0);
 });

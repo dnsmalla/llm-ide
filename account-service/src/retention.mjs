@@ -18,5 +18,6 @@ export function purge(db, now) {
     db.prepare('UPDATE sessions SET ip = NULL WHERE ip IS NOT NULL AND created_at <= ?').run(t - IP_RETENTION_MS);
     db.prepare('UPDATE audit_events SET ip = NULL WHERE ip IS NOT NULL AND at <= ?').run(t - IP_RETENTION_MS);
     db.prepare('DELETE FROM audit_events WHERE at <= ?').run(t - AUDIT_RETENTION_MS);
+    db.prepare("DELETE FROM relay_wraps WHERE device_id IN (SELECT id FROM devices WHERE status <> 'linked')").run();
   })();
 }
