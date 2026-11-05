@@ -27,7 +27,7 @@ test('relay v1 negatives fail closed in the sync port', () => {
   const k = S.deviceKeys(hex(relay.subkeys.rootHex), relay.subkeys.ids, relay.subkeys.epoch);
   for (const n of relay.negatives) {
     const env = structuredClone(relay.envelope.env);
-    const [op, rest] = n.split(/:(.*)/s);
+    const [op, rest] = n.includes(':') ? n.split(/:(.*)/s) : ['set', n];
     if (op === 'flip') { const x = b(env[rest]); x[0] ^= 1; env[rest] = x.toString('base64url'); }
     else if (op === 'truncate') { env[rest] = b(env[rest]).subarray(0, -1).toString('base64url'); }
     else { const [key, val] = rest.split('='); env[key] = /^[0-9]+$/.test(val) ? Number(val) : val; }
@@ -57,6 +57,19 @@ test('syncwrap: our wrap equals the vector ciphertext, unwraps to the four keys,
   assert.throws(() => S.unwrapSync({ env: sync.syncwrap.env, ...opts, currentEpoch: sync.epoch }), /stale_epoch/);
   const rogue = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   assert.throws(() => S.unwrapSync({ env: sync.syncwrap.env, ...opts, verifyKey: rogue.publicKey }), /bad_signature/);
+});
+
+test('sync vector negatives: flip, truncate, wrong purpose, wrong epoch, wrong to and wrong version all fail closed', () => {
+  const k = S.deviceKeys(hex(sync.rootHex), sync.ids, sync.epoch);
+  const vk = pub(sync.keys.desktopSigningSpki);
+  for (const n of sync.negatives) {
+    const env = structuredClone(sync.snapshot.env);
+    const [op, rest] = n.includes(':') ? n.split(/:(.*)/s) : ['set', n];
+    if (op === 'flip') { const x = b(env[rest]); x[0] ^= 1; env[rest] = x.toString('base64url'); }
+    else if (op === 'truncate') { env[rest] = b(env[rest]).subarray(0, -1).toString('base64url'); }
+    else { const [key, val] = rest.split('='); env[key] = /^[0-9]+$/.test(val) ? Number(val) : val; }
+    assert.throws(() => S.open({ env, key: k.snapshot, verifyKey: vk }), S.SyncCryptoError, n);
+  }
 });
 
 test('open refuses unknown envelope fields, unknown purposes and an over-cap frame', () => {

@@ -18,7 +18,7 @@ const users = await import('../server/users.mjs');
 const st = await import('../kb/sync-state.mjs');
 const S = await import('../core/sync-envelope.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
-const { drainOnce, LIMITS } = await import('../routes/sync/consumer.mjs');
+const { drainOnce, sweepStuckRequests, LIMITS } = await import('../routes/sync/consumer.mjs');
 const { ensureSyncKeys } = await import('../routes/sync/keys.mjs');
 
 let n = 0;
@@ -112,4 +112,13 @@ test('quota: at most perDrain per drain and perDay per device', async () => {
   const id = await t.send({}, { issuedAt: NOW + 200 });
   await drainOnce({ userId: t.u, store: t.store, now: NOW + 300, deps: t.deps() });
   assert.equal((await t.reply(id)).code, 'quota');
+});
+
+test('startup sweep answers turn_failed for a request left running by a crash', async () => {
+  const t = setup();
+  const requestId = 'R'.repeat(22);
+  st.recordRequest(t.u, 'h1-dev-' + n, requestId, NOW - 1000);
+  assert.ok((await sweepStuckRequests({ now: NOW, storeFor: () => t.store })).swept >= 1);
+  assert.deepEqual(await t.reply(requestId), { v: 1, requestId, ok: false, code: 'turn_failed' });
+  assert.equal(st.countRequestsSince(t.u, 'h1-dev-' + n, 0), 1);
 });

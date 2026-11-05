@@ -39,6 +39,7 @@ if (hasLoadHooks) {
 }
 const engineLoaded = () => loadedUrls.some((u) => u.endsWith('/llm_agent/sdk/engine.mjs'));
 const sdkLoaded = () => loadedUrls.some((u) => u.includes('/@anthropic-ai/claude-agent-sdk/'));
+const megaLoaded = () => loadedUrls.some((u) => u.includes('/node_modules/megajs/'));
 
 // Every relative module server.mjs imports statically — read from its source
 // so a new boot-path import is covered without editing this list. server.mjs
@@ -308,3 +309,5 @@ test('server.mjs: LLMIDE_ENGINE_PREWARM=0 boots without loading the engine', asy
   assert.doesNotMatch(output, /engine_prewarm/);
   assert.match(output, /ENGINE_LOADED false/);
 });
+
+test('megajs is not loaded by the boot path', () => { assert.equal(megaLoaded(), false); });

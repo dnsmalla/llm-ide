@@ -4,10 +4,10 @@ import { send, readJson } from '../../server/route-http.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
-import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices } from '../../kb/sync-state.mjs';
+import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish } from '../../kb/sync-state.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { ensureSyncKeys } from './keys.mjs';
-import { storeFor as defaultStoreFor, dropStore, syncCycle } from './scheduler.mjs';
+import { storeFor as defaultStoreFor, dropStore, publishNow } from './scheduler.mjs';
 
 const fail = (res, status, code, message, details) => { send(res, status, { error: { code, message, ...(details ? { details } : {}) } }); return true; };
 
@@ -42,9 +42,13 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       const field = validateMegaConfig(cfg);
       if (field) return fail(res, 400, 'VALIDATION_FAILED', `Invalid ${field}`, { field });
       const db = getDb();
+      const before = getSyncState(userId);
+      const oldEmail = getSecret(db, userId, 'sync.megaEmail');
+      const changed = !!before && (before.storeKind !== 'mega' || before.storeConfig.folder !== cfg.folder || oldEmail !== cfg.email);
       setSecret(db, userId, 'sync.megaEmail', cfg.email);
       setSecret(db, userId, 'sync.megaPassword', cfg.password);
       ensureSyncState(userId, { storeKind: 'mega', storeConfig: { folder: cfg.folder } });
+      if (changed) resetSyncPublish(userId);
       await dropStore(userId);
       send(res, 200, status(userId)); return true;
     }
@@ -69,10 +73,10 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
           if (!back || Buffer.from(back).toString() !== 'ok') return fail(res, 502, 'SYNC_IO', 'The store did not return what was written');
           send(res, 200, { ok: true }); return true;
         }
-        send(res, 200, await syncCycle(userId, { store })); return true;
+        send(res, 200, await publishNow(userId, { store })); return true;
       } catch (e) {
         const code = String(e?.code || '').startsWith('SYNC_') ? e.code : 'SYNC_IO';
-        return fail(res, code === 'SYNC_NOT_SET_UP' ? 409 : 502, code, 'Sync store error');
+        return fail(res, code === 'SYNC_NOT_SET_UP' || code === 'SYNC_BUSY' ? 409 : 502, code, 'Sync store error');
       }
     }
     return fail(res, 404, 'NOT_FOUND', 'No such sync route');

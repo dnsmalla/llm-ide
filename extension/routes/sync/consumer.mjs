@@ -6,6 +6,7 @@ import { createPublicKey } from 'node:crypto';
 import { open, seal, deviceKeys } from '../../core/sync-envelope.mjs';
 import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 import { getSyncState, listSyncDevices, recordRequest, finishRequest, countRequestsSince, nextSeq } from '../../kb/sync-state.mjs';
+import { getDb } from '../../kb/db.mjs';
 import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
 import { ensureSyncKeys } from './keys.mjs';
 
@@ -49,6 +50,31 @@ async function runTurn(userId, text, deps) {
     } });
   } catch { failure ??= 'turn_failed'; } finally { clearTimeout(timer); }
   return failure ? { ok: false, code: failure } : { ok: true, text: redactSecretsForStorage(reply).slice(0, 100_000) };
+}
+
+
+/** Startup sweep: a row can be left `running` when the core dies mid-turn. The inbox file is gone, so without this the
+ *  device would wait forever. Answer `turn_failed` through the same sealed reply path, then mark the row failed. A store
+ *  that is not available leaves the row for the next start instead of silently answering nowhere. */
+export async function sweepStuckRequests({ now = Date.now(), storeFor } = {}) {
+  const rows = getDb().prepare("SELECT user_id, device_id, request_id FROM sync_requests WHERE state = 'running'").all();
+  let swept = 0;
+  for (const row of rows) {
+    const state = getSyncState(row.user_id);
+    const dev = state && listSyncDevices(row.user_id).find((d) => d.deviceId === row.device_id);
+    const store = state && dev && storeFor?.(row.user_id);
+    if (!store) continue;
+    try {
+      const keys = ensureSyncKeys(row.user_id);
+      const dk = deviceKeys(keys.root, { userId: row.user_id, desktopId: state.syncId, deviceId: dev.deviceId }, keys.epoch);
+      const env = seal({ header: { purpose: 'reply', userId: row.user_id, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq: nextSeq(row.user_id, now), issuedAt: now, tier: '' },
+        key: dk.reply, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId: row.request_id, ok: false, code: 'turn_failed' })), signingKey: keys.signingKey });
+      await store.put(`${state.syncId}/d/${dev.dir}/out/${row.request_id}.bin`, Buffer.from(JSON.stringify(env)));
+      finishRequest(row.user_id, row.device_id, row.request_id, 'failed');
+      swept += 1;
+    } catch { /* leave it running for the next sweep */ }
+  }
+  return { swept };
 }
 
 export async function drainOnce({ userId, store, now = Date.now(), deps = defaultDeps }) {

@@ -83,6 +83,15 @@ export function getPublished(userId, deviceId) {
   return out;
 }
 
+/** A new MEGA account or folder is a new location: forget every blob record and force fresh key/wrap files there. */
+export function resetSyncPublish(userId) {
+  requireUser(userId);
+  getDb().transaction(() => {
+    getDb().prepare('DELETE FROM sync_published WHERE user_id = ?').run(userId);
+    getDb().prepare('UPDATE sync_devices SET wrap_epoch = 0 WHERE user_id = ?').run(userId);
+  })();
+}
+
 export function setPublished(userId, deviceId, kind, { file, seq, fileSha256, plainSha256, epoch }) {
   requireUser(userId);
   getDb().prepare(`INSERT INTO sync_published (user_id, device_id, kind, file, seq, file_sha256, plain_sha256, epoch) VALUES (?, ?, ?, ?, ?, ?, ?, ?)

@@ -18,7 +18,7 @@ const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
 const st = await import('../kb/sync-state.mjs');
 const { handleSyncRoute, isSyncRoute } = await import('../routes/sync/http-routes.mjs');
-const { recordCycleFailure } = await import('../routes/sync/scheduler.mjs');
+const { recordCycleFailure, publishNow, withUserLock } = await import('../routes/sync/scheduler.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
 const PROOF = busHostProof();
 
@@ -89,4 +89,26 @@ test('a refused login turns sync off instead of retrying (no account lockout); r
   recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_AUTH_FAILED' }), { now: 2000, backoff });
   assert.equal(st.getSyncState(u).enabled, false);
   assert.equal(st.getSyncState(u).lastError, 'SYNC_AUTH_FAILED');
+});
+
+test('changing the MEGA account or folder forgets published blobs and forces fresh key/wrap files', async () => {
+  const u = user();
+  await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+  st.addSyncDevice(u, { deviceId: 'h1-sync-1', dir: 'E'.repeat(22), tier: 'web', name: 'Phone', ecdhSpki: Buffer.from([1]), signingSpki: Buffer.from([2]), now: 1 });
+  st.setPublished(u, 'h1-sync-1', 'chats', { file: 's/' + 'a'.repeat(32) + '.bin', seq: 1, fileSha256: 'f', plainSha256: 'p', epoch: 1 });
+  st.setDeviceWrapEpoch(u, 'h1-sync-1', 1);
+  const next = await call('POST', '/kb/sync/mega', { userId: u, body: { ...MEGA, folder: 'llmide-sync-2' } });
+  assert.equal(next.status, 200);
+  assert.deepEqual(st.getPublished(u, 'h1-sync-1'), {});
+  assert.equal(st.listSyncDevices(u)[0].wrapEpoch, 0);
+  const same = await call('POST', '/kb/sync/mega', { userId: u, body: { ...MEGA, folder: 'llmide-sync-2' } });
+  assert.equal(same.status, 200);
+  assert.deepEqual(st.getPublished(u, 'h1-sync-1'), {}, 'same folder keeps the reset state');
+});
+
+test('manual publish shares the scheduler per-user lock and refuses instead of waiting for turns', async () => {
+  const u = user();
+  await withUserLock(u, async () => {
+    await assert.rejects(() => publishNow(u, { store: {} }), (e) => e.code === 'SYNC_BUSY');
+  });
 });

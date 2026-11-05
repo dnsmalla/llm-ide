@@ -7,13 +7,26 @@ import { getSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { publishOnce } from './producer.mjs';
-import { drainOnce } from './consumer.mjs';
+import { drainOnce, sweepStuckRequests } from './consumer.mjs';
 
 const PRODUCE_MS = 60_000;
 const DRAIN_MS = 30_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
 const SETUP_ERRORS = new Set(['SYNC_AUTH_FAILED', 'SYNC_MFA_REQUIRED']);
 const stores = new Map(); // userId -> SyncStore
+const busy = new Set(); // users with a scheduler cycle or a manual publish in flight
+
+const busyError = () => Object.assign(new Error('Sync is busy'), { code: 'SYNC_BUSY' });
+export async function withUserLock(userId, fn) {
+  if (busy.has(userId)) throw busyError();
+  busy.add(userId);
+  try { return await fn(); } finally { busy.delete(userId); }
+}
+
+export async function publishNow(userId, { now = Date.now(), store = storeFor(userId) } = {}) {
+  if (!store) throw Object.assign(new Error('Sync is not set up'), { code: 'SYNC_NOT_SET_UP' });
+  return withUserLock(userId, async () => ({ publish: await publishOnce({ userId, store, now }) }));
+}
 
 export function storeFor(userId) {
   const cached = stores.get(userId);
@@ -64,7 +77,6 @@ export function recordCycleFailure(userId, e, { now, backoff }) {
 
 export function startSyncScheduler({ logger, env = process.env } = {}) {
   if (env.LLMIDE_SYNC === 'off') return { async stop() {} };
-  const busy = new Set();
   const backoff = new Map(); // userId -> { until, ms }
   let lastProduce = 0;
   const tick = async () => {
@@ -83,6 +95,7 @@ export function startSyncScheduler({ logger, env = process.env } = {}) {
       } finally { busy.delete(userId); }
     }
   };
+  void sweepStuckRequests({ storeFor }).catch((e) => logger?.warn?.('sync_sweep_failed', { code: String(e?.code || 'SYNC_FAILED') }));
   const timer = setInterval(() => { void tick(); }, DRAIN_MS);
   timer.unref?.();
   return { async stop() { clearInterval(timer); await closeSyncStores(); } };

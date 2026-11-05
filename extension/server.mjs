@@ -20,7 +20,6 @@ import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
 import { handleHostApiRoute, isHostApiRoute } from './routes/host-api/http-routes.mjs';
-import { handleSyncRoute, isSyncRoute } from './routes/sync/http-routes.mjs';
 import { createBus, busEnabled } from './routes/bus/executor.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
 import { purgeOldAuditRows } from './server/audit.mjs';
@@ -323,6 +322,8 @@ const HOST = config.host;
 //   v110 — additive: POST /kb/repos/check-token { provider } verifies the vault's github.token / gitlab.token
 //          against the provider's /user endpoint and answers { ok, login, name, scopes? }; no token is returned.
 //   v111 — command bus desktop schedules, additive (spec docs/spec/command-bus.md section 9, migration 0063): GET /bus/schedules → { items: BusSchedule[] } (desktop-ui and ios-native; else 403 TIER_DENIED); POST /bus/schedules { kind: 'sources.update', args, intervalHours 1-168, standing?, standingDays? 1-90 } → 201 { schedule } (desktop-ui only; 400 INVALID_ARGS, 429 QUOTA_EXCEEDED at 10); DELETE /bus/schedules/:id → { deleted: true } | 404 (desktop-ui only; revokes its standing approval). POST /bus/commands/:id/approve takes an optional scheduleId: with the nonce it approves a desktop-enqueued run on that schedule's live standing approval (same kind and args, idem sched:<id>:, T1, at most one per half interval), else 403 STANDING_APPROVAL_INVALID { reason }. No server timer.
+const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
+
 const SERVER_API_VERSION = 112;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
@@ -815,7 +816,7 @@ const server = http.createServer(async (req, res) => {
 
   // Encrypted sync settings (/kb/sync/*): JWT + bus host proof.
   if (isSyncRoute(req.url || '')) {
-    try { await handleSyncRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
+    try { const { handleSyncRoute } = await import('./routes/sync/http-routes.mjs'); await handleSyncRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 
