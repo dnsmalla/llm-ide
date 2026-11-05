@@ -1,0 +1,105 @@
+# `llm-ide.com` VPS deployment
+
+This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive: the existing
+`sites-enabled/*` apps and PM2 services are untouched.
+
+## What runs where
+
+| Piece | Location |
+|---|---|
+| Web PWA | `https://llm-ide.com` → `/var/www/llm-ide-web` |
+| Public core API | `https://llm-ide.com/api/*` → `127.0.0.1:3457` |
+| Host API WebSocket | `wss://llm-ide.com/host-api/v1` → nginx → reverse SSH tunnel → this Mac's `127.0.0.1:3016` |
+| Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide` |
+| Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
+
+The web client is built with:
+
+```bash
+VITE_HOST_API_URL=wss://llm-ide.com/host-api/v1 npm run build
+```
+
+## Install pieces
+
+```bash
+install -d -m 700 -o llmide -g llmide /var/lib/llmide /etc/llm-ide
+git clone --depth 1 https://github.com/dnsmalla/llm-ide.git /srv/llm-ide/repo
+# .skills is a private submodule; copy the local checkout or provision a deploy key.
+cd /srv/llm-ide/repo && bash scripts/install-skills.sh
+```
+
+`/etc/llm-ide/core.env` must be `0600` and contain at least:
+
+```dotenv
+NODE_ENV=production
+PATH=/opt/node22/bin:/usr/local/bin:/usr/bin:/bin
+LLMIDE_HOST=127.0.0.1
+LLMIDE_PORT=3457
+LLMIDE_DATA_DIR=/var/lib/llmide
+LLMIDE_DB_PATH=/var/lib/llmide/llmide.db
+LLMIDE_BACKUP_DIR=/var/lib/llmide/backups
+LLMIDE_BACKUP_KEEP=3
+LLMIDE_DISABLE_REGISTRATION=1
+LLMIDE_JWT_SECRET=<64 hex chars>
+LLMIDE_VAULT_KEY=<64 hex chars>
+```
+
+The first account was created with registration temporarily open, then `LLMIDE_DISABLE_REGISTRATION=1`
+was restored and the service restarted. The credentials are root-owned at `/root/llm-ide-admin.txt`
+(mode `0600`) — move them into a password manager and remove that file.
+
+## nginx
+
+The full vhost is [llm-ide.com.nginx](llm-ide.com.nginx). It is enabled as
+`/etc/nginx/sites-enabled/llm-ide.com`; certificates come from Certbot:
+
+```bash
+certbot certonly --webroot -w /var/www/llm-ide-web \
+  -d llm-ide.com -d www.llm-ide.com
+```
+
+`/host-api/` is a WebSocket upgrade proxy to the reverse tunnel. `proxy_ssl_verify off` is
+required because the desktop Host API listener uses a pinned self-signed identity; nginx, not
+the browser, verifies the public certificate.
+
+## Mac side
+
+The desktop app must run with the Host API TLS listener and allow the exact page origin:
+
+```bash
+LLMIDE_HOST_API_TLS=1 \
+LLMIDE_HOST_API_WEB_ORIGINS=https://llm-ide.com \
+npm --prefix desktop run tauri dev
+```
+
+A LaunchAgent (`com.llmide.hostapi-tunnel`) holds:
+
+```bash
+ssh -N -R 127.0.0.1:3016:127.0.0.1:3016 root@72.62.76.92
+```
+
+Keep that process running; it is what makes the public `wss://` URL reach the Mac. If the host app
+is restarted, the listener keeps port 3016 and the tunnel reconnects.
+
+## Verify
+
+```bash
+curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/api/health
+curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
+curl --http1.1 -k --resolve llm-ide.com:443:72.62.76.92 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Origin: https://llm-ide.com' https://llm-ide.com/host-api/v1 -D -
+# 101 Switching Protocols
+```
+
+Pair from the web page with a PIN from **desktop Settings → Host API pairing**.
+
+## Known limits
+
+- The core's Claude CLI is installed but not authenticated. Model-generating pipeline steps will fail
+  until `claude login` or a per-user API key is configured.
+- The public `/api/*` surface is the full core API behind the auth gate. Registration is closed; do not
+  set `LLMIDE_DISABLE_REGISTRATION=0` on the public server.
+- DNS was moved from Squarespace; old resolvers may serve the old A records until the 30-minute TTL
+  expires. Flush the Mac cache with `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.

@@ -1,0 +1,21 @@
+[Unit]
+Description=LLM-IDE core
+After=network.target
+
+[Service]
+Type=simple
+User=llmide
+Group=llmide
+WorkingDirectory=/srv/llm-ide/repo/extension
+EnvironmentFile=/etc/llm-ide/core.env
+ExecStart=/opt/node22/bin/node server.mjs
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/llmide
+[Install]
+WantedBy=multi-user.target
