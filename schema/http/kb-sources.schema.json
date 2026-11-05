@@ -1105,7 +1105,8 @@
           "type": "object",
           "required": ["provider"],
           "properties": {
-            "provider": { "type": "string", "enum": ["github", "gitlab"], "description": "Which vault token to verify." }
+            "provider": { "type": "string", "enum": ["github", "gitlab"], "description": "Which vault token to verify." },
+            "baseUrl": { "type": "string", "description": "Self-hosted GitLab HTTPS base URL; ignored for GitHub.", "x-optional": true }
           }
         }
       },

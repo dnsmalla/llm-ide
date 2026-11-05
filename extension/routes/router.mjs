@@ -322,15 +322,27 @@ export async function handleKB(req, res) {
     }
 
     // Repositories settings: verify the provider token that is already in the vault. The browser never supplies it
-    // and the response never echoes it. Fixed hosts, pinned fetch, 15 s ceiling.
+    // and the response never echoes it. GitHub uses its fixed host; GitLab may use a validated public HTTPS base.
+    // Pinned fetch, 15 s ceiling.
     if (req.method === 'POST' && url.split('?')[0] === '/kb/repos/check-token') {
       let body;
       try { body = parseJSON(await readBody(req, 16 * 1024)); } catch { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return true; }
       const provider = body?.provider;
       if (provider !== 'github' && provider !== 'gitlab') { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider must be github or gitlab' } }); return true; }
+      // Self-hosted GitLab: an explicit public HTTPS instance, with no credentials/query/hash. Pinned fetch still
+      // refuses private/loopback addresses; supporting a LAN/VPN instance is deliberately left out (SSRF surface).
+      let gitlabBase = 'https://gitlab.com';
+      if (provider === 'gitlab' && body?.baseUrl !== undefined) {
+        if (typeof body.baseUrl !== 'string' || body.baseUrl.length > 300) { sendJSON(res, 400, { error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an https URL.' } }); return true; }
+        try {
+          const u = new URL(body.baseUrl);
+          if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw new Error('bad base');
+          gitlabBase = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+        } catch { sendJSON(res, 400, { error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an https URL without credentials, query or fragment.' } }); return true; }
+      }
       const token = getSecret(kb.getDb(), userId, `${provider}.token`);
       if (!token) { sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_TOKEN_MISSING`, message: `Save a ${provider === 'github' ? 'GitHub' : 'GitLab'} token first.` } }); return true; }
-      const endpoint = provider === 'github' ? 'https://api.github.com/user' : 'https://gitlab.com/api/v4/user';
+      const endpoint = provider === 'github' ? 'https://api.github.com/user' : `${gitlabBase}/api/v4/user`;
       try {
         const r = await makePinnedFetch()(endpoint, {
           headers: provider === 'github'
@@ -341,7 +353,11 @@ export async function handleKB(req, res) {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
           const message = typeof data?.message === 'string' ? data.message.slice(0, 300) : typeof data?.error === 'string' ? data.error.slice(0, 300) : `The ${provider === 'github' ? 'GitHub' : 'GitLab'} token was refused (${r.status}).`;
-          sendJSON(res, r.status === 401 || r.status === 403 ? 403 : 502, { error: { code: 'TOKEN_REFUSED', message } });
+          // Keep the provider's 401 ("this token is invalid/expired") distinct from 403 ("valid but not allowed").
+          // Never answer 401 here: the desktop shell treats any 401 as its own expired session and signs out.
+          if (r.status === 401) { sendJSON(res, 403, { error: { code: 'TOKEN_UNAUTHORIZED', message } }); return true; }
+          if (r.status === 403) { sendJSON(res, 403, { error: { code: 'TOKEN_FORBIDDEN', message } }); return true; }
+          sendJSON(res, 502, { error: { code: 'PROVIDER_ERROR', message } });
           return true;
         }
         const login = typeof data?.login === 'string' ? data.login : typeof data?.username === 'string' ? data.username : '';

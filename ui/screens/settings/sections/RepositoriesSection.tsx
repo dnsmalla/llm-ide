@@ -96,7 +96,7 @@ export default function RepositoriesSection() {
   const provider = REPO_PROVIDERS.find((p) => p.id === tab)!;
   const connected = secrets?.has(provider.tokenKey) ?? false;
   const gitlabHost = hostOf(cfg.gitlabBaseUrl);
-  const checkSupported = provider.id === "github" || gitlabHost === "gitlab.com" || gitlabHost === "www.gitlab.com";
+  const checkSupported = provider.id === "github" || (gitlabHost !== "" && /^https:\/\//i.test(normalizeBase(cfg.gitlabBaseUrl)));
   const both = (secrets?.has("gitlab.token") ?? false) && (secrets?.has("github.token") ?? false);
   const saved = cfg.saved[provider.id];
   const ops = cfg.operations[provider.id];
@@ -127,7 +127,10 @@ export default function RepositoriesSection() {
     setError(null);
     setStatus(null);
     try {
-      const body = await call(client, "POST", "/kb/repos/check-token", { provider: provider.id });
+      const body = await call(client, "POST", "/kb/repos/check-token", {
+        provider: provider.id,
+        ...(provider.id === "gitlab" ? { baseUrl: normalizeBase(cfg.gitlabBaseUrl) } : {}),
+      });
       const b = body && typeof body === "object" ? body as { login?: unknown; name?: unknown; scopes?: unknown } : {};
       const login = typeof b.login === "string" ? b.login : "";
       const scopes = Array.isArray(b.scopes) ? b.scopes.filter((x): x is string => typeof x === "string") : [];
@@ -323,7 +326,7 @@ export default function RepositoriesSection() {
               <Button onClick={() => setVisible((v) => !v)}>{visible ? "Hide" : "Show"}</Button>
             ) : null}
             <Button tone="primary" disabled={busy || draft.trim() === ""} onClick={() => void saveToken()}>{busy ? "Saving…" : "Save token"}</Button>
-            {connected ? <Button disabled={busy || checking || !checkSupported} label={checkSupported ? "Check token" : "Token check is only available for gitlab.com; the saved host is custom"} onClick={() => void checkToken()}>{checking ? "Checking…" : "Check token"}</Button> : null}
+            {connected ? <Button disabled={busy || checking || !checkSupported} label={checkSupported ? "Check token" : "Enter a valid GitLab instance URL first"} onClick={() => void checkToken()}>{checking ? "Checking…" : "Check token"}</Button> : null}
             {connected ? <Button tone="danger" disabled={busy || checking} onClick={() => void clearToken()}>Clear token</Button> : null}
           </div>
           <span className="st-hint">

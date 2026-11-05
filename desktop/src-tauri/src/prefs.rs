@@ -73,6 +73,22 @@ pub struct LoopDefaults {
     pub write_summary_note: bool,
 }
 
+impl LoopDefaults {
+    /// The same bounds the Settings card and the TypeScript decoder enforce. A hand-edited or hostile
+    /// prefs.json cannot hand the Loop engine a zero/absurd budget.
+    fn clamped(mut self) -> Self {
+        self.max_iterations = self.max_iterations.clamp(1, 100);
+        self.consecutive_failure_stop = self.consecutive_failure_stop.clamp(1, 20);
+        self.wall_clock_minutes = self.wall_clock_minutes.min(1440);
+        self.max_repairs_per_stage = self.max_repairs_per_stage.min(20);
+        self.pause_timeout_minutes = self.pause_timeout_minutes.min(240);
+        self.protected_path_policy = match self.protected_path_policy.as_str() {
+            "stop" => "stop", "warn" => "warn", "off" => "off", _ => "revert",
+        }.to_string();
+        self
+    }
+}
+
 impl Default for LoopDefaults {
     fn default() -> Self {
         Self {
@@ -173,10 +189,7 @@ impl Prefs {
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.loop_defaults {
-            n.loop_defaults = v.clone();
-            n.loop_defaults.protected_path_policy = match v.protected_path_policy.as_str() {
-                "stop" => "stop", "warn" => "warn", "off" => "off", _ => "revert",
-            }.to_string();
+            n.loop_defaults = v.clone().clamped();
         }
         if let Some(v) = &p.features {
             if v.is_empty() {
@@ -572,5 +585,25 @@ mod loop_default_tests {
         assert!(p.loop_defaults.write_summary_note);
         let back = parse(&serde_json::to_string(&p).unwrap());
         assert_eq!(back.loop_defaults, p.loop_defaults);
+    }
+
+    #[test]
+    fn loop_defaults_clamp_every_bound() {
+        let d = LoopDefaults {
+            max_iterations: 0, consecutive_failure_stop: 99, wall_clock_minutes: 99_999,
+            max_repairs_per_stage: 999, pause_timeout_minutes: 999,
+            protected_path_policy: "off".to_string(), write_summary_note: false,
+        };
+        let p = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(d), ..Default::default() });
+        assert_eq!(p.loop_defaults.max_iterations, 1);
+        assert_eq!(p.loop_defaults.consecutive_failure_stop, 20);
+        assert_eq!(p.loop_defaults.wall_clock_minutes, 1440);
+        assert_eq!(p.loop_defaults.max_repairs_per_stage, 20);
+        assert_eq!(p.loop_defaults.pause_timeout_minutes, 240);
+        assert_eq!(p.loop_defaults.protected_path_policy, "off");
+        let high = LoopDefaults { max_iterations: 500, consecutive_failure_stop: 0, ..LoopDefaults::default() };
+        let q = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(high), ..Default::default() });
+        assert_eq!(q.loop_defaults.max_iterations, 100);
+        assert_eq!(q.loop_defaults.consecutive_failure_stop, 1);
     }
 }

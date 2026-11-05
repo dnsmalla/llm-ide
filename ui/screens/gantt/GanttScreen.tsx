@@ -24,7 +24,7 @@ import {
   projectOptions,
   timelineRange,
   todayScrollLeft,
-  shiftScheduleBody,
+  enqueueShift, scheduleBody, shiftScheduleBody, type QueuedShift,
   type GanttCategory,
   type GanttRow,
   type Schedule,
@@ -78,6 +78,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [detail, setDetail] = useState<Issue | null>(null);
   const [nestedNote, setNestedNote] = useState(false);
   const shiftingRef = useRef(false);
+  const shiftQueueRef = useRef<QueuedShift[]>([]);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -127,16 +128,34 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const today = localToday();
   /** Drag/keyboard shift: save the moved dates through the existing schedule overlay route. */
   const shiftRow = useCallback(async (row: GanttRow, days: number) => {
-    const body = shiftScheduleBody(row, days);
-    if (body === null || shiftingRef.current) return;
+    if (shiftScheduleBody(row, days) === null) return;
+    enqueueShift(shiftQueueRef.current, row, days);
+    if (shiftingRef.current) return;
     shiftingRef.current = true;
     try {
-      const r = await deps.request("PUT", "/kb/issue-schedule", body);
-      if (r.status !== 200) { setNotice(`The schedule could not be moved (${r.status}).`); return; }
-      setNotice(`Moved ${issueLabel(row.issue)} ${days > 0 ? "+" : ""}${days} day${Math.abs(days) === 1 ? "" : "s"}.`);
-      await load();
-    } catch { setNotice("The core is not reachable right now."); }
-    finally { shiftingRef.current = false; }
+      while (shiftQueueRef.current.length > 0) {
+        const item = shiftQueueRef.current[0]!;
+        const savedDays = item.days;
+        const body = scheduleBody(item.row, savedDays);
+        if (body === null) { shiftQueueRef.current.shift(); continue; }
+        const r = await deps.request("PUT", "/kb/issue-schedule", body);
+        if (r.status !== 200) {
+          setNotice(`The schedule could not be moved (${r.status}).`);
+          shiftQueueRef.current.length = 0;
+          return;
+        }
+        setNotice(savedDays === 0
+          ? `Restored ${issueLabel(item.row.issue)} to its original dates.`
+          : `Moved ${issueLabel(item.row.issue)} ${savedDays > 0 ? "+" : ""}${savedDays} day${Math.abs(savedDays) === 1 ? "" : "s"}.`);
+        // Keep the item until the reload finishes: a compensating shift during the load must merge into the
+        // SAME queued target, not start a new one from the stale pre-save row.
+        await load();
+        if (item.days === savedDays) shiftQueueRef.current.shift();
+      }
+    } catch {
+      setNotice("The core is not reachable right now.");
+      shiftQueueRef.current.length = 0;
+    } finally { shiftingRef.current = false; }
   }, [deps, load]);
   const onShift = useCallback((row: GanttRow, days: number) => { void shiftRow(row, days); }, [shiftRow]);
 
