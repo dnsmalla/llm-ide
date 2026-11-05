@@ -237,12 +237,16 @@ test("DocGenScreen parity: Setup delivery list is honest, no manual edit, and th
 });
 
 
-test("Visual sibling thumbnails exclude the current image, huge files and unsupported formats", () => {
+test("Visual image strip excludes huge files and unsupported formats, keeps the current image", () => {
   const row = (name, size, kind = "file") => ({ name, path: `data/${name}`, kind, size });
   const rows = [
     row("current.png", 10), row("b.jpg", 20), row("a.webp", 30), row("huge.png", 6_000_000),
+    row("boundary.png", 5_000_000), row("over.png", 5_000_001), row("UPPER.PNG", 10),
     row("vector.svg", 10), row("notes.md", 10), row("folder.png", 10, "dir"), row("zero.png", 0),
   ];
-  assert.deepEqual(E.siblingImages(rows, "data/current.png").map((r) => r.name), ["a.webp", "b.jpg"]);
+  const before = rows.map((r) => r.name).join(",");
+  assert.deepEqual(E.siblingImages(rows, "data/current.png").map((r) => r.name), ["a.webp", "b.jpg", "boundary.png", "current.png", "UPPER.PNG"]);
   assert.deepEqual(E.siblingImages(rows, "data/current.png", 1).map((r) => r.name), ["a.webp"]);
+  assert.deepEqual(E.siblingImages(rows, "data/current.png", 0), []);
+  assert.equal(rows.map((r) => r.name).join(","), before, "the input rows are not reordered");
 });

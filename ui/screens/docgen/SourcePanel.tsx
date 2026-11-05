@@ -10,6 +10,7 @@ import { looksTextual, MAX_SOURCE_FILE_BYTES, walkFolder, type WalkProgress } fr
 import { estimateChars, fileItem, noteItem, sendOrder, type SourceItem, type SourceSelection } from "./sources.ts";
 import type { NotesHost } from "../library/host.ts";
 import { VirtualList } from "./VirtualList";
+import { shrinkDataUrl } from "./thumbnail.ts";
 
 export interface SourceEnv {
   notes: Pick<NotesHost, "rootGet" | "list"> | null;
@@ -55,14 +56,15 @@ const SOURCE_ROOTS: Record<"doc" | "visual", readonly { path: string; label: str
 };
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i;
+const PREVIEW_EXT = /\.(png|jpe?g|gif|webp)$/i;
 const MAX_THUMB_BYTES = 5_000_000;
 
-/** Sibling images in one folder for the Visual strip: current excluded, bounded, stable name order. */
-export function siblingImages(rows: readonly DirEntryRow[], currentPath: string, max = 12): DirEntryRow[] {
+/** Images in one folder for the Visual strip, including the current one so the strip never reflows while flipping. */
+export function siblingImages(rows: readonly DirEntryRow[], _currentPath: string, max = 12): DirEntryRow[] {
   return rows
-    .filter((r) => r.kind === "file" && r.path !== currentPath && /\.(png|jpe?g|gif|webp)$/i.test(r.name) && r.size > 0 && r.size <= MAX_THUMB_BYTES)
+    .filter((r) => r.kind === "file" && PREVIEW_EXT.test(r.name) && r.size > 0 && r.size <= MAX_THUMB_BYTES)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, max);
+    .slice(0, Math.max(0, max));
 }
 
 export function SourcePanel(p: SourcePanelProps): ReactNode {
@@ -119,6 +121,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   const [walk, setWalk] = useState<WalkProgress | null>(null);
   const [preview, setPreview] = useState<{ path: string; url: string } | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const thumbCache = useRef<Map<string, string>>(new Map());
+  const previewSeq = useRef(0);
+  const thumbRef = useRef<HTMLButtonElement | null>(null);
   const [walkNote, setWalkNote] = useState<string | null>(null);
   const walkCtl = useRef<AbortController | null>(null);
   const fs = env.fs;
@@ -187,20 +192,53 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
 
   const siblings = useMemo(() => (preview ? siblingImages(rows, preview.path) : []), [preview, rows]);
   useEffect(() => {
+    setThumbs({});
+    if (!preview) thumbCache.current.clear();
+  }, [preview?.path]);
+  useEffect(() => {
     if (!preview || !env.readImage) return undefined;
     let live = true;
-    setThumbs({});
     void (async () => {
       for (const r of siblings) {
+        if (!live) return;
+        if (r.path === preview.path) continue;
+        const cached = thumbCache.current.get(r.path);
+        if (cached) { setThumbs((old) => (old[r.path] === cached ? old : { ...old, [r.path]: cached })); continue; }
         try {
-          const url = await env.readImage!(r.path);
-          if (live && url) setThumbs((old) => ({ ...old, [r.path]: url }));
+          const full = await env.readImage!(r.path);
+          if (!live) return;
+          if (!full) continue;
+          const thumb = await shrinkDataUrl(full);
+          if (!live) return;
+          thumbCache.current.set(r.path, thumb);
+          setThumbs((old) => ({ ...old, [r.path]: thumb }));
         } catch { /* a sibling that cannot be read is simply omitted */ }
       }
     })();
     return () => { live = false; };
   }, [preview?.path, siblings, env.readImage]);
+  useEffect(() => {
+    if (preview) thumbRef.current?.focus();
+  }, [preview?.path]);
 
+  const showPreview = (path: string, url: string) => {
+    previewSeq.current += 1;
+    setPreview({ path, url });
+  };
+  const openPreview = async (path: string) => {
+    if (!env.readImage || path === preview?.path) return;
+    const seq = ++previewSeq.current;
+    try {
+      const url = await env.readImage(path);
+      if (seq === previewSeq.current && url) setPreview({ path, url });
+    } catch { /* the row's View action stays available for a retry */ }
+  };
+  const closePreview = () => {
+    previewSeq.current += 1;
+    setPreview(null);
+  };
+
+  useEffect(() => { setPreview(null); }, [dir]);
   const root = roots.find((r) => dir === r.path || dir.startsWith(`${r.path}/`)) ?? roots[0]!;
   const rel = dir === root.path ? "" : dir.slice(root.path.length + 1);
   const crumbs = rel === "" ? root.label : `${root.label} / ${rel}`;
@@ -242,16 +280,14 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
       {preview ? (
         <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`}>
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
-          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => setPreview(null)}>Close</button></div>
-          {siblings.length > 0 && (
-            <div className="dg-thumbs" role="listbox" aria-label={`Other images in ${dir || root.label}`}>
-              {siblings.map((r) => {
-                const url = thumbs[r.path];
+          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={closePreview}>Close</button></div>
+          {env.readImage && siblings.length > 0 && (
+            <div className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`}>
+              {siblings.map((r, i) => {
+                const here = r.path === preview.path;
+                const url = here ? preview.url : thumbs[r.path];
                 return (
-                  <button key={r.path} type="button" role="option" aria-selected={false} className="dg-thumb" title={r.name} aria-label={`Preview ${r.name}`} onClick={() => {
-                    if (url) setPreview({ path: r.path, url });
-                    else void env.readImage?.(r.path).then((u) => u && setPreview({ path: r.path, url: u }));
-                  }}>
+                  <button key={r.path} ref={i === 0 ? thumbRef : null} type="button" className="dg-thumb" data-current={here || undefined} aria-current={here ? "true" : undefined} aria-busy={!url && !here} title={r.name} aria-label={here ? `${r.name} (shown)` : `Preview ${r.name}`} onClick={() => void openPreview(r.path)}>
                     {url ? <span className="dg-thumb-img" style={{ backgroundImage: `url(${url})` }} /> : <span className="dg-thumb-wait" aria-hidden="true" />}
                     <span className="dg-thumb-name">{r.name}</span>
                   </button>
@@ -277,7 +313,10 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
             );
           }
           const image = IMAGE_EXT.test(r.name);
-          const reason = image ? (surface !== "visual" ? "image (Visual only)" : r.size > 5_000_000 ? "image over 5 MB" : null) : !looksTextual(r.name) ? "binary" : r.size > MAX_SOURCE_FILE_BYTES ? "too large" : null;
+          const previewable = PREVIEW_EXT.test(r.name);
+          const reason = image
+            ? surface !== "visual" ? "image (Visual only)" : !previewable ? "image (PNG, JPEG, GIF or WebP)" : r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
+            : !looksTextual(r.name) ? "binary" : r.size > MAX_SOURCE_FILE_BYTES ? "too large" : null;
           const key = `file:${r.path}`;
           const checked = selection.has(key);
           return (
@@ -286,8 +325,8 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
               <span className="dg-name">{r.name}</span>
               <UnreadMark sourceKey={key} unreadable={unreadable} />
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
-              {image && reason === null && env.readImage ? (
-                <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && setPreview({ path: r.path, url })); }}>View</button>
+              {previewable && reason === null && env.readImage ? (
+                <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && showPreview(r.path, url)); }}>View</button>
               ) : null}
             </label>
           );
