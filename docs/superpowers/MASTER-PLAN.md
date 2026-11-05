@@ -13,7 +13,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 23 | 42 | 11 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
+| Desktop multi-OS (Tauri) | 24 | 42 | 10 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
 | Mobile (iPhone native, PWA) | 12 | 6 | 11 | 29 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
 | Web app and relay | 7 | 4 | 7 | 18 | Host API web client built (pairing, chat, approvals), installable PWA with an offline shell, production static server and local/domain docs; no relay code yet; manual browser check (`web/MANUAL-CHECK.md`) deferred to the product stage |
 | Chrome extension | 6 | 3 | 7 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -22,7 +22,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 3 | 4 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 116 | 68 | 72 | 256 |  |
+| Total | 117 | 68 | 71 | 256 |  |
 
 ## How the surfaces connect
 
@@ -175,7 +175,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Still open after Wave 3: core comments read route (needs the IC1 to IC3 prerequisites) (me)
 - [x] Crash records of a survived panic are removed on a clean exit: `crash_report::clear_own_on_clean_exit` in the `RunEvent::Exit` path deletes only this process's records (matched by pid), earlier runs' records keep their banner; cargo test `clean_exit_drops_only_this_process_records` (me)
 - [ ] Parity gaps still open after the audit (each needs Rust, a core route, or a product decision): Explorer: dotfile and noise-dir visibility; SCM push/pull/fetch/remote are deliberately absent (need credentials and remote policy); Doc Gen: persistent output destination outside the project (a one-off native Export… copy is built);  Issues/Gantt: milestone/weight edits remain; GitHub/GitLab create/comment/close, nesting GitLab schedule keys and 2,000-issue paging are built; Loop/Auto Tasks: Loop Engineering task, SDK diff, System Check/Self-Heal/SDK Adoption loops, custom tasks, run records the Mac cannot read back (`stages` vs `attempts`); named prompt templates are now built; Settings/Shell: Code Graph file-watch debouncing and the truncation upload banner remain Mac-only (the timer-based auto-update is built) (me)
-- [ ] Decisions for you from the audit: (1) Doc Gen output file naming, the Mac uses `<template>-doc.md` and the desktop `<slug>-YYYYMMDD.md` (existing tests pin the desktop's); (2) the refactor-batch refusal (no rollback on the desktop) stays until a rollback exists (you)
+- [x] Decisions from the audit, delegated 2026-11-05 (UN-107, revisit if wrong): (1) keep the desktop Doc Gen names `<slug>-YYYYMMDD.md` (never overwrite; existing tests pin them); (2) keep the refactor-batch refusal until the desktop has a rollback (you)
 - [x] Native Loop maintainability: the runnable stage kinds now live in one predicate, `isNativeRunnable` in `ui/screens/loop/native/model.ts`, used by the run guard, `runSelectedStage` and the Run stage button (`runStage` keeps its per-kind dispatch); test in `ui/screens/loop/tests/native-model.test.mjs` (me)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
@@ -388,7 +388,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Relay deployment pipeline and monitoring (blocked on S4 hosting) (wait)
 - [ ] Chrome Web Store publishing step in the extension release (you)
 - [x] Release notes / CHANGELOG discipline per surface (October summary by surface in `CHANGELOG.md`, `docs/how-to/maintain-the-changelog.md`) (me)
-- [~] Mac auto-update feed in release builds: `mac-release.yml` now passes `MAC_SU_FEED_URL` / `MAC_SU_PUBLIC_KEY` to `build.sh` (which writes `SUFeedURL` / `SUPublicEDKey`) and fails before building when either secret is missing; open: you add the two secrets (Sparkle `generate_keys`, appcast host) and run one signed build-to-build update (you)
+- [~] Mac auto-update feed in release builds: `mac-release.yml` now passes `MAC_SU_FEED_URL` / `MAC_SU_PUBLIC_KEY` to `build.sh` (which writes `SUFeedURL` / `SUPublicEDKey`) and fails before building when either secret is missing; open: the keys and one signed build-to-build update, deferred to the first Mac release given to anyone else (UN-110) (you)
 
 ## Cross-cutting rules
 

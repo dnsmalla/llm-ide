@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 60 open, 28 done, 88 total
+Open count: 60 open, 29 done, 89 total
 
 ## How to use this file
 
@@ -91,10 +91,6 @@ Open count: 60 open, 28 done, 88 total
   - Why you: agents never kill processes.
   - How: list with `ps -axo pid,etime,command | grep -E 'server.mjs|node --test|swift-test' | grep -v grep`; port holders with `lsof -nP -iTCP:3456 -sTCP:LISTEN` and `lsof -nP -iTCP:3457 -sTCP:LISTEN`; then `kill <pid>` for ones you recognise. Do not kill the backend while the Swift app is in use. Details: [test-hangs.md](../how-to/test-hangs.md#stale-leftover-processes). You already did one clean-up (section E); re-check before UN-001 because the Tauri app adopts a 3456 core as "unverified".
   - Effort: 5 minutes. Blocks: a clean UN-001 and UN-004. Status: re-check before the first run.
-- [ ] **UN-107** Desktop audit decisions: (1) Doc Gen output file naming: the Mac uses `<template>-doc.md`, the desktop `<slug>-YYYYMMDD.md`; (2) keep the refactor-batch refusal until the desktop has a rollback.
-  - Why you: product decisions. Recommendation: (1) keep the desktop names, (2) keep the refusal.
-  - How: answer "go with your recommendation" or choose per item. Source: [MASTER-PLAN](MASTER-PLAN.md) S2 audit decisions row.
-  - Effort: 5 minutes. Blocks: Doc Gen parity and the refactor rollback. Status: open. The Loop missing-default decision is settled and implemented (write on load).
 - [ ] **UN-020** After each push, check CI.
   - Why you: your remote; agents are told not to push.
   - How: `gh run list --limit 5`.
@@ -155,6 +151,7 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 
 You said "do the best, secure, usable for big projects" and agents decided. Each is ticked; reopen any by saying so.
 
+- [x] **UN-107** Desktop audit decisions (2026-11-05, you: "do as per security based"): (1) keep the desktop Doc Gen names `<slug>-YYYYMMDD.md`, which never overwrite an earlier document (the Mac's `<template>-doc.md` does); (2) keep refusing refactor batches until the desktop has a rollback, so a bad multi-file edit can always be undone. The Loop missing-default decision is implemented (write on load). DELEGATED: revisit if wrong.
 - [x] **UN-060** Relay design D1 to D5, D7 to D9: tiered clients (PWA read-only plus low-risk queue), fixed read-only ceiling for remote turns, no recovery code in v1, printed revoke code, fixed-schedule heartbeat with 72-hour IP retention, upload-only extension scope, per-user sharing, external review before public exposure. DELEGATED: revisit if wrong. Source: [relay design](plans/2026-10-31-relay-design.md) section 13.
 - [x] **UN-061** No third-party analytics in the relay or PWA. DELEGATED: revisit if wrong.
 - [x] **UN-062** Sync-kit S1 to S6: keep the native iOS app permanently; freeze new phone surfaces while the relay is unbuilt; extension keeps local-core mode; relay carries a read-and-request subset first; delete PIN pairing at R9; each user enrolls their own devices. DELEGATED: revisit if wrong. Source: [sync-kit section 7](../kits/sync-kit.md).
@@ -167,6 +164,7 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 
 ## D. Later needs (not now; each has a trigger)
 
+- [ ] **UN-110** Mac auto-update keys: run Sparkle's `generate_keys` on your Mac (the private key stays in your Keychain, never in the repo or CI), then add GitHub secrets `MAC_SU_PUBLIC_KEY` (the public half) and `MAC_SU_FEED_URL` (the appcast address; GitHub Releases works, no domain needed), then one signed build-to-build update. Trigger: the first Mac release you give to anyone else; until then a CI release refuses to build without them (decided 2026-11-05, security first: no long-lived signing key before it is needed). How: [release-with-auto-update](../how-to/release-with-auto-update.md). Effort: 30 minutes.
 - [ ] **UN-070** Windows and Linux full passes (build, signing, packaging, manual check). Trigger: the macOS Tauri app reaches parity and daily use. Effort: a day per OS.
 - [ ] **UN-071** macOS signing and notarisation credentials: Apple Developer ID Application certificate (`.p12`), password, team id, notarisation credentials, a production bundle identifier and product name. Trigger: before the first public desktop release. How: [desktop-signing-decisions.md, What you must provide](../how-to/desktop-signing-decisions.md#what-you-must-provide); add as repository secrets.
 - [ ] **UN-072** Windows signing choice (Azure Trusted Signing or an EV certificate) and Linux formats (deb, AppImage). Trigger: when Windows or Linux builds are due. How: same doc, decisions 2 and 3.
