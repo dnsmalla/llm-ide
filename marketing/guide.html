@@ -1,9 +1,22 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Interactive guide — LLM-IDE</title><meta name="description" content="A step-by-step, interactive guide to installing LLM-IDE, creating an account, capturing a meeting and using the main features.">
 <link rel="stylesheet" href="styles.css"></head><body>
-<header class="site"><div class="wrap nav"><a class="brand" href="index.html">LLM<span>-IDE</span></a><ul>
-<li><a href="features.html">Features</a></li><li><a href="guide.html">Guide</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="why.html">Why LLM-IDE</a></li><li><a href="security.html">Security</a></li></ul>
-<a class="cta" href="/app/">Open web app</a> <a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div></header>
+<header class="site"><div class="wrap nav">
+<a class="brand" href="index.html">LLM-IDE</a>
+<ul class="nav-links">
+<li class="nav-product">
+<button class="nav-link" id="product-toggle" type="button" aria-expanded="false" aria-controls="product-menu">Product <svg class="nav-caret" viewBox="0 0 10 6" aria-hidden="true"><path d="m1 1 4 4 4-4"/></svg></button>
+<div class="mega" id="product-menu" hidden>
+<div class="mega-col"><span class="mega-label">Workspace</span><a href="features.html">All features</a><a href="project.html">Project model</a><a href="library.html">Library</a><a href="chat.html">Chat &amp; code</a><a href="issues.html">Issues &amp; Gantt</a></div>
+<div class="mega-col"><span class="mega-label">Intelligence</span><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a><a href="how-it-works.html">How it works</a></div>
+</div>
+</li>
+<li><a href="how-it-works.html">How it works</a></li>
+<li><a href="why.html">Why LLM-IDE</a></li>
+<li><a href="security.html">Security</a></li>
+</ul>
+<div class="nav-actions"><a class="cta ghost" href="/app/">Open app</a><a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div>
+</div></header>
 <main class="docs"><div class="wrap docs-layout">
 <aside class="docs-nav" aria-label="Guide sections">
 <input id="doc-search" type="search" placeholder="Search the guide…" aria-label="Search guide">
@@ -26,5 +39,10 @@
 <section class="doc-section" id="web" data-title="web"><h2>Connect the web app</h2><p>Open <a href="/app/">llm-ide.com/app</a>. The host address is prefilled with the desktop host URL. In the desktop app open <strong>Settings → Host API pairing</strong>, show the PIN, enter it on the web page and pair.</p><p class="fine">The current web link is a temporary direct host connection. The encrypted relay is in development.</p><div class="doc-check"><input type="checkbox" data-step="web"><span>I paired the web app with the desktop.</span></div></section>
 <section class="doc-section" id="trouble" data-title="trouble"><h2>Troubleshooting</h2><ul><li><strong>No passkey prompt:</strong> use Safari/Chrome on a device with iCloud Keychain or Windows Hello; avoid in-app browsers.</li><li><strong>Web app cannot pair:</strong> the desktop must be running, signed in, and showing the pairing PIN; check the host URL.</li><li><strong>Empty project:</strong> open a project first; the Library and Chat are project-scoped.</li><li><strong>AI unavailable:</strong> connect your Claude login or API key in Settings.</li></ul><button class="button secondary" id="reset-trouble" type="button">Reset guide progress</button></section>
 </article></div></main>
-<footer class="site"><div class="wrap foot"><div><strong>LLM-IDE</strong><br><span class="fine">Local-first AI workspace.</span><br><a href="project.html">Project</a> · <a href="auto-tasks.html">Auto Tasks</a> · <a href="loop.html">Loop</a> · <a href="code-graph.html">Graph</a> · <a href="doc-gen.html">Doc Gen</a></div><div><a href="features.html">Features</a> · <a href="tour.html">Tour</a> · <a href="security.html">Security</a> · <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></div></div></footer>
-<script src="site.js"></script></body></html>
+<footer class="site"><div class="wrap foot footer-grid">
+<div class="footer-brand"><a class="brand" href="index.html">LLM-IDE</a><p>Local-first AI workspace.<br>Your work stays on your machine.</p></div>
+<div><h4>Product</h4><a href="features.html">Features</a><a href="project.html">Project</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a></div>
+<div><h4>Explore</h4><a href="how-it-works.html">How it works</a><a href="why.html">Why LLM-IDE</a><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a></div>
+<div><h4>Trust</h4><a href="security.html">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="acceptable-use.html">Acceptable use</a></div>
+</div><div class="wrap footer-bottom"><span>© 2026 LLM-IDE</span><span>Local-first by design</span></div></footer>
+<script src="site.js"></script><script src="nav.js"></script></body></html>

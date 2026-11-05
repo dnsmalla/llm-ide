@@ -1,10 +1,30 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Why LLM-IDE — local-first AI</title><meta name="description" content="Why a local-first workspace with your own AI account is different from cloud AI tools.">
 <link rel="stylesheet" href="styles.css"></head><body>
-<header class="site"><div class="wrap nav"><a class="brand" href="index.html">LLM-IDE</a><ul><li><a href="features.html">Features</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="why.html">Why LLM-IDE</a></li><li><a href="guide.html">Guide</a></li><li><a href="security.html">Security</a></li><li><a href="pricing.html">Pricing</a></li></ul><a class="cta" href="/app/">Open web app</a> <a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div></header>
+<header class="site"><div class="wrap nav">
+<a class="brand" href="index.html">LLM-IDE</a>
+<ul class="nav-links">
+<li class="nav-product">
+<button class="nav-link" id="product-toggle" type="button" aria-expanded="false" aria-controls="product-menu">Product <svg class="nav-caret" viewBox="0 0 10 6" aria-hidden="true"><path d="m1 1 4 4 4-4"/></svg></button>
+<div class="mega" id="product-menu" hidden>
+<div class="mega-col"><span class="mega-label">Workspace</span><a href="features.html">All features</a><a href="project.html">Project model</a><a href="library.html">Library</a><a href="chat.html">Chat &amp; code</a><a href="issues.html">Issues &amp; Gantt</a></div>
+<div class="mega-col"><span class="mega-label">Intelligence</span><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a><a href="how-it-works.html">How it works</a></div>
+</div>
+</li>
+<li><a href="how-it-works.html">How it works</a></li>
+<li><a href="why.html">Why LLM-IDE</a></li>
+<li><a href="security.html">Security</a></li>
+</ul>
+<div class="nav-actions"><a class="cta ghost" href="/app/">Open app</a><a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div>
+</div></header>
 <main><section class="section"><div class="wrap"><p class="eyebrow">The difference</p><h1 style="max-width:850px">AI comes to your data.<br>Not the other way around.</h1><p class="lead">Cloud AI tools ask you to move your work into their product. LLM-IDE keeps the product around your work.</p></div></section>
 <section class="section"><div class="wrap"><div class="local-visual"><div class="local-box cloud"><h3><svg class="icon"><use href="icons.svg#shield"/></svg>Typical cloud workspace</h3><ul><li>Meetings uploaded to vendor storage</li><li>Code and chats on vendor servers</li><li>Vendor subscription + model markup</li><li>Remote access controlled by vendor</li></ul></div><div class="local-box desktop"><h3><svg class="icon"><use href="icons.svg#desktop"/></svg>LLM-IDE</h3><ul><li>Project stays in local SQLite/files</li><li>Your own Claude login or API key</li><li>Account service stores identity only</li><li>Desktop approves every device</li></ul></div></div></div></section>
 <section class="section"><div class="wrap"><div class="grid"><div class="card"><div class="card-icon"><svg class="icon lg"><use href="icons.svg#desktop"/></svg></div><h3>Local by architecture</h3><p>The core binds to loopback. The desktop initiates outbound connections; no public core port.</p></div><div class="card"><div class="card-icon"><svg class="icon lg"><use href="icons.svg#shield"/></svg></div><h3>Small cloud surface</h3><p>Identity, passkeys, sessions and device list. No meetings, code, chats or AI keys.</p></div><div class="card"><div class="card-icon"><svg class="icon lg"><use href="icons.svg#loop"/></svg></div><h3>Approval-first agents</h3><p>Tool calls and code edits are explicit. Protected paths and permissions are enforced by the host.</p></div></div></div></section>
 <section class="section"><div class="wrap"><div class="visual-band"><div><p class="eyebrow">One project</p><h2>Context is the feature.</h2><p class="lead">A meeting, a document, an issue and a code change are one story. LLM-IDE keeps them in one place so AI can reason about the whole thing.</p><a class="button secondary" href="how-it-works.html">See the architecture</a></div><div class="feature-visual"><div class="mock-grid"><div class="mock-box">Meeting</div><div class="mock-box">Decision</div><div class="mock-box">Issue</div><div class="mock-box">Code</div></div><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Shared local project</div></div></div></div></section></main>
-<footer class="site"><div class="wrap foot"><div><strong>LLM-IDE</strong><br><span class="fine">Local-first AI workspace.</span><br><a href="project.html">Project</a> · <a href="auto-tasks.html">Auto Tasks</a> · <a href="loop.html">Loop</a> · <a href="code-graph.html">Graph</a> · <a href="doc-gen.html">Doc Gen</a></div><div><a href="features.html">Features</a> · <a href="guide.html">Guide</a> · <a href="security.html">Security</a> · <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></div></div></footer>
-<script src="visuals.js"></script></body></html>
+<footer class="site"><div class="wrap foot footer-grid">
+<div class="footer-brand"><a class="brand" href="index.html">LLM-IDE</a><p>Local-first AI workspace.<br>Your work stays on your machine.</p></div>
+<div><h4>Product</h4><a href="features.html">Features</a><a href="project.html">Project</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a></div>
+<div><h4>Explore</h4><a href="how-it-works.html">How it works</a><a href="why.html">Why LLM-IDE</a><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a></div>
+<div><h4>Trust</h4><a href="security.html">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="acceptable-use.html">Acceptable use</a></div>
+</div><div class="wrap footer-bottom"><span>© 2026 LLM-IDE</span><span>Local-first by design</span></div></footer>
+<script src="visuals.js"></script><script src="nav.js"></script></body></html>

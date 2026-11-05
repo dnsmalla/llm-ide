@@ -1,7 +1,22 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>How it works — LLM-IDE</title><meta name="description" content="Follow the data path from account to desktop, encrypted relay and approved browser.">
 <link rel="stylesheet" href="styles.css"></head><body>
-<header class="site"><div class="wrap nav"><a class="brand" href="index.html">LLM-IDE</a><ul><li><a href="features.html">Features</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="why.html">Why LLM-IDE</a></li><li><a href="guide.html">Guide</a></li><li><a href="security.html">Security</a></li><li><a href="pricing.html">Pricing</a></li></ul><a class="cta" href="/app/">Open web app</a> <a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div></header>
+<header class="site"><div class="wrap nav">
+<a class="brand" href="index.html">LLM-IDE</a>
+<ul class="nav-links">
+<li class="nav-product">
+<button class="nav-link" id="product-toggle" type="button" aria-expanded="false" aria-controls="product-menu">Product <svg class="nav-caret" viewBox="0 0 10 6" aria-hidden="true"><path d="m1 1 4 4 4-4"/></svg></button>
+<div class="mega" id="product-menu" hidden>
+<div class="mega-col"><span class="mega-label">Workspace</span><a href="features.html">All features</a><a href="project.html">Project model</a><a href="library.html">Library</a><a href="chat.html">Chat &amp; code</a><a href="issues.html">Issues &amp; Gantt</a></div>
+<div class="mega-col"><span class="mega-label">Intelligence</span><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a><a href="how-it-works.html">How it works</a></div>
+</div>
+</li>
+<li><a href="how-it-works.html">How it works</a></li>
+<li><a href="why.html">Why LLM-IDE</a></li>
+<li><a href="security.html">Security</a></li>
+</ul>
+<div class="nav-actions"><a class="cta ghost" href="/app/">Open app</a><a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div>
+</div></header>
 <main><section class="section"><div class="wrap"><p class="eyebrow">Follow the data</p><h1 style="max-width:850px">Identity in the cloud.<br>Everything else on your desk.</h1><p class="lead">Click a stage to see what crosses the boundary.</p>
 <div class="pipeline" role="tablist" aria-label="Data path">
 <button class="pipe-btn" role="tab" aria-selected="true" data-stage="account"><b>01 · Account</b><span>Identity only</span></button>
@@ -15,6 +30,11 @@
 <div class="pipe-detail" data-detail="device" hidden><div><h3>Use the workspace anywhere</h3><p>The approved browser or phone asks the desktop for answers and actions. The desktop remains the authority; the cloud remains blind.</p><ul class="checks"><li>Passkey sign-in</li><li>Desktop approval</li><li>Revoke at any time</li></ul></div><div class="feature-visual" style="min-height:180px"><svg class="icon lg" style="color:var(--rose)"><use href="icons.svg#plan"/></svg><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Tiered access</div></div></div>
 </div></section>
 <section class="section"><div class="wrap"><p class="eyebrow">Four steps to a project</p><div class="grid"><div class="card"><h3>1 · Create</h3><p>Create an account with a passkey. No password, no email link in this preview.</p></div><div class="card"><h3>2 · Open</h3><p>Sign in to the desktop app and open the project folder.</p></div><div class="card"><h3>3 · Connect</h3><p>Capture a meeting, connect a source, or link the web app.</p></div><div class="card"><h3>4 · Ask</h3><p>Chat, review, plan and automate with the project in context.</p></div></div>
-<div class="actions" style="margin-top:22px"><a class="button" href="https://accounts.llm-ide.com/">Create account</a><a class="button secondary" href="guide.html">Open the interactive guide</a></div></div></section></main>
-<footer class="site"><div class="wrap foot"><div><strong>LLM-IDE</strong><br><span class="fine">Local-first AI workspace.</span><br><a href="project.html">Project</a> · <a href="auto-tasks.html">Auto Tasks</a> · <a href="loop.html">Loop</a> · <a href="code-graph.html">Graph</a> · <a href="doc-gen.html">Doc Gen</a></div><div><a href="features.html">Features</a> · <a href="guide.html">Guide</a> · <a href="security.html">Security</a> · <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></div></div></footer>
-<script src="visuals.js"></script></body></html>
+<div class="actions" style="margin-top:22px"><a class="button" href="https://accounts.llm-ide.com/">Create account</a><a class="button secondary" href="features.html">Explore features</a></div></div></section></main>
+<footer class="site"><div class="wrap foot footer-grid">
+<div class="footer-brand"><a class="brand" href="index.html">LLM-IDE</a><p>Local-first AI workspace.<br>Your work stays on your machine.</p></div>
+<div><h4>Product</h4><a href="features.html">Features</a><a href="project.html">Project</a><a href="auto-tasks.html">Auto Tasks</a><a href="loop.html">Loop</a></div>
+<div><h4>Explore</h4><a href="how-it-works.html">How it works</a><a href="why.html">Why LLM-IDE</a><a href="code-graph.html">Code Graph</a><a href="doc-gen.html">Doc Gen</a></div>
+<div><h4>Trust</h4><a href="security.html">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="acceptable-use.html">Acceptable use</a></div>
+</div><div class="wrap footer-bottom"><span>© 2026 LLM-IDE</span><span>Local-first by design</span></div></footer>
+<script src="visuals.js"></script><script src="nav.js"></script></body></html>
