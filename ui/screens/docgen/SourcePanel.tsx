@@ -125,6 +125,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   const [walk, setWalk] = useState<WalkProgress | null>(null);
   const [preview, setPreview] = useState<{ path: string; url: string } | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [thumbsReady, setThumbsReady] = useState(false);
   const thumbCache = useRef<Map<string, string>>(new Map());
   const previewSeq = useRef(0);
   const stripRef = useRef<HTMLDivElement | null>(null);
@@ -204,7 +205,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   useEffect(() => {
     if (!preview || !env.readImage) return undefined;
     let live = true;
+    setThumbsReady(false);
     void (async () => {
+      try {
       for (const r of siblings) {
         if (!live) return;
         if (r.path === preview.path) continue;
@@ -220,6 +223,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
           setThumbs((old) => ({ ...old, [r.path]: thumb }));
         } catch { /* a sibling that cannot be read is simply omitted */ }
       }
+      } finally { if (live) setThumbsReady(true); }
     })();
     return () => { live = false; };
   }, [preview?.path, siblings, env.readImage]);
@@ -287,7 +291,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
           <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => closePreview(true)}>Close</button></div>
           {env.readImage && siblings.length > 1 && (
-            <div ref={stripRef} className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`} aria-busy={siblings.some((r) => r.path !== preview.path && !thumbs[r.path])}>
+            <div ref={stripRef} className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`} aria-busy={!thumbsReady}>
               {siblings.map((r) => {
                 const here = r.path === preview.path;
                 const url = here ? preview.url : thumbs[r.path];

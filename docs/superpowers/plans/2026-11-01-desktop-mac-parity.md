@@ -25,7 +25,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 | 8 | Gantt | `Features/Issues/Gantt/` | `ui/screens/gantt/` | month/today/filters/validation done |
 | 9 | Loop | `Features/Loop/` | `ui/screens/loop/` | bridge, history/poll; budgets/policy Mac-only |
 | 10 | Doc Gen | `Features/Generation/DocGen/` | `ui/screens/docgen/` | destination, Use chat, templates/import, commands, chat column |
-| 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources + source preview done; result viewer/thumbnails pending |
+| 11 | Visual | `Features/Generation/Visual/` | `ui/screens/docgen/visual.tsx` | image sources, source preview and sibling-source thumbnails done; result viewer pending |
 | 12 | Library | `Features/Library/` | `ui/screens/library/` | single scroll, gist, toolbar/re-summarize/export, menus/prefs/⌘F |
 | 13 | Settings | `Features/Settings/` | `ui/screens/settings/` | toolbar/SDK/login/providers edit/sign-out-forget; updates honest note |
 | 14 | Home / Welcome | `Shell/Welcome/` | `ui/screens/welcome/` | Home target, reset banner; recency timestamps Mac-only |
@@ -41,7 +41,7 @@ views, controls and functions; Mac-only limits are stated in the UI, not faked. 
 ### Graph / Doc Gen / Visual
 - **Graph**: Code / InfiniteBrain / All generation through the Mac-style left run panel; no desktop-only mode/scan presets, no arbitrary graph.json opener. The bundled GraphKit CLI runs from a temp `.cjs` copy (a checkout app under `desktop/` otherwise makes Node treat it as ESM and every generate fails); a lost WebGL context rebuilds the view automatically with the saved camera. Empty `llm-doc` reports why InfiniteBrain has nothing to draw. Routines/storage, the Mac Library tree/quick-pick and 3D canvas remain Mac-local.
 - **Doc Gen**: editable result, Preview/Raw, configurable project-relative destination, Use-chat source, Markdown template import, template/command management, embedded Chat column. The Mac-only destination providers (Box/Slack/email) are shown as not wired.
-- **Visual**: image sources and source preview are real. The core returns text for Visual, so there is no image result viewer to mirror; the Mac’s local image viewer has no desktop equivalent.
+- **Visual**: image sources, source preview and a sibling-source thumbnail strip are real. The core returns text for Visual, so there is no image result viewer to mirror; the Mac’s local result image viewer has no desktop equivalent.
 
 ### Issues / Gantt / Review Conflicts
 - **Issues**: read-only cached detail, Mac column order, label/state filters, saved-repository picker, shortcuts. Create/comment/close/drag need provider write routes the core does not expose, so they remain absent; metadata is core-limited.
