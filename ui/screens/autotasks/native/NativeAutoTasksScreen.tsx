@@ -16,7 +16,7 @@ import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } fr
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
-import { releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
+import { autoTaskBusy, releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
 import { decideRun, resolvePath, type Resolve } from "./usage.ts";
 import { guardedAgentCall, type AgentWrites } from "../../loop/native/agent-call.ts";
@@ -115,6 +115,9 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         const c = state.configs[t.id];
         if (!scheduledRunAllowed(t.id, c, hasRepo) || !validateCron(c.cron)) continue;
         if (!cronMatches(c.cron, now)) continue;
+        // Do not arm a scheduled task that cannot start: the shell scheduler or another run may hold the shared lock.
+        // runTask acquires synchronously before its first await, so this check is race-free with it.
+        if (autoTaskBusy()) return;
         const key = `${t.id}:${minute}`;
         if (firedRef.current[key]) continue;
         let persisted: Record<string, string> = {};
