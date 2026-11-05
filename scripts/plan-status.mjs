@@ -2,7 +2,7 @@
 // Status of docs/superpowers/MASTER-PLAN.md.
 //
 // Reads every `## ` section that holds checkbox lines and counts, per section:
-//   - [x] done   - [~] partial   - [ ] not started
+//   - [x] done   - [~] partial   - [ ] not started   (- [-] retired/parked: not counted)
 // then prints a table (default), JSON (--json), or verifies that the numbers in
 // the plan's "Status dashboard" table equal the computed ones (--check, exit 1
 // on drift). --fix rewrites the dashboard numbers in place from the checkboxes.
