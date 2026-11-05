@@ -4861,7 +4861,7 @@ export type PostHostApiPinResponse200 = {
   pin?: string;
   /** ms since epoch, 10 minutes after minting */
   expiresAt?: number;
-  /** the v1 listener's bound port (wss://<host>:<port>/host-api/v1 in TLS mode, ws://127.0.0.1:<port>/host-api/v1 in dev mode) */
+  /** the v1 listener's bound port (wss://<host>:<port>/host-api/v1 in TLS mode, ws://127.0.0.1:<port>/host-api/v1 in dev mode) or, when only the relay bridge is on, the core's own port (ws://127.0.0.1:<port>/host-api/relay-bridge) */
   port?: number;
   /** TLS mode: sha256: + unpadded base64url SHA-256 of the certificate's DER SubjectPublicKeyInfo, which the client pins; null for the plaintext dev listener */
   fingerprint?: string | null;

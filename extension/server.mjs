@@ -510,6 +510,24 @@ const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 let bus = null;
 // Host API v1 listener (config.hostApiMode 'tls' or 'dev'); { gateway, listener, fingerprint } once started.
 let hostApi = null;
+// One Host API gateway for the LAN/dev listener and the relay bridge (lazy: off the boot path).
+let gatewayPromise = null;
+function ensureHostApiGateway() {
+  if (hostApi?.gateway) return Promise.resolve(hostApi.gateway);
+  gatewayPromise ??= (async () => {
+    const { createGateway } = await import('./routes/host-api/gateway.mjs');
+    const { sessionTransport } = await import('./server/host-api-listener.mjs');
+    const { hostname } = await import('node:os');
+    const { sharedAuditSink } = await import('./routes/host-api/audit.mjs');
+    const audit = sharedAuditSink();
+    const gateway = createGateway({ hostName: () => hostname(), log: (l) => logger.info(l), certificateFingerprint: () => hostApi?.fingerprint ?? null,
+      audit: (event, fields) => audit.record(event, fields), ...sessionTransport });
+    hostApi ??= { gateway, listener: null, fingerprint: null };
+    hostApi.gateway = gateway;
+    return gateway;
+  })();
+  return gatewayPromise;
+}
 // Feature route-group handlers, filled at boot (see initFeatureRoutes below).
 let featureHandlers = {};
 
@@ -1069,6 +1087,10 @@ const server = http.createServer(async (req, res) => {
     }
   }
 });
+if (config.hostApiRelay) {
+  void import('./server/relay-bridge.mjs').then((m) => m.attachRelayBridge(server, { ensureGateway: ensureHostApiGateway }));
+}
+
 
 const SERVER_STARTED_AT = Date.now();
 
@@ -1179,7 +1201,7 @@ function shutdown(signal) {
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
   stopBackgroundOutcomePoller();
-  if (hostApi) { try { hostApi.gateway.closeAll(); void hostApi.listener.close(); } catch { /* best-effort */ } }
+  if (hostApi) { try { hostApi.gateway.closeAll(); void hostApi.listener?.close(); } catch { /* best-effort */ } }
   // Command bus: end open event streams (server.close waits for them) and abort running jobs (their process groups).
   closeBusStreams();
   const busStopped = bus ? bus.stop().catch((err) => logger.warn('shutdown_bus_stop_failed', { error: err.message })) : Promise.resolve();
@@ -1489,8 +1511,7 @@ server.listen(PORT, HOST, () => {
   if (config.hostApiMode !== 'off') {
     void (async () => {
       try {
-        const { createGateway } = await import('./routes/host-api/gateway.mjs');
-        const { startHostApiListener, sessionTransport } = await import('./server/host-api-listener.mjs');
+        const { startHostApiListener } = await import('./server/host-api-listener.mjs');
         const { hostname } = await import('node:os');
         const log = (l) => logger.info(l);
         const { sharedAuditSink, listenerRefusalAuditor, identityEventAuditor } = await import('./routes/host-api/audit.mjs');
@@ -1503,8 +1524,7 @@ server.listen(PORT, HOST, () => {
           tls = { certPem: id.certPem, keyPem: id.keyPem };
           fingerprint = id.fingerprint;
         }
-        const gateway = createGateway({ hostName: () => hostname(), log, certificateFingerprint: () => fingerprint,
-          audit: (event, fields) => audit.record(event, fields), ...sessionTransport });
+        const gateway = await ensureHostApiGateway();
         // De-duplicated per peer for 60 s and capped per event type, so a refused flood cannot grow audit_log.
         const onRefused = listenerRefusalAuditor(audit);
         const listener = await startHostApiListener({ gateway, tls, log, onRefused });
