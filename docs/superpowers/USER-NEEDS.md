@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 62 open, 30 done, 92 total
+Open count: 61 open, 31 done, 92 total
 
 ## How to use this file
 
@@ -174,7 +174,7 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [ ] **UN-076** Record real meetings so the live archive ack and meeting flows can be switched on; meetings are one feature and not a blocker today. Trigger: when you want meeting notes. Unblocks: M1, M2 (7-day shadow soak), M3, L1 legacy duplicate deletion.
 - [ ] **UN-077** Headless always-on core decision (design only for now, see UN-033). Trigger: before command-bus S6.
 - [ ] **UN-078** Push notifications for the phone. Trigger: after the relay exists.
-- [ ] **UN-079** On-device TLS checks (ATS check, legacy cleartext path, packet capture). Trigger: when the TLS slice is built; list in [verification.md](../mobile/verification.md).
+- [x] **UN-079** On-device TLS checks (ATS check, legacy cleartext path, packet capture). Trigger: when the TLS slice is built; list in [verification.md](../mobile/verification.md). Status: done 2026-11-05, you tested on a real iPhone.
 - [ ] **UN-080** App Store submission state check (`ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified). Trigger: when you want the iPhone app released.
 - [ ] **UN-081** Chrome Web Store listing, review and the publishing step in the extension release. Trigger: when the extension is meant for other people.
 - [ ] **UN-082** Retire cleartext `:3006` and PIN pairing once the relay reaches parity. Trigger: relay parity (R9).
