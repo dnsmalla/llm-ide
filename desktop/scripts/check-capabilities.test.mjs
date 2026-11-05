@@ -41,6 +41,7 @@ test('core permissions outside the allowlist and unknown permissions fail; allow
   const withPerm = (p) => ({ ...ok(), capabilities: { 'a.json': cap([...base, p]) } });
   assert.deepEqual(check(withPerm('core:window:allow-start-dragging')), []);
   assert.deepEqual(check(withPerm('core:event:allow-listen')), []);
+  assert.deepEqual(check(withPerm('core:event:allow-unlisten')), []);
   for (const bad of ['core:window:allow-close', 'core:webview:allow-create-webview-window', 'weird:thing']) {
     assert.ok(check(withPerm(bad)).length, bad);
   }

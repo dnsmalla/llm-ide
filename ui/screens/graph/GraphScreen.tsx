@@ -36,6 +36,8 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const loadedFor = useRef<string | null | undefined>(undefined);
   const staleWhileHidden = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const camera = useRef<ViewCamera | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [mode, setMode] = useState<"code" | "memory" | "all">("code");
@@ -71,12 +73,12 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     let live = true;
     let un: (() => void) | null = null;
     void import("@tauri-apps/api/event").then(({ listen }) => listen("graph-auto-updated", () => {
-      if (!active) { staleWhileHidden.current = true; return; }
+      if (!activeRef.current) { staleWhileHidden.current = true; return; }
       loadedFor.current = null;
       void store.load(projectRoot, graphCandidates(mode));
     })).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
     return () => { live = false; un?.(); };
-  }, [active, projectRoot, mode, store]);
+  }, [projectRoot, mode, store]);
   useEffect(() => {
     if (!active || !staleWhileHidden.current) return;
     staleWhileHidden.current = false;
