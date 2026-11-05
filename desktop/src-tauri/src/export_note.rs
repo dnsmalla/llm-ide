@@ -38,7 +38,10 @@ pub async fn export_note(name: String, text: String, title: Option<String>) -> R
     if text.len() > MAX_EXPORT_BYTES {
         return Err("The note is too large to export.".into());
     }
-    let title = title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "Export Meeting".into());
+    let title = title
+        .map(|t| t.chars().filter(|c| !c.is_control()).take(80).collect::<String>().trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Export Meeting".into());
     let Some(file) = rfd::AsyncFileDialog::new()
         .set_title(title)
         .set_file_name(export_file_name(&name))

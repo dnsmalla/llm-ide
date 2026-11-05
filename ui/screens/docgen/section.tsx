@@ -67,7 +67,8 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     setExportNotice(null);
     try {
       const path = await invokeHost<string | null>("export_note", { name, text, title: "Export document" });
-      setExportNotice(path ? { kind: "ok", message: "Exported the document outside the project." } : { kind: "ok", message: "Export cancelled." });
+      // A cancelled native dialog is not an event worth a banner; only a real export gets one.
+      if (path) setExportNotice({ kind: "ok", message: "Exported the document outside the project." });
     } catch {
       setExportNotice({ kind: "error", message: "The document could not be exported." });
     }
