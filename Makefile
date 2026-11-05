@@ -244,7 +244,9 @@ host-api-check:
 .PHONY: contract-gates
 contract-gates:
 	node scripts/conformance-http.mjs
-	node scripts/conformance-bus.mjs
+	# The bus modules load core/config.mjs; a throwaway data dir keeps this static check off the real data and clear of
+	# the legacy kb/ tripwire.
+	d=$$(mktemp -d) && LLMIDE_DATA_DIR="$$d" node scripts/conformance-bus.mjs; s=$$?; rm -rf "$$d"; exit $$s
 	$(MAKE) host-api-check
 	node scripts/gen-api-types.mjs --check
 	node scripts/gen-openapi.mjs --check
