@@ -71,6 +71,15 @@ export function passkeyRoutes(routes, ctx) {
     const viaRecovery = session.via === 'recovery';
     try {
       ctx.db.transaction(() => {
+        // Re-check after the async WebAuthn verify: the session may have been revoked meanwhile (the real
+        // owner verified their email link or activated the account), and a sign-up session only ever
+        // creates the first passkey of a still-pending account.
+        const now = ctx.db.prepare('SELECT revoked_at, expires_at FROM sessions WHERE id_hash = ?').get(session.id_hash);
+        if (!now || now.revoked_at !== null || now.expires_at <= t) throw new HttpError(401, 'unauthenticated');
+        if (session.scope === 'setup' && session.via === 'signup'
+          && ctx.db.prepare('SELECT status FROM users WHERE id = ?').get(user.id)?.status !== 'pending_passkey') {
+          throw new HttpError(401, 'unauthenticated');
+        }
         ctx.db.prepare(
           `INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, name, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -148,3 +148,28 @@ test('N2: verifying the email link revokes setup sessions someone else opened on
   assert.equal((await addPasskey(victim, 'cred-victim')).status, 201);
   assert.deepEqual(app.db.prepare('SELECT id FROM passkeys').pluck().all(), ['cred-victim']);
 });
+
+test('N2: an attacker verify already in flight when the victim proves the email is refused', async (t) => {
+  const { fakeWebAuthn } = await import('./helpers.mjs');
+  const wa = fakeWebAuthn();
+  let release; const gate = new Promise((r) => { release = r; });
+  const orig = wa.verifyRegistrationResponse;
+  wa.verifyRegistrationResponse = async (o) => { if (o.response.id === 'cred-attacker') await gate; return orig(o); };
+  const app = await startApp({ env: { ACCOUNTS_DIRECT_SIGNUP: '1', ACCOUNTS_SIGNUP_OPEN: '1' }, webauthn: wa });
+  t.after(() => app.close());
+  const victimForm = { email: 'victim@example.com', displayName: 'V', language: 'en', timeZone: 'UTC' };
+  const attacker = app.client();
+  await attacker.call('POST', '/v1/signup/direct', victimForm);
+  const opts = await attacker.call('POST', '/v1/passkeys/options', {});
+  const inflight = attacker.call('POST', '/v1/passkeys/verify', { ceremonyId: opts.body.ceremonyId, response: { id: 'cred-attacker', challenge: opts.body.options.challenge } });
+  await new Promise((r) => setTimeout(r, 50));
+  const victim = app.client();
+  await victim.call('POST', '/v1/signup', victimForm);
+  const v = await victim.call('POST', '/v1/signup/verify', { token: linkToken(await waitForMail(app.mailer, 1)) });
+  assert.equal(v.status, 200);
+  release();
+  const res = await inflight;
+  assert.equal(res.status, 401, 'the revoked setup session cannot finish the ceremony');
+  assert.deepEqual(app.db.prepare('SELECT id FROM passkeys').pluck().all(), []);
+  assert.equal(app.db.prepare('SELECT status FROM users').pluck().get(), 'pending_passkey');
+});
