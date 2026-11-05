@@ -68,3 +68,27 @@ Tests: `web` 136/138 (the 2 failures are `serve.test.mjs` listen EPERM in the sa
 - No malicious test for a swapped nD or a forged ack `userId`.
 
 Not reviewed: SP3 Task 8 (screens and app switching) and Task 9 (real-desktop e2e and docs), which were uncommitted.
+
+## Re-review after the fixes (2026-11-06)
+
+Fixes `882d1db8` (C1: single-flight, pin-once `take()`, Settings polls one at a time), `28aa6b1b` (I1: revoke under the per-user lock), `2626889b` (I2: independent reference device), `2b68cb88` and `fd45081f` (SP3 retry and `bad_session`), `9e3d30b1` (inventory). Tests: `tests/sync*.test.mjs` 84 pass, 1 skipped; vectors ok; `web` 139/139.
+
+**Verdict: enrollment now holds against malicious storage.** The original race and 12 variants were tried, and none registered an attacker or confirmed a killed slot:
+
+- the original race, unchanged;
+- the same race, with storage hiding the attacker file at confirm;
+- storage showing the desktop only the attacker's claim;
+- poll racing confirm, in both orders;
+- confirm racing cancel;
+- start racing an in-flight poll for the previous slot;
+- a claim sealed for another slot;
+- an ack upload delayed past expiry;
+- a backend restart, then a replay into the new slot;
+- an old ack replayed after cancel;
+- storage keeping the ack but reporting a failed upload.
+
+The new reference device imports only `node:crypto` and `scripts/relay-reference.mjs`.
+
+**I-1, storage could block revoke forever** (delete before the row, no store timeouts): **fixed** in the commit after `9e3d30b1`. Revoke drops the row first and deletes the folder best-effort; every MEGA store call times out after 30 s (`withTimeouts`, `connectors/sync-store/index.mjs`); tests cover a refusing and a hanging delete.
+
+Still open (Minor): `enroll.mjs:99` puts `pinning` back to `waiting` if `take()` throws after the ack upload (should kill the slot); two simultaneous `startEnrollment` calls leave an orphan pending enrollment for up to 245 s (it cannot be confirmed); a restart leaves the old slot and `key.bin` on storage.
