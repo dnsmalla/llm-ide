@@ -56,6 +56,9 @@ export async function createHarness(platform: Platform, url: string = URLS[platf
       const html = readFileSync(new URL(`../fixtures/captions/${platform}/${name}.html`, import.meta.url), 'utf8');
       win.document.body.innerHTML = html;
     },
+    loadHtml(html: string) {
+      win.document.body.innerHTML = html;
+    },
     tick: (ms = 800) => mock.timers.tick(ms),
     close() {
       mock.timers.reset();

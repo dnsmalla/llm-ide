@@ -81,6 +81,52 @@ for (const p of PLATFORMS) {
   });
 }
 
+test('meet: noise inside real caption blocks is rejected, the genuine caption is kept', async () => {
+  const c = await run('meet', ['noise-and-caption']);
+  assert.deepEqual(c.map((m) => [m.speaker, m.text]), [['Bob Sample', 'Sounds good to me.']]);
+});
+
+const block = {
+  meet: (s: string, t: string) => `<div class="nMcdL bj4p3b"><div class="adE6rb">${s}</div><div class="ygicle">${t}</div></div>`,
+  teams: (s: string, t: string) =>
+    `<div data-tid="closed-caption-chat-message"><span class="ui-chat__message__author">${s}</span><div data-tid="closed-caption-text">${t}</div></div>`,
+  zoom: (s: string, t: string) => `<li class="transcript-message"><div class="speaker">${s}</div><div class="text">${t}</div></li>`,
+};
+const wrap = {
+  meet: (b: string) => `<div class="nMcdL bj4p3b">${b}</div>`,
+  teams: (b: string) => `<div id="caption-list">${b}</div>`,
+  zoom: (b: string) => `<div aria-label="Transcript"><ul>${b}</ul></div>`,
+};
+
+for (const p of PLATFORMS) {
+  test(`${p}: interleaved speakers keep their own line; only changed text is re-sent`, async () => {
+    const h = await createHarness(p);
+    h.start();
+    const A1 = "Let's start the review.";
+    const A2 = `${A1} First up is the budget.`;
+    const B1 = 'Sounds good to me.';
+    const render = (a: string, b?: string) =>
+      h.loadHtml(wrap[p](block[p]('Alice Example', a) + (b ? block[p]('Bob Sample', b) : '')));
+    render(A1);
+    h.tick();
+    render(A1, B1);
+    h.tick();
+    render(A1, B1); // nothing changed: no re-send
+    h.tick();
+    render(A2, B1); // Alice grows within 5 s
+    h.tick();
+    const c = h.captions();
+    h.close();
+    assert.deepEqual(c.map((m) => [m.speaker, m.text]), [
+      ['Alice Example', A1],
+      ['Bob Sample', B1],
+      ['Alice Example', A2],
+    ]);
+    assert.equal(c[0].sessionId, c[2].sessionId);
+    assert.notEqual(c[0].sessionId, c[1].sessionId);
+  });
+}
+
 test('meet: non-meeting page (landing) never starts capture', async () => {
   const h = await createHarness('meet', 'https://meet.google.com/landing');
   h.start();
