@@ -110,6 +110,8 @@ export function createBus({
       if (!classInfo(cmd.originClient)?.mayStart.includes(info.tier)) fail('tier_denied');
       if (Array.isArray(info.clients) && !info.clients.includes(cmd.originClient)) fail('tier_denied');
       const approved = !!cmd.approvedBy;
+      // T1/T2 always need a desktop approval (decideReceipt); re-check it here, not only through the command's state.
+      if (info.tier !== 'T0' && !approved) fail('tier_denied');
       if (info.tier === 'T0' && cmd.originClient !== 'desktop-ui' && !approved && !isKindEnabled(userId, kind)) fail('switch_off');
       if (!getDb().prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) fail('not_found');
       const args = getCommandArgs(userId, job.id) ?? {};

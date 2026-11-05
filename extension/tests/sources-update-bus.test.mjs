@@ -157,3 +157,18 @@ test('sourceIds shape is validated at receipt', () => {
   const u = mkUser();
   assert.throws(() => bus.receive(u, { v: 1, kind: 'sources.update', idem: 'v1', args: { sourceIds: ['has space'] } }, { client: 'ios-native' }), { code: 'INVALID_ARGS' });
 });
+
+test('a T1 job that reaches the runner without a recorded approval is refused (defence in depth)', async () => {
+  const u = mkUser(); const acct = 'cdcdcdcdcdcd';
+  seedAccount(u, acct); const t = gcalTransport();
+  const o = bus.receive(u, { v: 1, kind: 'sources.update', idem: `na-${Date.now()}`, args: { sourceIds: [`gcal:${acct}`] } }, { client: 'ios-native' });
+  const id = o.command.id;
+  const hash = db.prepare('SELECT args_hash FROM bus_commands WHERE user_id = ? AND id = ?').get(u, id).args_hash;
+  bus.approve(u, id, { client: 'desktop-ui', nonce: approvalNonce(u, id, hash) });
+  // The job is queued; erase the approval before the runner's next tick, as a store bug or tampering would.
+  db.prepare('UPDATE bus_commands SET approved_by = NULL WHERE user_id = ? AND id = ?').run(u, id);
+  await until(() => ['succeeded', 'failed', 'interrupted'].includes(bstore.getCommand(u, id).state));
+  const cmd = bstore.getCommand(u, id);
+  assert.equal(cmd.state, 'failed'); assert.equal(cmd.error, 'tier_denied');
+  assert.equal(t.calls.filter((c) => c.path.includes('/events')).length, 0);
+});
