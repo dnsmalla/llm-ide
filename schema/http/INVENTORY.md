@@ -329,7 +329,7 @@ Endpoints with no client caller (85):
 | `/kb/sync/devices/enroll/confirm` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:96` | - | - | tests only |
 | `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:101` | - | - | tests only |
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
-| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:107` | - | - | tests only |
+| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:108` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:860` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
