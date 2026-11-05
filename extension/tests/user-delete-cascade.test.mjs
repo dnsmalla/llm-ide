@@ -358,6 +358,7 @@ test('leaves no row in ANY user_id table (audit_log is anonymised instead)', () 
     const names = []; const vals = [];
     for (const c of cols) {
       if (c.name === 'user_id') { names.push(c.name); vals.push(doomed); continue; }
+      if (name === 'bus_schedules' && c.name === 'interval_ms') { names.push(c.name); vals.push(3_600_000); continue; }
       if (c.dflt_value !== null) continue;
       if (c.pk && /^INT/i.test(c.type) && cols.filter((x) => x.pk).length === 1) continue; // rowid alias
       if (!c.notnull && !c.pk) continue;

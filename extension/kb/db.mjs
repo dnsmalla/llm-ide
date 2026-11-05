@@ -1050,6 +1050,8 @@ export function deleteUserCascade(userId) {
       // migration 0061 — Host API paired devices (hashed tokens) and the phone chat id
       'host_api_devices', 'host_api_quick_chat',
       // migration 0062 — host_api_identity is install-level (one row, no user_id), so it is NOT in this per-user list
+      // migration 0063 — desktop schedules for bus kinds (standing approvals)
+      'bus_schedules',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
