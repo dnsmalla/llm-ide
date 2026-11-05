@@ -50,7 +50,9 @@ struct AppTerminationAsyncHooksTests {
             hook("stuck", timeout: 0.2) { try await Task.sleep(for: .seconds(30)) },
             hook("after") { log.add("after") },
         ], cap: 3)
-        #expect(Date().timeIntervalSince(started) < 2, "the stuck hook must not hold the quit")
+        // Far below the stuck hook's 30 s, not near its 0.2 s timeout: the hooks run on the main actor, which other
+        // suites running in parallel can hold for ~2 s on CI (two red runs at 2.05 s and 2.11 s).
+        #expect(Date().timeIntervalSince(started) < 10, "the stuck hook must not hold the quit")
         #expect(report.results[0].outcome == .timedOut)
         #expect(log.all == ["after"], "a timeout does not stop later hooks")
     }
