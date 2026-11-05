@@ -60,3 +60,24 @@ Start the core yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`
 - Opening a chat shows "Read-only", no composer; Show older pages back; Back returns to the phone chat.
 - A browser paired before the switch shows no panel (it must re-pair).
 - While a past chat is open, a running reply's approval cards appear only after Back.
+
+## Offline sync (MEGA) — once, with a throwaway dedicated MEGA account (2FA off)
+
+1. Desktop: set up sync with the dedicated account (Settings → sync), sync on. Start the desktop with
+   `LLMIDE_SYNC_WEB_ORIGIN=http://127.0.0.1:5180`. Build and `npm start` this client.
+2. Desktop: Add a phone or browser → Browser → open the link in the browser.
+   - [ ] The address bar shows no `#pair=`; Back does not bring it back.
+3. Enter a name, the MEGA email and password → Continue.
+   - [ ] The same 6 digits show on both screens; press Codes match on the desktop; the browser shows the snapshot.
+   - [ ] DevTools console: no CSP violations. If a MEGA host is blocked, note the exact host (design decision D1).
+4. DevTools → Application:
+   - [ ] IndexedDB `llmide-sync` → `device`: the CryptoKey entries show `extractable: false`.
+   - [ ] Nothing in IndexedDB, localStorage or sessionStorage contains the MEGA password.
+5. Quit the desktop. Reload the page → Unlock with the password.
+   - [ ] "Desktop last seen …" shows; after 45 minutes the "Desktop offline or storage withholding updates" banner shows.
+   - [ ] Queue a prompt; it is listed as waiting.
+6. Start the desktop again.
+   - [ ] Within about a minute the answer appears; with Host API paired, the live chat replaces the sync view.
+7. DevTools → Network → Offline: the offline banner shows; back online: it checks at once.
+8. Desktop: revoke this browser. - [ ] The browser shows "This browser was removed from sync".
+9. Keyboard only, then VoiceOver: pairing form, the code (read as single digits), unlock, the inbox, meetings and plans.

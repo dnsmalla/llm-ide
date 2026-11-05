@@ -637,7 +637,7 @@ setup, but it is the account password.
 |---|---|---|---|
 | **SP1** | Desktop producer: `SyncStore` + memory + **MEGA adapter** (**[user]** MEGA first, 2026-11-05; desktop megajs, dedicated account), sync v1 envelope + vectors, keys in the vault, snapshot producer, inbox consumer at the ceiling, Settings card | — | **plan written**; testable with a fake device and a fake MEGA client |
 | SP2 | Enrollment and device registry: QR sync fields, slot flow with SAS, `wrap.bin`, revoke, rotate, missing-folder detection | SP1 | devices can be added and removed |
-| SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP; **MEGA client in the browser (megajs, password per app session)** | SP2 | web works with the desktop off |
+| SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP; **MEGA client in the browser (megajs, password per app session)** | SP2 | web works with the desktop off — **plan written** (docs/superpowers/plans/2026-11-06-sync-sp3-web.md) |
 | SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (MEGA iOS SDK, Keychain session)** | SP2 | iPhone works with the desktop off |
 | SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server |
 | SP6 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users of Box |

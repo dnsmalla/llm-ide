@@ -28,3 +28,14 @@ Adding `enroll`/`enrollack` is additive: no existing byte changes, so `v` stays 
 - **Rotation.** A manifest epoch above the device's means GET `wrap.bin`, unwrap (higher epoch only), reopen the manifest; keep the old reply key for 24 h for `stale_epoch` replies.
 - **Revoke.** The device's folder disappears; missing `key.bin`/`wrap.bin`/`manifest.bin` means "removed from sync" and the device stops. Desktop-off revoke deletes `d/<dir>` in the storage UI; Settings shows the first six `dir` characters.
 - **Why storage cannot sit in the middle.** Without `es`, storage cannot produce a claim that opens or forge the ack. Without the desktop signing key, whose fingerprint came through the QR, it cannot forge `key.bin`, `ack.bin` or `wrap.bin`. A QR photographer who controls storage can replace the real claim, but the ack is bound to the pinned claim, so the real device fails closed. `nD` is chosen after the claim is committed; the device never accepts an ack for another claim. A second claim kills the slot.
+
+## Implementations of the device side
+
+- Node reference device: `extension/tests/helpers/sync-device.mjs` (SP2).
+- Browser (WebCrypto, SP3): `web/src/sync/` — `envelope.ts`, `enroll.ts`, `device.ts`; vectors checked by
+  `web/tests/sync-envelope.test.mjs` and `web/tests/sync-enroll.test.mjs`; end to end against the real desktop in
+  `web/tests/e2e/sync-desktop-e2e.test.mjs`.
+- Two device choices, both safe under the threat model: a missing `manifest.bin` while `key.bin` is present means
+  "waiting for the first snapshot" (the desktop publishes up to 60 s after confirm), not "removed"; and the device
+  switches to a newer epoch's keys as soon as the newer `wrap.bin` verifies (it is desktop-signed), keeping the old
+  reply key for 24 h.

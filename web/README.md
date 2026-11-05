@@ -41,6 +41,20 @@ Plan 6.
 
 Use [MANUAL-CHECK.md](MANUAL-CHECK.md) before calling a release shipped.
 
+## Offline sync (desktop off)
+
+When the desktop is not reachable, a browser linked to sync reads the desktop's last encrypted snapshot (chats,
+meetings with notes, plans and tasks, usage) from the user's dedicated MEGA account and can queue chat prompts that
+run, read-only, when the desktop is back (design: docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
+
+- Link it from the desktop: Settings → sync → Add a phone or browser → Browser. Open the link here (or paste it on the
+  Pairing screen) and compare the 6-digit code on both screens.
+- The MEGA password is asked once per session and never stored. Device keys are non-extractable WebCrypto keys in
+  IndexedDB (`llmide-sync`). Snapshots and replies stay in memory only.
+- The CSP adds exactly `https://g.api.mega.co.nz https://*.userstorage.mega.co.nz` to `connect-src`.
+- Code: `src/sync/`. Tests: `tests/sync-*.test.mjs` (vectors, malicious storage, fake MEGA) and
+  `tests/e2e/sync-desktop-e2e.test.mjs` (real desktop sync code).
+
 ## Installable shell
 
 The built client is a PWA: `manifest.webmanifest`, PNG/SVG icons and a service worker that caches only the app
