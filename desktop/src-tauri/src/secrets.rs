@@ -66,6 +66,7 @@ impl std::error::Error for SecretError {}
 pub trait SecretBackend: Send + Sync {
     fn get(&self, account: &str) -> Result<Option<String>, SecretError>;
     fn set(&self, account: &str, value: &str) -> Result<(), SecretError>;
+    fn delete(&self, account: &str) -> Result<(), SecretError>;
     fn name(&self) -> &'static str;
 }
 
@@ -78,6 +79,10 @@ impl SecretBackend for MemoryBackend {
     }
     fn set(&self, account: &str, value: &str) -> Result<(), SecretError> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(account.into(), value.into());
+        Ok(())
+    }
+    fn delete(&self, account: &str) -> Result<(), SecretError> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(account);
         Ok(())
     }
     fn name(&self) -> &'static str {
@@ -106,6 +111,12 @@ impl SecretBackend for OsBackend {
         keyring::Entry::new(SERVICE, account)
             .and_then(|e| e.set_password(value))
             .map_err(map_keyring)
+    }
+    fn delete(&self, account: &str) -> Result<(), SecretError> {
+        match keyring::Entry::new(SERVICE, account).and_then(|e| e.delete_credential()) {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(map_keyring(e)),
+        }
     }
     fn name(&self) -> &'static str {
         "os"
@@ -244,6 +255,9 @@ mod tests {
         }
         fn set(&self, _: &str, _: &str) -> Result<(), SecretError> {
             panic!("must not write when the store is locked")
+        }
+        fn delete(&self, _: &str) -> Result<(), SecretError> {
+            panic!("must not delete when the store is locked")
         }
         fn name(&self) -> &'static str {
             "locked"

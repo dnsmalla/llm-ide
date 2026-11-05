@@ -37,6 +37,8 @@ notify = "=8.2.1"
 ignore = "=0.4.25"
 trash = "=5.2.9"
 sha2 = "=0.10.9"
+# Account OAuth PKCE/state encoding. Already in the lock via other crates; direct use is explicit.
+base64 = "=0.22.1"
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
 url = "=2.5.8"
 # Project search (S-H): linear-time matcher (MIT OR Apache-2.0); already in the lock via ignore.

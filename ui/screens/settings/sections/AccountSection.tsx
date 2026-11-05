@@ -1,11 +1,57 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeMe, type Me } from "../decoders.ts";
 import { describeError } from "../errors.ts";
 import { accountLine, SIGN_OUT_TEXT } from "../misc-model.ts";
 import { SecretField } from "../secret-field.ts";
 import { useEnv, useModel, useRefreshOnFocus } from "../context.tsx";
+import { invokeHost } from "../../shell/host";
 import { Button, ErrorText, Field, NeedsHost, SecretInput } from "../ui.tsx";
+
+interface CloudAccount { signedIn: boolean; email: string | null }
+
+function decodeCloud(v: unknown): CloudAccount {
+  const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
+  return { signedIn: r.signed_in === true, email: typeof r.email === "string" ? r.email : null };
+}
+
+function CloudAccountCard() {
+  const [status, setStatus] = useState<CloudAccount | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    invokeHost<unknown>("account_status").then((v) => { if (live) setStatus(decodeCloud(v)); }, () => { if (live) setStatus({ signedIn: false, email: null }); });
+    return () => { live = false; };
+  }, []);
+  const signIn = async () => {
+    setBusy(true); setError(null);
+    try { setStatus(decodeCloud(await invokeHost("account_sign_in"))); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+  const signOut = async () => {
+    setBusy(true); setError(null);
+    try { setStatus(decodeCloud(await invokeHost("account_sign_out"))); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section className="st-stack" aria-label="LLM-IDE account">
+      <span className="st-label">LLM-IDE account</span>
+      <p className="st-hint">Link phones and browsers to this desktop. Your meetings, code and chats stay on this computer.</p>
+      {error ? <ErrorText text={error} /> : null}
+      {status === null ? <p className="st-hint" role="status">Reading the account…</p> : status.signedIn ? (
+        <div className="st-stack">
+          <p><span className="st-label">Signed in as </span>{status.email ?? "this account"}</p>
+          <div className="st-row"><Button disabled={busy} onClick={() => void signOut()}>Sign out of LLM-IDE</Button></div>
+        </div>
+      ) : (
+        <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void signIn()}>{busy ? "Waiting for the browser…" : "Sign in with a passkey"}</Button></div>
+      )}
+    </section>
+  );
+}
 
 export default function AccountSection() {
   const { client, host } = useEnv();
@@ -49,6 +95,8 @@ export default function AccountSection() {
 
   return (
     <div className="st-stack">
+      <CloudAccountCard />
+      <hr className="st-rule" />
       <ErrorText text={error} />
       <p><span className="st-label">Account </span>{accountLine(me)}</p>
       {me ? (
