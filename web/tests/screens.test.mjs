@@ -82,3 +82,36 @@ test("clear history stays mounted but disabled during a turn", () => {
   const s = UI.reduce(UI.initialChatState, { type: "sent", commandId: "c-1", text: "hi" });
   assert.match(html(h(UI.WebChat, chatProps(s))), /<button[^>]*disabled[^>]*>Clear history/);
 });
+
+const readProps = (state, extra = {}) => ({ capabilities: caps("chat", "read"), state, onOpen: noop, onOlder: noop, onClose: noop, onMore: noop, ...extra });
+
+test("read panel: hidden without the read capability", () => {
+  assert.equal(html(h(UI.ReadPanel, { ...readProps(UI.initialReadState), capabilities: caps("chat") })), "");
+});
+
+test("read panel: usage numbers, chat list with the phone chat marked, host text as text", () => {
+  const state = { ...UI.initialReadState,
+    usage: [{ provider: "anthropic", status: "ok", models: [
+      { model: "m1", label: "Sonnet", state: "warning", unit: "runs", window: "daily", used: 42, limit: 100, pct: 42, resetAt: 0 },
+      { model: "m2", state: "ok", unit: "tokens", window: "monthly", used: 5, limit: 0, resetAt: 0 }] }],
+    sessions: [{ id: "p", title: "Phone chat", updatedAt: 1, phoneChat: true }, { id: "x", title: "<img src=x onerror=alert(1)>", updatedAt: 2 }],
+    nextOffset: 50 };
+  const out = html(h(UI.ReadPanel, readProps(state)));
+  assert.match(out, /Sonnet: 42 of 100 runs · daily/);
+  assert.match(out, /m2: 5 tokens · monthly, no cap/);
+  assert.match(out, /Phone chat \(this device\)/);
+  assert.doesNotMatch(out, /<img/);
+  assert.match(out, /More chats/);
+});
+
+test("read panel: an open chat is read-only with Show older and Back", () => {
+  const state = { ...UI.initialReadState, open: { id: "x", title: "Router", nextBeforeSeq: 3,
+    messages: [{ seq: 3, role: "user", content: "<b>q</b>" }, { seq: 4, role: "assistant", content: "a" }] } };
+  const out = html(h(UI.ReadPanel, readProps(state)));
+  assert.match(out, /Router/);
+  assert.match(out, /Read-only/);
+  assert.match(out, /Show older/);
+  assert.match(out, /Back to the phone chat/);
+  assert.doesNotMatch(out, /<b>q/);
+  assert.doesNotMatch(out, /<textarea/);
+});

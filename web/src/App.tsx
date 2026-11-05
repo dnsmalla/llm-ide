@@ -5,17 +5,27 @@ import { lastHostUrl } from "./host-api/storage.ts";
 import { createAppModel, type AppModel, type Session } from "./app-model.ts";
 import { PairingScreen } from "./screens/PairingScreen.tsx";
 import { WebChat } from "./screens/WebChat.tsx";
+import { ReadPanel } from "./screens/ReadPanel.tsx";
 
 function Chat({ session, onForget }: { session: Session; onForget: () => void }) {
-  const { connection: c, controller } = session;
+  const { connection: c, controller, read } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
   const [conn, setConn] = useState<ConnectionState>(c.state);
   useEffect(() => c.onState(setConn), [c]);
+  const capabilities = state.capabilities ?? c.capabilities;
+  useEffect(() => { if (conn.kind === "ready") void read.refresh(); }, [read, conn.kind]);
   return (
-    <WebChat hostName={c.hello?.hostName ?? "Host"} connection={conn} capabilities={state.capabilities ?? c.capabilities} state={state}
-      onSend={(t) => void controller.send(t)} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
-      onForget={onForget} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
-      onTool={(r, d) => void controller.answerTool(r, d)} />
+    <div className="web-shell">
+      <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}
+        onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
+      {!readState.open && (
+        <WebChat hostName={c.hello?.hostName ?? "Host"} connection={conn} capabilities={capabilities} state={state}
+          onSend={(t) => void controller.send(t)} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
+          onForget={onForget} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
+          onTool={(r, d) => void controller.answerTool(r, d)} />
+      )}
+    </div>
   );
 }
 

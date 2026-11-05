@@ -12,3 +12,11 @@
 .web-actions { display: flex; gap: 8px; }
 .web-status:empty { display: none; }
 .web-error { margin: 0; }
+
+.web-shell { display: flex; flex-wrap: wrap; gap: 16px; }
+.web-read { flex: 1 1 260px; max-width: 100%; min-width: 0; }
+.web-read-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.web-read-usage, .web-read-chats { list-style: none; margin: 0; padding: 0; }
+.web-read-usage li[data-state="warning"], .web-read-usage li[data-state="exhausted"] { font-weight: 600; }
+.web-read-chats button { all: unset; cursor: pointer; text-decoration: underline; overflow-wrap: anywhere; }
+.web-read-chats button:focus-visible { outline: 2px solid currentColor; }
