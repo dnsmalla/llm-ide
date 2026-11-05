@@ -56,3 +56,68 @@ test("summarizeApproval: named sources, unknown ids flagged, origin in words, ho
   assert.equal(sum.summarizeApproval(t2, {}).needsConfirm, true);
   assert.deepEqual(sum.confirmFor(t2), { projectId: "p1", issueIds: ["2", "1"], ship: true });
 });
+
+const sch = await load("approvals/scheduler.ts");
+const H = 3_600_000;
+const schedule = (o = {}) => ({ id: "5a1b2c3d-0000-4000-8000-0000000000a1", kind: "sources.update", args: { sourceIds: ["gcal:aaaaaaaaaaaa"] }, intervalHours: 6, standing: true, standingUntil: "2026-12-05T00:00:00.000Z", createdAt: "2026-11-01T00:00:00.000Z", lastRunAt: null, ...o });
+
+function fakeBus({ state = "awaiting_approval", deduped = false, origin = "desktop-ui", args } = {}) {
+  const log = [];
+  return {
+    log,
+    deps: (list, nowMs) => ({
+      now: () => nowMs,
+      schedules: async () => list,
+      enqueue: async (f) => { log.push(["enqueue", f]); return { command: { id: `cmd-${f.idem.replace(/[^A-Za-z0-9]/g, "")}`.slice(0, 60), state }, deduped }; },
+      approvals: async () => { log.push(["approvals"]); return list.map((s) => ({ id: `cmd-${sch.idemFor(s, nowMs).replace(/[^A-Za-z0-9]/g, "")}`.slice(0, 60), kind: s.kind, originClient: origin, args: args ?? s.args, nonce: "a".repeat(64), tier: "T1" })); },
+      approve: async (a, extra) => { log.push(["approve", a.id, extra]); },
+    }),
+  };
+}
+
+test("scheduler: one idem per slot; ttl is min(interval, 24 h); slots are epoch-anchored", () => {
+  const s = schedule();
+  const t = Date.parse("2026-11-05T13:00:00Z");
+  assert.equal(sch.idemFor(s, t), `sched:${s.id}:${Math.floor(t / (6 * H))}`);
+  assert.equal(sch.idemFor(s, t + H), sch.idemFor(s, t), "same slot within the interval");
+  assert.notEqual(sch.idemFor(s, t + 6 * H), sch.idemFor(s, t));
+  assert.ok(sch.idemFor(s, t).length <= 64, "fits the idem limit");
+});
+
+test("scheduler: a live standing approval enqueues then approves with the nonce and scheduleId", async () => {
+  const f = fakeBus();
+  const now = Date.parse("2026-11-05T13:00:00Z");
+  const out = await sch.runSchedulesOnce(f.deps([schedule()], now));
+  assert.deepEqual(out.approved, [schedule().id]);
+  const enq = f.log.find((x) => x[0] === "enqueue")[1];
+  assert.deepEqual(enq, { kind: "sources.update", args: { sourceIds: ["gcal:aaaaaaaaaaaa"] }, idem: sch.idemFor(schedule(), now), ttlMs: 6 * H });
+  assert.deepEqual(f.log.find((x) => x[0] === "approve")[2], { scheduleId: schedule().id });
+});
+
+test("scheduler: never approves without a live standing approval, a different origin or different args", async () => {
+  const now = Date.parse("2026-11-05T13:00:00Z");
+  for (const [f, list, why] of [
+    [fakeBus(), [schedule({ standing: false, standingUntil: null })], "ask each run"],
+    [fakeBus(), [schedule({ standingUntil: "2026-11-05T12:59:00.000Z" })], "expired"],
+    [fakeBus({ origin: "ios-native" }), [schedule()], "a phone command"],
+    [fakeBus({ args: { sourceIds: ["gcal:aaaaaaaaaaaa", "ical:bbbbbbbbbbbb"] } }), [schedule()], "wider args"],
+    [fakeBus({ state: "queued" }), [schedule()], "already approved"],
+  ]) {
+    const out = await sch.runSchedulesOnce(f.deps(list, now));
+    assert.deepEqual(out.approved, [], why);
+    assert.equal(f.log.filter((x) => x[0] === "approve").length, 0, why);
+  }
+});
+
+test("scheduler: one failing schedule does not stop the others; errors carry the code only", async () => {
+  const now = Date.parse("2026-11-05T13:00:00Z");
+  const { BusCallError } = api;
+  const good = schedule({ id: "5a1b2c3d-0000-4000-8000-0000000000b2" });
+  const deps = {
+    ...fakeBus().deps([schedule(), good], now),
+    enqueue: async (f) => { if (f.idem.includes("0000000000a1")) throw new BusCallError(429, "QUOTA_EXCEEDED"); return { command: { id: "x", state: "queued" }, deduped: false }; },
+  };
+  const out = await sch.runSchedulesOnce(deps);
+  assert.deepEqual(out.errors, [`${schedule().id}:QUOTA_EXCEEDED`]);
+  assert.deepEqual(out.enqueued, [good.id]);
+});

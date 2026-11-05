@@ -143,6 +143,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     });
     return () => { live = false; stop?.(); };
   }, [projectRoot, session.signedIn, gate, features.usable]);
+  // The command-bus scheduler (docs/spec/command-bus.md section 9): not tied to a project or a feature, idle on a core
+  // that does not see this UI as the desktop class.
+  useEffect(() => {
+    if (!session.signedIn || gate !== "open") return undefined;
+    let live = true;
+    let stop: (() => void) | undefined;
+    void import("./approvals/scheduler").then((m) => {
+      if (live) stop = m.startBusScheduler();
+    });
+    return () => { live = false; stop?.(); };
+  }, [session.signedIn, gate]);
   const overridden = useRef(initialSection != null);
   // A home section whose feature is off (or was not compiled in) falls back to Library, as the Mac's resolveHome does.
   const usableHome = (): SectionId => selectHome(readHome(), features.usable);
