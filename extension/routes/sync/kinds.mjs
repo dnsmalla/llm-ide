@@ -3,7 +3,7 @@
 import { MAX_FRAME } from '../../core/sync-envelope.mjs';
 import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 import { listChatSessions, getChatSession } from '../../kb/chat-sessions.mjs';
-import { listMeetings, listEntitiesForMeetings } from '../../kb/meetings.mjs';
+import { listMeetingSummaries, listEntitiesForMeetings } from '../../kb/meetings.mjs';
 import { listPlans, getPlan } from '../../kb/plans.mjs';
 import { usageSummary } from '../../kb/usage.mjs';
 import { getDb } from '../../kb/db.mjs';
@@ -60,7 +60,7 @@ export function buildKinds(raw, now) {
 export function loadKinds(userId, now = Date.now()) {
   const sessions = listChatSessions(userId, { limit: DEPTH.sessions })
     .map((s) => ({ ...s, messages: getChatSession(userId, s.id, { messageLimit: DEPTH.messages * 2 })?.messages ?? [] }));
-  const meetings = listMeetings(userId, null, DEPTH.meetings);
+  const meetings = listMeetingSummaries(userId, DEPTH.meetings);
   const entities = listEntitiesForMeetings(userId, meetings.map((m) => m.id));
   const plans = listPlans(userId, DEPTH.plans).map((p) => getPlan(userId, p.id)).filter(Boolean);
   return buildKinds({ sessions, phoneChatId: getQuickChatId(userId), meetings, entities, plans, usage: usageSummary(getDb(), userId) }, now);

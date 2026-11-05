@@ -212,6 +212,15 @@ export function listMeetings(userId, cursor, limit) {
   }));
 }
 
+/** Meeting metadata for snapshots: no transcript, which a snapshot never sends (SP1 review Minor). */
+export function listMeetingSummaries(userId, limit = 50) {
+  requireUser(userId);
+  const cap = Math.max(1, Math.min(Number(limit) || 50, 500));
+  return lazyPrepare(getDb(), `SELECT id, title, date, duration_sec, participants FROM meetings
+    WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT ?`).all(userId, cap)
+    .map((m) => ({ ...m, participants: safeParseMeta(m.participants) || [] }));
+}
+
 export function listEntities(userId, meetingId) {
   requireUser(userId);
   const db = getDb();
