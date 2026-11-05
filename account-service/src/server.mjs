@@ -1,11 +1,12 @@
 import http from 'node:http';
 import { HttpError, send } from './http.mjs';
-import { checkOrigin, clientIp } from './guard.mjs';
+import { checkOrigin, checkOriginIfPresent, clientIp } from './guard.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
 import { createAudit } from './audit.mjs';
 import { createEmailTokens } from './email-tokens.mjs';
 import { deliver } from './mailer.mjs';
 import { createSessions } from './sessions.mjs';
+import { createOAuth } from './oauth.mjs';
 import { healthRoutes } from './routes/health.mjs';
 import { signupRoutes } from './routes/signup.mjs';
 import { createCeremonies } from './ceremonies.mjs';
@@ -13,8 +14,10 @@ import { passkeyRoutes } from './routes/passkeys.mjs';
 import { signinRoutes } from './routes/signin.mjs';
 import { recoveryRoutes } from './routes/recovery.mjs';
 import { accountRoutes } from './routes/account.mjs';
+import { oauthRoutes } from './routes/oauth.mjs';
+import { desktopRoutes } from './routes/desktop.mjs';
 
-const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes];
+const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes];
 
 export function createApp({ config, db, mailer = null, webauthn = null, now = Date.now }) {
   const ctx = { config, db, mailer, webauthn, now };
@@ -27,6 +30,7 @@ export function createApp({ config, db, mailer = null, webauthn = null, now = Da
   });
   ctx.sessions = createSessions(db, config, now);
   ctx.ceremonies = createCeremonies(db, now);
+  ctx.oauth = createOAuth(db, now);
   const routes = new Map();
   for (const register of ROUTE_GROUPS) register(routes, ctx);
   return http.createServer((req, res) => {
@@ -41,7 +45,10 @@ async function handle(req, res, routes, ctx) {
     if (!handler) throw new HttpError(404, 'not_found');
     req.clientIp = clientIp(req, ctx.config);
     ctx.limiter.hit(`ip:${req.clientIp}`, 120, 60_000);
-    if (req.method !== 'GET') checkOrigin(req, ctx.config);
+    if (req.method !== 'GET') {
+      if (handler.nativeClient) checkOriginIfPresent(req, ctx.config);
+      else checkOrigin(req, ctx.config);
+    }
     await handler(req, res, ctx);
   } catch (err) {
     if (!(err instanceof HttpError)) throw err;

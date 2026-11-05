@@ -41,6 +41,22 @@ export function timeZone(value) {
   return value;
 }
 
+export function deviceLabel(value) {
+  if (typeof value !== 'string') throw new HttpError(400, 'invalid_label');
+  const label = value.trim();
+  if (label.length < 1 || label.length > 80 || /\p{Cc}/u.test(label)) throw new HttpError(400, 'invalid_label');
+  return label;
+}
+
+// Public keys are opaque text (base64url SPKI or PEM, per relay 4.2); the service never parses
+// them, it only bounds them and rejects control characters other than PEM line breaks.
+export function publicKeyText(value) {
+  if (typeof value !== 'string') throw new HttpError(400, 'invalid_key');
+  const key = value.trim();
+  if (key.length < 32 || key.length > 8192 || !/^[\x20-\x7e\r\n\t]+$/.test(key)) throw new HttpError(400, 'invalid_key');
+  return key;
+}
+
 // Closed request objects, as in Host API v1: an unknown field is an error, not ignored.
 export function onlyKeys(body, allowed) {
   for (const key of Object.keys(body)) if (!allowed.includes(key)) throw new HttpError(400, 'invalid_payload');

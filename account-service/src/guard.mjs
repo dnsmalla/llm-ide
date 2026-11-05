@@ -13,3 +13,9 @@ export function clientIp(req, config) {
 export function checkOrigin(req, config) {
   if (req.headers.origin !== config.origin) throw new HttpError(403, 'bad_origin');
 }
+
+// Native clients (the desktop's OAuth token exchange and device registration) send no Origin at all.
+// A browser still sends one, so a foreign Origin is refused exactly as for cookie routes.
+export function checkOriginIfPresent(req, config) {
+  if (req.headers.origin !== undefined && req.headers.origin !== config.origin) throw new HttpError(403, 'bad_origin');
+}

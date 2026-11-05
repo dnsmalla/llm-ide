@@ -1,9 +1,13 @@
 import http from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import { loadConfig } from '../src/config.mjs';
 import { openDb } from '../src/db.mjs';
 import { createApp } from '../src/server.mjs';
 
 export const ORIGIN = 'http://localhost:3470';
+export const DESKTOP_CLIENT = 'llmide-desktop';
+export const DESKTOP_REDIRECT = 'http://127.0.0.1:49152/auth/callback';
+export const OAUTH_STATE = 'test-state-0123456789';
 
 export function memoryMailer() {
   const sent = [];
@@ -154,4 +158,62 @@ export async function signUpAndRegister(app, client, { email = 'ada@example.com'
   });
   if (done.status !== 201) throw new Error(`passkey ${done.status} ${JSON.stringify(done.body)}`);
   return app.db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+}
+
+export function pkcePair() {
+  const verifier = randomBytes(32).toString('base64url');
+  return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
+}
+
+// A null/undefined parameter is left out, so a test can exercise the missing-parameter case.
+export function authorizePath({
+  challenge = null,
+  redirectUri = DESKTOP_REDIRECT,
+  state = OAUTH_STATE,
+  clientId = DESKTOP_CLIENT,
+  method = 'S256',
+  responseType = 'code',
+} = {}) {
+  const params = new URLSearchParams();
+  const fields = {
+    client_id: clientId,
+    response_type: responseType,
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: method,
+    state,
+  };
+  for (const [name, value] of Object.entries(fields)) if (value != null) params.set(name, value);
+  return `/v1/oauth/authorize?${params}`;
+}
+
+export function authorize(app, web, params = {}) {
+  return rawRequest(app.base, 'GET', authorizePath(params), undefined, { cookie: web.cookie });
+}
+
+export function tokenRequest(app, fields, { form = true, headers = {} } = {}) {
+  const body = form ? new URLSearchParams(fields).toString() : JSON.stringify(fields);
+  return rawRequest(app.base, 'POST', '/v1/oauth/token', body, {
+    'content-type': form ? 'application/x-www-form-urlencoded' : 'application/json',
+    ...headers,
+  });
+}
+
+// The whole desktop flow: sign in with a passkey, authorize, exchange the code.
+export async function signInDesktop(app, params = {}) {
+  const web = app.client();
+  await signUpAndRegister(app, web);
+  const { verifier, challenge } = pkcePair();
+  const auth = await authorize(app, web, { ...params, challenge });
+  if (auth.status !== 302) throw new Error(`authorize ${auth.status} ${JSON.stringify(auth.body)}`);
+  const code = new URL(auth.headers.location).searchParams.get('code');
+  const token = await tokenRequest(app, {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: params.redirectUri ?? DESKTOP_REDIRECT,
+    client_id: DESKTOP_CLIENT,
+    code_verifier: verifier,
+  });
+  if (token.status !== 200) throw new Error(`token ${token.status} ${JSON.stringify(token.body)}`);
+  return { web, verifier, challenge, code, tokens: token.body };
 }
