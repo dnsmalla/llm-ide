@@ -37,13 +37,15 @@ function expire(db, now, row) {
 
 function publicStatus(db, row) {
   const desktop = db.prepare(
-    "SELECT signing_key, ecdh_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'",
+    "SELECT id, signing_key, ecdh_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'",
   ).get(row.user_id);
   const out = {
     requestId: row.id,
+    deviceId: row.device_id,
     state: row.state,
     expiresAt: row.expires_at,
   };
+  if (desktop) out.desktopId = desktop.id;
   if (row.state === 'approved' || row.state === 'keys' || row.state === 'linked') {
     out.desktopNonce = row.desktop_nonce;
     if (desktop) { out.desktopSigningKey = desktop.signing_key; out.desktopEcdhKey = desktop.ecdh_key; }
@@ -59,6 +61,7 @@ function publicStatus(db, row) {
 function desktopView(row) {
   return {
     requestId: row.id,
+    deviceId: row.device_id,
     state: row.state,
     kind: row.kind,
     label: row.label,

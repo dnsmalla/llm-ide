@@ -51,6 +51,7 @@ test('device linking: commitment, desktop approval, keys, SAS and confirmation',
   assert.equal(pending.body.requests.length, 1);
   assert.equal(pending.body.requests[0].label, 'Chrome');
   assert.equal(pending.body.requests[0].state, 'pending');
+  assert.match(pending.body.requests[0].deviceId, /^[A-Za-z0-9_-]{22}$/);
   assert.equal(pending.body.requests[0].commitment, commit);
 
   const desktopNonce = randomBytes(32).toString('base64url');
@@ -62,6 +63,8 @@ test('device linking: commitment, desktop approval, keys, SAS and confirmation',
   const status = await rawRequest(app.base, 'GET', `/v1/link/requests/status?requestId=${id}`, undefined, { cookie: web.cookie });
   assert.equal(status.status, 200);
   assert.equal(status.body.state, 'approved');
+  assert.equal(status.body.deviceId, pending.body.requests[0].deviceId);
+  assert.match(status.body.desktopId, /^[A-Za-z0-9_-]{22}$/);
   assert.equal(status.body.desktopNonce, approved.body.desktopNonce);
   assert.equal(status.body.desktopSigningKey, desktop.signingKey);
 

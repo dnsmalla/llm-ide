@@ -265,3 +265,14 @@ test('72 h after an email recovery, replacing or re-registering a desktop is hel
   const later = await signInDesktop(app, { reuse: first.web, fresh: true });
   assert.equal((await register(app, later.tokens.access_token)).status, 201);
 });
+
+test('GET /v1/desktop/account names the desktop device id once registered', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const { tokens } = await signInDesktop(app);
+  const before = await rawRequest(app.base, 'GET', '/v1/desktop/account', undefined, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(before.body.desktopId, null);
+  const reg = await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(tokens.access_token)), { 'content-type': 'application/json', authorization: `Bearer ${tokens.access_token}` });
+  const after = await rawRequest(app.base, 'GET', '/v1/desktop/account', undefined, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(after.body.desktopId, reg.body.device.id);
+});

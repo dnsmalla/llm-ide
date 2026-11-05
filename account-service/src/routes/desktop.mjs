@@ -9,7 +9,8 @@ export function desktopRoutes(routes, ctx) {
   routes.set('GET /v1/desktop/account', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     // Only what the desktop shows; passkeys and audit stay on the web account page.
-    send(res, 200, { id: user.id, email: user.email, displayName: user.display_name });
+    const desktopId = ctx.db.prepare("SELECT id FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").pluck().get(user.id) ?? null;
+    send(res, 200, { id: user.id, email: user.email, displayName: user.display_name, desktopId });
   }));
 
   // Design 4.4 step 5. The body carries a proof of possession of the signing key (devices.mjs).

@@ -22,6 +22,7 @@ function walk(dir) {
 }
 
 function check(file) {
+  if (file.endsWith(`${sep}check-boundary.mjs`)) return; // its own diagnostic strings mention imports
   const src = readFileSync(file, 'utf8');
   for (const m of src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g)) {
     const spec = m[1];
@@ -29,6 +30,15 @@ function check(file) {
       || ALLOWED.some((d) => spec === d || spec.startsWith(`${d}/`))
       || ((spec.startsWith('./') || spec.startsWith('../')) && resolve(dirname(file), spec).startsWith(root));
     if (!ok) problems.push(`${file.slice(root.length)}: importing "${spec}" is not allowed`);
+  }
+  // The relay unit forwards ciphertext only: no outbound network, no processes, no code loading, no mail or WebAuthn.
+  if (file.includes(`${sep}src${sep}relay${sep}`)) {
+    for (const m of src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g)) {
+      const spec = m[1];
+      const ok = ['node:crypto', 'node:events'].includes(spec) || spec.startsWith('./') || ['../rate-limit.mjs', '../guard.mjs'].includes(spec);
+      if (!ok) problems.push(`${file.slice(root.length)}: the relay may not import "${spec}"`);
+    }
+    if (/\bfetch\s*\(|\beval\s*\(|new Function\b|Math\.random\b/.test(src)) problems.push(`${file.slice(root.length)}: forbidden call in the relay`);
   }
 }
 

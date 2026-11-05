@@ -49,3 +49,14 @@ test('N1: direct sign-up outside localhost needs an allowlist of exact addresses
   assert.equal(loadConfig({ ACCOUNTS_DIRECT_SIGNUP: '1' }).directSignupEmails, null);
   assert.equal(loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP: '0' }).directSignup, false);
 });
+
+test('relay is off by default and its web origins are exact https origins, never the accounts origin', () => {
+  const base = { ACCOUNTS_ORIGIN: 'https://accounts.example.com', NODE_ENV: 'production', ACCOUNTS_MAIL_TRANSPORT: 'none' };
+  assert.equal(loadConfig(base).relay.enabled, false);
+  const on = loadConfig({ ...base, ACCOUNTS_RELAY: '1', ACCOUNTS_ALLOWED_WEB_ORIGINS: 'https://app.example.com' });
+  assert.equal(on.relay.enabled, true);
+  assert.deepEqual([...on.relay.webOrigins], ['https://app.example.com']);
+  assert.throws(() => loadConfig({ ...base, ACCOUNTS_ALLOWED_WEB_ORIGINS: 'http://app.example.com' }), /https/);
+  assert.throws(() => loadConfig({ ...base, ACCOUNTS_ALLOWED_WEB_ORIGINS: 'https://app.example.com/path' }), /bare origins/);
+  assert.throws(() => loadConfig({ ...base, ACCOUNTS_ALLOWED_WEB_ORIGINS: 'https://accounts.example.com' }), /own origin/);
+});

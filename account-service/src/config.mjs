@@ -47,6 +47,17 @@ export function loadConfig(env = process.env) {
   if (directSignup && !directSignupEmails && (prod || !LOOPBACK_HOSTS.has(url.hostname.replace(/^\[|\]$/g, '')))) {
     throw new Error('ACCOUNTS_DIRECT_SIGNUP outside localhost needs ACCOUNTS_DIRECT_SIGNUP_EMAILS (the exact addresses allowed)');
   }
+  const relayEnabled = flag(env, 'ACCOUNTS_RELAY');
+  // The web relay client lives on its OWN origin (relay D1, accounts design 3): a page the accounts/relay operator
+  // serves must never hold relay keys, so the accounts origin is refused here.
+  const webOrigins = (env.ACCOUNTS_ALLOWED_WEB_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  for (const o of webOrigins) {
+    let u;
+    try { u = new URL(o); } catch { throw new Error('ACCOUNTS_ALLOWED_WEB_ORIGINS must list bare origins'); }
+    if (u.origin !== o) throw new Error('ACCOUNTS_ALLOWED_WEB_ORIGINS must list bare origins');
+    if (prod && u.protocol !== 'https:') throw new Error('ACCOUNTS_ALLOWED_WEB_ORIGINS must use https in production');
+    if (o === origin) throw new Error('ACCOUNTS_ALLOWED_WEB_ORIGINS cannot contain the accounts origin: the web client needs its own origin');
+  }
   return Object.freeze({
     prod,
     origin,
@@ -60,6 +71,7 @@ export function loadConfig(env = process.env) {
     directSignupEmails,
     trustProxy: flag(env, 'ACCOUNTS_TRUST_PROXY'),
     secureCookies: url.protocol === 'https:',
+    relay: Object.freeze({ enabled: relayEnabled, webOrigins: Object.freeze(new Set(webOrigins)) }),
     mail: Object.freeze({
       transport,
       smtpUrl,

@@ -25,9 +25,9 @@ test('migrations create every table once and are idempotent', () => {
   const db = openDb(':memory:');
   migrate(db);
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").pluck().all();
-  for (const name of ['audit_events', 'desktop_tokens', 'devices', 'email_tokens', 'oauth_codes', 'link_requests', 'passkeys', 'schema_migrations', 'sessions', 'users', 'webauthn_challenges']) {
+  for (const name of ['audit_events', 'desktop_tokens', 'devices', 'email_tokens', 'oauth_codes', 'link_requests', 'relay_wraps', 'passkeys', 'schema_migrations', 'sessions', 'users', 'webauthn_challenges']) {
     assert.ok(tables.includes(name), name);
   }
-  assert.equal(db.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get(), 4);
+  assert.equal(db.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get(), 5);
   db.close();
 });
