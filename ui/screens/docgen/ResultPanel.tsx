@@ -20,6 +20,8 @@ export interface ResultPanelProps {
   onRefine: (instruction: string) => Promise<boolean> | boolean;
   onSave: () => void;
   onSaveAsNew: () => void;
+  /** Native save panel: write a copy anywhere the user chooses (desktop only). */
+  onExport?: (name: string, text: string) => void;
   onOpenSaved: (path: string) => void;
   /** Shows the saved file in the OS file manager. Absent outside the desktop app: no Reveal button. */
   onReveal?: (path: string) => void;
@@ -130,6 +132,11 @@ function Done(p: ResultPanelProps): ReactNode {
         {r.saveConflict && (
           <button type="button" className="dg-btn" onClick={p.onSaveAsNew}>
             Save as new file
+          </button>
+        )}
+        {p.onExport && (
+          <button type="button" className="dg-btn" disabled={r.saving || revising} title="Save a copy outside the project" onClick={() => p.onExport!(r.saved?.stem ?? "document", r.doc)}>
+            Export…
           </button>
         )}
         {r.saved && (

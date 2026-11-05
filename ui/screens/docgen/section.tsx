@@ -53,6 +53,7 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     return { fs, notes, store: storeFor(surface, fs, notes) };
   }, [surface]);
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
   const onReveal = useCallback((path: string) => {
     if (!available) return;
     setRevealNotice(null);
@@ -62,6 +63,16 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     void invokeHost("reveal_in_os", { relPath: rel }).then(() => undefined, () => setRevealNotice(REVEAL_FAILED));
   }, [available]);
   const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
+  const onExport = useCallback(async (name: string, text: string) => {
+    setExportNotice(null);
+    try {
+      const path = await invokeHost<string | null>("export_note", { name, text, title: "Export document" });
+      // A cancelled native dialog is not an event worth a banner; only a real export gets one.
+      if (path) setExportNotice({ kind: "ok", message: "Exported the document outside the project." });
+    } catch {
+      setExportNotice({ kind: "error", message: "The document could not be exported." });
+    }
+  }, []);
   const env = useMemo(() => ({
     reveal: available ? onReveal : undefined,
     fs: available ? deps.fs : null,
@@ -77,5 +88,5 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} onExport={available ? onExport : undefined} exportNotice={exportNotice} />;
 }
