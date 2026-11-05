@@ -245,6 +245,12 @@ chat-gates:
 host-api-check:
 	node scripts/conformance-host-api.mjs
 
+# Relay v1 shared vectors (schema/relay/v1) and the node:crypto reference.
+.PHONY: relay-check
+relay-check:
+	node scripts/relay-vectors.mjs
+	node --test scripts/relay-vectors.test.mjs
+
 # HTTP endpoint contract (schema/http): request and response shapes per route
 # group, checked against the roster. Part of `regression` (Phase 1 P16) and
 # run by the pre-push hook for mac/ pushes through `regression`; it is fast
@@ -256,6 +262,7 @@ contract-gates:
 	# the legacy kb/ tripwire.
 	d=$$(mktemp -d) && LLMIDE_DATA_DIR="$$d" node scripts/conformance-bus.mjs; s=$$?; rm -rf "$$d"; exit $$s
 	$(MAKE) host-api-check
+	$(MAKE) relay-check
 	node scripts/gen-api-types.mjs --check
 	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --check
