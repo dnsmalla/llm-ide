@@ -60,3 +60,20 @@ The Rust test `link_commitment_and_sas_match_the_service_vector` pins the same v
 - PWA on its own origin with a same-origin BFF; iOS passkey linking (sub-project 4).
 - Real GUI run of the Settings approval card and a real device link.
 - External security/legal review, SMTP/recovery.
+
+## Browser end-to-end check (2026-11-05)
+
+A local harness served `account-service/public` and proxied `/v1` to an in-memory account service with a
+test account and a registered desktop. Chrome (remote debugging) completed the real page flow:
+
+```text
+Start linking                    -> 201 pending request
+desktop approve                  -> approved
+browser reveals keys             -> keys
+browser-computed SAS             -> 668 383 (matches `/confirm` sas 668383)
+desktop confirm                  -> linked
+localStorage device token        -> present
+```
+
+The harness was temporary and is not committed; the repository tests cover the same API transition.
+The desktop Settings card still needs a real GUI run.
