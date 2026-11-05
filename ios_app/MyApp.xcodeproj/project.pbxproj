@@ -19,6 +19,7 @@
 		B8C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */; };
 		B8D103617AE1194F58F35BC3 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */; };
 		B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CC02D68D4369B858A43C3C /* UsageView.swift */; };
+		C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */; };
 		B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */; };
 		A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */; };
 		A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */; };
@@ -79,6 +80,7 @@
 		B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSwitcherSheet.swift; sourceTree = "<group>"; };
 		B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
 		B7CC02D68D4369B858A43C3C /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadChatsView.swift; sourceTree = "<group>"; };
 		B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedStore.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 				B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */,
 				B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */,
 				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
+				C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */,
 				A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */,
 				A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */,
 				A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */,
@@ -382,6 +385,7 @@
 				B8C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift in Sources */,
 				B8D103617AE1194F58F35BC3 /* ProjectsStore.swift in Sources */,
 				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
+				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
 				B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */,
 				A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */,
 				A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */,

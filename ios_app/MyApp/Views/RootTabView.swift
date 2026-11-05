@@ -20,7 +20,7 @@ struct RootTabView: View {
     @EnvironmentObject var filesStore: FilesStore
     @EnvironmentObject var issuesStore: IssuesStore
 
-    enum Tab: Hashable { case chat, project, activity, settings }
+    enum Tab: Hashable { case chat, project, history, activity, settings }
     @State private var selection: Tab = .chat
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -42,6 +42,12 @@ struct RootTabView: View {
                     .tabItem { Label("Project", systemImage: "folder.fill") }
                     .badge(explorerStore.pendingApproval == nil ? 0 : 1)
                     .tag(Tab.project)
+            }
+
+            if connection.servesV1Read {
+                NavigationStack { ReadChatsView() }
+                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                    .tag(Tab.history)
             }
 
             if connection.supports(MobileProtocol.Capability.activity) {
@@ -81,6 +87,10 @@ struct RootTabView: View {
             if !connection.supports(MobileProtocol.Capability.usage), !connection.servesV1Read { usageStore.resetForNewDevice() }
             if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
             refreshMacData()
+        }
+        // v1 dropped, or `read` revoked: the History tab is gone, so never leave the user on it.
+        .onChange(of: connection.servesV1Read) { on in
+            if !on, selection == .history { selection = .chat }
         }
     }
 
