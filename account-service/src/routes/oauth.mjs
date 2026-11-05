@@ -87,4 +87,14 @@ export function oauthRoutes(routes, ctx) {
     if (grantType === undefined) throw new HttpError(400, 'invalid_request');
     throw new HttpError(400, 'unsupported_grant_type');
   }));
+
+  // Sign-out revokes the refresh family. It is idempotent and never reveals whether the token existed.
+  routes.set('POST /v1/oauth/revoke', nativeClient(async (req, res) => {
+    const field = await tokenFields(req);
+    const clientId = field('client_id');
+    if (clientId !== undefined && clientId !== 'llmide-desktop') throw new HttpError(400, 'invalid_client');
+    const token = field('token');
+    if (typeof token === 'string') ctx.oauth.revokeRefresh({ refreshToken: token, clientId: 'llmide-desktop' });
+    send(res, 200, {});
+  }));
 }

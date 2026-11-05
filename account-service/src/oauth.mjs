@@ -102,6 +102,15 @@ export function createOAuth(db, now) {
       return { userId: row.user_id, tokens };
     },
 
+    revokeRefresh({ refreshToken, clientId }) {
+      if (clientId !== CLIENT_ID) throw new HttpError(400, 'invalid_client');
+      if (typeof refreshToken !== 'string' || !TOKEN_RE.test(refreshToken)) return false;
+      const row = tokenByHash.get(hash(refreshToken));
+      if (!row || row.kind !== 'refresh' || row.client_id !== clientId) return false;
+      revokeFamily.run(now(), row.family);
+      return true;
+    },
+
     rotateRefresh({ refreshToken, clientId }) {
       if (clientId !== CLIENT_ID) throw new HttpError(400, 'invalid_client');
       if (typeof refreshToken !== 'string' || !TOKEN_RE.test(refreshToken)) throw invalidGrant();

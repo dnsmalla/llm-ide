@@ -265,3 +265,15 @@ test('authorize requires a full web session, not a setup session', async (t) => 
   assert.equal(setup.status, 401);
   assert.deepEqual(setup.body, { error: 'unauthenticated' });
 });
+
+
+test('sign-out revokes the refresh family and is idempotent', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const { tokens } = await signInDesktop(app);
+  const revoke = () => rawRequest(app.base, 'POST', '/v1/oauth/revoke', new URLSearchParams({ client_id: DESKTOP_CLIENT, token: tokens.refresh_token }).toString(), { 'content-type': 'application/x-www-form-urlencoded' });
+  assert.equal((await revoke()).status, 200);
+  assert.equal((await revoke()).status, 200);
+  const rotated = await tokenRequest(app, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: DESKTOP_CLIENT });
+  assert.equal(rotated.status, 400);
+});

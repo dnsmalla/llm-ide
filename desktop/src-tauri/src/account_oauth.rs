@@ -315,6 +315,15 @@ pub async fn account_register_desktop() -> Result<AccountStatus, String> {
 pub async fn account_sign_out() -> Result<AccountStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let backend = store()?;
+        // Best effort: revoke the refresh family before dropping the local copy. Local sign-out still
+        // completes if the account service is unreachable.
+        if let Ok(origin) = origin() {
+            if let Ok(Some(tokens)) = load_tokens(backend.as_ref()) {
+                let _ = ureq::post(&format!("{origin}v1/oauth/revoke"))
+                    .set("content-type", "application/x-www-form-urlencoded")
+                    .send_form(&[("client_id", CLIENT_ID), ("token", &tokens.refresh_token)]);
+            }
+        }
         backend.delete(TOKENS_ACCOUNT).map_err(|e| e.to_string())?;
         backend.delete(PROFILE_ACCOUNT).map_err(|e| e.to_string())?;
         status_from(backend.as_ref())
