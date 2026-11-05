@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::Manager;
@@ -197,6 +198,35 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     Ok(GraphGenerated { path: rel.into(), nodes, edges })
 }
 
+/// True when a timer tick should run: off at 0, otherwise at or past the interval.
+pub fn auto_due(minutes: u32, elapsed_secs: u64) -> bool {
+    minutes > 0 && elapsed_secs >= u64::from(minutes) * 60
+}
+
+/// Background timer for Settings → Code Graph. It runs immediately on project open/switch and then every N
+/// minutes, regenerating the `all` graph (code + memory). File-watch debouncing stays Mac-only for now.
+pub fn start_auto(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_root: Option<String> = None;
+        let mut last_minutes = u32::MAX;
+        let mut last_run = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let minutes = crate::prefs::stored().graph_auto_update_minutes;
+            if minutes != last_minutes { last_minutes = minutes; last_run = Instant::now(); }
+            if minutes == 0 { last_root = None; continue; }
+            let root = crate::project::active_root().map(|p| p.to_string_lossy().into_owned());
+            let changed = root != last_root;
+            if changed { last_root = root.clone(); last_run = Instant::now(); }
+            if root.is_none() { continue; }
+            if !changed && !auto_due(minutes, last_run.elapsed().as_secs()) { continue; }
+            last_run = Instant::now();
+            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("all".into()), None));
+            if let Err(e) = result { eprintln!("graph auto-update: {e}"); }
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>) -> Result<GraphGenerated, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
@@ -228,5 +258,12 @@ mod tests {
         assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
         assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
         assert!(!Path::new(graph_rel("code")).is_absolute());
+    }
+
+    #[test]
+    fn auto_due_honours_off_and_the_interval() {
+        assert!(!auto_due(0, 99_999));
+        assert!(!auto_due(5, 299));
+        assert!(auto_due(5, 300));
     }
 }

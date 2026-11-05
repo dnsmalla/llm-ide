@@ -505,6 +505,7 @@ pub fn run() {
             }
             // Host prefs are read once, before the core is spawned: they decide its environment.
             prefs::init(fsutil::desktop_data_dir().ok().and_then(|d| fsutil::private_dir(&d).ok()));
+            graph_gen::start_auto(app.handle().clone());
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);
             }

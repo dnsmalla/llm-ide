@@ -37,7 +37,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   paths: dflt(() => import("./sections/PathsSection.tsx")),
   repositories: dflt(() => import("./sections/RepositoriesSection.tsx")),
   memory: dflt(() => import("./sections/MemorySection.tsx")),
-  "code-graph": named(notices, "CodeGraphGroup"),
+  "code-graph": dflt(() => import("./sections/CodeGraphSection.tsx")),
 };
 
 export function createSettingsRegistry(): SettingsRegistry<SectionComponent> {

@@ -43,6 +43,8 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   connections:
     "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
+  "code-graph":
+    "The host refreshes the code + memory graph on project open/switch and every configured interval; file-watch debouncing and the truncation upload banner remain Mac-only.",
   repositories:
     "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones), and Check token verifies the saved one for github.com or the configured public GitLab instance; pull/re-sync and the Mac's resolve step are not available in the desktop yet.",
   paths:

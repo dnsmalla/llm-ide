@@ -128,6 +128,8 @@ pub struct Prefs {
     pub backend_auto_start: bool,
     /// App-wide defaults for loops added to a newly detected project.
     pub loop_defaults: LoopDefaults,
+    /// Minutes between automatic Code Graph refreshes; 0 = off. Values 1-4 are raised to 5.
+    pub graph_auto_update_minutes: u32,
 }
 
 impl Default for Prefs {
@@ -135,7 +137,7 @@ impl Default for Prefs {
         Self {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
-            loop_defaults: LoopDefaults::default(),
+            loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0,
         }
     }
 }
@@ -158,6 +160,7 @@ pub struct PrefsPatch {
     pub backend_port: Option<u16>,
     pub backend_auto_start: Option<bool>,
     pub loop_defaults: Option<LoopDefaults>,
+    pub graph_auto_update_minutes: Option<u32>,
 }
 
 /// An explicit feature list: only keys the server knows, in the canonical order, with `agent_chat` always on.
@@ -190,6 +193,9 @@ impl Prefs {
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.loop_defaults {
             n.loop_defaults = v.clone().clamped();
+        }
+        if let Some(v) = p.graph_auto_update_minutes {
+            n.graph_auto_update_minutes = if v == 0 { 0 } else { v.clamp(5, 1440) };
         }
         if let Some(v) = &p.features {
             if v.is_empty() {
@@ -228,7 +234,7 @@ pub fn parse(text: &str) -> Prefs {
         features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
         backend_source: Some(p.backend_source), backend_node: Some(p.backend_node.clone()), backend_dir: Some(p.backend_dir.clone()),
         backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
-        loop_defaults: Some(p.loop_defaults.clone()),
+        loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
     })).unwrap_or_default()
 }
 
@@ -605,5 +611,19 @@ mod loop_default_tests {
         let q = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(high), ..Default::default() });
         assert_eq!(q.loop_defaults.max_iterations, 100);
         assert_eq!(q.loop_defaults.consecutive_failure_stop, 1);
+    }
+
+    #[test]
+    fn graph_auto_update_is_off_or_between_five_and_a_day() {
+        let mut p = Prefs::default();
+        assert_eq!(p.graph_auto_update_minutes, 0);
+        p = p.patched(&PrefsPatch { graph_auto_update_minutes: Some(1), ..Default::default() });
+        assert_eq!(p.graph_auto_update_minutes, 5);
+        p = p.patched(&PrefsPatch { graph_auto_update_minutes: Some(99_999), ..Default::default() });
+        assert_eq!(p.graph_auto_update_minutes, 1440);
+        p = p.patched(&PrefsPatch { graph_auto_update_minutes: Some(0), ..Default::default() });
+        assert_eq!(p.graph_auto_update_minutes, 0);
+        let back = parse(&serde_json::to_string(&p).unwrap());
+        assert_eq!(back.graph_auto_update_minutes, 0);
     }
 }

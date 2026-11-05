@@ -132,6 +132,9 @@ export interface SettingsHost {
   /** App-wide defaults for loops added to a newly detected project. */
   getLoopDefaults?(): Promise<LoopDefaults>;
   setLoopDefaults?(defaults: LoopDefaults): Promise<LoopDefaults>;
+  /** Minutes between automatic Code Graph refreshes (0 = off; 5-1440 otherwise). */
+  getGraphAutoUpdate?(): Promise<number>;
+  setGraphAutoUpdate?(minutes: number): Promise<number>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
   /** The optional-component store (Mermaid): status, and install/remove behind the host's native dialogs. */

@@ -22,7 +22,7 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0 };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -60,7 +60,7 @@ test("the prefs keys match the Rust schema", () => {
 
 test("without a host nothing host-backed is offered (the placeholders stay honest)", () => {
   const { host } = env({ host: false });
-  for (const k of ["getLtaMode", "setLtaMode", "launchLtaMode", "getRoutePrefs", "setRoutePrefs", "getExtraPrefs", "getLoopDefaults", "setLoopDefaults", "pickFolder", "confirmTrust"]) assert.equal(host[k], undefined, k);
+  for (const k of ["getLtaMode", "setLtaMode", "launchLtaMode", "getRoutePrefs", "setRoutePrefs", "getExtraPrefs", "getLoopDefaults", "setLoopDefaults", "getGraphAutoUpdate", "setGraphAutoUpdate", "pickFolder", "confirmTrust"]) assert.equal(host[k], undefined, k);
 });
 
 test("archiving mode and router/cap round-trip through get_prefs/set_prefs with a typed patch", async () => {
@@ -76,6 +76,10 @@ test("archiving mode and router/cap round-trip through get_prefs/set_prefs with 
   await host.setExtraPrefs({ learn: true });
   assert.deepEqual(await host.getExtraPrefs(), { compress: false, learn: true, terminal: true });
   assert.equal(state.stored.learn, true);
+  await host.setGraphAutoUpdate(15);
+  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { graphAutoUpdateMinutes: 15 } }]);
+  assert.equal(await host.getGraphAutoUpdate(), 15);
+  assert.equal(state.stored.graphAutoUpdateMinutes, 15);
 });
 
 test("a garbled host answer is an error, not invented values", async () => {
@@ -130,4 +134,12 @@ test("Loop defaults decode defensively and round-trip through set_prefs", async 
   assert.deepEqual(await host.setLoopDefaults(next), next);
   assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { loopDefaults: next } }]);
   assert.deepEqual(state.stored.loopDefaults, next);
+});
+
+
+test("graph auto-update decodes off and floors small intervals", () => {
+  assert.equal(m.decodePrefs(P).graphAutoUpdateMinutes, 0);
+  assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: 1 }).graphAutoUpdateMinutes, 5);
+  assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: 1440 }).graphAutoUpdateMinutes, 1440);
+  assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: -1 }).graphAutoUpdateMinutes, 0);
 });

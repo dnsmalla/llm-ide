@@ -42,6 +42,8 @@ export interface HostPrefs {
   backendAutoStart: boolean;
   /** Defaults applied to loops the Loop screen re-adds to a project. */
   loopDefaults: LoopDefaults;
+  /** Minutes between automatic Code Graph refreshes; 0 = off. Host raises 1-4 to 5. */
+  graphAutoUpdateMinutes: number;
 }
 
 export interface HostPrefsView {
@@ -88,7 +90,10 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const backendPort = typeof raw.backendPort === "number" && Number.isInteger(raw.backendPort) && raw.backendPort >= 0 && raw.backendPort <= 65535 ? raw.backendPort : 0;
   const backendAutoStart = raw.backendAutoStart !== false;
   const loopDefaults = decodeLoopDefaults(raw.loopDefaults);
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults };
+  const graphAutoUpdateMinutes = typeof raw.graphAutoUpdateMinutes === "number" && Number.isInteger(raw.graphAutoUpdateMinutes) && raw.graphAutoUpdateMinutes >= 0 && raw.graphAutoUpdateMinutes <= 1440
+    ? (raw.graphAutoUpdateMinutes === 0 ? 0 : Math.max(5, raw.graphAutoUpdateMinutes))
+    : 0;
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
