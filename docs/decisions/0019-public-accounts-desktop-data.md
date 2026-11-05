@@ -47,9 +47,14 @@ for one trusted machine and cannot become a public identity service.
    One desktop per account in v1; replacing it needs a fresh passkey check and unlinks
    every device.
 6. **The desktop signs in with OAuth 2.0 Authorization Code + PKCE** in the system
-   browser, returning through `llmide://`, and keeps one outbound relay connection. The
-   SSH tunnel and the public `/api/` path are removed. Host API v1 commands travel inside
-   relay envelopes.
+   browser, returning through a random loopback callback (`llmide://` is a fallback), and
+   keeps one outbound relay connection. The SSH tunnel and the public `/api/` path are
+   removed. Host API v1 commands travel inside relay envelopes.
+7. **The PWA delegates passkeys to the accounts origin and uses a same-origin BFF.**
+   A passkey has the RP ID `accounts.llm-ide.com`; it cannot be used on
+   `app.llm-ide.com`. The PWA opens the account sign-in page, and an app-origin BFF
+   exchanges the code and keeps the refresh token in an `HttpOnly` cookie. The accounts
+   API sends no CORS headers.
 
 Full design: [accounts and device linking](../superpowers/specs/2026-11-05-accounts-and-device-linking-design.md).
 

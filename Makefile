@@ -51,6 +51,14 @@ test-desktop: test-desktop-node
 	  cd desktop/src-tauri && PATH="$$TOOLCHAIN_BIN:$$PATH" "$$CARGO" test --lib; \
 	else echo "test-desktop: no working cargo (a shim that prints 'rustup ...' does not count); skipping cargo test --lib"; fi
 
+# --- account service ---------------------------------------------------------
+
+.PHONY: test-account-service
+test-account-service:
+	@if [ -d account-service/node_modules ]; then \
+	  cd account-service && npm run -s check:boundary && npm test --silent; \
+	else echo "test-account-service: account-service/node_modules missing (cd account-service && npm ci); skipping"; fi
+
 # --- mac app -----------------------------------------------------------------
 
 .PHONY: build-mac build-mac-lite build-mac-min build-mac-mobile-only test-mac regression test-shared-protocol
@@ -146,7 +154,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout graphkit-pin-check feature-gates contract-gates test-desktop-node test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
+regression: graph-kit-checkout graphkit-pin-check feature-gates contract-gates test-desktop-node test-account-service test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
