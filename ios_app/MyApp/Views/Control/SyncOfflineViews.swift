@@ -13,13 +13,13 @@ struct SyncOfflineSections: View {
                 if syncStore.phase == .removed { Text("This iPhone was removed from sync.").foregroundColor(.red) }
             }
             if !snap.chats.isEmpty {
-                Section("Chats") { ForEach(snap.chats) { c in Text(c.title) } }
+                Section("Chats") { ForEach(snap.chats) { c in NavigationLink(c.title) { SyncChatView(chat: c) } } }
             }
             if !snap.meetings.isEmpty {
-                Section("Meetings") { ForEach(snap.meetings) { m in Text("\(m.title) · \(m.date)") } }
+                Section("Meetings") { ForEach(snap.meetings) { m in NavigationLink("\(m.title) · \(m.date)") { SyncMeetingView(meeting: m) } } }
             }
             if !snap.plans.isEmpty {
-                Section("Plans") { ForEach(snap.plans) { p in Text(p.title) } }
+                Section("Plans") { ForEach(snap.plans) { p in NavigationLink(p.title) { SyncPlanView(plan: p) } } }
             }
         } else {
             Section { Text(syncStore.refreshing ? "Loading…" : "No snapshot yet. Turn sync on in Settings.").foregroundColor(.secondary) }
@@ -70,5 +70,34 @@ struct SyncSettingsCard: View {
             Button("Refresh now") { Task { await syncStore.refresh() } }.disabled(syncStore.phase != .ready)
             Button("Remove sync from this iPhone", role: .destructive) { Task { await syncStore.removeFromPhone() } }
         }
+    }
+}
+
+
+struct SyncChatView: View {
+    let chat: SyncChat
+    var body: some View {
+        List(chat.messages, id: \.seq) { m in
+            VStack(alignment: .leading) { Text(m.role).font(.caption).foregroundColor(.secondary); Text(m.content) }
+                .accessibilityElement(children: .combine)
+        }.navigationTitle(chat.title)
+    }
+}
+struct SyncMeetingView: View {
+    let meeting: SyncMeeting
+    var body: some View {
+        List {
+            Section("Meeting") { Text(meeting.title); Text(meeting.date); if !meeting.participants.isEmpty { Text(meeting.participants.joined(separator: ", ")) } }
+            Section("Notes") { ForEach(Array(meeting.notes.enumerated()), id: \.offset) { _, n in VStack(alignment: .leading) { Text(n.kind).font(.caption).foregroundColor(.secondary); Text(n.text) } } }
+        }.navigationTitle(meeting.title)
+    }
+}
+struct SyncPlanView: View {
+    let plan: SyncPlan
+    var body: some View {
+        List {
+            if !plan.goal.isEmpty { Section("Goal") { Text(plan.goal) } }
+            Section("Tasks") { ForEach(Array(plan.tasks.enumerated()), id: \.offset) { _, t in VStack(alignment: .leading) { Text(t.title); Text("\(t.status) · \(t.owner)").font(.caption).foregroundColor(.secondary) } } }
+        }.navigationTitle(plan.title)
     }
 }
