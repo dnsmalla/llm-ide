@@ -53,7 +53,7 @@ test("GitHub token check returns the login and scopes, never the token", async (
   } finally { _setPinnedFetchForTests(null); }
 });
 
-test("an invalid token is a 401, a forbidden token a 403, and a missing token a 400", async () => {
+test("an invalid token and a forbidden token are both 403 with distinct codes, and a missing token is 400", async () => {
   reset();
   const u = users.registerUser(db.getDb(), { email: `tok2-${Date.now()}@example.com`, password: "CorrectHorseBattery", displayName: "tok2" });
   setSecret(db.getDb(), u.id, "gitlab.token", "glpat_secret_value_12345");
@@ -61,7 +61,7 @@ test("an invalid token is a 401, a forbidden token a 403, and a missing token a 
   try {
     const unauthorized = res();
     await handleKB(req(u.id, { provider: "gitlab" }), unauthorized);
-    assert.equal(unauthorized.statusCode, 401, unauthorized.body);
+    assert.equal(unauthorized.statusCode, 403, unauthorized.body);
     assert.equal(JSON.parse(unauthorized.body).error.code, "TOKEN_UNAUTHORIZED");
   } finally { _setPinnedFetchForTests(null); }
   _setPinnedFetchForTests(async () => new Response(JSON.stringify({ message: "403 Forbidden" }), { status: 403 }));

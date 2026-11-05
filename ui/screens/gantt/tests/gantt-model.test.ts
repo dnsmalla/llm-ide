@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, enqueueShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, scheduleBody, enqueueShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -555,6 +555,10 @@ test("shiftScheduleBody preserves estimate/dependencies and refuses numberless r
   });
   assert.equal(shiftScheduleBody({ ...row, issue: issue({ number: null }) }, 1), null);
   assert.equal(shiftScheduleBody(row, 0), null);
+  assert.deepEqual(scheduleBody(row, 0), {
+    provider: "gitlab", repo: "acme/web", issueNumber: 7,
+    startDate: "2026-02-02", dueDate: "2026-02-05", estimateDays: 3, dependsOn: [2],
+  });
 });
 
 

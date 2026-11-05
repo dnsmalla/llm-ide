@@ -166,10 +166,9 @@ export function dragShift(startX: number, clientX: number, dayWidth: number): { 
   return { moved: Math.abs(delta) >= 3, days: Math.round(delta / Math.max(1, dayWidth)) };
 }
 
-/** Shift a row's actual schedule dates by whole days, preserving a missing side; fall back to the drawn bar for an
- *  estimate-only row (where moving the bar must materialise dates). Null for a zero/no-span shift. */
-export function shiftSchedule(row: Pick<GanttRow, "schedule" | "start" | "end">, days: number): { startDate: string | null; dueDate: string | null } | null {
-  if (!Number.isInteger(days) || days === 0) return null;
+/** Target dates for a whole-day shift, allowing 0 (a queued compensating gesture must re-send the original dates). */
+function shiftedDates(row: Pick<GanttRow, "schedule" | "start" | "end">, days: number): { startDate: string | null; dueDate: string | null } | null {
+  if (!Number.isInteger(days)) return null;
   const start = row.schedule?.startDate ? dayNumber(row.schedule.startDate) : null;
   const due = row.schedule?.dueDate ? dayNumber(row.schedule.dueDate) : null;
   if (start !== null || due !== null) {
@@ -179,14 +178,25 @@ export function shiftSchedule(row: Pick<GanttRow, "schedule" | "start" | "end">,
   return { startDate: dayString(row.start + days), dueDate: dayString(row.end + days + 1) };
 }
 
-/** The PUT body for a drag/keyboard shift; null when the row cannot be scheduled or the shift is zero. */
-export function shiftScheduleBody(row: GanttRow, days: number): (ScheduleKey & { startDate: string | null; dueDate: string | null; estimateDays: number | null; dependsOn: number[] }) | null {
-  const shifted = shiftSchedule(row, days);
+/** Shift a row's actual schedule dates by whole days, preserving a missing side; fall back to the drawn bar for an
+ *  estimate-only row (where moving the bar must materialise dates). Null for a zero/no-span shift. */
+export function shiftSchedule(row: Pick<GanttRow, "schedule" | "start" | "end">, days: number): { startDate: string | null; dueDate: string | null } | null {
+  return days === 0 ? null : shiftedDates(row, days);
+}
+
+/** The PUT body for a queued target, including 0. Null only when the row has no span/number. */
+export function scheduleBody(row: GanttRow, days: number): (ScheduleKey & { startDate: string | null; dueDate: string | null; estimateDays: number | null; dependsOn: number[] }) | null {
+  const shifted = shiftedDates(row, days);
   if (shifted === null || row.issue.number === null) return null;
   return {
     provider: row.issue.provider, repo: row.issue.repo, issueNumber: row.issue.number,
     ...shifted, estimateDays: row.schedule?.estimateDays ?? null, dependsOn: row.dependsOn,
   };
+}
+
+/** The PUT body for a drag/keyboard shift; null when the row cannot be scheduled or the shift is zero. */
+export function shiftScheduleBody(row: GanttRow, days: number): ReturnType<typeof scheduleBody> {
+  return days === 0 ? null : scheduleBody(row, days);
 }
 
 /**

@@ -24,7 +24,7 @@ import {
   projectOptions,
   timelineRange,
   todayScrollLeft,
-  enqueueShift, shiftScheduleBody, type QueuedShift,
+  enqueueShift, scheduleBody, shiftScheduleBody, type QueuedShift,
   type GanttCategory,
   type GanttRow,
   type Schedule,
@@ -136,7 +136,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
       while (shiftQueueRef.current.length > 0) {
         const item = shiftQueueRef.current[0]!;
         const savedDays = item.days;
-        const body = shiftScheduleBody(item.row, savedDays);
+        const body = scheduleBody(item.row, savedDays);
         if (body === null) { shiftQueueRef.current.shift(); continue; }
         const r = await deps.request("PUT", "/kb/issue-schedule", body);
         if (r.status !== 200) {
@@ -144,11 +144,11 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           shiftQueueRef.current.length = 0;
           return;
         }
-        // A second shift of this bar may have arrived during the PUT; keep the item and re-save its
-        // accumulated target, otherwise the later gesture would be silently lost.
-        if (item.days === savedDays) shiftQueueRef.current.shift();
         setNotice(`Moved ${issueLabel(item.row.issue)} ${savedDays > 0 ? "+" : ""}${savedDays} day${Math.abs(savedDays) === 1 ? "" : "s"}.`);
+        // Keep the item until the reload finishes: a compensating shift during the load must merge into the
+        // SAME queued target, not start a new one from the stale pre-save row.
         await load();
+        if (item.days === savedDays) shiftQueueRef.current.shift();
       }
     } catch {
       setNotice("The core is not reachable right now.");
