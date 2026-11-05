@@ -524,7 +524,7 @@ export class ChatController {
     const last = [...r.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
     if (last && last.seq === undefined && (last.status === "done" || last.status === "aborted") && !r.gap) {
       const content = assistantText(last);
-      if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status } });
+      if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status, tokenUsage: last.usage ?? null } });
     }
     while (r.state.queue.length > 0 && r.state.phase === "idle") {
       const [text] = r.state.queue;
