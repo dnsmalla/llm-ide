@@ -25,6 +25,8 @@ test('production requires https, smtps and never the file mailer', () => {
   assert.throws(() => loadConfig({ ...prod, ACCOUNTS_ORIGIN: 'http://accounts.llm-ide.com' }), /https/);
   assert.throws(() => loadConfig({ ...prod, ACCOUNTS_MAIL_TRANSPORT: 'file' }), /file mailer/);
   assert.throws(() => loadConfig({ ...prod, ACCOUNTS_SMTP_URL: 'smtp://smtp.example.com' }), /smtps/);
+  assert.equal(loadConfig({ ...prod, ACCOUNTS_MAIL_TRANSPORT: 'none' }).mail.transport, 'none');
+  assert.throws(() => loadConfig({ ...prod, ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_SIGNUP_OPEN: '1' }), /without a mail transport/);
 });
 
 test('refuses a non-loopback bind, a non-bare origin and a foreign RP ID', () => {

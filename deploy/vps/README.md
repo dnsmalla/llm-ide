@@ -88,8 +88,9 @@ ACCOUNTS_PORT=3470
 ACCOUNTS_ORIGIN=https://accounts.llm-ide.com
 ACCOUNTS_TRUST_PROXY=1
 ACCOUNTS_DB_PATH=/var/lib/llmide-accounts/accounts.db
-ACCOUNTS_MAIL_TRANSPORT=smtp
-ACCOUNTS_SMTP_URL=smtps://<user>:<password>@<provider-host>:465
+# Until a mail provider exists, use none (sign-up must stay closed). Switch to smtp when configured.
+ACCOUNTS_MAIL_TRANSPORT=none
+# ACCOUNTS_SMTP_URL=smtps://<user>:<password>@<provider-host>:465
 ACCOUNTS_MAIL_FROM=LLM-IDE <no-reply@llm-ide.com>
 # Do NOT set ACCOUNTS_SIGNUP_OPEN=1 before sub-project 5 (external review, legal gates).
 ```

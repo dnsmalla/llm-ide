@@ -22,9 +22,11 @@ export function loadConfig(env = process.env) {
   if (!LOOPBACK_HOSTS.has(host)) throw new Error('ACCOUNTS_HOST must be a loopback address; put nginx in front');
   const port = Number(env.ACCOUNTS_PORT ?? 3470);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('ACCOUNTS_PORT must be a port number');
+  const signupOpen = flag(env, 'ACCOUNTS_SIGNUP_OPEN');
   const transport = env.ACCOUNTS_MAIL_TRANSPORT ?? (prod ? 'smtp' : 'file');
-  if (!['smtp', 'file'].includes(transport)) throw new Error('ACCOUNTS_MAIL_TRANSPORT must be smtp or file');
-  if (prod && transport !== 'smtp') throw new Error('the file mailer writes sign-in links to disk; production needs smtp');
+  if (!['smtp', 'file', 'none'].includes(transport)) throw new Error('ACCOUNTS_MAIL_TRANSPORT must be smtp, file or none');
+  if (prod && transport === 'file') throw new Error('the file mailer writes sign-in links to disk; production needs smtp or none');
+  if (transport === 'none' && signupOpen) throw new Error('sign-up cannot open without a mail transport');
   const smtpUrl = env.ACCOUNTS_SMTP_URL ?? '';
   if (transport === 'smtp' && !smtpUrl.startsWith('smtps://')) throw new Error('ACCOUNTS_SMTP_URL must be an smtps:// URL');
   const retryMs = Number(env.ACCOUNTS_MAIL_RETRY_MS ?? 2000);
@@ -37,7 +39,7 @@ export function loadConfig(env = process.env) {
     host,
     port,
     dbPath: env.ACCOUNTS_DB_PATH ?? './data/accounts.db',
-    signupOpen: flag(env, 'ACCOUNTS_SIGNUP_OPEN'),
+    signupOpen,
     trustProxy: flag(env, 'ACCOUNTS_TRUST_PROXY'),
     secureCookies: url.protocol === 'https:',
     mail: Object.freeze({

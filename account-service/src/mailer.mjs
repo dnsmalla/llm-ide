@@ -14,6 +14,10 @@ export function createMailer(mail) {
       },
     };
   }
+  if (mail.transport === 'none') {
+    // Sign-up stays closed and no account mail is sent until an SMTP provider is configured.
+    return { async send() { throw new Error('email is not configured'); } };
+  }
   if (mail.transport === 'smtp') {
     const transport = nodemailer.createTransport(mail.smtpUrl);
     return {
