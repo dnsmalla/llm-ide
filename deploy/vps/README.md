@@ -8,9 +8,9 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 | Piece | Location |
 |---|---|
 | Web PWA | `https://llm-ide.com` → `/var/www/llm-ide-web` |
-| Public core API | `https://llm-ide.com/api/*` → `127.0.0.1:3457` |
+| Public core API | **closed** 2026-11-05: `https://llm-ide.com/api/*` answers 404 (see Known limits) |
 | Host API WebSocket | `wss://llm-ide.com/host-api/v1` → nginx → reverse SSH tunnel → this Mac's `127.0.0.1:3016` |
-| Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide` |
+| Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide`; **disabled** 2026-11-05 |
 | Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
 
 The web client is built with:
@@ -86,7 +86,7 @@ is restarted, the listener keeps port 3016 and the tunnel reconnects.
 ## Verify
 
 ```bash
-curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/api/health
+curl --resolve llm-ide.com:443:72.62.76.92 -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health   # 404 (closed)
 curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
 curl --http1.1 -k --resolve llm-ide.com:443:72.62.76.92 \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
@@ -101,7 +101,10 @@ Pair from the web page with a PIN from **desktop Settings → Host API pairing**
 
 - The core's Claude CLI is installed but not authenticated. Model-generating pipeline steps will fail
   until `claude login` or a per-user API key is configured.
-- The public `/api/*` surface is the full core API behind the auth gate. Registration is closed; do not
-  set `LLMIDE_DISABLE_REGISTRATION=0` on the public server.
+- `/api/*` is closed (404) and `llmide-core` is disabled (2026-11-05). It exposed the full core to the
+  internet, and every core user is an admin (agents, MCP stdio, plugin installs), so one leaked login meant
+  code execution on the VPS. Do not reopen it: public accounts come from the separate `account-service`
+  (ADR 0019, `docs/superpowers/specs/2026-11-05-accounts-and-device-linking-design.md`). Keep the admin
+  credentials in a password manager, not in `/root/llm-ide-admin.txt`.
 - DNS was moved from Squarespace; old resolvers may serve the old A records until the 30-minute TTL
   expires. Flush the Mac cache with `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
