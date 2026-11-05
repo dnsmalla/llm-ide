@@ -14,7 +14,17 @@ remote control: it connects to *the user's own Mac* over their local network
 running there, browse sessions, and start or stop scheduled tasks.
 
 There is no account, no sign-up, and no server operated by us. The phone talks
-only to the user's Mac.
+only to the user's Mac, and, if the user turns on sync, to their own MEGA account.
+
+## Optional: sync with the desktop off
+
+Users can let the app read an encrypted copy of their own desktop data (recent chats, meeting notes, plans, usage)
+when the desktop is switched off, and queue a chat prompt that the desktop answers later. The copy lives in a MEGA
+cloud account **the user owns** (a dedicated one is recommended); we operate no server and have no access. Everything
+is encrypted on the desktop before upload with standard algorithms through Apple's CryptoKit; MEGA stores only
+ciphertext. Setup needs the user's desktop (it shows a QR code and a 6-digit code to compare), so the reviewer can
+evaluate the rest of the app in demo mode, which never contacts MEGA. The MEGA password is used once to sign in and
+is not stored.
 
 ## How to review without a Mac — demo mode
 

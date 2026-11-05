@@ -504,7 +504,7 @@ setup, but it is the account password.
    account**. 2FA stays on the user's personal account, which is never connected. Our own E2E envelope
    means a stolen dedicated account yields ciphertext only. Its worst case is deletion or freeze, which
    the manifest makes visible.
-4. iPhone: the MEGA iOS SDK with `fastLogin` from a Keychain-stored session dump. The password is typed
+4. iPhone: a minimal HTTPS MEGA client in ios_app/SharedProtocol (MegaClient; OS crypto only, ported from megajs 1.3.10 and checked against megajs by a fixture), instead of the MEGA iOS SDK (C++ core plus six binary frameworks, an app key, non-OS crypto, and it would link into the Mac app through SharedProtocol). The password is typed once and never stored; the resumable session (session id + master key, as powerful as the SDK's dumpSession) is kept in the Keychain (ThisDeviceOnly). An expired session asks for the password again. Decision recorded in docs/superpowers/plans/2026-11-06-sync-sp4-ios.md.
    once and never stored.
 5. PWA: megajs in the browser. The password is asked for **per app session** and never stored. The
    session lives in memory only.
@@ -536,7 +536,7 @@ setup, but it is the account password.
 | Money | $0 (VPS already paid) | $0 (10 GB free, 250 MB/file) | $0 (20 GB free, third-party figure) |
 | Desktop setup | key generated; public line + sshd/nginx config once; host key pasted | existing CCG connector (subject = user) or one-time consent | dedicated account email + password once |
 | Desktop login needed | no | no (CCG) / consent once, again after 60 days off (OAuth) | password once (stored) |
-| Phone/web | HTTPS to own folder, same origin, no new dependency | Box OAuth, whole-account scope, client secret on device | megajs (web), MEGA SDK (iOS), password per web session |
+| Phone/web | HTTPS to own folder, same origin, no new dependency | Box OAuth, whole-account scope, client secret on device | megajs (web), own HTTPS client (iOS), password per web session |
 | Device scope | its own folder (nginx) | whole Box account | whole dedicated account |
 | Metadata seen by | the user's own server only | Box: names (random), sizes, times, IPs | MEGA: sizes, times, IPs (names are encrypted by MEGA) |
 | Rate limits | none beyond nginx `limit_req` | 1000 req/min/user, 240 uploads/min/user | unpublished command-weight quota; transfer quota on free plan |
@@ -638,7 +638,7 @@ setup, but it is the account password.
 | **SP1** | Desktop producer: `SyncStore` + memory + **MEGA adapter** (**[user]** MEGA first, 2026-11-05; desktop megajs, dedicated account), sync v1 envelope + vectors, keys in the vault, snapshot producer, inbox consumer at the ceiling, Settings card | — | **plan written**; testable with a fake device and a fake MEGA client |
 | SP2 | Enrollment and device registry: QR sync fields, slot flow with SAS, `wrap.bin`, revoke, rotate, missing-folder detection | SP1 | devices can be added and removed |
 | SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP; **MEGA client in the browser (megajs, password per app session)** | SP2 | web works with the desktop off — **plan written** (docs/superpowers/plans/2026-11-06-sync-sp3-web.md) |
-| SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (MEGA iOS SDK, Keychain session)** | SP2 | iPhone works with the desktop off |
+| SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (own HTTPS client in SharedProtocol, Keychain session)** | SP2 | iPhone works with the desktop off |
 | SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server |
 | SP6 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users of Box |
 | SP7 | Direct reads: Box documents and GitLab code in the PWA and the iPhone app (GitLab OAuth PKCE) | SP3/SP4 shells | docs and code with the desktop off |

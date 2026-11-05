@@ -166,3 +166,5 @@ design keep the approved name.
 6. **Key loss.** Losing the desktop vault means re-pairing every device (relay D3, no recovery in v1).
 7. **ADR churn.** ADR 0019 must be marked superseded in its header when this ADR is accepted, so that
    two half-designs do not coexist.
+
+The iPhone uses its own minimal HTTPS client (SP4), not the official SDK; its saved session has the same power and the same custody (Keychain, this device only).
