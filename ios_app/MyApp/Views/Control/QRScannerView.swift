@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 import AVFoundation
 import SharedProtocol
 
@@ -130,10 +131,18 @@ struct PairingInfo {
     }
 }
 
-/// Full-screen camera sheet that scans the pairing QR from Mac Settings →
-/// Mobile Control and hands back the connection details.
+struct ScanResult {
+    let mac: PairingInfo?
+    let sync: SyncPair?
+    init?(_ code: String) {
+        mac = PairingInfo(from: code)
+        sync = code.hasPrefix("llmide://pair?") ? try? SyncEnroll.parsePair(code) : nil
+        if mac == nil && sync == nil { return nil }
+    }
+}
+
 struct QRScannerSheet: View {
-    let onScan: (PairingInfo) -> Void
+    let onScan: (ScanResult) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var permissionDenied = false
     /// Set when a scanned code parsed but failed validation (wrong scheme,
@@ -165,13 +174,13 @@ struct QRScannerSheet: View {
                 } else {
                     CameraPreview(
                         onCode: { code in
-                            guard let info = PairingInfo(from: code) else {
+                            guard let info = ScanResult(code) else {
                                 // Silently ignoring a REJECTED code is
                                 // indistinguishable from "camera didn't see it",
                                 // so say so — the scanner keeps running.
                                 guard !code.isEmpty, rejectionNotice == nil else { return }
                                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                                rejectionNotice = "That isn't a valid LLM-IDE pairing code. Scan the QR in LLM-IDE → Settings → Mobile Control."
+                                rejectionNotice = "That isn't an LLM-IDE pairing code. Scan the QR in LLM-IDE → Settings (Mobile Control, or Sync → Add a phone or browser)."
                                 return
                             }
                             UINotificationFeedbackGenerator().notificationOccurred(.success)

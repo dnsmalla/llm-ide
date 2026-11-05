@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Entry screen — discovers Macs automatically; falls back to manual IP + PIN entry.
 struct ConnectView: View {
+    @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var connection: ConnectionService
     @StateObject private var discovery = DeviceDiscovery()
@@ -133,12 +134,15 @@ struct ConnectView: View {
         }
         .padding(.top, DesignSystem.Spacing.lg)
         .sheet(isPresented: $showScanner) {
-            QRScannerSheet { info in
-                errorMessage = nil
-                connectAttempted = true
-                connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer,
-                                     source: .qrScan)
-                connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
+            QRScannerSheet { scan in
+                if let info = scan.mac {
+                    errorMessage = nil
+                    connectAttempted = true
+                    connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer,
+                                         source: .qrScan)
+                    connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
+                }
+                if let pair = scan.sync { syncStore.startEnrollment(pair) }
             }
         }
     }

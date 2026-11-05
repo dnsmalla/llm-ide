@@ -4,13 +4,15 @@ struct ContentView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var syncStore: SyncStore
+    @State private var showSyncEnroll = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         // `isDemo` joins `hasDevice` here because demo mode deliberately saves
         // no device — without it the demo would be bounced straight back to the
         // pairing screen on the next render.
-        if connectionStore.hasDevice || connection.isDemo {
+        if connectionStore.hasDevice || connection.isDemo || syncStore.phase != .off {
             // Already have saved connection — go straight to the tab shell
             // (Chat first, Project, Settings). Each screen shows its own
             // connecting/offline banner while (re)connecting.
@@ -48,6 +50,9 @@ struct ContentView: View {
                         // Live socket, but the snapshot may be minutes old.
                         macStatusStore.requestMacStatus()
                     }
+                }
+                .sheet(isPresented: Binding(get: { syncStore.enrollStep != nil }, set: { if !$0 { syncStore.cancelEnrollment() } })) {
+                    SyncEnrollSheet().environmentObject(syncStore)
                 }
         } else {
             NavigationStack {

@@ -7,6 +7,7 @@ import SharedProtocol
 struct RootTabView: View {
     let deviceName: String
     @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @EnvironmentObject var autoTaskStore: AutoTaskStore
@@ -44,7 +45,7 @@ struct RootTabView: View {
                     .tag(Tab.project)
             }
 
-            if connection.servesV1Read {
+            if connection.servesV1Read || syncStore.phase != .off {
                 NavigationStack { ReadChatsView() }
                     .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                     .tag(Tab.history)
@@ -110,7 +111,7 @@ struct RootTabView: View {
 
     private func refreshMacData() {
         guard isConnected else { return }
-        if connection.servesV1Read {
+        if connection.servesV1Read || syncStore.phase != .off {
             usageStore.refresh()
             Task { await connection.reads.refresh() }
         }
@@ -154,6 +155,7 @@ struct ContextBar: View {
     let deviceName: String
     var onProjectTap: () -> Void
     @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var usageStore: UsageStore
