@@ -8,8 +8,9 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
+import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -140,23 +141,31 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!live) return;
       const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
       setLoopDefaults(defaults);
-      // Mac parity: a missing default loop is re-added in memory and only written when the user saves.
+      // Mac parity: a missing default loop is added AND written on open, so a scheduled run never silently sees
+      // an unsaved file. A failed write keeps the loops in memory and asks for the normal Save retry.
       let next = r;
       let added: string[] = [];
+      let saved = false;
+      let saveError: string | null = null;
       if (r.kind === "ok") {
         const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
         if (!live) return;
-        const ensured = ensureDefaultLoops(r.store, env.command, defaults);
-        added = ensured.added;
-        if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
+        const persisted = await persistEnsuredDefaults(fs, r, env.command, defaults);
+        if (!live) return;
+        next = persisted.load;
+        added = persisted.added;
+        saved = persisted.saved;
+        saveError = persisted.error;
       }
       setLoad(next);
       if (next.kind === "ok") {
         const loop = primaryLoop(next.store);
         setSelectedLoopId(loop?.id ?? null);
         setSelectedStageId(loop?.config.stages[0]?.id ?? null);
-        setDirty(added.length > 0);
-        if (added.length) setNotice(`Added the missing default loop(s): ${added.join(", ")}. Save to keep them.`);
+        setDirty(added.length > 0 && !saved);
+        if (added.length) setNotice(saveError
+          ? `Added the missing default loop(s): ${added.join(", ")}. They could not be saved: ${saveError}`
+          : `Added and saved the missing default loop(s): ${added.join(", ")}.`);
       }
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
