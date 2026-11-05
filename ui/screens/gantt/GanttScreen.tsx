@@ -144,7 +144,9 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           shiftQueueRef.current.length = 0;
           return;
         }
-        setNotice(`Moved ${issueLabel(item.row.issue)} ${savedDays > 0 ? "+" : ""}${savedDays} day${Math.abs(savedDays) === 1 ? "" : "s"}.`);
+        setNotice(savedDays === 0
+          ? `Restored ${issueLabel(item.row.issue)} to its original dates.`
+          : `Moved ${issueLabel(item.row.issue)} ${savedDays > 0 ? "+" : ""}${savedDays} day${Math.abs(savedDays) === 1 ? "" : "s"}.`);
         // Keep the item until the reload finishes: a compensating shift during the load must merge into the
         // SAME queued target, not start a new one from the stale pre-save row.
         await load();
