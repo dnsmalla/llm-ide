@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 60 open, 29 done, 89 total
+Open count: 63 open, 29 done, 92 total
 
 ## How to use this file
 
@@ -183,6 +183,19 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [ ] **UN-108** Host API v1 manual checks: Mac loopback (`scripts/mobile/verify-host-api-v1.swift` against a DEBUG app with `LLMIDE_HOST_API_DEV=1`), the web client in a real browser (`web/MANUAL-CHECK.md`), on-device pinned pairing with Tailscale (part of UN-079), shared v2/v1 PIN throttle and the desktop QR. Trigger: product stage, before TLS is on by default.
 - [ ] **UN-109** Parity checklist: every row verified against the Mac app, including Home and toolbar navigation (`plans/2026-10-31-tauri-parity-checklist.md`). Trigger: after the UN-001 follow-up runs.
 - [ ] **UN-085** Source Control hosted actions (PRs, issues) need a core route plan. Trigger: after the Issues core.
+
+- [ ] **UN-111** Device linking: run the desktop Settings approval card in a real window.
+  - Why you: the Rust commands, permissions and UI compile and are unit-tested, but the card has not been opened in a real desktop window.
+  - How: [USER-CHECKLIST D step 1](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later): build the updated app, sign in/register the desktop, start a link at `accounts.llm-ide.com/link.html`, allow it, compare the six-digit SAS and confirm; then deny a second request.
+  - Effort: 15 minutes. Blocks: closing the device-linking GUI check. Status: not run.
+- [ ] **UN-112** Device linking: complete one real production browser/desktop link.
+  - Why you: the browser end-to-end run used a local in-memory account service; it needs your real account, browser and desktop.
+  - How: [USER-CHECKLIST D step 2](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later); also verify the 10-minute expiry and the mismatched-commitment refusal.
+  - Effort: 15 minutes. Blocks: calling the production link verified. Status: not run.
+- [ ] **UN-113** Decide when account creation reopens.
+  - Why you: direct sign-up is deliberately off on the live service after the account-takeover fixes; only you can choose the launch/allowlist timing.
+  - How: [USER-CHECKLIST D step 3](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later). Current state: `signupOpen:false, directSignup:false`.
+  - Effort: 5 minutes. Blocks: public account growth and launch sign-up copy. Status: open decision.
 
 ## E. Done by you (history and recorded answers)
 
