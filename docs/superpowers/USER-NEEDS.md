@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 57 open, 28 done, 85 total
+Open count: 60 open, 28 done, 88 total
 
 ## How to use this file
 
@@ -16,9 +16,9 @@ Open count: 57 open, 28 done, 85 total
 ## A. Do now (only you can run or look at these)
 
 - [x] **UN-001** First run of the Tauri desktop app on your Mac.
-  - Why you: needs your Mac, a real login and eyes on the screen; no screen has ever been seen in the real app, so every "built" row depends on it.
+  - Why you: needs your Mac, a real login and eyes on the screen; until 2026-11-04 no screen had been seen in the real app.
   - How: `scripts/build-desktop-mac.sh`, open the app, then follow [RUN-ON-MAC.md, First-run checklist](../../desktop/RUN-ON-MAC.md#first-run-checklist) (sign up on the local core, scratch project, Chat, approvals, Trust banner, Explorer, Search, terminal, Source Control, Library, Settings, Extensions, Code Graph, Doc Gen). Report differences with the bug template at the end of that file.
-  - Effort: 45 minutes. Blocks: the parity checklist, Phase 3 exit, every Tauri "built, not GUI-verified" row. Status: done 2026-11-04 — you ran the desktop app and reported Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop all OK.
+  - Effort: 45 minutes. Blocks: the parity checklist, Phase 3 exit, every Tauri "built, not GUI-verified" row. Status: done 2026-11-04 — you ran the desktop app and reported Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop all OK. Named areas only; Search, terminal, Source Control, Extensions, Trust banner and approvals were not individually reported, and work after 2026-11-04 is not yet checked.
 - [ ] **UN-002** iPhone device tests: Phone access, tiers and approvals.
   - Why you: needs a real iPhone on the same network as the Mac.
   - How: [verification.md, rows F1 to F18](../mobile/verification.md) (F4 to F7c approval dialogs, F7b custom tasks absent on the phone, F9 template edit refused, F17 lock, kill, revoke, reconnect). Also check that the phone sees archived chats and notes only through the Mac, and background and reconnect behaviour. Record pass or fail per row in that file.
@@ -91,6 +91,10 @@ Open count: 57 open, 28 done, 85 total
   - Why you: agents never kill processes.
   - How: list with `ps -axo pid,etime,command | grep -E 'server.mjs|node --test|swift-test' | grep -v grep`; port holders with `lsof -nP -iTCP:3456 -sTCP:LISTEN` and `lsof -nP -iTCP:3457 -sTCP:LISTEN`; then `kill <pid>` for ones you recognise. Do not kill the backend while the Swift app is in use. Details: [test-hangs.md](../how-to/test-hangs.md#stale-leftover-processes). You already did one clean-up (section E); re-check before UN-001 because the Tauri app adopts a 3456 core as "unverified".
   - Effort: 5 minutes. Blocks: a clean UN-001 and UN-004. Status: re-check before the first run.
+- [ ] **UN-107** Desktop audit decisions: (1) Loop, a missing default loop: write the file on load like the Mac, or show a notice; (2) Doc Gen output file naming: the Mac uses `<template>-doc.md`, the desktop `<slug>-YYYYMMDD.md`; (3) keep the refactor-batch refusal until the desktop has a rollback.
+  - Why you: product decisions. Recommendation: (1) write on load like the Mac, (2) keep the desktop names, (3) keep the refusal.
+  - How: answer "go with your recommendation" or choose per item. Source: [MASTER-PLAN](MASTER-PLAN.md) S2 audit decisions row.
+  - Effort: 5 minutes. Blocks: Loop and Doc Gen parity rows. Status: open.
 - [ ] **UN-020** After each push, check CI.
   - Why you: your remote; agents are told not to push.
   - How: `gh run list --limit 5`.
@@ -178,6 +182,8 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [ ] **UN-082** Retire cleartext `:3006` and PIN pairing once the relay reaches parity. Trigger: relay parity (R9).
 - [ ] **UN-083** Delete legacy duplicate rows (destructive: export, backup, rollback drill) and switch the Library read path to `note_index`. Trigger: 7 clean shadow days on real meeting notes (UN-076).
 - [ ] **UN-084** Phase 6: one release with both apps, then the Swift app goes to maintenance. Trigger: Tauri macOS parity and daily use.
+- [ ] **UN-108** Host API v1 manual checks: Mac loopback (`scripts/mobile/verify-host-api-v1.swift` against a DEBUG app with `LLMIDE_HOST_API_DEV=1`), the web client in a real browser (`web/MANUAL-CHECK.md`), on-device pinned pairing with Tailscale (part of UN-079), shared v2/v1 PIN throttle and the desktop QR. Trigger: product stage, before TLS is on by default.
+- [ ] **UN-109** Parity checklist: every row verified against the Mac app, including Home and toolbar navigation (`plans/2026-10-31-tauri-parity-checklist.md`). Trigger: after the UN-001 follow-up runs.
 - [ ] **UN-085** Source Control hosted actions (PRs, issues) need a core route plan. Trigger: after the Issues core.
 
 ## E. Done by you (history and recorded answers)
