@@ -65,7 +65,7 @@ export function pairingPayload(p: HostPin): string | null {
 
 /** The payload as an inline SVG: dark modules on a fixed white field (with the 4-module quiet zone), so a dark theme
  *  never inverts it into a code the camera cannot read. */
-function PairingQr({ payload }: { payload: string }): ReactNode {
+export function PairingQr({ payload }: { payload: string }): ReactNode {
   const qr = qrcode(0, "M");
   qr.addData(payload);
   qr.make();

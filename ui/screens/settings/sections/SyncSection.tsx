@@ -5,6 +5,7 @@ import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { loadSyncStatus, saveMega, testSync, setSyncEnabled, publishNow, syncErrorText, describeSyncError, type SyncStatus } from "../sync-model.ts";
+import SyncDevices from "./SyncDevices.tsx";
 
 export default function SyncSection(): ReactNode {
   const { client } = useEnv();
@@ -53,6 +54,7 @@ export default function SyncSection(): ReactNode {
           <div className="st-row"><Button onClick={() => run(() => testSync(client), "MEGA connection works.")}>Test connection</Button></div>
           <label className="st-row"><input type="checkbox" checked={status.enabled} onChange={(e) => run(() => setSyncEnabled(client, e.target.checked))} /> Sync on</label>
           <div className="st-row"><Button onClick={() => run(() => publishNow(client), "Published.")} disabled={!status.enabled}>Publish now</Button></div>
+          {status.enabled ? <SyncDevices status={status} onStatus={(s) => setStatus(s)} /> : <p className="st-hint">Turn sync on to add a phone or browser.</p>}
           <p className="st-hint" aria-live="polite">{status.lastError ? `Last error: ${syncErrorText(status.lastError) ?? status.lastError}` : status.lastPublishAt ? `Last published ${new Date(status.lastPublishAt).toLocaleString()}` : "Not published yet."} · {status.devices.length} device(s)</p>
         </div>
       )}

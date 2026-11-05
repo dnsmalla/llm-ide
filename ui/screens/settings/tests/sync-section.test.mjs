@@ -41,3 +41,20 @@ test("MEGA error codes read as guidance", () => {
   assert.match(m.syncErrorText("SYNC_AUTH_FAILED"), /email or password/);
   assert.equal(m.syncErrorText("SOMETHING_ELSE"), null);
 });
+
+test('enrollment decoders are strict and the calls hit the device routes', async () => {
+  assert.deepEqual(m.decodeEnrollStart({ qr: "llmide://pair?sv=1", expiresAt: 5, tier: "ios" }), { qr: "llmide://pair?sv=1", expiresAt: 5, tier: "ios" });
+  assert.throws(() => m.decodeEnrollStart({ qr: "x", expiresAt: 5, tier: "android" }));
+  assert.throws(() => m.decodeEnrollStart({ qr: "javascript:alert(1)", expiresAt: 5, tier: "web" }), "only llmide:// or http(s) links render as a QR");
+  assert.equal(m.decodeEnrollPoll({ phase: "confirm", sas: "012345", name: "P", code: null }).sas, "012345");
+  assert.throws(() => m.decodeEnrollPoll({ phase: "confirm", sas: "12a", name: null, code: null }));
+  const s = m.decodeSyncStatus({ ...STATUS, rotationPending: true, devices: [{ deviceId: "d", name: "n", tier: "web", addedAt: 1, folderHint: "Ab3xQz" }] });
+  assert.equal(s.devices[0].folderHint, "Ab3xQz"); assert.equal(s.rotationPending, true);
+  assert.equal(m.decodeSyncStatus(STATUS).rotationPending, false, "an older core decodes");
+  const c = fake({ "POST /kb/sync/devices/enroll": { status: 200, body: { qr: "llmide://pair?sv=1", expiresAt: 1, tier: "ios" } },
+    "DELETE /kb/sync/devices/d1": { status: 200, body: STATUS }, "POST /kb/sync/rotate": { status: 200, body: STATUS } });
+  await m.startEnroll(c, "ios"); await m.revokeSyncDevice(c, "d1"); await m.rotateSyncKeys(c);
+  assert.deepEqual(c.calls, ['POST /kb/sync/devices/enroll {"tier":"ios"}', "DELETE /kb/sync/devices/d1", "POST /kb/sync/rotate {}"]);
+  assert.match(m.enrollFailureText("contested"), /Two devices/);
+  assert.match(m.enrollFailureText("claim_invalid"), /could not be verified/);
+});

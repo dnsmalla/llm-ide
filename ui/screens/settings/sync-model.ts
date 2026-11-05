@@ -5,10 +5,10 @@ import { ApiError, call, type CoreClient } from "./core-api.ts";
 
 export interface MegaSetup { email: string; password: string; folder: string }
 export interface MegaStore { folder: string; account: string }
-export interface SyncDevice { deviceId: string; name: string; tier: "web" | "ios"; addedAt: number }
+export interface SyncDevice { deviceId: string; name: string; tier: "web" | "ios"; addedAt: number; folderHint: string }
 export interface SyncStatus {
   configured: boolean; enabled: boolean; storeKind: string | null; store: MegaStore | null;
-  syncId: string | null; epoch: number | null; signingFingerprint: string | null; devices: SyncDevice[];
+  syncId: string | null; epoch: number | null; signingFingerprint: string | null; devices: SyncDevice[]; rotationPending: boolean;
   lastPublishAt: number | null; lastError: string | null;
 }
 
@@ -23,10 +23,11 @@ export function decodeSyncStatus(v: unknown): SyncStatus {
   const s = v.store;
   const store = isRecord(s) && typeof s.folder === "string" && typeof s.account === "string" ? { folder: s.folder, account: s.account } : null;
   const devices = (v.devices as unknown[]).filter((d): d is SyncDevice => isRecord(d) && typeof d.deviceId === "string" && typeof d.name === "string"
-    && (d.tier === "web" || d.tier === "ios") && typeof d.addedAt === "number");
+    && (d.tier === "web" || d.tier === "ios") && typeof d.addedAt === "number")
+    .map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: typeof d.folderHint === "string" ? d.folderHint : "" }));
   return { configured: v.configured, enabled: v.enabled, storeKind: v.storeKind as string | null, store,
     syncId: v.syncId as string | null, epoch: v.epoch as number | null, signingFingerprint: v.signingFingerprint as string | null, devices,
-    lastPublishAt: v.lastPublishAt as number | null, lastError: v.lastError as string | null };
+    rotationPending: v.rotationPending === true, lastPublishAt: v.lastPublishAt as number | null, lastError: v.lastError as string | null };
 }
 
 const SYNC_ERROR_TEXT: Record<string, string> = {
@@ -48,3 +49,34 @@ export const saveMega = async (client: CoreClient, cfg: MegaSetup) => decodeSync
 export const testSync = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/test", {}); };
 export const setSyncEnabled = async (client: CoreClient, enabled: boolean) => decodeSyncStatus(await call(client, "POST", "/kb/sync/enabled", { enabled }));
 export const publishNow = async (client: CoreClient) => call(client, "POST", "/kb/sync/publish", {});
+
+export interface EnrollStart { qr: string; expiresAt: number; tier: "web" | "ios" }
+export interface EnrollPoll { phase: "none" | "waiting" | "confirm" | "failed" | "expired"; sas: string | null; name: string | null; code: string | null }
+const PHASES = new Set(["none", "waiting", "confirm", "failed", "expired"]);
+
+export function decodeEnrollStart(v: unknown): EnrollStart {
+  if (isRecord(v) && typeof v.qr === "string" && /^(llmide:\/\/pair\?|https?:\/\/)/.test(v.qr) && Number.isInteger(v.expiresAt) && (v.tier === "web" || v.tier === "ios")) {
+    return { qr: v.qr, expiresAt: v.expiresAt as number, tier: v.tier };
+  }
+  throw new ApiError(0, "BAD_RESPONSE");
+}
+export function decodeEnrollPoll(v: unknown): EnrollPoll {
+  if (isRecord(v) && typeof v.phase === "string" && PHASES.has(v.phase) && (v.sas === null || (typeof v.sas === "string" && /^[0-9]{6}$/.test(v.sas)))
+    && strOrNull(v.name) && strOrNull(v.code)) {
+    return { phase: v.phase as EnrollPoll["phase"], sas: v.sas as string | null, name: v.name as string | null, code: v.code as string | null };
+  }
+  throw new ApiError(0, "BAD_RESPONSE");
+}
+const ENROLL_FAILURES: Record<string, string> = {
+  contested: "Two devices answered this code, so someone else may have seen it. Nothing was added. Start again, with the screen out of view of others.",
+  claim_invalid: "The device's answer could not be verified, or it is a different kind of device (iPhone app vs browser). Nothing was added.",
+  expired: "The code expired. Nothing was added. Start again.",
+  store: "The sync storage could not be reached. Nothing was added.",
+};
+export const enrollFailureText = (code: string | null): string => ENROLL_FAILURES[code ?? ""] ?? "Adding the device stopped. Nothing was added.";
+export const startEnroll = async (client: CoreClient, tier: "web" | "ios") => decodeEnrollStart(await call(client, "POST", "/kb/sync/devices/enroll", { tier }));
+export const pollEnroll = async (client: CoreClient) => decodeEnrollPoll(await call(client, "POST", "/kb/sync/devices/enroll/poll", {}));
+export const confirmEnroll = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/devices/enroll/confirm", {}));
+export const cancelEnroll = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/devices/enroll/cancel", {}); };
+export const revokeSyncDevice = async (client: CoreClient, deviceId: string) => decodeSyncStatus(await call(client, "DELETE", `/kb/sync/devices/${encodeURIComponent(deviceId)}`));
+export const rotateSyncKeys = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/rotate", {}));
