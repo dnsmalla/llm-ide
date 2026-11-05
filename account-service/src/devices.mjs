@@ -88,6 +88,7 @@ export function replaceDesktop(db, now, { token, ...desktop }) {
       "UPDATE devices SET status = 'unlinked', updated_at = ? WHERE user_id = ? AND kind <> 'desktop' AND status IN ('pending', 'linked')",
     ).run(t, desktop.userId).changes;
     db.prepare('DELETE FROM relay_wraps WHERE user_id = ?').run(desktop.userId);
+    db.prepare("UPDATE link_requests SET state = 'unlinked', updated_at = ? WHERE user_id = ? AND state IN ('pending','approved','keys')").run(t, desktop.userId);
     revokeDesktopSignIns(db, t, desktop.userId, token.family);
     return { id: insertDesktop(db, t, desktop), replacedId: old?.id ?? null, unlinked };
   })();

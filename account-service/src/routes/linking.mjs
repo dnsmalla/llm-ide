@@ -14,7 +14,7 @@ const tokenHash = (s) => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
 // The desktop proves possession of its registered signing key on approve and confirm, so a stolen bearer token alone
 // cannot move a link forward (review I2). The message binds the exact request and the desktop-chosen nonce.
 export const linkApproveMessage = (requestId, nonce) => `llmide/link/approve/v1\n${requestId}\n${nonce}`;
-export const linkConfirmMessage = (requestId) => `llmide/link/confirm/v1\n${requestId}`;
+export const linkConfirmMessage = (x) => `llmide/link/confirm/v1\n${x.requestId}\n${x.commitment}\n${x.signingKey}\n${x.ecdhKey}\n${x.desktopSigningKey}\n${x.desktopEcdhKey}\n${x.deviceNonce}\n${x.desktopNonce}\n${x.tier}\n${x.sas}`;
 function verifyOwnerProof(db, userId, proof, message) {
   if (typeof proof !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(proof)) throw new HttpError(400, 'invalid_proof');
   const signing = db.prepare("SELECT signing_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").pluck().get(userId);
@@ -70,7 +70,7 @@ function publicStatus(db, row) {
   if (row.state === 'keys' || row.state === 'linked') {
     out.deviceSigningKey = row.signing_key;
     out.deviceEcdhKey = row.ecdh_key;
-    if (desktop) out.sas = linkSas(row.signing_key, row.ecdh_key, desktop.signing_key, row.device_nonce, row.desktop_nonce);
+    if (desktop) out.sas = linkSas(row.signing_key, row.ecdh_key, desktop.signing_key, desktop.ecdh_key, row.device_nonce, row.desktop_nonce);
   }
   return out;
 }
@@ -145,6 +145,7 @@ export function linkingRoutes(routes, ctx) {
     if (!tokenHash(body.tokenHash)) throw new HttpError(400, 'invalid_token_hash');
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, session.user_id, id));
     if (row.state !== 'approved') throw new HttpError(409, row.state === 'keys' ? 'already_revealed' : 'not_approved');
+    if (row.device_status !== 'pending') throw new HttpError(409, row.device_status === 'revoked' ? 'device_revoked' : 'not_pending');
     if (linkCommitment(signingKey, ecdhKey, body.nonce) !== row.commitment) throw new HttpError(400, 'commitment_mismatch');
     const t = ctx.now();
     try {
@@ -193,7 +194,7 @@ export function linkingRoutes(routes, ctx) {
   routes.set('POST /v1/link/requests/deny', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     const body = await readJson(req);
-    onlyKeys(body, ['requestId', 'proof']);
+    onlyKeys(body, ['requestId', 'proof', 'sas']);
     const id = requestId(body.requestId);
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, user.id, id));
     if (row.state === 'linked') throw new HttpError(409, 'already_linked');
@@ -211,21 +212,27 @@ export function linkingRoutes(routes, ctx) {
   routes.set('POST /v1/link/requests/confirm', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     const body = await readJson(req);
-    onlyKeys(body, ['requestId', 'proof']);
+    onlyKeys(body, ['requestId', 'proof', 'sas']);
     const id = requestId(body.requestId);
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, user.id, id));
     if (row.state !== 'keys') throw new HttpError(409, row.state === 'linked' ? 'already_linked' : 'not_ready');
-    if (row.device_status === 'revoked') throw new HttpError(409, 'device_revoked');
-    const desktop = ctx.db.prepare("SELECT signing_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").pluck().get(user.id);
+    if (row.device_status !== 'pending') throw new HttpError(409, row.device_status === 'revoked' ? 'device_revoked' : 'not_pending');
+    const desktop = ctx.db.prepare("SELECT signing_key, ecdh_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").get(user.id);
     if (!desktop) throw new HttpError(409, 'desktop_missing');
-    verifyOwnerProof(ctx.db, user.id, body.proof, linkConfirmMessage(id));
+    const sas = linkSas(row.signing_key, row.ecdh_key, desktop.signing_key, desktop.ecdh_key, row.device_nonce, row.desktop_nonce);
+    if (typeof body.sas !== 'string' || !/^[0-9]{6}$/.test(body.sas) || body.sas !== sas) throw new HttpError(400, 'sas_mismatch');
+    verifyOwnerProof(ctx.db, user.id, body.proof, linkConfirmMessage({
+      requestId: id, commitment: row.commitment, signingKey: row.signing_key, ecdhKey: row.ecdh_key,
+      desktopSigningKey: desktop.signing_key, desktopEcdhKey: desktop.ecdh_key, deviceNonce: row.device_nonce,
+      desktopNonce: row.desktop_nonce, tier: row.kind, sas,
+    }));
     const t = ctx.now();
     ctx.db.transaction(() => {
       ctx.db.prepare("UPDATE link_requests SET state = 'linked', updated_at = ? WHERE id = ?").run(t, id);
-      ctx.db.prepare("UPDATE devices SET status = 'linked', linked_at = ?, updated_at = ? WHERE id = ?").run(t, t, row.device_id);
+      ctx.db.prepare("UPDATE devices SET status = 'linked', linked_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'").run(t, t, row.device_id);
     })();
     ctx.audit('link_confirmed', { userId: user.id, ip: req.clientIp, detail: { requestId: id } });
-    send(res, 200, { requestId: id, state: 'linked', sas: linkSas(row.signing_key, row.ecdh_key, desktop, row.device_nonce, row.desktop_nonce) });
+    send(res, 200, { requestId: id, state: 'linked', sas });
   }));
 }
 

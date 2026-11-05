@@ -68,14 +68,17 @@ async function revealKeys() {
   localStorage.setItem('llmide.device-token', b64(d.token));
 }
 
-async function sasFor(status) {
+async function sasFor() {
+  const pin = state.pin;
+  if (!pin) throw new Error('The desktop values were not pinned before the key reveal.');
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', concat(
     enc.encode('llmide/link/sas/v1'),
     state.signingSpki,
     state.ecdhSpki,
-    unb64(status.desktopSigningKey),
+    unb64(pin.desktopSigningKey),
+    unb64(pin.desktopEcdhKey),
     state.nonce,
-    unb64(status.desktopNonce),
+    unb64(pin.desktopNonce),
   )));
   const n = new DataView(digest.buffer).getUint32(0) % 1_000_000;
   return String(n).padStart(6, '0');
@@ -87,11 +90,14 @@ async function tick() {
     const status = await get(`/v1/link/requests/status?requestId=${encodeURIComponent(state.requestId)}`);
     $('link-label').textContent = `Request ${state.requestId.slice(0, 8)}… · ${status.state}`;
     if (status.state === 'approved' && !state.revealed) {
+      // Pin the desktop's key and nonce BEFORE revealing our keys. A service cannot grind the code afterwards.
+      if (!status.desktopSigningKey || !status.desktopEcdhKey || !status.desktopNonce) throw new Error('The desktop approval is incomplete.');
+      state.pin = { desktopSigningKey: status.desktopSigningKey, desktopEcdhKey: status.desktopEcdhKey, desktopNonce: status.desktopNonce };
       await revealKeys();
       state.revealed = true;
       $('link-status').textContent = 'Keys shared. Waiting for the desktop approval.';
     } else if (status.state === 'keys') {
-      const code = await sasFor(status);
+      const code = await sasFor();
       if (status.sas && status.sas !== code) throw new Error('The service returned a different code. Do not confirm; deny this request.');
       $('link-code').hidden = false;
       $('link-code').textContent = code.slice(0, 3) + ' ' + code.slice(3);

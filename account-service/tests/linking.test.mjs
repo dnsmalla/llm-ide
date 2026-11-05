@@ -81,10 +81,11 @@ test('device linking: commitment, desktop approval, keys, SAS and confirmation',
   const keys = await rawRequest(app.base, 'GET', '/v1/link/requests', undefined, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(keys.body.requests[0].signingKey, dev.signingKey);
   assert.equal(keys.body.requests[0].deviceNonce, dev.nonce);
-  const sas = linkSas(dev.signingKey, dev.ecdhKey, desktop.signingKey, dev.nonce, approved.body.desktopNonce);
+  const sas = linkSas(dev.signingKey, dev.ecdhKey, desktop.signingKey, desktop.ecdhKey, dev.nonce, approved.body.desktopNonce);
   assert.match(sas, /^\d{6}$/);
 
-  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, proof: linkConfirmProof(desktop, id) }, { authorization: `Bearer ${tokens.access_token}` });
+  const commitment = linkCommitment(dev.signingKey, dev.ecdhKey, dev.nonce);
+  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, sas, proof: linkConfirmProof(desktop, { requestId: id, commitment, signingKey: dev.signingKey, ecdhKey: dev.ecdhKey, desktopSigningKey: desktop.signingKey, desktopEcdhKey: desktop.ecdhKey, deviceNonce: dev.nonce, desktopNonce: approved.body.desktopNonce, tier: 'web', sas }) }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(confirmed.status, 200);
   assert.equal(confirmed.body.state, 'linked');
   assert.equal(confirmed.body.sas, sas);
@@ -175,9 +176,11 @@ test('only the web tier is linkable in v1, and approve/confirm need the desktop 
   assert.equal(approved.status, 200);
   const keys = await post(app, '/v1/link/requests/keys', { requestId: id, signingKey: dev.signingKey, ecdhKey: dev.ecdhKey, nonce: dev.nonce, tokenHash: dev.tokenHash }, { cookie: web.cookie });
   assert.equal(keys.status, 200);
-  const noConfirm = await post(app, '/v1/link/requests/confirm', { requestId: id }, { authorization: `Bearer ${tokens.access_token}` });
+  const commitment = linkCommitment(dev.signingKey, dev.ecdhKey, dev.nonce);
+  const sas = linkSas(dev.signingKey, dev.ecdhKey, desktop.signingKey, desktop.ecdhKey, dev.nonce, nonce);
+  const noConfirm = await post(app, '/v1/link/requests/confirm', { requestId: id, sas }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(noConfirm.status, 400);
   assert.equal(noConfirm.body.error, 'invalid_proof');
-  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, proof: linkConfirmProof(desktop, id) }, { authorization: `Bearer ${tokens.access_token}` });
+  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, sas, proof: linkConfirmProof(desktop, { requestId: id, commitment, signingKey: dev.signingKey, ecdhKey: dev.ecdhKey, desktopSigningKey: desktop.signingKey, desktopEcdhKey: desktop.ecdhKey, deviceNonce: dev.nonce, desktopNonce: nonce, tier: 'web', sas }) }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(confirmed.status, 200);
 });

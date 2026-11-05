@@ -13,7 +13,7 @@ export function linkCommitment(signingKey, ecdhKey, deviceNonce) {
   return digest([COMMIT_PREFIX, raw(signingKey), raw(ecdhKey), raw(deviceNonce)]).toString('base64url');
 }
 
-export function linkSas(signingKey, ecdhKey, desktopSigningKey, deviceNonce, desktopNonce) {
-  const h = digest([SAS_PREFIX, raw(signingKey), raw(ecdhKey), raw(desktopSigningKey), raw(deviceNonce), raw(desktopNonce)]);
+export function linkSas(signingKey, ecdhKey, desktopSigningKey, desktopEcdhKey, deviceNonce, desktopNonce) {
+  const h = digest([SAS_PREFIX, raw(signingKey), raw(ecdhKey), raw(desktopSigningKey), raw(desktopEcdhKey), raw(deviceNonce), raw(desktopNonce)]);
   return String(h.readUInt32BE(0) % 1_000_000).padStart(6, '0');
 }

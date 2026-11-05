@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { linkCommitment } from '../src/linking.mjs';
+import { linkCommitment, linkSas } from '../src/linking.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { openDb } from '../src/db.mjs';
 import { createApp } from '../src/server.mjs';
@@ -262,8 +262,9 @@ export function linkApproveProof(keys, requestId, desktopNonce) {
   return sign('sha256', Buffer.from(`llmide/link/approve/v1\n${requestId}\n${desktopNonce}`), { key: keys.signing.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
 }
 
-export function linkConfirmProof(keys, requestId) {
-  return sign('sha256', Buffer.from(`llmide/link/confirm/v1\n${requestId}`), { key: keys.signing.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+export function linkConfirmProof(keys, x) {
+  const msg = `llmide/link/confirm/v1\n${x.requestId}\n${x.commitment}\n${x.signingKey}\n${x.ecdhKey}\n${x.desktopSigningKey}\n${x.desktopEcdhKey}\n${x.deviceNonce}\n${x.desktopNonce}\n${x.tier}\n${x.sas}`;
+  return sign('sha256', Buffer.from(msg), { key: keys.signing.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
 }
 
 export function desktopProof(accessToken, keys, privateKey = keys.signing.privateKey) {
@@ -296,7 +297,9 @@ export async function linkedPair(app, { kind = 'web' } = {}) {
   const desktopNonce = randomBytes(32).toString('base64url');
   await rawRequest(app.base, 'POST', '/v1/link/requests/approve', JSON.stringify({ requestId, desktopNonce, proof: linkApproveProof(desktop, requestId, desktopNonce) }), auth);
   const keys = await rawRequest(app.base, 'POST', '/v1/link/requests/keys', JSON.stringify({ requestId, signingKey: device.signingKey, ecdhKey: device.ecdhKey, nonce, tokenHash: device.tokenHash }), cookie);
-  const done = await rawRequest(app.base, 'POST', '/v1/link/requests/confirm', JSON.stringify({ requestId, proof: linkConfirmProof(desktop, requestId) }), auth);
+  const commitment = linkCommitment(device.signingKey, device.ecdhKey, nonce);
+  const sas = linkSas(device.signingKey, device.ecdhKey, desktop.signingKey, desktop.ecdhKey, nonce, desktopNonce);
+  const done = await rawRequest(app.base, 'POST', '/v1/link/requests/confirm', JSON.stringify({ requestId, sas, proof: linkConfirmProof(desktop, { requestId, commitment, signingKey: device.signingKey, ecdhKey: device.ecdhKey, desktopSigningKey: desktop.signingKey, desktopEcdhKey: desktop.ecdhKey, deviceNonce: nonce, desktopNonce, tier: 'web', sas }) }), auth);
   if (done.status !== 200) throw new Error(`confirm ${done.status}`);
   const user = app.db.prepare('SELECT user_id FROM devices WHERE id = ?').get(reg.body.device.id);
   return { userId: user.user_id, web, desktop: { ...desktop, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, deviceId: reg.body.device.id }, device: { ...device, deviceId: keys.body.deviceId } };

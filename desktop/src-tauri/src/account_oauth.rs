@@ -31,7 +31,9 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 
 // The desktop nonce chosen by THIS app for each pending link; never trusted from a service reply.
 static LINK_NONCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static LINK_PINS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 fn link_nonces() -> &'static Mutex<HashMap<String, String>> { LINK_NONCES.get_or_init(|| Mutex::new(HashMap::new())) }
+fn link_pins() -> &'static Mutex<HashMap<String, (String, String)>> { LINK_PINS.get_or_init(|| Mutex::new(HashMap::new())) }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Tokens {
@@ -248,6 +250,11 @@ pub(crate) fn desktop_signing() -> Result<(SigningKey, String), String> {
     Ok((signing, keys.signing_public))
 }
 
+pub(crate) fn desktop_ecdh_public() -> Result<String, String> {
+    let backend = store()?;
+    Ok(device_keys(backend.as_ref())?.ecdh_public)
+}
+
 pub(crate) fn relay_access_token() -> Result<String, String> {
     let o = origin()?;
     let backend = store()?;
@@ -386,6 +393,8 @@ pub struct LinkRequest {
     pub commitment_ok: Option<bool>,
     pub signing_key: Option<String>,
     pub ecdh_key: Option<String>,
+    pub commitment: Option<String>,
+    pub device_nonce: Option<String>,
 }
 
 fn b64url_bytes(value: &str) -> Result<Vec<u8>, String> {
@@ -401,10 +410,10 @@ fn link_commitment(signing_key: &str, ecdh_key: &str, nonce: &str) -> Result<Str
     Ok(URL_SAFE_NO_PAD.encode(h.finalize()))
 }
 
-fn link_sas(signing_key: &str, ecdh_key: &str, desktop_signing_key: &str, device_nonce: &str, desktop_nonce: &str) -> Result<String, String> {
+fn link_sas(signing_key: &str, ecdh_key: &str, desktop_signing_key: &str, desktop_ecdh_key: &str, device_nonce: &str, desktop_nonce: &str) -> Result<String, String> {
     let mut h = Sha256::new();
     h.update(b"llmide/link/sas/v1");
-    for value in [signing_key, ecdh_key, desktop_signing_key, device_nonce, desktop_nonce] {
+    for value in [signing_key, ecdh_key, desktop_signing_key, desktop_ecdh_key, device_nonce, desktop_nonce] {
         h.update(b64url_bytes(value)?);
     }
     let digest = h.finalize();
@@ -469,7 +478,7 @@ fn link_requests_blocking() -> Result<Vec<LinkRequest>, String> {
             let nonce_ok = our_nonce.as_deref() == Some(desktop_nonce.as_str());
             commitment_ok = Some(ok && nonce_ok);
             if ok && nonce_ok {
-                sas = Some(link_sas(signing, ecdh, &desktop.signing_public, device_nonce, desktop_nonce)?);
+                sas = Some(link_sas(signing, ecdh, &desktop.signing_public, &desktop.ecdh_public, device_nonce, desktop_nonce)?);
             }
         }
         out.push(LinkRequest {
@@ -482,6 +491,8 @@ fn link_requests_blocking() -> Result<Vec<LinkRequest>, String> {
             commitment_ok,
             signing_key: signing,
             ecdh_key: ecdh,
+            commitment: get("commitment"),
+            device_nonce: get("deviceNonce"),
         });
     }
     Ok(out)
@@ -494,7 +505,10 @@ fn link_action_blocking(request_id: String, action: &str) -> Result<(), String> 
     let body = match action {
         "approve" => {
             let nonce = random_urlsafe(32)?;
+            let req = link_requests_blocking()?.into_iter().find(|r| r.request_id == request_id).ok_or("This request is gone.")?;
+            let commitment = req.commitment.clone().ok_or("The service did not return a commitment.")?;
             if let Ok(mut m) = link_nonces().lock() { m.insert(request_id.clone(), nonce.clone()); }
+            if let Ok(mut m) = link_pins().lock() { m.insert(request_id.clone(), (commitment, nonce.clone())); }
             let (signer, _): (SigningKey, String) = desktop_signing()?;
             let proof = URL_SAFE_NO_PAD.encode(Signer::<Signature>::sign(&signer, format!("llmide/link/approve/v1\n{request_id}\n{nonce}").as_bytes()).to_bytes());
             serde_json::json!({ "requestId": request_id, "desktopNonce": nonce, "proof": proof })
@@ -541,38 +555,66 @@ pub async fn account_link_confirm(request_id: String, sas: String, pin: String, 
         .map_err(|e| format!("account task failed: {e}"))?
 }
 
+fn link_confirm_message(x: &serde_json::Value) -> String {
+    format!("llmide/link/confirm/v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        x["requestId"].as_str().unwrap_or_default(), x["commitment"].as_str().unwrap_or_default(),
+        x["signingKey"].as_str().unwrap_or_default(), x["ecdhKey"].as_str().unwrap_or_default(),
+        x["desktopSigningKey"].as_str().unwrap_or_default(), x["desktopEcdhKey"].as_str().unwrap_or_default(),
+        x["deviceNonce"].as_str().unwrap_or_default(), x["desktopNonce"].as_str().unwrap_or_default(),
+        x["tier"].as_str().unwrap_or("web"), x["sas"].as_str().unwrap_or_default())
+}
+
 fn link_confirm_blocking(request_id: String, sas: String, pin: String, core: String) -> Result<(), String> {
+    let (pinned_commitment, pinned_nonce) = link_pins().lock().ok()
+        .and_then(|m| m.get(&request_id).cloned())
+        .ok_or("Approve this request from this desktop window first.")?;
     let r = link_requests_blocking()?.into_iter().find(|r| r.request_id == request_id).ok_or("This request is gone.")?;
     if r.state != "keys" || !r.commitment_ok.unwrap_or(false) { return Err("The device's keys do not match its commitment.".into()); }
-    let expected = r.sas.clone().ok_or("The device has not revealed its keys yet.")?;
+    if r.commitment.as_deref() != Some(pinned_commitment.as_str()) { return Err("The service changed the commitment after approval.".into()); }
+    let signing = r.signing_key.clone().ok_or("missing device signing key")?;
+    let ecdh_key = r.ecdh_key.clone().ok_or("missing device key")?;
+    let device_nonce = r.device_nonce.clone().ok_or("missing device nonce")?;
+    if link_commitment(&signing, &ecdh_key, &device_nonce)? != pinned_commitment { return Err("The revealed keys do not match the pinned commitment.".into()); }
+    let desktop_ecdh = desktop_ecdh_public()?;
+    let (signer, signing_spki) = desktop_signing()?;
+    let expected = link_sas(&signing, &ecdh_key, &signing_spki, &desktop_ecdh, &device_nonce, &pinned_nonce)?;
     if !ct_eq(&expected, &sas) { return Err("The code you confirmed is not this device's code.".into()); }
-    link_action_blocking(request_id.clone(), "confirm")?;
-    let tier = if r.kind == "ios" { "ios" } else { "web" };
+    let tier = "web"; // never take the tier from the service
+    let body = serde_json::json!({
+        "requestId": request_id, "sas": expected,
+        "commitment": pinned_commitment, "signingKey": signing, "ecdhKey": ecdh_key,
+        "desktopSigningKey": signing_spki, "desktopEcdhKey": desktop_ecdh,
+        "deviceNonce": device_nonce, "desktopNonce": pinned_nonce, "tier": tier,
+    });
+    let proof = URL_SAFE_NO_PAD.encode(Signer::<Signature>::sign(&signer, link_confirm_message(&body).as_bytes()).to_bytes());
+    let o = origin()?;
+    let backend = store()?;
+    account_json(&o, "v1/link/requests/confirm", "POST", &access_token(&o, backend.as_ref())?,
+        Some(serde_json::json!({ "requestId": request_id, "sas": expected, "proof": proof })))?;
     let token = crate::relay::bridge::pair(&core, tier, &r.label, &pin)
         .map_err(|e| format!("Linked, but this computer could not finish setup ({e}). Revoke the device and link again."))?;
-    let backend = store()?;
     let mut reg = crate::relay::registry::load(backend.as_ref())?;
     if reg.desktop_id.is_empty() {
-        let o = origin()?;
         let acct = account_json(&o, "v1/desktop/account", "GET", &access_token(&o, backend.as_ref())?, None)?;
         reg.user_id = acct["id"].as_str().unwrap_or_default().to_string();
         reg.desktop_id = acct["desktopId"].as_str().ok_or("Register this desktop first.")?.to_string();
     }
     reg.ensure_root();
-    let (signer, signing_spki) = desktop_signing()?;
     let root = reg.root_bytes()?;
     let device_id = r.device_id.clone();
     let (rq, rp) = crate::relay::crypto::device_keys(&root, &reg.user_id, &reg.desktop_id, &device_id, reg.epoch);
-    let ecdh = b64url_bytes(r.ecdh_key.as_deref().ok_or("missing device key")?)?;
     let wrap = crate::relay::crypto::make_wrap(&crate::relay::crypto::WrapInput {
         user_id: &reg.user_id, desktop_id: &reg.desktop_id, device_id: &device_id, epoch: reg.epoch, tier, seq: now_secs(), issued_at: now_secs() * 1000,
-        device_ecdh_spki: &ecdh, desktop_signing_spki: &b64url_bytes(&signing_spki)?, request: &rq, reply: &rp, host_api_token: &token,
+        device_ecdh_spki: &b64url_bytes(&ecdh_key)?, desktop_signing_spki: &b64url_bytes(&signing_spki)?, request: &rq, reply: &rp, host_api_token: &token,
     }, &signer, None, None).map_err(|e| format!("could not build the device key ({e})"))?;
     reg.add(crate::relay::registry::Device {
         device_id, label: r.label.clone(), tier: tier.into(), signing_key: r.signing_key.clone().unwrap_or_default(), ecdh_key: r.ecdh_key.clone().unwrap_or_default(),
         linked_at: now_secs(), confirmed: false, host_api_token: token, wrap_sig: wrap.sig.clone(), wrap: Some(serde_json::to_string(&wrap).map_err(|e| e.to_string())?), reply_count: 0,
     });
-    crate::relay::registry::save(backend.as_ref(), &reg)
+    crate::relay::registry::save(backend.as_ref(), &reg)?;
+    if let Ok(mut m) = link_pins().lock() { m.remove(&request_id); }
+    if let Ok(mut m) = link_nonces().lock() { m.remove(&request_id); }
+    Ok(())
 }
 
 #[tauri::command]
@@ -696,7 +738,7 @@ mod tests {
         let nd = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
         let nk = "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk";
         assert_eq!(link_commitment(signing, ecdh, nd).unwrap(), "Hmrt1CRsIXMxjpr927_sWlrOJCGQnyetTtwFVEXZlFg");
-        assert_eq!(link_sas(signing, ecdh, desktop, nd, nk).unwrap(), "954028");
+        assert_eq!(link_sas(signing, ecdh, desktop, ecdh, nd, nk).unwrap(), "274406");
         assert!(link_commitment("not-a-key", ecdh, nd).is_err());
     }
 
