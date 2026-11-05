@@ -121,7 +121,7 @@ Verify:
 
 ```bash
 curl -s https://accounts.llm-ide.com/health
-# {"ok":true,"service":"account-service","signupOpen":false}
+# {"ok":true,"service":"account-service","signupOpen":false,"directSignup":false}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Origin: https://accounts.llm-ide.com' \
   -H 'Content-Type: application/json' -d '{"email":"a@example.com","displayName":"A"}' \
   https://accounts.llm-ide.com/v1/signup
@@ -131,6 +131,40 @@ curl -s -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health
 systemctl show llmide-accounts -p User
 # User=llmide-accounts
 ```
+
+## Device linking (v1)
+
+The browser link page is served by the account service at `/link.html`; the desktop polls the same
+service for pending requests. Public keys, commitments and nonces are stored; private keys and the
+device token never leave the device.
+
+- Migration `0004_link_requests.sql` creates `link_requests` and the unique device-token hash index.
+- Endpoints: `POST /v1/link/requests`, `GET /v1/link/requests/status`, `POST /v1/link/requests/keys`
+  (web session); `GET /v1/link/requests`, `POST /v1/link/requests/{approve,deny,confirm}` (desktop Bearer).
+- The six-digit SAS is computed by both sides from the committed device keys, the desktop signing key,
+  and both nonces. Confirm only when the codes match.
+- Link requests expire after 10 minutes. The account service can refuse service but cannot read project
+  data; the relay is still a later sub-project.
+
+Deploy after pulling:
+
+```bash
+cd /srv/llm-ide/repo
+git fetch origin main && git reset --hard origin/main
+cd account-service
+chmod -R a+rX .
+PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
+PATH=/opt/node22/bin:$PATH npm test          # 95/95
+rsync -a --delete public/ /var/www/llm-ide-accounts/
+chown -R root:root /var/www/llm-ide-accounts
+systemctl restart llmide-accounts
+curl -fsS https://accounts.llm-ide.com/health
+# {"ok":true,"service":"account-service","signupOpen":false,"directSignup":false}
+curl -s -o /dev/null -w '%{http_code}\n' https://accounts.llm-ide.com/link.html  # 200
+```
+
+Confirm direct sign-up stays off. The fixed service requires `ACCOUNTS_DIRECT_SIGNUP_EMAILS` if direct
+sign-up is ever re-enabled in production; leaving it off is the safe default.
 
 ## Verify
 

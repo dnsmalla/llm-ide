@@ -6,6 +6,13 @@ const b64 = (bytes) => {
   return btoa(out).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 const bytes = (buffer) => new Uint8Array(buffer);
+const unb64 = (text) => {
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - text.length % 4) % 4);
+  const raw = atob(padded);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+};
 const concat = (...parts) => {
   const total = parts.reduce((n, p) => n + p.length, 0);
   const out = new Uint8Array(total);
@@ -61,6 +68,19 @@ async function revealKeys() {
   localStorage.setItem('llmide.device-token', b64(d.token));
 }
 
+async function sasFor(status) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', concat(
+    enc.encode('llmide/link/sas/v1'),
+    state.signingSpki,
+    state.ecdhSpki,
+    unb64(status.desktopSigningKey),
+    state.nonce,
+    unb64(status.desktopNonce),
+  )));
+  const n = new DataView(digest.buffer).getUint32(0) % 1_000_000;
+  return String(n).padStart(6, '0');
+}
+
 async function tick() {
   if (!state?.requestId) return;
   try {
@@ -71,8 +91,10 @@ async function tick() {
       state.revealed = true;
       $('link-status').textContent = 'Keys shared. Waiting for the desktop approval.';
     } else if (status.state === 'keys') {
+      const code = await sasFor(status);
+      if (status.sas && status.sas !== code) throw new Error('The service returned a different code. Do not confirm; deny this request.');
       $('link-code').hidden = false;
-      $('link-code').textContent = status.sas ? status.sas.slice(0, 3) + ' ' + status.sas.slice(3) : '';
+      $('link-code').textContent = code.slice(0, 3) + ' ' + code.slice(3);
       $('link-status').textContent = 'Compare this code with the desktop. Confirm there only if they match.';
     } else if (status.state === 'linked') {
       clearInterval(poll);
