@@ -91,10 +91,10 @@ Open count: 60 open, 28 done, 88 total
   - Why you: agents never kill processes.
   - How: list with `ps -axo pid,etime,command | grep -E 'server.mjs|node --test|swift-test' | grep -v grep`; port holders with `lsof -nP -iTCP:3456 -sTCP:LISTEN` and `lsof -nP -iTCP:3457 -sTCP:LISTEN`; then `kill <pid>` for ones you recognise. Do not kill the backend while the Swift app is in use. Details: [test-hangs.md](../how-to/test-hangs.md#stale-leftover-processes). You already did one clean-up (section E); re-check before UN-001 because the Tauri app adopts a 3456 core as "unverified".
   - Effort: 5 minutes. Blocks: a clean UN-001 and UN-004. Status: re-check before the first run.
-- [ ] **UN-107** Desktop audit decisions: (1) Loop, a missing default loop: write the file on load like the Mac, or show a notice; (2) Doc Gen output file naming: the Mac uses `<template>-doc.md`, the desktop `<slug>-YYYYMMDD.md`; (3) keep the refactor-batch refusal until the desktop has a rollback.
-  - Why you: product decisions. Recommendation: (1) write on load like the Mac, (2) keep the desktop names, (3) keep the refusal.
+- [ ] **UN-107** Desktop audit decisions: (1) Doc Gen output file naming: the Mac uses `<template>-doc.md`, the desktop `<slug>-YYYYMMDD.md`; (2) keep the refactor-batch refusal until the desktop has a rollback.
+  - Why you: product decisions. Recommendation: (1) keep the desktop names, (2) keep the refusal.
   - How: answer "go with your recommendation" or choose per item. Source: [MASTER-PLAN](MASTER-PLAN.md) S2 audit decisions row.
-  - Effort: 5 minutes. Blocks: Loop and Doc Gen parity rows. Status: open.
+  - Effort: 5 minutes. Blocks: Doc Gen parity and the refactor rollback. Status: open. The Loop missing-default decision is settled and implemented (write on load).
 - [ ] **UN-020** After each push, check CI.
   - Why you: your remote; agents are told not to push.
   - How: `gh run list --limit 5`.

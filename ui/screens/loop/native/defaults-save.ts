@@ -1,5 +1,5 @@
-// Add any missing built-in loops and persist them immediately, like the Mac writes a new project's Loop file on
-// open. A failed write keeps the in-memory store so the user can retry with the normal Save button.
+// Add any missing built-in loops to an existing Loop file and persist them immediately, so scheduled runs never
+// see an unsaved buffer. A failed write keeps the in-memory store for the normal Save retry.
 import type { LoopDefaults } from "../../shell/host-prefs.ts";
 import { saveLoops, type LoopFs, type LoopLoad } from "./store.ts";
 import { ensureDefaultLoops } from "./templates.ts";

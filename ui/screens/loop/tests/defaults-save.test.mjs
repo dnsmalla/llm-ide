@@ -21,9 +21,12 @@ test("missing built-in loops are written on open, not left dirty", async () => {
 
 test("an existing store is left alone and a failed write keeps the loops dirty", async () => {
   const store = initialProjectStore(null);
-  const untouched = await persistEnsuredDefaults(fake(async () => { throw new Error("should not write"); }), okLoad(store), null);
+  let writes = 0;
+  const untouched = await persistEnsuredDefaults(fake(async () => { writes += 1; throw new Error("should not write"); }), okLoad(store), null);
   assert.deepEqual(untouched.added, []);
   assert.equal(untouched.saved, false);
+  assert.equal(untouched.error, null);
+  assert.equal(writes, 0, "an unchanged store must not be written");
 
   const failed = await persistEnsuredDefaults(fake(async () => { throw new Error("disk full"); }), okLoad({ schemaVersion: 2, loops: [] }), null);
   assert.equal(failed.saved, false);

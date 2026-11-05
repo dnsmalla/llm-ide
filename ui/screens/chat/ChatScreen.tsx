@@ -73,6 +73,8 @@ export interface ChatScreenProps {
    * section and the Explorer dock pass the same store; absent = this screen keeps its own.
    */
   shared?: ChatUiStore;
+  /** This chat surface is on screen; window shortcuts bind only then. */
+  active?: boolean;
   /** Docked beside the editor (Explorer): no session column, a compact "Code Assistant" header with chat history and New chat. */
   dock?: boolean;
   /** Dock only: hides the dock (the header shows the button when this is given). */
@@ -81,7 +83,7 @@ export interface ChatScreenProps {
 
 const SESSION_PAGE = 100;
 
-export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, dock = false, onCollapse }: ChatScreenProps) {
+export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, active = false, dock = false, onCollapse }: ChatScreenProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -394,7 +396,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
             <DraftComposer
-              key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId}
+              key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId} active={active}
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
@@ -413,12 +415,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 }
 
 /** Owns the draft text locally (typing never re-renders the conversation) and saves it per chat on every change. */
-function DraftComposer({ controller, id, compose, models, mode, setMode, setModel, clearChat, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; mode: string; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void } & Omit<ComposerProps, "draft" | "onDraft" | "extras">) {
+function DraftComposer({ controller, id, compose, models, mode, setMode, setModel, clearChat, active, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; mode: string; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void; active: boolean } & Omit<ComposerProps, "draft" | "onDraft" | "extras" | "active">) {
   const [draft, setDraft] = useState(() => controller.getView(id).draft);
   const onDraft = (t: string) => { setDraft(t); controller.setView(id, { draft: t }); };
   const notice = <PlanSwitchNotice draft={draft} mode={mode} onSwitch={() => setMode("plan")} />;
-  if (!compose) return <>{notice}<Composer {...rest} draft={draft} onDraft={onDraft} /></>;
-  return <>{notice}<ComposerWithExtras {...rest} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
+  if (!compose) return <>{notice}<Composer {...rest} active={active} draft={draft} onDraft={onDraft} /></>;
+  return <>{notice}<ComposerWithExtras {...rest} active={active} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
 }
 
 /** The plan run's progress bar and counts, above the task list (the Mac's PlanExecutionCard header). */
