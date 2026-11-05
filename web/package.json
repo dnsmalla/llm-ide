@@ -6,7 +6,7 @@
   "description": "LLM-IDE web client: Host API v1 over WebSocket (pairing, chat, approvals)",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit -p . && vite build",
+    "build": "tsc --noEmit -p . && vite build && node scripts/stamp-sw.mjs",
     "preview": "vite preview",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "test:e2e": "node --test --experimental-strip-types tests/e2e/*.test.mjs",

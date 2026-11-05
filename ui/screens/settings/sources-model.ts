@@ -120,6 +120,12 @@ export function sourcesError(e: unknown): string {
       return "The saved token is valid but lacks permission to read the account. Add the required scope and try again.";
     case "TOKEN_REFUSED":
       return "The provider refused that token.";
+    case "INVALID_BASE_URL":
+      return "Enter a valid HTTPS GitLab instance URL without credentials, query or fragment.";
+    case "PROVIDER_UNREACHABLE":
+      return "The provider could not be reached. Check the URL and network; a private instance needs the operator's private-provider gate.";
+    case "TOKEN_RESPONSE_INVALID":
+      return "The provider answered, but without a user for this token.";
     default:
       return typeof e === "string" && e.trim() ? e.slice(0, 200) : e instanceof Error && e.message ? e.message : "The action failed.";
   }

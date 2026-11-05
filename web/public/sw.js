@@ -2,7 +2,7 @@
 // offline; it never caches the Host API WebSocket, pairing data, tokens or any cross-origin response.
 importScripts("/sw-prune.js");
 
-const CACHE = "llmide-shell-v2";
+const CACHE = "llmide-shell-__SW_BUILD__";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png", "/icons/apple-touch-icon.png"];
 
 /** Delete hashed assets from older builds; the current index.html is the source of truth. */

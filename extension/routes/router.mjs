@@ -343,7 +343,8 @@ export async function handleKB(req, res) {
       if (!token) { sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_TOKEN_MISSING`, message: `Save a ${provider === 'github' ? 'GitHub' : 'GitLab'} token first.` } }); return true; }
       const endpoint = provider === 'github' ? 'https://api.github.com/user' : `${gitlabBase}/api/v4/user`;
       try {
-        const r = await makePinnedFetch()(endpoint, {
+        // A self-hosted instance on a LAN/VPN is allowed only when the operator's private-provider gate is on.
+        const r = await makePinnedFetch({ allowPrivate: true })(endpoint, {
           headers: provider === 'github'
             ? { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}` }
             : { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token },
