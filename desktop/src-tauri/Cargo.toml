@@ -39,8 +39,10 @@ trash = "=5.2.9"
 sha2 = "=0.10.9"
 # Account OAuth PKCE/state encoding. Already in the lock via other crates; direct use is explicit.
 base64 = "=0.22.1"
+aes-gcm = "=0.10.3"
+hkdf = "=0.12.4"
 # Desktop device keys for the account relay: ECDSA P-256 signing + ECDH P-256 wrap keys.
-p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
+p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8", "ecdh"] }
 rand_core = { version = "=0.6.4", features = ["getrandom"] }
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
 url = "=2.5.8"

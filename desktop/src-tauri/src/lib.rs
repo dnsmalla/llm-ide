@@ -1,4 +1,5 @@
 mod account_oauth;
+mod relay;
 mod attach;
 #[cfg(feature = "spike")]
 mod ax_probe;
