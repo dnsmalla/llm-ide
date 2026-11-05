@@ -27,5 +27,5 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
   const { rt, host, approvals, banner } = useChatSurface(projectRoot, active);
   // No project: one clear card with the two paths instead of a disabled composer (the sessions list returns with a project).
   if (projectRoot === null) return <NoProjectCard what="chat" hint="Chats work inside a project: the assistant reads and edits the files of the open project." />;
-  return <ChatScreen controller={rt.controller} store={rt.store} core={rt.transport} host={host} approvals={approvals} banner={banner} shared={rt.ui} noProject={false} />;
+  return <ChatScreen controller={rt.controller} store={rt.store} core={rt.transport} host={host} approvals={approvals} banner={banner} shared={rt.ui} noProject={false} active={active} />;
 }

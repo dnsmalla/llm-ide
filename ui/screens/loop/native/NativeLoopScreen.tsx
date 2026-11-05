@@ -8,8 +8,9 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
+import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, ensureDefaultLoops, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -140,23 +141,31 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!live) return;
       const defaults = prefs === null ? undefined : decodePrefsView(prefs)?.stored.loopDefaults;
       setLoopDefaults(defaults);
-      // Mac parity: a missing default loop is re-added in memory and only written when the user saves.
+      // Mac parity: a missing default loop is added AND written on open, so a scheduled run never silently sees
+      // an unsaved file. A failed write keeps the loops in memory and asks for the normal Save retry.
       let next = r;
       let added: string[] = [];
+      let saved = false;
+      let saveError: string | null = null;
       if (r.kind === "ok") {
         const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
         if (!live) return;
-        const ensured = ensureDefaultLoops(r.store, env.command, defaults);
-        added = ensured.added;
-        if (added.length) next = { kind: "ok", store: ensured.store, hash: r.hash };
+        const persisted = await persistEnsuredDefaults(fs, r, env.command, defaults);
+        if (!live) return;
+        next = persisted.load;
+        added = persisted.added;
+        saved = persisted.saved;
+        saveError = persisted.error;
       }
       setLoad(next);
       if (next.kind === "ok") {
         const loop = primaryLoop(next.store);
         setSelectedLoopId(loop?.id ?? null);
         setSelectedStageId(loop?.config.stages[0]?.id ?? null);
-        setDirty(added.length > 0);
-        if (added.length) setNotice(`Added the missing default loop(s): ${added.join(", ")}. Save to keep them.`);
+        setDirty(added.length > 0 && !saved);
+        if (added.length) setNotice(saveError
+          ? `Added the missing default loop(s): ${added.join(", ")}. They could not be saved: ${saveError}`
+          : `Added and saved the missing default loop(s): ${added.join(", ")}.`);
       }
     }, (e: unknown) => live && setOpenError(e instanceof Error ? e.message : "The Loop file could not be read."));
     return () => { live = false; };
@@ -875,7 +884,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
-        {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
+        {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>

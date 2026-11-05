@@ -1,7 +1,7 @@
 // Composer: multiline, Enter sends, Shift+Enter newline, history recall (Up on an empty draft), Stop while a
 // turn runs, queue while streaming. File attachments need a host dialog command (the page never supplies a
 // path): `onAttach` is optional and the button is hidden without it.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
 
@@ -17,6 +17,8 @@ export interface ComposerProps {
   onStop: () => void;
   onDropQueued: (index: number) => void;
   onAttach?: () => void;
+  /** This composer's surface is on screen; only then does Cmd+M bind at window level. */
+  active?: boolean;
   disabledReason?: string | null;
   /** Slash menu, @ mentions, skill chips and attachments (slash/extras.tsx); absent = the plain composer. */
   extras?: ComposerExtras;
@@ -64,7 +66,8 @@ export function isMacPlatform(): boolean {
 
 /** The Mac's voice-input key (CodeAssistant+Voice, Cmd+M): Cmd+M on macOS, Ctrl+M elsewhere; no other modifier. Pure.
  *  On macOS the window menu's Minimize also owns Cmd+M, but WKWebView offers key equivalents to the page first, so
- *  this handler's preventDefault keeps the window up while the composer has focus (Minimize still works elsewhere). */
+ *  this handler's preventDefault keeps the window up while the active Chat surface owns the shortcut; outside Chat
+ *  the native Minimize still works. */
 export function isDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac = isMacPlatform()): boolean {
   const primary = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   return e.key.toLowerCase() === "m" && primary && !e.altKey && !e.shiftKey;
@@ -72,6 +75,14 @@ export function isDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey:
 
 /** The key the Dictate tooltip names. */
 export const dictationShortcutLabel = (mac = isMacPlatform()): string => (mac ? "Cmd+M" : "Ctrl+M");
+
+/** The window-level shortcut is enabled only while this surface is on screen. */
+export const dictationEnabled = (active: boolean, voice: unknown): boolean => active && voice !== null && voice !== undefined;
+
+/** Window-level shortcut: skip events the focused composer already handled (it calls preventDefault). */
+export function isGlobalDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; defaultPrevented?: boolean }, mac = isMacPlatform()): boolean {
+  return !e.defaultPrevented && isDictationShortcut(e, mac);
+}
 
 export function Composer(p: ComposerProps) {
   const speech = useRef<SpeechRecognitionLike | null>(null);
@@ -95,6 +106,21 @@ export function Composer(p: ComposerProps) {
     setListening(true);
     try { rec.start(); } catch { speech.current = null; setListening(false); }
   };
+  // Cmd+M works from anywhere in the Chat section, not only while the textarea has focus. The textarea's
+  // handler runs first and preventDefaults, so this listener does not toggle twice.
+  const toggleRef = useRef(toggleVoice);
+  toggleRef.current = toggleVoice;
+  useEffect(() => {
+    if (!dictationEnabled(p.active === true, voice)) return undefined;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!isGlobalDictationShortcut(e)) return;
+      e.preventDefault();
+      toggleRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [voice, p.active]);
+
   const recall = useRef<number | null>(null);
   const ime = useRef<ImeGuard | null>(null);
   if (!ime.current) ime.current = new ImeGuard();
