@@ -324,7 +324,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
           const image = IMAGE_EXT.test(r.name);
           const previewable = isImageFile(r.name);
           const reason = image
-            ? surface !== "visual" ? "image (Visual only)" : previewable && r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
+            ? surface !== "visual" ? "image (Visual only)" : r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
             : !looksTextual(r.name) ? "binary" : r.size > MAX_SOURCE_FILE_BYTES ? "too large" : null;
           const key = `file:${r.path}`;
           const checked = selection.has(key);
