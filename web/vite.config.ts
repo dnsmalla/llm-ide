@@ -24,6 +24,8 @@ const cspMeta = (): Plugin => ({
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
+  // The public site owns `/`; the PWA is mounted at `/app/`.
+  base: process.env.VITE_BASE || "/",
   plugins: [react(), cspMeta()],
   resolve: {
     alias: [
