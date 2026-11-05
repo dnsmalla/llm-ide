@@ -114,8 +114,9 @@ what symbolicates crash reports from this build.
 runs this same build → sign → notarize → DMG pipeline in GitHub Actions
 and attaches the DMG to a GitHub Release — see
 [`.github/workflows/mac-release.yml`](https://github.com/dnsmalla/llm-ide/blob/main/.github/workflows/mac-release.yml)
-for the required secrets. Steps 3–5 below (appcast + upload) still need
-doing by hand either way. CI sets `LLMIDE_BUILD_NUMBER` to `github.run_number` (and checks out full history) so `CFBundleVersion`/`sparkle:version` increases every run; `build.sh` warns in red if a CI build falls back to a shallow-clone commit count of 1.
+for the required secrets; `MAC_SU_FEED_URL` and `MAC_SU_PUBLIC_KEY` carry the two values above, and the run
+fails before building when either is missing, so a CI release never ships without auto-update. Steps 3–5 below (appcast + upload) still need
+doing by hand either way. CI sets `LLMIDE_BUILD_NUMBER` from `mac/Scripts/build-number.sh` (the commit count, the same source local builds use; it checks out full history) so `CFBundleVersion`/`sparkle:version` increases every release; `build.sh` warns in red if a CI build falls back to a shallow-clone commit count of 1.
 
 ### 3. Generate the appcast entry
 

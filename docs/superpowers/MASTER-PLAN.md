@@ -21,8 +21,8 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
-| Release and CI | 7 | 2 | 7 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 116 | 65 | 75 | 256 |  |
+| Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
+| Total | 116 | 66 | 74 | 256 |  |
 
 ## How the surfaces connect
 
@@ -388,7 +388,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Relay deployment pipeline and monitoring (blocked on S4 hosting) (wait)
 - [ ] Chrome Web Store publishing step in the extension release (you)
 - [x] Release notes / CHANGELOG discipline per surface (October summary by surface in `CHANGELOG.md`, `docs/how-to/maintain-the-changelog.md`) (me)
-- [ ] Mac auto-update feed in release builds: `mac/Scripts/build.sh` writes `SUFeedURL` and `SUPublicEDKey` only from `LLMIDE_SU_FEED_URL` / `LLMIDE_SU_PUBLIC_KEY`, and `mac-release.yml` sets neither, so a CI release ships without updates; add the two secrets and fail the release when they are empty, then one signed build-to-build update run (me, you)
+- [~] Mac auto-update feed in release builds: `mac-release.yml` now passes `MAC_SU_FEED_URL` / `MAC_SU_PUBLIC_KEY` to `build.sh` (which writes `SUFeedURL` / `SUPublicEDKey`) and fails before building when either secret is missing; open: you add the two secrets (Sparkle `generate_keys`, appcast host) and run one signed build-to-build update (you)
 
 ## Cross-cutting rules
 

@@ -26,6 +26,11 @@ name: mac-release
 #                               account password)
 #   MAC_NOTARY_TEAM_ID          Apple Developer Team ID (same TEAMID as
 #                               in MAC_SIGN_IDENTITY)
+#   MAC_SU_FEED_URL             Sparkle appcast URL baked into Info.plist
+#                               (SUFeedURL), e.g. https://updates.llmide.app/appcast.xml
+#   MAC_SU_PUBLIC_KEY           base64 EdDSA public key from Sparkle's
+#                               generate_keys (SUPublicEDKey); the private key
+#                               stays in your Keychain and signs the appcast
 #
 # See docs/how-to/release-with-auto-update.md for the equivalent local
 # (non-CI) release flow using mac/Scripts/release.sh directly.
@@ -83,6 +88,9 @@ jobs:
           [ -z "${{ secrets.MAC_NOTARY_APPLE_ID }}" ] && missing+=(MAC_NOTARY_APPLE_ID)
           [ -z "${{ secrets.MAC_NOTARY_PASSWORD }}" ] && missing+=(MAC_NOTARY_PASSWORD)
           [ -z "${{ secrets.MAC_NOTARY_TEAM_ID }}" ] && missing+=(MAC_NOTARY_TEAM_ID)
+          # Without these two, build.sh omits SUFeedURL/SUPublicEDKey and the release can never auto-update.
+          [ -z "${{ secrets.MAC_SU_FEED_URL }}" ] && missing+=(MAC_SU_FEED_URL)
+          [ -z "${{ secrets.MAC_SU_PUBLIC_KEY }}" ] && missing+=(MAC_SU_PUBLIC_KEY)
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             echo "See the header comment in .github/workflows/mac-release.yml for what each one is."
@@ -142,6 +150,8 @@ jobs:
         env:
           LLMIDE_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
           LLMIDE_NOTARY_PROFILE: ${{ env.NOTARY_PROFILE }}
+          LLMIDE_SU_FEED_URL: ${{ secrets.MAC_SU_FEED_URL }}
+          LLMIDE_SU_PUBLIC_KEY: ${{ secrets.MAC_SU_PUBLIC_KEY }}
         run: Scripts/release.sh
 
       # build.sh strips the shipped binary and writes the debug symbols to
