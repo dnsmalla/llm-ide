@@ -52,6 +52,8 @@ test("Cmd+M (Ctrl+M off macOS) toggles dictation; other modifiers and keys do no
   assert.equal(c.isDictationShortcut(k("m"), true), false);
   assert.equal(c.dictationShortcutLabel(true), "Cmd+M");
   assert.equal(c.dictationShortcutLabel(false), "Ctrl+M");
+  assert.equal(c.isGlobalDictationShortcut(k("m", { metaKey: true, defaultPrevented: true }), true), false, "a focused composer wins");
+  assert.equal(c.isGlobalDictationShortcut(k("m", { metaKey: true }), true), true);
 });
 
 test("Jump to latest shows only for a non-empty conversation the reader has scrolled away from", () => {
