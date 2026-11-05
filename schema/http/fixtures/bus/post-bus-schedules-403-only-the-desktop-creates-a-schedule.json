@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /bus/schedules",
+  "status": 403,
+  "description": "only the desktop creates a schedule",
+  "request": {
+    "body": {
+      "kind": "sources.update",
+      "args": {},
+      "intervalHours": 6
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can create a schedule",
+      "details": {
+        "client": "extension"
+      }
+    }
+  }
+}

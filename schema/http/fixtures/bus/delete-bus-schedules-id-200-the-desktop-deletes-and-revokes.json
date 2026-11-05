@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /bus/schedules/:id",
+  "status": 200,
+  "description": "the desktop deletes a schedule, which revokes its standing approval",
+  "request": {
+    "params": {
+      "id": "5a1b2c3d-0000-4000-8000-0000000000a1"
+    }
+  },
+  "response": {
+    "deleted": true
+  }
+}

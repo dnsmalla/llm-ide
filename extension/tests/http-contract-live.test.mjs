@@ -83,10 +83,11 @@ const SKIP_RULES = [
     // unproven caller). What that class can reproduce is replayed: validation, auth, TIER_DENIED, the read routes and the
     // unknown-id 404s. Everything else needs the desktop class (host nonce), a command seeded through POST /bus/commands, or an
     // engine, and is covered with the real handlers by tests/command-bus.test.mjs (the fixtures were recorded from them).
+    // Schedules: only 401 and the extension's 403 replay; the rest need the desktop class (tests/bus-schedules.test.mjs).
     why: 'command bus: needs the desktop client class, a seeded command or an engine; covered by tests/command-bus.test.mjs',
-    when: (fx) => /^(GET|POST|PUT) \/bus\//.test(fx.endpoint) && !(
+    when: (fx) => /^(GET|POST|PUT|DELETE) \/bus\//.test(fx.endpoint) && !(
       fx.status === 401
-      || (fx.status === 400 && fx.endpoint !== 'PUT /bus/kinds/:kind')
+      || (fx.status === 400 && fx.endpoint !== 'PUT /bus/kinds/:kind' && !fx.endpoint.includes('/bus/schedules'))
       || (fx.status === 403 && fx.response?.error?.code === 'TIER_DENIED' && !/\/(approve|deny)$/.test(fx.endpoint) && fx.endpoint !== 'GET /bus/approvals')
       || (fx.status === 200 && /^GET \/bus\/(kinds|commands)$/.test(fx.endpoint))
       || (fx.status === 404 && /^(GET|POST) \/bus\/commands\/:id(\/(events|cancel))?$/.test(fx.endpoint))

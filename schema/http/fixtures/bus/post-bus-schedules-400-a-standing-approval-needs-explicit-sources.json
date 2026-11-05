@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /bus/schedules",
+  "status": 400,
+  "description": "a standing approval needs explicit sources",
+  "request": {
+    "body": {
+      "kind": "sources.update",
+      "args": {},
+      "intervalHours": 6,
+      "standing": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_ARGS",
+      "message": "a standing approval needs the exact sourceIds it covers"
+    }
+  }
+}

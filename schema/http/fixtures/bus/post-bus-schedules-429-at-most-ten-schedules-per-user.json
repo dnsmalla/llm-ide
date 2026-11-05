@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /bus/schedules",
+  "status": 429,
+  "description": "at most ten schedules per user",
+  "request": {
+    "body": {
+      "kind": "sources.update",
+      "args": {},
+      "intervalHours": 6
+    }
+  },
+  "response": {
+    "error": {
+      "code": "QUOTA_EXCEEDED",
+      "message": "at most 10 schedules per user"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /bus/schedules/:id",
+  "status": 403,
+  "description": "only the desktop deletes a schedule",
+  "request": {
+    "params": {
+      "id": "5a1b2c3d-0000-4000-8000-0000000000a1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop can delete a schedule",
+      "details": {
+        "client": "extension"
+      }
+    }
+  }
+}

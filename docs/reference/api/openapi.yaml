@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 110
+  x-api-version: 111
 servers:
   - url: "https://{host}"
     variables:
@@ -4306,6 +4306,9 @@ paths:
                   type: "object"
                   additionalProperties: true
                   description: "Required for T2 kinds: repeats the exact projectId, issueIds and ship the command will act on (400 CONFIRM_MISMATCH otherwise). Typed per kind."
+                scheduleId:
+                  type: "string"
+                  description: "Approve on this schedule's standing approval (desktop-enqueued run, same kind and args, live, not too soon); 403 STANDING_APPROVAL_INVALID otherwise. The nonce is still required."
               required:
                 - "nonce"
       responses:
@@ -4560,6 +4563,143 @@ paths:
                 required:
                   - "kind"
                   - "enabled"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /bus/schedules:
+    get:
+      tags:
+        - "bus"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/BusSchedule"
+                required:
+                  - "items"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      tags:
+        - "bus"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                kind:
+                  type: "string"
+                  enum:
+                    - "sources.update"
+                args:
+                  type: "object"
+                  additionalProperties: true
+                  description: "Typed by the kind's registry args. A standing approval needs explicit sourceIds."
+                intervalHours:
+                  type: "integer"
+                standing:
+                  type: "boolean"
+                standingDays:
+                  type: "integer"
+                  description: "Default 30; only with standing: true."
+              required:
+                - "kind"
+                - "args"
+                - "intervalHours"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  schedule:
+                    "$ref": "#/components/schemas/BusSchedule"
+                required:
+                  - "schedule"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "429":
+          description: "Too Many Requests"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /bus/schedules/{id}:
+    delete:
+      tags:
+        - "bus"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "The schedule id."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  deleted:
+                    type: "boolean"
+                    const: true
+                required:
+                  - "deleted"
         "401":
           description: "Unauthorized"
           content:
@@ -16113,6 +16253,42 @@ components:
         - "enabled"
         - "allowed"
         - "needsApproval"
+    BusSchedule:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        kind:
+          type: "string"
+        args:
+          type: "object"
+          additionalProperties: true
+          description: "The exact args every run is enqueued with; a standing approval covers these args only."
+        intervalHours:
+          type: "integer"
+        standing:
+          type: "boolean"
+          description: "true while the standing approval is live (standingUntil in the future); false = every run waits for a click."
+        standingUntil:
+          type:
+            - "string"
+            - "null"
+        createdAt:
+          type: "string"
+        lastRunAt:
+          type:
+            - "string"
+            - "null"
+          description: "When a run was last approved on the standing approval."
+      required:
+        - "id"
+        - "kind"
+        - "args"
+        - "intervalHours"
+        - "standing"
+        - "standingUntil"
+        - "createdAt"
+        - "lastRunAt"
     CalendarIcalSource:
       type: "object"
       properties:

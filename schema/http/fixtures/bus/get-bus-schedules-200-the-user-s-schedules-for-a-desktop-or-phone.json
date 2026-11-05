@@ -1,0 +1,23 @@
+{
+  "endpoint": "GET /bus/schedules",
+  "status": 200,
+  "description": "the user's schedules, for a desktop or native phone client",
+  "response": {
+    "items": [
+      {
+        "id": "5a1b2c3d-0000-4000-8000-0000000000a1",
+        "kind": "sources.update",
+        "args": {
+          "sourceIds": [
+            "gcal:aaaaaaaaaaaa"
+          ]
+        },
+        "intervalHours": 6,
+        "standing": true,
+        "standingUntil": "2026-12-05T09:00:00.000Z",
+        "createdAt": "2026-11-05T09:00:00.000Z",
+        "lastRunAt": "2026-11-05T12:00:00.000Z"
+      }
+    ]
+  }
+}

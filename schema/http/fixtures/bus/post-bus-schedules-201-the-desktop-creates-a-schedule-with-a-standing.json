@@ -1,0 +1,34 @@
+{
+  "endpoint": "POST /bus/schedules",
+  "status": 201,
+  "description": "the desktop creates a schedule with a standing approval for exact sources",
+  "request": {
+    "body": {
+      "kind": "sources.update",
+      "args": {
+        "sourceIds": [
+          "gcal:aaaaaaaaaaaa"
+        ]
+      },
+      "intervalHours": 6,
+      "standing": true,
+      "standingDays": 30
+    }
+  },
+  "response": {
+    "schedule": {
+      "id": "5a1b2c3d-0000-4000-8000-0000000000a1",
+      "kind": "sources.update",
+      "args": {
+        "sourceIds": [
+          "gcal:aaaaaaaaaaaa"
+        ]
+      },
+      "intervalHours": 6,
+      "standing": true,
+      "standingUntil": "2026-12-05T09:00:00.000Z",
+      "createdAt": "2026-11-05T09:00:00.000Z",
+      "lastRunAt": null
+    }
+  }
+}

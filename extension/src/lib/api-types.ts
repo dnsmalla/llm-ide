@@ -476,6 +476,20 @@ export type BusApproval = {
   nonce: string;
 };
 
+export type BusSchedule = {
+  id: string;
+  kind: string;
+  /** The exact args every run is enqueued with; a standing approval covers these args only. */
+  args: Record<string, unknown>;
+  intervalHours: number;
+  /** true while the standing approval is live (standingUntil in the future); false = every run waits for a click. */
+  standing: boolean;
+  standingUntil: string | null;
+  createdAt: string;
+  /** When a run was last approved on the standing approval. */
+  lastRunAt: string | null;
+};
+
 export type CalendarIcalSource = {
   sourceId?: string;
   name?: string;
@@ -2986,6 +3000,8 @@ export type PostBusCommandsIdApproveRequest = {
     nonce: string;
     /** Required for T2 kinds: repeats the exact projectId, issueIds and ship the command will act on (400 CONFIRM_MISMATCH otherwise). Typed per kind. */
     confirm?: Record<string, unknown>;
+    /** Approve on this schedule's standing approval (desktop-enqueued run, same kind and args, live, not too soon); 403 STANDING_APPROVAL_INVALID otherwise. The nonce is still required. */
+    scheduleId?: string;
   };
 };
 
@@ -3068,6 +3084,60 @@ export type PutBusKindsKindResponse401 = CommonError;
 export type PutBusKindsKindResponse403 = CommonError;
 
 export type PutBusKindsKindResponse404 = CommonError;
+
+/** Request parts for `GET /bus/schedules` (schema/http/bus.schema.json). */
+export type GetBusSchedulesRequest = Record<string, never>;
+
+export type GetBusSchedulesResponse200 = {
+  items: BusSchedule[];
+};
+
+export type GetBusSchedulesResponse401 = CommonError;
+
+export type GetBusSchedulesResponse403 = CommonError;
+
+/** Request parts for `POST /bus/schedules` (schema/http/bus.schema.json). */
+export type PostBusSchedulesRequest = {
+  body: {
+    kind: "sources.update";
+    /** Typed by the kind's registry args. A standing approval needs explicit sourceIds. */
+    args: Record<string, unknown>;
+    intervalHours: number;
+    standing?: boolean;
+    /** Default 30; only with standing: true. */
+    standingDays?: number;
+  };
+};
+
+export type PostBusSchedulesResponse201 = {
+  schedule: BusSchedule;
+};
+
+export type PostBusSchedulesResponse400 = CommonError;
+
+export type PostBusSchedulesResponse401 = CommonError;
+
+export type PostBusSchedulesResponse403 = CommonError;
+
+export type PostBusSchedulesResponse429 = CommonError;
+
+/** Request parts for `DELETE /bus/schedules/:id` (schema/http/bus.schema.json). */
+export type DeleteBusSchedulesIdRequest = {
+  params: {
+    /** The schedule id. */
+    id: string;
+  };
+};
+
+export type DeleteBusSchedulesIdResponse200 = {
+  deleted: true;
+};
+
+export type DeleteBusSchedulesIdResponse401 = CommonError;
+
+export type DeleteBusSchedulesIdResponse403 = CommonError;
+
+export type DeleteBusSchedulesIdResponse404 = CommonError;
 
 /** Request parts for `POST /kb/calendar-ical/sources` (schema/http/calendar-ical.schema.json). */
 export type PostKbCalendarIcalSourcesRequest = {
@@ -8343,6 +8413,33 @@ export interface ApiEndpoints {
       401: PutBusKindsKindResponse401;
       403: PutBusKindsKindResponse403;
       404: PutBusKindsKindResponse404;
+    };
+  };
+  "GET /bus/schedules": {
+    request: GetBusSchedulesRequest;
+    responses: {
+      200: GetBusSchedulesResponse200;
+      401: GetBusSchedulesResponse401;
+      403: GetBusSchedulesResponse403;
+    };
+  };
+  "POST /bus/schedules": {
+    request: PostBusSchedulesRequest;
+    responses: {
+      201: PostBusSchedulesResponse201;
+      400: PostBusSchedulesResponse400;
+      401: PostBusSchedulesResponse401;
+      403: PostBusSchedulesResponse403;
+      429: PostBusSchedulesResponse429;
+    };
+  };
+  "DELETE /bus/schedules/:id": {
+    request: DeleteBusSchedulesIdRequest;
+    responses: {
+      200: DeleteBusSchedulesIdResponse200;
+      401: DeleteBusSchedulesIdResponse401;
+      403: DeleteBusSchedulesIdResponse403;
+      404: DeleteBusSchedulesIdResponse404;
     };
   };
   "POST /kb/calendar-ical/sources": {

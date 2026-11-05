@@ -264,6 +264,55 @@
         "expiresAt",
         "nonce"
       ]
+    },
+    "BusSchedule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The exact args every run is enqueued with; a standing approval covers these args only."
+        },
+        "intervalHours": {
+          "type": "integer"
+        },
+        "standing": {
+          "type": "boolean",
+          "description": "true while the standing approval is live (standingUntil in the future); false = every run waits for a click."
+        },
+        "standingUntil": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "lastRunAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "When a run was last approved on the standing approval."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "args",
+        "intervalHours",
+        "standing",
+        "standingUntil",
+        "createdAt",
+        "lastRunAt"
+      ]
     }
   },
   "endpoints": {
@@ -529,6 +578,11 @@
               "additionalProperties": true,
               "description": "Required for T2 kinds: repeats the exact projectId, issueIds and ship the command will act on (400 CONFIRM_MISMATCH otherwise). Typed per kind.",
               "x-optional": true
+            },
+            "scheduleId": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Approve on this schedule's standing approval (desktop-enqueued run, same kind and args, live, not too soon); 403 STANDING_APPROVAL_INVALID otherwise. The nonce is still required."
             }
           },
           "required": [
@@ -715,6 +769,131 @@
           "required": [
             "kind",
             "enabled"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/schedules": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BusSchedule"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/schedules": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "sources.update"
+              ]
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Typed by the kind's registry args. A standing approval needs explicit sourceIds."
+            },
+            "intervalHours": {
+              "type": "integer"
+            },
+            "standing": {
+              "type": "boolean",
+              "x-optional": true
+            },
+            "standingDays": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "Default 30; only with standing: true."
+            }
+          },
+          "required": [
+            "kind",
+            "args",
+            "intervalHours"
+          ]
+        }
+      },
+      "responses": {
+        "201": {
+          "type": "object",
+          "properties": {
+            "schedule": {
+              "$ref": "#/$defs/BusSchedule"
+            }
+          },
+          "required": [
+            "schedule"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /bus/schedules/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The schedule id."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "deleted": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "deleted"
           ]
         },
         "401": {

@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /bus/schedules/:id",
+  "status": 404,
+  "description": "no such schedule for this user",
+  "request": {
+    "params": {
+      "id": "5a1b2c3d-0000-4000-8000-0000000000a1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "schedule not found"
+    }
+  }
+}

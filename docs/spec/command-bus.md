@@ -20,6 +20,7 @@ Not covered: the Swift transport host (S2), the iOS renderer (S4), the extension
 | `schema/http/bus.schema.json`, `schema/http/fixtures/bus/` | the HTTP contract of the nine routes (generates `api-types.ts` and the OpenAPI document; the event schema is generated as `BusEvent`) |
 | `extension/routes/bus/` | `registry.mjs` (registry copy + the pure tier gate `decideReceipt`), `schema-validate.mjs`, `sequence.mjs`, `client.mjs` (client class), `executor.mjs`, `bus-routes.mjs`, `engines.mjs`, `review.mjs` |
 | `extension/kb/bus-store.mjs`, migration `0058_command_bus.sql` | persistence: `bus_commands`, `job_events`, `bus_kind_flags` |
+| `extension/kb/bus-schedules.mjs`, migration `0063_bus_schedules.sql`, `extension/routes/bus/schedules.mjs` | desktop schedules and the standing-approval policy (section 9) |
 | `extension/kb/job-queue.mjs`, `job-runner.mjs` | the existing job runner ([job-runner](job-runner.md)), now started by the bus |
 
 The schema validator looks every key up as an OWN property (`Object.hasOwn`): a body key named `constructor`, `toString`, `valueOf`, `hasOwnProperty` or `__proto__` is an additional property and is refused `INVALID_ARGS` for the envelope and for every `kinds.<kind>.args` (`extension/tests/bus-schema-proto.test.mjs`).
@@ -118,7 +119,7 @@ Rules, each tested:
 
 ## 7. Errors
 
-HTTP errors use the repo envelope `{ error: { code, message, details? } }` with the upper-case form of the bus code (`TIER_DENIED`, `KIND_NOT_ALLOWED_FOR_CLIENT`, `INVALID_ARGS`, `UNKNOWN_KIND`, `UNSUPPORTED_VERSION`, `KIND_NOT_AVAILABLE`, `IDEM_CONFLICT`, `QUOTA_EXCEEDED`, `PAYLOAD_TOO_LARGE`, `APPROVAL_NONCE_INVALID`, `CONFIRM_MISMATCH`, `NOT_PENDING`, `EXPIRED`, `ALREADY_FINISHED`, `TOO_MANY_READERS`, `BUS_DISABLED`, `NOT_FOUND`, `VALIDATION_FAILED`). A terminal `error` event carries the lower-case registry code (`schema/bus/registry.json` `errorCodes`) and a short message, never a stack, path, output or secret. An id that is not the caller's answers 404 `NOT_FOUND`, the same as an unknown id.
+HTTP errors use the repo envelope `{ error: { code, message, details? } }` with the upper-case form of the bus code (`TIER_DENIED`, `KIND_NOT_ALLOWED_FOR_CLIENT`, `INVALID_ARGS`, `UNKNOWN_KIND`, `UNSUPPORTED_VERSION`, `KIND_NOT_AVAILABLE`, `IDEM_CONFLICT`, `QUOTA_EXCEEDED`, `PAYLOAD_TOO_LARGE`, `APPROVAL_NONCE_INVALID`, `CONFIRM_MISMATCH`, `STANDING_APPROVAL_INVALID`, `NOT_PENDING`, `EXPIRED`, `ALREADY_FINISHED`, `TOO_MANY_READERS`, `BUS_DISABLED`, `NOT_FOUND`, `VALIDATION_FAILED`). A terminal `error` event carries the lower-case registry code (`schema/bus/registry.json` `errorCodes`) and a short message, never a stack, path, output or secret. An id that is not the caller's answers 404 `NOT_FOUND`, the same as an unknown id.
 
 ## 8. Contract changes in API 100
 
@@ -127,3 +128,17 @@ Additive: nine routes in `ALL_ENDPOINTS`, migration 0058, `SERVER_API_VERSION` 9
 For the Swift host (S2): to be the desktop class it must (1) generate a per-launch random 32-byte key and pass it hex-encoded to the core it spawns as `LLMIDE_HOST_APPROVAL_KEY` (and to nothing else), (2) compute `proof = hex(HMAC-SHA256(key_bytes, "bus-host-proof/v1"))` itself (CryptoKit `HMAC<SHA256>`), and (3) send it as `x-llmide-host-nonce` together with `x-llmide-client` per forwarded client, only to that spawned core. Sending the old `LLMIDE_CORE_NONCE` value no longer proves anything: without the derived proof every approval stays pending. (Change after the security review: H1.)
 
 Tests: `extension/tests/command-bus.test.mjs` (tenancy, tier refusals, approvals, idempotency, replay, cancel, quotas, kill switch, crash recovery, execution-time re-check, the engines with fake and stub CLIs), `extension/tests/loop-agent.test.mjs` (`readOnly`), `extension/tests/http-contract-live.test.mjs` (the replayable fixtures against a real server), `scripts/conformance-bus.mjs`.
+
+## 9. Schedules and standing approvals (API 111)
+
+The core never runs a timer for the bus (G7 ruling: a server timer would bypass the T1 approval). The desktop does the scheduling: every 60 s its shell reads `GET /bus/schedules` and, for each schedule, enqueues the current slot as `desktop-ui` with idem `sched:<scheduleId>:<floor(now / interval)>` and `ttlMs = min(interval, 24 h)`, so a slot runs at most once, however many windows or restarts there are, and an unanswered run expires before the next slot.
+
+- `POST /bus/schedules` (desktop class only): `{ kind, args, intervalHours 1-168, standing?, standingDays? 1-90, default 30 }`. Schedulable kinds: `sources.update` only (`SCHEDULABLE_KINDS`, available T1 kinds only; never T2, never T0). At most 10 per user. Audited `bus.schedule_create`.
+- `GET /bus/schedules` (desktop and `ios-native`): `{ items: [{ id, kind, args, intervalHours, standing, standingUntil, createdAt, lastRunAt }] }`.
+- `DELETE /bus/schedules/:id` (desktop class only): removes the schedule and so revokes its standing approval. Audited `bus.schedule_delete`.
+- **Without a standing approval** a scheduled run waits in the desktop inbox like a phone command, and the desktop raises the fixed `approval_needed` notification.
+- **With a standing approval** the desktop still reads the nonce from `GET /bus/approvals` and calls `POST /bus/commands/:id/approve { nonce, scheduleId }`. The core accepts it only when the schedule exists, `standing_until` is in the future, the command was enqueued by `desktop-ui` with that schedule's idem prefix, the kind is T1 and the command's args hash equals the schedule's, and the previous standing run was at least half an interval ago; otherwise 403 `STANDING_APPROVAL_INVALID { reason }` (`no_schedule`, `standing_expired`, `origin`, `tier`, `scope`, `not_scheduled`, `too_soon`) and the command stays for a click. `approved_by` is written as for any approval, `bus_commands.schedule_id` and the schedule's `last_run_at` in the same transaction; the audit row is `bus.approve` with `via: 'standing'` and `scheduleId`.
+- A standing approval for `sources.update` must list `sourceIds`; "every source" (no ids) is allowed only for ask-each-run schedules, because it would grow with each new connection.
+- **Execution-time re-check:** the T1/T2 `approved_by` check is unchanged; a run approved on a standing approval is refused `switch_off` when its schedule was deleted or its approval expired before the run started.
+- **Limit, stated plainly:** the desktop webview already holds the host proof and can approve any single T1 command. A standing approval adds no power: it records a human decision with a bounded scope, rate and lifetime, so unattended runs are explainable and revocable.
+- **What the phone sees:** scheduled runs in `GET /bus/commands` (`originClient: desktop-ui`) and the schedules read-only; it cannot create, delete or approve. A command that the phone queued is never covered by a standing approval.

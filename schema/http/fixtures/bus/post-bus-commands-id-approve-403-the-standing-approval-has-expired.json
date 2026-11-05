@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /bus/commands/:id/approve",
+  "status": 403,
+  "description": "the standing approval has expired: the run waits for a click",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-0000000000a2"
+    },
+    "body": {
+      "nonce": "5f0c1a9e7b3d4c2a8e6f1b0d9c7a5e3f2d4b6a8c0e1f3a5b7c9d1e2f4a6b8c0d",
+      "scheduleId": "5a1b2c3d-0000-4000-8000-0000000000a1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "STANDING_APPROVAL_INVALID",
+      "message": "no live standing approval covers this command; approve it with a click",
+      "details": {
+        "reason": "standing_expired"
+      }
+    }
+  }
+}

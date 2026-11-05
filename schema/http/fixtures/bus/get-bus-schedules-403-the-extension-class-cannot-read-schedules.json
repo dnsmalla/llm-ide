@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /bus/schedules",
+  "status": 403,
+  "description": "the extension class cannot read schedules",
+  "response": {
+    "error": {
+      "code": "TIER_DENIED",
+      "message": "only the desktop and the native phone can read schedules",
+      "details": {
+        "client": "extension"
+      }
+    }
+  }
+}
