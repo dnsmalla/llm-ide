@@ -156,7 +156,7 @@ Per-user isolation (every row and vault key carries the user; routes take the us
 | `files.export` with `text/markdown` for Docs; the `startPageToken` and `changes.list` error status for a stale token; Calendar `showDeleted` with `singleEvents` on a first full sync; Gmail `history.list` returning records after or at `startHistoryId` | Unverified; the code tolerates both readings |
 | Whether revoking one refresh token ends the whole grant for that client and user | Unverified; the design avoids depending on it (legacy token revoked before the new consent, no revoke on reconnect) |
 | Mac and Tauri screens, the setup guide page, selection-gated catalog rows, `pipelineReady` for `gdrive` and `gcal` (still false: the Mac manifests point at the MCP routes) | Slice G5/G6, not built |
-| Scheduled and phone-enqueued sync (`sources.update` bus kind, T1) | Slice G7, not built |
+| Phone-enqueued sync (`sources.update` bus kind, T1; gcal, gdrive, ical; Gmail is Pattern B and skipped) | Built (G7). A server timer is not built: scheduled sync is the desktop enqueuing the same kind |
 | Removing `/auth/google/start` (full-mailbox scope) | Waits for a UI on `/kb/google/start` |
 | Gmail attachments (v2), a Drive Picker mode, MCP adapters (G8), one-time-code redaction, Drive per-sheet export | Not built |
 | Activity feed: Gmail uses `email_fetched`; Calendar and Drive use `knowledge_updated`; there is no `connector_fetched` kind | As built |

@@ -69,9 +69,9 @@
       "tier": "T1",
       "lane": "write",
       "write": true,
-      "available": false,
-      "unavailableReason": "Node has no source registry: connector credentials and source lists live in the Mac app (email, Slack) or are sent per request (Box); no server-side refresh exists to adapt.",
-      "description": "Fetch email, Slack and document sources into the Library and re-index.",
+      "available": true,
+      "engineless": true,
+      "description": "Sync the connected server-side sources (Google Calendar, Google Drive, iCal feeds) into the Library; ids are gcal:<account>, gdrive:<account>, ical:<source>, none means all.",
       "engines": [],
       "args": {
         "type": "object",

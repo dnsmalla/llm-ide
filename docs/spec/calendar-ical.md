@@ -127,7 +127,7 @@ Host allowlist and pinned fetch; same-host redirects only; streamed caps and a d
 | Behaviour of other hosts (Outlook.com, iCloud, Fastmail) | Only reachable through `LLMIDE_ICAL_HOSTS`; not tested against real hosts |
 | `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, sub-daily rules, `RDATE;VALUE=PERIOD`, `THISANDFUTURE`, `VTIMEZONE` rules (zones come from the IANA database, not the feed) | Not expanded; flagged |
 | Windows zone names beyond the 21 in the table | Read as floating and flagged `tz_unknown` |
-| Scheduled and phone-enqueued sync (`sources.update` bus handler) | Not built |
+| Phone-enqueued sync (`sources.update` bus handler, T1, execution-time re-check) | Built (G7); scheduling = the desktop enqueues the same kind |
 | A Mac screen on these routes | The Tauri calendar card now uses the multi-feed routes of section 2 (`ui/screens/library/sources/google/`, built against fixtures only, not a real calendar); the Mac app has no screen for them yet |
 | Catalog `pipelineReady` for this source | Not wired |
 | Activity feed | Uses `knowledge_updated` |

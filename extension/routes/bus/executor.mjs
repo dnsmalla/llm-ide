@@ -16,6 +16,7 @@ import { redactValue } from '../../kb/bus-store.mjs';
 import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { validate } from './schema-validate.mjs';
 import { runReview } from './review.mjs';
+import { runSourcesUpdate } from './sources-update.mjs';
 import { truncateUtf8, chunkUtf8 } from './bytes.mjs';
 import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 
@@ -93,6 +94,7 @@ export function createBus({
     return isWithinRoots(real, trusted);
   });
   const review = deps.runReview ?? runReview;
+  const sourcesUpdate = deps.runSourcesUpdate ?? runSourcesUpdate;
 
   /** The execution-time re-check and the kind's work. Failures are thrown as `new Error(<registry error code>)`. */
   async function execute(kind, ctx) {
@@ -123,6 +125,7 @@ export function createBus({
       emit('progress', { step: 'checks passed' });
       let result;
       if (kind === 'review') result = await review({ userId, args, cwd: root, signal, spawn, emit, deps: deps.engineDeps });
+      else if (kind === 'sources.update') result = await sourcesUpdate({ userId, args, signal });
       else fail('kind_not_available');
       if (signal.aborted) return undefined;
       result = capResult(result);

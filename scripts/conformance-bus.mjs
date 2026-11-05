@@ -53,8 +53,8 @@ for (const [name, k] of Object.entries(reg.kinds)) {
   if (k.tier === 'T0' && k.write) bad(`${at}: T0 is read-only`);
   if (typeof k.available !== 'boolean') bad(`${at}: available must be boolean`);
   if (!k.available && !k.unavailableReason) bad(`${at}: an unavailable kind must say why (unavailableReason)`);
-  if (k.available && !(k.engines || []).length) bad(`${at}: an available kind needs engines`);
-  if (k.available && k.write) bad(`${at}: no write kind may be available until write mode on every engine is decided (spec, section 3)`);
+  if (k.available && !k.engineless && !(k.engines || []).length) bad(`${at}: an available kind needs engines`);
+  if (k.available && k.write && !k.engineless) bad(`${at}: no write kind may be available until write mode on every engine is decided (spec, section 3)`);
   if (!k.args || k.args.type !== 'object' || k.args.additionalProperties !== false) bad(`${at}: args must be an object schema with additionalProperties:false`);
   if (!['read', 'write'].includes(k.lane)) bad(`${at}: lane must be read or write`);
 }

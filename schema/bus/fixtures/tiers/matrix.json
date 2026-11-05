@@ -83,7 +83,7 @@
       "client": "ios-native",
       "kind": "sources.update",
       "flagEnabled": false,
-      "expect": "not_available"
+      "expect": "needs_approval"
     },
     {
       "client": "ios-native",
@@ -119,7 +119,7 @@
       "client": "desktop-ui",
       "kind": "sources.update",
       "flagEnabled": false,
-      "expect": "not_available"
+      "expect": "needs_approval"
     },
     {
       "client": "desktop-ui",

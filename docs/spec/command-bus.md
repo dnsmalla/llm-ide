@@ -80,7 +80,7 @@ Receipt gate (`decideReceipt`, pure, tested by `fixtures/tiers`): unknown kind r
 | Kind | Tier | Available | Notes |
 |---|---|---|---|
 | `review` | T0 | **yes** | read-only review of a registered project (`focus`: `code`, `doc`, `conflicts`), engine chosen by `engine: { provider, model?, credential? }` |
-| `sources.update` | T1 | no | Node has no source registry: connector credentials and lists live in the Mac app (email, Slack) or are sent per request (Box) |
+| `sources.update` | T1 | yes (no engine) | Syncs the server-side connected sources (`gcal:<account>`, `gdrive:<account>`, `ical:<source>`; none = all). Re-checks connection and scope at execution; Gmail, Box, Slack, email ids are skipped |
 | `issues.from_notes` | T1 | no | the deterministic note action extractor and the tracker allow-list are in the Mac app; Node has only the meeting planner |
 | `issues.implement` | T2 | no | no Node worktree runner or write-mode engine; codex and gemini write mode needs a design and a user decision |
 | `loop.run` | T1 | no | loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step |

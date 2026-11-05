@@ -184,20 +184,20 @@ Endpoints with no client caller (72):
 | `/kb/mcp-connector/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
 | `/kb/mcp-connector/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
 | `/kb/mcp-connector/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `gcal.json`, `gdrive.json`, `miro.json` | - | - |
-| `/kb/google/start` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:110` | - | - | tests only |
-| `/kb/google/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:123` | - | - | tests only |
-| `/kb/google/accounts` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:130` | - | - | tests only |
-| `/kb/google/disconnect` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:135` | - | - | tests only |
-| `/kb/google/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:146` | - | - | tests only |
-| `/kb/google/calendars` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:160` | - | - | tests only |
-| `/kb/google/drive/folders` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:166` | - | - | tests only |
-| `/kb/google/gmail/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:172` | - | - | tests only |
-| `/kb/google/gmail/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:194` | - | - | tests only |
-| `/kb/google/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:206` | - | - | tests only |
-| `/kb/calendar-ical/sources` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/calendar-ical.mjs:84` | - | - | tests only |
-| `/kb/calendar-ical/sources/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/calendar-ical.mjs:112` | - | - | tests only |
-| `/kb/calendar-ical/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:137` | - | - | tests only |
-| `/kb/calendar-ical/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:125` | - | - | tests only |
+| `/kb/google/start` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:143` | - | - | tests only |
+| `/kb/google/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:156` | - | - | tests only |
+| `/kb/google/accounts` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:163` | - | - | tests only |
+| `/kb/google/disconnect` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:168` | - | - | tests only |
+| `/kb/google/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:179` | - | - | tests only |
+| `/kb/google/calendars` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:193` | - | - | tests only |
+| `/kb/google/drive/folders` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:199` | - | - | tests only |
+| `/kb/google/gmail/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:205` | - | - | tests only |
+| `/kb/google/gmail/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:227` | - | - | tests only |
+| `/kb/google/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:239` | - | - | tests only |
+| `/kb/calendar-ical/sources` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/calendar-ical.mjs:119` | - | - | tests only |
+| `/kb/calendar-ical/sources/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/calendar-ical.mjs:147` | - | - | tests only |
+| `/kb/calendar-ical/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:172` | - | - | tests only |
+| `/kb/calendar-ical/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:160` | - | - | tests only |
 | `/kb/activity` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/router.mjs:1117` | `ActivityStore.swift` | - | - |
 | `/kb/activity/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1127` | `ActivityStore.swift` | - | - |
 | `/kb/usage/limits` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/router.mjs:1156` | `LlmIdeAPIClient+Usage.swift` | - | - |

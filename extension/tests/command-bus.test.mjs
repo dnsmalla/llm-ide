@@ -303,7 +303,7 @@ test('custom.run is desktop-only: every other client class gets 403 KIND_NOT_ALL
 test('unavailable kinds answer KIND_NOT_AVAILABLE with the reason; nothing is stubbed as success', async () => {
   await reset();
   for (const [kind, args, client] of [
-    ['sources.update', {}, 'desktop-ui'], ['issues.from_notes', { projectId: 'proj-1' }, 'ios-native'],
+    ['issues.from_notes', { projectId: 'proj-1' }, 'ios-native'],
     ['issues.implement', { projectId: 'proj-1', issueIds: ['1'] }, 'desktop-ui'],
     ['loop.run', { projectId: 'proj-1', loopId: 'l' }, 'ios-native'], ['custom.run', { customTaskId: 'c-1' }, 'desktop-ui'],
   ]) {
@@ -315,8 +315,8 @@ test('unavailable kinds answer KIND_NOT_AVAILABLE with the reason; nothing is st
   const kinds = (await call('GET', '/bus/kinds')).body;
   assert.equal(kinds.client, 'desktop-ui');
   const by = Object.fromEntries(kinds.kinds.map((k) => [k.kind, k]));
-  assert.equal(by.review.available, true);
-  for (const k of ['sources.update', 'issues.from_notes', 'issues.implement', 'loop.run', 'custom.run']) { assert.equal(by[k].available, false); assert.ok(by[k].unavailableReason); }
+  assert.equal(by.review.available, true); assert.equal(by['sources.update'].available, true);
+  for (const k of ['issues.from_notes', 'issues.implement', 'loop.run', 'custom.run']) { assert.equal(by[k].available, false); assert.ok(by[k].unavailableReason); }
   assert.equal(by['issues.implement'].tier, 'T2');
   const asExt = (await call('GET', '/bus/kinds', undefined, { client: 'extension' })).body;
   assert.equal(asExt.kinds.find((k) => k.kind === 'review').allowed, false);
