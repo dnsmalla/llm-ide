@@ -17,7 +17,8 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 ## Install pieces
 
 ```bash
-install -d -m 700 -o llmide -g llmide /var/lib/llmide /etc/llm-ide
+install -d -m 700 -o llmide -g llmide /var/lib/llmide
+install -d -m 700 -o root -g root /etc/llm-ide
 git clone --depth 1 https://github.com/dnsmalla/llm-ide.git /srv/llm-ide/repo
 # .skills is a private submodule; copy the local checkout or provision a deploy key.
 cd /srv/llm-ide/repo && bash scripts/install-skills.sh
@@ -74,7 +75,7 @@ useradd --system --home /var/lib/llmide-accounts --shell /usr/sbin/nologin llmid
 install -d -m 700 -o llmide-accounts -g llmide-accounts /var/lib/llmide-accounts
 install -d -m 755 /var/www/llm-ide-accounts
 cd /srv/llm-ide/repo && git pull --ff-only
-cd account-service && npm ci --omit=dev --no-audit --no-fund
+cd account-service && PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
 ```
 
 `/etc/llm-ide/accounts.env`:
@@ -93,6 +94,8 @@ ACCOUNTS_MAIL_FROM=LLM-IDE <no-reply@llm-ide.com>
 ```
 
 ```bash
+# Write the environment file from the dotenv block above, then:
+chown root:root /etc/llm-ide/accounts.env
 chmod 600 /etc/llm-ide/accounts.env
 cp deploy/vps/llmide-accounts.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now llmide-accounts

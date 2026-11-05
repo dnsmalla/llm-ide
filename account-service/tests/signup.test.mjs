@@ -4,12 +4,13 @@ import { startApp, waitForMail, linkToken, insertUser } from './helpers.mjs';
 
 const form = (email = 'ada@example.com') => ({ email, displayName: 'Ada', language: 'en', timeZone: 'Asia/Tokyo' });
 
-test('sign-up is refused while closed', async (t) => {
+test('sign-up is refused while closed, including verification of an old link', async (t) => {
   const app = await startApp({ env: { ACCOUNTS_SIGNUP_OPEN: '0' } });
   t.after(() => app.close());
   const res = await app.client().call('POST', '/v1/signup', form());
   assert.equal(res.status, 403);
   assert.deepEqual(res.body, { error: 'signup_closed' });
+  assert.equal((await app.client().call('POST', '/v1/signup/verify', { token: 'x'.repeat(43) })).status, 403);
 });
 
 test('new address: 202, a link mail, verify gives a setup session and a pending user', async (t) => {
@@ -71,10 +72,18 @@ test('origin, content type, validation and the per-address mail cap', async (t) 
   assert.deepEqual((await c.call('POST', '/v1/signup', form(), { origin: undefined })).body, { error: 'bad_origin' });
   assert.equal((await c.call('POST', '/v1/signup', form(), { origin: 'https://evil.example' })).status, 403);
   assert.equal((await c.call('POST', '/v1/signup', form(), { 'content-type': 'text/plain' })).status, 415);
-  assert.deepEqual((await c.call('POST', '/v1/signup', form('nope'))).body, { error: 'invalid_email' });
+  for (const bad of ['nope', '<victim@example.com>', 'a,b@example.com', 'x<victim@example.com>', 'victim@example.com,other@example.com']) {
+    assert.deepEqual((await c.call('POST', '/v1/signup', form(bad))).body, { error: 'invalid_email' }, bad);
+  }
   assert.deepEqual((await c.call('POST', '/v1/signup', { ...form(), timeZone: 'Mars/Base' })).body, { error: 'invalid_time_zone' });
   assert.deepEqual((await c.call('POST', '/v1/signup', { ...form(), displayName: '' })).body, { error: 'invalid_display_name' });
   assert.deepEqual((await c.call('POST', '/v1/signup', { ...form(), admin: true })).body, { error: 'invalid_payload' });
+});
+
+test('the per-address mail cap is three per hour and ten per day', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const c = app.client();
   for (let i = 0; i < 3; i += 1) assert.equal((await c.call('POST', '/v1/signup', form('cap@example.com'))).status, 202);
   assert.equal((await c.call('POST', '/v1/signup', form('cap@example.com'))).status, 429);
 });

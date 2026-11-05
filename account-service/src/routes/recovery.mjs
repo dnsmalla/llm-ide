@@ -22,7 +22,10 @@ export function recoveryRoutes(routes, ctx) {
     const body = await readJson(req);
     const found = ctx.tokens.consume('recovery', body.token);
     const user = found ? getUserByEmail(ctx.db, found.email) : null;
-    if (!user) throw new HttpError(400, 'invalid_or_expired_link');
+    if (!user) {
+      ctx.audit('recovery_verify_failed', { ip: req.clientIp });
+      throw new HttpError(400, 'invalid_or_expired_link');
+    }
     // A setup session may only register a passkey; nothing is revoked until one is added.
     const { cookie } = ctx.sessions.create({ userId: user.id, scope: 'setup', via: 'recovery', ip: req.clientIp });
     ctx.audit('recovery_verified', { userId: user.id, ip: req.clientIp });

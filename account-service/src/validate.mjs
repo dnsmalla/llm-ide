@@ -5,7 +5,20 @@ const TIME_ZONES = new Set([...Intl.supportedValuesOf('timeZone'), 'UTC']);
 export function normalizeEmail(value) {
   if (typeof value !== 'string') throw new HttpError(400, 'invalid_email');
   const email = value.trim().toLowerCase();
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'invalid_email');
+  // Exactly one bare mailbox. Reject display-name/mailbox-list syntax (<>, comma, semicolon, colon, quote)
+  // and whitespace/control characters: nodemailer parses those to a different envelope recipient, which
+  // would bypass the per-address mail cap and send mail from our domain to arbitrary addresses.
+  if (email.length > 254 || /[<>\s,;:\"\u0000-\u001f\u007f]/.test(email)) throw new HttpError(400, 'invalid_email');
+  const at = email.indexOf('@');
+  if (at < 1 || at !== email.lastIndexOf('@') || at === email.length - 1) throw new HttpError(400, 'invalid_email');
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.length > 64 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')) {
+    throw new HttpError(400, 'invalid_email');
+  }
+  if (domain.length > 253 || !/^[a-z0-9.-]+$/.test(domain) || domain.startsWith('.') || domain.endsWith('.') || domain.includes('..')) {
+    throw new HttpError(400, 'invalid_email');
+  }
   return email;
 }
 

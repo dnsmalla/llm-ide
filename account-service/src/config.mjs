@@ -13,8 +13,10 @@ export function loadConfig(env = process.env) {
   if (url.origin !== origin) throw new Error('ACCOUNTS_ORIGIN must be a bare origin such as https://accounts.llm-ide.com');
   if (prod && url.protocol !== 'https:') throw new Error('ACCOUNTS_ORIGIN must use https in production');
   const rpId = env.ACCOUNTS_RP_ID ?? url.hostname;
-  if (url.hostname !== rpId && !url.hostname.endsWith(`.${rpId}`)) {
-    throw new Error('ACCOUNTS_RP_ID must equal the origin host or be a parent domain of it');
+  // The PWA delegates WebAuthn to the accounts origin, so the RP ID must be exactly this host.
+  // A parent-domain RP ID would scope the passkey to sibling origins (e.g. app.llm-ide.com).
+  if (url.hostname !== rpId) {
+    throw new Error('ACCOUNTS_RP_ID must equal the origin host; parent-domain RP IDs are not supported');
   }
   const host = env.ACCOUNTS_HOST ?? '127.0.0.1';
   if (!LOOPBACK_HOSTS.has(host)) throw new Error('ACCOUNTS_HOST must be a loopback address; put nginx in front');

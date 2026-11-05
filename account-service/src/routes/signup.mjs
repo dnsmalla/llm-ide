@@ -27,10 +27,14 @@ export function signupRoutes(routes, ctx) {
   });
 
   routes.set('POST /v1/signup/verify', async (req, res) => {
+    if (!ctx.config.signupOpen) throw new HttpError(403, 'signup_closed');
     ctx.limiter.hit(`verify-ip:${req.clientIp}`, 20, HOUR);
     const body = await readJson(req);
     const found = ctx.tokens.consume('signup', body.token);
-    if (!found) throw new HttpError(400, 'invalid_or_expired_link');
+    if (!found) {
+      ctx.audit('signup_verify_failed', { ip: req.clientIp });
+      throw new HttpError(400, 'invalid_or_expired_link');
+    }
     const { email, payload } = found;
     const userId = ctx.db.transaction(() => {
       const existing = getUserByEmail(ctx.db, email);

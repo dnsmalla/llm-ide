@@ -26,9 +26,11 @@ server {
 
     # Closed 2026-11-05: /api/ exposed a full core (every user is an admin, which means code
     # execution) to the internet. Public accounts come from account-service (ADR 0019).
+    location = /api { return 404; }
     location /api/ { return 404; }
 
     # The temporary SSH tunnel/PIN host path was retired with ADR 0019.
+    location = /host-api { return 404; }
     location /host-api/ { return 404; }
 
     location = /manifest.webmanifest {

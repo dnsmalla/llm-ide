@@ -20,10 +20,15 @@ app.listen(config.port, config.host, () => {
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.once(signal, () => {
-    app.close(() => {
+    let closed = false;
+    const finish = () => {
+      if (closed) return;
+      closed = true;
       db.close();
       process.exit(0);
-    });
-    app.closeAllConnections();
+    };
+    app.close(finish);
+    // Let in-flight requests drain; only force sockets after a short grace period.
+    setTimeout(() => { app.closeAllConnections(); finish(); }, 5_000).unref();
   });
 }

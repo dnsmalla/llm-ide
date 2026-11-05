@@ -31,5 +31,5 @@ test('refuses a non-loopback bind, a non-bare origin and a foreign RP ID', () =>
   assert.throws(() => loadConfig({ ACCOUNTS_HOST: '0.0.0.0' }), /loopback/);
   assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com/x' }), /bare origin/);
   assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_RP_ID: 'evil.com' }), /RP_ID/);
-  assert.equal(loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_RP_ID: 'llm-ide.com' }).rpId, 'llm-ide.com');
+  assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_RP_ID: 'llm-ide.com' }), /RP_ID/);
 });
