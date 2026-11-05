@@ -60,8 +60,15 @@ function harness({ caps = ['host', 'chat', 'approvals'] } = {}) {
   return t;
 }
 
+test('the read bucket is per device: 20 reads, then a wait', () => {
+  const r = createRateLimiter();
+  for (let i = 0; i < 20; i += 1) assert.equal(r.read('d1', 0), null);
+  assert.ok(r.read('d1', 0) > 0);
+  assert.equal(r.read('d2', 0), null);
+});
+
 test('bucket: 40 frames pass, the 41st waits 0.1 s and passes at t=0.1; 6 turns pass, the 7th waits 10 s', () => {
-  assert.deepEqual({ ...RATE_LIMITS }, { frameCapacity: 40, framePerSecond: 10, turnCapacity: 6, turnPerSecond: 0.1, closeAfterRefusals: 100 });
+  assert.deepEqual({ ...RATE_LIMITS }, { frameCapacity: 40, framePerSecond: 10, turnCapacity: 6, turnPerSecond: 0.1, readCapacity: 20, readPerSecond: 2, closeAfterRefusals: 100 });
   const b = new TokenBucket(40, 10, 0);
   for (let i = 0; i < 40; i++) assert.equal(b.take(0), null);
   assert.equal(b.take(0), 100);

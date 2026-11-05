@@ -3,6 +3,7 @@
 export const RATE_LIMITS = Object.freeze({
   frameCapacity: 40, framePerSecond: 10, // per session
   turnCapacity: 6, turnPerSecond: 0.1,   // chat.send, per device
+  readCapacity: 20, readPerSecond: 2,    // read commands, per device: each can read up to ~768 KiB from SQLite
   closeAfterRefusals: 100,               // rate refusals before the session is closed
 });
 
@@ -23,6 +24,7 @@ export class TokenBucket {
 export function createRateLimiter(limits = RATE_LIMITS) {
   const frames = new Map(); // session -> TokenBucket
   const turns = new Map();  // deviceId -> TokenBucket (bounded by the paired devices)
+  const reads = new Map(); // deviceId -> TokenBucket (bounded by the paired devices)
   const refusals = new Map(); // session -> count
   const take = (map, key, cap, rate, now) => {
     let b = map.get(key);
@@ -32,6 +34,7 @@ export function createRateLimiter(limits = RATE_LIMITS) {
   return {
     frame: (session, now) => take(frames, session, limits.frameCapacity, limits.framePerSecond, now),
     turn: (deviceId, now) => take(turns, deviceId, limits.turnCapacity, limits.turnPerSecond, now),
+    read: (deviceId, now) => take(reads, deviceId, limits.readCapacity, limits.readPerSecond, now),
     /** Counts one rate refusal; true means close the session. */
     refused(session) {
       const n = (refusals.get(session) ?? 0) + 1;

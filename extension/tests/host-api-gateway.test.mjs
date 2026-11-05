@@ -8,8 +8,8 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, pending: [] };
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null } = {}) {
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, readCalls: [], pending: [] };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   let quick = null;
@@ -24,7 +24,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     close: (s) => t.closed.push(s),
     hostName: () => 'Test Computer',
     certificateFingerprint: () => fingerprint,
-    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : [])],
+    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : [])],
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
@@ -42,6 +42,11 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     cancel: (userId, chatSessionId) => { t.cancelled.push([userId, chatSessionId]); return true; },
     clear: (userId, chatSessionId) => { t.cleared.push([userId, chatSessionId]); return { cleared: true }; },
     decide: (args) => { t.decided.push(args); return { ok: true }; },
+    read: reads ?? {
+      sessions: (userId, opts) => { t.readCalls.push(['sessions', userId, opts]); return [{ id: 'chat-1', title: 'Phone chat', updatedAt: 1 }, { id: 'chat-2', title: 'Other', updatedAt: 2 }]; },
+      history: (userId, id, opts) => { t.readCalls.push(['history', userId, id, opts]); return id === 'chat-2' ? { hasMore: false, messages: [{ seq: 1, role: 'user', content: 'q' }, { seq: 2, role: 'assistant', content: 'a' }] } : null; },
+      usage: (userId) => { t.readCalls.push(['usage', userId]); return { providers: {} }; },
+    },
     append: (userId, chatSessionId, line) => { t.saved.push([userId, chatSessionId, line]); },
   });
   t.last = () => t.sent.at(-1)[1];
@@ -447,4 +452,82 @@ test('rev is per connection: events to one session never advance another\'s', as
   await t.g.receive(b, req('c-u', 'nope.cmd'));
   assert.equal(t.last().type, 'error');
   assert.equal(t.last().rev, 0);
+});
+
+test('reads: not served by default — capability_unavailable, the store is never touched', async () => {
+  const t = harness();
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.sessions', {}));
+  assert.equal(t.lastError(), 'capability_unavailable');
+  assert.equal(t.readCalls.length, 0);
+});
+
+test('reads: served and granted at pairing — sessions, history and usage answer for the session user only', async () => {
+  const t = harness({ read: true });
+  const s = {};
+  await t.paired(s);
+  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'read']);
+  await t.g.receive(s, req('c-1', 'chat.sessions', { limit: 1 }));
+  assert.deepEqual(t.last().result, { sessions: [{ id: 'chat-1', title: 'Phone chat', updatedAt: 1000 }], nextOffset: 1 });
+  assert.deepEqual(t.readCalls.at(-1), ['sessions', 'u1', { limit: 2, offset: 0 }]);
+  await t.g.receive(s, req('c-2', 'chat.history', { sessionId: 'chat-2' }));
+  assert.deepEqual(t.last().result.messages.map((m) => m.seq), [1, 2]);
+  assert.deepEqual(t.readCalls.at(-1), ['history', 'u1', 'chat-2', { limit: 100, beforeSeq: undefined }]);
+  await t.g.receive(s, req('c-3', 'usage.get', {}));
+  assert.deepEqual(t.last().result, { providers: [] });
+  assert.deepEqual(t.readCalls.at(-1), ['usage', 'u1']);
+});
+
+test('reads: an unknown or foreign chat id is not_found', async () => {
+  const t = harness({ read: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.history', { sessionId: 'someone-elses' }));
+  assert.equal(t.lastError(), 'not_found');
+});
+
+test('reads: the phone chat is flagged', async () => {
+  const t = harness({ read: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-0', 'chat.send', { text: 'hi' })); // creates the phone chat 'chat-1'
+  await t.g.receive(s, req('c-1', 'chat.sessions', {}));
+  assert.equal(t.last().result.sessions[0].phoneChat, true);
+  assert.equal(t.last().result.sessions[1].phoneChat, undefined);
+});
+
+test('reads: a token paired before read was served is denied with a re-pair hint', async () => {
+  const t = harness();
+  await t.paired({ n: 1 });
+  const token = t.last().result.token;
+  // A host now serving read, holding the same device row: the old token's scopes lack read.
+  const t2 = harness({ read: true });
+  t2.tokens.set(token, t.tokens.get(token));
+  const s2 = { n: 2 };
+  t2.g.opened(s2, '127.0.0.1');
+  await t2.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t2.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  assert.deepEqual(t2.last().result.capabilities, ['host', 'chat', 'approvals']);
+  await t2.g.receive(s2, req('c-1', 'usage.get', {}));
+  assert.equal(t2.lastError(), 'denied');
+  assert.match(t2.last().error.message, /pair again/);
+  assert.equal(t2.readCalls.length, 0);
+});
+
+test('reads: the per-device read bucket refuses with rate_limited and retryAfterMs', async () => {
+  const t = harness({ read: true });
+  const s = {};
+  await t.paired(s);
+  for (let i = 0; i < 20; i += 1) await t.g.receive(s, req(`c-${i}`, 'usage.get', {}));
+  await t.g.receive(s, req('c-x', 'usage.get', {}));
+  assert.equal(t.lastError(), 'rate_limited');
+  assert.ok(t.last().error.details.retryAfterMs > 0);
+});
+
+test('hostApiCapabilities: read only with LLMIDE_HOST_API_READ=1', async () => {
+  const { hostApiCapabilities } = await import('../routes/host-api/gateway.mjs');
+  assert.deepEqual(hostApiCapabilities({}), ['host', 'chat', 'approvals']);
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_READ: '1' }), ['host', 'chat', 'approvals', 'read']);
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_READ: '1', LLMIDE_HOST_API_TOOL_APPROVALS: '1' }), ['host', 'chat', 'approvals', 'tool_approvals', 'read']);
 });

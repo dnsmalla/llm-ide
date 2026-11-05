@@ -1,4 +1,4 @@
-// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 12 commands — the structural
+// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 15 commands (chat, approvals, and the `read` slice) — the structural
 // twin of the Mac's HostApiV1Gateway.swift. Chat runs in process (startHostTurn) on one server-side "Phone chat"
 // per user. The engine, decisions and chat-session modules load lazily, so this file stays off the boot path.
 // Never log frame content, tokens or PINs: type and size only.
@@ -8,6 +8,7 @@ import { createTranslator } from './translator.mjs';
 import { PairingThrottle, peerKey } from './throttle.mjs';
 import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
+import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -20,7 +21,9 @@ const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING'
 const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED']);
 
 export function hostApiCapabilities(env = process.env) {
-  return ['host', 'chat', 'approvals', ...(env.LLMIDE_HOST_API_TOOL_APPROVALS === '1' ? ['tool_approvals'] : [])];
+  return ['host', 'chat', 'approvals',
+    ...(env.LLMIDE_HOST_API_TOOL_APPROVALS === '1' ? ['tool_approvals'] : []),
+    ...(env.LLMIDE_HOST_API_READ === '1' ? ['read'] : [])]; // default off: a device gets read only if paired while served
 }
 
 const agentV2 = () => import('../agent-v2.mjs');
@@ -40,6 +43,15 @@ function defaultDeps() {
       return (await chatSessions()).getChatSession(userId, id, { messageLimit: limit })?.messages ?? [];
     },
     append: async (userId, chatSessionId, line) => (await chatSessions()).appendChatMessage(userId, chatSessionId, line),
+    // In-process, user-scoped stores (never HTTP). The session's userId is the only user a read ever names.
+    read: {
+      sessions: async (userId, { limit, offset }) => (await chatSessions()).listChatSessions(userId, { limit, offset }),
+      history: async (userId, sessionId, { limit, beforeSeq }) => (await chatSessions()).getChatSession(userId, sessionId, { messageLimit: limit, beforeSeq }),
+      usage: async (userId) => {
+        const [{ usageSummary }, { getDb }] = await Promise.all([import('../../kb/usage.mjs'), import('../../kb/db.mjs')]);
+        return usageSummary(getDb(), userId);
+      },
+    },
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
@@ -226,6 +238,13 @@ export function createGateway(overrides) {
     audit('rate_closed', { peer: entry.peer, userId: entry.state.userId, deviceId: entry.state.deviceId, dedupeKey: entry.peer });
     deps.close(s);
     closed(s);
+  }
+
+  function readRefused(s, entry, id) {
+    const wait = rate.read(entry.state.deviceId, deps.now());
+    if (wait == null) return false;
+    rateRefused(s, entry, id, wait);
+    return true;
   }
 
   function throttled(s, id, peer, throttle, event) {
@@ -441,6 +460,25 @@ export function createGateway(overrides) {
       case 'toolApprovals.answer':
         // Never always-allow from a client: allow once or deny.
         return answer(s, entry, id, { ...p, command }, p.decision === 'allow_once' ? 'allow' : 'deny', {});
+      case 'chat.sessions': {
+        if (readRefused(s, entry, id)) return;
+        const limit = p.limit ?? READ_LIMITS.sessionsDefault;
+        const offset = p.offset ?? 0;
+        const rows = await deps.read.sessions(userId, { limit: limit + 1, offset });
+        return respond(s, id, command, sessionsOf(rows, limit, offset, deps.quickChat.get(userId)));
+      }
+      case 'chat.history': {
+        if (readRefused(s, entry, id)) return;
+        const limit = p.limit ?? READ_LIMITS.historyDefault;
+        const session = await deps.read.history(userId, p.sessionId, { limit, beforeSeq: p.beforeSeq });
+        // Another user's id reads as unknown: the store query is WHERE user_id = ? AND id = ?.
+        if (!session) return fail(s, id, 'not_found', 'That chat is not on this computer.');
+        return respond(s, id, command, historyOf(session, limit));
+      }
+      case 'usage.get': {
+        if (readRefused(s, entry, id)) return;
+        return respond(s, id, command, usageOf(await deps.read.usage(userId)));
+      }
       default:
         return fail(s, id, 'unknown_command', 'This host does not serve that command.');
     }
