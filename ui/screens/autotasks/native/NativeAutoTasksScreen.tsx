@@ -14,6 +14,9 @@ import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptT
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
 import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
+import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
+import { runCustomTask } from "./run-custom.ts";
+import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
 import { decideRun, resolvePath, type Resolve } from "./usage.ts";
 import { guardedAgentCall, type AgentWrites } from "../../loop/native/agent-call.ts";
 import { readOnlyCheck } from "./read-only.ts";
@@ -49,6 +52,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [resetOpen, setResetOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [limitsOpen, setLimitsOpen] = useState(false);
+  const [customTasks, setCustomTasks] = useState<CustomAutoTask[]>(() => projectRoot ? loadCustomTasks(projectRoot) : []);
+  const [customEdit, setCustomEdit] = useState<CustomAutoTask | "new" | null>(null);
+  const [customDraft, setCustomDraft] = useState({ name: "", prompt: "", mode: "review" as CustomTaskMode, cron: "", enabled: true });
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [customRunning, setCustomRunning] = useState(false);
+  const [customRuns, setCustomRuns] = useState<CustomTaskRun[]>(readCustomRuns);
   const [folderPick, setFolderPick] = useState<null | "inputPath" | "outputPath">(null);
   const [folderList, setFolderList] = useState<LibraryFolder[] | null>(null);
   const [folderFilter, setFolderFilter] = useState("");
@@ -72,6 +81,15 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     return () => { live = false; };
   }, [fs, projectRoot]);
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
+  useEffect(() => {
+    setCustomTasks(projectRoot ? loadCustomTasks(projectRoot) : []);
+    setCustomEdit(null);
+  }, [projectRoot]);
+  useEffect(() => {
+    const onRuns = (e: Event) => setCustomRuns((e as CustomEvent).detail as CustomTaskRun[] ?? readCustomRuns());
+    window.addEventListener(CUSTOM_RUNS_EVENT, onRuns);
+    return () => window.removeEventListener(CUSTOM_RUNS_EVENT, onRuns);
+  }, []);
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const iconFor = (id: AutoTaskId): string => ({ sourceUpdate: "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", reviewCode: "✓", reviewDoc: "▤", reviewConflicts: "⚠", updateIssues: "☑", updatePlanStatus: "▥", generateDoc: "▦", regression: "↺", generateKnowledge: "✦" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
@@ -169,6 +187,67 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     } finally { setRunning(false); }
   };
 
+  const openCustom = (task?: CustomAutoTask) => {
+    setCustomError(null);
+    if (task) {
+      setCustomEdit(task);
+      setCustomDraft({ name: task.name, prompt: task.prompt, mode: task.mode, cron: task.cron, enabled: task.enabled });
+    } else {
+      setCustomEdit("new");
+      setCustomDraft({ name: "", prompt: "", mode: "review", cron: "", enabled: true });
+    }
+  };
+  const persistCustom = (list: CustomAutoTask[]) => { setCustomTasks(list); if (projectRoot) saveCustomTasks(list, undefined, projectRoot); };
+  const saveCustom = () => {
+    if (!projectRoot) { setCustomError("Open a project first."); return; }
+    const error = validateCustomTask(customDraft) ?? (customDraft.cron.trim() && !validateCron(customDraft.cron) ? "Use a valid five-field cron expression, or leave it empty." : null);
+    if (error) { setCustomError(error); return; }
+    try {
+      if (customEdit === "new" || customEdit === null) {
+        const next = createCustomTask(projectRoot, customDraft);
+        persistCustom([...customTasks, next]);
+        setCustomEdit(next);
+      } else {
+        const next = updateCustomTask(customEdit, customDraft);
+        persistCustom(customTasks.map((t) => t.id === next.id ? next : t));
+        setCustomEdit(next);
+      }
+      setCustomError(null);
+      setNotice(`Saved custom task “${customDraft.name.trim()}”.`);
+    } catch (e) { setCustomError(e instanceof Error ? e.message : String(e)); }
+  };
+  const deleteCustom = () => {
+    if (customEdit === "new" || customEdit === null) { setCustomEdit(null); return; }
+    persistCustom(customTasks.filter((t) => t.id !== customEdit.id));
+    setCustomEdit(null);
+    setNotice("Custom task deleted.");
+  };
+  const runCustom = async (task: CustomAutoTask) => {
+    if (customRunning) return;
+    if (!customTaskRunnable(task)) { setNotice(CUSTOM_IMPLEMENT_MESSAGE); return; }
+    if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
+    setCustomRunning(true);
+    const started = new Date();
+    try {
+      const result = await runCustomTask(task, {
+        request: (path, init) => core.request(path, init as never),
+        workRoot: () => invokeHost<string>("loop_work_root"),
+        changedPaths: async () => { try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; } },
+        revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+      });
+      if (result.warning) setLog((l) => [...l, result.warning!]);
+      appendCustomRun({
+        id: crypto.randomUUID(), taskId: task.id, task: task.name, at: started.toISOString(), ok: result.ok,
+        summary: result.reply.trim().split("\n")[0]?.slice(0, 300) || result.error || (result.ok ? "completed" : "failed"),
+        trigger: "manual",
+      });
+      setNotice(result.ok ? `${task.name} completed.` : `${task.name} did not complete: ${result.error ?? "failed"}`);
+    } catch (e) {
+      appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", trigger: "manual" });
+      setNotice(e instanceof Error ? e.message : "The custom task could not run.");
+    } finally { setCustomRunning(false); }
+  };
+
   const openFolderPicker = (field: "inputPath" | "outputPath") => {
     setFolderPick(field); setFolderFilter(""); setFolderList(null);
     void scanLibraryFolders(fs).then((list) => setFolderList(list));
@@ -209,6 +288,23 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           ))}
           {grouped.length === 0 ? <p className="atn-hint">No tasks match this filter.</p> : null}
         </div>
+        <section className="atn-custom" aria-label="Custom tasks">
+          <h3 className="atn-group">Custom Tasks <button type="button" className="atn-link" disabled={!projectRoot} onClick={() => openCustom()}>Add</button></h3>
+          {!projectRoot ? <p className="atn-hint">Open a project to add custom tasks.</p> : customTasks.length === 0 ? <p className="atn-hint">No custom tasks yet.</p> : (
+            <ul>
+              {customTasks.map((t) => (
+                <li key={t.id}>
+                  <button type="button" className="atn-row" data-on={customEdit !== "new" && customEdit?.id === t.id || undefined} onClick={() => openCustom(t)}>
+                    <input type="checkbox" checked={t.enabled} onClick={(e) => e.stopPropagation()} onChange={(e) => persistCustom(customTasks.map((x) => x.id === t.id ? { ...x, enabled: e.target.checked } : x))} aria-label={`${t.name} enabled`} />
+                    <span className="atn-task-icon" aria-hidden="true">✦</span><span>{t.name}</span>
+                    {!customTaskRunnable(t) ? <span className="atn-hint atn-mac-only">Mac only</span> : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {customRuns.length ? <section className="atn-history"><h3>Recent custom runs</h3><ul>{customRuns.slice(0, 3).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{new Date(r.at).toLocaleString()}</span></li>)}</ul></section> : null}
+        </section>
         <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
@@ -259,6 +355,26 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>
       </main>
       {limitsOpen ? <ModelLimitsPanel onClose={() => setLimitsOpen(false)} /> : null}
+      {customEdit ? (
+        <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-custom-title">
+          <div className="atn-modal-card atn-custom-editor">
+            <header><h2 id="atn-custom-title">{customEdit === "new" ? "New custom task" : "Custom task"}</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close custom task" onClick={() => setCustomEdit(null)}>×</button></header>
+            <label className="atn-field"><span>Name</span><input value={customDraft.name} maxLength={80} autoFocus placeholder="Nightly cleanup" onChange={(e) => setCustomDraft((d) => ({ ...d, name: e.target.value }))} /></label>
+            <label className="atn-field"><span>Mode</span><select value={customDraft.mode} onChange={(e) => setCustomDraft((d) => ({ ...d, mode: e.target.value as CustomTaskMode }))}><option value="review">Review — edits are reverted</option><option value="implement">Implement — Mac only</option></select><em>{customDraft.mode === "implement" ? CUSTOM_IMPLEMENT_MESSAGE : "The task runs against the whole project and every file it changes is reverted."}</em></label>
+            <label className="atn-field"><span>Schedule</span><input className="atn-cron" value={customDraft.cron} spellCheck={false} placeholder="0 * * * * — empty for manual only" onChange={(e) => setCustomDraft((d) => ({ ...d, cron: e.target.value }))} /><em>{customDraft.cron.trim() ? (validateCron(customDraft.cron) ? describeCron(customDraft.cron) : "Invalid five-field cron expression.") : "Manual only."}</em></label>
+            <label className="atn-field"><span>Prompt</span><textarea rows={8} value={customDraft.prompt} onChange={(e) => setCustomDraft((d) => ({ ...d, prompt: e.target.value }))} /></label>
+            {customError ? <p className="atn-notice" role="alert">{customError}</p> : null}
+            {customEdit !== "new" ? <p className="atn-hint">{customTaskStatus(customEdit, state.masterEnabled, new Date())}</p> : null}
+            <div className="atn-modal-actions">
+              {customEdit !== "new" ? <button type="button" className="atn-btn atn-danger" onClick={deleteCustom}>Delete</button> : null}
+              <span className="atn-spacer" />
+              {customEdit !== "new" ? <button type="button" className="atn-btn" disabled={customRunning || !customTaskRunnable(customEdit)} title={!customTaskRunnable(customEdit) ? CUSTOM_IMPLEMENT_MESSAGE : undefined} onClick={() => void runCustom(customEdit)}>{customRunning ? "Running…" : "▶ Run now"}</button> : null}
+              <button type="button" className="atn-btn" onClick={() => setCustomEdit(null)}>Cancel</button>
+              <button type="button" className="atn-btn atn-primary" onClick={saveCustom}>{customEdit === "new" ? "Create" : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {folderPick ? (
         <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-folder-title">
           <div className="atn-modal-card">

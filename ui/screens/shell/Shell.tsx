@@ -31,6 +31,7 @@ import { featureStore } from "./feature-store";
 import { disabledSectionText, isSectionEnabled, keepSectionNotice, type SectionNotice } from "./features";
 import { quickSwitchRows } from "./menu-model";
 import { coreApiWarning } from "./core-api-floor";
+import { startCustomTaskScheduler } from "../autotasks/native/schedule.ts";
 
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
@@ -129,6 +130,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // Landing: Welcome without a project, the home section with one. First load, then project open/close.
   const prevRoot = useRef<string | null | undefined>(undefined);
   const projectRoot = project?.root ?? null;
+  // Custom Auto Tasks schedule from the shell, so a cron still fires while another section is open (or Auto Tasks
+  // was never opened this session). The built-in tasks keep their page scheduler for now.
+  useEffect(() => startCustomTaskScheduler(projectRoot), [projectRoot]);
   const overridden = useRef(initialSection != null);
   // A home section whose feature is off (or was not compiled in) falls back to Library, as the Mac's resolveHome does.
   const usableHome = (): SectionId => selectHome(readHome(), features.usable);
