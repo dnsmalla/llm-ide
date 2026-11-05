@@ -303,6 +303,7 @@ macro_rules! product_handlers {
                 account_oauth::account_status,
                 account_oauth::account_sign_in,
                 account_oauth::account_sign_out,
+                account_oauth::account_register_desktop,
                 read_graph_file,
                 project::project_open,
                 project::project_open_recent,

@@ -10,6 +10,9 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+use p256::SecretKey;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
@@ -18,6 +21,7 @@ use crate::secrets::{default_backend, SecretBackend};
 
 const TOKENS_ACCOUNT: &str = "account-tokens";
 const PROFILE_ACCOUNT: &str = "account-profile";
+const DEVICE_KEYS_ACCOUNT: &str = "account-device-keys";
 const DEFAULT_ORIGIN: &str = "https://accounts.llm-ide.com";
 const CLIENT_ID: &str = "llmide-desktop";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
@@ -199,6 +203,89 @@ fn sign_in_blocking() -> Result<AccountStatus, String> {
     Ok(AccountStatus { signed_in: true, email: Some(email) })
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeviceKeys {
+    signing_secret: String,
+    ecdh_secret: String,
+    signing_public: String,
+    ecdh_public: String,
+}
+
+fn b64(bytes: &[u8]) -> String { URL_SAFE_NO_PAD.encode(bytes) }
+
+/// Generate once, keep the private halves only in the OS store. The public halves go to the account
+/// service; the relay will use the private halves for signed wraps later.
+fn device_keys(backend: &dyn SecretBackend) -> Result<DeviceKeys, String> {
+    if let Some(raw) = backend.get(DEVICE_KEYS_ACCOUNT).map_err(|e| e.to_string())? {
+        return serde_json::from_str(&raw).map_err(|_| "stored desktop keys are unreadable".to_string());
+    }
+    let signing = SecretKey::random(&mut OsRng);
+    let ecdh = SecretKey::random(&mut OsRng);
+    let keys = DeviceKeys {
+        signing_secret: b64(signing.to_pkcs8_der().map_err(|e| e.to_string())?.as_bytes()),
+        ecdh_secret: b64(ecdh.to_pkcs8_der().map_err(|e| e.to_string())?.as_bytes()),
+        signing_public: b64(signing.public_key().to_public_key_der().map_err(|e| e.to_string())?.as_bytes()),
+        ecdh_public: b64(ecdh.public_key().to_public_key_der().map_err(|e| e.to_string())?.as_bytes()),
+    };
+    backend.set(DEVICE_KEYS_ACCOUNT, &serde_json::to_string(&keys).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(keys)
+}
+
+fn access_token(origin: &Url, backend: &dyn SecretBackend) -> Result<String, String> {
+    let mut tokens = load_tokens(backend)?.ok_or_else(|| "Sign in to LLM-IDE first.".to_string())?;
+    if tokens.expires_at > now_secs() + 60 {
+        return Ok(tokens.access_token);
+    }
+    let response = ureq::post(&format!("{origin}v1/oauth/token"))
+        .set("content-type", "application/x-www-form-urlencoded")
+        .send_form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", CLIENT_ID),
+            ("refresh_token", &tokens.refresh_token),
+        ]);
+    let body = match response {
+        Ok(r) => r.into_string().map_err(|e| e.to_string())?,
+        Err(ureq::Error::Status(_, r)) => return Err(r.into_string().unwrap_or_else(|_| "Your LLM-IDE session expired. Sign in again.".into())),
+        Err(e) => return Err(format!("cannot reach the account service: {e}")),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|_| "the account service returned an invalid reply".to_string())?;
+    let access = parsed.get("access_token").and_then(|v| v.as_str()).ok_or_else(|| "Your LLM-IDE session expired. Sign in again.".to_string())?;
+    let refresh = parsed.get("refresh_token").and_then(|v| v.as_str()).ok_or_else(|| "Your LLM-IDE session expired. Sign in again.".to_string())?;
+    let expires_in = parsed.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(900);
+    tokens.access_token = access.into();
+    tokens.refresh_token = refresh.into();
+    tokens.expires_at = now_secs() + expires_in;
+    backend.set(TOKENS_ACCOUNT, &serde_json::to_string(&tokens).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(tokens.access_token)
+}
+
+fn register_desktop_blocking() -> Result<AccountStatus, String> {
+    let origin = origin()?;
+    let backend = store()?;
+    let access = access_token(&origin, backend.as_ref())?;
+    let keys = device_keys(backend.as_ref())?;
+    let payload = serde_json::json!({
+        "label": hostname_label(),
+        "signingKey": keys.signing_public,
+        "ecdhKey": keys.ecdh_public,
+    });
+    let response = ureq::post(&format!("{origin}v1/desktop"))
+        .set("authorization", &format!("Bearer {access}"))
+        .set("content-type", "application/json")
+        .send_string(&payload.to_string());
+    match response {
+        Ok(_) => {}
+        Err(ureq::Error::Status(409, _)) => return Err("This account already has a desktop registered. Replace-desktop is not available yet.".into()),
+        Err(ureq::Error::Status(_, r)) => return Err(r.into_string().unwrap_or_else(|_| "The account service refused this desktop.".into())),
+        Err(e) => return Err(format!("cannot reach the account service: {e}")),
+    }
+    status_from(backend.as_ref())
+}
+
+fn hostname_label() -> String {
+    std::env::var("HOSTNAME").ok().filter(|v| !v.trim().is_empty()).map(|v| v.trim().chars().take(80).collect()).unwrap_or_else(|| "LLM-IDE desktop".into())
+}
 /// Webview-visible: a boolean and the display email; never a token.
 #[tauri::command]
 pub async fn account_status() -> Result<AccountStatus, String> {
@@ -215,6 +302,13 @@ pub async fn account_sign_in() -> Result<AccountStatus, String> {
     tauri::async_runtime::spawn_blocking(sign_in_blocking)
     .await
     .map_err(|e| format!("account task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn account_register_desktop() -> Result<AccountStatus, String> {
+    tauri::async_runtime::spawn_blocking(register_desktop_blocking)
+        .await
+        .map_err(|e| format!("account task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -250,6 +344,18 @@ mod tests {
         assert!(account_origin(Some("http://accounts.llm-ide.com")).is_err());
         assert!(account_origin(Some("https://accounts.llm-ide.com/x")).is_err());
         assert!(account_origin(Some("https://user:pw@accounts.llm-ide.com")).is_err());
+    }
+
+    #[test]
+    fn device_keys_are_generated_once_and_private_halves_stay_in_the_store() {
+        let b = MemoryBackend::default();
+        let one = device_keys(&b).unwrap();
+        let two = device_keys(&b).unwrap();
+        assert_eq!(one.signing_public, two.signing_public);
+        assert_eq!(one.ecdh_public, two.ecdh_public);
+        assert!(!one.signing_secret.is_empty() && !one.ecdh_secret.is_empty());
+        assert_ne!(one.signing_secret, one.ecdh_secret);
+        assert!(!serde_json::to_string(&status_from(&b).unwrap()).unwrap().contains(&one.signing_secret));
     }
 
     #[test]

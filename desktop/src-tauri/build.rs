@@ -32,6 +32,7 @@ const COMMANDS: &[&str] = &[
     "account_status",
     "account_sign_in",
     "account_sign_out",
+    "account_register_desktop",
     "read_graph_file",
     "project_open",
     "project_open_recent",

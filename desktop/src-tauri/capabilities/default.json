@@ -41,6 +41,7 @@
     "allow-account-status",
     "allow-account-sign-in",
     "allow-account-sign-out",
+    "allow-account-register-desktop",
     "allow-read-graph-file",
     "allow-project-open",
     "allow-project-open-recent",
