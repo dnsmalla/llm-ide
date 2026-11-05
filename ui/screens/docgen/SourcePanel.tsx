@@ -7,7 +7,7 @@ import { describeFailure, isCancel } from "./errors.ts";
 import { estimateFit, formatBytes, MAX_SELECTED_SOURCES } from "./model.ts";
 import { filterNotes, loadNotes, type NotesIndexState } from "./notes-source.ts";
 import { looksTextual, MAX_SOURCE_FILE_BYTES, walkFolder, type WalkProgress } from "./project-files.ts";
-import { estimateChars, fileItem, noteItem, sendOrder, type SourceItem, type SourceSelection } from "./sources.ts";
+import { estimateChars, fileItem, isImageFile, noteItem, sendOrder, type SourceItem, type SourceSelection } from "./sources.ts";
 import type { NotesHost } from "../library/host.ts";
 import { VirtualList } from "./VirtualList";
 import { shrinkDataUrl } from "./thumbnail.ts";
@@ -56,15 +56,19 @@ const SOURCE_ROOTS: Record<"doc" | "visual", readonly { path: string; label: str
 };
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i;
-const PREVIEW_EXT = /\.(png|jpe?g|gif|webp)$/i;
 const MAX_THUMB_BYTES = 5_000_000;
 
 /** Images in one folder for the Visual strip, including the current one so the strip never reflows while flipping. */
-export function siblingImages(rows: readonly DirEntryRow[], _currentPath: string, max = 12): DirEntryRow[] {
-  return rows
-    .filter((r) => r.kind === "file" && PREVIEW_EXT.test(r.name) && r.size > 0 && r.size <= MAX_THUMB_BYTES)
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, Math.max(0, max));
+export function siblingImages(rows: readonly DirEntryRow[], max = 12, currentPath?: string): DirEntryRow[] {
+  const all = rows
+    .filter((r) => r.kind === "file" && isImageFile(r.name) && r.size > 0 && r.size <= MAX_THUMB_BYTES)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const cap = Math.max(0, max);
+  if (cap === 0) return [];
+  if (all.length <= cap) return all;
+  const at = currentPath ? all.findIndex((r) => r.path === currentPath) : -1;
+  // Keep the shown image in the strip even when it sorts past the cap: replace the last slot instead of dropping it.
+  return at >= cap ? [...all.slice(0, cap - 1), all[at]!] : all.slice(0, cap);
 }
 
 export function SourcePanel(p: SourcePanelProps): ReactNode {
@@ -123,7 +127,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const thumbCache = useRef<Map<string, string>>(new Map());
   const previewSeq = useRef(0);
-  const thumbRef = useRef<HTMLButtonElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const viewRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const wasOpen = useRef(false);
   const [walkNote, setWalkNote] = useState<string | null>(null);
   const walkCtl = useRef<AbortController | null>(null);
   const fs = env.fs;
@@ -190,7 +196,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     );
   };
 
-  const siblings = useMemo(() => (preview ? siblingImages(rows, preview.path) : []), [preview, rows]);
+  const siblings = useMemo(() => (preview ? siblingImages(rows, 12, preview.path) : []), [preview, rows]);
   useEffect(() => {
     setThumbs({});
     if (!preview) thumbCache.current.clear();
@@ -218,13 +224,10 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     return () => { live = false; };
   }, [preview?.path, siblings, env.readImage]);
   useEffect(() => {
-    if (preview) thumbRef.current?.focus();
+    if (preview && !wasOpen.current) stripRef.current?.querySelector<HTMLButtonElement>("[data-current]")?.focus();
+    wasOpen.current = preview !== null;
   }, [preview?.path]);
 
-  const showPreview = (path: string, url: string) => {
-    previewSeq.current += 1;
-    setPreview({ path, url });
-  };
   const openPreview = async (path: string) => {
     if (!env.readImage || path === preview?.path) return;
     const seq = ++previewSeq.current;
@@ -233,12 +236,14 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
       if (seq === previewSeq.current && url) setPreview({ path, url });
     } catch { /* the row's View action stays available for a retry */ }
   };
-  const closePreview = () => {
+  const closePreview = (restoreFocus = false) => {
+    const path = preview?.path;
     previewSeq.current += 1;
     setPreview(null);
+    if (restoreFocus && path) requestAnimationFrame(() => viewRefs.current.get(path)?.focus());
   };
 
-  useEffect(() => { setPreview(null); }, [dir]);
+  useEffect(() => { closePreview(false); }, [dir]);
   const root = roots.find((r) => dir === r.path || dir.startsWith(`${r.path}/`)) ?? roots[0]!;
   const rel = dir === root.path ? "" : dir.slice(root.path.length + 1);
   const crumbs = rel === "" ? root.label : `${root.label} / ${rel}`;
@@ -278,16 +283,16 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
         <StatusBanner severity="error" message={<>{err}</>} />
       )}
       {preview ? (
-        <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`}>
+        <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closePreview(true); } }}>
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
-          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={closePreview}>Close</button></div>
-          {env.readImage && siblings.length > 0 && (
-            <div className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`}>
-              {siblings.map((r, i) => {
+          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => closePreview(true)}>Close</button></div>
+          {env.readImage && siblings.length > 1 && (
+            <div ref={stripRef} className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`} aria-busy={siblings.some((r) => r.path !== preview.path && !thumbs[r.path])}>
+              {siblings.map((r) => {
                 const here = r.path === preview.path;
                 const url = here ? preview.url : thumbs[r.path];
                 return (
-                  <button key={r.path} ref={i === 0 ? thumbRef : null} type="button" className="dg-thumb" data-current={here || undefined} aria-current={here ? "true" : undefined} aria-busy={!url && !here} title={r.name} aria-label={here ? `${r.name} (shown)` : `Preview ${r.name}`} onClick={() => void openPreview(r.path)}>
+                  <button key={r.path} type="button" className="dg-thumb" data-current={here || undefined} aria-current={here ? "true" : undefined} tabIndex={here ? -1 : 0} title={r.name} aria-label={here ? `${r.name} (shown)` : `Preview ${r.name}`} onClick={() => void openPreview(r.path)}>
                     {url ? <span className="dg-thumb-img" style={{ backgroundImage: `url(${url})` }} /> : <span className="dg-thumb-wait" aria-hidden="true" />}
                     <span className="dg-thumb-name">{r.name}</span>
                   </button>
@@ -313,9 +318,9 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
             );
           }
           const image = IMAGE_EXT.test(r.name);
-          const previewable = PREVIEW_EXT.test(r.name);
+          const previewable = isImageFile(r.name);
           const reason = image
-            ? surface !== "visual" ? "image (Visual only)" : !previewable ? "image (PNG, JPEG, GIF or WebP)" : r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
+            ? surface !== "visual" ? "image (Visual only)" : previewable && r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
             : !looksTextual(r.name) ? "binary" : r.size > MAX_SOURCE_FILE_BYTES ? "too large" : null;
           const key = `file:${r.path}`;
           const checked = selection.has(key);
@@ -326,7 +331,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
               <UnreadMark sourceKey={key} unreadable={unreadable} />
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
               {previewable && reason === null && env.readImage ? (
-                <button type="button" className="dg-link" onClick={(e) => { e.preventDefault(); void env.readImage!(r.path).then((url) => url && showPreview(r.path, url)); }}>View</button>
+                <button type="button" className="dg-link" ref={(el) => { if (el) viewRefs.current.set(r.path, el); else viewRefs.current.delete(r.path); }} onClick={(e) => { e.preventDefault(); void openPreview(r.path); }}>View</button>
               ) : null}
             </label>
           );

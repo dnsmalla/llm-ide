@@ -12,3 +12,4 @@ export { INITIAL_RUN } from "../run.ts";
 export { SourceSelection, fileItem, noteItem } from "../sources.ts";
 export { MermaidView } from "../mermaid/MermaidView.tsx";
 export { UnreadMark } from "../SourcePanel.tsx";
+export { dataUrlToBlob } from "../thumbnail.ts";

@@ -245,8 +245,23 @@ test("Visual image strip excludes huge files and unsupported formats, keeps the 
     row("vector.svg", 10), row("notes.md", 10), row("folder.png", 10, "dir"), row("zero.png", 0),
   ];
   const before = rows.map((r) => r.name).join(",");
-  assert.deepEqual(E.siblingImages(rows, "data/current.png").map((r) => r.name), ["a.webp", "b.jpg", "boundary.png", "current.png", "UPPER.PNG"]);
-  assert.deepEqual(E.siblingImages(rows, "data/current.png", 1).map((r) => r.name), ["a.webp"]);
-  assert.deepEqual(E.siblingImages(rows, "data/current.png", 0), []);
+  assert.deepEqual(E.siblingImages(rows, 12, "data/current.png").map((r) => r.name), ["a.webp", "b.jpg", "boundary.png", "current.png", "UPPER.PNG"]);
+  assert.deepEqual(E.siblingImages(rows, 1, "data/current.png").map((r) => r.name), ["current.png"]);
+  assert.deepEqual(E.siblingImages(rows, 0, "data/current.png"), []);
   assert.equal(rows.map((r) => r.name).join(","), before, "the input rows are not reordered");
+});
+
+
+test("a current image past the cap keeps its slot", () => {
+  const rows = Array.from({ length: 15 }, (_, i) => ({ name: `img-${String(i).padStart(2, "0")}.png`, path: `data/img-${i}.png`, kind: "file", size: 10 }));
+  const current = rows[14].path;
+  const out = E.siblingImages(rows, 5, current).map((r) => r.path);
+  assert.equal(out.length, 5);
+  assert.equal(out.at(-1), current);
+});
+
+test("dataUrlToBlob decodes base64 without fetch (the app CSP blocks data: connect-src)", async () => {
+  const blob = E.dataUrlToBlob("data:image/png;base64,AAECAw==");
+  assert.equal(blob.type, "image/png");
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [0, 1, 2, 3]);
 });
