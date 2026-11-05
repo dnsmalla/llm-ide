@@ -3,3 +3,4 @@
 pub mod crypto;
 pub mod registry;
 pub mod bridge;
+pub mod client;
