@@ -15,7 +15,6 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const st = await import('../kb/sync-state.mjs');
-const E = await import('../core/sync-enroll.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
 const { publishOnce } = await import('../routes/sync/producer.mjs');
 const { startEnrollment, pollEnrollment, confirmEnrollment, _resetEnrollmentsForTest } = await import('../routes/sync/enroll.mjs');
