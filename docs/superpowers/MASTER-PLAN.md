@@ -15,14 +15,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 24 | 42 | 10 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
 | Mobile (iPhone native, PWA) | 15 | 5 | 7 | 27 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
-| Web app and relay | 7 | 6 | 13 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; public account service deployed (sub-project 1, sign-in pages) with desktop sign-in broken (review Critical) and sign-up open early (S9); device linking, relay and launch gates not built |
+| Web app and relay | 7 | 9 | 10 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; public account service deployed (sub-project 1, sign-in pages) with desktop sign-in broken (review Critical) and sign-up open early (S9); device linking, relay and launch gates not built |
 | Chrome extension | 7 | 3 | 6 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 3 | 5 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 121 | 69 | 73 | 263 |  |
+| Total | 121 | 72 | 70 | 263 |  |
 
 ## How the surfaces connect
 
@@ -245,10 +245,10 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [-] Public accounts, sub-project 4: iPhone and web clients sign in with a passkey, wait for desktop approval and talk to the desktop through the relay (me) **Retired 2026-11-05 by ADR 0020** (phone and web use the sync tiers SP3/SP4).
 - [-] Public accounts, sub-project 5, launch gates: external security review (D9), terms and privacy policy (minimum age 16), an email provider with SPF/DKIM/DMARC, DNS for `accounts.` and `app.llm-ide.com`, then open sign-up (you) **Retired 2026-11-05 by ADR 0020** (no public sign-up; no external review needed for personal sync).
 - [ ] **Encrypted sync, ADR 0020 (proposed 2026-11-05, user decision):** the phone and web keep working with the desktop off by reading encrypted snapshots of the desktop's own data and queueing prompts, stored on the user's own server (SFTP, first), Box or MEGA behind one `SyncStore` interface; the desktop needs no login; no AI runs with the desktop off. Spec `specs/2026-11-05-box-encrypted-sync-design.md`, research `research/2026-11-05-offline-desktop-research.md` (me)
-- [ ] Sync SP1, desktop producer: `SyncStore` + memory + **MEGA adapter first (user decision)**, sync v1 envelope and vectors, keys in the vault, snapshot producer, inbox consumer at the read-only ceiling, MEGA Settings card (plan `plans/2026-11-05-box-sync-desktop-producer.md`, 9 tasks) (me)
-- [ ] Sync SP2, enrollment and device registry: QR sync fields, slot flow with SAS, per-device wrap, revoke, rotate (me)
-- [ ] Sync SP3, web app sync tier: read views with staleness, queued prompt and reply (me)
-- [ ] Sync SP4, iPhone sync tier (me)
+- [~] Sync SP1, desktop producer, MEGA first: built and reviewed 2026-11-06 (`33ee8293`..`4134256e`, review fixes `f73a73d5`; review `reviews/2026-11-06-sync-sp1-review.md`): sync v1 envelope and vectors, keys in the vault, SyncStore + memory + MEGA adapter (megajs 1.3.10, lazy, store calls time out after 30 s), snapshot producer, read-only inbox consumer, `/kb/sync/*` (API 112), MEGA card in Settings; open: your real-MEGA check (me, you)
+- [~] Sync SP2, enrollment and device registry: built and reviewed 2026-11-06 (`bc5d2400`..`eef50b8c`, API 113; fixes `882d1db8`..`9e3d30b1`, `92e4ab83`; review `reviews/2026-11-06-sync-sp2-sp3-review.md`): QR with the desktop key fingerprint, pinned claim and signed ack, 6-digit code, rotation, revoke and desktop-off revoke; holds against malicious storage (the original race and 12 variants blocked); open: three Minor leftovers in the review, and your real-device check (me, you)
+- [~] Sync SP3, web app sync tier: built and reviewed 2026-11-06 (`e1ea574d`..`cedecf90`, fixes `2b68cb88`, `fd45081f`, `8f50798d`): non-extractable WebCrypto keys in IndexedDB, MEGA in the browser (password per session, never stored), offline read views with staleness, queued chat prompts (max 5), end-to-end test against the real desktop code; open: confirm MEGA transfer hosts allow browser CORS (web/MANUAL-CHECK.md step 3), your browser check (me, you)
+- [ ] Sync SP4, iPhone sync tier: plan `plans/2026-11-06-sync-sp4-ios.md` (10 tasks; own small MEGA client, Secure Enclave keys) (me)
 - [ ] Sync SP5, own-server SFTP adapter (me)
 - [ ] Sync SP6, Box adapter (desktop and devices) (me)
 - [ ] Sync SP7, direct reads of Box documents and GitLab code from the phone and web (me)
