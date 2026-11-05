@@ -38,6 +38,7 @@ struct ContentView: View {
                 // receive callback or the next heartbeat tick, with no
                 // resync of the mirrored Mac state.
                 .onChange(of: scenePhase) { phase in
+                    syncStore.setForeground(phase == .active)
                     guard phase == .active, !connection.isDemo,
                           connectionStore.hasDevice else { return }
                     if connection.connectionStatus == .disconnected, !connection.userClosed {

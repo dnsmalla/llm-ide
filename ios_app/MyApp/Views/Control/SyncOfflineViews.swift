@@ -4,6 +4,7 @@ import SharedProtocol
 /// The History tab when the desktop is not reachable: the verified snapshot and the prompt queue.
 struct SyncOfflineSections: View {
     @EnvironmentObject var syncStore: SyncStore
+    @State private var draft = ""
 
     var body: some View {
         if let snap = syncStore.snapshot {
@@ -22,6 +23,13 @@ struct SyncOfflineSections: View {
             }
         } else {
             Section { Text(syncStore.refreshing ? "Loading…" : "No snapshot yet. Turn sync on in Settings.").foregroundColor(.secondary) }
+        }
+        if syncStore.phase == .ready {
+            Section("Ask the desktop") {
+                TextField("Prompt", text: $draft, axis: .vertical).lineLimit(2...5)
+                Button("Queue") { let t = draft; draft = ""; Task { await syncStore.send(t) } }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
         if !syncStore.queued.isEmpty {
             Section("Queued prompts") {
