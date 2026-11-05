@@ -1,3 +1,4 @@
+import "./sync/pair-fragment.ts"; // first: strips #pair= before anything else runs (design 5.2)
 import "@llmide/ui-kit/styles.css";
 import "./web.css";
 import { createRoot } from "react-dom/client";
