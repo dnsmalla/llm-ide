@@ -138,6 +138,14 @@ const ALLOWED_KEYS = new Set([
   // whenever the password is re-saved). Not a secret, but it must live next to
   // the password it guards — see checkImapHostBinding.
   'email.imapPasswordHost',
+
+  // Encrypted sync (routes/sync/keys.mjs, routes/sync/http-routes.mjs): the per-epoch root key, the desktop ECDSA
+  // P-256 signing key (PKCS8), and the dedicated MEGA account's email and password for the MEGA adapter.
+  // Server-internal: never client-settable through /kb/vault, never listed, never returned by a route.
+  'sync.rootKey',
+  'sync.signingKey',
+  'sync.megaEmail',
+  'sync.megaPassword',
   // Per-user Anthropic API key.  When present, agent calls run with
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
   // to their own account instead of the operator's Claude CLI login.
@@ -199,7 +207,7 @@ const ICAL_SOURCE_KEY_RE = /^ical\.src\.[a-f0-9]{12}\.url$/;
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
-const INTERNAL_KEYS = new Set(['email.imapPasswordHost']);
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword']);
 
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed
