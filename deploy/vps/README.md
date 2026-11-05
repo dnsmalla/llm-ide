@@ -76,7 +76,7 @@ install -d -m 700 -o root -g root /etc/llm-ide
 install -d -m 700 -o llmide-accounts -g llmide-accounts /var/lib/llmide-accounts
 install -d -m 755 /var/www/llm-ide-accounts
 cd /srv/llm-ide/repo && git pull --ff-only
-cd account-service && PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
+cd account-service && chmod -R a+rX . && PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
 ```
 
 `/etc/llm-ide/accounts.env`:
