@@ -4,6 +4,7 @@
 // MemoryChatStore (tests, previews).
 import { CoreHttpError, type CoreTransport } from "./transport";
 import { textPartOf, type Message } from "./state";
+import { decodeUsage } from "./usage";
 
 export interface SessionSummary {
   id: string;
@@ -56,7 +57,10 @@ export function toMessages(rows: readonly StoredMessage[]): Message[] {
   const out: Message[] = [];
   for (const r of rows) {
     if (r.role === "user") out.push({ role: "user", id: `s${r.seq}`, seq: r.seq, text: r.content });
-    else if (r.role === "assistant") out.push({ role: "assistant", id: `s${r.seq}`, seq: r.seq, parts: [textPartOf(r.content)], notices: [], status: "done" });
+    else if (r.role === "assistant") {
+      const usage = decodeUsage(r.meta?.tokenUsage);
+      out.push({ role: "assistant", id: `s${r.seq}`, seq: r.seq, parts: [textPartOf(r.content)], notices: [], status: "done", ...(usage ? { usage } : {}) });
+    }
   }
   return out;
 }

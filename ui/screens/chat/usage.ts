@@ -9,6 +9,19 @@ export interface UsageCounts {
   cacheCreationTokens: number;
 }
 
+/** Validate a stored/live usage object; unknown or malformed counts are dropped rather than displayed as zero. */
+export function decodeUsage(v: unknown): UsageCounts | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const n = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? Math.floor(x) : null);
+  const inputTokens = n(o.inputTokens), outputTokens = n(o.outputTokens), cacheReadTokens = n(o.cacheReadTokens);
+  // The Mac's cacheCreationTokens is Int?: older files/events omit it and the Mac shows 0 cache writes.
+  const creation = o.cacheCreationTokens === undefined || o.cacheCreationTokens === null ? 0 : n(o.cacheCreationTokens);
+  return inputTokens === null || outputTokens === null || cacheReadTokens === null || creation === null
+    ? null
+    : { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens: creation };
+}
+
 export const CACHE_WRITE_MULTIPLIER = 1.25;
 export const CACHE_READ_MULTIPLIER = 0.1;
 
@@ -56,8 +69,8 @@ export function sessionUsage(usages: readonly UsageCounts[]): UsageCounts | null
 
 export interface ChatTotalLabel { text: string; title: string; ariaLabel: string }
 
-/** The header's chat total. Counts come only from live `usage` events (history rows carry none), so when some
- *  loaded or unloaded replies have no count the label says the total covers part of the chat, never "This chat". */
+/** The header's chat total. Counts come from live `usage` events and from persisted `metadata.tokenUsage` on
+ *  history rows; when some loaded/unloaded replies have no count the label says the total covers part of the chat. */
 export function chatTotalLabel(messages: readonly { role: string; status?: string; usage?: UsageCounts }[], hasMoreOlder: boolean): ChatTotalLabel | null {
   const replies = messages.filter((m) => m.role === "assistant" && m.status !== "streaming");
   const total = sessionUsage(replies.flatMap((m) => (m.usage ? [m.usage] : [])));

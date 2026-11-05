@@ -36,6 +36,7 @@ test("a turn streams to completion, sends the right body, and persists both side
   await tick(5);
   const rows = await msgs(store, "a");
   assert.deepEqual(rows.map((r) => [r.role, r.content]), [["user", "hi there"], ["assistant", "Hello world"]]);
+  assert.deepEqual(rows[1].meta?.tokenUsage, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 40000, cacheCreationTokens: 8000 });
 });
 
 test("switching chats never touches a running turn (background sessions)", async () => {

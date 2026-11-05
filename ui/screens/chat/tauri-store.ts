@@ -10,6 +10,7 @@
 // timestamps are Apple reference-date seconds (we convert to epoch seconds, as SessionSummary uses).
 import { CoreHttpError } from "./transport";
 import type { ChatStore, ListHealth, MessagePage, SessionSummary, StoredMessage } from "./store";
+import { decodeUsage } from "./usage";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -105,13 +106,22 @@ const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 export function fromFileMessage(m: unknown, index: number): StoredMessage {
   const o = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
   const role = o.role === "user" || o.role === "assistant" ? o.role : "system";
-  return { seq: index + 1, role, content: asString(o.content), meta: null, createdAt: typeof o.createdAt === "number" ? toEpoch(o.createdAt) : 0 };
+  const metadata = o.metadata && typeof o.metadata === "object" ? o.metadata as Record<string, unknown> : null;
+  const usage = decodeUsage(metadata?.tokenUsage);
+  return { seq: index + 1, role, content: asString(o.content), meta: usage ? { tokenUsage: usage } : null, createdAt: typeof o.createdAt === "number" ? toEpoch(o.createdAt) : 0 };
 }
 
 /** A new message in the Mac `ChatMessage` shape (extra keys are kept verbatim by the host and ignored by the Mac). */
 export function toFileMessage(msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }, nowMs: number): Record<string, unknown> {
   const stopped = msg.meta?.status === "aborted";
-  return { id: newChatId(), role: msg.role, content: msg.content, status: stopped ? "stopped" : "done", toolSteps: [], createdAt: toApple(nowMs) };
+  const metadata: Record<string, unknown> = {};
+  if (msg.role === "assistant" && typeof msg.meta?.mode === "string" && msg.meta.mode) metadata.mode = msg.meta.mode;
+  const usage = decodeUsage(msg.meta?.tokenUsage);
+  if (usage) metadata.tokenUsage = usage;
+  return {
+    id: newChatId(), role: msg.role, content: msg.content, status: stopped ? "stopped" : "done", toolSteps: [],
+    ...(Object.keys(metadata).length ? { metadata } : {}), createdAt: toApple(nowMs),
+  };
 }
 
 export interface TauriChatStoreOptions {

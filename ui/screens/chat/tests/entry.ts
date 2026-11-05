@@ -54,3 +54,5 @@ export * from "../badges/subagents";
 export * from "../ui-state";
 export * from "../DockHeader";
 export * from "../usage";
+
+export * from "../tauri-store";
