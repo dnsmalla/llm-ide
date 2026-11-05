@@ -21,6 +21,28 @@ async function api(path, body) {
   return data;
 }
 const supported = () => window.PublicKeyCredential && navigator.credentials;
+let passkeyTimeout = null;
+const browserName = () => {
+  const ua = navigator.userAgent;
+  if (/CriOS/i.test(ua)) return 'Chrome on iOS';
+  if (/FxiOS/i.test(ua)) return 'Firefox on iOS';
+  if (/EdgiOS/i.test(ua)) return 'Edge on iOS';
+  if (/Safari/i.test(ua) && !/Chrome|Chromium|Edg/i.test(ua)) return 'Safari';
+  if (/Chrome|Chromium|Edg/i.test(ua)) return 'Chrome/Edge';
+  if (/Firefox/i.test(ua)) return 'Firefox';
+  return 'this browser';
+};
+async function showPasskeySupport() {
+  const el = $('support');
+  if (!el) return;
+  if (!supported()) { el.textContent = `Passkeys are not available in ${browserName()}. Use Safari or Chrome on a device with a platform passkey.`; return; }
+  try {
+    const uv = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
+    el.textContent = uv
+      ? 'This device has a platform passkey authenticator (Touch ID, Face ID or Windows Hello).'
+      : 'No platform passkey authenticator was found. You may still use a security key, or enable iCloud Keychain / Windows Hello.';
+  } catch { el.textContent = 'Could not check passkey support in this browser.'; }
+}
 
 let registration = null;
 
@@ -39,7 +61,17 @@ async function createPasskey() {
     user: { ...pk.user, id: toBytes(pk.user.id) },
     excludeCredentials: (pk.excludeCredentials || []).map((c) => ({ ...c, id: toBytes(c.id) })),
   };
-  const credential = await navigator.credentials.create({ publicKey });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let credential;
+  try {
+    credential = await navigator.credentials.create({ publicKey, signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      throw new Error(`No passkey prompt appeared in ${browserName()}. Use Safari or Chrome on this device, enable iCloud Keychain / Windows Hello, and avoid in-app browsers.`);
+    }
+    throw e;
+  } finally { clearTimeout(timer); }
   const response = {
     id: credential.id, rawId: toB64(credential.rawId), type: credential.type,
     response: {
@@ -117,6 +149,7 @@ async function account() {
 
 const page = document.body.dataset.page;
 if (page === 'signup') {
+  void showPasskeySupport();
   $('signup-form').addEventListener('submit', signup);
   $('register').addEventListener('click', async () => {
     const button = $('register');
