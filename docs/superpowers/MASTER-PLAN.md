@@ -245,15 +245,15 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Public accounts, sub-project 4: iPhone and web clients sign in with a passkey, wait for desktop approval and talk to the desktop through the relay (me) **Retired 2026-11-05 by ADR 0020** (phone and web use the sync tiers SP3/SP4).
 - [ ] Public accounts, sub-project 5, launch gates: external security review (D9), terms and privacy policy (minimum age 16), an email provider with SPF/DKIM/DMARC, DNS for `accounts.` and `app.llm-ide.com`, then open sign-up (you) **Retired 2026-11-05 by ADR 0020** (no public sign-up; no external review needed for personal sync).
 - [ ] **Encrypted sync, ADR 0020 (proposed 2026-11-05, user decision):** the phone and web keep working with the desktop off by reading encrypted snapshots of the desktop's own data and queueing prompts, stored on the user's own server (SFTP, first), Box or MEGA behind one `SyncStore` interface; the desktop needs no login; no AI runs with the desktop off. Spec `specs/2026-11-05-box-encrypted-sync-design.md`, research `research/2026-11-05-offline-desktop-research.md` (me)
-- [ ] Sync SP1, desktop producer: `SyncStore` + memory + SFTP adapter, sync v1 envelope and vectors, keys in the vault, snapshot producer, inbox consumer at the read-only ceiling, Settings card, server setup (plan `plans/2026-11-05-box-sync-desktop-producer.md`, 10 tasks) (me)
+- [ ] Sync SP1, desktop producer: `SyncStore` + memory + **MEGA adapter first (user decision)**, sync v1 envelope and vectors, keys in the vault, snapshot producer, inbox consumer at the read-only ceiling, MEGA Settings card (plan `plans/2026-11-05-box-sync-desktop-producer.md`, 9 tasks) (me)
 - [ ] Sync SP2, enrollment and device registry: QR sync fields, slot flow with SAS, per-device wrap, revoke, rotate (me)
 - [ ] Sync SP3, web app sync tier: read views with staleness, queued prompt and reply (me)
 - [ ] Sync SP4, iPhone sync tier (me)
-- [ ] Sync SP5, Box adapter (desktop and devices) (me)
-- [ ] Sync SP6, MEGA adapter, opt-in with a dedicated MEGA account (me)
+- [ ] Sync SP5, own-server SFTP adapter (me)
+- [ ] Sync SP6, Box adapter (desktop and devices) (me)
 - [ ] Sync SP7, direct reads of Box documents and GitLab code from the phone and web (me)
 - [ ] Sync SP8, park and retire: ADR 0019 superseded header, production refusal for `ACCOUNTS_RELAY` and the account service, nginx accounts vhost off, site copy (me)
-- [ ] Sync setup on your server: the SSH user and nginx location from the SP1 setup doc, then pin the host key in Settings (you)
+- [ ] Sync setup: create a separate MEGA account just for LLM-IDE (two-factor off on that account only) and enter it in Settings, Sync (you)
 - [~] Public LLM-IDE site: marketing pages under `marketing/` with a guide and product tour, and the web app mounted at `/app` (`77e5df3e`, `2ca46173`, `d72b4324`); PWA tests and asset pruning fixed for the `/app` base path (`03fa55c3`) (me)
 
 ## S5. Chrome extension
