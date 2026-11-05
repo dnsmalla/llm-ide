@@ -18,6 +18,78 @@ function decodeCloud(v: unknown): CloudAccount {
   return { signedIn: r.signed_in === true, email: typeof r.email === "string" ? r.email : null };
 }
 
+
+interface LinkRequest {
+  requestId: string;
+  state: string;
+  kind: string;
+  label: string;
+  sas: string | null;
+  commitmentOk: boolean | null;
+}
+
+function decodeLinkRequests(v: unknown): LinkRequest[] {
+  const array = Array.isArray(v) ? v : [];
+  return array.flatMap((raw) => {
+    const r = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    if (typeof r.requestId !== "string" || typeof r.state !== "string") return [];
+    return [{
+      requestId: r.requestId,
+      state: r.state,
+      kind: typeof r.kind === "string" ? r.kind : "device",
+      label: typeof r.label === "string" ? r.label : "Device",
+      sas: typeof r.sas === "string" ? r.sas : null,
+      commitmentOk: typeof r.commitmentOk === "boolean" ? r.commitmentOk : null,
+    }];
+  });
+}
+
+function LinkRequests() {
+  const [requests, setRequests] = useState<LinkRequest[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    invokeHost<unknown>("account_link_requests").then((v) => { setRequests(decodeLinkRequests(v)); setError(null); },
+      (e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 4000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const act = async (request: LinkRequest, action: "approve" | "deny" | "confirm") => {
+    setBusy(`${request.requestId}:${action}`); setError(null);
+    try {
+      await invokeHost(`account_link_${action}`, { requestId: request.requestId });
+      load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  };
+  if (error) return <ErrorText text={error} />;
+  if (requests.length === 0) return <p className="st-hint">No phone or browser is waiting to link.</p>;
+  return (
+    <div className="st-stack" aria-live="polite">
+      {requests.map((r) => (
+        <div className="st-dialog" key={r.requestId} aria-label={`Link request from ${r.label}`}>
+          <strong>{r.label}</strong> <span className="st-hint">wants to link as {r.kind}</span>
+          {r.commitmentOk === false ? <ErrorText text="The device's keys do not match its commitment. Deny this request." /> : null}
+          {r.state === "keys" && r.sas ? (
+            <>
+              <p className="st-hint">Compare this code with the one shown on the device. Only confirm if they match.</p>
+              <p className="link-sas" style={{ fontSize: 24, letterSpacing: ".2em", fontWeight: 700 }}>{r.sas}</p>
+            </>
+          ) : r.state === "approved" ? <p className="st-hint">Waiting for the device's keys…</p> : <p className="st-hint">Approve only if you started this link.</p>}
+          <div className="st-row">
+            {r.state === "pending" ? <Button tone="primary" disabled={busy !== null} onClick={() => void act(r, "approve")}>Allow</Button> : null}
+            {r.state === "keys" && r.commitmentOk ? <Button tone="primary" disabled={busy !== null} onClick={() => void act(r, "confirm")}>Codes match — confirm</Button> : null}
+            {r.state !== "keys" ? <Button disabled={busy !== null} onClick={() => void act(r, "deny")}>Deny</Button> : <Button disabled={busy !== null} onClick={() => void act(r, "deny")}>Deny</Button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CloudAccountCard() {
   const [status, setStatus] = useState<CloudAccount | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +135,7 @@ function CloudAccountCard() {
         <div className="st-stack">
           <p><span className="st-label">Signed in as </span>{status.email ?? "this account"}</p>
           <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void register(false)}>Register this desktop</Button><Button disabled={busy} onClick={() => void signOut()}>Sign out of LLM-IDE</Button></div>
+          <div className="st-stack"><span className="st-label">Device linking</span><LinkRequests /></div>
           {offerReplace ? (
             <div className="st-stack">
               <p className="st-hint">Replacing signs out the old desktop and unlinks every phone and browser. You sign in with your passkey again first.</p>

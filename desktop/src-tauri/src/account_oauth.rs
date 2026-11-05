@@ -334,6 +334,154 @@ fn hostname_label() -> String {
     std::env::var("HOSTNAME").ok().filter(|v| !v.trim().is_empty()).map(|v| v.trim().chars().take(80).collect()).unwrap_or_else(|| "LLM-IDE desktop".into())
 }
 /// Webview-visible: a boolean and the display email; never a token.
+
+/// A pending link request as the Settings card sees it. Only public values and the SAS-derived code;
+/// no token, no private key, no account password.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkRequest {
+    pub request_id: String,
+    pub state: String,
+    pub kind: String,
+    pub label: String,
+    pub sas: Option<String>,
+    pub commitment_ok: Option<bool>,
+}
+
+fn b64url_bytes(value: &str) -> Result<Vec<u8>, String> {
+    URL_SAFE_NO_PAD.decode(value).map_err(|_| "The link request contained an invalid key.".to_string())
+}
+
+fn link_commitment(signing_key: &str, ecdh_key: &str, nonce: &str) -> Result<String, String> {
+    let mut h = Sha256::new();
+    h.update(b"llmide/link/commit/v1");
+    h.update(b64url_bytes(signing_key)?);
+    h.update(b64url_bytes(ecdh_key)?);
+    h.update(b64url_bytes(nonce)?);
+    Ok(URL_SAFE_NO_PAD.encode(h.finalize()))
+}
+
+fn link_sas(signing_key: &str, ecdh_key: &str, desktop_signing_key: &str, device_nonce: &str, desktop_nonce: &str) -> Result<String, String> {
+    let mut h = Sha256::new();
+    h.update(b"llmide/link/sas/v1");
+    for value in [signing_key, ecdh_key, desktop_signing_key, device_nonce, desktop_nonce] {
+        h.update(b64url_bytes(value)?);
+    }
+    let digest = h.finalize();
+    let n = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
+    Ok(format!("{n:06}"))
+}
+
+fn account_json(origin: &Url, path: &str, method: &str, access: &str, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let url = format!("{origin}{path}");
+    let mut req = match method {
+        "GET" => ureq::get(&url),
+        "POST" => ureq::post(&url),
+        _ => return Err("unsupported account request".into()),
+    };
+    req = req.set("authorization", &format!("Bearer {access}"));
+    let response = match body {
+        Some(value) => req.set("content-type", "application/json").send_string(&value.to_string()),
+        None => req.call(),
+    };
+    let text = match response {
+        Ok(r) => r.into_string().map_err(|e| format!("cannot read the account reply: {e}"))?,
+        Err(ureq::Error::Status(code, r)) => {
+            let detail = r.into_string().unwrap_or_default();
+            let code = serde_json::from_str::<serde_json::Value>(&detail).ok()
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+                .unwrap_or_else(|| format!("account request failed ({code})"));
+            return Err(match code.as_str() {
+                "desktop_missing" => "Register this desktop before approving a phone or browser.".into(),
+                "not_approved" => "The desktop has not approved this request yet.".into(),
+                "not_ready" => "The device has not revealed its keys yet. Refresh in a moment.".into(),
+                "already_linked" => "This device is already linked.".into(),
+                "commitment_mismatch" => "The device's keys do not match the request commitment.".into(),
+                _ => code,
+            });
+        }
+        Err(e) => return Err(format!("cannot reach the account service: {e}")),
+    };
+    serde_json::from_str(&text).map_err(|_| "the account service returned an invalid link reply".to_string())
+}
+
+fn link_requests_blocking() -> Result<Vec<LinkRequest>, String> {
+    let origin = origin()?;
+    let backend = store()?;
+    let access = access_token(&origin, backend.as_ref())?;
+    let desktop = device_keys(backend.as_ref())?;
+    let reply = account_json(&origin, "v1/link/requests", "GET", &access, None)?;
+    let items = reply.get("requests").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let get = |key: &str| item.get(key).and_then(|v| v.as_str()).map(str::to_string);
+        let state = get("state").unwrap_or_default();
+        let signing = get("signingKey");
+        let ecdh = get("ecdhKey");
+        let device_nonce = get("deviceNonce");
+        let desktop_nonce = get("desktopNonce");
+        let commitment = get("commitment");
+        let mut sas = None;
+        let mut commitment_ok = None;
+        if let (Some(signing), Some(ecdh), Some(device_nonce), Some(desktop_nonce), Some(commitment)) = (&signing, &ecdh, &device_nonce, &desktop_nonce, &commitment) {
+            let ok = link_commitment(signing, ecdh, device_nonce)?.as_str() == commitment.as_str();
+            commitment_ok = Some(ok);
+            if ok {
+                sas = Some(link_sas(signing, ecdh, &desktop.signing_public, device_nonce, desktop_nonce)?);
+            }
+        }
+        out.push(LinkRequest {
+            request_id: get("requestId").unwrap_or_default(),
+            state: if state == "unlinked" { "unlinked".into() } else { state },
+            kind: get("kind").unwrap_or_default(),
+            label: get("label").unwrap_or_default(),
+            sas,
+            commitment_ok,
+        });
+    }
+    Ok(out)
+}
+
+fn link_action_blocking(request_id: String, action: &str) -> Result<(), String> {
+    let origin = origin()?;
+    let backend = store()?;
+    let access = access_token(&origin, backend.as_ref())?;
+    let body = match action {
+        "approve" => serde_json::json!({ "requestId": request_id, "desktopNonce": random_urlsafe(32)? }),
+        _ => serde_json::json!({ "requestId": request_id }),
+    };
+    account_json(&origin, &format!("v1/link/requests/{action}"), "POST", &access, Some(body))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn account_link_requests() -> Result<Vec<LinkRequest>, String> {
+    tauri::async_runtime::spawn_blocking(link_requests_blocking)
+        .await
+        .map_err(|e| format!("account task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn account_link_approve(request_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || link_action_blocking(request_id, "approve"))
+        .await
+        .map_err(|e| format!("account task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn account_link_deny(request_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || link_action_blocking(request_id, "deny"))
+        .await
+        .map_err(|e| format!("account task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn account_link_confirm(request_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || link_action_blocking(request_id, "confirm"))
+        .await
+        .map_err(|e| format!("account task failed: {e}"))?
+}
+
 #[tauri::command]
 pub async fn account_status() -> Result<AccountStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -446,4 +594,17 @@ mod tests {
         b.delete(PROFILE_ACCOUNT).unwrap();
         assert!(!status_from(&b).unwrap().signed_in);
     }
+    /// Pins the linking bytes the service checks: raw SPKI DER + nonce, not the base64url text.
+    #[test]
+    fn link_commitment_and_sas_match_the_service_vector() {
+        let signing = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIJ7JKU7uML0jWaO0HouA-rF2Q-N2ElkshbKon2bZ5OiMrS5-SImMneH5FPDSR2PRm49CTpACSI-igZGEq6JPBw";
+        let ecdh = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEy-roH-xmwlElK-Hr6ZCG9WMBsiYaSwzoHuWryhyfeOFxeM5FZOKdoMiEGf91_ZrEIg9V20v5SvZshr-CGGNMsA";
+        let desktop = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nQPwarzYqTh25KMR87RTq2QDrTj0ZzBHC4jcUQiHs9WmgwuoN6X6XpUjq_VgH23HZ66bKOKkvcnB4IwRL043Q";
+        let nd = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+        let nk = "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk";
+        assert_eq!(link_commitment(signing, ecdh, nd).unwrap(), "Hmrt1CRsIXMxjpr927_sWlrOJCGQnyetTtwFVEXZlFg");
+        assert_eq!(link_sas(signing, ecdh, desktop, nd, nk).unwrap(), "954028");
+        assert!(link_commitment("not-a-key", ecdh, nd).is_err());
+    }
+
 }

@@ -16,8 +16,9 @@ import { recoveryRoutes } from './routes/recovery.mjs';
 import { accountRoutes } from './routes/account.mjs';
 import { oauthRoutes } from './routes/oauth.mjs';
 import { desktopRoutes, deviceRoutes } from './routes/desktop.mjs';
+import { linkingRoutes } from './routes/linking.mjs';
 
-const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes, deviceRoutes];
+const ROUTE_GROUPS = [healthRoutes, signupRoutes, passkeyRoutes, signinRoutes, recoveryRoutes, accountRoutes, oauthRoutes, desktopRoutes, deviceRoutes, linkingRoutes];
 
 export function createApp({ config, db, mailer = null, webauthn = null, now = Date.now }) {
   const ctx = { config, db, mailer, webauthn, now };
