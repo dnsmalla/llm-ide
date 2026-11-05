@@ -108,3 +108,24 @@ test('a folder deleted during a turn gets no reply written into it', async () =>
   await drainOnce({ userId: u, store, now: T + 30, deps });
   assert.deepEqual(under(store, `${sid}/d/${a.pair.dir}/`), []);
 });
+
+test('storage that fails or hangs the folder delete cannot keep a revoked device registered (review I-1)', async () => {
+  const { withTimeouts } = await import('../connectors/sync-store/index.mjs');
+  const { u, store } = setup();
+  const a = await enrolled(u, store, 'A');
+  const failing = { ...store, removeTree: async () => { throw Object.assign(new Error('nope'), { code: 'EACCES' }); } };
+  assert.equal(await revokeDevice(u, a.deviceId, { store: failing }), true);
+  assert.deepEqual(st.listSyncDevices(u), [], 'the row is gone even though storage refused the delete');
+  const b = await enrolled(u, store, 'B');
+  const hanging = withTimeouts({ ...store, removeTree: () => new Promise(() => {}) }, 50);
+  assert.equal(await revokeDevice(u, b.deviceId, { store: hanging }), true, 'a hung delete times out instead of holding the lock');
+  assert.deepEqual(st.listSyncDevices(u), []);
+});
+
+test('withTimeouts rejects a hung store call with SYNC_TIMEOUT and passes normal calls through', async () => {
+  const { withTimeouts } = await import('../connectors/sync-store/index.mjs');
+  const s = withTimeouts({ get: () => new Promise(() => {}), list: async () => ['ok'], describe: () => ({ kind: 'x' }) }, 30);
+  await assert.rejects(s.get('a'), (e) => e.code === 'SYNC_TIMEOUT');
+  assert.deepEqual(await s.list('a'), ['ok']);
+  assert.deepEqual(s.describe(), { kind: 'x' }, 'non-I/O methods are kept');
+});

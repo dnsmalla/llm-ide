@@ -6,6 +6,7 @@ import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
+import { withTimeouts } from '../../connectors/sync-store/index.mjs';
 import { publishOnce } from './producer.mjs';
 import { rotateKeys } from './keys.mjs';
 import { drainOnce, sweepStuckRequests } from './consumer.mjs';
@@ -39,7 +40,7 @@ export function storeFor(userId) {
   const email = getSecret(db, userId, 'sync.megaEmail');
   const password = getSecret(db, userId, 'sync.megaPassword');
   if (!email || !password) return null;
-  const store = createMegaStore(state.storeConfig, { email, password });
+  const store = withTimeouts(createMegaStore(state.storeConfig, { email, password }));
   stores.set(userId, store);
   return store;
 }

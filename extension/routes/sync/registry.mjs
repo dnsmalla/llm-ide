@@ -1,5 +1,5 @@
-// The desktop's local device registry is the only registry (design 5.2 step 4). Revoke = delete the device folder, then
-// the row (the caller rotates). A registered device whose wrap was written at this location (wrapEpoch > 0) and whose
+// The desktop's local device registry is the only registry (design 5.2 step 4). Revoke = drop the row first, then delete
+// the folder best-effort (the caller rotates): storage that fails or hangs the delete cannot keep a device registered. A registered device whose wrap was written at this location (wrapEpoch > 0) and whose
 // folder has no key.bin was deleted on the storage with the desktop off (spec Q10): drop it, say so, never recreate it.
 import { getSyncState, listSyncDevices, deleteSyncDevice } from '../../kb/sync-state.mjs';
 import { recordActivity } from '../../kb/activity.mjs';
@@ -10,8 +10,11 @@ export async function revokeDevice(userId, deviceId, { store }) {
   const state = getSyncState(userId);
   const dev = state && listSyncDevices(userId).find((d) => d.deviceId === deviceId);
   if (!dev) return false;
-  if (store) await store.removeTree(`${state.syncId}/d/${dev.dir}`);
-  return deleteSyncDevice(userId, deviceId);
+  const removed = deleteSyncDevice(userId, deviceId);
+  // Best-effort: a leftover folder only holds keys for epochs the device already had; the rotation that follows
+  // means no new snapshot is wrapped to it.
+  if (store) { try { await store.removeTree(`${state.syncId}/d/${dev.dir}`); } catch { /* storage refused or timed out */ } }
+  return removed;
 }
 
 export async function pruneMissingDevices(userId, { store }) {

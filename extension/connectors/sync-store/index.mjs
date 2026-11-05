@@ -17,6 +17,24 @@ export function checkSize(bytes) {
   if (Buffer.byteLength(bytes) > MAX_FILE_BYTES) throw err('SYNC_TOO_LARGE', 'Sync file too large');
 }
 
+export const STORE_OP_TIMEOUT_MS = 30_000;
+
+/**
+ * Every store call rejects with SYNC_TIMEOUT after `ms`, so a hung storage call cannot hold the per-user lock (and block
+ * revoke) forever. shortcut: the underlying request is not cancelled and may still finish late; add cancellation if an
+ * adapter exposes it.
+ */
+export function withTimeouts(store, ms = STORE_OP_TIMEOUT_MS) {
+  const wrap = (fn) => (...args) => {
+    let timer;
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(err('SYNC_TIMEOUT', 'Sync storage did not answer in time')), ms); });
+    return Promise.race([fn(...args), timeout]).finally(() => clearTimeout(timer));
+  };
+  const out = { ...store };
+  for (const k of ['put', 'get', 'list', 'remove', 'removeTree']) if (typeof store[k] === 'function') out[k] = wrap(store[k].bind(store));
+  return out;
+}
+
 /** In-memory adapter for tests. */
 export function createMemoryStore() {
   const files = new Map(); // path -> { bytes, mtimeMs }
