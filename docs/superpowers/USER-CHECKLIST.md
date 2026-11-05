@@ -34,7 +34,7 @@ Cost note: the repo has no measured dollar cost. The how-to's estimate is 1.2 to
 
 ## B. Manual app checks (about 30 minutes)
 
-Before you start: quit any server on port 3456 (`lsof -nP -iTCP:3456 -sTCP:LISTEN`, then `kill <pid>`), then `open /Users/dinsmallade/llm-ide/mac/LlmIdeMac.app`. Your data is already in `~/Library/Application Support/llm-ide/system/`. Safe mode: `defaults write com.llmide.macapp lta.mode shadow` (or the Settings → Agent history control).
+Before you start: quit any server on port 3456 (`lsof -nP -iTCP:3456 -sTCP:LISTEN`, then `kill <pid>`), build the app with `mac/build_app.sh` (the bundle is a build output and may be absent), then `open /Users/dinsmallade/llm-ide/mac/LlmIdeMac.app`. Your data is already in `~/Library/Application Support/llm-ide/system/`. Safe mode: `defaults write com.llmide.macapp lta.mode shadow` (or the Settings → Agent history control).
 
 1. **Basics:** meetings list, chats, settings, the OS page, the Storage hub, Settings → Agent history all load.
 2. **Providers (Settings):** your DeepSeek key appears as a connection (migrated from the built-in key; the old key is kept). Press Test; the model list loads.
