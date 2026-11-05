@@ -46,6 +46,8 @@
     "allow-account-link-approve",
     "allow-account-link-deny",
     "allow-account-link-confirm",
+    "allow-relay-status",
+    "allow-relay-set-enabled",
     "allow-read-graph-file",
     "allow-project-open",
     "allow-project-open-recent",

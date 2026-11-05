@@ -2,6 +2,12 @@
 //! signing key, desktop-side verification of every envelope against the LOCAL registry, one loopback bridge session
 //! per device session. Off by default (registry.enabled); off means no outbound traffic at all.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::{Message, WebSocket};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -12,6 +18,7 @@ use sha2::{Digest, Sha256};
 
 use super::crypto::{self, Envelope, Header, KEY_MESSAGE_CAP};
 use super::registry::Registry;
+use crate::secrets::SecretBackend;
 
 const SKEW_MS: u64 = 10 * 60_000;
 const MAX_SESSIONS: usize = 4;
@@ -161,4 +168,187 @@ mod tests {
         assert!(eb.seq > ea.seq && ea.seq >= 1);
         assert_eq!(crypto::open(&ea, &rp, d.signer.verifying_key()).unwrap(), b"{\"r\":1}");
     }
+}
+
+
+pub struct ClientConfig {
+    pub relay_url: String,
+    pub core_url: String,
+    pub store: Box<dyn SecretBackend>,
+    pub token: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
+    pub signer: SigningKey,
+    pub signing_spki: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, PartialEq, Eq)]
+pub struct RelayStatus { pub connected: bool, pub devices_online: usize }
+
+pub struct RelayHandle {
+    stop: Arc<AtomicBool>,
+    status: Arc<Mutex<RelayStatus>>,
+}
+
+impl RelayHandle {
+    pub fn stop(&self) { self.stop.store(true, Ordering::SeqCst); }
+    pub fn status(&self) -> RelayStatus { self.status.lock().map(|s| s.clone()).unwrap_or_default() }
+}
+
+impl Drop for RelayHandle {
+    fn drop(&mut self) { self.stop(); }
+}
+
+fn read_timeout(ws: &WebSocket<MaybeTlsStream<std::net::TcpStream>>) {
+    let t = Some(Duration::from_millis(50));
+    match ws.get_ref() {
+        MaybeTlsStream::Plain(s) => { let _ = s.set_read_timeout(t); }
+        MaybeTlsStream::Rustls(s) => { let _ = s.get_ref().set_read_timeout(t); }
+        _ => {}
+    }
+}
+
+fn socket<'a>(ws: &'a mut WebSocket<MaybeTlsStream<std::net::TcpStream>>) -> &'a mut WebSocket<MaybeTlsStream<std::net::TcpStream>> { ws }
+
+fn send_text(ws: &mut WebSocket<MaybeTlsStream<std::net::TcpStream>>, text: String) -> Result<(), ()> {
+    ws.send(Message::text(text)).map_err(|_| ())
+}
+
+fn send_env(ws: &mut WebSocket<MaybeTlsStream<std::net::TcpStream>>, env_json: &str) -> Result<(), ()> {
+    send_text(ws, format!("{{\"t\":\"env\",\"env\":{env_json}}}"))
+}
+
+fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
+
+fn connect(cfg: &ClientConfig) -> Result<(WebSocket<MaybeTlsStream<std::net::TcpStream>>, Desktop, HashMap<String, (String, super::bridge::BridgeSession)>, String), String> {
+    let mut reg = super::registry::load(cfg.store.as_ref())?;
+    if !reg.enabled { return Err("relay is off".into()); }
+    if reg.desktop_id.is_empty() { return Err("register this desktop first".into()); }
+    let mut ws = tungstenite::connect(cfg.relay_url.as_str()).map_err(|e| format!("relay connect: {e}"))?.0;
+    #[allow(unused_braces)]
+    { read_timeout(&ws); }
+    // challenge
+    let challenge = loop {
+        match ws.read() {
+            Ok(Message::Text(t)) => {
+                let v: serde_json::Value = serde_json::from_str(&t).map_err(|_| "bad relay challenge")?;
+                if v["t"] == "challenge" { break v["nonce"].as_str().ok_or("bad challenge")?.to_string(); }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(format!("relay challenge: {e}")),
+        }
+    };
+    let token = (cfg.token)().map_err(|e| format!("relay token: {e}"))?;
+    let proof = auth_proof(&cfg.signer, &challenge, &token);
+    send_text(&mut ws, serde_json::json!({ "t": "auth", "token": token, "proof": proof }).to_string()).map_err(|_| "relay auth")?;
+    loop {
+        match ws.read() {
+            Ok(Message::Text(t)) => {
+                let v: serde_json::Value = serde_json::from_str(&t).map_err(|_| "bad relay ready")?;
+                match v["t"].as_str() {
+                    Some("ready") => {
+                        if v["role"] != "desktop" || v["userId"].as_str() != Some(reg.user_id.as_str()) || v["desktopId"].as_str() != Some(reg.desktop_id.as_str()) {
+                            return Err("relay identity mismatch".into());
+                        }
+                        break;
+                    }
+                    Some("err") => return Err(format!("relay refused auth: {}", v["code"].as_str().unwrap_or("unknown"))),
+                    _ => {}
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(format!("relay ready: {e}")),
+        }
+    }
+    let mut bridges = HashMap::new();
+    // pending wraps
+    for d in &reg.devices {
+        if let Some(w) = &d.wrap { let _ = send_env(&mut ws, w); }
+    }
+    reg.enabled = true;
+    Ok((ws, Desktop::new(reg, cfg.signer.clone()), bridges, challenge))
+}
+
+fn run_loop(cfg: ClientConfig, status: Arc<Mutex<RelayStatus>>, stop: Arc<AtomicBool>) {
+    let mut backoff = 1u64;
+    while !stop.load(Ordering::SeqCst) {
+        match connect(&cfg) {
+            Ok((mut ws, mut desktop, mut bridges, challenge)) => {
+                if let Ok(mut s) = status.lock() { s.connected = true; s.devices_online = 0; }
+                let mut last_auth = now_ms();
+                backoff = 1;
+                loop {
+                    if stop.load(Ordering::SeqCst) { break; }
+                    // pump core → relay
+                    for (session, (device, bridge)) in bridges.iter() {
+                        while let Some(frame) = bridge.try_recv() {
+                            if let Some(env) = desktop.reply(device, session, &frame, now_ms()) { let _ = send_text(&mut ws, env); }
+                        }
+                    }
+                    if now_ms().saturating_sub(last_auth) > 9 * 60_000 {
+                        if let Ok(token) = (cfg.token)() {
+                            let proof = auth_proof(&cfg.signer, &challenge, &token);
+                            let _ = send_text(&mut ws, serde_json::json!({ "t": "auth", "token": token, "proof": proof }).to_string());
+                        }
+                        last_auth = now_ms();
+                    }
+                    match ws.read() {
+                        Ok(Message::Text(t)) => {
+                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else { break; };
+                            match v["t"].as_str() {
+                                Some("ping") => { let _ = send_text(&mut ws, "{\"t\":\"pong\"}".into()); }
+                                Some("env") => {
+                                    let Ok(env) = serde_json::from_value::<Envelope>(v["env"].clone()) else { continue; };
+                                    let outs = desktop.on_env(env, now_ms());
+                                    let _ = super::registry::save(cfg.store.as_ref(), &desktop.reg);
+                                    for out in outs {
+                                        match out {
+                                            Out::Relay(t) => { let _ = send_text(&mut ws, t); }
+                                            Out::Bridge { session, frame, .. } => { if let Some((_, b)) = bridges.get(&session) { let _ = b.send(&frame); } }
+                                            Out::OpenBridge { device, session, tier } => {
+                                                if let Ok(b) = super::bridge::BridgeSession::connect(&cfg.core_url, &tier) {
+                                                    bridges.insert(session, (device, b));
+                                                }
+                                            }
+                                            Out::CloseDevice(device) => {
+                                                for (_, (d, _)) in bridges.iter().filter(|(_, (d, _))| d == &device) { let _ = d; }
+                                                let gone: Vec<String> = bridges.iter().filter(|(_, (d, _))| d == &device).map(|(k, _)| k.clone()).collect();
+                                                for k in gone { bridges.remove(&k); }
+                                            }
+                                        }
+                                    }
+                                    if let Ok(mut s) = status.lock() { s.devices_online = bridges.len(); }
+                                }
+                                Some("peer") if v["online"] == false => {
+                                    if let Some(id) = v["id"].as_str() {
+                                        let gone = desktop.drop_device(id);
+                                        for k in gone { bridges.remove(&k); }
+                                        if let Ok(mut s) = status.lock() { s.devices_online = bridges.len(); }
+                                    }
+                                }
+                                Some("err") => break,
+                                _ => {}
+                            }
+                        }
+                        Ok(Message::Close(_)) | Err(tungstenite::Error::ConnectionClosed) => break,
+                        Ok(_) => {}
+                        Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        if let Ok(mut s) = status.lock() { s.connected = false; s.devices_online = 0; }
+        if stop.load(Ordering::SeqCst) { break; }
+        let jitter = (rand_core::OsRng.next_u32() % 21) as u64;
+        std::thread::sleep(Duration::from_secs(backoff + jitter / 10));
+        backoff = (backoff * 2).min(60);
+    }
+}
+
+pub fn start(cfg: ClientConfig) -> RelayHandle {
+    let status = Arc::new(Mutex::new(RelayStatus::default()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = status.clone(); let st = stop.clone();
+    std::thread::spawn(move || run_loop(cfg, s, st));
+    RelayHandle { stop, status }
 }

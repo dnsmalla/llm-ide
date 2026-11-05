@@ -248,6 +248,16 @@ pub(crate) fn relay_access_token() -> Result<String, String> {
     access_token(&o, backend.as_ref())
 }
 
+pub(crate) fn relay_store() -> Result<Box<dyn SecretBackend>, String> { store() }
+
+pub(crate) fn relay_url() -> Result<String, String> {
+    let mut u = origin()?;
+    let scheme = if u.scheme() == "https" { "wss" } else { "ws" };
+    u.set_scheme(scheme).map_err(|_| "bad relay scheme".to_string())?;
+    u.set_path("/relay/v1");
+    Ok(u.to_string())
+}
+
 fn ct_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() { return false; }

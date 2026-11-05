@@ -309,6 +309,8 @@ macro_rules! product_handlers {
                 account_oauth::account_link_approve,
                 account_oauth::account_link_deny,
                 account_oauth::account_link_confirm,
+                relay::relay_status,
+                relay::relay_set_enabled,
                 read_graph_file,
                 project::project_open,
                 project::project_open_recent,

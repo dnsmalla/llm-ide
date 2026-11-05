@@ -37,6 +37,8 @@ const COMMANDS: &[&str] = &[
     "account_link_approve",
     "account_link_deny",
     "account_link_confirm",
+    "relay_status",
+    "relay_set_enabled",
     "read_graph_file",
     "project_open",
     "project_open_recent",
