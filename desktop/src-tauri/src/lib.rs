@@ -548,6 +548,7 @@ pub fn run() {
             pty::kill_all();
             #[cfg(feature = "spike")]
             sse_replay::stop();
+            graph_gen::graph_cancel();
             crash_report::clear_own_on_clean_exit();
         }
         _ => {}

@@ -64,6 +64,17 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     setFatal(null);
     void store.load(projectRoot, graphCandidates(mode));
   }, [active, projectRoot, mode, store]);
+  // The host timer writes graph-code.json in the background; reload the active view when it reports a refresh.
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    let un: (() => void) | null = null;
+    void import("@tauri-apps/api/event").then(({ listen }) => listen("graph-auto-updated", () => {
+      loadedFor.current = null;
+      void store.load(projectRoot, graphCandidates(mode));
+    })).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
+    return () => { live = false; un?.(); };
+  }, [active, projectRoot, mode, store]);
   useEffect(() => () => store.cancel(), [store]);
   useEffect(() => {
     if (!projectRoot) { setRepos([]); setTarget(""); return; }

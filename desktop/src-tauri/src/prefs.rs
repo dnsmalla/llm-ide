@@ -342,7 +342,7 @@ pub struct PrefsView {
 fn view(stored: Prefs, persisted: bool) -> PrefsView {
     let launch = launch();
     // The theme applies at once; only the others need a restart.
-    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), ..stored.clone() } != launch;
+    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, ..stored.clone() } != launch;
     PrefsView { stored, launch, restart_needed, persisted }
 }
 

@@ -29,4 +29,3 @@ const make = (id: string): ComponentType => {
 
 export const MobileGroup = make("mobile");
 export const SelfHealGroup = make("self-heal");
-export const CodeGraphGroup = make("code-graph");

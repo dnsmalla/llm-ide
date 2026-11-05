@@ -204,7 +204,8 @@ pub fn auto_due(minutes: u32, elapsed_secs: u64) -> bool {
 }
 
 /// Background timer for Settings → Code Graph. It runs immediately on project open/switch and then every N
-/// minutes, regenerating the `all` graph (code + memory). File-watch debouncing stays Mac-only for now.
+/// minutes, regenerating the code graph (the screen's default mode). File-watch debouncing and the memory
+/// graph stay Mac-only for now.
 pub fn start_auto(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut last_root: Option<String> = None;
@@ -212,17 +213,23 @@ pub fn start_auto(app: tauri::AppHandle) {
         let mut last_run = Instant::now();
         loop {
             std::thread::sleep(Duration::from_secs(30));
+            let launch = crate::prefs::launch();
+            let enabled = launch.features.is_empty() || launch.features.iter().any(|f| f == "code_graph_3d");
             let minutes = crate::prefs::stored().graph_auto_update_minutes;
             if minutes != last_minutes { last_minutes = minutes; last_run = Instant::now(); }
-            if minutes == 0 { last_root = None; continue; }
+            if minutes == 0 || !enabled { last_root = None; continue; }
             let root = crate::project::active_root().map(|p| p.to_string_lossy().into_owned());
             let changed = root != last_root;
             if changed { last_root = root.clone(); last_run = Instant::now(); }
             if root.is_none() { continue; }
             if !changed && !auto_due(minutes, last_run.elapsed().as_secs()) { continue; }
+            if RUNNING.load(Ordering::SeqCst) { continue; }
+            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("code".into()), None));
             last_run = Instant::now();
-            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("all".into()), None));
-            if let Err(e) = result { eprintln!("graph auto-update: {e}"); }
+            match result {
+                Ok(_) => { let _ = tauri::Emitter::emit(&app, "graph-auto-updated", serde_json::json!({})); }
+                Err(e) => eprintln!("graph auto-update: {e}"),
+            }
         }
     });
 }
