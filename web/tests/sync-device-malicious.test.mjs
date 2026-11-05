@@ -6,7 +6,7 @@ import * as S from '../../extension/core/sync-envelope.mjs';
 import * as E from '../../extension/core/sync-enroll.mjs';
 import { createTamperStore } from './helpers/tamper-store.mjs';
 import { createFakeDesktop } from './helpers/fake-desktop.mjs';
-import { parsePair } from '../src/sync/enroll.ts';
+import { enrollKeys, parsePair } from '../src/sync/enroll.ts';
 import { startPairing, readAck, readFirstWrap, readSnapshot, sendRequest, readReply } from '../src/sync/device.ts';
 
 const T = 1_762_400_000_000;
@@ -47,13 +47,17 @@ test('an ack forged by storage, or replayed from an earlier slot, is refused and
     signingKey: rogue.privateKey, seq: 1, issuedAt: T });
   store.onGet = (p, b) => (p.endsWith('/ack.bin') ? bytesOf(forged) : b);
   await assert.rejects(readAck(store, e), refused('bad_signature'));
-  const old = await pairing();
-  await startPairing(old.store, old.pair, { name: 'Old', now: T });
-  await old.desk.take(T);
-  const oldAck = await old.store.inner.get(`${old.pair.sid}/e/${old.pair.slot}/ack.bin`);
-  store.onGet = (p, b) => (p.endsWith('/ack.bin') ? oldAck : b);
-  await assert.rejects(readAck(store, e), (err) => typeof err.code === 'string' && err.code.startsWith('bad_'));
   assert.equal(e.userId, null, 'nothing was taken from a refused ack');
+  // The same browser's ack from an earlier slot of the same desktop: only the session differs.
+  const same = await pairing();
+  const first = await startPairing(same.store, same.pair, { name: 'Browser', now: T });
+  await same.desk.take(T);
+  const oldAck = await same.store.inner.get(`${same.pair.sid}/e/${same.pair.slot}/ack.bin`);
+  const pair2 = parsePair(await same.desk.open(T));
+  const again = { ...first, pair: { ...pair2, es: '' }, keys: await enrollKeys(Buffer.from(pair2.es, 'base64url'), pair2.sid, pair2.slot) };
+  same.store.onGet = (p, x) => (p === `${pair2.sid}/e/${pair2.slot}/ack.bin` ? oldAck : x);
+  await assert.rejects(readAck(same.store, again), refused('bad_session'));
+  assert.equal(again.userId, null);
 });
 
 test('QR photographed + storage hides the real claim: the desktop acks the attacker, the browser refuses it', async () => {
