@@ -167,7 +167,7 @@ Endpoints with no client caller (72):
 | `/kb/ingest-scip` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:654` | - | - | tests only |
 | `/kb/ingest-code-graph` | ALL_ENDPOINTS | POST | token | code_graph_3d | `extension/routes/code-graph.mjs:21` | `LlmIdeAPIClient+CodeGraph.swift` | - | - |
 | `/kb/connect-github-issues` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:681` | - | `kb.ts` | - |
-| `/kb/repos/check-token` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:326` | - | - | tests only |
+| `/kb/repos/check-token` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:327` | - | - | tests only |
 | `/kb/connect-tickets-json` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:703` | - | - | comments/docs only |
 | `/kb/connect-qa` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1584` | - | `kb.ts` | - |
 | `/kb/email/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:723` | `LlmIdeAPIClient+Email.swift` | - | - |
