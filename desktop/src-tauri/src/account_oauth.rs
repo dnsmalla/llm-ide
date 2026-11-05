@@ -180,7 +180,7 @@ fn exchange(origin: &Url, code: &str, verifier: &str, redirect: &str) -> Result<
 }
 
 fn fetch_email(origin: &Url, tokens: &Tokens) -> Result<String, String> {
-    let response = ureq::get(&format!("{origin}v1/account"))
+    let response = ureq::get(&format!("{origin}v1/desktop/account"))
         .set("authorization", &format!("Bearer {}", tokens.access_token))
         .call();
     let body = match response {
@@ -196,11 +196,27 @@ fn sign_in_blocking() -> Result<AccountStatus, String> {
     let origin = origin()?;
     let (redirect, code, verifier) = authorize_and_wait(&origin)?;
     let tokens = exchange(&origin, &code, &verifier, &redirect)?;
-    let email = fetch_email(&origin, &tokens)?;
-    let backend = store()?;
-    backend.set(TOKENS_ACCOUNT, &serde_json::to_string(&tokens).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    backend.set(PROFILE_ACCOUNT, &serde_json::to_string(&Profile { email: email.clone() }).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(AccountStatus { signed_in: true, email: Some(email) })
+    let stored = fetch_email(&origin, &tokens).and_then(|email| {
+        let backend = store()?;
+        backend.set(TOKENS_ACCOUNT, &serde_json::to_string(&tokens).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        backend.set(PROFILE_ACCOUNT, &serde_json::to_string(&Profile { email: email.clone() }).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(email)
+    });
+    match stored {
+        Ok(email) => Ok(AccountStatus { signed_in: true, email: Some(email) }),
+        Err(e) => {
+            // Never leave a minted refresh family live on the server when this sign-in is abandoned.
+            revoke_refresh(&origin, &tokens.refresh_token);
+            Err(e)
+        }
+    }
+}
+
+/// Best effort; the server answers 200 whether or not the token existed.
+fn revoke_refresh(origin: &Url, refresh_token: &str) {
+    let _ = ureq::post(&format!("{origin}v1/oauth/revoke"))
+        .set("content-type", "application/x-www-form-urlencoded")
+        .send_form(&[("client_id", CLIENT_ID), ("token", refresh_token)]);
 }
 
 
@@ -319,9 +335,7 @@ pub async fn account_sign_out() -> Result<AccountStatus, String> {
         // completes if the account service is unreachable.
         if let Ok(origin) = origin() {
             if let Ok(Some(tokens)) = load_tokens(backend.as_ref()) {
-                let _ = ureq::post(&format!("{origin}v1/oauth/revoke"))
-                    .set("content-type", "application/x-www-form-urlencoded")
-                    .send_form(&[("client_id", CLIENT_ID), ("token", &tokens.refresh_token)]);
+                revoke_refresh(&origin, &tokens.refresh_token);
             }
         }
         backend.delete(TOKENS_ACCOUNT).map_err(|e| e.to_string())?;

@@ -3,6 +3,14 @@ import { listDevices, publicDevice, registerDesktop, revokeDevice } from '../dev
 import { deviceLabel, onlyKeys, publicKeyText } from '../validate.mjs';
 
 export function desktopRoutes(routes, ctx) {
+  // The desktop's profile read (design 4.4). Bearer access token only: the cookie is never read here,
+  // so this route needs no CSRF guard and GET /v1/account stays cookie-only.
+  routes.set('GET /v1/desktop/account', nativeClient(async (req, res) => {
+    const { user } = ctx.oauth.requireAccess(req);
+    // Only what the desktop shows; passkeys and audit stay on the web account page.
+    send(res, 200, { id: user.id, email: user.email, displayName: user.display_name });
+  }));
+
   // Register-only half of design 4.4 step 5: replace/link/relay are later sub-projects.
   routes.set('POST /v1/desktop', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
