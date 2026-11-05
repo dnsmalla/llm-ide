@@ -41,6 +41,7 @@ sha2 = "=0.10.9"
 base64 = "=0.22.1"
 aes-gcm = "=0.10.3"
 hkdf = "=0.12.4"
+tungstenite = { version = "=0.27.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 # Desktop device keys for the account relay: ECDSA P-256 signing + ECDH P-256 wrap keys.
 p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8", "ecdh"] }
 rand_core = { version = "=0.6.4", features = ["getrandom"] }
