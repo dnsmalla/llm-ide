@@ -110,7 +110,13 @@ export function revokeDevice(db, now, { userId, id }) {
     db.prepare("UPDATE devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?")
       .run(t, t, id, userId);
     db.prepare('DELETE FROM relay_wraps WHERE device_id = ?').run(id);
-    if (row.kind === 'desktop') revokeDesktopSignIns(db, t, userId);
+    db.prepare("UPDATE link_requests SET state = 'unlinked', updated_at = ? WHERE device_id = ? AND state IN ('pending','approved','keys')").run(t, id);
+    if (row.kind === 'desktop') {
+      db.prepare("UPDATE devices SET status = 'unlinked', updated_at = ? WHERE user_id = ? AND kind <> 'desktop' AND status IN ('pending','linked')").run(t, userId);
+      db.prepare('DELETE FROM relay_wraps WHERE user_id = ?').run(userId);
+      db.prepare("UPDATE link_requests SET state = 'unlinked', updated_at = ? WHERE user_id = ? AND state IN ('pending','approved','keys')").run(t, userId);
+      revokeDesktopSignIns(db, t, userId);
+    }
     return true;
   })();
 }

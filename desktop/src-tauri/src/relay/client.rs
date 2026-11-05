@@ -198,8 +198,8 @@ impl Drop for RelayHandle {
     fn drop(&mut self) { self.stop(); }
 }
 
-fn read_timeout(ws: &WebSocket<MaybeTlsStream<std::net::TcpStream>>) {
-    let t = Some(Duration::from_millis(50));
+fn read_timeout(ws: &WebSocket<MaybeTlsStream<std::net::TcpStream>>, ms: u64) {
+    let t = Some(Duration::from_millis(ms));
     match ws.get_ref() {
         MaybeTlsStream::Plain(s) => { let _ = s.set_read_timeout(t); }
         MaybeTlsStream::Rustls(s) => { let _ = s.get_ref().set_read_timeout(t); }
@@ -223,9 +223,9 @@ fn connect(cfg: &ClientConfig) -> Result<(WebSocket<MaybeTlsStream<std::net::Tcp
     let mut reg = super::registry::load(cfg.store.as_ref())?;
     if !reg.enabled { return Err("relay is off".into()); }
     if reg.desktop_id.is_empty() { return Err("register this desktop first".into()); }
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let mut ws = tungstenite::connect(cfg.relay_url.as_str()).map_err(|e| format!("relay connect: {e}"))?.0;
-    #[allow(unused_braces)]
-    { read_timeout(&ws); }
+    read_timeout(&ws, 10_000);
     // challenge
     let challenge = loop {
         match ws.read() {
@@ -259,6 +259,7 @@ fn connect(cfg: &ClientConfig) -> Result<(WebSocket<MaybeTlsStream<std::net::Tcp
             Err(e) => return Err(format!("relay ready: {e}")),
         }
     }
+    read_timeout(&ws, 50);
     let mut bridges = HashMap::new();
     // pending wraps
     for d in &reg.devices {
@@ -275,9 +276,24 @@ fn run_loop(cfg: ClientConfig, status: Arc<Mutex<RelayStatus>>, stop: Arc<Atomic
             Ok((mut ws, mut desktop, mut bridges, challenge)) => {
                 if let Ok(mut s) = status.lock() { s.connected = true; s.devices_online = 0; }
                 let mut last_auth = now_ms();
+                let mut last_reload = now_ms();
+                let mut sent_wraps = std::collections::HashSet::new();
                 backoff = 1;
                 loop {
                     if stop.load(Ordering::SeqCst) { break; }
+                    // A link can be confirmed while this socket is up. Reload the registry, merge the devices this
+                    // connection changed, and deliver any new pending wrap without clobbering the new device.
+                    if now_ms().saturating_sub(last_reload) >= 1_500 {
+                        if let Ok(current) = super::registry::load(cfg.store.as_ref()) {
+                            for d in &current.devices {
+                                if let Some(w) = &d.wrap {
+                                    if sent_wraps.insert(d.device_id.clone()) { let _ = send_env(&mut ws, w); }
+                                }
+                            }
+                            desktop.reg = current;
+                        }
+                        last_reload = now_ms();
+                    }
                     // pump core → relay
                     for (session, (device, bridge)) in bridges.iter() {
                         while let Some(frame) = bridge.try_recv() {
@@ -299,7 +315,12 @@ fn run_loop(cfg: ClientConfig, status: Arc<Mutex<RelayStatus>>, stop: Arc<Atomic
                                 Some("env") => {
                                     let Ok(env) = serde_json::from_value::<Envelope>(v["env"].clone()) else { continue; };
                                     let outs = desktop.on_env(env, now_ms());
-                                    let _ = super::registry::save(cfg.store.as_ref(), &desktop.reg);
+                                    if let Ok(mut current) = super::registry::load(cfg.store.as_ref()) {
+                                        for d in desktop.reg.devices.clone() { current.add(d); }
+                                        current.enabled = desktop.reg.enabled;
+                                        let _ = super::registry::save(cfg.store.as_ref(), &current);
+                                        desktop.reg = current;
+                                    }
                                     for out in outs {
                                         match out {
                                             Out::Relay(t) => { let _ = send_text(&mut ws, t); }

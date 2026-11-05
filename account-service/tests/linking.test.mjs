@@ -6,6 +6,8 @@ import {
   desktopBody,
   desktopKeys,
   rawRequest,
+  linkApproveProof,
+  linkConfirmProof,
   signInDesktop,
   signUpAndRegister,
   startApp,
@@ -55,7 +57,7 @@ test('device linking: commitment, desktop approval, keys, SAS and confirmation',
   assert.equal(pending.body.requests[0].commitment, commit);
 
   const desktopNonce = randomBytes(32).toString('base64url');
-  const approved = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce }, { authorization: `Bearer ${tokens.access_token}` });
+  const approved = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce, proof: linkApproveProof(desktop, id, desktopNonce) }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(approved.status, 200);
   assert.equal(approved.body.state, 'approved');
   assert.match(approved.body.desktopNonce, /^[A-Za-z0-9_-]{43}$/);
@@ -82,7 +84,7 @@ test('device linking: commitment, desktop approval, keys, SAS and confirmation',
   const sas = linkSas(dev.signingKey, dev.ecdhKey, desktop.signingKey, dev.nonce, approved.body.desktopNonce);
   assert.match(sas, /^\d{6}$/);
 
-  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id }, { authorization: `Bearer ${tokens.access_token}` });
+  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, proof: linkConfirmProof(desktop, id) }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(confirmed.status, 200);
   assert.equal(confirmed.body.state, 'linked');
   assert.equal(confirmed.body.sas, sas);
@@ -101,7 +103,8 @@ test('a swapped key or stale approval cannot link', async (t) => {
   const app = await startApp();
   t.after(() => app.close());
   const { web, tokens } = await signInDesktop(app);
-  await registerDesktop(app, tokens.access_token);
+  const desktop = desktopKeys();
+  await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(tokens.access_token, desktop)), { 'content-type': 'application/json', authorization: `Bearer ${tokens.access_token}` });
   const dev = device();
   const created = await post(app, '/v1/link/requests', { kind: 'web', label: 'Chrome', commitment: linkCommitment(dev.signingKey, dev.ecdhKey, dev.nonce) }, { cookie: web.cookie });
   const id = created.body.requestId;
@@ -113,7 +116,8 @@ test('a swapped key or stale approval cannot link', async (t) => {
   assert.equal(early.status, 409);
   assert.equal(early.body.error, 'not_approved');
 
-  await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce: randomBytes(32).toString('base64url') }, { authorization: `Bearer ${tokens.access_token}` });
+  const desktopNonce = randomBytes(32).toString('base64url');
+  await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce, proof: linkApproveProof(desktop, id, desktopNonce) }, { authorization: `Bearer ${tokens.access_token}` });
   const swapped = device();
   const mismatch = await post(app, '/v1/link/requests/keys', {
     requestId: id, signingKey: swapped.signingKey, ecdhKey: swapped.ecdhKey, nonce: dev.nonce, tokenHash: swapped.tokenHash,
@@ -124,7 +128,8 @@ test('a swapped key or stale approval cannot link', async (t) => {
   app.clock.advance(11 * 60_000);
   const expired = await rawRequest(app.base, 'GET', `/v1/link/requests/status?requestId=${id}`, undefined, { cookie: web.cookie });
   assert.equal(expired.body.state, 'unlinked');
-  const late = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce: randomBytes(32).toString('base64url') }, { authorization: `Bearer ${tokens.access_token}` });
+  const lateNonce = randomBytes(32).toString('base64url');
+  const late = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce: lateNonce, proof: linkApproveProof(desktop, id, lateNonce) }, { authorization: `Bearer ${tokens.access_token}` });
   assert.equal(late.status, 409);
 });
 

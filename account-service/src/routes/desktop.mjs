@@ -52,11 +52,13 @@ export function deviceRoutes(routes, ctx) {
     ctx.sessions.requireFresh(session);
     const id = decodeURIComponent(new URL(req.url, 'http://localhost').pathname.split('/').pop() ?? '');
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error('invalid device id');
+    const target = ctx.db.prepare('SELECT kind FROM devices WHERE id = ? AND user_id = ?').get(id, session.user_id);
     if (!revokeDevice(ctx.db, ctx.now, { userId: session.user_id, id })) {
       send(res, 404, { error: 'not_found' });
       return;
     }
-    ctx.relay?.disconnect(id);
+    if (target?.kind === 'desktop') ctx.relay?.disconnectUser(session.user_id);
+    else ctx.relay?.disconnect(id);
     ctx.audit('device_revoked', { userId: session.user_id, ip: req.clientIp, detail: { deviceId: id } });
     send(res, 200, { revoked: true });
   });

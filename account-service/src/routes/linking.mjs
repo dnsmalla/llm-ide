@@ -1,13 +1,30 @@
+import { createPublicKey, verify } from 'node:crypto';
 import { HttpError, nativeClient, readJson, send } from '../http.mjs';
 import { newId } from '../db.mjs';
 import { linkCommitment, linkSas } from '../linking.mjs';
 import { deviceLabel, onlyKeys, p256PublicKey } from '../validate.mjs';
 
 const LINK_TTL_MS = 10 * 60_000;
-const KINDS = new Set(['web', 'ios']);
+const KINDS = new Set(['web']); // native iOS linking is not in v1: the requester must not choose the uncapped tier
 const STATES = new Set(['pending', 'approved', 'keys', 'linked', 'unlinked']);
 const b64u32 = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{43}$/.test(s);
 const tokenHash = (s) => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
+
+
+// The desktop proves possession of its registered signing key on approve and confirm, so a stolen bearer token alone
+// cannot move a link forward (review I2). The message binds the exact request and the desktop-chosen nonce.
+export const linkApproveMessage = (requestId, nonce) => `llmide/link/approve/v1\n${requestId}\n${nonce}`;
+export const linkConfirmMessage = (requestId) => `llmide/link/confirm/v1\n${requestId}`;
+function verifyOwnerProof(db, userId, proof, message) {
+  if (typeof proof !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(proof)) throw new HttpError(400, 'invalid_proof');
+  const signing = db.prepare("SELECT signing_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").pluck().get(userId);
+  if (!signing) throw new HttpError(409, 'desktop_missing');
+  let ok = false;
+  try {
+    ok = verify('sha256', Buffer.from(message), { key: createPublicKey({ key: Buffer.from(signing, 'base64url'), format: 'der', type: 'spki' }), dsaEncoding: 'ieee-p1363' }, Buffer.from(proof, 'base64url'));
+  } catch { ok = false; }
+  if (!ok) throw new HttpError(403, 'invalid_proof');
+}
 
 function requestId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) throw new HttpError(400, 'invalid_request');
@@ -159,13 +176,14 @@ export function linkingRoutes(routes, ctx) {
   routes.set('POST /v1/link/requests/approve', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     const body = await readJson(req);
-    onlyKeys(body, ['requestId', 'desktopNonce']);
+    onlyKeys(body, ['requestId', 'desktopNonce', 'proof']);
     const id = requestId(body.requestId);
     if (!b64u32(body.desktopNonce)) throw new HttpError(400, 'invalid_desktop_nonce');
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, user.id, id));
     if (row.state !== 'pending') throw new HttpError(409, row.state === 'approved' ? 'already_approved' : 'not_pending');
     const desktop = ctx.db.prepare("SELECT signing_key, ecdh_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").get(user.id);
     if (!desktop) throw new HttpError(409, 'desktop_missing');
+    verifyOwnerProof(ctx.db, user.id, body.proof, linkApproveMessage(id, body.desktopNonce));
     ctx.db.prepare("UPDATE link_requests SET desktop_nonce = ?, state = 'approved', updated_at = ? WHERE id = ?").run(body.desktopNonce, ctx.now(), id);
     ctx.audit('link_approved', { userId: user.id, ip: req.clientIp, detail: { requestId: id } });
     send(res, 200, { requestId: id, state: 'approved', desktopNonce: body.desktopNonce });
@@ -175,7 +193,7 @@ export function linkingRoutes(routes, ctx) {
   routes.set('POST /v1/link/requests/deny', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     const body = await readJson(req);
-    onlyKeys(body, ['requestId']);
+    onlyKeys(body, ['requestId', 'proof']);
     const id = requestId(body.requestId);
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, user.id, id));
     if (row.state === 'linked') throw new HttpError(409, 'already_linked');
@@ -193,12 +211,14 @@ export function linkingRoutes(routes, ctx) {
   routes.set('POST /v1/link/requests/confirm', nativeClient(async (req, res) => {
     const { user } = ctx.oauth.requireAccess(req);
     const body = await readJson(req);
-    onlyKeys(body, ['requestId']);
+    onlyKeys(body, ['requestId', 'proof']);
     const id = requestId(body.requestId);
     const row = expire(ctx.db, ctx.now, rowFor(ctx.db, user.id, id));
     if (row.state !== 'keys') throw new HttpError(409, row.state === 'linked' ? 'already_linked' : 'not_ready');
+    if (row.device_status === 'revoked') throw new HttpError(409, 'device_revoked');
     const desktop = ctx.db.prepare("SELECT signing_key FROM devices WHERE user_id = ? AND kind = 'desktop' AND status = 'linked'").pluck().get(user.id);
     if (!desktop) throw new HttpError(409, 'desktop_missing');
+    verifyOwnerProof(ctx.db, user.id, body.proof, linkConfirmMessage(id));
     const t = ctx.now();
     ctx.db.transaction(() => {
       ctx.db.prepare("UPDATE link_requests SET state = 'linked', updated_at = ? WHERE id = ?").run(t, id);

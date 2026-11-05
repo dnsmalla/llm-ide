@@ -258,6 +258,14 @@ export function desktopKeys() {
 
 // Proof of possession (devices.mjs desktopProofMessage): the signing key signs the keys bound to the
 // SHA-256 of the access token it registers with. ECDSA P-256 / SHA-256, raw r||s, base64url.
+export function linkApproveProof(keys, requestId, desktopNonce) {
+  return sign('sha256', Buffer.from(`llmide/link/approve/v1\n${requestId}\n${desktopNonce}`), { key: keys.signing.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+}
+
+export function linkConfirmProof(keys, requestId) {
+  return sign('sha256', Buffer.from(`llmide/link/confirm/v1\n${requestId}`), { key: keys.signing.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+}
+
 export function desktopProof(accessToken, keys, privateKey = keys.signing.privateKey) {
   const tokenHash = createHash('sha256').update(accessToken).digest('hex');
   const message = `llmide/desktop/register/v1\n${tokenHash}\n${keys.signingKey}\n${keys.ecdhKey}`;
@@ -285,9 +293,10 @@ export async function linkedPair(app, { kind = 'web' } = {}) {
   const cookie = { 'content-type': 'application/json', origin: ORIGIN, cookie: web.cookie };
   const created = await rawRequest(app.base, 'POST', '/v1/link/requests', JSON.stringify({ kind, label: 'Phone', commitment: linkCommitment(device.signingKey, device.ecdhKey, nonce) }), cookie);
   const requestId = created.body.requestId;
-  await rawRequest(app.base, 'POST', '/v1/link/requests/approve', JSON.stringify({ requestId, desktopNonce: randomBytes(32).toString('base64url') }), auth);
+  const desktopNonce = randomBytes(32).toString('base64url');
+  await rawRequest(app.base, 'POST', '/v1/link/requests/approve', JSON.stringify({ requestId, desktopNonce, proof: linkApproveProof(desktop, requestId, desktopNonce) }), auth);
   const keys = await rawRequest(app.base, 'POST', '/v1/link/requests/keys', JSON.stringify({ requestId, signingKey: device.signingKey, ecdhKey: device.ecdhKey, nonce, tokenHash: device.tokenHash }), cookie);
-  const done = await rawRequest(app.base, 'POST', '/v1/link/requests/confirm', JSON.stringify({ requestId }), auth);
+  const done = await rawRequest(app.base, 'POST', '/v1/link/requests/confirm', JSON.stringify({ requestId, proof: linkConfirmProof(desktop, requestId) }), auth);
   if (done.status !== 200) throw new Error(`confirm ${done.status}`);
   const user = app.db.prepare('SELECT user_id FROM devices WHERE id = ?').get(reg.body.device.id);
   return { userId: user.user_id, web, desktop: { ...desktop, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, deviceId: reg.body.device.id }, device: { ...device, deviceId: keys.body.deviceId } };

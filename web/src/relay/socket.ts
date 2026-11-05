@@ -70,6 +70,7 @@ export function createRelaySocket(o: RelaySocketOptions): SocketLike {
       await up(header("keyconfirm", "", 0), await keyConfirmPlaintext(w.sig));
       return;
     }
+    if (Math.abs(now() - env.issuedAt) > SKEW_MS) return;
     if (!o.session.reply) return;
     const expect = { from: ids.desktopId, to: ids.deviceId, userId: ids.userId, desktopId: ids.desktopId, epoch: o.session.epoch };
     if (env.purpose === "opened" && openNonce && state === 0) {

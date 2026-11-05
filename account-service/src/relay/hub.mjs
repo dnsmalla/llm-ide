@@ -162,7 +162,10 @@ export function createHub(ctx, limits = RELAY_LIMITS) {
   }
 
   function disconnectUser(userId, code = CLOSE.revoked) {
-    for (const e of [...byDevice.values()]) if (e.id.userId === userId) disconnect(e.id.deviceId, code);
+    // Close devices first so they learn their own 4003, not a peer-offline event caused by the desktop closing.
+    const own = [...byDevice.values()].filter((e) => e.id.userId === userId);
+    for (const e of own.filter((x) => x.id.role !== 'desktop')) disconnect(e.id.deviceId, code);
+    for (const e of own.filter((x) => x.id.role === 'desktop')) disconnect(e.id.deviceId, code);
   }
 
   function close() {

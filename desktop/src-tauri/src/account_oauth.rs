@@ -6,7 +6,9 @@
 //! tested. Production defaults to https://accounts.llm-ide.com.
 
 use std::io::{Read, Write};
+use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -26,6 +28,10 @@ const DEVICE_KEYS_ACCOUNT: &str = "account-device-keys";
 const DEFAULT_ORIGIN: &str = "https://accounts.llm-ide.com";
 const CLIENT_ID: &str = "llmide-desktop";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+
+// The desktop nonce chosen by THIS app for each pending link; never trusted from a service reply.
+static LINK_NONCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+fn link_nonces() -> &'static Mutex<HashMap<String, String>> { LINK_NONCES.get_or_init(|| Mutex::new(HashMap::new())) }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Tokens {
@@ -459,8 +465,10 @@ fn link_requests_blocking() -> Result<Vec<LinkRequest>, String> {
         let mut commitment_ok = None;
         if let (Some(signing), Some(ecdh), Some(device_nonce), Some(desktop_nonce), Some(commitment)) = (&signing, &ecdh, &device_nonce, &desktop_nonce, &commitment) {
             let ok = link_commitment(signing, ecdh, device_nonce)?.as_str() == commitment.as_str();
-            commitment_ok = Some(ok);
-            if ok {
+            let our_nonce = link_nonces().lock().ok().and_then(|m| m.get(&get("requestId").unwrap_or_default()).cloned());
+            let nonce_ok = our_nonce.as_deref() == Some(desktop_nonce.as_str());
+            commitment_ok = Some(ok && nonce_ok);
+            if ok && nonce_ok {
                 sas = Some(link_sas(signing, ecdh, &desktop.signing_public, device_nonce, desktop_nonce)?);
             }
         }
@@ -484,10 +492,23 @@ fn link_action_blocking(request_id: String, action: &str) -> Result<(), String> 
     let backend = store()?;
     let access = access_token(&origin, backend.as_ref())?;
     let body = match action {
-        "approve" => serde_json::json!({ "requestId": request_id, "desktopNonce": random_urlsafe(32)? }),
+        "approve" => {
+            let nonce = random_urlsafe(32)?;
+            if let Ok(mut m) = link_nonces().lock() { m.insert(request_id.clone(), nonce.clone()); }
+            let (signer, _): (SigningKey, String) = desktop_signing()?;
+            let proof = URL_SAFE_NO_PAD.encode(Signer::<Signature>::sign(&signer, format!("llmide/link/approve/v1\n{request_id}\n{nonce}").as_bytes()).to_bytes());
+            serde_json::json!({ "requestId": request_id, "desktopNonce": nonce, "proof": proof })
+        }
+        "confirm" => {
+            let (signer, _): (SigningKey, String) = desktop_signing()?;
+            let proof = URL_SAFE_NO_PAD.encode(Signer::<Signature>::sign(&signer, format!("llmide/link/confirm/v1\n{request_id}").as_bytes()).to_bytes());
+            serde_json::json!({ "requestId": request_id, "proof": proof })
+        }
         _ => serde_json::json!({ "requestId": request_id }),
     };
-    account_json(&origin, &format!("v1/link/requests/{action}"), "POST", &access, Some(body))?;
+    let result = account_json(&origin, &format!("v1/link/requests/{action}"), "POST", &access, Some(body));
+    if action != "approve" { if let Ok(mut m) = link_nonces().lock() { m.remove(&request_id); } }
+    result?;
     Ok(())
 }
 
