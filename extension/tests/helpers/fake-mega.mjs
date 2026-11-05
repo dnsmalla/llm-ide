@@ -42,7 +42,7 @@ export function createFakeMega({ email, password }) {
       upload(opt, source) {
         return { complete: (async () => {
           await gate('upload');
-          if (!Buffer.isBuffer(source) || source.length !== opt.size) throw new Error('Specified data size does not match');
+          if (!(source instanceof Uint8Array) || source.length !== opt.size) throw new Error('Specified data size does not match'); // Buffer is a Uint8Array; the browser passes plain ones
           const c = makeNode({ name: opt.name, directory: false, parent: n, data: Buffer.from(source) });
           n.children.push(c);
           fake.uploads.push(Buffer.from(source));

@@ -8,10 +8,11 @@ const version = (JSON.parse(readFileSync(new URL("./package.json", import.meta.u
 // One fixed origin for dev and preview: the host's LLMIDE_HOST_API_WEB_ORIGINS must list http://127.0.0.1:5180.
 // Not 5173: that is the desktop's own Vite.
 export const WEB_PORT = 5180;
-// connect-src: plaintext ws only to loopback (the dev listener); wss to any host the user enters (phase 6 hosts).
+// connect-src: plaintext ws only to loopback (the dev listener); wss to any host the user enters (phase 6 hosts);
+// MEGA for offline sync (design 8.3): the API host and the transfer hosts it hands out per download/upload.
 export const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss:", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
+  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
 ].join("; ");
 
 // Vite's dev server injects an inline React-refresh preamble, so the CSP meta goes into the built page only.

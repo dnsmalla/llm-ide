@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 export const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss:", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
+  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
 ].join("; ");
 
 const MIME = {

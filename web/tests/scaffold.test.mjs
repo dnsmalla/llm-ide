@@ -6,15 +6,25 @@ import { fileURLToPath } from "node:url";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("the built page's CSP allows no inline or remote script and no plaintext ws beyond loopback", async () => {
-  const { CSP, WEB_PORT } = await import("../vite.config.ts");
-  assert.equal(WEB_PORT, 5180);
-  assert.match(CSP, /script-src 'self';/);
-  assert.doesNotMatch(CSP, /unsafe-eval|script-src[^;]*unsafe-inline|\*\.|https?:\/\/(?!127)/);
-  assert.match(CSP, /object-src 'none'/);
-  for (const ws of CSP.match(/ws:\/\/[^ ;]+/g)) assert.match(ws, /^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\*$/);
-});
+const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz"];
 
+test("the CSP allows no inline or remote script; remote connects go only to MEGA's API and transfer hosts", async () => {
+  const { CSP, WEB_PORT } = await import("../vite.config.ts");
+  const { CSP: SERVED } = await import("../scripts/serve.mjs");
+  assert.equal(WEB_PORT, 5180);
+  assert.equal(SERVED, CSP, "the static server sends the same policy as the built page");
+  assert.match(CSP, /script-src 'self';/);
+  assert.doesNotMatch(CSP, /unsafe-eval|wasm-unsafe-eval|script-src[^;]*unsafe-inline/);
+  assert.match(CSP, /object-src 'none'/);
+  const dirs = Object.fromEntries(CSP.split("; ").map((d) => { const [k, ...v] = d.split(" "); return [k, v]; }));
+  for (const [k, v] of Object.entries(dirs)) {
+    for (const src of v) if (/^https?:/.test(src) || src.includes("*.")) assert.ok(k === "connect-src" && MEGA_CONNECT.includes(src), `${k} ${src}`);
+  }
+  assert.deepEqual(dirs["connect-src"].filter((s) => s.startsWith("https:")), MEGA_CONNECT);
+  for (const ws of CSP.match(/ws:\/\/[^ ;]+/g)) assert.match(ws, /^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\*$/);
+  const nginx = readFileSync(join(WEB, "../deploy/vps/llm-ide.com.nginx"), "utf8");
+  assert.ok(nginx.includes(`connect-src ${dirs["connect-src"].join(" ")};`), "the VPS vhost sends the same connect-src");
+});
 test("the package pins exact versions only", () => {
   const pkg = JSON.parse(readFileSync(join(WEB, "package.json"), "utf8"));
   for (const [name, v] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) assert.match(v, /^\d+\.\d+\.\d+$/, name);
