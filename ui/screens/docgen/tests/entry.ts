@@ -1,7 +1,7 @@
 // Bundled by the component tests (esbuild): everything they render, in one module.
 export { DocGenScreen } from "../DocGenScreen.tsx";
 export { SetupPanel } from "../SetupPanel.tsx";
-export { SourcePanel } from "../SourcePanel.tsx";
+export { SourcePanel, siblingImages } from "../SourcePanel.tsx";
 export { ResultPanel } from "../ResultPanel.tsx";
 export { HistoryPanel } from "../HistoryPanel.tsx";
 export { TemplateManager, parseMarkdownTemplate } from "../TemplateManager.tsx";
@@ -12,3 +12,4 @@ export { INITIAL_RUN } from "../run.ts";
 export { SourceSelection, fileItem, noteItem } from "../sources.ts";
 export { MermaidView } from "../mermaid/MermaidView.tsx";
 export { UnreadMark } from "../SourcePanel.tsx";
+export { dataUrlToBlob } from "../thumbnail.ts";
