@@ -34,12 +34,13 @@ pub fn write_export(path: &Path, text: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn export_note(name: String, text: String) -> Result<Option<String>, String> {
+pub async fn export_note(name: String, text: String, title: Option<String>) -> Result<Option<String>, String> {
     if text.len() > MAX_EXPORT_BYTES {
         return Err("The note is too large to export.".into());
     }
+    let title = title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "Export Meeting".into());
     let Some(file) = rfd::AsyncFileDialog::new()
-        .set_title("Export Meeting")
+        .set_title(title)
         .set_file_name(export_file_name(&name))
         .add_filter("Markdown", &["md"])
         .save_file()

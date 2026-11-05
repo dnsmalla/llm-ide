@@ -89,6 +89,9 @@ test("ResultPanel done: notices, save states, refine form, document rendered as 
   assert.match(saved, /Saved to <code>llm-doc\/generated\/x-2\.md<\/code>/);
   assert.match(saved, /<button[^>]*disabled=""[^>]*>Saved</);
   assert.match(saved, />Open in Explorer</);
+  const exportable = html(h(E.ResultPanel, resultProps({ ...done, saved: { path: "p.md", hash: "h", size: 1, stem: "x" }, dirty: false }, { onExport: noop })));
+  assert.match(exportable, />Export…</);
+  assert.doesNotMatch(saved, />Export…</, "no export action without a desktop host");
   const dirty = html(h(E.ResultPanel, resultProps({ ...done, saved: { path: "p.md", hash: "h", size: 1, stem: "x" }, dirty: true })));
   assert.match(dirty, />Save changes</);
   const conflict = html(h(E.ResultPanel, resultProps({ ...done, saveConflict: true, saveError: { message: "changed outside", retryable: false, action: "none" } })));

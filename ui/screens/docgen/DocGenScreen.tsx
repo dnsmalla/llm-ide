@@ -35,6 +35,10 @@ export interface DocGenScreenProps {
   revealNotice?: string | null;
   /** The host's picker for a Markdown template file (desktop only). */
   pickTemplateFile?: () => Promise<PickedTemplateFile>;
+  /** Native save panel for an out-of-project copy (desktop only). */
+  onExport?: (name: string, text: string) => Promise<void>;
+  /** Result of the last out-of-project export (null when none). */
+  exportNotice?: { kind: "ok" | "error"; message: string } | null;
   onOpenExternal: (url: string) => void;
   onOpenSettings: () => void;
   /** The diagram renderer binding (host builds only). */
@@ -174,7 +178,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
               <HistoryPanel fs={p.env.fs} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}
@@ -207,6 +211,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   return (
     <div className="dg-root" data-active={p.active} data-surface={store.surface} aria-busy={busy}>
       {p.revealNotice && <StatusBanner severity="error" message={<>{p.revealNotice}</>} />}
+      {p.exportNotice && <StatusBanner severity={p.exportNotice.kind === "ok" ? "info" : "error"} message={<>{p.exportNotice.message}</>} />}
       <header className="dg-top">
         <h1 className="dg-title">{title}</h1>
         {s.setup === "ready" && <button type="button" className="dg-btn" aria-pressed={showSources} onClick={() => setShowSources((v) => !v)}>{showSources ? "Hide sources" : "Show sources"}</button>}
