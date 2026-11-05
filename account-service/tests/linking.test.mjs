@@ -154,3 +154,30 @@ test('a link request is private to its account and its device session', async (t
   const anonymous = await rawRequest(app.base, 'GET', `/v1/link/requests/status?requestId=${id}`, undefined, {});
   assert.equal(anonymous.status, 401);
 });
+
+test('only the web tier is linkable in v1, and approve/confirm need the desktop key proof', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const { web, tokens } = await signInDesktop(app);
+  const desktop = desktopKeys();
+  await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(tokens.access_token, desktop)), { 'content-type': 'application/json', authorization: `Bearer ${tokens.access_token}` });
+  const dev = device();
+  const ios = await post(app, '/v1/link/requests', { kind: 'ios', label: 'Phone', commitment: linkCommitment(dev.signingKey, dev.ecdhKey, dev.nonce) }, { cookie: web.cookie });
+  assert.equal(ios.status, 400);
+  assert.equal(ios.body.error, 'invalid_kind');
+  const created = await post(app, '/v1/link/requests', { kind: 'web', label: 'Chrome', commitment: linkCommitment(dev.signingKey, dev.ecdhKey, dev.nonce) }, { cookie: web.cookie });
+  const id = created.body.requestId;
+  const nonce = randomBytes(32).toString('base64url');
+  const noProof = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce: nonce }, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(noProof.status, 400);
+  assert.equal(noProof.body.error, 'invalid_proof');
+  const approved = await post(app, '/v1/link/requests/approve', { requestId: id, desktopNonce: nonce, proof: linkApproveProof(desktop, id, nonce) }, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(approved.status, 200);
+  const keys = await post(app, '/v1/link/requests/keys', { requestId: id, signingKey: dev.signingKey, ecdhKey: dev.ecdhKey, nonce: dev.nonce, tokenHash: dev.tokenHash }, { cookie: web.cookie });
+  assert.equal(keys.status, 200);
+  const noConfirm = await post(app, '/v1/link/requests/confirm', { requestId: id }, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(noConfirm.status, 400);
+  assert.equal(noConfirm.body.error, 'invalid_proof');
+  const confirmed = await post(app, '/v1/link/requests/confirm', { requestId: id, proof: linkConfirmProof(desktop, id) }, { authorization: `Bearer ${tokens.access_token}` });
+  assert.equal(confirmed.status, 200);
+});
