@@ -9,15 +9,10 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 |---|---|
 | Web PWA | `https://llm-ide.com` → `/var/www/llm-ide-web` |
 | Public core API | **closed** 2026-11-05: `https://llm-ide.com/api/*` answers 404 (see Known limits) |
-| Host API WebSocket | `wss://llm-ide.com/host-api/v1` → nginx → reverse SSH tunnel → this Mac's `127.0.0.1:3016` |
+| Host API WebSocket | **retired** 2026-11-05; `/host-api/*` answers 404 (ADR 0019) |
 | Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide`; **disabled** 2026-11-05 |
+| Account service | `accounts.llm-ide.com`, `llmide-accounts.service`, data `/var/lib/llmide-accounts`; sign-up closed |
 | Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
-
-The web client is built with:
-
-```bash
-VITE_HOST_API_URL=wss://llm-ide.com/host-api/v1 npm run build
-```
 
 ## Install pieces
 
@@ -58,44 +53,80 @@ certbot certonly --webroot -w /var/www/llm-ide-web \
   -d llm-ide.com -d www.llm-ide.com
 ```
 
-`/host-api/` is a WebSocket upgrade proxy to the reverse tunnel. `proxy_ssl_verify off` is
-required because the desktop Host API listener uses a pinned self-signed identity; nginx, not
-the browser, verifies the public certificate.
+`/host-api/` was a temporary SSH-tunnel path; it now answers 404. The relay design replaces it
+with an outbound-only connection from the desktop.
 
-## Mac side
+## Account service (`accounts.llm-ide.com`)
 
-The desktop app must run with the Host API TLS listener and allow the exact page origin:
+Public accounts (ADR 0019; design `docs/superpowers/specs/2026-11-05-accounts-and-device-linking-design.md`).
+Its own system user, database and loopback process; **sign-up is closed** until the external review.
+It never runs the core, AI or agents.
+
+| Piece | Location |
+|---|---|
+| Service | `llmide-accounts.service`, user `llmide-accounts`, `127.0.0.1:3470` |
+| Data | `/var/lib/llmide-accounts/accounts.db` |
+| Config | `/etc/llm-ide/accounts.env` (`0600`, root-owned) |
+| nginx | [accounts.llm-ide.com.nginx](accounts.llm-ide.com.nginx), log without IPs |
 
 ```bash
-LLMIDE_HOST_API_TLS=1 \
-LLMIDE_HOST_API_WEB_ORIGINS=https://llm-ide.com \
-npm --prefix desktop run tauri dev
+useradd --system --home /var/lib/llmide-accounts --shell /usr/sbin/nologin llmide-accounts
+install -d -m 700 -o llmide-accounts -g llmide-accounts /var/lib/llmide-accounts
+install -d -m 755 /var/www/llm-ide-accounts
+cd /srv/llm-ide/repo && git pull --ff-only
+cd account-service && npm ci --omit=dev --no-audit --no-fund
 ```
 
-A LaunchAgent (`com.llmide.hostapi-tunnel`) holds:
+`/etc/llm-ide/accounts.env`:
+
+```dotenv
+NODE_ENV=production
+ACCOUNTS_HOST=127.0.0.1
+ACCOUNTS_PORT=3470
+ACCOUNTS_ORIGIN=https://accounts.llm-ide.com
+ACCOUNTS_TRUST_PROXY=1
+ACCOUNTS_DB_PATH=/var/lib/llmide-accounts/accounts.db
+ACCOUNTS_MAIL_TRANSPORT=smtp
+ACCOUNTS_SMTP_URL=smtps://<user>:<password>@<provider-host>:465
+ACCOUNTS_MAIL_FROM=LLM-IDE <no-reply@llm-ide.com>
+# Do NOT set ACCOUNTS_SIGNUP_OPEN=1 before sub-project 5 (external review, legal gates).
+```
 
 ```bash
-ssh -N -R 127.0.0.1:3016:127.0.0.1:3016 root@72.62.76.92
+chmod 600 /etc/llm-ide/accounts.env
+cp deploy/vps/llmide-accounts.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now llmide-accounts
+certbot certonly --webroot -w /var/www/llm-ide-accounts -d accounts.llm-ide.com
+cp deploy/vps/accounts.llm-ide.com.nginx /etc/nginx/sites-available/accounts.llm-ide.com
+ln -s /etc/nginx/sites-available/accounts.llm-ide.com /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
 ```
 
-Do not turn on `LLMIDE_HOST_API_READ` (chat history and usage over Host API v1) for a host reached through this tunnel yet. Through it, nginx on the VPS terminates TLS and sees tokens and chat text in the clear, every internet client reaches the listener as `127.0.0.1` (one shared pairing throttle, so one client can lock the owner out of pairing, and the audit log loses the real address), and other VPS processes can reach the tunnel port without nginx's Origin check. Wait until the real client address is forwarded and end-to-end encryption to the host exists (the relay design).
+The DNS `A` record for `accounts.llm-ide.com` must point at the VPS before `certbot`. Until the
+certificate exists, enable only the port-80 server block.
 
-Keep that process running; it is what makes the public `wss://` URL reach the Mac. If the host app
-is restarted, the listener keeps port 3016 and the tunnel reconnects.
+Verify:
+
+```bash
+curl -s https://accounts.llm-ide.com/health
+# {"ok":true,"service":"account-service","signupOpen":false}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Origin: https://accounts.llm-ide.com' \
+  -H 'Content-Type: application/json' -d '{"email":"a@example.com","displayName":"A"}' \
+  https://accounts.llm-ide.com/v1/signup
+# 403 (signup_closed)
+curl -s -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health
+# 404
+systemctl show llmide-accounts -p User
+# User=llmide-accounts
+```
 
 ## Verify
 
 ```bash
-curl --resolve llm-ide.com:443:72.62.76.92 -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health   # 404 (closed)
+curl --resolve llm-ide.com:443:72.62.76.92 -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health   # 404
+curl --resolve llm-ide.com:443:72.62.76.92 -o /dev/null -w '%{http_code}\n' https://llm-ide.com/host-api/v1  # 404
 curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
-curl --http1.1 -k --resolve llm-ide.com:443:72.62.76.92 \
-  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-  -H 'Origin: https://llm-ide.com' https://llm-ide.com/host-api/v1 -D -
-# 101 Switching Protocols
 ```
-
-Pair from the web page with a PIN from **desktop Settings → Host API pairing**.
 
 ## Known limits
 

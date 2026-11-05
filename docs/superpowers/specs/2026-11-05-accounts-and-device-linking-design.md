@@ -36,8 +36,8 @@ Nothing here was run or measured. Numbers are proposed starting values. Library 
 | A6 | **One desktop per account in v1.** A second desktop is refused. "Replace this account's desktop" needs a fresh passkey check; replacing unlinks every phone (each re-approves). No recovery key (relay D3). |
 | A7 | **The server knows:** email, display name, language, time zone, device list (label, kind, status, times), sign-in settings. The **project list travels E2E-encrypted** through the relay; the server never sees project names. |
 | A8 | **Approach A:** a new top-level `account-service/`: its own deployable Node service, own SQLite, own unprivileged system user; units identity, profile, devices, relay. |
-| A9 | **Desktop sign-in:** system browser, OAuth 2.0 Authorization Code with PKCE (RFC 7636, native-app rules of RFC 8252), returning through the `llmide://` deep link. The desktop registers its device public keys and keeps one outbound relay connection. |
-| A10 | **iPhone and web:** passkey sign-in, wait for desktop approval, then talk to the desktop through the relay. |
+| A9 | **Desktop sign-in:** system browser, OAuth 2.0 Authorization Code with PKCE (RFC 7636, native-app rules of RFC 8252), returning to a random loopback callback (`http://127.0.0.1:<ephemeral>/auth/callback`); `llmide://` is a fallback only. The desktop registers its device public keys and keeps one outbound relay connection. |
+| A10 | **iPhone and web:** passkey sign-in at the `accounts.llm-ide.com` origin, wait for desktop approval, then talk to the desktop through the relay. The PWA never performs WebAuthn itself: it delegates sign-in to the account pages and uses a BFF on `app.llm-ide.com` for code exchange and refresh. |
 | A11 | **Removed:** the SSH tunnel and `/api/` exposure (the `/api/` proxy was closed on 2026-11-05, commit `35d43f2b`). PIN pairing is removed later at relay R9 (sync-kit S5). |
 | A12 | **Unchanged:** the local core's local login; Host API v1 commands (`schema/host-api/v1/`, `extension/routes/host-api/`), which now travel inside relay envelopes instead of a direct socket. |
 
@@ -76,7 +76,11 @@ MASTER-PLAN rejected option C, "a server-side app with its own login and data", 
 | devices | the device registry copy, pending link requests, revoke, the one-desktop rule | identity, relay |
 | relay | encrypted envelopes, per-device queues, the desktop's outbound connection | desktop, devices |
 
-**Origins (proposed, open question Q3):** `https://accounts.llm-ide.com` serves the account pages and `/v1/` API and is the WebAuthn RP ID; the relay endpoints live on the same service under `/relay/v1/`; the PWA is on a **separate origin and hosting account** (`https://app.llm-ide.com`, relay D1) and signs in through the same Authorization Code + PKCE flow as the desktop. `llm-ide.com` itself serves no API.
+**Origins:** `https://accounts.llm-ide.com` serves the account pages and `/v1/` API and is the WebAuthn RP ID; the relay endpoints live on the same service under `/relay/v1/`; the PWA is on a **separate origin and hosting account** (`https://app.llm-ide.com`, relay D1). `llm-ide.com` itself serves no API.
+
+The PWA does **not** perform WebAuthn on `app.llm-ide.com`: a passkey registered for the `accounts.llm-ide.com` RP ID cannot be used from another origin. The PWA opens the account sign-in page, the passkey ceremony runs on the accounts origin, and the authorization code returns to an `app.llm-ide.com` callback served by a small BFF. The BFF exchanges the code and keeps the refresh token server-side in an `HttpOnly; Secure; SameSite=Lax` cookie on the app origin; the browser holds only the short-lived access token in memory. The accounts API therefore sends no CORS headers and the PWA makes no cross-origin `/v1/` calls. This is required by the PWA's separate origin, not optional.
+
+The PWA's relay WebSocket connects to `wss://accounts.llm-ide.com/relay/v1` with `Origin: https://app.llm-ide.com`; the relay checks an explicit `ACCOUNTS_ALLOWED_WEB_ORIGINS` allowlist (never `*`).
 
 The Node core still binds to `127.0.0.1`; only the desktop opens outbound connections (relay design non-goal list). The account service binds to `127.0.0.1` behind nginx.
 
@@ -109,14 +113,14 @@ All state-changing requests are JSON `POST`/`PATCH` from the exact service origi
 
 ### 4.4 Desktop sign-in (sub-project 2)
 
-1. The desktop creates a PKCE verifier (43 to 128 chars) and `S256` challenge and a `state`, and opens the system browser at `/v1/oauth/authorize?client_id=llmide-desktop&redirect_uri=llmide://auth/callback&code_challenge=…&code_challenge_method=S256&state=…`.
+1. The desktop creates a PKCE verifier (43 to 128 chars) and `S256` challenge and a `state`, binds a random loopback port, and opens the system browser at `/v1/oauth/authorize?client_id=llmide-desktop&redirect_uri=http%3A%2F%2F127.0.0.1%3A<port>%2Fauth%2Fcallback&code_challenge=…&code_challenge_method=S256&state=…`. The `llmide://auth/callback` custom scheme remains a fallback only if loopback is impossible; PKCE still protects the code.
 2. The user signs in with a passkey (4.2) and confirms "Sign in LLM-IDE on this computer?".
-3. The service redirects to `llmide://auth/callback?code=…&state=…` (code: 256-bit, single use, 60 seconds, hash stored, bound to the challenge and redirect URI).
+3. The service redirects to the exact loopback redirect URI with `?code=…&state=…` (code: 256-bit, single use, 60 seconds, hash stored, bound to the challenge and redirect URI). The desktop closes the loopback listener after one request; a foreign scheme handler cannot read the loopback callback.
 4. The desktop checks `state`, then `POST /v1/oauth/token` with the verifier, and receives an access token (opaque, 15 minutes) and a rotating refresh token (30-day idle; reuse of an old refresh token revokes the family).
 5. The desktop registers its device public keys (ECDSA P-256 signing, ECDH P-256 wrap; relay 4.2) as the account's **desktop**. If the account already has one, `409 desktop_exists` and the desktop offers "Replace this account's desktop" (4.7).
 6. The desktop opens its one outbound connection to the relay. Every admin operation on it is signed by the desktop signing key (relay 4.8), so the bearer token alone is not a takeover.
 
-A custom scheme can be claimed by another local app; PKCE makes an intercepted code useless without the verifier (RFC 8252 section 8.1).
+A custom scheme can be claimed by another local app; PKCE makes an intercepted code useless without the verifier (RFC 8252 section 8.1), but the loopback redirect is the default because it cannot be claimed by another app.
 
 ### 4.5 Device linking (sub-projects 2 and 4)
 
@@ -182,7 +186,7 @@ Assets: the user's ability to sign in, the device list, the right to link a devi
 | P6 | **Malicious relay** | Relay design 4.10 and threats T1 to T23 apply unchanged | As stated there |
 | P7 | **Abuse and spam sign-ups** | Sign-up closed until launch; rate limits per IP and per address; an address gets at most 3 mails per hour and 10 per day from all routes; an account exists only after the link is used; unfinished accounts deleted after 24 h | Low-volume abuse from many IPs |
 | P8 | **User enumeration** | Sign-up and recovery always `202` with the same body; sign-in names no account; same error for every sign-in failure; mail sent off the request path so timing does not depend on the branch | Rate-limit `429`s apply equally to every address |
-| P9 | **CSRF and cross-origin** | Every non-GET needs `Origin` equal to the service origin and `Content-Type: application/json`; cookies `SameSite=Strict`; no CORS on the account API | None known |
+| P9 | **CSRF and cross-origin** | Every non-GET needs `Origin` equal to the service origin and `Content-Type: application/json`; cookies `SameSite=Strict`; no CORS on the account API, because the PWA uses the app-origin BFF and never calls `/v1/` cross-origin | None known |
 | P10 | **Token leaks via mail links** | Token in the URL fragment; single use; 15 minutes; hash at rest; `Referrer-Policy: no-referrer` on the pages | A mail account reader within 15 minutes (= P2) |
 | P11 | **Supply chain** | Three runtime dependencies, exact pins, lockfile, CI boundary check (only allowed imports; never `extension/`), `npm audit` in CI | A compromised pinned version; review on every bump |
 | P12 | **Operator mistake** (reopen `/api/`, file mailer in production) | Config refuses non-loopback bind, non-HTTPS origin and the file mailer in production; the VPS README forbids reopening `/api/` | — |
@@ -240,9 +244,12 @@ Public sign-up opens only when **all** are done (sub-project 5):
 | Token blindness | After a full scenario, no issued token, cookie or link fragment appears anywhere in the database | Scan every table |
 | Retention | IPs nulled at 72 h, pending accounts deleted at 24 h | Injected clock |
 | Boundary | No import outside the package, `node:` built-ins and the three allowed dependencies | CI script |
-| Real passkeys | Registration and sign-in with a real authenticator | Sub-project 4: browser automation with Chrome's virtual authenticator, plus the user on a real iPhone (`(you)`) |
+| Real passkeys | Registration and sign-in with a real authenticator, RP ID and origin exact | Sub-project 4: browser automation with Chrome's virtual authenticator, plus the user on a real iPhone (`(you)`); assert a passkey from `accounts.llm-ide.com` is not offered on `app.llm-ide.com` |
 | OAuth + PKCE | Wrong verifier, reused code, expired code, wrong redirect URI, refresh reuse | Sub-project 2 |
 | Linking | Key substitution by the service gives mismatched codes; contested claim; timeout; deny | Sub-project 2, scripted malicious-service test |
+| PWA BFF | Code exchange and refresh stay same-origin; no CORS preflight; cookie flags; logout/revoke | Sub-project 4, browser + BFF tests |
+| Relay origin | The PWA origin is allowed; any other origin is refused | Sub-project 3/4 |
+| Desktop redirect | Loopback code is single-use and foreign scheme cannot exchange it | Sub-project 2 |
 | Relay | The negative-test list of relay 11.1 | Sub-project 3 |
 | External review | Spec and code | Sub-project 5 |
 
@@ -264,7 +271,7 @@ Each has a recommended secure default that the plans assume until you say otherw
 |---|---|---|
 | Q1 | Which email provider sends sign-up and recovery mail? | A transactional provider over SMTPS (port 465), such as Amazon SES (Tokyo region) or Postmark, with SPF, DKIM and DMARC on the sending domain; never a self-hosted mail server. |
 | Q2 | Which WebAuthn library? | `@simplewebauthn/server` 14.0.3, exact pin, bumped only with a changelog read. |
-| Q3 | Which origins? | `accounts.llm-ide.com` (account pages, API, relay; WebAuthn RP ID) on the VPS; the PWA on `app.llm-ide.com` with a **separate hosting account** and hardware-key MFA (relay D1); the PWA currently at the `llm-ide.com` root moves there. |
+| Q3 | Which origins? | `accounts.llm-ide.com` (account pages, API, relay; WebAuthn RP ID) on the VPS; the PWA on `app.llm-ide.com` with a **separate hosting account** and hardware-key MFA (relay D1), plus a same-origin BFF for token exchange/refresh; the PWA currently at the `llm-ide.com` root moves there. The PWA delegates passkeys to the accounts origin; it never uses a parent-domain RP ID. |
 | Q4 | Hold "replace desktop" for 72 hours after an email recovery? | Yes. |
 | Q5 | Spam defence beyond rate limits (CAPTCHA)? | None at launch (no third-party script, UN-061); add a privacy-preserving challenge only if abuse appears. |
 | Q6 | Who writes the terms and privacy policy, and which minimum age? | A lawyer-reviewed text for the operator's jurisdiction; minimum age 16. |
