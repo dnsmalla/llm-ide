@@ -1,0 +1,7 @@
+{
+  "endpoint": "POST /kb/sync/devices/enroll/cancel",
+  "status": 200,
+  "response": {
+    "ok": true
+  }
+}

@@ -19,6 +19,9 @@ const vault = await import('../server/vault.mjs');
 const st = await import('../kb/sync-state.mjs');
 const { handleSyncRoute, isSyncRoute } = await import('../routes/sync/http-routes.mjs');
 const { recordCycleFailure, publishNow, withUserLock } = await import('../routes/sync/scheduler.mjs');
+const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
+const { createReferenceDevice } = await import('./helpers/sync-device.mjs');
+const { _resetEnrollmentsForTest } = await import('../routes/sync/enroll.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
 const PROOF = busHostProof();
 
@@ -111,4 +114,45 @@ test('manual publish shares the scheduler per-user lock and refuses instead of w
   await withUserLock(u, async () => {
     await assert.rejects(() => publishNow(u, { store: {} }), (e) => e.code === 'SYNC_BUSY');
   });
+});
+
+test('device enrollment over the routes: QR, SAS, confirm, list, revoke, rotate', async () => {
+  _resetEnrollmentsForTest();
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'memory', storeConfig: {} });
+  st.setSyncEnabled(u, true);
+  const store = createMemoryStore();
+  const deps = { storeFor: () => store };
+  assert.equal((await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'android' }, deps })).body.error.details.field, 'tier');
+  const start = await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' }, deps });
+  assert.equal(start.status, 200); assert.ok(start.body.qr.startsWith('llmide://pair?'));
+  assert.equal((await call('POST', '/kb/sync/devices/enroll/confirm', { userId: u, body: {}, deps })).body.error.code, 'ENROLL_NOT_READY');
+  const dev = createReferenceDevice({ name: 'Route phone' });
+  await dev.scanAndClaim(store, start.body.qr);
+  const poll = await call('POST', '/kb/sync/devices/enroll/poll', { userId: u, body: {}, deps });
+  assert.equal(poll.body.phase, 'confirm');
+  assert.equal(await dev.readAck(store), poll.body.sas);
+  const done = await call('POST', '/kb/sync/devices/enroll/confirm', { userId: u, body: {}, deps });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.devices[0].name, 'Route phone');
+  assert.equal(done.body.devices[0].folderHint.length, 6);
+  assert.equal(done.body.rotationPending, false);
+  const raw = JSON.stringify(done.body);
+  assert.ok(!raw.includes(dev.pair.dir) && !raw.includes(start.body.qr.match(/es=([^&]+)/)[1]), 'no folder capability or es in status');
+  const e0 = done.body.epoch;
+  const rot = await call('POST', '/kb/sync/rotate', { userId: u, body: {}, deps });
+  assert.equal(rot.body.epoch, e0 + 1);
+  assert.equal((await call('DELETE', '/kb/sync/devices/AAAAAAAAAAAAAAAAAAAAAA', { userId: u, deps })).status, 404);
+  const rev = await call('DELETE', `/kb/sync/devices/${dev.deviceId}`, { userId: u, deps });
+  assert.equal(rev.status, 200); assert.deepEqual(rev.body.devices, []); assert.equal(rev.body.epoch, e0 + 2);
+  assert.equal((await call('POST', '/kb/sync/devices/enroll/cancel', { userId: u, body: {}, deps })).body.ok, true);
+  assert.equal((await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' }, proof: false, deps })).status, 403);
+});
+
+test('enrollment needs a store and sync on', async () => {
+  const u = user();
+  assert.equal((await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' } })).body.error.code, 'SYNC_NOT_SET_UP');
+  st.ensureSyncState(u, { storeKind: 'memory', storeConfig: {} });
+  const store = createMemoryStore();
+  assert.equal((await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' }, deps: { storeFor: () => store } })).body.error.code, 'SYNC_OFF');
 });

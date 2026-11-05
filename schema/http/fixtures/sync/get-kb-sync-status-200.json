@@ -1,1 +1,28 @@
-{"endpoint":"GET /kb/sync/status","status":200,"response":{"configured":true,"enabled":true,"storeKind":"mega","store":{"folder":"llmide-sync","account":"l***@example.com"},"syncId":"AAAAAAAAAAAAAAAAAAAAAA","epoch":1,"signingFingerprint":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","devices":[],"lastPublishAt":1762300000000,"lastError":null}}
+{
+  "endpoint": "GET /kb/sync/status",
+  "status": 200,
+  "response": {
+    "configured": true,
+    "enabled": true,
+    "storeKind": "mega",
+    "store": {
+      "folder": "llmide-sync",
+      "account": "l***@example.com"
+    },
+    "syncId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "epoch": 1,
+    "signingFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "devices": [
+      {
+        "deviceId": "BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Phone",
+        "tier": "ios",
+        "addedAt": 1762300000000,
+        "folderHint": "ABCDEF"
+      }
+    ],
+    "lastPublishAt": 1762300000000,
+    "lastError": null,
+    "rotationPending": false
+  }
+}

@@ -2069,10 +2069,17 @@ export type EncryptedSyncStatus = {
   epoch?: number | null;
   /** base64url SHA-256 of the desktop signing SPKI */
   signingFingerprint?: string | null;
-  devices?: unknown[];
+  devices?: {
+    deviceId?: string;
+    name?: string;
+    tier?: string;
+    addedAt?: number;
+    folderHint?: string;
+  }[];
   lastPublishAt?: number | null;
   /** an error code only */
   lastError?: string | null;
+  rotationPending?: boolean;
 };
 
 /** Request parts for `GET /kb/storage` (schema/http/agent-history.schema.json). */
@@ -8066,6 +8073,56 @@ export type PostKbSyncPublishResponse200 = {
   };
 };
 
+/** Request parts for `POST /kb/sync/devices/enroll` (schema/http/sync.schema.json). */
+export type PostKbSyncDevicesEnrollRequest = {
+  body: {
+    tier: "web" | "ios";
+  };
+};
+
+export type PostKbSyncDevicesEnrollResponse200 = {
+  qr?: string;
+  expiresAt?: number;
+  tier?: string;
+};
+
+/** Request parts for `POST /kb/sync/devices/enroll/poll` (schema/http/sync.schema.json). */
+export type PostKbSyncDevicesEnrollPollRequest = Record<string, never>;
+
+export type PostKbSyncDevicesEnrollPollResponse200 = {
+  phase?: "none" | "waiting" | "confirm" | "failed" | "expired";
+  sas?: string | null;
+  name?: string | null;
+  tier?: string | null;
+  code?: string | null;
+};
+
+/** Request parts for `POST /kb/sync/devices/enroll/confirm` (schema/http/sync.schema.json). */
+export type PostKbSyncDevicesEnrollConfirmRequest = Record<string, never>;
+
+export type PostKbSyncDevicesEnrollConfirmResponse200 = EncryptedSyncStatus;
+
+/** Request parts for `POST /kb/sync/devices/enroll/cancel` (schema/http/sync.schema.json). */
+export type PostKbSyncDevicesEnrollCancelRequest = Record<string, never>;
+
+export type PostKbSyncDevicesEnrollCancelResponse200 = {
+  ok?: boolean;
+};
+
+/** Request parts for `DELETE /kb/sync/devices/:id` (schema/http/sync.schema.json). */
+export type DeleteKbSyncDevicesIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteKbSyncDevicesIdResponse200 = EncryptedSyncStatus;
+
+/** Request parts for `POST /kb/sync/rotate` (schema/http/sync.schema.json). */
+export type PostKbSyncRotateRequest = Record<string, never>;
+
+export type PostKbSyncRotateResponse200 = EncryptedSyncStatus;
+
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
   "GET /kb/storage": {
@@ -10409,6 +10466,42 @@ export interface ApiEndpoints {
     request: PostKbSyncPublishRequest;
     responses: {
       200: PostKbSyncPublishResponse200;
+    };
+  };
+  "POST /kb/sync/devices/enroll": {
+    request: PostKbSyncDevicesEnrollRequest;
+    responses: {
+      200: PostKbSyncDevicesEnrollResponse200;
+    };
+  };
+  "POST /kb/sync/devices/enroll/poll": {
+    request: PostKbSyncDevicesEnrollPollRequest;
+    responses: {
+      200: PostKbSyncDevicesEnrollPollResponse200;
+    };
+  };
+  "POST /kb/sync/devices/enroll/confirm": {
+    request: PostKbSyncDevicesEnrollConfirmRequest;
+    responses: {
+      200: PostKbSyncDevicesEnrollConfirmResponse200;
+    };
+  };
+  "POST /kb/sync/devices/enroll/cancel": {
+    request: PostKbSyncDevicesEnrollCancelRequest;
+    responses: {
+      200: PostKbSyncDevicesEnrollCancelResponse200;
+    };
+  };
+  "DELETE /kb/sync/devices/:id": {
+    request: DeleteKbSyncDevicesIdRequest;
+    responses: {
+      200: DeleteKbSyncDevicesIdResponse200;
+    };
+  };
+  "POST /kb/sync/rotate": {
+    request: PostKbSyncRotateRequest;
+    responses: {
+      200: PostKbSyncRotateResponse200;
     };
   };
 }

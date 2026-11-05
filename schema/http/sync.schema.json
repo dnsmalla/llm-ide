@@ -1,5 +1,5 @@
 {
-  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO.",
+  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO. 409 SYNC_OFF|ENROLL_NOT_READY|ENROLL_FAILED, 404 NOT_FOUND (revoke).",
   "$defs": {
     "EncryptedSyncStatus": {
       "type": "object",
@@ -52,7 +52,27 @@
           "description": "base64url SHA-256 of the desktop signing SPKI"
         },
         "devices": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string"
+              },
+              "addedAt": {
+                "type": "integer"
+              },
+              "folderHint": {
+                "type": "string"
+              }
+            }
+          }
         },
         "lastPublishAt": {
           "type": [
@@ -66,6 +86,9 @@
             "null"
           ],
           "description": "an error code only"
+        },
+        "rotationPending": {
+          "type": "boolean"
         }
       }
     }
@@ -174,6 +197,130 @@
               }
             }
           }
+        }
+      }
+    },
+    "POST /kb/sync/devices/enroll": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "tier"
+          ],
+          "properties": {
+            "tier": {
+              "type": "string",
+              "enum": [
+                "web",
+                "ios"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "qr": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "integer"
+            },
+            "tier": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/sync/devices/enroll/poll": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "phase": {
+              "type": "string",
+              "enum": [
+                "none",
+                "waiting",
+                "confirm",
+                "failed",
+                "expired"
+              ]
+            },
+            "sas": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tier": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/sync/devices/enroll/confirm": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      }
+    },
+    "POST /kb/sync/devices/enroll/cancel": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "DELETE /kb/sync/devices/:id": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      },
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/sync/rotate": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
         }
       }
     }

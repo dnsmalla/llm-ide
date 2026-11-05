@@ -7,8 +7,11 @@ import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish } from '../../kb/sync-state.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { ensureSyncKeys } from './keys.mjs';
-import { storeFor as defaultStoreFor, dropStore, publishNow } from './scheduler.mjs';
+import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending } from './scheduler.mjs';
+import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } from './enroll.mjs';
+import { revokeDevice } from './registry.mjs';
 
+const DEVICE_RE = /^\/kb\/sync\/devices\/([A-Za-z0-9_-]{22})$/;
 const fail = (res, status, code, message, details) => { send(res, status, { error: { code, message, ...(details ? { details } : {}) } }); return true; };
 
 export function isSyncRoute(url) {
@@ -18,13 +21,13 @@ export function isSyncRoute(url) {
 
 function status(userId) {
   const s = getSyncState(userId);
-  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], lastPublishAt: null, lastError: null };
+  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], rotationPending: false, lastPublishAt: null, lastError: null };
   return {
     configured: true, enabled: s.enabled, storeKind: s.storeKind,
     store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : null,
     syncId: s.syncId, epoch: s.epoch, signingFingerprint: ensureSyncKeys(userId).fingerprint,
-    devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt })),
-    lastPublishAt: s.lastPublishAt, lastError: s.lastError,
+    devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: d.dir.slice(0, 6) })),
+    rotationPending: rotationPending(userId), lastPublishAt: s.lastPublishAt, lastError: s.lastError,
   };
 }
 
@@ -77,6 +80,35 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       } catch (e) {
         const code = String(e?.code || '').startsWith('SYNC_') ? e.code : 'SYNC_IO';
         return fail(res, code === 'SYNC_NOT_SET_UP' || code === 'SYNC_BUSY' ? 409 : 502, code, 'Sync store error');
+      }
+    }
+    if (path.startsWith('/kb/sync/devices') || path === '/kb/sync/rotate') {
+      const body = req.method === 'POST' ? await readJson(req, 1024) : {};
+      if (req.method === 'POST' && path === '/kb/sync/devices/enroll' && body.tier !== 'web' && body.tier !== 'ios') {
+        return fail(res, 400, 'VALIDATION_FAILED', 'tier must be web or ios', { field: 'tier' });
+      }
+      const store = getSyncState(userId) ? storeFor(userId) : null;
+      if (!store) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
+      const m = DEVICE_RE.exec(path);
+      try {
+        if (req.method === 'POST' && path === '/kb/sync/devices/enroll') { send(res, 200, await startEnrollment(userId, { store, tier: body.tier, env })); return true; }
+        if (req.method === 'POST' && path === '/kb/sync/devices/enroll/poll') { send(res, 200, await pollEnrollment(userId)); return true; }
+        if (req.method === 'POST' && path === '/kb/sync/devices/enroll/confirm') {
+          await confirmEnrollment(userId);
+          await publishNow(userId, { store }).catch(() => {});
+          send(res, 200, status(userId)); return true;
+        }
+        if (req.method === 'POST' && path === '/kb/sync/devices/enroll/cancel') { await cancelEnrollment(userId); send(res, 200, { ok: true }); return true; }
+        if (req.method === 'DELETE' && m) {
+          if (!(await revokeDevice(userId, m[1], { store }))) return fail(res, 404, 'NOT_FOUND', 'No such device');
+          await rotateNow(userId, { store });
+          send(res, 200, status(userId)); return true;
+        }
+        if (req.method === 'POST' && path === '/kb/sync/rotate') { await rotateNow(userId, { store }); send(res, 200, status(userId)); return true; }
+      } catch (e) {
+        const code = String(e?.code || '');
+        if (code === 'SYNC_OFF' || code.startsWith('ENROLL_')) return fail(res, 409, code, 'Enrollment is not possible now');
+        return fail(res, 502, code.startsWith('SYNC_') ? code : 'SYNC_IO', 'Sync store error');
       }
     }
     return fail(res, 404, 'NOT_FOUND', 'No such sync route');

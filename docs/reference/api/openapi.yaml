@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 112
+  x-api-version: 113
 servers:
   - url: "https://{host}"
     variables:
@@ -14294,6 +14294,116 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/sync/devices/enroll:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "tier"
+              properties:
+                tier:
+                  type: "string"
+                  enum:
+                    - "web"
+                    - "ios"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  qr:
+                    type: "string"
+                  expiresAt:
+                    type: "integer"
+                  tier:
+                    type: "string"
+  /kb/sync/devices/enroll/cancel:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+  /kb/sync/devices/enroll/confirm:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/devices/enroll/poll:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  phase:
+                    type: "string"
+                    enum:
+                      - "none"
+                      - "waiting"
+                      - "confirm"
+                      - "failed"
+                      - "expired"
+                  sas:
+                    type:
+                      - "string"
+                      - "null"
+                  name:
+                    type:
+                      - "string"
+                      - "null"
+                  tier:
+                    type:
+                      - "string"
+                      - "null"
+                  code:
+                    type:
+                      - "string"
+                      - "null"
+  /kb/sync/devices/{id}:
+    delete:
+      tags:
+        - "sync"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
   /kb/sync/enabled:
     post:
       tags:
@@ -14375,6 +14485,17 @@ paths:
                         type: "integer"
                       replied:
                         type: "integer"
+  /kb/sync/rotate:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
   /kb/sync/status:
     get:
       tags:
@@ -17068,6 +17189,19 @@ components:
           description: "base64url SHA-256 of the desktop signing SPKI"
         devices:
           type: "array"
+          items:
+            type: "object"
+            properties:
+              deviceId:
+                type: "string"
+              name:
+                type: "string"
+              tier:
+                type: "string"
+              addedAt:
+                type: "integer"
+              folderHint:
+                type: "string"
         lastPublishAt:
           type:
             - "integer"
@@ -17077,6 +17211,8 @@ components:
             - "string"
             - "null"
           description: "an error code only"
+        rotationPending:
+          type: "boolean"
     Entity:
       type: "object"
       required:

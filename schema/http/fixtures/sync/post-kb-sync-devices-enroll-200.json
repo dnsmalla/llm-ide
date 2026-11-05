@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/sync/devices/enroll",
+  "status": 200,
+  "response": {
+    "qr": "llmide://pair?sv=1&sid=AAAAAAAAAAAAAAAAAAAAAA&sfp=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB&dir=CCCCCCCCCCCCCCCCCCCCCC&slot=DDDDDDDDDDDDDDDDDDDDDD&es=EEEEEEEEEEEEEEEEEEEEEE&st=mega%3Allmide-sync",
+    "expiresAt": 1762300120000,
+    "tier": "ios"
+  },
+  "request": {
+    "body": {
+      "tier": "ios"
+    }
+  }
+}

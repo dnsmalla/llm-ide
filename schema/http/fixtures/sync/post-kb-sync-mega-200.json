@@ -12,9 +12,18 @@
     "syncId": "AAAAAAAAAAAAAAAAAAAAAA",
     "epoch": 1,
     "signingFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "devices": [],
+    "devices": [
+      {
+        "deviceId": "BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Phone",
+        "tier": "ios",
+        "addedAt": 1762300000000,
+        "folderHint": "ABCDEF"
+      }
+    ],
     "lastPublishAt": null,
-    "lastError": null
+    "lastError": null,
+    "rotationPending": false
   },
   "request": {
     "body": {

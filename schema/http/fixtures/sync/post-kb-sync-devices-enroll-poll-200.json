@@ -1,0 +1,11 @@
+{
+  "endpoint": "POST /kb/sync/devices/enroll/poll",
+  "status": 200,
+  "response": {
+    "phase": "none",
+    "sas": null,
+    "name": null,
+    "tier": null,
+    "code": null
+  }
+}
