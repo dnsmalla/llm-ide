@@ -101,7 +101,7 @@ struct SettingsView: View {
                     }
                 }
 
-                if connection.supports(MobileProtocol.Capability.usage) {
+                if connection.supports(MobileProtocol.Capability.usage) || connection.servesV1Read {
                     NavigationLink { UsageView() } label: {
                         HStack(spacing: DesignSystem.Spacing.md) {
                             Image(systemName: "gauge.with.dots.needle.67percent")

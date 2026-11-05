@@ -78,7 +78,7 @@ struct RootTabView: View {
         .onChange(of: connection.macCapabilities) { _ in
             if selection == .project, !connection.hasProjectSections { selection = .chat }
             if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
-            if !connection.supports(MobileProtocol.Capability.usage) { usageStore.resetForNewDevice() }
+            if !connection.supports(MobileProtocol.Capability.usage), !connection.servesV1Read { usageStore.resetForNewDevice() }
             if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
             refreshMacData()
         }
@@ -99,8 +99,13 @@ struct RootTabView: View {
     }
 
     private func refreshMacData() {
-        // Host API v1 serves chat + approvals only (Plan 4); these stores still speak v2 and would send nothing.
-        guard isConnected, connection.hostApiVersion == 2 else { return }
+        guard isConnected else { return }
+        if connection.servesV1Read {
+            usageStore.refresh()
+            Task { await connection.reads.refresh() }
+        }
+        // Host API v1 serves chat, approvals and read only; these stores still speak v2 and would send nothing.
+        guard connection.hostApiVersion == 2 else { return }
         macStatusStore.requestMacStatus()
         autoTaskStore.refreshAll()
         loopStore.refreshAll()

@@ -141,6 +141,16 @@ final class ConnectionService: ObservableObject {
     /// The v1 client still in hello/auth, so a Disconnect, Forget or new connect can close it (final review I3).
     private var connectingV1: HostApiV1Client?
 
+    /// Host API v1 `read` (chat list + one chat, read-only). Sends only through the v1 client, never v2.
+    @Published private(set) var readState = HostApiReadState()
+    private(set) lazy var reads: HostApiReadController = {
+        let r = HostApiReadController(host: { [weak self] in self?.v1Client })
+        r.onChange = { [weak self] in self?.readState = $0 }
+        return r
+    }()
+    /// True only on a v1 connection whose host granted `read`. Not optimistic, unlike `supports`.
+    var servesV1Read: Bool { HostApiReadGate.isOn(apiVersion: hostApiVersion, capabilities: macCapabilities) }
+
     /// Whether to offer a feature. Optimistic until the first handshake so tabs don't flicker
     /// in after launch; after it, exactly what the Mac advertised.
     func supports(_ capability: String) -> Bool {
@@ -389,6 +399,7 @@ final class ConnectionService: ObservableObject {
         switch event {
         case .capabilities(let caps):
             macCapabilities = caps
+            if !servesV1Read { reads.reset() }   // `read` revoked: clear what is on screen now
             llmIdeStore?.handle(event)
         case .disconnected(let reason):
             guard hostApiVersion == 1 else { return }
@@ -399,7 +410,10 @@ final class ConnectionService: ObservableObject {
             invalidateSocket()
             connectionStatus = .disconnected
             scheduleReconnect(retryAfterMs: reason.retryAfterMs)
-        case .event, .progress, .resync:
+        case .resync:
+            llmIdeStore?.handle(event)
+            if servesV1Read { Task { await reads.refresh() } }
+        case .event, .progress:
             llmIdeStore?.handle(event)
         }
     }
@@ -522,6 +536,7 @@ final class ConnectionService: ObservableObject {
         connectingV1?.close()
         connectingV1 = nil
         hostApiVersion = 2
+        reads.reset()
         v2Host.connectionEnded()
     }
 

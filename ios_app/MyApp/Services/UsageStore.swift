@@ -19,10 +19,13 @@ final class UsageStore: ObservableObject {
     /// The Mac's chip: "review" (Ask) | "acceptEdits" | "auto" (Bypass). Nil until first heard.
     var permissionMode: String? { state?.permissionMode }
 
+    private var v1Ticket = 0
+
     func refresh() {
-        guard connection?.connectionStatus == .connected,
-              connection?.supports(MobileProtocol.Capability.usage) == true else { return }
-        connection?.sendEncodable(UsageGet())
+        guard let connection, connection.connectionStatus == .connected else { return }
+        if connection.servesV1Read { return refreshV1(connection) }
+        guard connection.supports(MobileProtocol.Capability.usage) else { return }
+        connection.sendEncodable(UsageGet())
         loadError = nil
         watchdog?.cancel()
         watchdog = Task { [weak self] in
@@ -30,6 +33,26 @@ final class UsageStore: ObservableObject {
             guard !Task.isCancelled, let self, self.state == nil,
                   self.connection?.connectionStatus == .connected else { return }
             self.loadError = "The Mac didn't answer. Update LLM-IDE on the Mac to a version with usage."
+        }
+    }
+
+    /// Host API v1: `usage.get` (capability `read`), mapped into the same `UsageState` the v2 screen shows.
+    private func refreshV1(_ connection: ConnectionService) {
+        v1Ticket += 1
+        let mine = v1Ticket
+        loadError = nil
+        watchdog?.cancel()
+        let host = connection.host
+        Task { [weak self] in
+            do {
+                let r = try await host.send(.usageGet, HostApiUsageGetRequest(), as: HostApiUsageGetResult.self)
+                guard let self, mine == self.v1Ticket, self.connection?.servesV1Read == true else { return }
+                self.state = HostApiReadMapping.usageState(r)
+            } catch {
+                guard let self, mine == self.v1Ticket else { return }
+                let text = (error as? HostApiRejection)?.message ?? ""
+                self.loadError = text.isEmpty ? "Your host sent usage this app could not read." : String(text.prefix(500))
+            }
         }
     }
 
@@ -42,6 +65,7 @@ final class UsageStore: ObservableObject {
     }
 
     func resetForNewDevice() {
+        v1Ticket += 1
         state = nil
         loadError = nil
         watchdog?.cancel()

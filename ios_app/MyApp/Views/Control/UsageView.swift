@@ -10,10 +10,12 @@ struct UsageView: View {
     var body: some View {
         List {
             if let s = store.state {
-                Section {
-                    permissionRow(s.permissionMode)
-                } footer: {
-                    Text("Phone chats run under the Mac's setting. It can only be changed on the Mac.")
+                if !s.permissionMode.isEmpty {
+                    Section {
+                        permissionRow(s.permissionMode)
+                    } footer: {
+                        Text("Phone chats run under the Mac's setting. It can only be changed on the Mac.")
+                    }
                 }
                 if let error = s.error {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill")
