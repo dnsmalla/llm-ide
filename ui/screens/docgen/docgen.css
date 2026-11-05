@@ -110,3 +110,10 @@
 .dg-sidebar details:last-of-type { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dg-sidebar details:last-of-type .dg-sources { flex: 1; min-height: 0; }
 .dg-warn { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--tok-color-warning); color: var(--tok-color-body); font-size: 11px; font-weight: 700; flex: none; }
+/* Sibling-image strip under a Visual preview: thumbnails are read through the host image reader. */
+.dg-thumbs { display: flex; gap: var(--tok-space-sm); overflow-x: auto; padding-top: var(--tok-space-sm); }
+.dg-thumb { flex: 0 0 104px; display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-surface); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dg-thumb:hover, .dg-thumb:focus-visible { border-color: var(--tok-color-accent); }
+.dg-thumb-img, .dg-thumb-wait { display: block; width: 100%; height: 64px; border-radius: 3px; background-color: var(--tok-color-body); background-position: center; background-repeat: no-repeat; background-size: cover; }
+.dg-thumb-wait { opacity: .5; }
+.dg-thumb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }

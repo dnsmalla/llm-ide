@@ -55,6 +55,15 @@ const SOURCE_ROOTS: Record<"doc" | "visual", readonly { path: string; label: str
 };
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i;
+const MAX_THUMB_BYTES = 5_000_000;
+
+/** Sibling images in one folder for the Visual strip: current excluded, bounded, stable name order. */
+export function siblingImages(rows: readonly DirEntryRow[], currentPath: string, max = 12): DirEntryRow[] {
+  return rows
+    .filter((r) => r.kind === "file" && r.path !== currentPath && /\.(png|jpe?g|gif|webp)$/i.test(r.name) && r.size > 0 && r.size <= MAX_THUMB_BYTES)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, max);
+}
 
 export function SourcePanel(p: SourcePanelProps): ReactNode {
   const [tab, setTabState] = useState<Tab>(() => {
@@ -109,6 +118,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   const [err, setErr] = useState<string | null>(null);
   const [walk, setWalk] = useState<WalkProgress | null>(null);
   const [preview, setPreview] = useState<{ path: string; url: string } | null>(null);
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [walkNote, setWalkNote] = useState<string | null>(null);
   const walkCtl = useRef<AbortController | null>(null);
   const fs = env.fs;
@@ -175,6 +185,22 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     );
   };
 
+  const siblings = useMemo(() => (preview ? siblingImages(rows, preview.path) : []), [preview, rows]);
+  useEffect(() => {
+    if (!preview || !env.readImage) return undefined;
+    let live = true;
+    setThumbs({});
+    void (async () => {
+      for (const r of siblings) {
+        try {
+          const url = await env.readImage!(r.path);
+          if (live && url) setThumbs((old) => ({ ...old, [r.path]: url }));
+        } catch { /* a sibling that cannot be read is simply omitted */ }
+      }
+    })();
+    return () => { live = false; };
+  }, [preview?.path, siblings, env.readImage]);
+
   const root = roots.find((r) => dir === r.path || dir.startsWith(`${r.path}/`)) ?? roots[0]!;
   const rel = dir === root.path ? "" : dir.slice(root.path.length + 1);
   const crumbs = rel === "" ? root.label : `${root.label} / ${rel}`;
@@ -217,6 +243,22 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
         <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`}>
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
           <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => setPreview(null)}>Close</button></div>
+          {siblings.length > 0 && (
+            <div className="dg-thumbs" role="listbox" aria-label={`Other images in ${dir || root.label}`}>
+              {siblings.map((r) => {
+                const url = thumbs[r.path];
+                return (
+                  <button key={r.path} type="button" role="option" aria-selected={false} className="dg-thumb" title={r.name} aria-label={`Preview ${r.name}`} onClick={() => {
+                    if (url) setPreview({ path: r.path, url });
+                    else void env.readImage?.(r.path).then((u) => u && setPreview({ path: r.path, url: u }));
+                  }}>
+                    {url ? <span className="dg-thumb-img" style={{ backgroundImage: `url(${url})` }} /> : <span className="dg-thumb-wait" aria-hidden="true" />}
+                    <span className="dg-thumb-name">{r.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : null}
       <VirtualList

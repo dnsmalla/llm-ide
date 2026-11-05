@@ -235,3 +235,14 @@ test("DocGenScreen parity: Setup delivery list is honest, no manual edit, and th
   assert.doesNotMatch(done, /aria-label="Document markdown"/);
   assert.match(done, />Start another</);
 });
+
+
+test("Visual sibling thumbnails exclude the current image, huge files and unsupported formats", () => {
+  const row = (name, size, kind = "file") => ({ name, path: `data/${name}`, kind, size });
+  const rows = [
+    row("current.png", 10), row("b.jpg", 20), row("a.webp", 30), row("huge.png", 6_000_000),
+    row("vector.svg", 10), row("notes.md", 10), row("folder.png", 10, "dir"), row("zero.png", 0),
+  ];
+  assert.deepEqual(E.siblingImages(rows, "data/current.png").map((r) => r.name), ["a.webp", "b.jpg"]);
+  assert.deepEqual(E.siblingImages(rows, "data/current.png", 1).map((r) => r.name), ["a.webp"]);
+});
