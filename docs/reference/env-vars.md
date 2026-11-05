@@ -51,7 +51,7 @@ Strongly recommended for any deployment that's not your laptop:
 |---|---|
 | `LLMIDE_BCRYPT_COST` | Bcrypt rounds for password hashing. Lower = faster login but easier offline crack. Range: 10-14, default 12. **Don't go below 10.** Server refuses to start outside that range. |
 | `LLMIDE_TRUST_PROXY` | When `1`, the server honors `X-Forwarded-For` for rate-limit/audit IPs. Only enable if a trusted reverse proxy fronts the server — otherwise clients can spoof their source IP. |
-| `LLMIDE_CORS_ORIGINS` | Comma-separated additions to the always-accepted `chrome-extension://*` + `localhost` + `127.0.0.1` allowlist. Use to whitelist a specific browser extension ID in production. |
+| `LLMIDE_CORS_ORIGINS` | Comma-separated additions to the always-accepted `chrome-extension://*` + `localhost` + `127.0.0.1` allowlist. To pin the browser extension to one ID instead, list it in `<dataDir>/extension-ids.json` (see the CORS invariant). |
 | `LLMIDE_ACCESS_TTL_SEC` | Access token lifetime. Shorter = better, but more refresh churn. Default `900` (15 min). |
 | `LLMIDE_REFRESH_TTL_SEC` | Refresh token lifetime. Determines "stay signed in for N days". Default `2592000` (30 days). |
 | `LLMIDE_SLACK_CLIENT_ID` | Client ID of LLM-IDE's own hosted Slack App (one app for the whole install, not per-user). Required for the "Connect Slack" one-click OAuth flow; `/auth/slack/start` returns `CONFIG_MISSING` when unset. Register at [api.slack.com/apps](https://api.slack.com/apps), redirect URL `http://127.0.0.1:<LLMIDE_PORT>/auth/slack/callback`. |

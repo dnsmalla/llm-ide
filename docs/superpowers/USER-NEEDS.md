@@ -133,7 +133,7 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 - [ ] **UN-043** Tauri feature-off mechanism: build-time tree-shake plus runtime `/health features`.
   - Source: kit plan "Gates added". Recommended: yes, both.
 - [ ] **UN-044** Pin the Chrome extension origin instead of accepting every `chrome-extension://*` (ROADMAP Q22).
-  - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent. Effort: 2 minutes. Recommended: yes; do it once the id is stable.
+  - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent; it goes in `extension-ids.json` in the server's data dir (Mac: `~/Library/Application Support/llm-ide/system/`; desktop: `~/Library/Application Support/llm-ide-desktop/core/`), then restart the server. Effort: 2 minutes. Status: mechanism built 2026-11-05; waiting on the id.
 - [ ] **UN-045** Flag-off `no-ack` capture retention (up to 50 captures) until the ack protocol is on by default.
   - Source: [extension storage audit](plans/2026-10-31-extension-storage-audit.md). Recommended: accept for now, turn the ack default on after the real-meeting check (UN-016).
 - [ ] **UN-046** Status audit decisions: write the missing connector-catalog spec and schedule catalog phase 3 and a real Miro run; close the 51 private-wrapper decode-lab skips before more Mac routes switch.

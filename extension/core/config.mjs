@@ -17,6 +17,7 @@ import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
 import { loadDevSecrets } from './dev-secrets.mjs';
 import { legacyTripwire } from './legacy-tripwire.mjs';
 import { parseOriginAllowlist } from './host-api-origins.mjs';
+import { loadPinnedExtensionIds } from './extension-origins.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -370,6 +371,8 @@ export const config = Object.freeze({
   // CORS — comma-separated list of allowed origins beyond the always-
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.
   extraCorsOrigins: envStr('LLMIDE_CORS_ORIGINS', '').split(',').map((s) => s.trim()).filter(Boolean),
+  // chrome-extension origin pin from <dataDir>/extension-ids.json (core/extension-origins.mjs); null = any extension.
+  pinnedExtensionIds: loadPinnedExtensionIds(DATA_LAYOUT.dataDir),
 
   // Replayed conversation history (the removed classic loop; now the Mac's history packer). Sized in CHARS,
   // not turns: the old fixed "last 8 turns" window was blown by tool-call

@@ -16,13 +16,13 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop multi-OS (Tauri) | 23 | 42 | 11 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
 | Mobile (iPhone native, PWA) | 12 | 6 | 11 | 29 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
 | Web app and relay | 7 | 4 | 7 | 18 | Host API web client built (pairing, chat, approvals), installable PWA with an offline shell, production static server and local/domain docs; no relay code yet; manual browser check (`web/MANUAL-CHECK.md`) deferred to the product stage |
-| Chrome extension | 6 | 2 | 8 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
+| Chrome extension | 6 | 3 | 7 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
+| Security | 10 | 3 | 4 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 116 | 66 | 74 | 256 |  |
+| Total | 116 | 68 | 72 | 256 |  |
 
 ## How the surfaces connect
 
@@ -251,7 +251,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] CI workflow `extension-ci.yml`; 464 files under `extension/tests` (me)
 - [~] "Extension stores nothing": audited ([audit](plans/2026-10-31-extension-storage-audit.md)); speaker names and pinned participants no longer persisted (`755fd3df`); remaining: flag-off `no-ack` capture retention (up to 50) until the ack protocol is on by default (you)
 - [~] "Mac app not running" state for the side panel: described in USER-CHECKLIST B7; not verified in a run (you)
-- [ ] Pin the extension origin: CORS accepts every `chrome-extension://*` (ROADMAP Q22) (you)
+- [~] Pin the extension origin (ROADMAP Q22): the server pins CORS to the IDs in `<dataDir>/extension-ids.json` (fail closed on a bad file; no file = any extension, as before; `extension/core/extension-origins.mjs`); open: your ID in that file (UN-044) (you)
 - [ ] Manual real-meeting checklist (`extension/CLAUDE.md` Testing Checklist) before any caption/LLM merge (you)
 - [ ] Chrome Web Store listing and review: no evidence in the repo (unverified) (you)
 - [ ] `llmide://` launch from Chrome (Q11) (me)
@@ -356,7 +356,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Claude-style permissions: Ask / Accept Edits / Bypass with prefix rules (project notes, PR #65; unverified in this audit) (me)
 - [x] Phase 0 staging script excludes secrets, keys, DBs (report "Packaging") (me)
 - [~] Provider and connector fetch pinning: pinned for providers, adapter MCP, extension install, tracker hosts, Box content downloads (host allowlist, manual redirects, token dropped cross-origin, size caps) and MCP connector OAuth discovery/token calls; **not** pinned: Jev connection check, 7 literal-host calls, subprocess egress (`plans/2026-10-31-status-audit.md` (e)); independent review welcome (ROADMAP X7) (me)
-- [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
+- [~] Pin extension origin instead of `chrome-extension://*` (Q22): mechanism built (`extension-ids.json` in the data dir); open: your ID (UN-044) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
 - [~] Relay: E2E design revised to the independent review (threats T1 to T23, negative-test list, gate G-EXT before public exposure; `plans/2026-10-31-relay-design.md`); build items open: spec R0, crypto vectors R1, key rotation, emergency revoke and no-plaintext tests in R2 to R4 (me)
 - [x] Workspace Trust server: per-user trust records, untrusted folders' `.mcp.json` stdio servers are not loaded and project hooks/plugins/skill scripts are named in a notice, `LLMIDE_WORKSPACE_TRUST=off` kill switch, API 95 (Tauri plan §8) (me)

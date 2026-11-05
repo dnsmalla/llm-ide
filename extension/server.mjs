@@ -33,6 +33,7 @@ import { stopAllAgents } from './agents/meeting-agent.mjs';
 
 import { migrationStatus } from './kb/migrations.mjs';
 import { config, configSummary } from './core/config.mjs';
+import { extensionOriginAllowed } from './core/extension-origins.mjs';
 import { sendJSON } from './core/utils.mjs';
 import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
@@ -653,7 +654,7 @@ function setCORS(req, res) {
   // diagnostic.  Also accept https:// localhost variants for the
   // hypothetical TLS-fronted deployment.
   const isAllowed =
-    origin.startsWith('chrome-extension://') ||
+    extensionOriginAllowed(origin, config.pinnedExtensionIds) ||
     origin.startsWith('http://localhost:')   || origin.startsWith('https://localhost:')   ||
     origin.startsWith('http://127.0.0.1:')   || origin.startsWith('https://127.0.0.1:')   ||
     origin.startsWith('http://[::1]:')       || origin.startsWith('https://[::1]:')       ||
