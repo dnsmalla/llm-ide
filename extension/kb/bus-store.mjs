@@ -136,7 +136,7 @@ const shapeRow = (r, job) => {
   if (state === 'enqueued') state = job?.state ?? 'queued';
   return {
     id: r.id, kind: r.kind, tier: r.tier, state, idem: r.idem, originClient: r.origin_client,
-    approvalReason: r.approval_reason, approvedBy: r.approved_by, ttlAt: r.ttl_at, createdAt: r.created_at,
+    approvalReason: r.approval_reason, approvedBy: r.approved_by, scheduleId: r.schedule_id ?? null, ttlAt: r.ttl_at, createdAt: r.created_at,
     startedAt: job?.startedAt ?? null, finishedAt: job?.finishedAt ?? null,
     error: job?.error ?? null, result: job?.result ?? null, jobId: job ? job.id : null,
   };
@@ -212,7 +212,7 @@ export function createCommand(userId, { kind, tier, idem, args, originClient, ne
 }
 
 /** awaiting_approval -> enqueued (job created). Throws NOT_FOUND / NOT_PENDING / EXPIRED. */
-export function approveCommand(userId, id, { approvedBy, lane, jobPayload, now = Date.now() }) {
+export function approveCommand(userId, id, { approvedBy, lane, jobPayload, scheduleId = null, now = Date.now() }) {
   const db = getDb();
   const out = db.transaction(() => {
     const r = db.prepare('SELECT * FROM bus_commands WHERE user_id = ? AND id = ?').get(userId, id);
@@ -220,7 +220,9 @@ export function approveCommand(userId, id, { approvedBy, lane, jobPayload, now =
     if (r.state === 'expired') return { expired: true };
     if (r.state !== 'awaiting_approval') throw busError('NOT_PENDING', 'this command is not waiting for approval', { state: r.state });
     if (Date.parse(r.ttl_at) < now) { expireOne(userId, id); return { expired: true }; } // committed, so the expiry sticks
-    db.prepare("UPDATE bus_commands SET state='enqueued', approved_by=?, decided_at=? WHERE user_id=? AND id=?").run(approvedBy, nowIso(), userId, id);
+    db.prepare("UPDATE bus_commands SET state='enqueued', approved_by=?, schedule_id=?, decided_at=? WHERE user_id=? AND id=?").run(approvedBy, scheduleId, nowIso(), userId, id);
+    // Same transaction: the rate check of the next standing approval reads last_run_at.
+    if (scheduleId) db.prepare('UPDATE bus_schedules SET last_run_at = ? WHERE user_id = ? AND id = ?').run(nowIso(), userId, scheduleId);
     enqueueJob(userId, { id, kind: r.kind, lane, payload: jobPayload ?? { args: jparse(r.args_json, {}) } });
     appendEvent(userId, id, { type: 'progress', payload: { step: 'approved' } });
     return { command: getCommand(userId, id) };

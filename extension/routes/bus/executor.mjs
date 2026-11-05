@@ -17,6 +17,8 @@ import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, m
 import { validate } from './schema-validate.mjs';
 import { runReview } from './review.mjs';
 import { runSourcesUpdate } from './sources-update.mjs';
+import { getSchedule } from '../../kb/bus-schedules.mjs';
+import { standingRefusal } from './schedules.mjs';
 import { truncateUtf8, chunkUtf8 } from './bytes.mjs';
 import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 
@@ -112,6 +114,12 @@ export function createBus({
       const approved = !!cmd.approvedBy;
       // T1/T2 always need a desktop approval (decideReceipt); re-check it here, not only through the command's state.
       if (info.tier !== 'T0' && !approved) fail('tier_denied');
+      // A run approved on a standing approval: the schedule must still exist and its approval must still be live, so
+      // deleting the schedule (revoking) stops a run that is still queued.
+      if (cmd.scheduleId) {
+        const s = getSchedule(userId, cmd.scheduleId);
+        if (!s || !s.standing || s.kind !== kind) fail('switch_off');
+      }
       if (info.tier === 'T0' && cmd.originClient !== 'desktop-ui' && !approved && !isKindEnabled(userId, kind)) fail('switch_off');
       if (!getDb().prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) fail('not_found');
       const args = getCommandArgs(userId, job.id) ?? {};
@@ -217,7 +225,7 @@ export function createBus({
     return out;
   }
 
-  function approve(userId, id, { client, nonce, confirm }) {
+  function approve(userId, id, { client, nonce, confirm, scheduleId }) {
     if (!mayApprove(client)) throw new BusError(403, 'TIER_DENIED', 'only the desktop can approve a command', { client });
     expireStale(userId);
     const cmd = getCommand(userId, id);
@@ -227,12 +235,19 @@ export function createBus({
     const want = approvalNonce(userId, id, hash);
     const ok = typeof nonce === 'string' && nonce.length === want.length && crypto.timingSafeEqual(Buffer.from(nonce), Buffer.from(want));
     if (!ok) throw new BusError(403, 'APPROVAL_NONCE_INVALID', 'the approval nonce is missing or wrong; read it from the desktop approvals list');
+    let viaSchedule = null;
+    if (scheduleId !== undefined) {
+      const schedule = typeof scheduleId === 'string' ? getSchedule(userId, scheduleId) : null;
+      const reason = standingRefusal({ schedule, cmd, argsHash: hash, now: Date.now() });
+      if (reason) throw new BusError(403, 'STANDING_APPROVAL_INVALID', 'no live standing approval covers this command; approve it with a click', { reason });
+      viaSchedule = schedule.id;
+    }
     const info = kindInfo(cmd.kind);
     if (REGISTRY.tiers[info.tier].approval === 'desktop_confirm' && !confirmMatches(args, confirm)) {
       throw new BusError(400, 'CONFIRM_MISMATCH', 'confirm must repeat the exact ids this command will act on');
     }
     let command;
-    try { command = approveCommand(userId, id, { approvedBy: client, lane: laneFor(info, cmd.kind, args), jobPayload: { args } }); }
+    try { command = approveCommand(userId, id, { approvedBy: client, lane: laneFor(info, cmd.kind, args), jobPayload: { args }, scheduleId: viaSchedule }); }
     catch (e) {
       if (e.code === 'NOT_FOUND') throw new BusError(404, 'NOT_FOUND', 'command not found');
       if (e.code === 'NOT_PENDING') throw new BusError(409, 'NOT_PENDING', e.message, e.details);
