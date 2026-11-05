@@ -14,10 +14,12 @@ export function decodeUsage(v: unknown): UsageCounts | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const n = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? Math.floor(x) : null);
-  const inputTokens = n(o.inputTokens), outputTokens = n(o.outputTokens), cacheReadTokens = n(o.cacheReadTokens), cacheCreationTokens = n(o.cacheCreationTokens);
-  return inputTokens === null || outputTokens === null || cacheReadTokens === null || cacheCreationTokens === null
+  const inputTokens = n(o.inputTokens), outputTokens = n(o.outputTokens), cacheReadTokens = n(o.cacheReadTokens);
+  // The Mac's cacheCreationTokens is Int?: older files/events omit it and the Mac shows 0 cache writes.
+  const creation = o.cacheCreationTokens === undefined || o.cacheCreationTokens === null ? 0 : n(o.cacheCreationTokens);
+  return inputTokens === null || outputTokens === null || cacheReadTokens === null || creation === null
     ? null
-    : { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
+    : { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens: creation };
 }
 
 export const CACHE_WRITE_MULTIPLIER = 1.25;

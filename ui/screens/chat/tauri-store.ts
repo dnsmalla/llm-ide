@@ -115,7 +115,7 @@ export function fromFileMessage(m: unknown, index: number): StoredMessage {
 export function toFileMessage(msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }, nowMs: number): Record<string, unknown> {
   const stopped = msg.meta?.status === "aborted";
   const metadata: Record<string, unknown> = {};
-  if (typeof msg.meta?.mode === "string" && msg.meta.mode) metadata.mode = msg.meta.mode;
+  if (msg.role === "assistant" && typeof msg.meta?.mode === "string" && msg.meta.mode) metadata.mode = msg.meta.mode;
   const usage = decodeUsage(msg.meta?.tokenUsage);
   if (usage) metadata.tokenUsage = usage;
   return {
