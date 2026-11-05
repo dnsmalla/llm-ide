@@ -38,8 +38,8 @@ test("host-api command registry: host commands have a capability and exact schem
   }
 });
 
-test("host-api command registry: 12 commands and every fixture validates", () => {
-  assert.equal(Object.keys(commands.commands).length, 12);
+test("host-api command registry: 15 commands and every fixture validates", () => {
+  assert.equal(Object.keys(commands.commands).length, 15);
   for (const [name, c] of Object.entries(commands.commands)) {
     for (const [kind, schema] of [["request", c.request], ["result", c.result]]) {
       const value = json(`fixtures/commands/${name}.${kind}.json`);
@@ -99,10 +99,26 @@ test("host-api README lists every command with its metadata", () => {
     const c = commands.commands[name];
     assert.deepEqual(rows.get(name), { capability: c.capability, idempotent: c.idempotent, v2Tag: c.v2Tag }, name);
   }
-  assert.match(readme, /12 commands/);
+  assert.match(readme, /15 commands/);
   assert.match(readme, /seven flat variants/);
   assert.match(readme, /host\.capabilities/);
   assert.match(readme, /envelope `rev`/);
+});
+
+test("host-api read commands: capability read, idempotent, closed shapes, bounded lists", () => {
+  assert.ok(commands.capabilities.includes("read"));
+  for (const name of ["chat.sessions", "chat.history", "usage.get"]) {
+    const c = commandEntry(name);
+    assert.equal(c.capability, "read", name);
+    assert.equal(c.idempotent, true, name);
+    assert.equal(c.request.additionalProperties, false, name);
+    assert.equal(c.result.additionalProperties, false, name);
+  }
+  assert.equal(commandEntry("chat.sessions").result.properties.sessions.maxItems, 100);
+  assert.equal(commandEntry("chat.history").result.properties.messages.maxItems, 500);
+  // A foreign or system role never validates, so a mapper bug cannot leak a system line.
+  const bad = { messages: [{ seq: 1, role: "system", content: "x" }] };
+  assert.ok(validate(commandEntry("chat.history").result, bad, { defs: envelope.$defs }).length > 0);
 });
 
 test("generated Host API constants match the registry", () => {

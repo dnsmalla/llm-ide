@@ -18,6 +18,10 @@
     "chat.send.attachment-unknown-field.json": { "command": "chat.send", "kind": "request", "at": ".attachments[0].extra" },
     "chat.cancel.unknown-field.json": { "command": "chat.cancel", "kind": "request", "at": ".x" },
     "chat.snapshot.message-missing-content.json": { "command": "chat.snapshot", "kind": "result", "at": ".messages[0].content" },
-    "toolApprovals.answer.bad-decision.json": { "command": "toolApprovals.answer", "kind": "request", "at": ".decision" }
+    "toolApprovals.answer.bad-decision.json": { "command": "toolApprovals.answer", "kind": "request", "at": ".decision" },
+    "chat.history.missing-session-id.json": { "command": "chat.history", "kind": "request", "at": ".sessionId" },
+    "chat.history.bad-session-id.json": { "command": "chat.history", "kind": "request", "at": ".sessionId" },
+    "chat.sessions.limit-too-large.json": { "command": "chat.sessions", "kind": "request", "at": ".limit" },
+    "usage.get.model-unknown-field.json": { "command": "usage.get", "kind": "result", "at": ".providers[0].models[0].apiKey" }
   }
 }

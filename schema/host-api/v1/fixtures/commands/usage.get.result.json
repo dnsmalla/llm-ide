@@ -1,0 +1,1 @@
+{"providers":[{"provider":"anthropic","status":"ok","activeModel":"claude-sonnet-4-5","models":[{"model":"claude-sonnet-4-5","label":"Sonnet","state":"ok","unit":"runs","window":"daily","used":42,"limit":100,"pct":42,"resetAt":1762387200000},{"model":"claude-haiku-4-5","state":"ok","unit":"tokens","window":"monthly","used":0,"limit":0,"resetAt":1764547200000}]}]}

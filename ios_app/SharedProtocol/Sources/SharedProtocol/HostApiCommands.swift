@@ -16,8 +16,10 @@ public struct HostApiLimits: Sendable {
 public enum HostApiCommand: String, CaseIterable, Sendable {
     case approvalsAnswer = "approvals.answer"
     case chatCancel = "chat.cancel"
+    case chatHistory = "chat.history"
     case chatHistoryClear = "chat.history.clear"
     case chatSend = "chat.send"
+    case chatSessions = "chat.sessions"
     case chatSnapshot = "chat.snapshot"
     case hostAuthPair = "host.auth.pair"
     case hostAuthRevoke = "host.auth.revoke"
@@ -26,13 +28,16 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case hostPing = "host.ping"
     case hostSnapshot = "host.snapshot"
     case toolApprovalsAnswer = "toolApprovals.answer"
+    case usageGet = "usage.get"
 
     public var capability: String {
         switch self {
         case .approvalsAnswer: return "approvals"
         case .chatCancel: return "chat"
+        case .chatHistory: return "read"
         case .chatHistoryClear: return "chat"
         case .chatSend: return "chat"
+        case .chatSessions: return "read"
         case .chatSnapshot: return "chat"
         case .hostAuthPair: return "host"
         case .hostAuthRevoke: return "host"
@@ -41,6 +46,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostPing: return "host"
         case .hostSnapshot: return "host"
         case .toolApprovalsAnswer: return "tool_approvals"
+        case .usageGet: return "read"
         }
     }
 
@@ -48,8 +54,10 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         switch self {
         case .approvalsAnswer: return false
         case .chatCancel: return true
+        case .chatHistory: return true
         case .chatHistoryClear: return true
         case .chatSend: return false
+        case .chatSessions: return true
         case .chatSnapshot: return true
         case .hostAuthPair: return false
         case .hostAuthRevoke: return true
@@ -58,6 +66,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostPing: return true
         case .hostSnapshot: return true
         case .toolApprovalsAnswer: return false
+        case .usageGet: return true
         }
     }
 }
@@ -68,8 +77,10 @@ public enum HostApi {
     public static let commands: [String: HostApiCommand] = [
         "approvals.answer": .approvalsAnswer,
         "chat.cancel": .chatCancel,
+        "chat.history": .chatHistory,
         "chat.history.clear": .chatHistoryClear,
         "chat.send": .chatSend,
+        "chat.sessions": .chatSessions,
         "chat.snapshot": .chatSnapshot,
         "host.auth.pair": .hostAuthPair,
         "host.auth.revoke": .hostAuthRevoke,
@@ -77,7 +88,8 @@ public enum HostApi {
         "host.hello": .hostHello,
         "host.ping": .hostPing,
         "host.snapshot": .hostSnapshot,
-        "toolApprovals.answer": .toolApprovalsAnswer
+        "toolApprovals.answer": .toolApprovalsAnswer,
+        "usage.get": .usageGet
     ]
 }
 

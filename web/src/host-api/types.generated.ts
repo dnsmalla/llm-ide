@@ -2,7 +2,7 @@
 // Types for the web client. Types only: the host validates every frame it sends.
 export const HOST_API_VERSION = 1;
 export const HOST_API_LIMITS = {"maxFrameBytes":1048576,"defaultListItems":100,"maxListItems":500,"maxListBytes":786432} as const;
-export const HOST_API_CAPABILITIES = ["host","chat","approvals","tool_approvals"] as const;
+export const HOST_API_CAPABILITIES = ["host","chat","approvals","tool_approvals","read"] as const;
 export type HostApiCapability = (typeof HOST_API_CAPABILITIES)[number];
 export const HOST_API_ERROR_CODES = ["auth_failed","capability_unavailable","unknown_command","invalid_payload","not_found","busy","denied","desktop_only","rate_limited","host_unreachable","internal"] as const;
 export type HostApiErrorCode = (typeof HOST_API_ERROR_CODES)[number];
@@ -10,8 +10,10 @@ export type HostApiErrorBody = { code: HostApiErrorCode; details?: { hint?: stri
 export const HOST_API_COMMANDS = {
   "approvals.answer": { capability: "approvals", idempotent: false },
   "chat.cancel": { capability: "chat", idempotent: true },
+  "chat.history": { capability: "read", idempotent: true },
   "chat.history.clear": { capability: "chat", idempotent: true },
   "chat.send": { capability: "chat", idempotent: false },
+  "chat.sessions": { capability: "read", idempotent: true },
   "chat.snapshot": { capability: "chat", idempotent: true },
   "host.auth.pair": { capability: "host", idempotent: false },
   "host.auth.revoke": { capability: "host", idempotent: true },
@@ -20,21 +22,25 @@ export const HOST_API_COMMANDS = {
   "host.ping": { capability: "host", idempotent: true },
   "host.snapshot": { capability: "host", idempotent: true },
   "toolApprovals.answer": { capability: "tool_approvals", idempotent: false },
+  "usage.get": { capability: "read", idempotent: true },
 } as const;
 export type HostApiCommandName = keyof typeof HOST_API_COMMANDS;
 export interface HostApiCommandMap {
   "approvals.answer": { request: { answers: Record<string, string>; commandId: string; requestId: string }; result: { accepted: boolean } };
   "chat.cancel": { request: Record<string, never>; result: { cancelled: boolean } };
+  "chat.history": { request: { beforeSeq?: number; limit?: number; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
   "chat.history.clear": { request: Record<string, never>; result: { cleared: boolean } };
   "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; text: string }; result: { accepted: boolean; requestId?: string } };
+  "chat.sessions": { request: { limit?: number; offset?: number }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
   "chat.snapshot": { request: { limit?: number }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
-  "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals">; token: string } };
+  "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };
-  "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals"> } };
-  "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals">; certificateFingerprint?: string; hostKind: "mac" | "desktop"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
+  "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read"> } };
+  "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read">; certificateFingerprint?: string; hostKind: "mac" | "desktop"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
   "host.ping": { request: Record<string, never>; result: Record<string, never> };
   "host.snapshot": { request: { topics: Array<"chat" | "status" | "autotasks" | "loop"> }; result: { snapshots: Record<string, Record<string, unknown>> } };
   "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; requestId: string }; result: { accepted: boolean } };
+  "usage.get": { request: Record<string, never>; result: { providers: Array<{ activeModel?: string; models: Array<{ label?: string; limit: number; model: string; pct?: number; resetAt: number; state: "ok" | "warning" | "exhausted"; unit: "runs" | "tokens"; used: number; window: "daily" | "monthly" }>; provider: string; status: "ok" | "degraded" | "paused" | "unconfigured" }> } };
 }
 export type HostApiRequest<C extends HostApiCommandName> = HostApiCommandMap[C]["request"];
 export type HostApiResult<C extends HostApiCommandName> = HostApiCommandMap[C]["result"];
@@ -46,6 +52,6 @@ export interface HostApiEventMap {
   "chat.delta": { text: string };
   "chat.done": { requestId: string; stopReason?: string };
   "chat.error": { message: string; retryable?: boolean };
-  "host.capabilities": { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals"> };
+  "host.capabilities": { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read"> };
   "toolApproval.request": { command?: string; commandId: string; contentPreview?: string; filePath?: string; newString?: string; oldString?: string; overwrites?: boolean; replaceAll?: boolean; requestId: string; summary?: string; toolName: string; truncated: boolean };
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "limits": { "maxFrameBytes": 1048576, "defaultListItems": 100, "maxListItems": 500, "maxListBytes": 786432 },
-  "capabilities": ["host", "chat", "approvals", "tool_approvals"],
+  "capabilities": ["host", "chat", "approvals", "tool_approvals", "read"],
   "commands": {
     "host.hello": {
       "capability": "host",
@@ -30,7 +30,7 @@
           "apiVersions": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
             "minItems": 1
           },
           "protocolVersion": { "type": "integer", "minimum": 1 },
@@ -60,7 +60,7 @@
           "token": { "type": "string", "minLength": 16, "maxLength": 512 },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
             "minItems": 1
           }
         }
@@ -86,7 +86,7 @@
         "properties": {
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
             "minItems": 1
           }
         }
@@ -300,6 +300,129 @@
         "required": ["accepted"],
         "properties": {
           "accepted": { "type": "boolean" }
+        }
+      }
+    },
+    "chat.sessions": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "offset": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessions"],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "title", "updatedAt"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+                "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "updatedAt": { "type": "integer", "minimum": 0 },
+                "phoneChat": { "type": "boolean" }
+              }
+            }
+          },
+          "nextOffset": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "chat.history": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId"],
+        "properties": {
+          "sessionId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+          "beforeSeq": { "type": "integer", "minimum": 1 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["messages"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["seq", "role", "content"],
+              "properties": {
+                "seq": { "type": "integer", "minimum": 1 },
+                "role": { "type": "string", "enum": ["user", "assistant"] },
+                "content": { "type": "string", "maxLength": 100000 }
+              }
+            }
+          },
+          "nextBeforeSeq": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "usage.get": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": "usage_get",
+      "request": { "type": "object", "additionalProperties": false, "properties": {} },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["provider", "status", "models"],
+              "properties": {
+                "provider": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "status": { "type": "string", "enum": ["ok", "degraded", "paused", "unconfigured"] },
+                "activeModel": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "models": {
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["model", "state", "unit", "window", "used", "limit", "resetAt"],
+                    "properties": {
+                      "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "state": { "type": "string", "enum": ["ok", "warning", "exhausted"] },
+                      "unit": { "type": "string", "enum": ["runs", "tokens"] },
+                      "window": { "type": "string", "enum": ["daily", "monthly"] },
+                      "used": { "type": "integer", "minimum": 0 },
+                      "limit": { "type": "integer", "minimum": 0 },
+                      "pct": { "type": "integer", "minimum": 0, "maximum": 999 },
+                      "resetAt": { "type": "integer", "minimum": 0 }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

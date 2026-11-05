@@ -35,6 +35,40 @@ public struct HostApiChatCancelResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiChatHistoryRequest: Codable, Equatable, Sendable {
+    public var beforeSeq: Int?
+    public var limit: Int?
+    public var sessionId: String
+
+    public init(beforeSeq: Int? = nil, limit: Int? = nil, sessionId: String) {
+        self.beforeSeq = beforeSeq
+        self.limit = limit
+        self.sessionId = sessionId
+    }
+}
+
+public struct HostApiChatHistoryResultMessagesItem: Codable, Equatable, Sendable {
+    public var content: String
+    public var role: String
+    public var seq: Int
+
+    public init(content: String, role: String, seq: Int) {
+        self.content = content
+        self.role = role
+        self.seq = seq
+    }
+}
+
+public struct HostApiChatHistoryResult: Codable, Equatable, Sendable {
+    public var messages: [HostApiChatHistoryResultMessagesItem]
+    public var nextBeforeSeq: Int?
+
+    public init(messages: [HostApiChatHistoryResultMessagesItem], nextBeforeSeq: Int? = nil) {
+        self.messages = messages
+        self.nextBeforeSeq = nextBeforeSeq
+    }
+}
+
 public struct HostApiChatHistoryClearRequest: Codable, Equatable, Sendable {
 
     public init() {
@@ -76,6 +110,40 @@ public struct HostApiChatSendResult: Codable, Equatable, Sendable {
     public init(accepted: Bool, requestId: String? = nil) {
         self.accepted = accepted
         self.requestId = requestId
+    }
+}
+
+public struct HostApiChatSessionsRequest: Codable, Equatable, Sendable {
+    public var limit: Int?
+    public var offset: Int?
+
+    public init(limit: Int? = nil, offset: Int? = nil) {
+        self.limit = limit
+        self.offset = offset
+    }
+}
+
+public struct HostApiChatSessionsResultSessionsItem: Codable, Equatable, Sendable {
+    public var id: String
+    public var phoneChat: Bool?
+    public var title: String
+    public var updatedAt: Int
+
+    public init(id: String, phoneChat: Bool? = nil, title: String, updatedAt: Int) {
+        self.id = id
+        self.phoneChat = phoneChat
+        self.title = title
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct HostApiChatSessionsResult: Codable, Equatable, Sendable {
+    public var nextOffset: Int?
+    public var sessions: [HostApiChatSessionsResultSessionsItem]
+
+    public init(nextOffset: Int? = nil, sessions: [HostApiChatSessionsResultSessionsItem]) {
+        self.nextOffset = nextOffset
+        self.sessions = sessions
     }
 }
 
@@ -236,6 +304,58 @@ public struct HostApiToolApprovalsAnswerResult: Codable, Equatable, Sendable {
 
     public init(accepted: Bool) {
         self.accepted = accepted
+    }
+}
+
+public struct HostApiUsageGetRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiUsageGetResultProvidersItemModelsItem: Codable, Equatable, Sendable {
+    public var label: String?
+    public var limit: Int
+    public var model: String
+    public var pct: Int?
+    public var resetAt: Int
+    public var state: String
+    public var unit: String
+    public var used: Int
+    public var window: String
+
+    public init(label: String? = nil, limit: Int, model: String, pct: Int? = nil, resetAt: Int, state: String, unit: String, used: Int, window: String) {
+        self.label = label
+        self.limit = limit
+        self.model = model
+        self.pct = pct
+        self.resetAt = resetAt
+        self.state = state
+        self.unit = unit
+        self.used = used
+        self.window = window
+    }
+}
+
+public struct HostApiUsageGetResultProvidersItem: Codable, Equatable, Sendable {
+    public var activeModel: String?
+    public var models: [HostApiUsageGetResultProvidersItemModelsItem]
+    public var provider: String
+    public var status: String
+
+    public init(activeModel: String? = nil, models: [HostApiUsageGetResultProvidersItemModelsItem], provider: String, status: String) {
+        self.activeModel = activeModel
+        self.models = models
+        self.provider = provider
+        self.status = status
+    }
+}
+
+public struct HostApiUsageGetResult: Codable, Equatable, Sendable {
+    public var providers: [HostApiUsageGetResultProvidersItem]
+
+    public init(providers: [HostApiUsageGetResultProvidersItem]) {
+        self.providers = providers
     }
 }
 

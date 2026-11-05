@@ -287,6 +287,9 @@ final class HostApiV1Gateway {
             respond(session, id, .toolApprovalsAnswer, HostApiToolApprovalsAnswerResult(accepted: true))
             deps.forward((try? JSONEncoder().encode(ToolApprovalAnswer(commandId: internalId, requestId: p.requestId,
                                                                         allow: p.decision == "allow_once"))) ?? Data())
+        case .chatSessions, .chatHistory, .usageGet:
+            // Unreachable: the Mac never serves `read`, so the gate refused above. The desktop host serves it.
+            fail(session, id, "capability_unavailable", "This Mac does not serve read right now.")
         }
     }
 

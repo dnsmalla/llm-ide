@@ -1,0 +1,1 @@
+{"providers":[{"provider":"anthropic","status":"ok","models":[{"model":"m","state":"ok","unit":"runs","window":"daily","used":0,"limit":0,"resetAt":0,"apiKey":"x"}]}]}
