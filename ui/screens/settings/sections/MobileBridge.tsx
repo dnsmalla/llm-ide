@@ -5,12 +5,14 @@ import { useMacBridge } from "../../bridge/BridgeGate.tsx";
 import { macBridge } from "../../bridge/mac-bridge.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import HostApiPairing from "./HostApiPairing.tsx";
+import SyncSection from "./SyncSection.tsx";
 
 export default function MobileBridge(): ReactNode {
   return (
     <div className="st-stack">
       <MacBridge />
       <HostApiPairing />
+      <SyncSection />
     </div>
   );
 }

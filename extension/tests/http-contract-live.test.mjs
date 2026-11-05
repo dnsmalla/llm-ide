@@ -115,6 +115,12 @@ const SKIP_RULES = [
     when: (fx) => /^(GET|POST|DELETE) \/host-api\//.test(fx.endpoint) && fx.status !== 403,
   },
   {
+    // Encrypted sync routes check the bus host proof first and then log in to MEGA; the replay server has neither.
+    // Covered by tests/sync-routes.test.mjs with a fake store.
+    why: 'Sync: needs the bus host proof and a MEGA session; covered by tests/sync-routes.test.mjs',
+    when: (fx) => /^(GET|POST) \/kb\/sync\//.test(fx.endpoint) && fx.status !== 403,
+  },
+  {
     why: 'token check: needs a vault token seeded for the fixture user; covered by tests/kb-repo-token.test.mjs',
     when: (fx) => fx.endpoint === 'POST /kb/repos/check-token' && (fx.status === 200 || fx.status === 403),
   },
