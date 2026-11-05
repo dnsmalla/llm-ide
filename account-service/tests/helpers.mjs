@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { linkCommitment } from '../src/linking.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { openDb } from '../src/db.mjs';
 import { createApp } from '../src/server.mjs';
@@ -260,4 +261,29 @@ export function desktopProof(accessToken, keys, privateKey = keys.signing.privat
 
 export function desktopBody(accessToken, keys = desktopKeys(), label = 'Ada Mac') {
   return { label, signingKey: keys.signingKey, ecdhKey: keys.ecdhKey, proof: desktopProof(accessToken, keys) };
+}
+
+// A desktop plus one linked web device, driven through the real routes. The device token hash is SHA-256 of the
+// DECODED 32 bytes, exactly as public/link.js computes it (the relay recomputes it the same way).
+export async function linkedPair(app, { kind = 'web' } = {}) {
+  const { web, tokens } = await signInDesktop(app);
+  const desktop = desktopKeys();
+  const auth = { 'content-type': 'application/json', authorization: `Bearer ${tokens.access_token}` };
+  const reg = await rawRequest(app.base, 'POST', '/v1/desktop', JSON.stringify(desktopBody(tokens.access_token, desktop)), auth);
+  if (reg.status !== 201) throw new Error(`register ${reg.status}`);
+  const make = () => generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const signing = make(); const ecdh = make();
+  const spki = (k) => k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+  const nonce = randomBytes(32).toString('base64url');
+  const raw = randomBytes(32);
+  const device = { signing, ecdh, signingKey: spki(signing), ecdhKey: spki(ecdh), token: raw.toString('base64url'), tokenHash: createHash('sha256').update(raw).digest('hex') };
+  const cookie = { 'content-type': 'application/json', origin: ORIGIN, cookie: web.cookie };
+  const created = await rawRequest(app.base, 'POST', '/v1/link/requests', JSON.stringify({ kind, label: 'Phone', commitment: linkCommitment(device.signingKey, device.ecdhKey, nonce) }), cookie);
+  const requestId = created.body.requestId;
+  await rawRequest(app.base, 'POST', '/v1/link/requests/approve', JSON.stringify({ requestId, desktopNonce: randomBytes(32).toString('base64url') }), auth);
+  const keys = await rawRequest(app.base, 'POST', '/v1/link/requests/keys', JSON.stringify({ requestId, signingKey: device.signingKey, ecdhKey: device.ecdhKey, nonce, tokenHash: device.tokenHash }), cookie);
+  const done = await rawRequest(app.base, 'POST', '/v1/link/requests/confirm', JSON.stringify({ requestId }), auth);
+  if (done.status !== 200) throw new Error(`confirm ${done.status}`);
+  const user = app.db.prepare('SELECT user_id FROM devices WHERE id = ?').get(reg.body.device.id);
+  return { userId: user.user_id, web, desktop: { ...desktop, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, deviceId: reg.body.device.id }, device: { ...device, deviceId: keys.body.deviceId } };
 }
