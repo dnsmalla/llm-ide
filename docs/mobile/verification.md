@@ -138,6 +138,23 @@ User decision 2026-11-04: these are run at the product stage and do not gate Pla
 | H7 | Reset the security identity on the Mac, then reconnect | `pin_mismatch`; credentials are kept; only a new QR scan or typed PIN replaces the pin |
 | H8 | Pair over `wss://` and compare the fingerprint with the host's Settings | They match; a host with another certificate is refused before any frame |
 
+## Host API v1 reads from the iPhone app (user-run)
+
+Setup: the desktop host with `LLMIDE_HOST_API_READ=1` (plus the DEBUG setup in the section above), and an iPhone paired over v1 **after** the switch was on (a device paired before it must re-pair to get `read`). Plan: `docs/superpowers/plans/2026-11-05-host-api-v1-reads-ios.md`.
+
+| # | Check | Expected |
+|---|---|---|
+| F19 | Pair over v1 to a host serving `read` | Tabs: Chat, History, Settings. History lists the host's chats newest first; the phone chat row says "Live chat · on the Chat tab" and does not open |
+| F20 | Same host without `LLMIDE_HOST_API_READ`, or a device paired before it was on | No History tab; Settings has no "Usage & limits"; nothing calls `chat.sessions`, `chat.history` or `usage.get` (host log) |
+| F21 | v2 pairing to the Mac (rows F1-F17) | No History tab; Usage & limits, the permission chip and every v2 screen behave exactly as before |
+| F22 | More than 50 chats: tap More chats repeatedly and quickly | Each tap adds one page with no duplicate rows; the button disappears at the end or at 500 chats |
+| F23 | Open a long chat, tap Show older until it goes away | Older messages appear above; the view keeps at most the newest 2,000; there is no composer, no Stop, no Clear |
+| F24 | Open chat A and immediately go back and open chat B | Only B's messages show; no error from A appears on B or on the list |
+| F25 | After reading chat B, send a message from the Chat tab | It goes to the phone chat (visible on the host's phone chat), never to B |
+| F26 | Usage strip and Settings → Usage & limits on v1 | Up to 3 meters on the strip, all on the full screen; no permission row or chip; numbers match the web client's Usage |
+| F27 | Turn `read` off on the host (restart without the switch) while History is open; also lose the network | History content clears and the app returns to Chat; on reconnect without `read` the tab stays hidden |
+| F28 | VoiceOver on: History list, usage strip, a chat; then Settings → Accessibility → Larger Text at the largest size | Each row is read as one element (title + time, meter name + detail, "You:" / "Assistant:" + text, "title, read-only"); text grows and wraps with no clipping |
+
 ## Security
 
 ```bash
