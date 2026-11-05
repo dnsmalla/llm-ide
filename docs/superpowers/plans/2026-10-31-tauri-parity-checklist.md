@@ -164,7 +164,7 @@ Phase 5 rows close at `x` (macOS) for the macOS exit gate; `x+w` waits for the W
 | 3D graph view | yes (`Graph3DView`, `CGSimulation3D`) | defer | Option B (WebGL 3D, graph-kit K3) after the macOS gate; Swift keeps it meanwhile |
 | Plugin graph engines (`graph-engine.json`) | yes (`PluginGraphEngine`) | defer | built-in engine only in Phase 5 |
 | Code note generation batch | yes (`CodeNoteService`) | defer | moves with the job runner |
-| Graph settings section | yes (`GraphSettingsSection`) | - | not started (engine choice, auto-update) |
+| Graph settings section | yes (`GraphSettingsSection`) | - | timer auto-update built; file-watch debounce and upload-truncation banner Mac-only |
 
 ## 8. Issues and Gantt (P5-I; plan section 6)
 

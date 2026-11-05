@@ -550,6 +550,8 @@ mod tests {
         // LAUNCH is the defaults in unit tests.
         let same = view(Prefs { theme: Theme::Light, ..Prefs::default() }, true);
         assert!(!same.restart_needed, "theme applies at once");
+        let graph = view(Prefs { graph_auto_update_minutes: 15, ..Prefs::default() }, true);
+        assert!(!graph.restart_needed, "the timer reads stored() live");
         let diff = view(Prefs { learn: true, ..Prefs::default() }, true);
         assert!(diff.restart_needed);
     }

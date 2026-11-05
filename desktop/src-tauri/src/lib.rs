@@ -517,6 +517,7 @@ pub fn run() {
             if let Err(e) = ctrlc::set_handler(move || {
                 let _ = signal_chat.quit_archive(std::time::Duration::from_secs(3));
                 signal_host.shutdown();
+                graph_gen::graph_cancel();
                 pty::kill_all();
                 std::process::exit(0);
             }) {
