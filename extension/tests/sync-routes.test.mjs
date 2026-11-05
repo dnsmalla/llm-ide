@@ -156,3 +156,35 @@ test('enrollment needs a store and sync on', async () => {
   const store = createMemoryStore();
   assert.equal((await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' }, deps: { storeFor: () => store } })).body.error.code, 'SYNC_OFF');
 });
+
+test('a revoke during a publish never leaves files in the revoked device folder (review I1)', async () => {
+  _resetEnrollmentsForTest();
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'memory', storeConfig: {} });
+  st.setSyncEnabled(u, true);
+  const store = createMemoryStore();
+  const deps = { storeFor: () => store };
+  const start = await call('POST', '/kb/sync/devices/enroll', { userId: u, body: { tier: 'ios' }, deps });
+  const dev = createReferenceDevice({ name: 'Revoked phone' });
+  await dev.scanAndClaim(store, start.body.qr);
+  await call('POST', '/kb/sync/devices/enroll/poll', { userId: u, body: {}, deps });
+  assert.equal((await call('POST', '/kb/sync/devices/enroll/confirm', { userId: u, body: {}, deps })).status, 200);
+  const base = `${st.getSyncState(u).syncId}/d/${dev.pair.dir}`;
+  st.setDeviceWrapEpoch(u, dev.deviceId, 0); // the next publish rewrites key.bin + wrap.bin first
+  let release; let held = false;
+  const put = store.put.bind(store);
+  store.put = async (p, b) => { if (!held && p.startsWith(base)) { held = true; await new Promise((r) => { release = r; }); } return put(p, b); };
+  const pub = publishNow(u, { store });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(held, 'the publish is held in a write to the device folder');
+  const rev = await call('DELETE', `/kb/sync/devices/${dev.deviceId}`, { userId: u, deps });
+  release();
+  await pub;
+  const files = async () => [...store.dump().keys()].filter((k) => k.startsWith(`${base}/`));
+  if (rev.status === 200) assert.deepEqual(await files(), [], 'a revoke that succeeded leaves the folder empty');
+  else assert.equal(rev.body.error.code, 'SYNC_BUSY');
+  const again = await call('DELETE', `/kb/sync/devices/${dev.deviceId}`, { userId: u, deps });
+  if (rev.status !== 200) assert.equal(again.status, 200);
+  assert.deepEqual(await files(), [], 'nothing was recreated');
+  assert.equal(st.listSyncDevices(u).length, 0);
+});

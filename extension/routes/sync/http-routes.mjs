@@ -7,7 +7,7 @@ import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish } from '../../kb/sync-state.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { ensureSyncKeys } from './keys.mjs';
-import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending } from './scheduler.mjs';
+import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending, withUserLock } from './scheduler.mjs';
 import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } from './enroll.mjs';
 import { revokeDevice } from './registry.mjs';
 
@@ -100,7 +100,8 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
         }
         if (req.method === 'POST' && path === '/kb/sync/devices/enroll/cancel') { await cancelEnrollment(userId); send(res, 200, { ok: true }); return true; }
         if (req.method === 'DELETE' && m) {
-          if (!(await revokeDevice(userId, m[1], { store }))) return fail(res, 404, 'NOT_FOUND', 'No such device');
+          // Under the per-user lock (review I1): a publish in flight would write the deleted folder back.
+          if (!(await withUserLock(userId, () => revokeDevice(userId, m[1], { store })))) return fail(res, 404, 'NOT_FOUND', 'No such device');
           await rotateNow(userId, { store });
           send(res, 200, status(userId)); return true;
         }
