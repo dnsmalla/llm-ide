@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, enqueueShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -564,4 +564,16 @@ test("dragShift uses a 3 px threshold and whole-day round steps", () => {
   assert.deepEqual(dragShift(100, 141, 20), { moved: true, days: 2 });
   assert.deepEqual(dragShift(100, 59, 20), { moved: true, days: -2 });
   assert.deepEqual(dragShift(100, 100, 0), { moved: false, days: 0 });
+});
+
+
+test("queued shifts accumulate for the same issue and stay separate for another", () => {
+  const a = { issue: issue({ id: "a", number: 7 }), schedule: sched({ startDate: "2026-01-05" }), start: 0, end: 0 } as never;
+  const b = { issue: issue({ id: "b", number: 8 }), schedule: sched({ startDate: "2026-01-05" }), start: 0, end: 0 } as never;
+  const q = enqueueShift([], a, 1);
+  enqueueShift(q, a, 2);
+  enqueueShift(q, b, -1);
+  assert.equal(q.length, 2);
+  assert.equal(q[0]!.days, 3);
+  assert.equal(q[1]!.days, -1);
 });

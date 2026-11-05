@@ -149,6 +149,17 @@ export function estimateSpanDays(est: number, anchor: "start" | "due"): number {
   return Math.max(1, anchor === "start" ? Math.floor(est) : Math.ceil(est));
 }
 
+export interface QueuedShift { key: string; row: GanttRow; days: number }
+export const shiftKey = (row: GanttRow): string => `${row.issue.provider}:${row.issue.repo}#${row.issue.number ?? row.issue.id}`;
+/** Queue a shift; a second shift of the same issue while a save is in flight accumulates on the original row. */
+export function enqueueShift(queue: QueuedShift[], row: GanttRow, days: number): QueuedShift[] {
+  const key = shiftKey(row);
+  const found = queue.find((q) => q.key === key);
+  if (found) found.days += days;
+  else queue.push({ key, row, days });
+  return queue;
+}
+
 /** A pointer drag's day delta: a 3 px threshold stops a click from becoming a tiny move. */
 export function dragShift(startX: number, clientX: number, dayWidth: number): { moved: boolean; days: number } {
   const delta = clientX - startX;
