@@ -99,21 +99,21 @@ function LinkRequests() {
 
 
 function RelayCard() {
-  const [status, setStatus] = useState<{ connected: boolean; devicesOnline: number } | null>(null);
+  const [status, setStatus] = useState<{ connected: boolean; devicesOnline: number; enabled: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     invokeHost<unknown>("relay_status").then((v) => {
       const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
-      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0 });
-    }, () => setStatus({ connected: false, devicesOnline: 0 }));
+      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0, enabled: r.enabled === true });
+    }, () => setStatus({ connected: false, devicesOnline: 0, enabled: false }));
   }, []);
   const toggle = async (enabled: boolean) => {
     setBusy(true); setError(null);
     try {
       const v = await invokeHost<unknown>("relay_set_enabled", { enabled });
       const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
-      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0 });
+      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0, enabled: r.enabled === true });
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
@@ -123,8 +123,8 @@ function RelayCard() {
       <p className="st-hint">Carry ciphertext between this desktop and your linked devices. Off means no outbound relay connection.</p>
       {error ? <ErrorText text={error} /> : null}
       <div className="st-row">
-        <Button tone={status?.connected ? "danger" : "primary"} disabled={busy} onClick={() => void toggle(!(status?.connected ?? false))}>
-          {status?.connected ? "Turn off relay" : "Turn on relay"}
+        <Button tone={status?.connected ? "danger" : "primary"} disabled={busy} onClick={() => void toggle(!(status?.enabled ?? false))}>
+          {status?.enabled ? "Turn off relay" : "Turn on relay"}
         </Button>
         {status?.connected ? <span className="st-hint">{status.devicesOnline} device{status.devicesOnline === 1 ? "" : "s"} online</span> : null}
       </div>

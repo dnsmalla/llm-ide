@@ -181,7 +181,8 @@ pub struct ClientConfig {
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, PartialEq, Eq)]
-pub struct RelayStatus { pub connected: bool, pub devices_online: usize }
+#[serde(rename_all = "camelCase")]
+pub struct RelayStatus { pub connected: bool, pub devices_online: usize, pub enabled: bool }
 
 pub struct RelayHandle {
     stop: Arc<AtomicBool>,

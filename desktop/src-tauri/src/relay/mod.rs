@@ -17,8 +17,11 @@ fn handle_slot() -> &'static Mutex<Option<client::RelayHandle>> { HANDLE.get_or_
 
 #[tauri::command]
 pub async fn relay_status() -> Result<client::RelayStatus, String> {
-    Ok(handle_slot().lock().map_err(|_| "relay state is unavailable".to_string())?
-        .as_ref().map(|h| h.status()).unwrap_or_default())
+    let enabled = crate::account_oauth::relay_store().and_then(|s| registry::load(s.as_ref())).map(|r| r.enabled).unwrap_or(false);
+    let mut status = handle_slot().lock().map_err(|_| "relay state is unavailable".to_string())?
+        .as_ref().map(|h| h.status()).unwrap_or_default();
+    status.enabled = enabled;
+    Ok(status)
 }
 
 #[tauri::command]
@@ -37,7 +40,8 @@ pub async fn relay_set_enabled(enabled: bool, host: tauri::State<'_, CoreHost>) 
         let cfg = client::ClientConfig { relay_url: crate::account_oauth::relay_url()?, core_url: core, store,
             token, signer, signing_spki };
         let handle = client::start(cfg);
-        let status = handle.status();
+        let mut status = handle.status();
+        status.enabled = true;
         *handle_slot().lock().map_err(|_| "relay state is unavailable".to_string())? = Some(handle);
         Ok(status)
     } else {

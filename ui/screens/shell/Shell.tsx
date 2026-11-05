@@ -154,6 +154,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     });
     return () => { live = false; stop?.(); };
   }, [session.signedIn, gate]);
+  // Resume an enabled relay once the spawned core is ready. The setting itself lives in the OS-secret store.
+  useEffect(() => {
+    if (!shellHost.isAvailable() || !session.signedIn || gate !== "open") return undefined;
+    let live = true;
+    void invokeHost<unknown>("relay_status").then((v) => {
+      const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
+      if (live && r.enabled === true) return invokeHost("relay_set_enabled", { enabled: true });
+      return undefined;
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [session.signedIn, gate]);
   const overridden = useRef(initialSection != null);
   // A home section whose feature is off (or was not compiled in) falls back to Library, as the Mac's resolveHome does.
   const usableHome = (): SectionId => selectHome(readHome(), features.usable);
