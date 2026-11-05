@@ -211,3 +211,9 @@ body {
   .web-msg { max-width: 100%; }
   .web-read { flex-basis: 100%; }
 }
+
+/* Offline sync tier */
+.web-sync-sas { display: block; font-size: 2.2rem; font-weight: 700; letter-spacing: .18em; font-variant-numeric: tabular-nums; margin: 8px 0; }
+.web-form textarea { background: #0b1119; color: #eef2f7; border: 1px solid var(--tok-color-border, #263445); border-radius: 8px; padding: 8px; font: inherit; max-width: 100%; box-sizing: border-box; }
+.web-read details summary { cursor: pointer; }
+.web-read details summary:focus-visible { outline: 2px solid currentColor; }

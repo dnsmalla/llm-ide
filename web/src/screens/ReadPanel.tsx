@@ -41,7 +41,7 @@ export function ReadPanel(p: ReadPanelProps) {
     );
   }
   return (
-    <aside className="web-read" aria-label="Chats and usage">
+    <aside className="web-read" aria-label="Chats, meetings, plans and usage">
       {state.error && <StatusBanner severity="error" message={state.error} />}
       {state.usage && (
         <section aria-label="Usage">
@@ -66,6 +66,42 @@ export function ReadPanel(p: ReadPanelProps) {
         </ul>
         {state.nextOffset != null && <button type="button" onClick={p.onMore} disabled={state.loading}>More chats</button>}
       </section>
+      {state.meetings && (
+        <section aria-label="Meetings">
+          <h2>Meetings</h2>
+          {state.meetings.length === 0 ? <p className="chat-muted">No meetings in this snapshot.</p> : (
+            <ul className="web-read-chats">
+              {state.meetings.map((m) => (
+                <li key={m.id}>
+                  <details>
+                    <summary>{m.title || "Meeting"}{m.date ? ` · ${m.date}` : ""}</summary>
+                    {m.participants.length > 0 && <p>With {m.participants.join(", ")}</p>}
+                    <ul>{m.notes.map((n, i) => <li key={i}><strong>{n.kind}:</strong> {n.text}</li>)}</ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+      {state.plans && (
+        <section aria-label="Plans">
+          <h2>Plans</h2>
+          {state.plans.length === 0 ? <p className="chat-muted">No plans in this snapshot.</p> : (
+            <ul className="web-read-chats">
+              {state.plans.map((p) => (
+                <li key={p.id}>
+                  <details>
+                    <summary>{p.title || "Plan"}</summary>
+                    {p.goal && <p>{p.goal}</p>}
+                    <ul>{p.tasks.map((t, i) => <li key={i}>{t.title} — {t.status}{t.owner ? `, ${t.owner}` : ""}{t.due ? `, due ${t.due}` : ""}</li>)}</ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </aside>
   );
 }

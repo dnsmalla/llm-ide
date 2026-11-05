@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { checkHostUrl } from "../host-api/url.ts";
 
@@ -8,11 +8,12 @@ export interface PairingProps {
   error: string | null;
   revokedNotice: string | null;
   onSubmit: (url: string, pin: string) => void;
+  footer?: ReactNode;
 }
 
 /** The first screen of the web client. Deliberately a product page, not a bare form: explain what the browser is
  *  connecting to, where the PIN comes from, and separate the cloud account from the desktop host. */
-export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit }: PairingProps) {
+export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit, footer }: PairingProps) {
   const [url, setUrl] = useState(initialUrl);
   const [pin, setPin] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -84,6 +85,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
         </section>
       </div>
 
+      {footer}
       <footer className="web-foot">
         <span>LLM-IDE web companion</span>
         <span>Project data stays local</span>

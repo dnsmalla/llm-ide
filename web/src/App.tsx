@@ -3,16 +3,23 @@ import type { ConnectionState } from "./host-api/connection.ts";
 import { initialHostUrl } from "./host-api/url.ts";
 import { lastHostUrl } from "./host-api/storage.ts";
 import { createAppModel, type AppModel, type Session } from "./app-model.ts";
+import { createSyncController, type SyncController } from "./sync/controller.ts";
 import { PairingScreen } from "./screens/PairingScreen.tsx";
 import { WebChat } from "./screens/WebChat.tsx";
 import { ReadPanel } from "./screens/ReadPanel.tsx";
+import { SyncLinkEntry, SyncTier } from "./screens/SyncTier.tsx";
 
-function Chat({ session, onForget }: { session: Session; onForget: () => void }) {
+/** The session's connection state, re-rendered on every change. */
+function useConnection(session: Session | null): ConnectionState | null {
+  const [, bump] = useState(0);
+  useEffect(() => session?.connection.onState(() => bump((n) => n + 1)), [session]);
+  return session?.connection.state ?? null;
+}
+
+function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionState; onForget: () => void }) {
   const { connection: c, controller, read } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
-  const [conn, setConn] = useState<ConnectionState>(c.state);
-  useEffect(() => c.onState(setConn), [c]);
   const capabilities = state.capabilities ?? c.capabilities;
   return (
     <div className="web-shell">
@@ -28,10 +35,19 @@ function Chat({ session, onForget }: { session: Session; onForget: () => void })
   );
 }
 
-export function App({ model: given }: { model?: AppModel }) {
+export function App({ model: given, sync: givenSync }: { model?: AppModel; sync?: SyncController }) {
   const [model] = useState(() => given ?? createAppModel(initialHostUrl(import.meta.env.VITE_HOST_API_URL, lastHostUrl().get())));
+  const [sync] = useState(() => givenSync ?? createSyncController());
   const s = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const sy = useSyncExternalStore(sync.subscribe, sync.getState, sync.getState);
+  const conn = useConnection(s.session);
   useEffect(() => { model.start(); return model.dispose; }, [model]);
-  if (s.session) return <Chat session={s.session} onForget={model.forget} />;
-  return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)} />;
+  useEffect(() => { void sync.start(); return sync.dispose; }, [sync]);
+  const live = conn?.kind === "ready";
+  useEffect(() => { if (live) sync.pause(); else sync.resume(); }, [live, sync]);
+  const hostDown = !s.session || conn?.kind === "reconnecting" || conn?.kind === "failed";
+  if (sy.phase === "pairing" || (sy.phase !== "none" && hostDown)) return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} />;
+  if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} />;
+  return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)}
+    footer={<SyncLinkEntry onLink={sync.acceptLink} error={sy.phase === "none" ? sy.error : null} />} />;
 }

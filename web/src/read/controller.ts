@@ -1,6 +1,7 @@
 // Read-only views over Host API v1 `read`: the chat list, one chat's history and the usage summary. No React here.
 import type { HostLink } from "../host-api/connection.ts";
 import type { HostApiResult } from "../host-api/types.generated.ts";
+import type { MeetingItem, PlanItem } from "../sync/kinds.ts";
 
 export const MAX_SESSIONS = 500;
 export const MAX_OPEN_MESSAGES = 2000;
@@ -13,8 +14,9 @@ type Providers = HostApiResult<"usage.get">["providers"];
 export interface OpenChat { id: string; title: string; messages: Lines; nextBeforeSeq: number | null }
 export interface ReadState {
   sessions: Sessions; nextOffset: number | null; open: OpenChat | null; usage: Providers | null; loading: boolean; error: string | null;
+  meetings: MeetingItem[] | null; plans: PlanItem[] | null; // filled only by the offline sync tier (read/snapshot.ts)
 }
-export const initialReadState: ReadState = { sessions: [], nextOffset: null, open: null, usage: null, loading: false, error: null };
+export const initialReadState: ReadState = { sessions: [], nextOffset: null, open: null, usage: null, loading: false, error: null, meetings: null, plans: null };
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.slice(0, 500) : "Something went wrong.");
 
 export function createReadController(link: HostLink) {

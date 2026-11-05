@@ -102,3 +102,29 @@ test("forget asks first; a declined confirm keeps the session and the token", as
   assert.equal(m.getState().notice, null, "revoked on the host, and not mistaken for a revocation notice");
   m.dispose();
 });
+
+const fakeSync = (phase) => {
+  const state = { phase, pairStep: null, sas: null, busy: false, error: null, notice: null, online: true, email: '', snapshot: null, stale: false, checkedAt: null, pending: [], answered: [] };
+  return { getState: () => state, subscribe: () => () => {}, start: async () => {}, dispose: () => {}, pause: () => {}, resume: () => {},
+    acceptLink: () => true, pair: async () => {}, cancelPairing: () => {}, unlock: async () => {}, refresh: async () => {}, send: async () => true, lock: async () => {}, forget: async () => {} };
+};
+
+test("sync: desktop unreachable and this browser linked shows the sync tier; desktop live shows the chat", async () => {
+  const down = desk({ token: "k".repeat(40), up: false });
+  const m = down.model();
+  m.start(); await tick(); await tick();
+  assert.match(html(h(UI.App, { model: m, sync: fakeSync("locked") })), /offline sync/);
+  const up = desk({ token: "k".repeat(40) });
+  const m2 = up.model();
+  m2.start(); await tick(); await tick(); await tick();
+  const out = html(h(UI.App, { model: m2, sync: fakeSync("locked") }));
+  assert.doesNotMatch(out, /offline sync/);
+  assert.match(out, /Clear history/);
+});
+
+test("sync: never paired and not linked shows Pairing with the paste-a-link form", () => {
+  const m = desk().model();
+  const out = html(h(UI.App, { model: m, sync: fakeSync("none") }));
+  assert.match(out, /Pairing link/);
+  assert.match(out, /Pair browser/);
+});
