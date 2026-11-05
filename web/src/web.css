@@ -1,3 +1,14 @@
+html, body { margin: 0; min-height: 100%; background: var(--tok-color-body, #0f1115); color: var(--tok-color-text, #eef2f7); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+body { background: radial-gradient(circle at 15% -10%, #17293c 0, transparent 42%), var(--tok-color-body, #0f1115); }
+.web-app h1 { letter-spacing: -.04em; margin: 8px 0 4px; }
+.web-form { background: var(--tok-color-surface, #121922); border: 1px solid var(--tok-color-border, #263445); border-radius: 14px; padding: 18px; }
+.web-form label { color: var(--tok-color-text-muted, #9badc1); font-size: 13px; }
+.web-form input { background: #0b1119; color: var(--tok-color-text, #eef2f7); border: 1px solid var(--tok-color-border, #263445); border-radius: 8px; }
+.web-form button { background: var(--tok-color-accent, #7cc4ff); color: #06111c; border: 0; border-radius: 8px; padding: 10px 14px; font: inherit; font-weight: 700; cursor: pointer; }
+.web-form button:disabled { opacity: .55; cursor: default; }
+.chat-muted { color: var(--tok-color-text-muted, #9badc1); }
+.web-guide { background: var(--tok-color-surface, #121922); }
+.web-guide h2, .web-guide h3 { color: var(--tok-color-text, #eef2f7); }
 /* Layout only; colours come from --tok-* via the kit. */
 .web-app { display: flex; flex-direction: column; gap: 12px; max-width: 860px; margin: 0 auto; padding: 16px; box-sizing: border-box; min-height: 100vh; color: var(--tok-text, inherit); }
 .web-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -26,3 +37,7 @@
 .web-guide p { margin: 0; }
 .web-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 12px 0; }
 .web-features section { border-top: 1px solid var(--tok-border, #2c3542); padding-top: 8px; }
+.web-app h1 { color: var(--tok-color-text, #eef2f7); }
+.web-form, .web-guide { background: #121922; color: #eef2f7; }
+.web-form input { color: #eef2f7; }
+.web-form label, .web-guide .chat-muted { color: #9badc1; }
