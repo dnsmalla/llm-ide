@@ -40,6 +40,7 @@ export function loadConfig(env = process.env) {
     port,
     dbPath: env.ACCOUNTS_DB_PATH ?? './data/accounts.db',
     signupOpen,
+    directSignup: flag(env, 'ACCOUNTS_DIRECT_SIGNUP'),
     trustProxy: flag(env, 'ACCOUNTS_TRUST_PROXY'),
     secureCookies: url.protocol === 'https:',
     mail: Object.freeze({
