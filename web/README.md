@@ -48,10 +48,14 @@ meetings with notes, plans and tasks, usage) from the user's dedicated MEGA acco
 run, read-only, when the desktop is back (design: docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
 
 - Link it from the desktop: Settings → sync → Add a phone or browser → Browser. Open the link here (or paste it on the
-  Pairing screen) and compare the 6-digit code on both screens.
+  Pairing screen) and compare the 6-digit code on both screens. An app installed to the iPhone home screen has storage
+  separate from Safari and cannot receive an opened link, so paste the link into its Pairing screen instead.
 - The MEGA password is asked once per session and never stored. Device keys are non-extractable WebCrypto keys in
   IndexedDB (`llmide-sync`). Snapshots and replies stay in memory only.
 - The CSP adds exactly `https://g.api.mega.co.nz https://*.userstorage.mega.co.nz` to `connect-src`.
+- Known risk, unverified: only `g.api.mega.co.nz` was checked to answer cross-origin (CORS) requests. If MEGA's file
+  transfer hosts (`*.userstorage.mega.co.nz`) send no CORS headers, the browser can sign in but cannot download or upload
+  sync files. MANUAL-CHECK.md step 3 checks this; the fallback is a credential-free download proxy on the VPS.
 - Code: `src/sync/`. Tests: `tests/sync-*.test.mjs` (vectors, malicious storage, fake MEGA) and
   `tests/e2e/sync-desktop-e2e.test.mjs` (real desktop sync code).
 

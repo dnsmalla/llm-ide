@@ -70,6 +70,9 @@ Start the core yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`
 3. Enter a name, the MEGA email and password → Continue.
    - [ ] The same 6 digits show on both screens; press Codes match on the desktop; the browser shows the snapshot.
    - [ ] DevTools console: no CSP violations. If a MEGA host is blocked, note the exact host (design decision D1).
+   - [ ] DevTools Network: the requests to `*.userstorage.mega.co.nz` succeed, with no "blocked by CORS policy" error.
+     If they fail, MEGA's transfer hosts do not allow browser access: record it (README "Known risk"); the browser tier
+     then needs a download proxy.
 4. DevTools → Application:
    - [ ] IndexedDB `llmide-sync` → `device`: the CryptoKey entries show `extractable: false`.
    - [ ] Nothing in IndexedDB, localStorage or sessionStorage contains the MEGA password.
@@ -81,3 +84,5 @@ Start the core yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`
 7. DevTools → Network → Offline: the offline banner shows; back online: it checks at once.
 8. Desktop: revoke this browser. - [ ] The browser shows "This browser was removed from sync".
 9. Keyboard only, then VoiceOver: pairing form, the code (read as single digits), unlock, the inbox, meetings and plans.
+10. iPhone, installed to the home screen: the installed app cannot receive an opened link (its storage is separate from
+    Safari). - [ ] Copy the link from the desktop, paste it into the installed app's Pairing screen, and pairing works.
