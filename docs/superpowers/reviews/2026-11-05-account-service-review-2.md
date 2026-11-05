@@ -2,7 +2,11 @@
 
 Independent review of the work committed after the [first review](2026-11-05-account-service-review.md): account-service, desktop sign-in and the account pages (`6d64d311`..`0dc21dcd`), and the public site with the web app at `/app` (`17635c34`, `77e5df3e`, `2ca46173`, `d72b4324`). Uncommitted `marketing/` edits were not reviewed.
 
-## Do first
+## Resolution (2026-11-05, later the same day)
+
+All Critical and Important findings of both reviews are fixed, each with a test that failed before the fix, and each batch re-reviewed adversarially: N2 (`ec20eae0`, plus the in-flight verify race `18fbc09d`), N1 (`c53e3cce`), C1 (`37d659a1`), I3 (`9399b64d`), I1 (`ab3a74f5`), I2 (`b9087a76`). The batch-B review's two follow-ups (a revoked desktop re-registering with its old token; a silent authorize leading to replace) are closed by `ab3a74f5` and `b9087a76`. `account-service` tests 91/91. Still open: deploying to the VPS (the live build predates these fixes), the export/delete buttons on the account pages, the site overclaims and deploy/header items below, and the Minor items in the per-batch reviews.
+
+## Do first (as written before the fixes)
 
 1. **Switch off direct sign-up on the VPS now** (`ACCOUNTS_DIRECT_SIGNUP=1`; `https://accounts.llm-ide.com/health` reports `directSignup: true`). With it on, **N2 is an account takeover on the live service**.
 2. Fix N2, C1, I3, I1, I2, N1 in that order, each with a test that fails before the fix.
