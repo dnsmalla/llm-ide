@@ -6,11 +6,15 @@ import SharedProtocol
 struct ReadChatsView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var usageStore: UsageStore
+    @EnvironmentObject var syncStore: SyncStore
 
     private var state: HostApiReadState { connection.readState }
+    private var live: Bool { connection.servesV1Read && connection.connectionStatus == .connected }
 
     var body: some View {
         List {
+            if !live { SyncOfflineSections() }
+            else {
             if let error = state.error, state.open == nil {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -38,14 +42,14 @@ struct ReadChatsView: View {
                         .disabled(state.loading)
                 }
             }
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(DesignSystem.Colors.background.ignoresSafeArea())
         .navigationTitle("History")
         .refreshable {
-            usageStore.refresh()
-            await connection.reads.refresh()
+            if live { usageStore.refresh(); await connection.reads.refresh() } else { await syncStore.refresh() }
         }
         .task {
             if usageStore.state == nil { usageStore.refresh() }
