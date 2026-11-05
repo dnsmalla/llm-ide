@@ -97,6 +97,41 @@ function LinkRequests() {
   );
 }
 
+
+function RelayCard() {
+  const [status, setStatus] = useState<{ connected: boolean; devicesOnline: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    invokeHost<unknown>("relay_status").then((v) => {
+      const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
+      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0 });
+    }, () => setStatus({ connected: false, devicesOnline: 0 }));
+  }, []);
+  const toggle = async (enabled: boolean) => {
+    setBusy(true); setError(null);
+    try {
+      const v = await invokeHost<unknown>("relay_set_enabled", { enabled });
+      const r = v && typeof v === "object" ? v as Record<string, unknown> : {};
+      setStatus({ connected: r.connected === true, devicesOnline: typeof r.devicesOnline === "number" ? r.devicesOnline : 0 });
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="st-stack">
+      <span className="st-label">Relay</span>
+      <p className="st-hint">Carry ciphertext between this desktop and your linked devices. Off means no outbound relay connection.</p>
+      {error ? <ErrorText text={error} /> : null}
+      <div className="st-row">
+        <Button tone={status?.connected ? "danger" : "primary"} disabled={busy} onClick={() => void toggle(!(status?.connected ?? false))}>
+          {status?.connected ? "Turn off relay" : "Turn on relay"}
+        </Button>
+        {status?.connected ? <span className="st-hint">{status.devicesOnline} device{status.devicesOnline === 1 ? "" : "s"} online</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function CloudAccountCard() {
   const [status, setStatus] = useState<CloudAccount | null>(null);
   const [busy, setBusy] = useState(false);
@@ -143,6 +178,7 @@ function CloudAccountCard() {
           <p><span className="st-label">Signed in as </span>{status.email ?? "this account"}</p>
           <div className="st-row"><Button tone="primary" disabled={busy} onClick={() => void register(false)}>Register this desktop</Button><Button disabled={busy} onClick={() => void signOut()}>Sign out of LLM-IDE</Button></div>
           <div className="st-stack"><span className="st-label">Device linking</span><LinkRequests /></div>
+          <RelayCard />
           {offerReplace ? (
             <div className="st-stack">
               <p className="st-hint">Replacing signs out the old desktop and unlinks every phone and browser. You sign in with your passkey again first.</p>
