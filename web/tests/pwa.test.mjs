@@ -1,9 +1,10 @@
 // Installable shell: manifest, icons, production-only registration and a worker that never caches the host API.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -74,5 +75,19 @@ test("a production build stamps a unique worker cache name", async () => {
   assert.match(id, /^[0-9a-f]{12}$/);
   assert.match(readFileSync(file, "utf8"), new RegExp(`CACHE = "llmide-shell-${id}"`));
   assert.doesNotMatch(readFileSync(file, "utf8"), /__SW_BUILD__/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+
+test("the stamp CLI works from a path containing a space", () => {
+  const dir = mkdtempSync(join(tmpdir(), "llmide sw "));
+  const script = join(dir, "stamp-sw.mjs");
+  const target = join(dir, "sw.js");
+  copyFileSync(join(import.meta.dirname, "../scripts/stamp-sw.mjs"), script);
+  writeFileSync(target, 'const CACHE = "llmide-shell-__SW_BUILD__";');
+  const run = spawnSync(process.execPath, [script, target], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /stamped/);
+  assert.doesNotMatch(readFileSync(target, "utf8"), /__SW_BUILD__/);
   rmSync(dir, { recursive: true, force: true });
 });

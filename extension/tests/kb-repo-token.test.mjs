@@ -71,6 +71,13 @@ test("an invalid token and a forbidden token are both 403 with distinct codes, a
     assert.equal(forbidden.statusCode, 403, forbidden.body);
     assert.equal(JSON.parse(forbidden.body).error.code, "TOKEN_FORBIDDEN");
   } finally { _setPinnedFetchForTests(null); }
+  _setPinnedFetchForTests(async () => new Response(JSON.stringify({ message: "500 Internal Server Error" }), { status: 500 }));
+  try {
+    const down = res();
+    await handleKB(req(u.id, { provider: "gitlab" }), down);
+    assert.equal(down.statusCode, 502, down.body);
+    assert.equal(JSON.parse(down.body).error.code, "PROVIDER_ERROR");
+  } finally { _setPinnedFetchForTests(null); }
   const missing = res();
   await handleKB(req(u.id, { provider: "github" }), missing);
   assert.equal(missing.statusCode, 400, missing.body);

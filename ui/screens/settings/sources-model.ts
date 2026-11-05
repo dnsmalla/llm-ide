@@ -117,13 +117,15 @@ export function sourcesError(e: unknown): string {
     case "TOKEN_UNAUTHORIZED":
       return "The saved token is invalid or has expired. Paste a new token and save it.";
     case "TOKEN_FORBIDDEN":
-      return "The saved token is valid but lacks permission to read the account. Add the required scope and try again.";
+      return "The provider denied this request. Check the token's scopes, SSO or rate limit and try again.";
+    case "PROVIDER_ERROR":
+      return "The provider answered with an error. Check the instance URL; this does not necessarily mean the token is invalid.";
     case "TOKEN_REFUSED":
       return "The provider refused that token.";
     case "INVALID_BASE_URL":
       return "Enter a valid HTTPS GitLab instance URL without credentials, query or fragment.";
     case "PROVIDER_UNREACHABLE":
-      return "The provider could not be reached. Check the URL and network; a private instance needs the operator's private-provider gate.";
+      return "The provider could not be reached. Check the URL and network; a LAN/VPN GitLab instance is not supported here.";
     case "TOKEN_RESPONSE_INVALID":
       return "The provider answered, but without a user for this token.";
     default:

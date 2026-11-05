@@ -96,7 +96,7 @@ export default function RepositoriesSection() {
   const provider = REPO_PROVIDERS.find((p) => p.id === tab)!;
   const connected = secrets?.has(provider.tokenKey) ?? false;
   const gitlabHost = hostOf(cfg.gitlabBaseUrl);
-  const checkSupported = provider.id === "github" || gitlabHost !== "";
+  const checkSupported = provider.id === "github" || (gitlabHost !== "" && /^https:\/\//i.test(normalizeBase(cfg.gitlabBaseUrl)));
   const both = (secrets?.has("gitlab.token") ?? false) && (secrets?.has("github.token") ?? false);
   const saved = cfg.saved[provider.id];
   const ops = cfg.operations[provider.id];

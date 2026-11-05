@@ -2,8 +2,9 @@
 // index.html and hashed assets leaves sw.js byte-identical, the browser keeps the old worker, and old assets
 // are never evicted. `npm run build` rewrites the placeholder in dist/sw.js after Vite copies public/.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const SW_MARKER = "__SW_BUILD__";
 
@@ -16,7 +17,7 @@ export function stampSw(path, seed = `${Date.now()}-${Math.random()}`) {
   return id;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   const path = resolve(process.argv[2] ?? "dist/sw.js");
   const id = stampSw(path);
   console.log(`stamped ${path} with ${id}`);

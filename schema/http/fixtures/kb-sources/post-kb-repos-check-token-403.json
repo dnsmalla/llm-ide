@@ -8,8 +8,8 @@
   },
   "response": {
     "error": {
-      "code": "TOKEN_REFUSED",
-      "message": "The GitHub token was refused"
+      "code": "TOKEN_FORBIDDEN",
+      "message": "The GitHub token is valid but not allowed"
     }
   }
 }

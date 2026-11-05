@@ -322,14 +322,15 @@ export async function handleKB(req, res) {
     }
 
     // Repositories settings: verify the provider token that is already in the vault. The browser never supplies it
-    // and the response never echoes it. Fixed hosts, pinned fetch, 15 s ceiling.
+    // and the response never echoes it. GitHub uses its fixed host; GitLab may use a validated public HTTPS base.
+    // Pinned fetch, 15 s ceiling.
     if (req.method === 'POST' && url.split('?')[0] === '/kb/repos/check-token') {
       let body;
       try { body = parseJSON(await readBody(req, 16 * 1024)); } catch { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return true; }
       const provider = body?.provider;
       if (provider !== 'github' && provider !== 'gitlab') { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider must be github or gitlab' } }); return true; }
-      // Self-hosted GitLab: an explicit HTTPS instance, with no credentials/query/hash. The pinned fetch still
-      // classifies every resolved address, so this cannot be turned into an SSRF probe.
+      // Self-hosted GitLab: an explicit public HTTPS instance, with no credentials/query/hash. Pinned fetch still
+      // refuses private/loopback addresses; supporting a LAN/VPN instance is deliberately left out (SSRF surface).
       let gitlabBase = 'https://gitlab.com';
       if (provider === 'gitlab' && body?.baseUrl !== undefined) {
         if (typeof body.baseUrl !== 'string' || body.baseUrl.length > 300) { sendJSON(res, 400, { error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an https URL.' } }); return true; }
@@ -343,8 +344,7 @@ export async function handleKB(req, res) {
       if (!token) { sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_TOKEN_MISSING`, message: `Save a ${provider === 'github' ? 'GitHub' : 'GitLab'} token first.` } }); return true; }
       const endpoint = provider === 'github' ? 'https://api.github.com/user' : `${gitlabBase}/api/v4/user`;
       try {
-        // A self-hosted instance on a LAN/VPN is allowed only when the operator's private-provider gate is on.
-        const r = await makePinnedFetch({ allowPrivate: true })(endpoint, {
+        const r = await makePinnedFetch()(endpoint, {
           headers: provider === 'github'
             ? { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}` }
             : { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token },
@@ -357,7 +357,7 @@ export async function handleKB(req, res) {
           // Never answer 401 here: the desktop shell treats any 401 as its own expired session and signs out.
           if (r.status === 401) { sendJSON(res, 403, { error: { code: 'TOKEN_UNAUTHORIZED', message } }); return true; }
           if (r.status === 403) { sendJSON(res, 403, { error: { code: 'TOKEN_FORBIDDEN', message } }); return true; }
-          sendJSON(res, 502, { error: { code: 'TOKEN_REFUSED', message } });
+          sendJSON(res, 502, { error: { code: 'PROVIDER_ERROR', message } });
           return true;
         }
         const login = typeof data?.login === 'string' ? data.login : typeof data?.username === 'string' ? data.username : '';
