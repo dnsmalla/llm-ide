@@ -8,7 +8,7 @@ import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 import { getSyncState, listSyncDevices, recordRequest, finishRequest, countRequestsSince, nextSeq } from '../../kb/sync-state.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
-import { ensureSyncKeys } from './keys.mjs';
+import { ensureSyncKeys, previousRoot } from './keys.mjs';
 
 export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAgeMs: 86_400_000, maxSkewMs: 600_000, perDrain: 5, perDay: 50, turnMs: 600_000, outboxDays: 7 });
 const NAME_RE = /^([0-9]{13})-([A-Za-z0-9_-]{22})\.bin$/;
@@ -82,13 +82,15 @@ export async function drainOnce({ userId, store, now = Date.now(), deps = defaul
   const state = getSyncState(userId);
   if (!state?.enabled) return out;
   const keys = ensureSyncKeys(userId);
+  const prev = previousRoot(userId, now);
   for (const dev of listSyncDevices(userId)) {
     const base = `${state.syncId}/d/${dev.dir}`;
     const dk = deviceKeys(keys.root, { userId, desktopId: state.syncId, deviceId: dev.deviceId }, keys.epoch);
     const verifyKey = createPublicKey({ key: dev.signingSpki, format: 'der', type: 'spki' });
-    const writeReply = async (requestId, body) => {
-      const env = seal({ header: { purpose: 'reply', userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq: nextSeq(userId, now), issuedAt: now, tier: '' },
-        key: dk.reply, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, ...body })), signingKey: keys.signingKey });
+    const prevDk = prev && deviceKeys(prev.root, { userId, desktopId: state.syncId, deviceId: dev.deviceId }, prev.epoch);
+    const writeReply = async (requestId, body, { key = dk.reply, epoch = keys.epoch } = {}) => {
+      const env = seal({ header: { purpose: 'reply', userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch, session: '', seq: nextSeq(userId, now), issuedAt: now, tier: '' },
+        key, plaintext: Buffer.from(JSON.stringify({ v: 1, requestId, ...body })), signingKey: keys.signingKey });
       await store.put(`${base}/out/${requestId}.bin`, Buffer.from(JSON.stringify(env)));
       out.replied += 1;
     };
@@ -100,16 +102,19 @@ export async function drainOnce({ userId, store, now = Date.now(), deps = defaul
       if (!m || f.size > LIMITS.maxFileBytes) { await store.remove(path); out.refused += 1; continue; }
       if (taken >= LIMITS.perDrain) break;
       const bytes = await store.get(path);
-      let env; let req = null;
+      let env; let req = null; let stale = false;
       try {
         env = JSON.parse(Buffer.from(bytes).toString('utf8'));
-        req = parseRequest(open({ env, key: dk.request, verifyKey, expect: { purpose: 'request', userId, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch: keys.epoch } }));
+        stale = !!prevDk && env?.epoch === prev.epoch;
+        req = parseRequest(open({ env, key: stale ? prevDk.request : dk.request, verifyKey,
+          expect: { purpose: 'request', userId, desktopId: state.syncId, from: dev.deviceId, to: state.syncId, epoch: stale ? prev.epoch : keys.epoch } }));
       } catch { req = null; }
       if (!req || req.requestId !== m[2]) { await store.remove(path); out.refused += 1; continue; }
       const fresh = recordRequest(userId, dev.deviceId, req.requestId, now);
       await store.remove(path);
       if (!fresh) continue; // replay: already answered or failed, never re-run
       taken += 1;
+      if (stale) { await writeReply(req.requestId, { ok: false, code: 'stale_epoch' }, { key: prevDk.reply, epoch: prev.epoch }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue; }
       if (env.issuedAt < now - LIMITS.maxAgeMs || env.issuedAt > now + LIMITS.maxSkewMs) {
         await writeReply(req.requestId, { ok: false, code: 'expired' }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue;
       }

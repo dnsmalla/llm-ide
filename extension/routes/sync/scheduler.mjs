@@ -7,6 +7,7 @@ import { getSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { publishOnce } from './producer.mjs';
+import { rotateKeys } from './keys.mjs';
 import { drainOnce, sweepStuckRequests } from './consumer.mjs';
 
 const PRODUCE_MS = 60_000;
@@ -15,6 +16,7 @@ const MAX_BACKOFF_MS = 15 * 60_000;
 const SETUP_ERRORS = new Set(['SYNC_AUTH_FAILED', 'SYNC_MFA_REQUIRED']);
 const stores = new Map(); // userId -> SyncStore
 const busy = new Set(); // users with a scheduler cycle or a manual publish in flight
+const rotateDue = new Set(); // users whose rotation waits for the lock
 
 const busyError = () => Object.assign(new Error('Sync is busy'), { code: 'SYNC_BUSY' });
 export async function withUserLock(userId, fn) {
@@ -54,9 +56,29 @@ export async function closeSyncStores() {
   await Promise.allSettled(all.map((s) => s.close?.()));
 }
 
+export const rotationPending = (userId) => rotateDue.has(userId);
+
+/** Rotate now under the per-user lock, or mark it pending for the next cycle when a cycle holds the lock. */
+export async function rotateNow(userId, { store = storeFor(userId), now = Date.now() } = {}) {
+  try {
+    return await withUserLock(userId, async () => {
+      rotateDue.delete(userId);
+      rotateKeys(userId, now);
+      if (store) await publishOnce({ userId, store, now });
+      return 'done';
+    });
+  } catch (e) {
+    if (e?.code !== 'SYNC_BUSY') throw e;
+    rotateDue.add(userId);
+    return 'pending';
+  }
+}
+
 export async function syncCycle(userId, { now = Date.now(), produce = true, store = storeFor(userId) } = {}) {
   if (!store) throw Object.assign(new Error('Sync is not set up'), { code: 'SYNC_NOT_SET_UP' });
-  const publish = produce ? await publishOnce({ userId, store, now }) : null;
+  let doPublish = produce;
+  if (rotateDue.delete(userId)) { rotateKeys(userId, now); doPublish = true; }
+  const publish = doPublish ? await publishOnce({ userId, store, now }) : null;
   const drain = await drainOnce({ userId, store, now });
   return { publish, drain };
 }

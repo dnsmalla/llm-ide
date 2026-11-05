@@ -3,7 +3,7 @@
 import { randomBytes, createPrivateKey, createPublicKey } from 'node:crypto';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
-import { getSyncState } from '../../kb/sync-state.mjs';
+import { getSyncState, setEpoch } from '../../kb/sync-state.mjs';
 import { newSigningKey, spkiFingerprint } from '../../core/sync-envelope.mjs';
 
 export function ensureSyncKeys(userId) {
@@ -20,3 +20,29 @@ export function ensureSyncKeys(userId) {
 }
 
 export const syncIdsFor = (userId, state) => ({ userId, desktopId: state.syncId });
+
+export const PREV_KEY_MS = 86_400_000;
+
+/** Design 5.3 rotate: new K_root, epoch + 1. The previous root is kept 24 h only to answer old-epoch requests with
+ *  stale_epoch. The caller holds the per-user lock and republishes (wraps are rewritten because wrapEpoch != epoch). */
+export function rotateKeys(userId, now = Date.now()) {
+  const db = getDb();
+  const state = getSyncState(userId);
+  if (!state) throw Object.assign(new Error('Sync is not set up'), { code: 'SYNC_NOT_SET_UP' });
+  const old = getSecret(db, userId, 'sync.rootKey');
+  db.transaction(() => {
+    if (old) setSecret(db, userId, 'sync.prevRootKey', JSON.stringify({ epoch: state.epoch, key: old, until: now + PREV_KEY_MS }));
+    setSecret(db, userId, 'sync.rootKey', randomBytes(32).toString('base64url'));
+    setEpoch(userId, state.epoch + 1);
+  })();
+  return state.epoch + 1;
+}
+
+export function previousRoot(userId, now = Date.now()) {
+  const raw = getSecret(getDb(), userId, 'sync.prevRootKey');
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw);
+    return Number.isSafeInteger(p.epoch) && p.until > now ? { epoch: p.epoch, root: Buffer.from(p.key, 'base64url') } : null;
+  } catch { return null; }
+}
