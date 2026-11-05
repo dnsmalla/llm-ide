@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Allow LLM-IDE desktop</title>
+  <link rel="stylesheet" href="/styles.css?v=4">
+</head>
+<body data-page="consent">
+  <main class="card">
+    <h1>LLM-IDE</h1>
+    <p id="question">Reading your account…</p>
+    <p class="muted">Only allow this if you just chose “Sign in” in LLM-IDE on this computer.</p>
+    <div class="actions">
+      <button id="allow" type="button" disabled>Allow</button>
+      <button id="deny" type="button" class="secondary" disabled>Deny</button>
+    </div>
+    <button id="confirm" type="button" hidden>Confirm with your passkey</button>
+    <p id="status" class="status" role="status"></p>
+  </main>
+  <script src="/app.js?v=4"></script>
+</body>
+</html>

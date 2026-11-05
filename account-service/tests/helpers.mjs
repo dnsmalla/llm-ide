@@ -187,8 +187,25 @@ export function authorizePath({
   return `/v1/oauth/authorize?${params}`;
 }
 
-export function authorize(app, web, params = {}) {
+export function authorizeGet(app, web, params = {}) {
   return rawRequest(app.base, 'GET', authorizePath(params), undefined, { cookie: web.cookie });
+}
+
+// The consent page's POST: the authorize query string as the browser got it, plus the user's choice.
+export function consent(app, web, request, decision = 'allow', headers = {}) {
+  return rawRequest(app.base, 'POST', '/v1/oauth/consent', JSON.stringify({ request, decision }), {
+    'content-type': 'application/json', origin: ORIGIN, cookie: web.cookie, ...headers,
+  });
+}
+
+// The whole browser leg: authorize, then Allow on the consent page. A successful Allow is returned
+// as the 302 the page performs (location = the loopback redirect); anything else is returned as is.
+export async function authorize(app, web, params = {}) {
+  const res = await authorizeGet(app, web, params);
+  if (res.status !== 302 || !res.headers.location.startsWith('/consent.html?')) return res;
+  const allowed = await consent(app, web, res.headers.location.slice('/consent.html?'.length));
+  if (allowed.status !== 200) return allowed;
+  return { ...allowed, status: 302, headers: { ...allowed.headers, location: allowed.body.redirect } };
 }
 
 export function tokenRequest(app, fields, { form = true, headers = {} } = {}) {

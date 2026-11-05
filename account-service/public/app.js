@@ -109,27 +109,38 @@ async function signup(event) {
   }
 }
 
+// Must be called directly from a click (transient user activation). Rotates to a fresh full session.
+async function passkeySignIn() {
+  const options = await api('/v1/signin/options', {});
+  const pk = options.options;
+  const publicKey = { ...pk, challenge: toBytes(pk.challenge), allowCredentials: (pk.allowCredentials || []).map((c) => ({ ...c, id: toBytes(c.id) })) };
+  const credential = await navigator.credentials.get({ publicKey });
+  const response = {
+    id: credential.id, rawId: toB64(credential.rawId), type: credential.type,
+    response: {
+      clientDataJSON: toB64(credential.response.clientDataJSON),
+      authenticatorData: toB64(credential.response.authenticatorData),
+      signature: toB64(credential.response.signature),
+      userHandle: credential.response.userHandle ? toB64(credential.response.userHandle) : undefined,
+    },
+    clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+  };
+  await api('/v1/signin/verify', { ceremonyId: options.ceremonyId, response });
+}
+
+// Sign-in started by the desktop's authorize returns to its consent page; nothing else is followed.
+const returnTo = () => {
+  const target = new URLSearchParams(location.search).get('return');
+  return target && target.startsWith('/consent.html?') ? target : '/account.html';
+};
+
 async function signin() {
   if (!supported()) { setStatus('This browser cannot use a passkey.', true); return; }
   const button = $('signin'); button.disabled = true;
   setStatus('Waiting for your passkey…');
   try {
-    const options = await api('/v1/signin/options', {});
-    const pk = options.options;
-    const publicKey = { ...pk, challenge: toBytes(pk.challenge), allowCredentials: (pk.allowCredentials || []).map((c) => ({ ...c, id: toBytes(c.id) })) };
-    const credential = await navigator.credentials.get({ publicKey });
-    const response = {
-      id: credential.id, rawId: toB64(credential.rawId), type: credential.type,
-      response: {
-        clientDataJSON: toB64(credential.response.clientDataJSON),
-        authenticatorData: toB64(credential.response.authenticatorData),
-        signature: toB64(credential.response.signature),
-        userHandle: credential.response.userHandle ? toB64(credential.response.userHandle) : undefined,
-      },
-      clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
-    };
-    await api('/v1/signin/verify', { ceremonyId: options.ceremonyId, response });
-    location.href = '/account.html';
+    await passkeySignIn();
+    location.href = returnTo();
   } catch (e) {
     setStatus(e.message || String(e), true);
     button.disabled = false;
@@ -148,6 +159,49 @@ async function account() {
       location.href = '/signin.html';
     };
   } catch (e) { $('who').textContent = e.message || String(e); }
+}
+
+// Design 4.4 step 2. Only the POST issues a code; the page then navigates to the loopback redirect.
+async function consentPage() {
+  const request = location.search.slice(1);
+  const res = await fetch('/v1/account', { credentials: 'same-origin' }).catch(() => null);
+  if (!res || res.status === 401) { location.href = `/signin.html?return=${encodeURIComponent(`/consent.html?${request}`)}`; return; }
+  const me = await res.json().catch(() => ({}));
+  $('question').textContent = `Allow “LLM-IDE desktop” on this computer to sign in to ${me.email}?`;
+  const buttons = [$('allow'), $('deny'), $('confirm')];
+  const decide = async (decision) => {
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+      const { redirect } = await api('/v1/oauth/consent', { request, decision });
+      setStatus(decision === 'allow' ? 'Allowed. Returning to LLM-IDE…' : 'Denied. You can close this window.');
+      location.href = redirect;
+    } catch (e) {
+      if (e.message === 'reauth_required') {
+        // A fresh passkey proof is needed; the passkey prompt needs a click of its own.
+        $('confirm').hidden = false;
+        $('confirm').disabled = false;
+        setStatus('Confirm it is you with your passkey, then allow.');
+        return;
+      }
+      setStatus(e.message || String(e), true);
+      buttons.forEach((b) => { b.disabled = false; });
+    }
+  };
+  $('allow').addEventListener('click', () => decide('allow'));
+  $('deny').addEventListener('click', () => decide('deny'));
+  $('confirm').addEventListener('click', async () => {
+    $('confirm').disabled = true;
+    try {
+      await passkeySignIn();
+      $('confirm').hidden = true;
+      await decide('allow');
+    } catch (e) {
+      setStatus(e.message || String(e), true);
+      $('confirm').disabled = false;
+    }
+  });
+  $('allow').disabled = false;
+  $('deny').disabled = false;
 }
 
 const page = document.body.dataset.page;
@@ -169,3 +223,4 @@ if (page === 'signup') {
 }
 if (page === 'signin') $('signin').addEventListener('click', signin);
 if (page === 'account') account();
+if (page === 'consent') void consentPage();

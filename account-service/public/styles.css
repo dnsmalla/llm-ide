@@ -13,3 +13,5 @@ a { color:var(--accent); }
 .status { min-height:1.4em; color:var(--accent); }
 .status.error { color:#ff9b9b; }
 code { color:var(--text); }
+.actions { display:flex; gap:10px; margin:18px 0 12px; }
+button.secondary { background:transparent; color:var(--text); border:1px solid var(--line); }

@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import {
   DESKTOP_CLIENT,
   DESKTOP_REDIRECT,
+  ORIGIN,
   OAUTH_STATE,
   authorize,
+  authorizeGet,
+  authorizePath,
+  consent,
   linkToken,
   pkcePair,
   rawRequest,
@@ -247,25 +251,109 @@ test('authorize validates the client, redirect URI, PKCE and state', async (t) =
   }
 });
 
-test('authorize requires a full web session, not a setup session', async (t) => {
+test('authorize never issues a code: a signed-in user is sent to the consent page', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const web = app.client();
+  await signUpAndRegister(app, web);
+  const { challenge } = pkcePair();
+  const path = authorizePath({ challenge });
+  const res = await authorizeGet(app, web, { challenge });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, `/consent.html?${path.split('?')[1]}`);
+  assert.equal(res.headers['cache-control'], 'no-store');
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM oauth_codes').pluck().get(), 0);
+  assert.equal(app.db.prepare("SELECT COUNT(*) FROM audit_events WHERE event = 'oauth_code_issued'").pluck().get(), 0);
+});
+
+test('authorize sends a visitor without a full session to sign-in, returning to consent', async (t) => {
   const app = await startApp();
   t.after(() => app.close());
   const { challenge } = pkcePair();
+  const query = authorizePath({ challenge }).split('?')[1];
+  const expected = `/signin.html?return=${encodeURIComponent(`/consent.html?${query}`)}`;
 
-  const anonymous = await authorize(app, app.client(), { challenge });
-  assert.equal(anonymous.status, 401);
-  assert.deepEqual(anonymous.body, { error: 'unauthenticated' });
+  const anonymous = await authorizeGet(app, app.client(), { challenge });
+  assert.equal(anonymous.status, 302);
+  assert.equal(anonymous.headers.location, expected);
 
   const pending = app.client();
   const before = app.mailer.sent.length;
   await pending.call('POST', '/v1/signup', { email: 'ada@example.com', displayName: 'Ada', language: 'en', timeZone: 'Asia/Tokyo' });
   const token = linkToken(await waitForMail(app.mailer, before + 1));
   await pending.call('POST', '/v1/signup/verify', { token });
-  const setup = await authorize(app, pending, { challenge });
-  assert.equal(setup.status, 401);
-  assert.deepEqual(setup.body, { error: 'unauthenticated' });
+  const setup = await authorizeGet(app, pending, { challenge });
+  assert.equal(setup.status, 302);
+  assert.equal(setup.headers.location, expected);
+  // A setup session cannot consent either.
+  assert.deepEqual((await consent(app, pending, query)).body, { error: 'unauthenticated' });
+
+  // A bad request is refused before any redirect, signed in or not.
+  const bad = await authorizeGet(app, app.client(), { challenge, redirectUri: 'http://evil.example/auth/callback' });
+  assert.equal(bad.status, 400);
+  assert.deepEqual(bad.body, { error: 'invalid_request' });
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM oauth_codes').pluck().get(), 0);
 });
 
+test('consent Allow issues the code with the consent session\'s passkey time; a stale session must re-prove', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const web = app.client();
+  await signUpAndRegister(app, web);
+  const { challenge } = pkcePair();
+  const query = authorizePath({ challenge }).split('?')[1];
+
+  app.clock.advance(6 * 60_000);
+  const stale = await consent(app, web, query);
+  assert.equal(stale.status, 401);
+  assert.deepEqual(stale.body, { error: 'reauth_required' });
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM oauth_codes').pluck().get(), 0);
+
+  const opts = await web.call('POST', '/v1/signin/options', {});
+  await web.call('POST', '/v1/signin/verify', { ceremonyId: opts.body.ceremonyId, response: { id: 'cred-ada', challenge: opts.body.options.challenge } });
+  const allowed = await consent(app, web, query);
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers['referrer-policy'], 'no-referrer');
+  const target = new URL(allowed.body.redirect);
+  assert.equal(target.origin + target.pathname, DESKTOP_REDIRECT);
+  assert.equal(target.searchParams.get('state'), OAUTH_STATE);
+  assert.match(target.searchParams.get('code'), /^[A-Za-z0-9_-]{43}$/);
+  const sessionAuthAt = app.db.prepare("SELECT auth_at FROM sessions WHERE revoked_at IS NULL AND scope = 'full'").pluck().get();
+  assert.equal(app.db.prepare('SELECT auth_at FROM oauth_codes').pluck().get(), sessionAuthAt);
+});
+
+test('consent Deny redirects with access_denied and issues nothing', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const web = app.client();
+  await signUpAndRegister(app, web);
+  const { challenge } = pkcePair();
+  const query = authorizePath({ challenge }).split('?')[1];
+  const denied = await consent(app, web, query, 'deny');
+  assert.equal(denied.status, 200);
+  const target = new URL(denied.body.redirect);
+  assert.equal(target.origin + target.pathname, DESKTOP_REDIRECT);
+  assert.equal(target.searchParams.get('error'), 'access_denied');
+  assert.equal(target.searchParams.get('state'), OAUTH_STATE);
+  assert.equal(target.searchParams.get('code'), null);
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM oauth_codes').pluck().get(), 0);
+});
+
+test('consent refuses a foreign or missing Origin, a bad decision and a bad request', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const web = app.client();
+  await signUpAndRegister(app, web);
+  const { challenge } = pkcePair();
+  const query = authorizePath({ challenge }).split('?')[1];
+  assert.equal((await consent(app, web, query, 'allow', { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await consent(app, web, query, 'allow', { origin: undefined })).status, 403);
+  assert.deepEqual((await consent(app, web, query, 'maybe')).body, { error: 'invalid_request' });
+  assert.deepEqual((await consent(app, web, authorizePath({ challenge, clientId: 'x' }).split('?')[1])).body, { error: 'invalid_client' });
+  assert.deepEqual((await consent(app, web, `${query}&state=two`)).body, { error: 'invalid_request' });
+  assert.equal(app.db.prepare('SELECT COUNT(*) FROM oauth_codes').pluck().get(), 0);
+  assert.equal(ORIGIN, app.config.origin);
+});
 
 test('sign-out revokes the refresh family and is idempotent', async (t) => {
   const app = await startApp();
@@ -276,4 +364,15 @@ test('sign-out revokes the refresh family and is idempotent', async (t) => {
   assert.equal((await revoke()).status, 200);
   const rotated = await tokenRequest(app, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: DESKTOP_CLIENT });
   assert.equal(rotated.status, 400);
+});
+
+test('the consent page loads only app.js (no inline script) and writes server text with textContent', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../public/consent.html', import.meta.url), 'utf8');
+  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script src="/app.js?v=4">']);
+  assert.doesNotMatch(html, /<script[^>]*>[^<]+<\/script>/);
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const consentCode = js.slice(js.indexOf('async function consentPage()'), js.indexOf('const page = document.body.dataset.page;'));
+  assert.match(consentCode, /\$\('question'\)\.textContent = /);
+  assert.doesNotMatch(consentCode, /innerHTML/);
 });
