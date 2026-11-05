@@ -251,7 +251,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] CI workflow `extension-ci.yml`; 464 files under `extension/tests` (me)
 - [~] "Extension stores nothing": audited ([audit](plans/2026-10-31-extension-storage-audit.md)); speaker names and pinned participants no longer persisted (`755fd3df`); remaining: flag-off `no-ack` capture retention (up to 50) until the ack protocol is on by default (you)
 - [~] "Mac app not running" state for the side panel: described in USER-CHECKLIST B7; not verified in a run (you)
-- [~] Pin the extension origin (ROADMAP Q22): the server pins CORS to the IDs in `<dataDir>/extension-ids.json` (fail closed on a bad file; no file = any extension, as before; `extension/core/extension-origins.mjs`); open: your ID in that file (UN-044) (you)
+- [~] Pin the extension origin (ROADMAP Q22): the server pins CORS to the IDs in `<dataDir>/extension-ids.json` (fail closed on a bad file; no file = any extension, as before; `extension/core/extension-origins.mjs`); open: your ID in that file once the extension is installed; not installed as of 2026-11-05 (UN-044) (you)
 - [ ] Manual real-meeting checklist (`extension/CLAUDE.md` Testing Checklist) before any caption/LLM merge (you)
 - [ ] Chrome Web Store listing and review: no evidence in the repo (unverified) (you)
 - [ ] `llmide://` launch from Chrome (Q11) (me)
