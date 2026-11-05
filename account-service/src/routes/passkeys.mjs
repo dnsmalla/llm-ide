@@ -5,6 +5,11 @@ import { getUser } from '../users.mjs';
 function requirePasskeySession(req, ctx) {
   const session = ctx.sessions.require(req, ['setup', 'full']);
   if (session.scope === 'full') ctx.sessions.requireFresh(session);
+  // A sign-up setup session only creates the first passkey. Once the account is active, only a
+  // fresh full session (or an email-proven recovery session) may add one.
+  if (session.scope === 'setup' && session.via === 'signup' && getUser(ctx.db, session.user_id)?.status !== 'pending_passkey') {
+    throw new HttpError(401, 'unauthenticated');
+  }
   return session;
 }
 
@@ -77,7 +82,7 @@ export function passkeyRoutes(routes, ctx) {
             ctx.db.prepare('UPDATE users SET recovered_at = ? WHERE id = ?').run(t, user.id);
             ctx.sessions.revokeOthers(user.id, null); // every session, this setup session included
           }
-          ctx.sessions.revoke(session.id_hash);
+          ctx.sessions.revokeSetup(user.id); // every setup session, not only this one
         }
       })();
     } catch (err) {

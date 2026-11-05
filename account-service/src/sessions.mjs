@@ -28,6 +28,8 @@ export function createSessions(db, config, now) {
   const touch = db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?');
   const revokeOne = db.prepare('UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL');
   const revokeUser = db.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id_hash != ? AND revoked_at IS NULL');
+  const revokeUserSetup = db.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND scope = 'setup' AND revoked_at IS NULL");
+  const live = db.prepare('SELECT 1 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? LIMIT 1');
 
   function read(req) {
     const token = parseCookies(req.headers.cookie)[name];
@@ -65,6 +67,12 @@ export function createSessions(db, config, now) {
     },
     revokeOthers(userId, keepIdHash) {
       return revokeUser.run(now(), userId, keepIdHash ?? '').changes;
+    },
+    revokeSetup(userId) {
+      return revokeUserSetup.run(now(), userId).changes;
+    },
+    hasLive(userId) {
+      return live.get(userId, now()) !== undefined;
     },
   };
 }

@@ -23,10 +23,14 @@ export function signupRoutes(routes, ctx) {
     const userId = ctx.db.transaction(() => {
       const existing = getUserByEmail(ctx.db, email);
       const t = ctx.now();
+      // Never hand out a session for an account someone else may hold: an active one, or a pending one
+      // with a live session. A pending row nobody holds any more (abandoned) is reset and reused.
       if (existing?.status === 'active') throw new HttpError(409, 'account_exists');
+      if (existing && (existing.status !== 'pending_passkey' || ctx.sessions.hasLive(existing.id))) return null;
       if (existing) {
-        ctx.db.prepare('UPDATE users SET display_name = ?, language = ?, time_zone = ?, updated_at = ? WHERE id = ?')
-          .run(profile.displayName, profile.language, profile.timeZone, t, existing.id);
+        ctx.sessions.revokeOthers(existing.id, null);
+        ctx.db.prepare('UPDATE users SET display_name = ?, language = ?, time_zone = ?, webauthn_user_id = ?, updated_at = ? WHERE id = ?')
+          .run(profile.displayName, profile.language, profile.timeZone, randomBytes(32), t, existing.id);
         return existing.id;
       }
       const id = newId();
@@ -36,6 +40,12 @@ export function signupRoutes(routes, ctx) {
       ).run(id, email, profile.displayName, profile.language, profile.timeZone, randomBytes(32), t, t);
       return id;
     })();
+    // Same answer whether or not the address has an account; only a fresh sign-up gets a session.
+    if (!userId) {
+      ctx.audit('signup_direct_refused', { userId: getUserByEmail(ctx.db, email)?.id ?? null, ip: req.clientIp });
+      send(res, 201, { status: 'add_passkey' }, { 'set-cookie': ctx.sessions.clearCookie() });
+      return;
+    }
     const { cookie } = ctx.sessions.create({ userId, scope: 'setup', via: 'signup', ip: req.clientIp });
     ctx.audit('signup_direct', { userId, ip: req.clientIp });
     send(res, 201, { status: 'add_passkey' }, { 'set-cookie': cookie });
@@ -74,6 +84,8 @@ export function signupRoutes(routes, ctx) {
       const t = ctx.now();
       if (existing?.status === 'active') return null;
       if (existing) {
+        // The email proof owns this pending row: sessions anyone else opened on it die here.
+        ctx.sessions.revokeOthers(existing.id, null);
         ctx.db.prepare('UPDATE users SET display_name = ?, language = ?, time_zone = ?, updated_at = ? WHERE id = ?')
           .run(payload.displayName, payload.language, payload.timeZone, t, existing.id);
         return existing.id;
