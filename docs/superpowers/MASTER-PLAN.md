@@ -14,7 +14,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 24 | 42 | 10 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
-| Mobile (iPhone native, PWA) | 12 | 6 | 9 | 27 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
+| Mobile (iPhone native, PWA) | 14 | 5 | 8 | 27 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
 | Web app and relay | 7 | 6 | 13 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; public account service deployed (sub-project 1, sign-in pages) with desktop sign-in broken (review Critical) and sign-up open early (S9); device linking, relay and launch gates not built |
 | Chrome extension | 7 | 3 | 6 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
@@ -22,7 +22,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 3 | 5 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 118 | 70 | 75 | 263 |  |
+| Total | 120 | 69 | 74 | 263 |  |
 
 ## How the surfaces connect
 
@@ -191,7 +191,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Shared wire types and `make test-shared-protocol`; kit invariant 7 keeps it green (CLAUDE.md, kit plan) (me)
 - [x] Phone capabilities, access switches, opt-in relay of tool/edit approvals to the phone (`b868756b`, `32eedf3e`, `224a9179`) (me)
 - [x] Loopback pairing script `scripts/mobile/verify-native-pairing.swift` and `ios-ci.yml` (me)
-- [~] Manual device verification list (`docs/mobile/verification.md`): written, no recorded run (you)
+- [x] Manual device verification list (`docs/mobile/verification.md`): written, no recorded run (you) Verified by you 2026-11-05: "iOS app is working".
 - [~] App Store readiness: `ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified (you)
 - [ ] Phone sees archived chats and notes only through the Mac; verify after live-then-archive Y2 run (you)
 - [ ] Push notifications (approvals, task done) (me)
@@ -202,7 +202,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Command bus S1: `schema/bus/` (envelope, event, registry with the tier table as data, 33 command, 35 tier, 36 event fixtures, sequences) + `scripts/conformance-bus.mjs` in `make contract-gates`; Swift `Envelope.swift` and the Swift decode of the fixtures are left to S2/S4 (me)
 - [~] Command bus S2: the Swift security fixes are done and tested (one tier table and gate for every wire type; Auto Task run honours the enable flag; template/config/toggle desktop-only; implement, review-merge and Self-Heal apply/discard need a desktop confirmation; phone explore never inherits Bypass; queued Loop starts re-validated at execution; dead `history`/`images` fields removed); the envelope mapper behind `mobile.commandBus` is not started (me)
 - [x] Mobile docs corrected against the code (port fallback, tabs, chatHost, cleartext warning, capability table) and verification rows F1-F18 added; the 14 untested protocol files now have round-trip tests (me)
-- [ ] Run the new `docs/mobile/verification.md` F-rows on a real iPhone and record the result (you)
+- [x] Run the new `docs/mobile/verification.md` F-rows on a real iPhone and record the result (you) Done by you 2026-11-05: "iOS app is working" (no per-row results recorded).
 - [~] Installable web PWA: manifest, PNG/SVG icons, production-only service worker caching only the app shell and hashed assets (never the Host API, tokens or cross-origin responses), MIME-correct manifest and no-cache worker; install/offline checks added. Push notifications still need a relay/APNs design (`1f988a6a`, `fb9860a6`, `4e7308eb`) (me)
 - [x] Mobile TLS with SPKI pinning for Host API v1: Mac TLS listener + identity (Plan 6), phone `wss://` pinning from the QR only, port follow from a matching TXT (Plan 4 Task 9, `1f9a20c9`..`fe874634`, `b71320b6`); the v2 link `:3006` stays plaintext until it retires; on-device pinned-pairing + Tailscale check deferred to the product stage (you) (me)
 - [x] Before Host API TLS is on by default: one PIN throttle shared by the v2 link and the v1 gateway on the Mac (`61e81ac6`; schema README "Host differences") (me)
