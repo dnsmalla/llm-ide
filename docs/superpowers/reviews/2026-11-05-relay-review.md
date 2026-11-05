@@ -34,3 +34,57 @@ Envelope spec and vectors, relay config, migration and import boundary, relay au
 - **I5:** worked around. The relay uses the raw-bytes hash consistently; the `tests/linking.test.mjs:31` fixture still hashes the string.
 
 Not reviewed in this batch: commits after `d387b969` (the core bridge and Rust side, including the registry that I-A depends on).
+
+## Batch 2: `4b07bf29`..`10c77a60`
+
+Core relay bridge with tier caps, desktop envelope crypto, device registry and bridge client, link confirmation and the signed wrap, the desktop state machine, the outbound client, the Settings on/off control. Tests: `cargo test relay` 12/12, `cargo test account` 6/6, extension relay and Host API tests 143/143, `tsc` clean.
+
+**Verdict:** not safe to use against a real account service and not ready for G-EXT. Exposure today is still nil (off by default, no nginx `/relay/` route).
+
+**Holds up:** the core bridge is loopback only, allows no Origin, needs the bus host proof and a known tier; the web tier is capped to host, chat and read on both the token and the session, and remote turns are forced to `AUTO_READ_ONLY`; the webview cannot reach the bridge. In Rust: signature before decryption, per-device and per-direction keys, a wrap bound to device id, epoch, both SPKIs and tier, constant-time compares, keys only in the OS secret store, nothing secret logged.
+
+### Critical
+
+- **C1 is now exploitable end to end.** The desktop discards its own nonce (`desktop/src-tauri/src/account_oauth.rs:487`) and computes the SAS from the nonce the service returns (`:456`, `:464`); `link_confirm_blocking` (`:523-555`) then adds the service's keys to the registry and seals the Host API token and subkeys to them. A malicious service gets a working token. **Fix C1 (and C2) before anything else.**
+
+### Important
+
+- **The tier is self-declared:** `account_oauth.rs:529` takes it from the requester-chosen `kind` (`account-service/src/routes/linking.mjs:7`, `:88`), and `ios` means no cap (`extension/core/host-api-relay.mjs:3`), so a browser claiming `ios` can answer approvals. The tier must come from something the requester cannot choose.
+- **Linking while the relay runs loses the device:** the loop saves the registry copy it loaded at connect after every envelope (`relay/client.rs:302`), overwriting the device just added (`account_oauth.rs:550`); the core token is orphaned and the wrap is never sent, because wraps go out only at connect (`client.rs:265`).
+- **The relay cannot connect over a real network:** a 50 ms read timeout, and WouldBlock is treated as fatal in the challenge and ready loops (`client.rs:228`, `:237`, `:259`), so any round trip over 50 ms fails. Tests pass only on loopback.
+- **wss:// panics:** rustls 0.23.46 is built without `ring` or `aws-lc-rs` and no provider is installed (`Cargo.toml:44`), so `ClientConfig::builder()` panics in the relay thread. It fails closed, and the TLS path has never run (certificate checking uses webpki-roots with no skip).
+- **No revoke on the desktop:** `Registry::remove` (`relay/registry.rs:56`) is never called, `Out::CloseDevice` is never produced (`client.rs:312`), and the epoch is fixed at 1 (rotation deferred to R4). A device revoked on the web keeps working until the user also revokes it under Host API devices.
+
+### Medium
+
+- **Kill-switch race:** `enabled=true` set in memory (`client.rs:267`) can be saved back after the user turns the relay off (`:302`), and the shell then resumes it on the next launch.
+- **Bridge threads leak** (`relay/bridge.rs:38`): after 8 leaks the core's 8-connection cap (`extension/server/relay-bridge.mjs:25`) refuses every new session until a restart.
+- **Relay sessions never expire** (`client.rs:66`): repeated device reloads fill the session slots.
+- **The SAS check at confirm proves nothing:** the webview passes back the SAS it was shown (`AccountSection.tsx:67`).
+- **New crates have no justification comments:** `aes-gcm`, `hkdf`, `tungstenite` are pinned exactly but uncommented.
+
+**Untested guards:** the `link_confirm_blocking` gates, the session-to-device binding (`client.rs:78`), the reply cap, the registry overwrite, any wss connection, `attachRelayBridge`, `bridge::pair`.
+
+### Prior findings at `10c77a60`
+
+- **C1:** still open, now load-bearing (`account_oauth.rs:487`, `:456`, `:464`).
+- **C2:** still open (`account-service/public/link.js:71-79`, `:89-94`).
+- **I1:** partly. The SAS still omits the desktop ECDH key (`account_oauth.rs:398-401`, `linking.mjs:16-17`), but the wrap uses a signed ephemeral key.
+- **I2:** still open. `nativeClient` is only a marker (`account-service/src/http.mjs:65-68`), and approve and confirm accept a bare token (`linking.mjs:159`, `:193`).
+- **I3:** partly. Confirm requires state `keys` (`linking.mjs:199`), but revoke and replace leave `link_requests` (`devices.mjs:104-116`, `:78-92`), and the device update has no status guard (`linking.mjs:205`).
+- **I4:** still open (`link.js:42-43`).
+- **I5:** partly. `link.js` hashes raw bytes; the `tests/linking.test.mjs:31` fixture still hashes the string.
+- **I-A:** partly. `relay/auth.mjs:35` is unchanged and no migration marks v1 links unverified; the desktop registry now drops unknown senders (`client.rs:58`), but it is fed through C1.
+- **I-B:** still open (`devices.mjs:104-116`), and the desktop has no revoke either.
+- **M-1:** still open (`account-service/src/relay/ws.mjs:108`).
+- **M-2:** still open and now reachable. `web/src/relay/socket.ts:62` runs before the wrap branch, and the desktop replays the wrap with its confirm-time `issued_at` (`account_oauth.rs:547`, `client.rs:265`), so a device first connecting more than 10 minutes after linking never gets its keys.
+
+### Fix order
+
+1. C1 and C2 (keep each side's own nonce; compute the SAS only from values committed before the reveal), with a malicious-service test.
+2. Tier from a value the requester cannot choose.
+3. I2 (desktop signature on approve and confirm).
+4. I-B and the desktop revoke.
+5. The registry overwrite.
+6. The real-network blockers: timeouts, WouldBlock handling, a rustls crypto provider.
+7. M-2, then the Medium items.
