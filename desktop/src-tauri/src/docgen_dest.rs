@@ -59,7 +59,6 @@ fn state() -> &'static Mutex<Option<PathBuf>> {
 fn current() -> Option<PathBuf> {
     let mut slot = state().lock().ok()?;
     if slot.is_none() { *slot = load(); }
-    if slot.as_ref().is_some_and(|p| !p.is_dir()) { *slot = None; return None; }
     slot.clone()
 }
 
@@ -97,7 +96,7 @@ fn safe_name(raw: &str) -> Result<String, FsError> {
     if !out.to_ascii_lowercase().ends_with(".md") { out.push_str(".md"); }
     let stem = out.trim_end_matches(".md").to_ascii_lowercase();
     if matches!(stem.as_str(), "con" | "prn" | "aux" | "nul" | "com1" | "com2" | "com3" | "com4" | "com5" | "com6" | "com7" | "com8" | "com9" | "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5" | "lpt6" | "lpt7" | "lpt8" | "lpt9") {
-        out.push_str(".md");
+        out = format!("_{out}");
     }
     Ok(out)
 }
@@ -124,37 +123,47 @@ fn write_one(dir: &Path, name: &str, text: &str, expected_hash: Option<&str>) ->
         let actual = hash_file(&target)?;
         if actual != expected { return Err(FsError { code: "conflict", message: "the file changed on disk".into() }); }
     }
-    // Unique hidden sibling, created with create_new and O_NOFOLLOW: a planted temp symlink/hard link cannot
-    // redirect the write, and two writers cannot share one temp name.
-    let seq = TMP.fetch_add(1, Ordering::Relaxed);
-    let partial = dir.join(format!(".{}.llmide-{}-{seq}.tmp", name.chars().take(100).collect::<String>(), std::process::id()));
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)] {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.custom_flags(libc::O_NOFOLLOW);
-    }
     let fail = |e: std::io::Error| FsError { code: "io", message: format!("cannot write the document: {e}") };
-    let mut f = opts.open(&partial).map_err(fail)?;
-    if let Err(e) = f.write_all(text.as_bytes()).and_then(|_| f.sync_all()) {
-        let _ = std::fs::remove_file(&partial);
-        return Err(fail(e));
-    }
-    drop(f);
-    // Re-check the CAS immediately before install, after the (possibly long) write.
-    if let Some(expected) = expected_hash {
-        let actual = hash_file(&target)?;
-        if actual != expected {
+    let open_new = |path: &Path| {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)] {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        opts.open(path)
+    };
+    if expected_hash.is_none() {
+        // Direct create-only claim. This works on exFAT/FAT/SMB where rename-with-no-replace and hard links
+        // are unsupported; O_NOFOLLOW still refuses a planted symlink at the target name.
+        let mut f = open_new(&target).map_err(|e| {
+            let code = if e.kind() == std::io::ErrorKind::AlreadyExists { "exists" } else { "io" };
+            FsError { code, message: "cannot create the document".into() }
+        })?;
+        if let Err(e) = f.write_all(text.as_bytes()).and_then(|_| f.sync_all()) {
+            let _ = std::fs::remove_file(&target);
+            return Err(fail(e));
+        }
+        drop(f);
+    } else {
+        // Revision: unique hidden temp, then re-check the hash immediately before install.
+        let seq = TMP.fetch_add(1, Ordering::Relaxed);
+        let partial = dir.join(format!(".{}.llmide-{}-{seq}.tmp", name.chars().take(100).collect::<String>(), std::process::id()));
+        let mut f = open_new(&partial).map_err(fail)?;
+        if let Err(e) = f.write_all(text.as_bytes()).and_then(|_| f.sync_all()) {
+            let _ = std::fs::remove_file(&partial);
+            return Err(fail(e));
+        }
+        drop(f);
+        let actual = match hash_file(&target) {
+            Ok(h) => h,
+            Err(e) => { let _ = std::fs::remove_file(&partial); return Err(e); }
+        };
+        if actual != expected_hash.unwrap() {
             let _ = std::fs::remove_file(&partial);
             return Err(FsError { code: "conflict", message: "the file changed while saving".into() });
         }
         std::fs::rename(&partial, &target).map_err(|e| { let _ = std::fs::remove_file(&partial); fail(e) })?;
-    } else {
-        crate::fs_ops::rename_noreplace(&partial, &target).map_err(|e| {
-            let _ = std::fs::remove_file(&partial);
-            let code = if e.kind() == std::io::ErrorKind::AlreadyExists { "exists" } else { "io" };
-            FsError { code, message: "cannot install the document".into() }
-        })?;
     }
     #[cfg(unix)]
     if let Ok(d) = std::fs::File::open(dir) { let _ = d.sync_all(); }

@@ -179,7 +179,7 @@ function Done(p: ResultPanelProps): ReactNode {
       )}
       {r.saved && (
         <p className="dg-muted" role="status">
-          {r.dirty ? "Unsaved changes. Last saved to" : "Saved to"} <code>{r.saved.path}</code>
+          {r.dirty ? "Unsaved changes. Last saved to" : "Saved to"} <code>{r.saved.external ? r.saved.path.replace(/^external:/, "") : r.saved.path}</code>
         </p>
       )}
       {revising && (
