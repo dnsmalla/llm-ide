@@ -2516,27 +2516,25 @@ git commit -m "docs(desktop): release runbook, real-run checklist and signing de
 
 | # | Decision | Default built by this plan |
 |---|---|---|
-| D1 | Windows signing provider (**superseded by "Free release mode"**: unsigned by default) | Azure Artifact Signing (~USD 10/month) if you are eligible (organisation in US/CA/EU/UK with 3+ years history, or an individual in US/CA); otherwise an OV certificate in a cloud HSM with a signtool KSP. EV is not worth its price now: it no longer buys instant SmartScreen trust. |
+| D1 | Windows signing provider (**superseded by "Release mode"**: Windows unsigned) | Azure Artifact Signing (~USD 10/month) if you are eligible (organisation in US/CA/EU/UK with 3+ years history, or an individual in US/CA); otherwise an OV certificate in a cloud HSM with a signtool KSP. EV is not worth its price now: it no longer buys instant SmartScreen trust. |
 | D2 | Linux formats | AppImage (self-updates) + deb (package manager); no rpm, no Flatpak. If the AppImage exceeds the 150 MB budget, ship deb + AppImage anyway with a recorded exception, or deb only. |
 | D3 | Update channels | One `stable` channel (`desktop-stable` release), promoted by hand after the checklist; no beta channel. |
 | D4 | Production bundle identifier and product name | Keep `com.llmide.desktop` / `LLM-IDE` (already set, distinct from the Swift app). The binary keeps its crate name `llmide-desktop-poc` for now; renaming it (`mainBinaryName`) later changes the Windows exe and Linux binary names and needs a migration note. |
 | D5 | arm64 builds | macOS arm64 + x64 yes (already in the matrix); Windows arm64 and Linux arm64 no for now (no node pin, no runner smoke, no demand yet). |
 | D6 | Who holds the update private key | You: generated on your Mac, stored as two GitHub secrets for CI, two offline backups (password manager + encrypted USB). The public key is committed so a key change is a reviewed commit. |
-| D7 | Notarization credential (**superseded by "Free release mode"**: ad-hoc only, no notarization) | Reuse the Mac app's Apple ID + app-specific password secrets (zero new secrets); move both trains to an App Store Connect API key later. |
+| D7 | Notarization credential (**superseded by "Release mode"**: the existing Developer ID and Mac secrets, signed and notarized) | Reuse the Mac app's Apple ID + app-specific password secrets (zero new secrets); move both trains to an App Store Connect API key later. |
 | D8 | Automatic update checks | On by default (daily check only, install always asks, signature always verified); a switch in Updates & About turns it off. |
 
-## Free release mode (user decision 2026-11-05: "I am doing this system for free")
+## Release mode (user decisions 2026-11-05)
 
-This overrides D1 and D7 and changes what Tasks 6, 7, 11 and 13 ship by default. Nothing paid is required.
+"I am doing this system for free" and "I already have an Apple Developer ID; Windows signing, no". This overrides D1 and D7 and sets what Tasks 6, 7, 11 and 13 ship by default.
 
-- **No paid OS signing.** No Apple Developer ID or notarization ($99 a year), no Windows Authenticode certificate. Tasks 6 and 7 are still built, but only run when `signed=true` and their secrets exist; the default release path never needs them, and the fail-fast secret check applies only to `signed=true` runs.
-- **macOS: ad-hoc signing only.** Apple Silicon refuses to run a completely unsigned binary, so every Mach-O (the app, the bundled `node`, native `.node` modules) is ad-hoc signed (`codesign --force --sign -`; Tauri's `signingIdentity: "-"`), which is free. Gatekeeper still shows "cannot verify the developer"; users open the app once from the context menu or System Settings, Privacy and Security.
-- **Windows: unsigned NSIS installer.** SmartScreen shows "Windows protected your PC"; users choose More info, then Run anyway.
-- **Linux: unchanged** (AppImage and deb are normally unsigned); publish the checksums.
-- **The updater key stays required, and is free.** Task 3's updater signature check and Task 9's verification are mandatory in every mode: a tag release fails if any updater artifact lacks a valid signature from `desktop/release/updater.pubkey`, and the app never installs an update without one. This is what keeps auto-update safe without paid certificates. D6 (you hold the key, 2 CI secrets, 2 offline backups) is unchanged.
-- **Task 11** publishes unsigned (ad-hoc on macOS) installers plus signed updater artifacts, `latest.json`, `SHA256SUMS`, SBOMs and provenance attestations (all free on a public repo), as a draft release you publish by hand.
-- **Task 13** adds a short "First launch of an unsigned app" section to the release how-to and the release notes template (macOS: Open from the context menu, or System Settings, Privacy and Security, Open Anyway; Windows: More info, Run anyway; how to check `SHA256SUMS`).
-- **Later:** turning on paid signing is `signed=true` plus the secrets from Tasks 6 and 7; nothing else changes.
+- **macOS: signed and notarized by default.** Task 6 runs on every tag release with the user's existing Developer ID: the `MAC_*` secrets already used by `mac-release.yml` (certificate, identity, notarization Apple ID, app-specific password, team id). No new paid account. The fail-fast secret check applies to the macOS job of every tag release.
+- **Windows: unsigned, by decision.** Task 7 is still built but runs only with `windows_signed=true` and its secrets, which the default never sets. The NSIS installer is unsigned; SmartScreen shows "Windows protected your PC" and users choose More info, then Run anyway. No Windows signing cost now or later unless the user changes this decision.
+- **Linux: unchanged** (AppImage and deb, normally unsigned); publish the checksums.
+- **The updater key stays required, and is free.** Task 3's updater signature check and Task 9's verification are mandatory on every OS: a tag release fails if any updater artifact lacks a valid signature from `desktop/release/updater.pubkey`, and the app never installs an update without one. This keeps auto-update safe on Windows and Linux without paid certificates. D6 (the user holds the key, 2 CI secrets, 2 offline backups) is unchanged.
+- **Task 11** publishes the signed and notarized macOS dmg, the unsigned Windows installer and Linux packages, signed updater artifacts, `latest.json`, `SHA256SUMS`, SBOMs and provenance attestations (free on a public repo), as a draft release published by hand.
+- **Task 13** adds a short "First launch on Windows" section to the release how-to and release-notes template (More info, Run anyway; how to check `SHA256SUMS`).
 
 ## Self-review notes
 
