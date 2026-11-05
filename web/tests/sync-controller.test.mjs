@@ -178,3 +178,27 @@ test('a stored record starts locked with the remembered email', async () => {
   assert.equal(c2.getState().email, EMAIL);
   c2.dispose();
 });
+
+test('a retry after a transient failure once the claim landed reuses the same claim (contract 4c), so the slot is not contested', async () => {
+  const r = rig();
+  r.link = await r.desk.open(T);
+  await r.c.start();
+  const claims = [];
+  const put = r.store.put.bind(r.store);
+  let failOnce = true;
+  r.store.put = async (p, b, m) => {
+    if (p.includes('/e/') && !p.endsWith('/ack.bin')) {
+      claims.push({ p, b: Buffer.from(b).toString('base64') });
+      await put(p, b, m);
+      if (failOnce) { failOnce = false; throw new SyncStoreError('SYNC_UNREACHABLE'); } // landed, but the answer was lost
+      return;
+    }
+    return put(p, b, m);
+  };
+  await r.c.pair({ email: EMAIL, password: PW, name: 'Laptop browser' });
+  assert.equal(r.c.getState().phase, 'pairing', 'the link is kept for a retry');
+  await r.c.pair({ email: EMAIL, password: PW, name: 'Another name' });
+  assert.equal(claims.length, 2);
+  assert.deepEqual(claims[1], claims[0], 'same claim name and bytes');
+  assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+});

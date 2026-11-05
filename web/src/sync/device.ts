@@ -35,7 +35,17 @@ function verifyKeyOf(d: LinkedDevice): Promise<CryptoKey> {
 }
 
 /** Contract 4a-4c: pin the desktop key by sfp, make this browser's keys, write the claim once. */
-export async function startPairing(store: DeviceStore, pair: Pair, { name, now }: { name: string; now: number }): Promise<Enrolling> {
+export async function startPairing(store: DeviceStore, pair: Pair, o: { name: string; now: number }): Promise<Enrolling> {
+  const e = await prepareClaim(store, pair, o);
+  await putClaim(store, e);
+  return e;
+}
+
+/** Contract 4c: write the claim; a retry writes the same name and bytes again, never a second claim. */
+export const putClaim = (store: DeviceStore, e: Enrolling) => store.put(e.claimPath, e.claimBytes, 1);
+
+/** Contract 4a-4b: pin the desktop key by sfp, make the device keys and seal the claim (nothing is written). */
+export async function prepareClaim(store: DeviceStore, pair: Pair, { name, now }: { name: string; now: number }): Promise<Enrolling> {
   const spki = await store.get(`${pair.sid}/d/${pair.dir}/key.bin`);
   if (!spki || b64u(await sha256(spki)) !== pair.sfp) fail("bad_desktop_key");
   let desktopVerify: CryptoKey;
@@ -47,7 +57,6 @@ export async function startPairing(store: DeviceStore, pair: Pair, { name, now }
   const env = await sealClaim({ pair, tier: "web", name, ecdhSpki: dev.ecdhSpki, signingSpki: dev.signingSpki, signingKey: dev.signingPrivate, issuedAt: now, keys });
   const e: Enrolling = { pair: { ...pair, es: "" }, keys, dev, deviceId: await deviceIdOf(dev.signingSpki), name, claimPath: `${pair.sid}/e/${pair.slot}/${newId22()}.bin`,
     claimBytes: utf8(JSON.stringify(env)), desktopSpki: new Uint8Array(spki!), desktopVerify, userId: null };
-  await store.put(e.claimPath, e.claimBytes, 1);
   return e;
 }
 

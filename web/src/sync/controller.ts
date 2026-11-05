@@ -3,7 +3,7 @@
 // nothing decrypted is persisted. Polls every 30 s while unlocked, online and not paused (desktop live over Host API).
 import { parsePair, type Pair } from "./enroll.ts";
 import { SyncCryptoError } from "./envelope.ts";
-import { readAck, readFirstWrap, readReply, readSnapshot, sendRequest, startPairing, type BlobCache } from "./device.ts";
+import { prepareClaim, putClaim, readAck, readFirstWrap, readReply, readSnapshot, sendRequest, type BlobCache, type Enrolling } from "./device.ts";
 import { indexedDbKeyStore, memoryKeyStore, type KeyStore, type LinkedDevice } from "./keystore.ts";
 import type { Snapshot } from "./kinds.ts";
 import { openMegaStore, type OpenedStore } from "./mega-store.ts";
@@ -103,6 +103,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
   let device: LinkedDevice | null = null;
   let store: OpenedStore | null = null;
   let pair: Pair | null = null;
+  let claim: Enrolling | null = null; // prepared for `pair`; kept across retries so a retry rewrites the same claim (4c)
   let pairRun = 0;
   let paused = false; let disposed = false; let refreshing = false;
   let timer: unknown = null; let backoff = POLL_MS;
@@ -138,7 +139,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       const p = parsePair(url.trim());
       folderOf(p.st);
       void closeStore();
-      pairRun += 1; pair = p;
+      pairRun += 1; pair = p; claim = null;
       set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null,
         notice: device ? "Pairing again replaces this browser's current sync link." : null });
       return true;
@@ -154,8 +155,10 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     try {
       s = await d.openStore({ email: i.email, password: i.password, folder: folderOf(p.st) });
       set({ pairStep: "claiming" });
-      const e = await startPairing(s, p, { name: i.name, now: d.now() });
-      pair = null;
+      claim ??= await prepareClaim(s, p, { name: i.name, now: d.now() });
+      const e = claim;
+      await putClaim(s, e);
+      pair = null; claim = null;
       const open = s;
       const sas = await waitFor(run, () => readAck(open, e), ACK_WAIT_MS);
       set({ pairStep: "sas", sas });
@@ -251,7 +254,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     },
     acceptLink,
     pair: pairNow,
-    cancelPairing() { pairRun += 1; pair = null; set({ phase: device ? "locked" : "none", pairStep: null, sas: null, busy: false, error: null }); },
+    cancelPairing() { pairRun += 1; pair = null; claim = null; set({ phase: device ? "locked" : "none", pairStep: null, sas: null, busy: false, error: null }); },
     unlock,
     refresh,
     send,
@@ -261,7 +264,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     },
     async forget() {
       if (!d.confirm(FORGET_SYNC_CONFIRM)) return;
-      pairRun += 1; await closeStore(); device = null; pair = null; texts.clear();
+      pairRun += 1; await closeStore(); device = null; pair = null; claim = null; texts.clear();
       try { await d.keystore.clear(); } catch { /* nothing kept */ }
       set({ phase: "none", snapshot: null, answered: [], pending: [], error: null, notice: null, stale: false, email: "", busy: false });
     },
