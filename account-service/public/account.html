@@ -11,7 +11,25 @@
     <h1>LLM-IDE</h1>
     <p id="who" class="muted">Reading your account…</p>
     <div id="details"></div>
-    <button id="signout" type="button">Sign out</button>
+    <section aria-labelledby="export-h">
+      <h2 id="export-h">Your data</h2>
+      <p id="export-help" class="muted">Download your profile, sessions and security log as a JSON file.</p>
+      <button id="export" type="button" aria-describedby="export-help">Download my data</button>
+    </section>
+    <section aria-labelledby="delete-h">
+      <h2 id="delete-h">Delete my account</h2>
+      <div id="delete-warning" class="muted">
+        <p>This permanently deletes your account, passkeys and sign-in sessions. It cannot be undone.</p>
+        <p>Backups age out within 7 days. Data stored on your computer by the LLM-IDE desktop app is not deleted.</p>
+      </div>
+      <form id="delete-form" novalidate>
+        <label>Type your email address to confirm
+          <input id="confirm-email" type="email" autocomplete="off" aria-describedby="delete-warning">
+        </label>
+        <button id="delete" type="submit" class="danger" disabled>Delete my account</button>
+      </form>
+    </section>
+    <button id="signout" type="button" class="secondary">Sign out</button>
     <p id="status" class="status" role="status"></p>
   </main>
   <script src="/app.js?v=4"></script>

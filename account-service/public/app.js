@@ -158,7 +158,53 @@ async function account() {
       await api('/v1/signout', {}).catch(() => {});
       location.href = '/signin.html';
     };
+    setupExportDelete(me);
   } catch (e) { $('who').textContent = e.message || String(e); }
+}
+
+function setupExportDelete(me) {
+  $('export').onclick = async () => {
+    const button = $('export'); button.disabled = true;
+    try {
+      const res = await fetch('/v1/account/export', { credentials: 'same-origin' });
+      if (res.status === 401) { location.href = '/signin.html'; return; }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Request failed (${res.status})`);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `llm-ide-account-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.append(link); link.click(); link.remove();
+      URL.revokeObjectURL(url);
+      setStatus('Your data was downloaded.');
+    } catch (e) { setStatus(e.message || String(e), true); }
+    button.disabled = false;
+    statusEl.tabIndex = -1; statusEl.focus();
+  };
+  const input = $('confirm-email');
+  const matches = () => input.value.trim().toLowerCase() === me.email;
+  input.addEventListener('input', () => { $('delete').disabled = !matches(); });
+  $('delete-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!matches()) return;
+    const button = $('delete'); button.disabled = true; input.disabled = true;
+    try {
+      // The passkey prompt needs this click's user activation; delete needs a fresh proof.
+      if (!supported()) throw new Error('This browser cannot use a passkey.');
+      setStatus('Waiting for your passkey…');
+      await passkeySignIn();
+      await api('/v1/account/delete', { confirmEmail: input.value });
+      document.querySelector('main').replaceChildren();
+      const h = document.createElement('h1'); h.textContent = 'Account deleted';
+      const p = document.createElement('p'); p.className = 'muted';
+      p.textContent = 'Your account was deleted and you are signed out. Backups age out within 7 days. Data stored by the desktop app on your computer was not deleted.';
+      document.querySelector('main').append(h, p);
+      h.tabIndex = -1; h.focus();
+    } catch (e) {
+      setStatus(e.message || String(e), true);
+      button.disabled = false; input.disabled = false;
+      statusEl.tabIndex = -1; statusEl.focus();
+    }
+  });
 }
 
 // Design 4.4 step 2. Only the POST issues a code; the page then navigates to the loopback redirect.

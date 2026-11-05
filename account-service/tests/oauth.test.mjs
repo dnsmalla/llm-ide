@@ -376,3 +376,14 @@ test('the consent page loads only app.js (no inline script) and writes server te
   assert.match(consentCode, /\$\('question'\)\.textContent = /);
   assert.doesNotMatch(consentCode, /innerHTML/);
 });
+
+test('the account page loads only app.js (no inline script/style) and export/delete write with textContent', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../public/account.html', import.meta.url), 'utf8');
+  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script src="/app.js?v=4">']);
+  assert.doesNotMatch(html, /<script[^>]*>[^<]+<\/script>|\sstyle=|\son\w+=/);
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = js.slice(js.indexOf('function setupExportDelete('), js.indexOf('// Design 4.4 step 2.'));
+  assert.doesNotMatch(code, /innerHTML/);
+  assert.match(code, /llm-ide-account-export-/);
+});

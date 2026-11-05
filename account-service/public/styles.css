@@ -15,3 +15,6 @@ a { color:var(--accent); }
 code { color:var(--text); }
 .actions { display:flex; gap:10px; margin:18px 0 12px; }
 button.secondary { background:transparent; color:var(--text); border:1px solid var(--line); }
+h2 { margin:22px 0 6px; font-size:17px; }
+button.danger { background:#ff9b9b; }
+button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
