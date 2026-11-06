@@ -73,7 +73,8 @@ public enum SourceOAuth {
               (8...4096).contains(access.count) else { throw SourceOAuthError.badTokenResponse }
         let refresh = o["refresh_token"] as? String
         if let r = refresh, r.count > 4096 { throw SourceOAuthError.badTokenResponse }
-        if let scope = o["scope"] as? String, scope.range(of: #"(^|\s)(api|write_repository|root_readwrite)(\s|$)"#, options: .regularExpression) != nil {
+        // Allowlist: GitLab grants only these; Box reports no scope or root_readonly.
+        if let scope = o["scope"] as? String, !Set(scope.split(separator: " ").map(String.init)).isSubset(of: ["read_api", "read_repository", "root_readonly"]) {
             throw SourceOAuthError.scopeTooWide
         }
         let ttl = min(max((o["expires_in"] as? Int) ?? 3600, 1), 86_400)

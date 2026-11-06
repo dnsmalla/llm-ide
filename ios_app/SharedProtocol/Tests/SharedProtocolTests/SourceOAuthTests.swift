@@ -44,6 +44,7 @@ struct SourceOAuthTests {
         let t = try SourceOAuth.parseTokens(Data(#"{"access_token":"acc-12345678","refresh_token":"r1","expires_in":7200,"scope":"read_api read_repository"}"#.utf8), nowMs: 1000)
         #expect(t == SourceTokens(access: "acc-12345678", refresh: "r1", expiresAtMs: 1000 + 7_200_000 - 60_000))
         #expect(throws: SourceOAuthError.scopeTooWide) { try SourceOAuth.parseTokens(Data(#"{"access_token":"acc-12345678","scope":"api"}"#.utf8), nowMs: 0) }
+        #expect(throws: SourceOAuthError.scopeTooWide) { try SourceOAuth.parseTokens(Data(#"{"access_token":"acc-12345678","scope":"read_api read_repository sudo"}"#.utf8), nowMs: 0) }
         #expect(throws: SourceOAuthError.badTokenResponse) { try SourceOAuth.parseTokens(Data(#"{"access_token":1}"#.utf8), nowMs: 0) }
     }
 

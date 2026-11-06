@@ -31,6 +31,7 @@ public enum SourceHTTP {
     private static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 20
+        c.timeoutIntervalForResource = 60
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.urlCache = nil
         c.httpCookieStorage = nil
