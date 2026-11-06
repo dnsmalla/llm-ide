@@ -125,7 +125,12 @@ impl HttpRemote {
         ureq::AgentBuilder::new().redirects(0).timeout(timeout.min(CALL_CAP).max(Duration::from_millis(100))).build()
     }
 
-    fn call(&self, method: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<Value, RemoteError> {
+    pub(crate) fn call(&self, method: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<Value, RemoteError> {
+        self.call_capped(method, path, body, timeout, RESPONSE_MAX)
+    }
+
+    /// `call` with its own response cap (a held meeting capture can reach a few MB).
+    pub(crate) fn call_capped(&self, method: &str, path: &str, body: Option<&Value>, timeout: Duration, cap: u64) -> Result<Value, RemoteError> {
         let url = format!("{}{}", self.base, path);
         let req = Self::agent(timeout).request(method, &url).set("Authorization", &format!("Bearer {}", self.token));
         let res = match body {
@@ -133,10 +138,10 @@ impl HttpRemote {
             None => req.call(),
         };
         match res {
-            Ok(resp) => read_json(resp),
+            Ok(resp) => read_json(resp, cap),
             Err(ureq::Error::Status(401 | 403, _)) => Err(RemoteError::Unauthorized),
             Err(ureq::Error::Status(409, resp)) => {
-                let v = read_json(resp).unwrap_or(Value::Null);
+                let v = read_json(resp, cap).unwrap_or(Value::Null);
                 if v.pointer("/error/code").and_then(Value::as_str) == Some("NO_RECEIPT") {
                     Err(RemoteError::NoReceipt)
                 } else {
@@ -155,9 +160,9 @@ impl HttpRemote {
     }
 }
 
-fn read_json(resp: ureq::Response) -> Result<Value, RemoteError> {
+fn read_json(resp: ureq::Response, cap: u64) -> Result<Value, RemoteError> {
     let mut buf = Vec::new();
-    resp.into_reader().take(RESPONSE_MAX).read_to_end(&mut buf).map_err(|_| RemoteError::Unreachable)?;
+    resp.into_reader().take(cap).read_to_end(&mut buf).map_err(|_| RemoteError::Unreachable)?;
     serde_json::from_slice(&buf).map_err(|_| RemoteError::Invalid)
 }
 

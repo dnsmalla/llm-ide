@@ -20,6 +20,8 @@ use serde::Deserialize;
 
 use crate::capture_store::{self, FinalMeta, IndexUpsert, Row};
 use crate::chat_archive::RemoteError;
+use crate::chat_archive::HttpRemote;
+use serde_json::json;
 
 pub const TICK: Duration = Duration::from_secs(20);
 pub const MAX_PER_TICK: usize = 5;
@@ -155,6 +157,34 @@ impl Archivist {
             self.attempts.clear(); // bounded memory; the core holds at most 200 unacked captures per user
         }
         Ok(r)
+    }
+}
+
+const CALL: Duration = Duration::from_secs(3);
+/// A held capture is at most 2,000 lines of at most 2,000 characters (agents/live-sessions.mjs).
+const CAPTURE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Deserialize)]
+struct UnackedList {
+    sessions: Vec<Unacked>,
+}
+
+/// The core's live routes over the host's loopback client (bearer token, no redirects, bounded reads).
+/// Ids reach the path only after `valid_capture_id`, so they need no escaping.
+impl CaptureRemote for HttpRemote {
+    fn unacked(&self) -> Result<Vec<Unacked>, RemoteError> {
+        let v = self.call("GET", "/kb/live/unacked", None, CALL)?;
+        serde_json::from_value::<UnackedList>(v).map(|l| l.sessions).map_err(|_| RemoteError::Invalid)
+    }
+    fn capture(&self, id: &str) -> Result<HeldCapture, RemoteError> {
+        let v = self.call_capped("GET", &format!("/kb/live/{id}/capture"), None, CALL, CAPTURE_MAX_BYTES)?;
+        serde_json::from_value(v).map_err(|_| RemoteError::Invalid)
+    }
+    fn index(&self, upsert: &IndexUpsert) -> Result<(), RemoteError> {
+        self.call("POST", "/kb/index/notes", Some(&json!({ "notes": [upsert] })), CALL).map(|_| ())
+    }
+    fn ack(&self, id: &str, note_key: &str, hash: &str, lines: usize) -> Result<(), RemoteError> {
+        self.call("POST", &format!("/kb/live/{id}/ack"), Some(&json!({ "noteKey": note_key, "hash": hash, "lines": lines })), CALL).map(|_| ())
     }
 }
 
@@ -322,4 +352,92 @@ mod tests {
         assert!(valid_capture_id("0b6c2d4e-1111-4a2b-9c3d-123456789abc") && valid_capture_id("legacy-17300-ab12cd34ef56"));
         assert!(!valid_capture_id("..") && !valid_capture_id("a/b") && !valid_capture_id(&"a".repeat(201)));
     }
+    use crate::chat_archive::HttpRemote;
+    use serde_json::{json, Value};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<(String, String, Value)>>>;
+
+    /// A loopback server with one canned reply per (method, path); it records every request.
+    fn serve(replies: Vec<(&'static str, String, u16, Value)>) -> (String, Seen) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for conn in l.incoming() {
+                let Ok(mut conn) = conn else { break };
+                let mut r = BufReader::new(conn.try_clone().unwrap());
+                let mut line = String::new();
+                if r.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let mut p = line.split_whitespace();
+                let (method, path) = (p.next().unwrap_or("").to_string(), p.next().unwrap_or("").to_string());
+                let mut len = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if r.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0u8; len];
+                let _ = r.read_exact(&mut body);
+                log.lock().unwrap().push((method.clone(), path.clone(), serde_json::from_slice(&body).unwrap_or(Value::Null)));
+                let (status, v) = replies
+                    .iter()
+                    .find(|(m, pth, ..)| *m == method && *pth == path)
+                    .map(|(_, _, s, v)| (*s, v.clone()))
+                    .unwrap_or((404, json!({"error": {"code": "NOT_FOUND"}})));
+                let b = v.to_string();
+                let _ = conn.write_all(format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes());
+            }
+        });
+        (url, seen)
+    }
+
+    fn core_replies(ack_status: u16) -> Vec<(&'static str, String, u16, Value)> {
+        let hash = "a".repeat(64);
+        vec![
+            ("GET", "/kb/live/unacked".into(), 200, json!({"sessions": [{"sessionId": "cap-h", "meetingTitle": "Standup", "startedAt": 1, "captionCount": 2, "lines": 2, "hash": hash, "durable": true, "source": "memory"}]})),
+            ("GET", "/kb/live/cap-h/capture".into(), 200, json!({"sessionId": "cap-h", "title": "Standup", "startedAt": 1_762_335_000_000i64, "durationSec": 60, "language": "en", "lines": 2, "hash": hash,
+                "rows": [{"time": "09:30:01", "speaker": "Ana", "text": "Hello."}, {"time": "09:31:01", "speaker": "Ben", "text": "Hi."}]})),
+            ("POST", "/kb/index/notes".into(), 200, json!({"upserted": 1})),
+            ("POST", "/kb/live/cap-h/ack".into(), ack_status, json!({"sessionId": "cap-h", "state": "acked", "ackedAt": "2026-11-07T00:00:00.000Z", "idempotent": false})),
+        ]
+    }
+
+    #[test]
+    fn archives_over_loopback_http() {
+        let (url, seen) = serve(core_replies(200));
+        let remote = HttpRemote::new(&url, "tok").unwrap();
+        let root = scratch("http");
+        assert_eq!(Archivist::default().tick(&remote, &root, &|| true).unwrap().archived, 1);
+        let seen = seen.lock().unwrap();
+        let ack = seen.iter().find(|(m, p, _)| m == "POST" && p == "/kb/live/cap-h/ack").unwrap();
+        assert_eq!(ack.2["hash"], json!("a".repeat(64)));
+        assert_eq!(ack.2["lines"], json!(2));
+        let key = ack.2["noteKey"].as_str().unwrap();
+        assert!(root.join(key).exists());
+        let ix = seen.iter().find(|(m, p, _)| m == "POST" && p == "/kb/index/notes").unwrap();
+        assert_eq!(ix.2["notes"][0]["noteKey"], json!(key));
+        assert_eq!(ix.2["notes"][0]["kind"], json!("meeting"));
+    }
+
+    #[test]
+    fn a_refused_ack_keeps_the_note_and_an_auth_error_stops_the_pass() {
+        let (url, _) = serve(core_replies(409));
+        let root = scratch("http409");
+        let r = Archivist::default().tick(&HttpRemote::new(&url, "tok").unwrap(), &root, &|| true).unwrap();
+        assert_eq!(r.failed, 1);
+        assert_eq!(md_files(&root), 1, "the note stays; the next pass reuses it");
+        let (url, _) = serve(vec![("GET", "/kb/live/unacked".into(), 401, json!({"error": {"code": "UNAUTHORIZED"}}))]);
+        assert_eq!(Archivist::default().tick(&HttpRemote::new(&url, "tok").unwrap(), &root, &|| true), Err(RemoteError::Unauthorized));
+    }
+
 }
