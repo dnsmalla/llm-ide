@@ -149,3 +149,18 @@ test('two simultaneous starts leave one live enrollment and no orphan key.bin (r
   await createReferenceDevice().scanAndClaim(store, live[0].qr, { now: T });
   assert.equal((await pollEnrollment(u, { now: T + 1000 })).phase, 'confirm', 'the live QR can be confirmed');
 });
+
+test('sftp QR and folder prep', async () => {
+  const { createSftpStore } = await import('../connectors/sync-store/sftp.mjs');
+  const { createFakeSftp } = await import('./helpers/fake-sftp.mjs');
+  const u = user();
+  const cfg = { host: 'sync.example.com', port: 22, username: 'llmidesync', hostFingerprint: `SHA256:${'A'.repeat(43)}`, webHost: 'llm-ide.com', root: '/data' };
+  st.ensureSyncState(u, { storeKind: 'sftp', storeConfig: cfg }); st.setSyncEnabled(u, true);
+  const fake = createFakeSftp(); const store = createSftpStore(cfg, { privateKey: 'k' }, { connect: fake.connect });
+  const { qr } = await startEnrollment(u, { store, tier: 'ios', now: T }); const pair = E.parsePair(qr);
+  assert.equal(pair.st, 'sftp:llm-ide.com');
+  assert.ok(fs.statSync(path.join(fake.root, 'data', pair.sid, 'e', pair.slot)).isDirectory());
+  const dev = createReferenceDevice({ tier: 'ios', name: 'Own server phone' });
+  await dev.scanAndClaim(store, qr, { now: T + 600 }); await pollEnrollment(u, { now: T + 1000 }); await confirmEnrollment(u, { now: T + 2000 });
+  assert.ok(fs.statSync(path.join(fake.root, 'data', pair.sid, 'd', pair.dir, 'in')).isDirectory());
+});

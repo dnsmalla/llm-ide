@@ -146,6 +146,7 @@ const ALLOWED_KEYS = new Set([
   'sync.signingKey',
   'sync.megaEmail',
   'sync.megaPassword',
+  'sync.sshKey',
   'sync.prevRootKey',
   // Per-user Anthropic API key.  When present, agent calls run with
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
@@ -208,7 +209,7 @@ const ICAL_SOURCE_KEY_RE = /^ical\.src\.[a-f0-9]{12}\.url$/;
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
-const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.prevRootKey']);
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.prevRootKey']);
 
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed

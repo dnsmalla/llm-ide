@@ -9,7 +9,7 @@ export const PAIR_FIELDS = Object.freeze(['sid', 'sfp', 'dir', 'slot', 'es', 'st
 export const ID22 = /^[A-Za-z0-9_-]{22}$/;
 export const NAME_MAX = 64;
 const FP43 = /^[A-Za-z0-9_-]{43}$/;
-const ST_RE = /^(mega:[A-Za-z0-9_.-]{1,64}|memory:)$/; // memory: is the test adapter only
+const ST_RE = /^(mega:[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/; // sftp: = own server's HTTPS host; memory: is the test adapter only
 const USER_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const ENROLL_SALT = sha256(Buffer.from('llmide-sync-enroll-v1'));
 const fail = (code) => { throw new SyncCryptoError(code); };

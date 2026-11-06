@@ -188,3 +188,14 @@ test('a revoke during a publish never leaves files in the revoked device folder 
   assert.deepEqual(await files(), [], 'nothing was recreated');
   assert.equal(st.listSyncDevices(u).length, 0);
 });
+
+test('a changed SFTP host key turns sync off, and sync.sshKey is internal', () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'sftp', storeConfig: { host: 'sync.example.com', port: 22, username: 'llmidesync', hostFingerprint: `SHA256:${'A'.repeat(43)}`, webHost: 'llm-ide.com', root: '/data' } });
+  st.setSyncEnabled(u, true);
+  recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_HOST_KEY_CHANGED' }), { now: 1, backoff: new Map() });
+  assert.equal(st.getSyncState(u).enabled, false);
+  assert.equal(st.getSyncState(u).lastError, 'SYNC_HOST_KEY_CHANGED');
+  assert.equal(vault.isUserSettableVaultKey('sync.sshKey'), false);
+  assert.ok(!vault.VAULT_KEYS.includes('sync.sshKey'));
+});

@@ -7,6 +7,7 @@ import { getSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { withTimeouts } from '../../connectors/sync-store/index.mjs';
+import { createSftpStore } from '../../connectors/sync-store/sftp.mjs';
 import { publishOnce } from './producer.mjs';
 import { rotateKeys } from './keys.mjs';
 import { drainOnce, sweepStuckRequests } from './consumer.mjs';
@@ -14,7 +15,7 @@ import { drainOnce, sweepStuckRequests } from './consumer.mjs';
 const PRODUCE_MS = 60_000;
 const DRAIN_MS = 30_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
-const SETUP_ERRORS = new Set(['SYNC_AUTH_FAILED', 'SYNC_MFA_REQUIRED']);
+const SETUP_ERRORS = new Set(['SYNC_AUTH_FAILED', 'SYNC_MFA_REQUIRED', 'SYNC_HOST_KEY_CHANGED']);
 const stores = new Map(); // userId -> SyncStore
 const busy = new Set(); // users with a scheduler cycle or a manual publish in flight
 const rotateDue = new Set(); // users whose rotation waits for the lock
@@ -35,14 +36,25 @@ export function storeFor(userId) {
   const cached = stores.get(userId);
   if (cached) return cached;
   const state = getSyncState(userId);
-  if (state?.storeKind !== 'mega') return null;
-  const db = getDb();
-  const email = getSecret(db, userId, 'sync.megaEmail');
-  const password = getSecret(db, userId, 'sync.megaPassword');
-  if (!email || !password) return null;
-  const store = withTimeouts(createMegaStore(state.storeConfig, { email, password }));
+  const raw = state && openStore(userId, state);
+  if (!raw) return null;
+  const store = withTimeouts(raw);
   stores.set(userId, store);
   return store;
+}
+
+function openStore(userId, state) {
+  const db = getDb();
+  if (state.storeKind === 'mega') {
+    const email = getSecret(db, userId, 'sync.megaEmail');
+    const password = getSecret(db, userId, 'sync.megaPassword');
+    return email && password ? createMegaStore(state.storeConfig, { email, password }) : null;
+  }
+  if (state.storeKind === 'sftp') {
+    const privateKey = getSecret(db, userId, 'sync.sshKey');
+    return privateKey ? createSftpStore(state.storeConfig, { privateKey }) : null;
+  }
+  return null;
 }
 
 export async function dropStore(userId) {

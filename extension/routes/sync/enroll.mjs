@@ -60,7 +60,10 @@ async function startOne(userId, { store, tier, now = Date.now(), env = process.e
   const p = { pair, es, keys: enrollKeys(es, pair.sid, pair.slot), tier, store, openedAt: now, phase: 'waiting', code: null, claim: null, claimAt: 0, sas: null, timer: null };
   pending.set(userId, p);
   const qr = pairUrl(pair, tier, webOrigin(env));
-  try { await store.put(`${pair.sid}/d/${pair.dir}/key.bin`, keys.signingSpki); } catch (e) { await kill(p, 'store'); throw e; }
+  try {
+    await store.put(`${pair.sid}/d/${pair.dir}/key.bin`, keys.signingSpki);
+    await store.ensureDir?.(slotDir(p)); // own server: nginx never creates the folder the claim goes into
+  } catch (e) { await kill(p, 'store'); throw e; }
   p.timer = setTimeout(() => { void kill(p, 'expired'); }, ENROLL.claimMs + ENROLL.confirmMs + 5_000);
   p.timer.unref?.();
   return { qr, expiresAt: now + ENROLL.claimMs, tier };

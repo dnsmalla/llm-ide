@@ -18,6 +18,7 @@ export async function writeDeviceWrap({ userId, store, state, keys, dev, now }) 
   const base = `${state.syncId}/d/${dev.dir}`;
   const ids = syncIdsFor(userId, state);
   await store.put(`${base}/key.bin`, keys.signingSpki);
+  await store.ensureDir?.(`${base}/in`); // own server: the device's inbox must exist before it can PUT a request
   const dk = deviceKeys(keys.root, { ...ids, deviceId: dev.deviceId }, keys.epoch);
   const wrap = makeSyncWrap({ ids: { ...ids, deviceId: dev.deviceId }, epoch: keys.epoch, tier: dev.tier, deviceEcdhSpki: dev.ecdhSpki,
     desktopSigningSpki: keys.signingSpki, keys: dk, signingKey: keys.signingKey, seq: nextSeq(userId, now), issuedAt: now });
