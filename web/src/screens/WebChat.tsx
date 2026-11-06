@@ -79,14 +79,18 @@ export function WebChat(p: WebChatProps) {
   const disabledReason = !ready ? "Not connected" : !p.capabilities.has("chat") ? "This host does not serve chat" : null;
   const questions = state.approvals.filter((a) => a.kind === "question");
   return (
-    <main className="web-app">
-      <header className="web-header">
-        <h1>{p.hostName}</h1>
-        <Chip label={chipLabel(p.connection)} />
-        <span className="chat-spacer" />
-        <button type="button" onClick={p.onClear} disabled={disabledReason !== null || state.turn !== null}
-          title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : undefined)}>Clear history</button>
-        <button type="button" onClick={p.onForget}>Forget this host</button>
+    <main className="web-app web-chat-app">
+      <header className="web-chat-bar">
+        <div className="web-chat-identity">
+          <span className="web-mark web-chat-mark" aria-hidden="true" />
+          <div><span className="web-chat-eyebrow">Connected desktop</span><h1>{p.hostName}</h1></div>
+        </div>
+        <div className="web-chat-actions">
+          <Chip label={chipLabel(p.connection)} />
+          <button type="button" className="web-chat-action" onClick={p.onClear} disabled={disabledReason !== null || state.turn !== null}
+            title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : undefined)}>Clear history</button>
+          <button type="button" className="web-chat-action web-chat-action-muted" onClick={p.onForget}>Forget this host</button>
+        </div>
       </header>
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       {p.connection.kind === "reconnecting" && <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />}
