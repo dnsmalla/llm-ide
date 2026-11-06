@@ -73,9 +73,10 @@ export async function handleLiveRoutes(req, res, ctx) {
   // (desktop/src-tauri/src/capture_archivist.rs). It writes the note, verifies it, then acks.
   if (req.method === 'GET' && /^\/kb\/live\/[^/]*\/capture$/.test(path)) {
     // An empty or malformed id names no capture: 404, never a 400/500 the archivist would retry differently.
+    const rawId = path.slice('/kb/live/'.length, -'/capture'.length);
     let sessionId = '';
     try {
-      sessionId = decodeParam(path.slice('/kb/live/'.length, -'/capture'.length));
+      sessionId = decodeParam(rawId);
     } catch { /* malformed percent-encoding */ }
     const cap = sessionId ? liveCaptureOf(userId, sessionId) : null;
     if (!cap) {

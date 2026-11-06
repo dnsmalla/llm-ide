@@ -273,11 +273,11 @@ Endpoints with no client caller (94):
 | `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1455` | - | - | comments/docs only |
 | `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1438` | - | - | comments/docs only |
 | `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1449` | - | - | comments/docs only |
-| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:131` | - | `useRemoteSessions.ts` | - |
-| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:236` | - | `useRemoteSessions.ts` | - |
-| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:86` | - | `useLiveSync.ts` | - |
-| `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:107` | - | `capture-live.ts` | - |
-| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:137` | - | `useRemoteTranscript.ts` | - |
+| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:136` | - | `useRemoteSessions.ts` | - |
+| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:241` | - | `useRemoteSessions.ts` | - |
+| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:91` | - | `useLiveSync.ts` | - |
+| `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:112` | - | `capture-live.ts` | - |
+| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:142` | - | `useRemoteTranscript.ts` | - |
 | `/kb/agent/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:71` | - | `useAgent.ts` | - |
 | `/kb/agent/stop` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:91` | - | `useAgent.ts` | - |
 | `/kb/agent/runs` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:103` | - | `useAgent.ts` | - |
@@ -305,7 +305,7 @@ Endpoints with no client caller (94):
 | `/kb/live/unacked` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:37` | - | - | comments/docs only |
 | `/kb/live/:id/ack` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:46` | - | - | comments/docs only |
 | `/kb/live/:id/status` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:67` | - | `App.tsx`, `capture-live.ts` | - |
-| `/kb/live/:id/capture` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:75` | - | - | tests only |
+| `/kb/live/:id/capture` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:76` | - | - | tests only |
 | `/kb/agent/working-state` | ALL_ENDPOINTS | GET | token | core | `extension/routes/lifecycle-routes.mjs:111` | - | - | tests only |
 | `/agent/v2/sessions/purge` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:116` | - | - | tests only |
 | `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:181` | - | - | tests only |
