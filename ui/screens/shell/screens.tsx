@@ -33,6 +33,7 @@ const loaders: Partial<Record<SectionId, Loader>> = {
   welcome: () => import("../welcome/index.tsx"),
   chat: () => import("../chat/index.tsx"),
   library: () => import("../library/index.tsx"),
+  live: () => import("../live/index.tsx"),
   settings: () => import("../settings/index.tsx"),
   conflicts: () => import("../review/index.tsx"),
 };

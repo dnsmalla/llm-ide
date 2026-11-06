@@ -1,0 +1,16 @@
+import { test, before } from "node:test";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
+const HERE=dirname(fileURLToPath(import.meta.url)),LIVE=resolve(HERE,".."),DESKTOP=resolve(LIVE,"../../../desktop");const req=createRequire(join(DESKTOP,"package.json"));const {createElement:h}=req("react");const {renderToStaticMarkup:html}=req("react-dom/server");let M;
+before(async()=>{const {build}=req("esbuild");const outfile=join(bundleDir("live"),"components.mjs");await build({stdin:{contents:`export * from "./PermissionCard.tsx"; export * from "./TranscriptList.tsx"; export * from "./LiveScreen.tsx"; export * from "./transcript.ts";`,resolveDir:LIVE,loader:"ts"},outfile,bundle:true,format:"esm",platform:"node",packages:"external",jsx:"automatic",logLevel:"silent"});M=await import(pathToFileURL(outfile).href)});
+const status=(o={})=>({supported:true,trusted:false,recording:false,sessionId:null,startedAtMs:null,notesRoot:true,macAppRunning:false,devBuild:false,...o});const noop=()=>{};
+test("permission card",()=>{const out=html(h(M.PermissionCard,{status:status({devBuild:true}),asked:false,onRequest:noop,onOpenSettings:noop,onCheck:noop}));assert.match(out,/caption text/i);assert.match(out,/never records audio/i);assert.match(out,/Allow Accessibility/);assert.match(out,/Open System Settings/);assert.match(out,/Check again/);assert.match(out,/Terminal/)});
+test("permission asked",()=>{const out=html(h(M.PermissionCard,{status:status(),asked:true,onRequest:noop,onOpenSettings:noop,onCheck:noop}));assert.match(out,/Privacy &amp; Security/);assert.match(out,/relaunch/i)});
+test("transcript text only",()=>{const t=new M.LiveTranscript();t.apply({type:"append",row:0,time:"09:30:01",speaker:"<b>Eve</b>",text:"<img src=x onerror=alert(1)> **bold**"});const out=html(h(M.TranscriptList,{transcript:t}));assert.equal(out.includes("<img"),false);assert.equal(out.includes("<b>Eve"),false);assert.match(out,/&lt;img src=x/);assert.match(out,/\*\*bold\*\*/)});
+test("windows",()=>{const t=new M.LiveTranscript();for(let i=0;i<20000;i++)t.apply({type:"append",row:i,time:"00:00:00",speaker:"S",text:`line ${i}`});const out=html(h(M.TranscriptList,{transcript:t}));assert.equal((out.match(/class="lv-row"/g)??[]).length,M.PAGE_ROWS);assert.match(out,/line 19999/);assert.match(out,/Show earlier/)});
+test("non-macos",()=>{const deps={capture:{status:async()=>status({supported:false})},language:()=>"en",openLibrary:noop};const out=html(h(M.LiveScreen,{active:true,deps,initialStatus:status({supported:false})}));assert.match(out,/macOS/);assert.match(out,/Chrome extension/)});
+test("idle trusted",()=>{const deps={capture:{},language:()=>"en",openLibrary:noop};const out=html(h(M.LiveScreen,{active:true,deps,initialStatus:status({trusted:true})}));assert.match(out,/Start capture/);assert.match(out,/Turn on captions in Zoom or Teams/)});
+test("mac running",()=>{const deps={capture:{},language:()=>"en",openLibrary:noop};const out=html(h(M.LiveScreen,{active:true,deps,initialStatus:status({trusted:true,macAppRunning:true})}));assert.match(out,/Mac app is also running/)});

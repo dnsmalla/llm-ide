@@ -31,7 +31,7 @@ function macLabels() {
   return new Map([...body.matchAll(/case \.(\w+):\s*return "([^"]+)"/g)].map((x) => [x[1], x[2]]));
 }
 
-test("toolbar order equals the Mac's ShellSection.toolbarOrder (Live aside: no desktop live capture)", () => {
+test("toolbar order equals the Mac's ShellSection.toolbarOrder ", () => {
   const order = macToolbarOrder();
   assert.ok(order.length >= 10);
   for (const c of order) assert.ok(Object.hasOwn(tb.MAC_CASE_TO_ID, c), `Mac toolbar item "${c}" has no desktop mapping: add it to MAC_CASE_TO_ID`);
@@ -171,7 +171,7 @@ test("toolbar markup: role=toolbar, aria-current on the active item, disabled it
   assert.match(out, /role="toolbar"[^>]*aria-label="Sections"[^>]*aria-orientation="horizontal"/);
   assert.match(out, /data-tauri-drag-region/);
   const labels = [...out.matchAll(/<span class="sh-tool-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-  assert.deepEqual(labels, ["Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]);
+  assert.deepEqual(labels, ["Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live"]);
   assert.equal((out.match(/aria-current="page"/g) ?? []).length, 1);
   assert.match(out, /aria-current="page"[^>]*data-tb-id="library"|data-tb-id="library"[^>]*aria-current="page"/);
   assert.equal((out.match(/tabindex="0"/g) ?? []).length, 1, "exactly one tab stop");

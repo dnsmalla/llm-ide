@@ -133,7 +133,7 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
 test("section registry: toolbar sections first in the Mac's order; Settings last; Spike only with developer tools", () => {
   nav.setDevTools(false);
   const labels = nav.visibleSections().map((d) => d.label);
-  assert.deepEqual(labels, ["Home", "Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Chat", "Settings"]);
+  assert.deepEqual(labels, ["Home", "Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live", "Chat", "Settings"]);
   assert.equal(nav.devToolsEnabled(), false);
   nav.setDevTools(true);
   assert.equal(nav.visibleSections().at(-1).id, "spike");

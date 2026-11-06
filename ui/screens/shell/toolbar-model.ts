@@ -4,11 +4,10 @@ import { SECTIONS, devToolsEnabled, type SectionDef, type SectionId } from "./se
 import { ALL_FEATURES, isSectionEnabled, type AppFeature } from "./features";
 
 /**
- * The toolbar sections in the Mac's `ShellSection.toolbarOrder` (Live is only shown while a session records and
- * the desktop has no live capture yet, so it is absent). `tests/toolbar.test.mjs` parses the Swift source and fails
+ * The toolbar sections in the Mac's `ShellSection.toolbarOrder` (Live mirrors the Mac toolbar order). `tests/toolbar.test.mjs` parses the Swift source and fails
  * when this list drifts from it.
  */
-export const TOOLBAR_IDS: readonly SectionId[] = ["explorer", "graph", "autotasks", "conflicts", "issues", "gantt", "loop", "docgen", "visual", "library"];
+export const TOOLBAR_IDS: readonly SectionId[] = ["explorer", "graph", "autotasks", "conflicts", "issues", "gantt", "loop", "docgen", "visual", "library", "live"];
 
 /** Mac `ShellSection.visibleInToolbar` equivalents, persisted per viewer in the app's storage. */
 const HIDDEN_KEY = "llmide.toolbar.hidden";
@@ -36,7 +35,7 @@ export const MAC_CASE_TO_ID: Readonly<Record<string, SectionId | null>> = {
   docGen: "docgen",
   visual: "visual",
   library: "library",
-  live: null,
+  live: "live",
 };
 
 const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
