@@ -8,3 +8,4 @@ export { ReadPanel } from "../src/screens/ReadPanel.tsx";
 export { initialReadState } from "../src/read/controller.ts";
 export { SyncTier, SyncLinkEntry, REPLY_TEXT } from "../src/screens/SyncTier.tsx";
 export { snapshotReadState } from "../src/read/snapshot.ts";
+export { SourcesScreen, SourcesEntry, REASON } from "../src/screens/SourcesScreen.tsx";

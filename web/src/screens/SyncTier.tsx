@@ -9,7 +9,7 @@ import { MAX_TEXT } from "../sync/device.ts";
 import type { SyncController, SyncState } from "../sync/controller.ts";
 
 type Actions = Pick<SyncController, "pair" | "cancelPairing" | "unlock" | "send" | "refresh" | "lock" | "forget">;
-export interface SyncTierProps { state: SyncState; sync: Actions; hostPaired: boolean }
+export interface SyncTierProps { state: SyncState; sync: Actions; hostPaired: boolean; onSources?: () => void }
 
 const READ = new Set(["read"] as const);
 const when = (ms: number) => new Date(ms).toLocaleString();
@@ -24,13 +24,14 @@ export const REPLY_TEXT: Record<string, string> = {
   stale_epoch: "The desktop changed its keys. Send it again.",
 };
 
-function Frame({ children, hostPaired }: { children: ReactNode; hostPaired: boolean }) {
+function Frame({ children, hostPaired, onSources }: { children: ReactNode; hostPaired: boolean; onSources?: () => void }) {
   return (
     <main className="web-app">
       <header className="web-header">
         <h1>LLM-IDE · offline sync</h1>
         <span className="chat-spacer" />
         {hostPaired && <span className="chat-muted">Desktop not reachable</span>}
+        {onSources && <button type="button" onClick={onSources}>Documents and code</button>}
       </header>
       {children}
     </main>
@@ -162,9 +163,9 @@ function ReadyView({ state, sync }: { state: SyncState; sync: Actions }) {
   );
 }
 
-export function SyncTier({ state, sync, hostPaired }: SyncTierProps) {
+export function SyncTier({ state, sync, hostPaired, onSources }: SyncTierProps) {
   return (
-    <Frame hostPaired={hostPaired}>
+    <Frame hostPaired={hostPaired} onSources={onSources}>
       {state.phase === "pairing" ? <PairView state={state} sync={sync} />
         : state.phase === "locked" ? <UnlockView state={state} sync={sync} />
         : state.phase === "removed" ? (

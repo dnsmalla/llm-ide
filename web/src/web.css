@@ -217,3 +217,12 @@ body {
 .web-form textarea { background: #0b1119; color: #eef2f7; border: 1px solid var(--tok-color-border, #263445); border-radius: 8px; padding: 8px; font: inherit; max-width: 100%; box-sizing: border-box; }
 .web-read details summary { cursor: pointer; }
 .web-read details summary:focus-visible { outline: 2px solid currentColor; }
+.web-src { margin: 0; max-width: 100%; max-height: 70vh; overflow: auto; box-sizing: border-box; white-space: pre; tab-size: 4; padding: 10px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0b1119; border: 1px solid var(--tok-color-border, #263445); border-radius: 8px; }
+.web-snippet { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.web-crumbs { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; padding: 0; }
+.web-crumbs li + li::before { content: "/"; margin-right: 4px; color: var(--tok-color-text-muted, #9badc1); }
+.web-crumbs button, .web-entry { all: unset; cursor: pointer; text-decoration: underline; overflow-wrap: anywhere; }
+.web-crumbs button:focus-visible, .web-entry:focus-visible { outline: 2px solid currentColor; }
+.web-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.web-search input { min-width: 0; flex: 1 1 160px; padding: 8px; font: inherit; }
+.web-doc { overflow-wrap: anywhere; }
