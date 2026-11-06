@@ -24,8 +24,12 @@ import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, type SectionDef, type SectionId } from "./sections";
 import { landingFor, readHome, selectHome } from "./landing";
-import { core, coreStatusStore, trustGate } from "./runtime";
+import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
+import { inboxStore } from "./approvals/inbox-store";
+import { decodeSyncStatus } from "../settings/sync-model.ts";
+import { installNotifyBridge } from "./notify/bridge";
+import { reportSection } from "./notify/notify";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
@@ -92,6 +96,22 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const session = useCoreSession();
   const features = useFeatures();
   const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent } = useActiveProject();
+  // Notifications and the tray (desktop only): counts and sync state to the host, tray actions back to the shell.
+  useEffect(() => {
+    if (!shellHost.isAvailable()) return undefined;
+    return installNotifyBridge({
+      invoke: (cmd, args) => invokeHost<unknown>(cmd, args),
+      listen: (event, cb) => import("@tauri-apps/api/event").then(({ listen }) => listen<unknown>(event, (ev) => cb(ev.payload))),
+      chatApprovals: { getSnapshot: chatApprovalStore.get, subscribe: chatApprovalStore.subscribe },
+      inbox: inboxStore, activity: activityStore, session: core,
+      syncStatus: async () => decodeSyncStatus(await core.request("/kb/sync/status")),
+      setSyncEnabled: async (on) => decodeSyncStatus(await core.request("/kb/sync/enabled", { method: "POST", body: { enabled: on } })),
+      publish: (ev) => shellBus.publish(ev),
+      openInbox: () => globalThis.dispatchEvent?.(new Event("llmide:open-inbox")),
+    });
+  }, []);
+  useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
+
   const [guideOpen, setGuideOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);

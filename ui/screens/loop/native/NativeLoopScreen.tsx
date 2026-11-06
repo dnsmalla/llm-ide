@@ -1,5 +1,6 @@
 // Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
+import { notifyTask } from "../../shell/notify/notify";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
@@ -659,6 +660,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
       }
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
+      if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
@@ -666,6 +668,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
+      void notifyTask("loop", false);
     } finally {
       runningRef.current = false;
       pausedRef.current = false;

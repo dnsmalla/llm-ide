@@ -5,7 +5,7 @@ import { PermissionCard } from "./PermissionCard.tsx";
 import { TranscriptList } from "./TranscriptList.tsx";
 import { RecoveryList } from "./RecoveryList.tsx";
 export interface LiveRecording { sessionId: string; startedAtMs: number; platform: string | null }
-export interface LiveDeps { capture: CaptureHost; language(): string; openLibrary(): void; onRecordingChange?(r: LiveRecording | null): void; indexNote?(note: FinalizedNote): Promise<"indexed" | "skipped" | "failed"> }
+export interface LiveDeps { capture: CaptureHost; language(): string; openLibrary(): void; onRecordingChange?(r: LiveRecording | null): void; indexNote?(note: FinalizedNote): Promise<"indexed" | "skipped" | "failed">; /** The tray Start/Stop toggle; returns unsubscribe. */ onToggleRequest?(run: () => void): () => void }
 type Phase = "idle" | "starting" | "recording" | "stopping" | "done";
 /** The phase after a status read: a capture the host still runs is adopted (after a remount), so Stop is always reachable. */
 export function adoptPhase(phase: Phase, s: CaptureStatus): Phase { return s.recording && (phase === "idle" || phase === "done") ? "recording" : phase; }
@@ -23,6 +23,9 @@ export function LiveScreen({active,deps,initialStatus}:{active:boolean;deps:Live
  const onEvent=useCallback((ev:CaptureEvent)=>{if(ev.type!=="state"){transcript.apply(ev);return}if(ev.state==="recording"){setPlatform(ev.platform);setNotice(null)}else if(ev.state!=="stopped")setNotice(ev)},[transcript]);
  const start=useCallback(async()=>{setError(null);setResult(null);setNotice(null);setPlatform(null);transcript.clear();setPhase("starting");try{const s=await deps.capture.start(deps.language(),onEvent);setStartedAt(s.startedAtMs);setNow(Date.now());setPhase("recording");deps.onRecordingChange?.({sessionId:s.sessionId,startedAtMs:s.startedAtMs,platform:null})}catch(e){setError(captureErrorText(e));setPhase("idle");void refresh()}},[deps,onEvent,refresh,transcript]);
  const stop=useCallback(async()=>{setPhase("stopping");try{const r=await deps.capture.stop(title);setResult(r);setPhase("done");setIndexState(null);if(r.note&&deps.indexNote)setIndexState(await deps.indexNote(r.note))}catch(e){setError(captureErrorText(e));setPhase("done")}finally{deps.onRecordingChange?.(null)}},[deps,title]);
+ const toggleRef=useRef<(()=>void)|null>(null);
+ toggleRef.current=phase==="recording"?()=>void stop():phase==="idle"||phase==="done"?()=>void start():null;
+ useEffect(()=>deps.onToggleRequest?.(()=>toggleRef.current?.()),[deps]);
  if(!status)return <div className="sh-panel" role="status"><p className="sh-panel-text">Checking capture…</p></div>;
  if(!status.supported)return <section className="sh-panel lv-card"><h2 className="sh-panel-title">Live captions</h2><p className="sh-panel-text">Live caption capture from Zoom and Teams desktop works on macOS in this version. Windows and Linux come later.</p><p className="sh-panel-text">For Google Meet, Teams or Zoom in a browser, use the Chrome extension.</p></section>;
  if(!status.notesRoot&&phase==="idle")return <section className="sh-panel lv-card"><h2 className="sh-panel-title">Choose a notes folder first</h2><p className="sh-panel-text">The meeting note is saved in your notes folder. Choose it in Library, then come back.</p><button type="button" className="sh-button" onClick={deps.openLibrary}>Open Library</button></section>;

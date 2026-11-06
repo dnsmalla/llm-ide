@@ -5,6 +5,7 @@
 import "@llmide/ui-kit/styles.css";
 import "./graph.css";
 import { Suspense, lazy, useMemo, useState } from "react";
+import { notifyTask } from "../shell/notify/notify";
 import { invokeHost, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
 import { LayoutEngine } from "./engine.ts";
@@ -40,7 +41,10 @@ function CodeGraphPage({ active, projectRoot }: SectionProps) {
       store={store}
       active={active}
       projectRoot={projectRoot}
-      onGenerate={async (mode, target) => { await invokeHost("graph_generate", { mode, target: target || null }); }}
+      onGenerate={async (mode, target) => {
+        try { await invokeHost("graph_generate", { mode, target: target || null }); void notifyTask("graph", true); }
+        catch (e) { void notifyTask("graph", false); throw e; }
+      }}
       onCancel={() => { void invokeHost("graph_cancel").catch(() => undefined); }}
       openFile={(path) => shellBus.publish({ type: "open-file", path })}
     />

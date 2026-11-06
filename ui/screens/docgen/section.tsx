@@ -3,6 +3,7 @@
 import "@llmide/ui-kit/styles.css";
 import "../library/library.css";
 import "./docgen.css";
+import { generationEnded, notifyTask } from "../shell/notify/notify";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { core, host as shellHost, invokeHost, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
@@ -33,6 +34,17 @@ function storeFor(surface: Surface, fs: ReturnType<typeof createHostFs>, notes: 
       run: { readers: { file: fileReader(fs), note: notesReader(notes), image: imageReader((cmd, args) => invokeHost(cmd, args)) }, fs, destination: (() => { try { return localStorage.getItem("llmide.docgen.destination") ?? undefined; } catch { return undefined; } })() },
     });
     stores.set(surface, s);
+    if (surface === "doc") {
+      // Doc Gen only: a Visual generation stays silent (decision D5).
+      const run = s.run;
+      let prev: string = run.getSnapshot().phase;
+      run.subscribe(() => {
+        const next = run.getSnapshot().phase;
+        const ended = generationEnded(prev, next);
+        prev = next;
+        if (ended !== null) void notifyTask("docgen", ended);
+      });
+    }
   }
   return s;
 }

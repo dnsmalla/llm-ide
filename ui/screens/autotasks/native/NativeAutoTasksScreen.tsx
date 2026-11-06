@@ -1,6 +1,7 @@
 // Native Auto Tasks screen. Independent of Mobile Control: the task catalog and per-task settings are local. The
 // runner/scheduler is the next port phase; while it is absent, Run controls are explicitly disabled rather than
 // pretending to execute.
+import { notifyTask } from "../../shell/notify/notify";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
@@ -188,10 +189,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       setLog((l) => [...l, r.reply ?? "(no reply)", ...(touched.length ? [`changed: ${touched.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`did not run: skill not found in your skills library: ${r.unresolvedSkills.join(", ")}`] : [])]);
       setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok, summary: r.resultSubtype ?? (ok ? "completed" : "failed"), durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);
+      void notifyTask("autotask", ok);
     } catch (e) {
       setLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
       setNotice(e instanceof Error ? e.message : "The task could not run.");
+      void notifyTask("autotask", false);
     } finally { setRunning(false); releaseAutoTask(); }
   };
 
@@ -252,9 +255,11 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         trigger: "manual",
       });
       setNotice(result.ok ? `${task.name} completed.` : `${task.name} did not complete: ${result.error ?? "failed"}`);
+      void notifyTask("autotask", result.ok);
     } catch (e) {
       appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, projectRoot: projectRoot ?? "", at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", trigger: "manual" });
       setNotice(e instanceof Error ? e.message : "The custom task could not run.");
+      void notifyTask("autotask", false);
     } finally { setCustomRunning(false); releaseAutoTask(); }
   };
 
