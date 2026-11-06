@@ -11,11 +11,11 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 
 ## Summary
 
-- Endpoints in `ALL_ENDPOINTS`: **196**
+- Endpoints in `ALL_ENDPOINTS`: **197**
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
-- Auth: 266 token, 13 public
-- Handler found: 276; no handler found: 3
-- No app and no extension caller: 93 (tests only: 77, comments/docs only: 16, no reference: 0)
+- Auth: 267 token, 13 public
+- Handler found: 277; no handler found: 3
+- No app and no extension caller: 94 (tests only: 78, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
@@ -35,20 +35,20 @@ By first path segment:
 | `/generate-questions` | 1 |
 | `/health` | 1 |
 | `/host-api` | 3 |
-| `/kb` | 165 |
+| `/kb` | 166 |
 | `/launch-app` | 1 |
 
 By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 264 |
+| core | 265 |
 | code_graph_3d | 1 |
 | gantt_issues | 5 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (93):
+Endpoints with no client caller (94):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -91,6 +91,7 @@ Endpoints with no client caller (93):
 - `/kb/chat/sessions/:id/archive/commit` — tests only
 - `/kb/live/unacked` — comments/docs only
 - `/kb/live/:id/ack` — comments/docs only
+- `/kb/live/:id/capture` — tests only
 - `/kb/agent/working-state` — tests only
 - `/agent/v2/sessions/purge` — tests only
 - `/kb/session-purges` — tests only
@@ -272,11 +273,11 @@ Endpoints with no client caller (93):
 | `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1455` | - | - | comments/docs only |
 | `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1438` | - | - | comments/docs only |
 | `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1449` | - | - | comments/docs only |
-| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:118` | - | `useRemoteSessions.ts` | - |
-| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:223` | - | `useRemoteSessions.ts` | - |
-| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:73` | - | `useLiveSync.ts` | - |
-| `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:94` | - | `capture-live.ts` | - |
-| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:124` | - | `useRemoteTranscript.ts` | - |
+| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:131` | - | `useRemoteSessions.ts` | - |
+| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:236` | - | `useRemoteSessions.ts` | - |
+| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:86` | - | `useLiveSync.ts` | - |
+| `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:107` | - | `capture-live.ts` | - |
+| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:137` | - | `useRemoteTranscript.ts` | - |
 | `/kb/agent/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:71` | - | `useAgent.ts` | - |
 | `/kb/agent/stop` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:91` | - | `useAgent.ts` | - |
 | `/kb/agent/runs` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:103` | - | `useAgent.ts` | - |
@@ -304,6 +305,7 @@ Endpoints with no client caller (93):
 | `/kb/live/unacked` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:37` | - | - | comments/docs only |
 | `/kb/live/:id/ack` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:46` | - | - | comments/docs only |
 | `/kb/live/:id/status` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:67` | - | `App.tsx`, `capture-live.ts` | - |
+| `/kb/live/:id/capture` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:75` | - | - | tests only |
 | `/kb/agent/working-state` | ALL_ENDPOINTS | GET | token | core | `extension/routes/lifecycle-routes.mjs:111` | - | - | tests only |
 | `/agent/v2/sessions/purge` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:116` | - | - | tests only |
 | `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:181` | - | - | tests only |
@@ -345,7 +347,7 @@ Endpoints with no client caller (93):
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | `sync-model.ts` | - | - |
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:870` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:872` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:107` | `core.ts` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:132` | `core.ts` | `config.ts` | - |
@@ -356,7 +358,7 @@ Endpoints with no client caller (93):
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:331` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:376` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:901` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:903` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:423` | `core.ts` | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:605` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:620` | - | - | tests only |
@@ -430,7 +432,7 @@ Endpoints with no client caller (93):
 
 ## Consistency
 
-Checked: 279 roster entries, 546 app source files, 52 extension source files.
+Checked: 280 roster entries, 546 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/live/:id/capture",
+  "status": 200,
+  "description": "Example data. A finalized capture nobody has acked yet: the desktop archivist writes these rows as a note, verifies it, then acks with the lines and hash shown.",
+  "request": { "params": { "id": "live-session-7" } },
+  "response": {
+    "sessionId": "live-session-7", "title": "Standup", "startedAt": 1798500000000, "durationSec": 60, "language": "en", "lines": 2,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "rows": [
+      { "time": "08:00:00", "speaker": "Ana", "text": "Let us start the budget review." },
+      { "time": "08:01:00", "speaker": "Ben", "text": "Agreed, the rollback plan is ready." }
+    ]
+  }
+}

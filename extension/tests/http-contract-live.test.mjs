@@ -151,6 +151,10 @@ const SKIP_RULES = [
     when: (fx) => fx.status < 300 && fx.endpoint === 'POST /agent/v2/sessions/purge',
   },
   {
+    why: 'needs a finalized capture seeded through the live append and finalize routes, so the archivist read can answer 200; covered by tests/live-capture-archivist.test.mjs',
+    when: (fx) => fx.status === 200 && fx.endpoint === 'GET /kb/live/:id/capture',
+  },
+  {
     why: 'needs a finalized capture seeded through the live append and finalize routes, so the ack can answer 409',
     when: (fx) => fx.status === 409 && /^POST \/kb\/live\/:id\/ack$/.test(fx.endpoint),
   },

@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /kb/live/:id/capture",
+  "status": 404,
+  "description": "The capture is still live, already acked, or unknown to this user.",
+  "request": { "params": { "id": "live-session-9" } },
+  "response": { "error": { "code": "NOT_FOUND", "message": "capture is not finalized, already acked or not known" } }
+}

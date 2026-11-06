@@ -5980,6 +5980,36 @@ export type GetKbLiveIdStatusResponse200 = {
   startedAt?: number | null;
 };
 
+/** Request parts for `GET /kb/live/:id/capture` (schema/http/lifecycle.schema.json). */
+export type GetKbLiveIdCaptureRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbLiveIdCaptureResponse200 = {
+  sessionId: string;
+  title: string;
+  /** Capture start, Unix ms. */
+  startedAt: number | null;
+  durationSec: number;
+  /** Empty when the client sent none. */
+  language: string;
+  /** Lines the server holds. The ack must echo it. */
+  lines: number;
+  /** SHA-256 (64 hex) of the redacted transcript the server holds. The ack must echo it. */
+  hash: string;
+  /** The held (redacted) transcript, one row per line. The desktop archivist refuses a capture whose row count differs from lines. */
+  rows: {
+    /** UTC HH:MM:SS of the caption, as the held transcript stores it. */
+    time: string;
+    speaker: string;
+    text: string;
+  }[];
+};
+
+export type GetKbLiveIdCaptureResponse404 = CommonError;
+
 /** Request parts for `GET /kb/live/unacked` (schema/http/lifecycle.schema.json). */
 export type GetKbLiveUnackedRequest = Record<string, never>;
 
@@ -9945,6 +9975,13 @@ export interface ApiEndpoints {
     request: GetKbLiveIdStatusRequest;
     responses: {
       200: GetKbLiveIdStatusResponse200;
+    };
+  };
+  "GET /kb/live/:id/capture": {
+    request: GetKbLiveIdCaptureRequest;
+    responses: {
+      200: GetKbLiveIdCaptureResponse200;
+      404: GetKbLiveIdCaptureResponse404;
     };
   };
   "GET /kb/live/unacked": {

@@ -454,10 +454,10 @@
         "400": {
           "$ref": "_common#/$defs/Error"
         },
-        "409": {
+        "404": {
           "$ref": "_common#/$defs/Error"
         },
-        "404": {
+        "409": {
           "$ref": "_common#/$defs/Error"
         }
       }
@@ -615,6 +615,93 @@
               "description": "Capture start, Unix ms."
             }
           }
+        }
+      }
+    },
+    "GET /kb/live/:id/capture": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "title",
+            "startedAt",
+            "durationSec",
+            "language",
+            "lines",
+            "hash",
+            "rows"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Capture start, Unix ms."
+            },
+            "durationSec": {
+              "type": "integer"
+            },
+            "language": {
+              "type": "string",
+              "description": "Empty when the client sent none."
+            },
+            "lines": {
+              "type": "integer",
+              "description": "Lines the server holds. The ack must echo it."
+            },
+            "hash": {
+              "type": "string",
+              "description": "SHA-256 (64 hex) of the redacted transcript the server holds. The ack must echo it."
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "time",
+                  "speaker",
+                  "text"
+                ],
+                "properties": {
+                  "time": {
+                    "type": "string",
+                    "description": "UTC HH:MM:SS of the caption, as the held transcript stores it."
+                  },
+                  "speaker": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "The held (redacted) transcript, one row per line. The desktop archivist refuses a capture whose row count differs from lines."
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
         }
       }
     },
