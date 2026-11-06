@@ -73,6 +73,12 @@ struct SyncSettingsCard: View {
             VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
                 switch syncStore.phase {
                 case .off: Text("Add this iPhone from the desktop: Settings → Phone and web sync → Add a phone or browser, then scan the code here.")
+                case .needsPassword where syncStore.storeKind == "box":
+                    Text("Box ended the sign-in. Connect Box again to the account the desktop syncs to.")
+                    Button(signingIn ? "Connecting…" : "Connect Box") {
+                        signingIn = true
+                        Task { await syncStore.reconnectBox(); signingIn = false }
+                    }.disabled(signingIn)
                 case .needsPassword:
                     Text("MEGA ended the sign-in. Sign in again to the dedicated sync account.")
                     TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress)

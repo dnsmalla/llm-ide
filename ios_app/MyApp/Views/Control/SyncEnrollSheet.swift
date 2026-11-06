@@ -35,10 +35,14 @@ struct SyncEnrollSheet: View {
                     VStack { Image(systemName: "checkmark.circle").font(.largeTitle); Text("Sync is on").font(.headline); Text("The desktop's snapshot will appear in History.").multilineTextAlignment(.center) }.padding()
                 default:
                     Form {
-                        if syncStore.needsLogin {
+                        if syncStore.storeKind == "mega" {
                             Section("MEGA account") {
                                 TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).autocapitalization(.none)
                                 SecureField("Password", text: $password).textContentType(.password)
+                            }
+                        } else {
+                            Section("Box") {
+                                Text("Sign in to the Box account the desktop syncs to. Box gives this iPhone access to that whole Box account (Box has no single-folder access), so use a Box account kept for LLM-IDE.").font(.footnote)
                             }
                         }
                         if let fixed = syncStore.preparedName {
@@ -47,8 +51,11 @@ struct SyncEnrollSheet: View {
                             Section("This iPhone") { TextField("Name", text: $name) }
                         }
                         Section {
-                            Button("Continue") { syncStore.enroll(email: email, password: password, name: syncStore.preparedName ?? name); password = "" }
-                                .disabled((syncStore.needsLogin && (email.isEmpty || password.isEmpty)) || name.isEmpty)
+                            Button(syncStore.storeKind == "box" ? "Sign in to Box" : "Continue") {
+                                if syncStore.storeKind == "box" { syncStore.enrollBox(name: syncStore.preparedName ?? name) }
+                                else { syncStore.enroll(email: email, password: password, name: syncStore.preparedName ?? name); password = "" }
+                            }
+                            .disabled(name.isEmpty || (syncStore.storeKind == "mega" && (email.isEmpty || password.isEmpty)))
                         }
                     }
                 }
