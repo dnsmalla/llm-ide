@@ -2,6 +2,13 @@
  * Swift app's Theme.swift). tokens.json deliberately does not store them. */
 :root {
   --tok-color-success: var(--tok-color-accent3);
+  /* File-tree icon tints by file kind (shared tree rows: Explorer, Library, Review). */
+  --tok-color-file-folder: var(--tok-color-accent4);
+  --tok-color-file-code: var(--tok-color-accent2);
+  --tok-color-file-config: color-mix(in srgb, var(--tok-color-accent4) 70%, var(--tok-color-danger));
+  --tok-color-file-doc: color-mix(in srgb, var(--tok-color-accent2) 80%, var(--tok-color-text));
+  --tok-color-file-image: var(--tok-color-accent);
+  --tok-color-file-data: var(--tok-color-accent3);
   --tok-color-warning: var(--tok-color-accent4);
   --tok-color-info: var(--tok-color-accent2);
   --tok-color-diff-added-fg: var(--tok-color-success);
