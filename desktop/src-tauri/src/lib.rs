@@ -10,6 +10,7 @@ mod capture_readers;
 mod capture_store;
 mod capture_ax_macos;
 mod capture_session;
+mod capture_host;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;
@@ -285,6 +286,14 @@ fn bring_to_front(app: &tauri::AppHandle) {
 macro_rules! product_handlers {
     ($($spike:path),* $(,)?) => {
         tauri::generate_handler![
+                capture_host::capture_status,
+                capture_host::capture_request_permission,
+                capture_host::capture_open_settings,
+                capture_host::capture_start,
+                capture_host::capture_stop,
+                capture_host::capture_recover_list,
+                capture_host::capture_recover_finish,
+                capture_host::capture_recover_discard,
                 core_host::core_status,
                 core_host::core_stop,
                 core_host::core_start,
@@ -567,6 +576,7 @@ pub fn run() {
         // activation takes effect; the bench needs no external activation step.
         RunEvent::Ready if autobench_env().is_some() => bring_to_front(app_handle),
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            capture_host::shutdown();
             // Live-then-archive first (the core must still be up), capped at 6 s, once per process.
             let _ = app_handle.state::<chat_cmds::ChatService>().quit_archive_default();
             app_handle.state::<CoreHost>().shutdown();
