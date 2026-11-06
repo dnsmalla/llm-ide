@@ -52,7 +52,9 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
           <div className="st-row">
             <Button tone="primary" disabled={busy} onClick={() => void run(async () => { onStatus(await confirmEnroll(client)); stop(); })}>Codes match</Button>
             <Button tone="danger" disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Codes differ</Button>
+            <Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); setPoll(null); setStart(await startEnroll(client, "ios")); })}>Start over with a new QR</Button>
           </div>
+          <p className="st-hint">The QR is shown only before the iPhone claims it. Starting over makes the old code in the iPhone useless.</p>
         </div>
       ) : screen === "failed" && poll ? (
         <div className="st-stack" role="alert">
@@ -62,7 +64,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
       ) : (
         <div className="st-stack" role="status">
           <PairingQr payload={start.qr} />
-          <p className="st-hint">{start.tier === "ios" ? "Scan with the LLM-IDE iPhone app." : "Open this link in the browser you want to add."} The code works for 2 minutes and once only. Keep this screen out of view of others.</p>
+          <p className="st-hint">{start.tier === "ios" ? "Scan with the LLM-IDE iPhone app." : "Open this link in the browser you want to add."} The QR is replaced by the comparison code as soon as the device scans it. The code works for 2 minutes and once only. Keep this screen out of view of others.</p>
           {status.storeKind !== "box" || showLink
             ? <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p> // for Box the link carries the client secret
             : <div className="st-row"><Button onClick={() => setShowLink(true)}>Show link</Button></div>}
