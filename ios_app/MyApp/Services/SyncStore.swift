@@ -4,7 +4,8 @@ import Security
 import UIKit
 import SharedProtocol
 
-/// The iPhone's sync tier: with the desktop off, read the last encrypted snapshot and queue chat prompts, from MEGA or from the user's own server.
+/// The iPhone's sync tier: with the desktop off, read the last encrypted snapshot and queue chat prompts, from MEGA, Box
+/// or the user's own server. Which one is fixed by the pairing's `st` (`storeKind`); only that client is ever used.
 @MainActor
 final class SyncStore: ObservableObject {
     enum Phase: Equatable { case off, needsPassword, ready, removed }
@@ -33,7 +34,7 @@ final class SyncStore: ObservableObject {
     private var mega: MegaClient?
     private var server: SyncHttpsClient?
     private var box: BoxClient?
-    @Published private(set) var storeKind = "mega"
+    @Published private(set) var storeKind: SyncStoreKind = .mega
     private var pendingPair: SyncPair?
     /// The claim prepared for `pendingPair`, kept across retries so a retry rewrites the same claim (contract 4c).
     private var prepared: (device: SyncDevice, stored: StoredKeys)?
@@ -42,12 +43,30 @@ final class SyncStore: ObservableObject {
     private var enrollTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
     private var nowMs: Int { Int(Date().timeIntervalSince1970 * 1000) }
-    /// MEGA pairings need the account password each session; an own-server (`sftp:`) pairing does not.
-    var needsLogin: Bool { !((pendingPair?.st ?? device?.state.pair.st)?.hasPrefix("sftp:") ?? false) }
+    /// The storage the paired device uses (`storeKind` follows a pairing in progress, for the sheet).
+    private var activeKind: SyncStoreKind? { device.flatMap { SyncStoreKind(st: $0.state.pair.st) } }
+    /// The client for `activeKind`; send and refresh use only this one.
+    private var remote: SyncRemoteStore? {
+        switch activeKind { case .mega: return mega; case .sftp: return server; case .box: return box; case nil: return nil }
+    }
     private func attachBox(_ b: BoxClient, folder: String) {
         let app = b.app
-        b.onTokens = { t in _ = Keychain.save(StoredBox(folder: folder, app: app, tokens: t), .box) }
+        // A rotation from a client that is no longer the current one (signed out, replaced) is never written back.
+        b.onTokens = { [weak self, weak b] t in
+            guard let self, let b, self.box === b else { return }
+            if !Keychain.save(StoredBox(folder: folder, app: app, tokens: t), .box) {
+                self.lastError = "This phone couldn't save the Box sign-in to its Keychain. Connect Box again if sync stops."
+            }
+        }
         box = b
+    }
+    /// Before a new pairing's client takes over: end every older session and drop the other kinds' secrets.
+    private func retireStores(keeping kind: SyncStoreKind) async {
+        let (oldMega, oldBox) = (mega, box)
+        mega = nil; box = nil; server = nil
+        await oldMega?.logout(); await oldBox?.revoke()
+        if kind != .mega { Keychain.delete(.mega) }
+        if kind != .box { Keychain.delete(.box) }
     }
 
     init() { restore() }
@@ -56,21 +75,25 @@ final class SyncStore: ObservableObject {
         guard let st = Keychain.load(SyncDeviceState.self, .state), st.isEnrolled,
               let sk = Keychain.load(StoredKeys.self, .keys), let keys = try? Self.loadKeys(sk),
               let d = try? SyncDevice(state: st, keys: keys) else { return }
+        guard let kind = SyncStoreKind(st: st.pair.st) else { return }
         attach(d)
+        storeKind = kind
         queued = Self.read([Queued].self, "queue.json") ?? []
-        if d.state.pair.st.hasPrefix("sftp:") {
-            if let server = try? SyncHttpsClient(host: String(d.state.pair.st.dropFirst(5))) {
-                self.server = server; mega = nil; megaEmail = ""; phase = .ready
-            } else { phase = .off }
-        } else if let m = Keychain.load(StoredMega.self, .mega) {
-            megaEmail = m.email
-            mega = MegaClient(folder: m.folder, session: m.session)
-            phase = .ready
-        } else if let b = Keychain.load(StoredBox.self, .box), !b.tokens.refresh.isEmpty {
-            attachBox(BoxClient(folder: b.folder, app: b.app, tokens: b.tokens), folder: b.folder)
-            phase = .ready
-        } else { phase = .needsPassword }
-        storeKind = st.pair.st.hasPrefix("box:") ? "box" : "mega"
+        switch kind {
+        case .sftp:
+            if let server = try? SyncHttpsClient(host: String(d.state.pair.st.dropFirst(5))) { self.server = server; phase = .ready } else { phase = .off }
+        case .mega:
+            if let m = Keychain.load(StoredMega.self, .mega) {
+                megaEmail = m.email
+                mega = MegaClient(folder: m.folder, session: m.session)
+                phase = .ready
+            } else { phase = .needsPassword }
+        case .box:
+            if let b = Keychain.load(StoredBox.self, .box), !b.tokens.refresh.isEmpty {
+                attachBox(BoxClient(folder: b.folder, app: b.app, tokens: b.tokens), folder: b.folder)
+                phase = .ready
+            } else { phase = .needsPassword }
+        }
         if let cache = Self.read([String: Data].self, "snapshot-cache.json"), !cache.isEmpty {
             Task { snapshot = (try? await d.readSnapshot(SyncDictionaryStore(files: cache), nowMs: nowMs)) ?? nil }
         }
@@ -95,8 +118,8 @@ final class SyncStore: ObservableObject {
     }
 
     func startEnrollment(_ pair: SyncPair) {
-        guard pair.st.hasPrefix("mega:") || pair.st.hasPrefix("sftp:") || pair.st.hasPrefix("box:") else { lastError = "This code is not for a sync storage this app can open."; return }
-        storeKind = pair.st.hasPrefix("box:") ? "box" : "mega"
+        guard let kind = SyncStoreKind(st: pair.st) else { lastError = "This code is not for a sync storage this app can open."; return }
+        storeKind = kind
         pendingPair = pair; prepared = nil
         Task { try? await Task.sleep(nanoseconds: 600_000_000); enrollStep = .login }
     }
@@ -113,6 +136,7 @@ final class SyncStore: ObservableObject {
     }
     func cancelEnrollment() {
         enrollTask?.cancel(); enrollTask = nil; enrollStep = nil; pendingPair = nil; prepared = nil
+        if let k = activeKind { storeKind = k }  // back to the paired storage
     }
     /// Back to the sign-in form for the same QR; the prepared claim is reused.
     func retryEnrollment() { if pendingPair != nil { enrollStep = .login } }
@@ -156,7 +180,7 @@ final class SyncStore: ObservableObject {
                 return
             }
             prepared = nil; pendingPair = nil
-            await mega?.logout()
+            await retireStores(keeping: .mega)
             attach(d); mega = c; megaEmail = email
             queued = []; Self.write(queued, "queue.json")
             phase = .ready; enrollStep = .done
@@ -186,8 +210,8 @@ final class SyncStore: ObservableObject {
             if let sas { enrollStep = .sas(sas); UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.") }
             _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(store, nowMs: self.nowMs) ? true : nil }
             guard Keychain.save(stored, .keys) && Keychain.save(d.state, .state) else { enrollStep = .failed("This phone couldn't save the sign-in to its Keychain. Try again."); return }
-            prepared = nil; pendingPair = nil; await mega?.logout(); mega = nil
-            Keychain.delete(.mega)  // re-pairing a MEGA phone to the own server drops the old MEGA session secret
+            prepared = nil; pendingPair = nil
+            await retireStores(keeping: .sftp)  // re-pairing to the own server drops the old MEGA or Box session secrets
             attach(d); server = store; megaEmail = ""
             queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
             await refresh()
@@ -195,10 +219,12 @@ final class SyncStore: ObservableObject {
     }
 
     private func runBoxEnrollment(pair: SyncPair, name: String, folder: String, app: BoxClient.App) async {
+        var opened: BoxClient?
         do {
             enrollStep = .working("Signing in to Box…")
             let t = try await BoxAuth.signIn(app: app)
             let store = BoxClient(folder: folder, app: app, tokens: t)
+            opened = store
             enrollStep = .working("Checking the desktop's key…")
             let (d, stored): (SyncDevice, StoredKeys)
             if let p = prepared { (d, stored) = p } else {
@@ -211,14 +237,22 @@ final class SyncStore: ObservableObject {
             let sas = d.state.userId != nil ? try await d.readAck(store) : try await poll(SyncDevice.ackWindowMs) { try await d.readAck(store) }
             if let sas { enrollStep = .sas(sas); UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.") }
             _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(store, nowMs: self.nowMs) ? true : nil }
-            guard Keychain.save(stored, .keys) && Keychain.save(d.state, .state) && Keychain.save(StoredBox(folder: folder, app: app, tokens: t), .box) else {
+            await retireStores(keeping: .box)  // before the save: the old Box session must not overwrite the new tokens
+            // store.tokens, not t: a rotation during the pairing replaced t, which Box has already spent.
+            guard Keychain.save(stored, .keys) && Keychain.save(d.state, .state) && Keychain.save(StoredBox(folder: folder, app: app, tokens: store.tokens), .box) else {
+                await store.revoke()
                 enrollStep = .failed("This phone couldn't save the sign-in to its Keychain. Try again."); return
             }
-            prepared = nil; pendingPair = nil; await mega?.logout(); mega = nil; server = nil
+            prepared = nil; pendingPair = nil; opened = nil
             attach(d); attachBox(store, folder: folder); megaEmail = ""
             queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
             await refresh()
-        } catch is CancellationError { } catch { enrollStep = .failed(Self.message(for: error)) }
+        } catch is CancellationError {
+            if let opened { Task { await opened.revoke() } }  // a new task: this one is cancelled
+        } catch {
+            await opened?.revoke()
+            enrollStep = .failed(Self.message(for: error))
+        }
     }
 
     private func poll<T>(_ windowMs: Int, _ step: () async throws -> T?) async throws -> T {
@@ -229,7 +263,10 @@ final class SyncStore: ObservableObject {
     func refresh() async {
         guard phase == .ready || phase == .removed, let device, !refreshing else { return }
         let store: SyncRemoteStore
-        do { if let mega { store = try await mega.pinned() } else if let box { store = box } else if let server { store = server } else { return } } catch { fail(error); return }
+        let b = box
+        do {
+            if activeKind == .mega, let mega { store = try await mega.pinned() } else if let r = remote { store = r } else { return }
+        } catch { fail(error); return }
         refreshing = true; defer { refreshing = false }
         do {
             let rec = SyncRecordingStore(remote: store)
@@ -254,27 +291,32 @@ final class SyncStore: ObservableObject {
             Self.write(queued, "queue.json")
             lastError = nil
             for text in resend { await send(text) }
-        } catch { fail(error) }
+        } catch { fail(error, box: b) }
     }
 
     func send(_ text: String) async {
         guard phase == .ready, let device else { return }
-        let remote: SyncRemoteStore? = server ?? mega
         guard let remote else { return }
+        let b = box
         do {
             let id = try await device.sendRequest(remote, text: text, nowMs: nowMs)
             queued.append(Queued(id: id, text: text, issuedAtMs: nowMs))
             Self.write(queued, "queue.json"); lastError = nil
-        } catch { fail(error) }
+        } catch { fail(error, box: b) }
     }
 
     /// After Box refused the saved sign-in (revoked, or unused for 60 days): sign in again with the same Box app.
     func reconnectBox() async {
-        guard device != nil, let old = Keychain.load(StoredBox.self, .box) else { return }
+        guard activeKind == .box, let old = Keychain.load(StoredBox.self, .box) else { return }
         do {
             let t = try await BoxAuth.signIn(app: old.app)
-            _ = Keychain.save(StoredBox(folder: old.folder, app: old.app, tokens: t), .box)
-            attachBox(BoxClient(folder: old.folder, app: old.app, tokens: t), folder: old.folder)
+            let b = BoxClient(folder: old.folder, app: old.app, tokens: t)
+            guard Keychain.save(StoredBox(folder: old.folder, app: old.app, tokens: t), .box) else {
+                await b.revoke(); lastError = "This phone couldn't save the Box sign-in to its Keychain. Try again."; return
+            }
+            let stale = box
+            attachBox(b, folder: old.folder)
+            await stale?.revoke()
             phase = .ready; lastError = nil
             await refresh()
         } catch { lastError = Self.message(for: error) }
@@ -283,7 +325,7 @@ final class SyncStore: ObservableObject {
     /// After MEGA ended the session (ESID): sign in again with the same account. The email is not kept once the
     /// session is gone, so the user types it again.
     func signIn(email: String, password: String) async {
-        guard let device else { return }
+        guard let device, activeKind == .mega else { return }
         let folder = String(device.state.pair.st.dropFirst("mega:".count))
         do {
             let session = try await MegaClient.login(email: email, password: password)
@@ -295,9 +337,10 @@ final class SyncStore: ObservableObject {
     }
 
     func removeFromPhone() async {
-        await mega?.logout(); await box?.revoke()
-        box = nil; server = nil
-        for item in [Keychain.Item.state, .keys, .mega] { Keychain.delete(item) }
+        let (oldMega, oldBox) = (mega, box)
+        mega = nil; box = nil; server = nil  // first: a refresh still in flight finds no current client to write back for
+        await oldMega?.logout(); await oldBox?.revoke()
+        for item in [Keychain.Item.state, .keys, .mega, .box] { Keychain.delete(item) }
         try? FileManager.default.removeItem(at: Self.dir)
         device = nil; mega = nil; box = nil; server = nil; snapshot = nil; queued = []; lastError = nil; megaEmail = ""
         phase = .off
@@ -316,9 +359,12 @@ final class SyncStore: ObservableObject {
         }
     }
 
-    private func fail(_ error: Error) {
+    /// `box`: the Box client the failed call used; a failure from one that is no longer current changes nothing.
+    private func fail(_ error: Error, box failed: BoxClient? = nil) {
         if (error as? SyncHttpsClient.Failure) == .missing { phase = .removed }
-        if let f = error as? BoxClient.Failure, f == .authFailed, let b = box {
+        if let f = error as? BoxClient.Failure, f == .authFailed, let b = failed ?? box {
+            guard b === box else { return }
+            // Keep the folder and the Box app for Connect Box; the refused tokens are gone.
             _ = Keychain.save(StoredBox(folder: b.folder, app: b.app, tokens: BoxClient.Tokens(access: "", refresh: "")), .box)
             box = nil; phase = .needsPassword
         }
@@ -339,6 +385,23 @@ final class SyncStore: ObservableObject {
             case .rateLimited: return "MEGA is busy. Try again in a minute."
             case .quota: return "The MEGA account is over its storage or transfer quota."
             case .tooLarge, .badResponse, .http, .api: return "Couldn't read from MEGA (\(f))."
+            }
+        }
+        if let f = error as? BoxClient.Failure {
+            switch f {
+            case .authFailed: return "Box ended the sign-in. Connect Box again."
+            case .badClient: return "Box refused the app in this pairing code. Show a new code on the desktop."
+            case .rateLimited: return "Box is busy. Try again in a minute."
+            case .quota: return "The Box account is out of storage."
+            case .missing: return "The sync folder was not found in this Box account. Sign in to the Box account the desktop uses."
+            case .tooLarge, .badResponse, .http: return "Couldn't read from Box (\(f))."
+            }
+        }
+        if let f = error as? SourceOAuthError {
+            switch f {
+            case .cancelled: return "Box sign-in was cancelled."
+            case .stateMismatch, .failed: return "Box sign-in did not finish. Try again."
+            default: return "Box sign-in did not finish (\(f)). Try again."
             }
         }
         if let f = error as? SyncHttpsClient.Failure {

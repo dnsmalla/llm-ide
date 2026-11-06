@@ -35,10 +35,14 @@ struct SyncEnrollSheet: View {
                     VStack { Image(systemName: "checkmark.circle").font(.largeTitle); Text("Sync is on").font(.headline); Text("The desktop's snapshot will appear in History.").multilineTextAlignment(.center) }.padding()
                 default:
                     Form {
-                        if syncStore.storeKind == "mega" {
+                        if syncStore.storeKind.needsPassword {
                             Section("MEGA account") {
                                 TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).autocapitalization(.none)
                                 SecureField("Password", text: $password).textContentType(.password)
+                            }
+                        } else if syncStore.storeKind == .sftp {
+                            Section("Your server") {
+                                Text("This iPhone reaches its own folder on your server. Nothing to sign in to.").font(.footnote)
                             }
                         } else {
                             Section("Box") {
@@ -51,11 +55,11 @@ struct SyncEnrollSheet: View {
                             Section("This iPhone") { TextField("Name", text: $name) }
                         }
                         Section {
-                            Button(syncStore.storeKind == "box" ? "Sign in to Box" : "Continue") {
-                                if syncStore.storeKind == "box" { syncStore.enrollBox(name: syncStore.preparedName ?? name) }
+                            Button(syncStore.storeKind == .box ? "Sign in to Box" : "Continue") {
+                                if syncStore.storeKind == .box { syncStore.enrollBox(name: syncStore.preparedName ?? name) }
                                 else { syncStore.enroll(email: email, password: password, name: syncStore.preparedName ?? name); password = "" }
                             }
-                            .disabled(name.isEmpty || (syncStore.storeKind == "mega" && (email.isEmpty || password.isEmpty)))
+                            .disabled(name.isEmpty || (syncStore.storeKind.needsPassword && (email.isEmpty || password.isEmpty)))
                         }
                     }
                 }

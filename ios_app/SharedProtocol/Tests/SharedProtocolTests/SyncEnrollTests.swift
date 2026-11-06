@@ -100,8 +100,6 @@ struct SyncEnrollTests {
         #expect(throws: SyncCryptoError("bad_name")) { _ = try SyncEnroll.sealClaim(pair: pair, tier: "ios", name: "", keys: SoftwareSyncDeviceKeys(), issuedAt: 1) }
         #expect(throws: SyncCryptoError("bad_tier")) { _ = try SyncEnroll.sealClaim(pair: pair, tier: "mac", name: "x", keys: SoftwareSyncDeviceKeys(), issuedAt: 1) }
     }
-}
-
 
     @Test func boxPairCarriesTheBoxApp() throws {
         let base = "llmide://pair?sv=1&sid=\(String(repeating: "A", count: 22))&sfp=\(String(repeating: "B", count: 43))&dir=\(String(repeating: "C", count: 22))&slot=\(String(repeating: "D", count: 22))&es=\(String(repeating: "E", count: 22))&st=box%3Allmide-sync"
@@ -111,3 +109,14 @@ struct SyncEnrollTests {
         #expect(throws: SyncCryptoError.self) { try SyncEnroll.parsePair(base + "&bi=x&bs=y") }
         #expect(try SyncEnroll.parsePair(base.replacingOccurrences(of: "st=box", with: "st=mega")).bs == nil)
     }
+
+    @Test func storeKindComesFromThePairingOnly() {
+        #expect(SyncStoreKind(st: "mega:llmide-sync") == .mega)
+        #expect(SyncStoreKind(st: "sftp:llm-ide.com") == .sftp)
+        #expect(SyncStoreKind(st: "box:llmide-sync") == .box)
+        #expect(SyncStoreKind(st: "memory:") == nil)
+        #expect(SyncStoreKind.mega.needsPassword && !SyncStoreKind.sftp.needsPassword && !SyncStoreKind.box.needsPassword,
+                "an own-server or Box pairing never shows the MEGA form")
+    }
+}
+

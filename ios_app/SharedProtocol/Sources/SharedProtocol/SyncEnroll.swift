@@ -2,6 +2,17 @@ import Foundation
 import CryptoKit
 
 /// The pairing QR's sync fields (device contract item 1).
+/// Which sync storage a pairing's `st` names. The iPhone picks its client from this, never from which secrets it happens
+/// to hold, so a phone moved from one storage to another never keeps talking to the old one.
+public enum SyncStoreKind: String, Codable, Sendable {
+    case mega, sftp, box
+    public init?(st: String) {
+        if st.hasPrefix("mega:") { self = .mega } else if st.hasPrefix("sftp:") { self = .sftp } else if st.hasPrefix("box:") { self = .box } else { return nil }
+    }
+    /// Only MEGA asks for an email and password; Box signs in in a browser sheet; the own server needs nothing.
+    public var needsPassword: Bool { self == .mega }
+}
+
 public struct SyncPair: Codable, Equatable, Sendable {
     public var sid: String, sfp: String, dir: String, slot: String, es: String, st: String
     public var bi: String? = nil, bs: String? = nil
@@ -31,7 +42,7 @@ public enum SyncEnroll {
 
     static func isB64u(_ s: String, _ n: Int) -> Bool { s.utf8.count == n && s.utf8.allSatisfy(SyncB64.isB64uByte) }
 
-    /// `mega:<folder>`, `sftp:<lower-case DNS host>`, or `memory:` (the test adapter).
+    /// `mega:<folder>`, `box:<folder>`, `sftp:<lower-case DNS host>`, or `memory:` (the test adapter).
     public static func isStore(_ st: String) -> Bool {
         if st == "memory:" { return true }
         if st.hasPrefix("sftp:") { return isOwnServerHost(String(st.dropFirst(5))) }
