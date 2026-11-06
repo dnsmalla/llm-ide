@@ -14,19 +14,19 @@ Before merging caption/transcript/LLM changes, run through this against a real m
 
 ## Capture drafts and local storage (live-then-archive T5.2)
 
-The extension stores nothing of its own except an unfinished capture draft (`transcriptDraft:<id>` + `draftStage:<id>`), kept only until the server reports the capture acked by the Mac app. Run with `LLMIDE_LIVE_ACK=1` on the server (Mac-managed server) unless a row says otherwise.
-- [ ] Record 1+ min, Stop with the Mac app running: the draft is gone from `chrome.storage.local` only after the Mac note exists (status `acked`); before that it is still there
-- [ ] Stop with the Mac app/server CLOSED: the draft stays, the banner says "Mac app not running"; open the app, the capture is re-sent, the Mac writes the note, the draft disappears
+The extension stores nothing of its own except an unfinished capture draft (`transcriptDraft:<id>` + `draftStage:<id>`), kept only until the server reports the capture acked by an archivist. **Pending the desktop archivist:** the Swift Mac app's `LiveSessionMirror` was the only component that acked (`POST /kb/live/:id/ack`) and it is gone; the Tauri desktop does not yet adopt `/kb/live/unacked` (MASTER-PLAN, Chrome extension). Until it does, the rows marked *(pending archivist)* cannot pass; run the server with `LLMIDE_LIVE_ACK` unset and use the "without `LLMIDE_LIVE_ACK`" row.
+- [ ] Record 1+ min, Stop with the desktop app running *(pending archivist)*: the draft is gone from `chrome.storage.local` only after the note exists (status `acked`); before that it is still there
+- [ ] Stop with the desktop app/server CLOSED *(pending archivist)*: the draft stays, the banner says "Desktop app not running"; open the app, the capture is re-sent, the desktop app writes the note, the draft disappears
 - [ ] Close the panel mid-recording, reopen after 2+ min: the transcript is restored in the live view, re-sent and released after the ack
-- [ ] Restart the server between Stop and the Mac ack: the draft is kept ("not confirmed copied" + Resend button), never deleted on an unknown status
+- [ ] Restart the server between Stop and the archivist ack: the draft is kept ("not confirmed copied" + Resend button), never deleted on an unknown status
 - [ ] Server WITHOUT `LLMIDE_LIVE_ACK`: the draft is kept and listed with Export and Delete; with 50 kept, Stop refuses to finalize (error shown, capture stays) until you delete or export one. Nothing is ever dropped automatically
 - [ ] Record past 2000 lines: the capture is never released; it is listed with Export and Delete
-- [ ] Rename a speaker, set a language, Stop: the Mac note carries the display names, the language, the real start time and duration (not the Stop time)
+- [ ] Rename a speaker, set a language, Stop: the desktop note carries *(pending archivist)* the display names, the language, the real start time and duration (not the Stop time)
 - [ ] Fill storage (or block it in devtools) and Stop: a persistent red error appears, the capture is still sent, and the draft appears once space is back
 - [ ] Two panels open: only the recording panel finalizes its capture; the other re-sends it only after the draft is 2 minutes stale
 - [ ] No `transcripts` or `chatMessages` key is written (`chrome.storage.local.get(null)` in the panel console)
-- [ ] Settings -> "Meetings saved in this browser (old)": lists old saved meetings read-only; nothing is sent until "Copy to Mac"; a copy is removed locally only after the Mac confirms; pressing twice sends once; closing the panel mid-copy and pressing again resumes
-- [ ] Chat with the Mac app closed: "Mac app not running", nothing is persisted; reopen the app, the banner clears by itself
+- [ ] Settings -> "Meetings saved in this browser (old)": lists old saved meetings read-only; nothing is sent until "Copy to the desktop app"; a copy is removed locally only after the desktop app confirms *(pending archivist)*; pressing twice sends once; closing the panel mid-copy and pressing again resumes
+- [ ] Chat with the desktop app closed: "Desktop app not running", nothing is persisted; reopen the app, the banner clears by itself
 - [ ] Upgrading from a build that kept `chatMessages`: a non-empty old buffer is NOT deleted; the chat tab offers Export, and only that (or an empty buffer after the server answered) removes it
 
 ## LLM Output

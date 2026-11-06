@@ -118,7 +118,7 @@ export default function ChatView({
 
       {offline && (
         <div className="error-message quota-warning" role="alert">
-          Mac app not running. Chat history lives in the Mac app; nothing is stored in this browser. Open LLM-IDE to
+          Desktop app not running. Chat history lives in the desktop app; nothing is stored in this browser. Open LLM-IDE to
           continue.
         </div>
       )}

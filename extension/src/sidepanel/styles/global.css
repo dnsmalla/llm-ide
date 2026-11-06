@@ -4,7 +4,7 @@
 :root {
   /* Colours, spacing and radii come from the shared design tokens
      (schema/design/tokens.json -> tokens.generated.css), so the side panel
-     matches the Mac app. Names below are kept so existing rules keep working. */
+     matches the desktop app. Names below are kept so existing rules keep working. */
 
   /* Brand / interactive */
   --color-primary: var(--tok-color-accent);
@@ -53,7 +53,7 @@
   --space-4: var(--tok-space-lg);
   --space-5: var(--tok-space-xl);
 
-  /* Radii (the side panel keeps a tighter xs step than the Mac scale) */
+  /* Radii (the side panel keeps a tighter xs step than the desktop scale) */
   --radius-xs: 4px;
   --radius-sm: var(--tok-radius-sm);
   --radius-md: var(--tok-radius-sm);

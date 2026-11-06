@@ -97,7 +97,7 @@ export function isValidCaption(speaker: string, text: string): boolean {
   return true;
 }
 
-/** Live-sync and Mac mirror: spoken-word sources only (not agent commentary). */
+/** Live-sync and desktop mirror: spoken-word sources only (not agent commentary). */
 export function isHumanTranscriptSource(source: string | undefined): boolean {
   if (!source) return true;
   return !source.startsWith('agent-');

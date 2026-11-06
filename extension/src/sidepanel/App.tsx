@@ -26,7 +26,7 @@ import LoginView from './components/LoginView';
 import HelpPanel from './components/HelpPanel';
 
 // Trimmed tab set.  Actions / Plan / Review were moved out of the
-// extension and into the Mac app — they're project-management
+// extension and into the desktop app — they're project-management
 // surfaces that benefit from a bigger window and don't belong in a
 // 280-px-wide side panel.  The extension stays focused on capture
 // (Transcript), the AI surface that operates on it (Notes, Questions,
@@ -76,9 +76,9 @@ const REQUIRED_ENDPOINTS = [
 ];
 
 // Minimum server API version this client requires. The server reports
-// `apiVersion` in /health (SERVER_API_VERSION in server.mjs). The Mac client
+// `apiVersion` in /health (SERVER_API_VERSION in server.mjs). The desktop client
 // enforces the same handshake (BackendManager requires apiVersion >= 18); the
-// extension must too, or a version bump the Mac flags as incompatible would be
+// extension must too, or a version bump the desktop app flags as incompatible would be
 // silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
 // contract change lands that this client depends on. A NEWER server is fine
 // (backward-compatible), so we only flag servers BELOW this floor.
@@ -138,7 +138,7 @@ export default function App() {
 
   const transcript = useTranscript();
   // Mirror the live transcript to the backend so other clients
-  // (Mac desktop app) can show it in real time.  Fire-and-forget;
+  // (desktop app) can show it in real time.  Fire-and-forget;
   // failure here doesn't affect the local capture or the canonical
   // /kb/ingest finalize path.
   const liveSync = useLiveSync({
@@ -250,7 +250,7 @@ export default function App() {
   const handleStopMirroring = useCallback(() => {
     setIsMirroring(false);
   }, []);
-  // Dispatch / codegen / review / outcome flows live in the Mac app
+  // Dispatch / codegen / review / outcome flows live in the desktop app
   // now — the extension just captures and supports the AI surfaces
   // (notes, agent questions, chat).
 
@@ -281,7 +281,7 @@ export default function App() {
           const health = await response.json();
           const reported: string[] = Array.isArray(health?.endpoints) ? health.endpoints : [];
           const missing = REQUIRED_ENDPOINTS.filter((e) => !reported.includes(e));
-          // Version handshake (symmetric with the Mac client): a server below
+          // Version handshake (symmetric with the desktop client): a server below
           // the contract floor is stale even when the endpoint names line up.
           // A missing/non-numeric apiVersion means a process predating the
           // version field — also stale.
@@ -317,7 +317,7 @@ export default function App() {
     plan.clearPlan();
     const bytes = crypto.getRandomValues(new Uint8Array(8));
     const rand = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    // One id for the live session AND the crash draft: the server and the Mac
+    // One id for the live session AND the crash draft: the server and the desktop app
     // ack the capture by it, and the draft is released only on that ack.
     const newSessionId = `m-${Date.now().toString(36)}-${rand}`;
     setSessionId(newSessionId);
@@ -535,11 +535,11 @@ export default function App() {
       {!serverOnline && (
         <div className="error-message server-offline" role="alert">
           <span>
-            Mac app not running. Open LLM-IDE to search, chat and sync captures. Nothing is stored in this browser while
-            it is closed except an unfinished capture, which is kept until the Mac app confirms it has a copy.
+            Desktop app not running. Open LLM-IDE to search, chat and sync captures. Nothing is stored in this browser while
+            it is closed except an unfinished capture, which is kept until the desktop app confirms it has a copy.
           </span>
           <div className="server-offline-actions">
-            <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to the Mac app">
+            <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to the desktop app">
               Retry
             </button>
           </div>
@@ -549,7 +549,7 @@ export default function App() {
       {draftRelease.reports.some((r) => r.outcome === 'storage-error') && (
         <div className="error-message" role="alert">
           A capture could not be stored in this browser (storage full or unavailable). It is held in memory and keeps
-          being sent to the Mac app. Download its transcript before closing this panel.
+          being sent to the desktop app. Download its transcript before closing this panel.
         </div>
       )}
 
@@ -563,7 +563,7 @@ export default function App() {
         <div className="quota-warning" role="status">
           <span>
             {draftRelease.kept.length} capture{draftRelease.kept.length === 1 ? '' : 's'} kept in this browser because
-            the Mac app cannot confirm a complete copy (an old server, or longer than 2000 lines). Nothing is deleted
+            the desktop app cannot confirm a complete copy (an old server, or longer than 2000 lines). Nothing is deleted
             automatically.
           </span>
           <ul>
@@ -586,8 +586,8 @@ export default function App() {
         <div className="quota-warning" role="status">
           <span>
             {unconfirmed.length === 1
-              ? '1 capture is kept here until the Mac app confirms it has a copy.'
-              : `${unconfirmed.length} captures are kept here until the Mac app confirms they have a copy.`}
+              ? '1 capture is kept here until the desktop app confirms it has a copy.'
+              : `${unconfirmed.length} captures are kept here until the desktop app confirms they have a copy.`}
             {unconfirmed.some(
               (r) =>
                 r.outcome === 'not-confirmed' ||
@@ -611,7 +611,7 @@ export default function App() {
                 key={r.id}
                 className="btn btn-sm"
                 onClick={() => void draftRelease.resend(r.id)}
-                aria-label={`Send ${r.title} to the Mac app again`}
+                aria-label={`Send ${r.title} to the desktop app again`}
               >
                 Resend {r.title}
               </button>
@@ -710,7 +710,7 @@ export default function App() {
         )}
 
         {/* Actions / Plan / Review panels intentionally removed — they
-            live in the Mac app now.  Use the desktop app for the
+            live in the desktop app now.  Use the desktop app for the
             project-management workflow (extract action items, generate
             plans, dispatch tickets, approve via review queue). */}
 

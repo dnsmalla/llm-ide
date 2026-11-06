@@ -35,7 +35,7 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatViewMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // true when the Mac-managed server cannot be reached: nothing is stored.
+  // true when the desktop-managed server cannot be reached: nothing is stored.
   const [offline, setOffline] = useState(false);
   // The old local chat buffer, when it is the only copy (offered for Export).
   const [legacyChat, setLegacyChat] = useState<LegacyChatMessage[]>([]);
@@ -88,7 +88,7 @@ export function useChat() {
     [],
   );
 
-  // While offline, look for the Mac app again.
+  // While offline, look for the desktop app again.
   useEffect(() => {
     if (!offline) return;
     let cancelled = false;
@@ -153,7 +153,7 @@ export function useChat() {
 
         // The engine keys its conversation on the chat session id. When no
         // server session could be made there is nothing to continue: ask the
-        // server for one now (it is the same rolling session the Mac archives).
+        // server for one now (it is the same rolling session the desktop app archives).
         if (!sid) {
           sid = await ensureTranscriptSessionId();
           if (!sid) throw new TypeError('server unreachable');

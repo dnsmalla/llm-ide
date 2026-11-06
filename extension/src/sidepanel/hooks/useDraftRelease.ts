@@ -14,7 +14,7 @@ const POLL_MS = 15_000;
 const runLocked = lockRunner('llmide-draft-release');
 
 /**
- * Keeps a capture draft only until the server says the Mac acked it. Polls the
+ * Keeps a capture draft only until the server says the desktop app acked it. Polls the
  * status of every draft; deletes none on an unreachable/unknown answer.
  * `activeSessionId` is the capture this panel is recording right now.
  */

@@ -3,23 +3,23 @@ import { getServerUrl } from '../lib/config';
 import { isSupportedUrl } from '../lib/platforms';
 import { pickStartTarget } from '../lib/capture-target';
 
-// ── Mac-app deep link ─────────────────────────────────────────────────
+// ── Desktop-app deep link ─────────────────────────────────────────────────
 // We used to spawn a detached Chrome popup window of the side panel
 // when recording started.  That created a "second screen" alongside
-// the side panel and the Mac app — confusing.  Now OPEN_POPUP just
+// the side panel and the desktop app — confusing.  Now OPEN_POPUP just
 // opens a tab to the server's /launch-app endpoint, which 302s into
-// the llmide:// scheme so the native Mac app comes to the front.
+// the llmide:// scheme so the desktop app comes to the front.
 // (We can't navigate directly to a custom scheme from a chrome-extension://
 // origin — Chrome MV3 silently blocks it.  The server redirect bypasses
 // that.)
 
-async function openMacAppDeepLink(): Promise<void> {
+async function openDesktopDeepLink(): Promise<void> {
   try {
     const serverUrl = await getServerUrl();
     const url = `${serverUrl}/launch-app?to=transcript`;
     await chrome.tabs.create({ url, active: false });
   } catch (err) {
-    console.error('[LLM-IDE] Failed to open Mac app deep link:', err);
+    console.error('[LLM-IDE] Failed to open desktop app deep link:', err);
   }
 }
 
@@ -100,7 +100,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   const type = (message as { type: unknown }).type;
 
-  // Deep-link to the Mac app.  The message name OPEN_POPUP is
+  // Deep-link to the desktop app.  The message name OPEN_POPUP is
   // historical; it now opens the native app via /launch-app rather
   // than spawning a Chrome window.
   if (type === MsgType.OPEN_POPUP) {
@@ -109,7 +109,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chrome.sidePanel.open({ windowId: _sender.tab.windowId }).catch(console.error);
       }
     }
-    openMacAppDeepLink().catch(console.error);
+    openDesktopDeepLink().catch(console.error);
     sendResponse({ ok: true });
     return false;
   }

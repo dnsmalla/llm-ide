@@ -1,6 +1,6 @@
 // /kb/live/* routes — append captions during a recording, list
 // active sessions, finalize a session, and the SSE stream that
-// mirrors live captions to other clients (e.g. Mac app watching a
+// mirrors live captions to other clients (e.g. the desktop app watching a
 // Chrome-extension capture). Extracted from kb/router.mjs as part
 // of the modularization sweep.
 //
@@ -32,14 +32,14 @@ export async function handleLiveRoutes(req, res, ctx) {
   if (!url.startsWith('/kb/live')) return false;
   const path = url.split('?')[0];
 
-  // GET /kb/live/unacked — finalized captures the Mac has not acknowledged
+  // GET /kb/live/unacked — finalized captures the desktop app has not acknowledged
   // (in memory, and durable crash rows after a restart). Plan 3.6 B.
   if (req.method === 'GET' && path === '/kb/live/unacked') {
     sendJSON(res, 200, { sessions: listUnackedLiveSessions(userId) });
     return true;
   }
 
-  // POST /kb/live/:sessionId/ack — the Mac app has written and verified the file.
+  // POST /kb/live/:sessionId/ack — the archivist (desktop app) has written and verified the file.
   // The server recomputes lines and hash; a mismatch is 409 ACK_MISMATCH and
   // deletes nothing (agents/live-sessions.mjs).
   if (req.method === 'POST' && /^\/kb\/live\/[^/]+\/ack$/.test(path)) {

@@ -40,7 +40,7 @@ export const LANGUAGES = [
 ] as const;
 
 export interface TranscriptOptions {
-  /** The live session id the server and the Mac key this capture by (the draft shares it). */
+  /** The live session id the server and the desktop app key this capture by (the draft shares it). */
   sessionId?: string;
   deviceId?: string;
   volume?: number;
@@ -179,7 +179,7 @@ export function useTranscript() {
 
   // Stop: store the FINAL snapshot as the draft and send the COMPLETE transcript
   // to the server (stopCapture). The draft is NOT deleted here; it is released
-  // only when the server holds an identical copy that the Mac acked
+  // only when the server holds an identical copy that the desktop app acked
   // (useDraftRelease). Each step is independent: a failed storage write never
   // prevents the send (the capture is then held in memory), and a failed send
   // never loses the draft. Idempotent: the session id is cleared first.
@@ -191,7 +191,7 @@ export function useTranscript() {
       .then((r) => {
         if (r.storageError) {
           setSaveError(
-            'This capture could not be stored in the browser (storage full or unavailable). It is kept in memory and still being sent to the Mac app. Download the transcript before closing this panel.',
+            'This capture could not be stored in the browser (storage full or unavailable). It is kept in memory and still being sent to the desktop app. Download the transcript before closing this panel.',
           );
         } else if (r.send === 'blocked-full') {
           setSaveError(
@@ -199,7 +199,7 @@ export function useTranscript() {
           );
         } else if (r.send === 'too-large') {
           setSaveError(
-            'This capture is longer than the Mac app can hold (2000 lines). The part the server has was sent; the full transcript stays in this browser: download it.',
+            'This capture is longer than the desktop app can hold (2000 lines). The part the server has was sent; the full transcript stays in this browser: download it.',
           );
         }
       })
@@ -239,7 +239,7 @@ export function useTranscript() {
 
   // Restore the newest recording that was interrupted before Stop into the
   // live view (read-only: nothing is moved or deleted; the draft stays until
-  // the Mac acks it, see useDraftRelease).
+  // the desktop app acks it, see useDraftRelease).
   useEffect(() => {
     listDrafts(chromeArea())
       .then((entries) => {

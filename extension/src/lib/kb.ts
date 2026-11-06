@@ -33,7 +33,7 @@ export interface ConnectorResult {
   [k: string]: unknown;
 }
 
-export const OFFLINE_MESSAGE = 'Mac app not running. Open LLM-IDE to search your notes.';
+export const OFFLINE_MESSAGE = 'Desktop app not running. Open LLM-IDE to search your notes.';
 
 /** The local server cannot be reached (connection refused, timeout, breaker open). Nothing is stored for this case. */
 export class OfflineError extends Error {

@@ -1,5 +1,5 @@
-// The side-panel chat as a live client of the Mac-managed server: one chat turn
-// on the SAME v2 engine the Mac app uses (POST /agent/v2/stream, SSE). Nothing
+// The side-panel chat as a live client of the desktop-managed server: one chat turn
+// on the SAME v2 engine the desktop app uses (POST /agent/v2/stream, SSE). Nothing
 // is stored here. No imports from config.ts, so the Node test runner can load
 // this file with a fake fetch.
 //
@@ -137,7 +137,7 @@ async function errorFromResponse(res: Response): Promise<V2TurnError> {
     if (typeof e.message === 'string' && e.message.trim()) message = e.message;
   }
   if (code === 'TURN_IN_PROGRESS') {
-    message = 'Another side panel or the Mac app is still answering this chat. Wait for it to finish, then send again.';
+    message = 'Another side panel or the desktop app is still answering this chat. Wait for it to finish, then send again.';
   }
   return new V2TurnError(code, message, { status: res.status });
 }
@@ -208,7 +208,7 @@ export async function streamV2Turn(opts: StreamOpts): Promise<V2TurnResult> {
   } catch (err) {
     if (err instanceof V2TurnError) throw err;
     if (signal?.aborted) throw err;
-    throw new V2TurnError('CONNECTION_LOST', 'The connection to the Mac app was lost mid-answer.', {
+    throw new V2TurnError('CONNECTION_LOST', 'The connection to the desktop app was lost mid-answer.', {
       partialText: text,
     });
   }

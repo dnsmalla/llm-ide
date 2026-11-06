@@ -113,7 +113,7 @@ export default function Settings({
           <br />
           4. Click Generate Notes when done
           <br />
-          5. Requires the LLM-IDE Mac app to be running
+          5. Requires the LLM-IDE desktop app to be running
         </p>
       </div>
 
@@ -154,7 +154,7 @@ function KBSearchPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Read live from the Mac-managed server; no copy is kept. null = unreachable.
+  // Read live from the desktop-managed server; no copy is kept. null = unreachable.
   const [offline, setOffline] = useState(false);
   useEffect(() => {
     getKBStats().then((st) => {

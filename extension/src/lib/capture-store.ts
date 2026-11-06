@@ -1,7 +1,7 @@
 // The extension keeps NOTHING of its own (live-then-archive plan 0.1 rule 5,
 // Q18). The one exception is a meeting CAPTURE DRAFT: `transcriptDraft:<id>`
 // holds a capture until the server proves it holds an identical copy that the
-// Mac app acked. Everything here is pure logic over injected dependencies (a
+// desktop app acked. Everything here is pure logic over injected dependencies (a
 // chrome.storage-like area and a live API), so it runs under the Node test
 // runner with no browser.
 //
@@ -30,7 +30,7 @@ export interface StorageArea {
 }
 
 export interface Draft {
-  id: string; // the live session id (the server and the Mac key the capture by it)
+  id: string; // the live session id (the server and the desktop app key the capture by it)
   meetingTitle: string;
   date: string;
   duration: number;
@@ -46,7 +46,7 @@ export interface Draft {
 /**
  * recording: still capturing (or the panel died before Stop).
  * finalizing: Stop pressed, the server may not hold a verified copy yet.
- * awaiting-ack: the server holds a verified copy and requires the Mac's ack.
+ * awaiting-ack: the server holds a verified copy and requires the desktop app's ack.
  * no-ack: the server has no ack protocol (flag off): the local copy is KEPT.
  * released: acked and verified; the draft is gone (the marker stops a late write).
  */
@@ -437,7 +437,7 @@ export async function stopCapture(
   try {
     const r = await api.finalize(snap.id, exp.tooLarge ? undefined : exp.payload);
     if (exp.tooLarge) {
-      send = 'too-large'; // the streamed buffer was finalized for the Mac; our copy can never be proven
+      send = 'too-large'; // the streamed buffer was finalized for the desktop app; our copy can never be proven
     } else {
       try {
         send = await recordFinalize(area, snap.id, exp, r, now);
@@ -490,12 +490,12 @@ export async function resendDraft(
 
 export type DraftOutcome =
   | 'released' // acked and verified: draft deleted
-  | 'waiting' // the server holds a verified copy, the Mac has not acked yet
+  | 'waiting' // the server holds a verified copy, the desktop app has not acked yet
   | 'not-durable' // held in server memory only; keep
   | 'unreachable' // status unknown: keep
   | 'not-confirmed' // server has no record / expired: keep, needs a resend
   | 'partial' // the server's copy differs from ours: keep (re-sent when allowed)
-  | 'partial-acked' // the Mac acked a copy that differs from ours: keep, manual Resend
+  | 'partial-acked' // the desktop app acked a copy that differs from ours: keep, manual Resend
   | 'too-large' // cannot be held by the server: kept here, export or delete
   | 'blocked-full' // retained store full: nothing finalized
   | 'storage-error' // a write failed: the capture is only in memory
@@ -610,7 +610,7 @@ export async function reconcileDrafts(
         continue;
       }
       if (!verified) {
-        push('partial-acked'); // the Mac acked a different copy: keep, the user can Resend
+        push('partial-acked'); // the desktop app acked a different copy: keep, the user can Resend
         continue;
       }
       let done = false;
@@ -709,7 +709,7 @@ export function exportDraftJson(draft: Draft): string {
   );
 }
 
-// ─── Legacy `transcripts` (read-only view + verified copy to the Mac) ───
+// ─── Legacy `transcripts` (read-only view + verified copy to the desktop app) ───
 
 export const LEGACY_KEY = 'transcripts';
 
@@ -743,7 +743,7 @@ export async function legacyCaptureId(t: LegacyTranscript): Promise<string> {
 
 export type LegacyOutcome =
   | 'copied' // acked and verified, local copy deleted
-  | 'waiting' // sent, the Mac has not acked yet; run again later
+  | 'waiting' // sent, the desktop app has not acked yet; run again later
   | 'skipped-large' // too big for a verified copy: local copy kept
   | 'skipped-empty'
   | 'no-ack-protocol' // server has no ack: nothing deleted
@@ -784,8 +784,8 @@ function deleteLegacyLocal(area: StorageArea, id: string): Promise<boolean> {
 }
 
 /**
- * Copy ONE legacy transcript to the Mac and delete the local copy only after the
- * server holds a copy identical to it (lines, hash, language, start) AND the Mac
+ * Copy ONE legacy transcript to the desktop app and delete the local copy only after the
+ * server holds a copy identical to it (lines, hash, language, start) AND the desktop app
  * acked it. Idempotent and resumable (the capture id is content-addressed).
  * Never deletes on any error.
  */
@@ -844,7 +844,7 @@ export async function importLegacyTranscript(
             ? { ...base, outcome: 'copied' }
             : { ...base, outcome: 'error', detail: 'local delete could not be verified' };
         }
-        if (st.state === 'expired') return { ...base, outcome: 'error', detail: 'the Mac did not confirm in time' };
+        if (st.state === 'expired') return { ...base, outcome: 'error', detail: 'the desktop app did not confirm in time' };
         if (i < polls) await sleep(opts.pollMs ?? 2000);
       }
       return { ...base, outcome: 'waiting' };

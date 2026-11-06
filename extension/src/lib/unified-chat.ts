@@ -100,7 +100,7 @@ export async function clearChatSessionMessages(sessionId: string): Promise<void>
 /**
  * Resolve the active extension transcript session id from the SERVER (the one
  * copy). Nothing is cached in chrome.storage: an unreachable server returns
- * null and the caller shows "Mac app not running".
+ * null and the caller shows "Desktop app not running".
  */
 export async function ensureTranscriptSessionId(): Promise<string | null> {
   try {

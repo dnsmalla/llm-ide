@@ -12,12 +12,12 @@ import { chromeArea, httpLiveApi, lockRunner } from '../../lib/capture-live';
 const runLocked = lockRunner('llmide-legacy-import');
 
 const OUTCOME_TEXT: Record<LegacyReport['outcome'], string> = {
-  copied: 'copied to the Mac, local copy removed',
-  waiting: 'sent; waiting for the Mac app to confirm (run again later)',
+  copied: 'copied to the desktop app, local copy removed',
+  waiting: 'sent; waiting for the desktop app to confirm (run again later)',
   'skipped-large': 'too large for a verified copy, kept here',
   'skipped-empty': 'empty, kept here',
   'no-ack-protocol': 'this server cannot confirm copies; nothing was sent or deleted',
-  unreachable: 'Mac app not running; nothing deleted',
+  unreachable: 'Desktop app not running; nothing deleted',
   mismatch: 'the server did not hold the same lines; nothing deleted',
   busy: 'another import is running',
   error: 'failed; nothing deleted',
@@ -25,8 +25,8 @@ const OUTCOME_TEXT: Record<LegacyReport['outcome'], string> = {
 
 /**
  * Read-only list of the meetings the extension saved locally before it stopped
- * keeping history, with an explicit "Copy to Mac" action. A local copy is
- * deleted only after the Mac app confirms it holds the copy.
+ * keeping history, with an explicit "Copy to the desktop app" action. A local copy is
+ * deleted only after the desktop app confirms it holds the copy.
  */
 export default function LegacyTranscriptsPanel() {
   const [items, setItems] = useState<LegacyTranscript[]>([]);
@@ -80,8 +80,8 @@ export default function LegacyTranscriptsPanel() {
     <section className="legacy-transcripts">
       <h3 className="settings-heading">Meetings saved in this browser (old)</h3>
       <p className="settings-hint">
-        The extension no longer keeps a meeting history. These were saved before. Copy them to the Mac app; each local
-        copy is removed only after the Mac app confirms it has the copy. Nothing is sent until you press the button.
+        The extension no longer keeps a meeting history. These were saved before. Copy them to the desktop app; each local
+        copy is removed only after the desktop app confirms it has the copy. Nothing is sent until you press the button.
       </p>
       <ul className="kb-results">
         {items.map((t) => {
@@ -104,7 +104,7 @@ export default function LegacyTranscriptsPanel() {
       </ul>
       <div className="settings-row">
         <button className="btn btn-sm" disabled={running || selected.size === 0} onClick={copy}>
-          {running ? 'Copying…' : `Copy ${selected.size || ''} to Mac`}
+          {running ? 'Copying…' : `Copy ${selected.size || ''} to the desktop app`}
         </button>
         <button className="btn btn-sm" disabled={running} onClick={() => setSelected(new Set(items.map((t) => t.id)))}>
           Select all

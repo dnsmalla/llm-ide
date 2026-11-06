@@ -1,9 +1,9 @@
 // Floating overlay — injects a minimal "LLM-IDE" status pill into the
 // meeting page while recording is active.  Clicking "Open" deep-links to
-// the native Mac app via the service worker (LAUNCH_MAC_APP message,
+// the desktop app via the service worker (LAUNCH_MAC_APP message,
 // historically called OPEN_POPUP for backwards compat with stored builds).
 // We no longer spawn a detached Chrome popup window — the side panel
-// covers in-Chrome viewing, and the Mac app covers everything else.
+// covers in-Chrome viewing, and the desktop app covers everything else.
 
 import { MsgType } from '../lib/messages';
 
