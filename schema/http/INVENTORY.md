@@ -427,7 +427,7 @@ Endpoints with no client caller (93):
 
 ## Consistency
 
-Checked: 276 roster entries, 543 app source files, 52 extension source files.
+Checked: 276 roster entries, 546 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (4 distinct paths, 4 reasons):
 
