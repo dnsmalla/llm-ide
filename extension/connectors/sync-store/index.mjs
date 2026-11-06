@@ -55,3 +55,10 @@ export function createMemoryStore() {
     dump() { return new Map([...files].map(([p, f]) => [p, f.bytes])); },
   };
 }
+
+/** l***@example.com: enough to recognise an account, not enough to reuse it. */
+export function maskEmail(email) {
+  const s = String(email ?? '');
+  const at = s.lastIndexOf('@');
+  return at > 0 ? `${s[0]}***${s.slice(at)}` : '***';
+}

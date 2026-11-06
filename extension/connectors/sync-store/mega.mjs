@@ -5,7 +5,8 @@
 // SYNC_RATE_LIMITED for the scheduler's back-off. Operations run one at a time per store, so two callers never race to
 // create the same folder. Deletes are permanent. The email and password never appear in a log line or an error.
 import { Storage } from 'megajs';
-import { checkPath, checkSize, MAX_FILE_BYTES } from './index.mjs';
+import { checkPath, checkSize, MAX_FILE_BYTES, maskEmail } from './index.mjs';
+export { maskEmail };
 
 export const DEFAULT_MEGA_FOLDER = 'llmide-sync';
 const RETRY_DELAYS_MS = [2_000, 8_000];
@@ -52,12 +53,6 @@ export function validateMegaConfig(c) {
   if (typeof c.password !== 'string' || c.password.length < 1 || c.password.length > 1024) return 'password';
   if (typeof c.folder !== 'string' || !FOLDER_RE.test(c.folder) || c.folder === '.' || c.folder === '..') return 'folder';
   return null;
-}
-
-export function maskEmail(email) {
-  const s = String(email ?? '');
-  const at = s.lastIndexOf('@');
-  return at > 0 ? `${s[0]}***${s.slice(at)}` : '***';
 }
 
 function realLogin({ email, password }, { onLost }) {
