@@ -1,0 +1,87 @@
+/* Screen-level visual consistency (2026-11-06).
+   The menu structure and screen internals stay as they are; this layer only normalises the
+   shape, density and hierarchy of controls and surfaces so every section reads as one product. */
+
+:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn, .rv-btn) {
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease, color .15s ease;
+}
+:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn, .rv-btn):hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+:root :is(.lib-btn-primary, .dg-primary, .loop-btn-primary, .chat-primary, .ex-btn-primary, .gr-primary, .atn-primary, .iss-primary, .gnt-primary, .rv-primary) {
+  border-color: var(--tok-color-accent);
+  background: var(--tok-color-accent);
+  color: var(--tok-color-body);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--tok-color-accent) 18%, transparent);
+}
+:root :is(.lib-btn-danger, .chat-danger) {
+  border-color: color-mix(in srgb, var(--tok-color-danger) 55%, var(--tok-color-border));
+  color: var(--tok-color-danger);
+}
+
+/* One surface treatment for panels and cards. Layout-specific padding stays with each screen. */
+:root :is(.lib-card, .atn-card, .loop-card, .gr-panel, .ex-panel, .sh-panel) {
+  border: 1px solid var(--tok-color-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tok-color-surface) 86%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 13%, transparent);
+}
+
+/* One page-title hierarchy. Existing per-screen margins stay. */
+:root :is(.iss-title, .gnt-title, .dg-title, .gr-title, .ext-title, .lib-viewer-title, .atn-titlebar h1) {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.03em;
+  color: var(--tok-color-text);
+}
+
+/* Compact uppercase group headers inside screens. */
+:root :is(.scm-title, .gr-section-title, .atn-section-title, .loop-section-title) {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tok-color-text-muted);
+}
+
+/* Form controls: same height and focus language as Settings. */
+:root :is(.iss-field input, .iss-field select, .gnt-field input, .gnt-field select, .dg-field input, .dg-field select, .dg-field textarea, .atn-field input, .atn-field select, .atn-field textarea, .gr-field input, .gr-field select, .rv-field input, .rv-field select) {
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--tok-color-border);
+  border-radius: 8px;
+  background: var(--tok-color-body);
+  color: var(--tok-color-text);
+  font: inherit;
+}
+:root :is(.iss-field input, .iss-field select, .gnt-field input, .gnt-field select, .dg-field input, .dg-field select, .dg-field textarea, .atn-field input, .atn-field select, .atn-field textarea):focus {
+  outline: none;
+  border-color: var(--tok-color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 14%, transparent);
+}
+
+/* Empty states say the same thing with the same rhythm. */
+:root :is(.lib-empty, .atn-empty, .loop-native-empty) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--tok-color-text-muted);
+}
+:root :is(.lib-empty-title, .atn-empty h1, .loop-native-empty h1) {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: var(--tok-color-text);
+}

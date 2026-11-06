@@ -7,6 +7,7 @@ import { App } from "./App";
 import "@llmide/ui-kit/styles.css";
 import "./design/shell.css";
 import "@llmide/screens/shell/shell.css";
+import "@llmide/screens/shell/consistency.css";
 import "./styles.css";
 
 // Screens never import @tauri-apps/api (it is not resolvable from ui/screens): the host bridge is
