@@ -4,6 +4,7 @@ mod attach;
 #[cfg(feature = "spike")]
 mod ax_probe;
 mod capture_validate;
+mod capture_delta;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;
