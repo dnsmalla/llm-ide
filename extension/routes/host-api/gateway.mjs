@@ -1,6 +1,5 @@
-// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 17 commands (chat, approvals, the `read` slice and `compose`) — the structural
-// twin of the Mac's HostApiV1Gateway.swift. Chat runs in process (startHostTurn) on one server-side "Phone chat"
-// per user. The engine, decisions and chat-session modules load lazily, so this file stays off the boot path.
+// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 17 commands (chat, approvals, the `read` slice and `compose`).
+// Chat runs in process (startHostTurn) on one server-side "Phone chat" per user. The engine, decisions and chat-session modules load lazily, so this file stays off the boot path.
 // Never log frame content, tokens or PINs: type and size only.
 import { parseRequest, response, event, errorFrame, clamp } from './frame.mjs';
 import { HostApiSession, helloRefusal, internalId } from './session.mjs';
@@ -9,7 +8,7 @@ import { PairingThrottle, peerKey } from './throttle.mjs';
 import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
-import { attachmentsToFiles, optionsOf, offersModel } from './compose.mjs';
+import { attachmentsToFiles, isBinaryAttachment, optionsOf, offersModel } from './compose.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -276,6 +275,7 @@ export function createGateway(overrides) {
   }
 
   // A chat.send that picks a mode or model needs `compose` (served ∩ granted), like a command of that capability.
+  // Returns true when it refused (the frame is answered).
   function composeRefused(s, entry, id) {
     if (entry.grants?.has('compose') && deps.capabilities().includes('compose')) return false;
     if (!deps.capabilities().includes('compose')) { fail(s, id, 'capability_unavailable', 'This computer does not serve compose right now.'); return true; }
@@ -451,6 +451,8 @@ export function createGateway(overrides) {
         return respond(s, id, command, { messages: await lines(userId, limit) });
       }
       case 'chat.send': {
+        // Text only (fixtures/security/compose.json imagesAllowed:false): the engine would read `[binary:` framing as an image.
+        if ((p.attachments ?? []).some(isBinaryAttachment)) return fail(s, id, 'invalid_payload', 'Attachments must be plain text; images are not accepted.');
         const picks = p.mode !== undefined || p.model !== undefined;
         if (picks && composeRefused(s, entry, id)) return;
         const wait = rate.turn(entry.state.deviceId, deps.now());
@@ -514,10 +516,10 @@ export function createGateway(overrides) {
         return respond(s, id, command, usageOf(await deps.read.usage(userId)));
       }
       case 'chat.new': {
-        const wait = rate.turn(entry.state.deviceId, deps.now());
+        const wait = rate.turn(entry.state.deviceId, deps.now()); // a write: the turn bucket, not the read one
         if (wait != null) return rateRefused(s, entry, id, wait);
         if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
-        await creatingQuickChat.get(userId);
+        await creatingQuickChat.get(userId); // a first phone chat being created right now is replaced, not raced
         const sessionId = await deps.quickChat.create(userId);
         deps.quickChat.set(userId, sessionId);
         audit('chat_new', { peer: entry.peer, userId, deviceId: entry.state.deviceId });

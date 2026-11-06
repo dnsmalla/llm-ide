@@ -4,17 +4,20 @@ import { clamp } from './frame.mjs';
 // chat parity plan, the `compose` options. Pure. The v1 wire names an attachment by its file name only; the engine
 // (core/prompt-framing.mjs) reads { path, content } and treats `path` as a display label, never a file to open.
 
-/** The wire's attachments as the engine's files; entries without both strings are dropped (the schema already refused them). */
+/** The engine turns a `[binary:image/…]` text into an image block (splitImageAttachments); Decision 7: images are refused. */
+export const isBinaryAttachment = (a) => typeof a?.text === 'string' && a.text.startsWith('[binary:');
+
+/** The wire's attachments as the engine's files; entries without both strings (the schema already refused them) or carrying binary framing are dropped. */
 export function attachmentsToFiles(list) {
   return (Array.isArray(list) ? list : [])
-    .filter((a) => typeof a?.name === 'string' && typeof a?.text === 'string')
+    .filter((a) => typeof a?.name === 'string' && typeof a?.text === 'string' && !isBinaryAttachment(a))
     .map((a) => ({ path: a.name, content: a.text }));
 }
 
 /** The modes a `compose` client may pick; the same list as HOST_TURN_MODES in routes/agent-v2.mjs (tested equal). */
 export const COMPOSE_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document']);
 const MAX_MODELS = 50;
-const MODEL_RE = /^[A-Za-z0-9_.:[\]-]{1,200}$/;
+const MODEL_RE = /^[A-Za-z0-9_.:[\]-]{1,200}$/; // the wire pattern of chat.send.model / chat.options models
 /** chat.options from listSdkModels' entries: the account's Claude models, first = the SDK default. */
 export function optionsOf(entries) {
   const seen = new Set(); const models = [];

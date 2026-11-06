@@ -1034,16 +1034,17 @@ export function clearChatSessionState(userId, chatSessionId) {
   return { cleared: true };
 }
 
-/**
- * Runs one Agent v2 turn in process, exactly as POST /agent/v2/stream would for a read-only client (the Host
- * API gateway): mode auto_read_only, the default provider, the extension chat workspace, no Bypass. Every
- * event the SSE stream would carry goes to `onEvent`. Resolves when the turn ends; a refusal the route answers
- * with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT, ROUTE_UNAVAILABLE)
- * rejects with an Error carrying that `code`.
- */
+/** The modes a Host API client may ask for: `auto` (run as auto_read_only) and the tool-restricted modes. Never execute. */
 export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document']);
 
-/** Runs one Agent v2 turn in process for the Host API: auto_read_only unless a bounded mode is chosen, then clamped again. */
+/**
+ * Runs one Agent v2 turn in process, exactly as POST /agent/v2/stream would for a read-only client (the Host
+ * API gateway): mode auto_read_only unless the client picked one of HOST_TURN_MODES (clamped to read-only again
+ * here), the default provider with an optional model id the gateway already checked, the extension chat
+ * workspace, no Bypass. Every event the SSE stream would carry goes to `onEvent`. Resolves when the turn ends; a
+ * refusal the route answers with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT,
+ * ROUTE_UNAVAILABLE) rejects with an Error carrying that `code`.
+ */
 export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, onEvent, deps = {} }) {
   const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
   const hostMode = mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
