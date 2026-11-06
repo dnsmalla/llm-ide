@@ -194,7 +194,9 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px var(--tok-space-xs) 2px 0;
+  min-height: 22px;
+  box-sizing: border-box;
+  padding: 0 var(--tok-space-xs) 0 0;
   font-size: var(--tok-type-filename-size);
   color: var(--tok-color-text);
   cursor: default;
