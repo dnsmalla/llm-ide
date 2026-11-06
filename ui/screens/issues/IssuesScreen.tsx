@@ -44,6 +44,8 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createBody, setCreateBody] = useState("");
+  // One key per issue the user means to create: a double click or a retry after a lost answer replays, never duplicates.
+  const createIdem = useRef<string | null>(null);
   const [createRepo, setCreateRepo] = useState("");
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -126,12 +128,15 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     if (!REPO_SHAPE.test(repo) || !createTitle.trim()) { setError("Enter an owner/name repository and a title."); return; }
     setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody });
+      createIdem.current ??= crypto.randomUUID();
+      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody, idem: createIdem.current });
       if (r.status !== 200) {
+        if (r.status === 409) createIdem.current = null;
         const b = r.body && typeof r.body === "object" ? r.body as { error?: { message?: unknown } } : {};
         setError(typeof b.error?.message === "string" ? b.error.message : `The issue could not be created (${r.status}).`);
         return;
       }
+      createIdem.current = null;
       setNotice("Issue created.");
       setCreateOpen(false); setCreateTitle(""); setCreateBody(""); setCreateRepo("");
       await load();

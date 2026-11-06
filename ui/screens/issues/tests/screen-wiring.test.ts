@@ -35,3 +35,12 @@ test("a failed first page clears the count note from the previous load, and a la
   assert.match(issues, /setRows\(r\.issues\);\s*setPaging\(r\);\s*setError\(issuesLoadError\(r\)\);/, "a partial walk with a 401 shows the banner next to the rows it kept");
   assert.equal(issues.includes("r.status === 401 ? \"Sign in again to read issues.\""), false, "the message lives in issuesLoadError, one copy");
 });
+
+test("New issue sends one idempotency key per issue and drops it after a success or a key conflict", () => {
+  const issues = read("../IssuesScreen.tsx");
+  assert.match(issues, /const createIdem = useRef<string \| null>\(null\);/);
+  assert.match(issues, /createIdem\.current \?\?= crypto\.randomUUID\(\);/);
+  assert.match(issues, /"\/kb\/issues\/create", \{ provider: filters\.provider, repo, title: createTitle\.trim\(\), body: createBody, idem: createIdem\.current \}/);
+  assert.match(issues, /if \(r\.status === 409\) createIdem\.current = null;/, "an edited retry after a lost answer gets a new key");
+  assert.match(issues, /createIdem\.current = null;\s*setNotice\("Issue created\."\);/);
+});
