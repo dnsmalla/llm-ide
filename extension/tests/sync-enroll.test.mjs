@@ -164,3 +164,11 @@ test('sftp QR and folder prep', async () => {
   await dev.scanAndClaim(store, qr, { now: T + 600 }); await pollEnrollment(u, { now: T + 1000 }); await confirmEnrollment(u, { now: T + 2000 });
   assert.ok(fs.statSync(path.join(fake.root, 'data', pair.sid, 'd', pair.dir, 'in')).isDirectory());
 });
+
+test('st accepts only lower-case DNS names for the own server', () => {
+  const base = { sid: 'A'.repeat(22), sfp: 'B'.repeat(43), dir: 'C'.repeat(22), slot: 'D'.repeat(22), es: 'E'.repeat(22) };
+  for (const st of ['sftp:llm-ide.com', 'sftp:sync.example.org']) assert.equal(E.parsePair(E.pairUrl({ ...base, st }, 'ios', 'https://llm-ide.com')).st, st);
+  for (const st of ['sftp:LLM-IDE.com', 'sftp:localhost', 'sftp:72.62.76.92', 'sftp:llm-ide.com:8443', 'sftp:']) {
+    assert.throws(() => E.parsePair(E.pairUrl({ ...base, st }, 'ios', 'https://llm-ide.com')), (e) => e.code === 'bad_pair', st);
+  }
+});

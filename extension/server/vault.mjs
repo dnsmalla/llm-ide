@@ -140,7 +140,8 @@ const ALLOWED_KEYS = new Set([
   'email.imapPasswordHost',
 
   // Encrypted sync (routes/sync/keys.mjs, routes/sync/http-routes.mjs): the per-epoch root key, the desktop ECDSA
-  // P-256 signing key (PKCS8), and the dedicated MEGA account's email and password for the MEGA adapter.
+  // P-256 signing key (PKCS8), the dedicated MEGA account's email and password for the MEGA adapter, and the own-server
+  // adapter's OpenSSH ed25519 private key (sync.sshKey).
   // Server-internal: never client-settable through /kb/vault, never listed, never returned by a route.
   'sync.rootKey',
   'sync.signingKey',

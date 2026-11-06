@@ -1,7 +1,8 @@
 // Timers for every user with sync on: producer every 60 s +/- 15 s, consumer every 30 s; one cycle per user at a time;
 // failures back off exponentially up to 15 min and are recorded as a code only. A refused login (SYNC_AUTH_FAILED,
-// SYNC_MFA_REQUIRED) turns sync off instead of retrying, so a changed password never locks the MEGA account. One MEGA
-// store (one logged-in session) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
+// SYNC_MFA_REQUIRED) or a changed server host key (SYNC_HOST_KEY_CHANGED) turns sync off instead of retrying, so a changed
+// password never locks the MEGA account and a swapped server is never written to. One store (one MEGA session or one
+// SSH connection) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
