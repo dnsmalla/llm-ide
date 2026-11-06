@@ -684,7 +684,8 @@ export function rowsOfTranscript(transcript) {
 
 /**
  * The held (redacted) copy of a finalized capture nobody has acked yet, for the desktop archivist
- * (GET /kb/live/:id/capture). Null while it is live, once acked or expired, or when unknown to this user.
+ * (GET /kb/live/:id/capture). Null while it is live, once acked or expired (expires_at passed), or when unknown to
+ * this user.
  * `lines` and `hash` are exactly what the ack must echo.
  */
 export function liveCaptureOf(userId, sessionId) {
@@ -700,7 +701,8 @@ export function liveCaptureOf(userId, sessionId) {
     };
   }
   const row = getCrashRow(userId, sessionId);
-  if (!row) return null;
+  // Past its TTL it is expired (expireCrashRows may not have run yet): never handed out for archiving.
+  if (!row || !(Date.parse(row.expires_at) > Date.now())) return null;
   const startedAt = Date.parse(row.started_at);
   return {
     sessionId, title: row.title, startedAt: Number.isFinite(startedAt) ? startedAt : null, durationSec: row.duration_sec,

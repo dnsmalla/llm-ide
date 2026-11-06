@@ -102,3 +102,21 @@ test('GET /kb/live/:id/capture answers 200 with the held copy and 404 otherwise'
   assert.equal(missing.status, 404);
   assert.equal(missing.body.error.code, 'NOT_FOUND');
 });
+
+test('a durable row past its expires_at is not served, even before the expiry job ran', () => {
+  finalized('cap-old');
+  live._resetForTests();
+  assert.ok(live.liveCaptureOf(U, 'cap-old'));
+  conn.prepare('UPDATE live_crash_rows SET expires_at = ? WHERE owner_user_id = ? AND session_id = ?')
+    .run(new Date(Date.now() - 1000).toISOString(), U, 'cap-old');
+  assert.equal(live.liveCaptureOf(U, 'cap-old'), null);
+});
+
+test('an empty or malformed capture id answers 404, never a 400 or 500', async () => {
+  for (const url of ['/kb/live//capture', '/kb/live/%E0%A4%A/capture', '/kb/live/%/capture']) {
+    const r = await get(U, url);
+    assert.equal(r.handled, true, url);
+    assert.equal(r.status, 404, url);
+    assert.equal(r.body.error.code, 'NOT_FOUND', url);
+  }
+});
