@@ -1,3 +1,10 @@
+# Own-server sync (design 8.1, deploy/vps/sync-sftp.md): rate limit per client and exact CORS origins.
+limit_req_zone $binary_remote_addr zone=llmidesync:1m rate=2r/s;
+map $http_origin $llmidesync_origin {
+    default "";
+    "https://llm-ide.com" $http_origin;
+}
+
 server {
     listen 80;
     server_name llm-ide.com www.llm-ide.com;
@@ -32,6 +39,47 @@ server {
     # The temporary SSH tunnel/PIN host path was retired with ADR 0019.
     location = /host-api { return 404; }
     location /host-api/ { return 404; }
+
+    # Own-server sync. Random folder names are the capability. GET only allow-listed reads; PUT only new requests
+    # and enrollment claims into desktop-created folders. No listing, no path logs, small bodies, rate-limited.
+    location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/(?<f>d/[A-Za-z0-9_-]{22}/(?:key\.bin|wrap\.bin|manifest\.bin|s/[0-9a-f]{32}\.bin|out/[A-Za-z0-9_-]{22}\.bin)|e/[A-Za-z0-9_-]{22}/ack\.bin)$" {
+        limit_except GET { deny all; }
+        alias /srv/llmide-sync/data/$sid/$f;
+        default_type application/octet-stream;
+        access_log off;
+        error_log /var/log/nginx/error.log crit;
+        limit_req zone=llmidesync burst=40 nodelay;
+        limit_req_status 429;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Access-Control-Allow-Origin $llmidesync_origin always;
+        add_header Vary Origin always;
+    }
+    location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/(?<f>d/[A-Za-z0-9_-]{22}/in/[0-9]{13}-[A-Za-z0-9_-]{22}\.bin|e/[A-Za-z0-9_-]{22}/[A-Za-z0-9_-]{22}\.bin)$" {
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin $llmidesync_origin always;
+            add_header Access-Control-Allow-Methods "PUT" always;
+            add_header Access-Control-Max-Age 600 always;
+            add_header Vary Origin always;
+            return 204;
+        }
+        limit_except PUT { deny all; }
+        alias /srv/llmide-sync/data/$sid/$f;
+        dav_methods PUT;
+        create_full_put_path off;
+        dav_access group:rw;
+        client_body_temp_path /srv/llmide-sync-tmp;
+        client_max_body_size 64k;
+        access_log off;
+        error_log /var/log/nginx/error.log crit;
+        limit_req zone=llmidesync burst=10 nodelay;
+        limit_req_status 429;
+        add_header Cache-Control "no-store" always;
+        add_header Access-Control-Allow-Origin $llmidesync_origin always;
+        add_header Vary Origin always;
+    }
+    location /sync/ { access_log off; return 404; }
 
     location = /manifest.webmanifest {
         default_type application/manifest+json;

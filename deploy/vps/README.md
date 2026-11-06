@@ -219,3 +219,7 @@ When G-EXT closes (later slice R8), the nginx block is: `location = /relay/v1 { 
 proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
 proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 120s; }`, with
 `ACCOUNTS_ALLOWED_WEB_ORIGINS=https://app.llm-ide.com`.
+
+## Own-server sync
+
+`sync-sftp.md` sets up the chrooted `llmidesync` account, sshd `Match` block and nginx `/sync/` locations. Files: `50-llmidesync.conf`, the sync blocks in `llm-ide.com.nginx`, and `check-sync.sh`. Run the read-only checks after any change.
