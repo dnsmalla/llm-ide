@@ -13,7 +13,10 @@ import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { ingestSources, deleteSourcesByPrefix, getDb, MAX_INGEST_BATCH } from '../kb/db.mjs';
 
 const TOKEN_URL = 'https://api.box.com/oauth2/token';
-const API = 'https://api.box.com/2.0';
+export const API = 'https://api.box.com/2.0';
+export const UPLOAD_API = 'https://upload.box.com/api/2.0';
+export const AUTHORIZE_URL = 'https://account.box.com/api/oauth2/authorize';
+export const REVOKE_URL = 'https://api.box.com/oauth2/revoke';
 const FETCH_DEADLINE_MS = 30_000;
 const MAX_FILES = 2000;      // safety cap (mirrors git's fence caps)
 const MAX_DEPTH = 10;        // subfolder recursion cap
@@ -43,7 +46,7 @@ function refuse(msg) { return Object.assign(new Error(`Box fetch refused: ${msg}
 // never-responding content URL) can otherwise block the whole request up to
 // the 300s socket cap. Callers may pass their own `signal` to override.
 // `fetchImpl` is a test seam; production uses a fresh pinned fetch.
-async function boxFetch(url, { token, headers, signal, fetchImpl } = {}) {
+async function boxFetch(url, { token, headers, signal, fetchImpl, method = 'GET', body } = {}) {
   const ctrl = signal ? null : new AbortController();
   const timer = ctrl ? setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS) : null;
   const doFetch = fetchImpl || makePinnedFetch();
@@ -53,12 +56,14 @@ async function boxFetch(url, { token, headers, signal, fetchImpl } = {}) {
     for (let hop = 0; ; hop++) {
       if (!isAllowedBoxUrl(current)) throw refuse(`host not allowed (${hop ? 'redirect' : 'request'})`);
       const res = await doFetch(current, {
-        method: 'GET',
+        method,
         headers: { ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}), ...(headers || {}) },
+        ...(body == null ? {} : { body }),
         redirect: 'manual',
         signal: signal || ctrl?.signal,
       });
       if (!REDIRECT_STATUSES.has(res.status)) return res;
+      if (method !== 'GET') { try { await res.body?.cancel?.(); } catch { /* ignore */ } throw refuse('redirect on a write'); }
       const loc = res.headers?.get?.('location');
       try { await res.body?.cancel?.(); } catch { /* ignore */ }
       if (!loc) throw refuse('redirect without a location');
@@ -73,14 +78,21 @@ async function boxFetch(url, { token, headers, signal, fetchImpl } = {}) {
   }
 }
 
-// Read a body with a hard byte cap. Test doubles without a stream fall back to text()/json().
-async function readCapped(res, max) {
+function checkLength(res, max) {
   const len = Number(res.headers?.get?.('content-length'));
-  if (Number.isFinite(len) && len > max) { try { await res.body?.cancel?.(); } catch { /* ignore */ } throw refuse(`response larger than ${max} bytes`); }
+  if (Number.isFinite(len) && len > max) { try { void res.body?.cancel?.(); } catch { /* ignore */ } throw refuse(`response larger than ${max} bytes`); }
+}
+/** A body as a Buffer with a hard byte cap; an absent body is empty. */
+export async function readCappedBuffer(res, max) {
+  checkLength(res, max);
   const reader = res.body?.getReader?.();
-  if (!reader) return null;
-  const chunks = [];
-  let total = 0;
+  if (!reader) {
+    if (res.body === null || res.body === undefined) return Buffer.alloc(0);
+    const b = Buffer.from(await res.arrayBuffer());
+    if (b.length > max) throw refuse(`response larger than ${max} bytes`);
+    return b;
+  }
+  const chunks = []; let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -88,9 +100,13 @@ async function readCapped(res, max) {
     if (total > max) { try { await reader.cancel(); } catch { /* ignore */ } throw refuse(`response larger than ${max} bytes`); }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
 }
-async function readJson(res) {
+async function readCapped(res, max) {
+  if (!res.body?.getReader) { checkLength(res, max); return null; }
+  return (await readCappedBuffer(res, max)).toString('utf8');
+}
+export async function readJson(res) {
   const t = await readCapped(res, MAX_JSON_BYTES);
   if (t === null) return res.json().catch(() => ({}));
   try { return JSON.parse(t); } catch { return {}; }
@@ -142,23 +158,28 @@ function makeSession(creds) {
 
 // Authenticated GET with 429/Retry-After backoff (#7) and a one-time 401
 // token refresh (#6). `retryDelayMs` overrides the backoff base (tests pass 0).
-async function boxGet(session, url, { headers, retryDelayMs, fetchImpl } = {}) {
+export async function boxRequest(session, url, { method = 'GET', body, headers, retryDelayMs, fetchImpl, maxWaitMs = Infinity } = {}) {
   let refreshed = false;
   for (let attempt = 0; ; attempt++) {
     const token = await session.ensure();
-    const res = await boxFetch(url, { token, headers, fetchImpl });
+    const res = await boxFetch(url, { token, headers, fetchImpl, method, body });
     if (res.status === 429 && attempt < MAX_HTTP_RETRIES) {
-      await sleep(retryDelayMs ?? retryAfterMs(res) ?? 1000 * (attempt + 1));
+      const ra = retryAfterMs(res);
+      if (ra !== null && ra > maxWaitMs) return res;
+      try { await res.body?.cancel?.(); } catch { /* ignore */ }
+      await sleep(retryDelayMs ?? ra ?? 1000 * (attempt + 1));
       continue;
     }
     if (res.status === 401 && !refreshed) {
       refreshed = true;
+      try { await res.body?.cancel?.(); } catch { /* ignore */ }
       await session.refresh();
       continue;
     }
     return res;
   }
 }
+const boxGet = (session, url, opts) => boxRequest(session, url, opts);
 
 export { boxFetch as _boxFetchForTests, readCapped as _readCappedForTests };
 
@@ -174,24 +195,37 @@ export function buildTokenForm({ clientId, clientSecret, subjectType, subjectId 
 }
 
 /** Exchange CCG creds for a short-lived access token. */
-async function exchangeCCGToken(creds, _opts = {}) {
+export async function postToken(form, { fetchImpl } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS);
   try {
-    const res = await makePinnedFetch()(TOKEN_URL, {
+    const res = await (fetchImpl || makePinnedFetch())(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: buildTokenForm(creds),
+      body: form,
       signal: ctrl.signal,
     });
     const data = await readJson(res);
     if (!res.ok || !data.access_token) {
-      throw new Error(`Box auth failed: ${data.error_description || data.error || res.status}`);
+      throw Object.assign(new Error(`Box auth failed: ${data.error_description || data.error || res.status}`),
+        { code: 'BOX_AUTH_FAILED', status: res.status, boxError: typeof data.error === 'string' ? data.error : null });
     }
-    return { accessToken: data.access_token };
+    return data;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function exchangeCCGToken(creds) {
+  return { accessToken: (await postToken(buildTokenForm(creds))).access_token };
+}
+
+export function buildAuthCodeForm({ clientId, clientSecret, code, redirectUri, codeVerifier }) {
+  return new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId, client_secret: clientSecret,
+    redirect_uri: redirectUri, ...(codeVerifier ? { code_verifier: codeVerifier } : {}) }).toString();
+}
+export function buildRefreshForm({ clientId, clientSecret, refreshToken }) {
+  return new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret }).toString();
 }
 
 /** Pure: split a folder-items response into files + subfolders. */
