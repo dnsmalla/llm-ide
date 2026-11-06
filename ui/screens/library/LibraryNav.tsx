@@ -123,7 +123,15 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
       {p.extensions.map((x) => (
         <Fragment key={x.id}>
           <h3 className="lib-nav-group" data-accent={x.id}>
-            <button type="button" className="lib-nav-group-btn" aria-expanded={open(x.id)} onClick={() => p.onExtension(x.id)}>
+            <button
+              type="button"
+              className="lib-nav-group-btn"
+              aria-expanded={open(x.id)}
+              onClick={() => {
+                if (open(x.id)) toggle(x.id);
+                else { toggle(x.id); p.onExtension(x.id); }
+              }}
+            >
               <span className="lib-nav-chevron" aria-hidden="true">{open(x.id) ? "▾" : "▸"}</span><PuzzleIcon /> <span className="lib-nav-label">{x.label}</span>
             </button>
             <button type="button" className="lib-plus" aria-label={`Open ${x.label}`} title={`Open ${x.label}`} onClick={() => p.onExtension(x.id)}>＋</button>
