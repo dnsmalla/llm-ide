@@ -94,9 +94,9 @@ server {
         default_type application/manifest+json;
         try_files $uri =404;
     }
-    # The OAuth callback carries ?code=&state= in its query: never write it to the access log.
+    # The OAuth callbacks (SP7 reads, SP6 Box sync) carry ?code=&state= in their query: never write them to the access log.
     # The app may be built with VITE_BASE=/ or /app/, so cover both paths.
-    location ~ ^/(app/)?oauth-callback\.html$ {
+    location ~ ^/(app/)?(oauth|box)-callback\.html$ {
         access_log off;
         try_files $uri =404;
     }

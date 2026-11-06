@@ -2,39 +2,52 @@
 // Sign-in: Box OAuth 2.0 with the user's OWN Box app, whose client id and secret came in the pairing link (Box documents
 // no public-client flow, SP6 D2). A popup carries the consent. The tokens live in this page's memory only and the refresh
 // token is revoked on close (per app session, D4). PKCE is sent too (undocumented by Box: accepted or ignored). Writes
-// create only new, uniquely named files and never replace or delete anything (one writer per file, design 3).
+// create only new, uniquely named files and never replace or delete anything (one writer per file, design 3). The OAuth
+// and the byte cap are SP7's guarded code (sources/oauth.ts, sources/http.ts) with Box's read-write scope.
 import { b64u } from "../relay/wire.ts";
+import { readCapped } from "../sources/http.ts";
+import { authorizeUrl, challengeFor, CHANNEL, exchangeCode, OAuthError, randomString, refreshTokens, revokeToken, waitForCode,
+  type ChannelLike, type Every, type ProviderConfig, type Tokens } from "../sources/oauth.ts";
 import { checkPath, MAX_FILE_BYTES, SyncStoreError, type OpenedStore } from "./mega-store.ts";
 
 const API = "https://api.box.com/2.0";
 const UPLOAD = "https://upload.box.com/api/2.0";
-const TOKEN = "https://api.box.com/oauth2/token";
-const REVOKE = "https://api.box.com/oauth2/revoke";
-const AUTHORIZE = "https://account.box.com/api/oauth2/authorize";
+const SCOPE = "root_readwrite";
+// The hosts a Box response may land on: the API, the upload host and Box's two pre-signed download hosts (SP7's list).
+const HOSTS = ["api.box.com", "upload.box.com", "dl.boxcloud.com", "public.boxcloud.com"];
+const LIST_CAP = 4 * 1048576;
+const TIMEOUT_MS = 60_000;
 const APP_RE = /^[A-Za-z0-9]{16,128}$/;
 const SEGMENT = /^[A-Za-z0-9_.-]{1,64}$/;
-const CHANNEL = "llmide-box-auth";
 export interface Authorize { run(url: string): Promise<URLSearchParams>; close(): void }
 interface Entry { type: string; id: string; name: string; size?: number }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-export const callbackUrl = (origin: string) => `${origin}/box-callback.html`;
+/** The redirect page, next to the app whatever base path it is served under (VITE_BASE=/ or /app/). */
+export const callbackUrl = (baseURI: string) => new URL("box-callback.html", baseURI).toString();
 const rand = (n: number) => b64u(globalThis.crypto.getRandomValues(new Uint8Array(n)));
+const OAUTH_CODE: Record<string, string> = {
+  unreachable: "SYNC_UNREACHABLE", client_refused: "SYNC_BAD_CLIENT", provider_error: "SYNC_IO",
+  sign_in_cancelled: "SYNC_AUTH_CANCELLED", sign_in_timeout: "SYNC_AUTH_CANCELLED",
+};
+const syncError = (e: unknown) => (e instanceof SyncStoreError ? e : new SyncStoreError(e instanceof OAuthError ? OAUTH_CODE[e.code] ?? "SYNC_AUTH_FAILED" : "SYNC_AUTH_FAILED"));
+const landedOk = (r: Response) => { try { return !r.url || HOSTS.includes(new URL(r.url).hostname) && new URL(r.url).protocol === "https:"; } catch { return false; } };
 
 /** Opens the popup NOW (call it inside the click, or the browser blocks it) and points it at Box once the URL is ready.
- *  box-callback.html posts the redirect's query on a same-origin BroadcastChannel and closes itself. */
-export function popupAuthorize(): Authorize {
+ *  box-callback.html posts { state, code, error } on SP7's same-origin channel; waitForCode takes only our state, checks
+ *  the code's shape, and gives up when the popup closes or after SP7's sign-in timeout. */
+export function popupAuthorize(o: { channel?: () => ChannelLike; every?: Every; timeoutMs?: number } = {}): Authorize {
   const popup = (globalThis as { open?: (u: string, n: string, f: string) => Window | null }).open?.("", "llmide-box-auth", "popup,width=520,height=720") ?? null;
   return {
-    run: (url) => new Promise((resolve, reject) => {
-      if (!popup) { reject(new SyncStoreError("SYNC_POPUP_BLOCKED")); return; }
-      const ch = new BroadcastChannel(CHANNEL);
-      let closedTicks = 0;
-      const stop = () => { clearInterval(timer); ch.close(); };
-      const timer = setInterval(() => { if (popup.closed && ++closedTicks > 1) { stop(); reject(new SyncStoreError("SYNC_AUTH_CANCELLED")); } }, 1000);
-      ch.onmessage = (ev) => { if (typeof ev.data === "string") { stop(); resolve(new URLSearchParams(ev.data)); } };
+    run: async (url) => {
+      if (!popup) throw new SyncStoreError("SYNC_POPUP_BLOCKED");
+      const state = new URL(url).searchParams.get("state") ?? "";
+      const code = waitForCode(state, (o.channel ?? (() => new BroadcastChannel(CHANNEL) as unknown as ChannelLike))(),
+        { isClosed: () => popup.closed, every: o.every, timeoutMs: o.timeoutMs });
+      code.catch(() => {}); // awaited below; this only stops an early rejection being reported as unhandled
       popup.location.href = url;
-    }),
+      try { return new URLSearchParams({ state, code: await code }); } catch (e) { throw syncError(e); }
+    },
     close: () => { try { if (popup && !popup.closed) popup.close(); } catch { /* cross-origin or gone */ } },
   };
 }
@@ -51,45 +64,62 @@ function multipart(attributes: object, data: Uint8Array): { body: Uint8Array; ty
 }
 
 export async function openBoxStore({ clientId, clientSecret, folder }: { clientId: string; clientSecret: string; folder: string },
-  { fetch: f = globalThis.fetch.bind(globalThis) as Fetch, authorize = popupAuthorize(), origin = globalThis.location?.origin ?? "" }:
-  { fetch?: Fetch; authorize?: Authorize; origin?: string } = {}): Promise<OpenedStore> {
-  if (!APP_RE.test(clientId) || !APP_RE.test(clientSecret)) { authorize.close(); throw new SyncStoreError("SYNC_BAD_CLIENT"); }
-  if (!SEGMENT.test(folder) || folder === "." || folder === "..") { authorize.close(); throw new SyncStoreError("SYNC_BAD_PATH"); }
+  { fetch: f = globalThis.fetch.bind(globalThis) as Fetch, authorize, baseURI = globalThis.document?.baseURI ?? "" }:
+  { fetch?: Fetch; authorize?: Authorize; baseURI?: string } = {}): Promise<OpenedStore> {
+  const auth = authorize ?? popupAuthorize();
+  if (!APP_RE.test(clientId) || !APP_RE.test(clientSecret)) { auth.close(); throw new SyncStoreError("SYNC_BAD_CLIENT"); }
+  if (!SEGMENT.test(folder) || folder === "." || folder === "..") { auth.close(); throw new SyncStoreError("SYNC_BAD_PATH"); }
+  const app: ProviderConfig = { clientId, clientSecret };
+  const ff = f as typeof fetch;
+  const withRefresh = (t: Tokens): Tokens & { refresh: string } => { if (!t.refresh) throw new SyncStoreError("SYNC_AUTH_FAILED"); return t as Tokens & { refresh: string }; };
 
-  async function token(form: Record<string, string>): Promise<{ access: string; refresh: string }> {
-    let r: Response;
-    try {
-      r = await f(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ ...form, client_id: clientId, client_secret: clientSecret }).toString() });
-    } catch { throw new SyncStoreError("SYNC_UNREACHABLE"); }
-    const j = await r.json().catch(() => ({})) as Record<string, unknown>;
-    if (r.status === 429) throw new SyncStoreError("SYNC_RATE_LIMITED");
-    if (!r.ok || typeof j.access_token !== "string" || typeof j.refresh_token !== "string") throw new SyncStoreError(j.error === "invalid_client" ? "SYNC_BAD_CLIENT" : "SYNC_AUTH_FAILED");
-    return { access: j.access_token, refresh: j.refresh_token };
-  }
-
-  const verifier = rand(32);
-  const challenge = b64u(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const verifier = randomString(32);
   const state = `w.${rand(16)}`;
-  const redirect = callbackUrl(origin);
-  const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: redirect, state, code_challenge: challenge, code_challenge_method: "S256" });
+  const redirect = callbackUrl(baseURI);
   let back: URLSearchParams;
-  try { back = await authorize.run(`${AUTHORIZE}?${q}`); } finally { authorize.close(); }
+  try { back = await auth.run(authorizeUrl("box", app, redirect, state, await challengeFor(verifier), SCOPE)); } finally { auth.close(); }
   if (back.get("state") !== state) throw new SyncStoreError("SYNC_AUTH_FAILED");
   if (back.get("error")) throw new SyncStoreError("SYNC_AUTH_CANCELLED");
-  let tokens: { access: string; refresh: string } | null = await token({ grant_type: "authorization_code", code: back.get("code") ?? "", redirect_uri: redirect, code_verifier: verifier });
+  let tokens: (Tokens & { refresh: string }) | null;
+  try { tokens = withRefresh(await exchangeCode("box", app, back.get("code") ?? "", verifier, redirect, ff)); } catch (e) { throw syncError(e); }
 
+  // Box refresh tokens are single use: one refresh in flight; concurrent 401s wait for it and retry with its token.
+  let renewing: Promise<void> | null = null;
+  function renew(sent: string): Promise<void> {
+    if (tokens && tokens.access !== sent) return Promise.resolve(); // rotated since this request was sent
+    return (renewing ??= (async () => {
+      await Promise.resolve(); // runs after `renewing` is assigned, so `finally` always clears it
+      const t = tokens;
+      try {
+        if (!t) throw new SyncStoreError("SYNC_SESSION_EXPIRED");
+        const next = withRefresh(await refreshTokens("box", app, t.refresh, redirect, ff));
+        if (tokens !== t) { void revokeToken("box", app, next.refresh, ff); throw new SyncStoreError("SYNC_SESSION_EXPIRED"); } // closed meanwhile
+        tokens = next;
+      } catch (e) { throw syncError(e); }
+      finally { renewing = null; }
+    })());
+  }
   async function api(url: string, init: RequestInit = {}): Promise<Response> {
     for (let again = true; ; again = false) {
+      if (renewing) await renewing.catch(() => {});
       if (!tokens) throw new SyncStoreError("SYNC_SESSION_EXPIRED");
+      const sent = tokens.access;
       let r: Response;
-      try { r = await f(url, { ...init, headers: { ...((init.headers as Record<string, string>) ?? {}), Authorization: `Bearer ${tokens.access}` } }); }
+      // The browser drops Authorization on the cross-origin hop to Box's pre-signed download host.
+      try { r = await f(url, { ...init, headers: { ...((init.headers as Record<string, string>) ?? {}), Authorization: `Bearer ${sent}` },
+        credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) }); }
       catch { throw new SyncStoreError("SYNC_UNREACHABLE"); }
-      if (r.status === 401 && again) { tokens = await token({ grant_type: "refresh_token", refresh_token: tokens.refresh }); continue; }
+      if (!landedOk(r)) throw new SyncStoreError("SYNC_IO");
+      if (r.status === 401 && again) { await renew(sent); continue; }
       if (r.status === 401) throw new SyncStoreError("SYNC_SESSION_EXPIRED");
       if (r.status === 429) throw new SyncStoreError("SYNC_RATE_LIMITED");
       return r;
     }
+  }
+  async function json(r: Response): Promise<unknown> {
+    const { bytes, truncated } = await readCapped(r, LIST_CAP);
+    if (truncated) throw new SyncStoreError("SYNC_TOO_LARGE");
+    try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return {}; }
   }
   const ids = new Map<string, string>(); // folder path below the sync folder ("" = the sync folder) -> Box id
   async function items(id: string): Promise<Entry[] | null> {
@@ -98,14 +128,14 @@ export async function openBoxStore({ clientId, clientSecret, folder }: { clientI
       const r = await api(`${API}/folders/${encodeURIComponent(id)}/items?fields=id,name,type,size&limit=1000&offset=${offset}`);
       if (r.status === 404) return null;
       if (!r.ok) throw new SyncStoreError("SYNC_IO");
-      const e = ((await r.json()) as { entries?: Entry[] }).entries ?? [];
+      const e = ((await json(r)) as { entries?: Entry[] }).entries ?? [];
       out.push(...e);
       if (e.length < 1000) return out;
     }
   }
   async function mkdir(parent: string, name: string): Promise<string> {
     const r = await api(`${API}/folders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, parent: { id: parent } }) });
-    const j = await r.json().catch(() => ({})) as { id?: string; context_info?: { conflicts?: { id?: string } | Array<{ id?: string }> } };
+    const j = await json(r) as { id?: string; context_info?: { conflicts?: { id?: string } | Array<{ id?: string }> } };
     if (r.ok && j.id) return String(j.id);
     const c = j.context_info?.conflicts;
     const id = Array.isArray(c) ? c[0]?.id : c?.id;
@@ -148,11 +178,11 @@ export async function openBoxStore({ clientId, clientSecret, folder }: { clientI
       const file = kids.find((e) => e.type === "file" && e.name === segs[segs.length - 1]);
       if (!file) return null;
       if ((file.size ?? 0) > MAX_FILE_BYTES) throw new SyncStoreError("SYNC_TOO_LARGE");
-      const r = await api(`${API}/files/${encodeURIComponent(file.id)}/content`); // the browser follows Box's redirect and drops the bearer cross-origin
+      const r = await api(`${API}/files/${encodeURIComponent(file.id)}/content`);
       if (r.status === 404) return null;
       if (!r.ok) throw new SyncStoreError("SYNC_IO");
-      const bytes = new Uint8Array(await r.arrayBuffer());
-      if (bytes.length > MAX_FILE_BYTES) throw new SyncStoreError("SYNC_TOO_LARGE");
+      const { bytes, truncated } = await readCapped(r, MAX_FILE_BYTES); // capped while it downloads
+      if (truncated) throw new SyncStoreError("SYNC_TOO_LARGE");
       return bytes;
     },
     put: async (path, bytes, mkdirFrom = Infinity) => {
@@ -164,13 +194,12 @@ export async function openBoxStore({ clientId, clientSecret, folder }: { clientI
       const r = await api(`${UPLOAD}/files/content`, { method: "POST", headers: { "Content-Type": type }, body: body as unknown as BodyInit });
       if (r.ok || r.status === 409) return; // 409: names are unique per write, so this is a retry of a write that landed
       if (r.status === 404) { ids.clear(); throw new SyncStoreError("SYNC_MISSING"); }
-      const j = await r.json().catch(() => ({})) as { code?: string };
+      const j = await json(r).catch(() => ({})) as { code?: string };
       throw new SyncStoreError(j.code === "storage_limit_exceeded" ? "SYNC_QUOTA" : "SYNC_IO");
     },
     async close() {
       const t = tokens; tokens = null;
-      if (t) await f(REVOKE, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, token: t.refresh }).toString() }).catch(() => undefined);
+      if (t) await revokeToken("box", app, t.refresh, ff);
     },
   };
 }

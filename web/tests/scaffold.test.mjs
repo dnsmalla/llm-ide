@@ -29,6 +29,7 @@ test("the CSP allows no inline or remote script; remote connects go only to MEGA
   for (const ws of CSP.match(/ws:\/\/[^ ;]+/g)) assert.match(ws, /^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\*$/);
   const nginx = readFileSync(join(WEB, "../deploy/vps/llm-ide.com.nginx"), "utf8");
   assert.ok(nginx.includes(`connect-src ${dirs["connect-src"].join(" ")};`), "the VPS vhost sends the same connect-src");
+  assert.match(nginx, /location ~ \^\/\(app\/\)\?\(oauth\|box\)-callback\\\.html\$ \{\s*access_log off;/, "neither sign-in callback's code reaches the access log");
   const caddy = readFileSync(join(WEB, "DEPLOY.md"), "utf8");
   assert.ok(caddy.includes(`connect-src 'self' wss: ${REMOTE_CONNECT.join(" ")};`), "the Caddy example lists the same remote hosts");
 });

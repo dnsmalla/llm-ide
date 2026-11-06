@@ -12,7 +12,7 @@ export function createFakeBox({ clientId = 'cid0123456789abcdef', clientSecret =
   const fake = {
     clientId, clientSecret, login, nodes, calls: [], uploads: [], purges: 0, versionDeletes: 0, revoked: [],
     issueCode() { const c = `code${newId()}`; codes.add(c); return c; },
-    grant() { const r = `rt${newId()}`; refresh.add(r); return r; },
+    grant() { const r = `rt-token-${newId()}`; refresh.add(r); return r; },
     expireAccess() { access.clear(); },
     revokeRefresh() { refresh.clear(); },
     failNext(match, status, { headers = {}, body = {} } = {}) { failures.push({ match, status, headers, body }); },
@@ -45,7 +45,7 @@ export function createFakeBox({ clientId = 'cid0123456789abcdef', clientSecret =
   const header = (init, name) => new Headers(init.headers ?? {}).get(name);
   const form = (init) => new URLSearchParams(typeof init.body === 'string' ? init.body : Buffer.from(init.body ?? '').toString());
   function tokens() {
-    const a = `at${newId()}`; const r = `rt${newId()}`;
+    const a = `at-token-${newId()}`; const r = `rt-token-${newId()}`; // Box-like length (SP7 parseTokens wants >= 8)
     access.add(a); refresh.add(r);
     return json(200, { access_token: a, refresh_token: r, expires_in: 3600, token_type: 'bearer' });
   }
