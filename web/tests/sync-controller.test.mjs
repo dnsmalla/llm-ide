@@ -14,10 +14,10 @@ const EMAIL = 'sync@example.com';
 const flush = () => new Promise((r) => setImmediate(r));
 const kinds = (tag = 'a') => ({ chats: { items: [{ id: 'c1', title: `Chat ${tag}`, updatedAt: T, messages: [] }] }, usage: { items: [{ providers: [] }] } });
 
-function rig(st = 'mega:llmide-sync') {
+function rig(st = 'mega:llmide-sync', box = {}) {
   const store = createTamperStore();
-  const desk = createFakeDesktop({ store, st });
-  const r = { store, desk, st, clock: T, timers: [], net: [], keystore: memoryKeyStore(), link: null, gets: 0, closed: 0, failOpen: null, dev: null, sasSeen: null };
+  const desk = createFakeDesktop({ store, st, bi: box.clientId, bs: box.clientSecret });
+  const r = { store, desk, st, clock: T, timers: [], net: [], keystore: memoryKeyStore(), link: null, gets: 0, closed: 0, failOpen: null, dev: null, sasSeen: null, boxOpened: [] };
   r.c = createSyncController({
     keystore: r.keystore, now: () => r.clock,
     sleep: async (ms) => { r.clock += ms; if (!r.desk.lastSas) await r.desk.take(r.clock); else if (!r.dev) r.dev = await r.desk.confirm(r.clock); },
@@ -31,6 +31,11 @@ function rig(st = 'mega:llmide-sync') {
       assert.equal(st, r.st);
       if (r.failOpen) throw r.failOpen;
       if (st.startsWith('mega:') && (email !== EMAIL || password !== PW)) throw new SyncStoreError('SYNC_AUTH_FAILED');
+      return { get: (p) => { r.gets++; return store.get(p); }, put: (p, b, m) => store.put(p, b, m), close: async () => { r.closed++; } };
+    },
+    openBox: async (cfg) => {
+      r.boxOpened.push(cfg);
+      if (r.failOpen) throw r.failOpen;
       return { get: (p) => { r.gets++; return store.get(p); }, put: (p, b, m) => store.put(p, b, m), close: async () => { r.closed++; } };
     },
   });
@@ -234,7 +239,7 @@ test('a failed own-server re-pair on a MEGA device keeps the login form', async 
   assert.equal(r.c.getState().login, true, 'a MEGA device never shows the no-login Connect button');
 });
 
-test('a Box pairing link opens Box (not MEGA), stores the Box app on the device', async () => {
+test('a Box pairing link opens Box (not MEGA), stores the Box app on the device, and Unlock reopens Box', async () => {
   const opened = [];
   const fakeStore = { async get() { return null; }, async put() {}, async close() {} };
   const link = `https://pwa.example/#pair=${encodeURIComponent(`sv=1&sid=${'A'.repeat(22)}&sfp=${'B'.repeat(43)}&dir=${'C'.repeat(22)}&slot=${'D'.repeat(22)}&es=${'E'.repeat(22)}&st=box%3Allmide-sync&bi=cid0123456789abcdef&bs=csec0123456789abcdef`)}`;
@@ -246,4 +251,46 @@ test('a Box pairing link opens Box (not MEGA), stores the Box app on the device'
   assert.equal(c.getState().store, 'box');
   await c.pair({ email: '', password: '', name: 'Browser' });
   assert.deepEqual(opened[0], { clientId: 'cid0123456789abcdef', clientSecret: 'csec0123456789abcdef', folder: 'llmide-sync' });
+});
+
+const BOX_APP = { clientId: 'cid0123456789abcdef', clientSecret: 'csec0123456789abcdef' };
+async function boxReady() {
+  const r = rig('box:llmide-sync', BOX_APP);
+  r.link = await r.desk.open(T);
+  await r.c.start();
+  assert.equal(r.c.getState().store, 'box');
+  await r.c.pair({ email: '', password: '', name: 'Laptop browser' });
+  assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+  return r;
+}
+
+test('Box: Unlock reopens Box with the stored app, and every error reads as Box, not MEGA', async () => {
+  const r = await boxReady();
+  assert.deepEqual((await r.keystore.load()).box, BOX_APP);
+  await r.c.lock();
+  r.failOpen = new SyncStoreError('SYNC_POPUP_BLOCKED');
+  await r.c.unlock({ email: '', password: '' });
+  assert.match(r.c.getState().error, /Allow pop-ups/);
+  r.failOpen = null;
+  await r.c.unlock({ email: '', password: '' });
+  assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+  assert.deepEqual(r.boxOpened.at(-1), { ...BOX_APP, folder: 'llmide-sync' });
+  const get = r.store.get; r.store.get = async () => { throw new SyncStoreError('SYNC_SESSION_EXPIRED'); };
+  await r.c.refresh();
+  r.store.get = get;
+  assert.equal(r.c.getState().phase, 'locked');
+  assert.equal(r.c.getState().error, 'The Box session ended. Connect Box again.', 'the lock text names Box, not the MEGA password');
+});
+
+test('Box: a box: device without its Box app never falls through to MEGA', async () => {
+  const r = await boxReady();
+  const rec = await r.keystore.load(); delete rec.box;
+  let mega = 0;
+  const c = createSyncController({ keystore: r.keystore, takePairLink: () => null, onNetwork: () => () => {}, online: () => true,
+    setTimer: () => null, clearTimer: () => {}, now: () => r.clock,
+    openStore: async () => { mega++; throw new Error('MEGA must not be used'); }, openBox: async () => { throw new Error('no app to open'); } });
+  await c.start();
+  await c.unlock({ email: '', password: '' });
+  assert.equal(mega, 0);
+  assert.match(c.getState().error, /Box refused the app in this pairing link/);
 });

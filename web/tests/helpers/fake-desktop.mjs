@@ -6,7 +6,7 @@ import * as E from '../../../extension/core/sync-enroll.mjs';
 
 const bytesOf = (env) => Buffer.from(JSON.stringify(env));
 
-export function createFakeDesktop({ store, userId = 'user-AAAAAAAAAAAAAAAAAAAAAA', tier = 'web', webOrigin = 'https://llm-ide.com', st = 'memory:' } = {}) {
+export function createFakeDesktop({ store, userId = 'user-AAAAAAAAAAAAAAAAAAAAAA', tier = 'web', webOrigin = 'https://llm-ide.com', st = 'memory:', bi, bs } = {}) {
   const signing = S.newSigningKey();
   const d = { store, userId, sid: E.newId22(), epoch: 1, root: randomBytes(32), seq: 1000, signing, prevRoot: null, devices: new Map(), lastSas: null };
   const next = () => ++d.seq;
@@ -16,7 +16,7 @@ export function createFakeDesktop({ store, userId = 'user-AAAAAAAAAAAAAAAAAAAAAA
   return Object.assign(d, {
     async open(now = Date.now()) {
       const es = randomBytes(16);
-      const pair = { sid: d.sid, sfp: S.spkiFingerprint(signing.spki), dir: E.newId22(), slot: E.newId22(), es: es.toString('base64url'), st };
+      const pair = { sid: d.sid, sfp: S.spkiFingerprint(signing.spki), dir: E.newId22(), slot: E.newId22(), es: es.toString('base64url'), st, bi, bs };
       pending = { pair, keys: E.enrollKeys(es, pair.sid, pair.slot), claim: null };
       d.lastSas = null;
       await store.put(`${d.sid}/d/${pair.dir}/key.bin`, signing.spki);

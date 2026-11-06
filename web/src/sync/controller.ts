@@ -1,13 +1,13 @@
 // Sync tier controller (design 6, 4.3-4.4, 12; no React): pair this browser, open the sync storage for this session
-// (MEGA with a password typed each session, or the user's own server with no login), read the latest verified
-// snapshot, queue chat prompts and collect replies. The MEGA password reaches only the login call;
-// nothing decrypted is persisted. Polls every 30 s while unlocked, online and not paused (desktop live over Host API).
+// (MEGA with a password typed each session, Box with a sign-in each session, or the user's own server with no login),
+// read the latest verified snapshot, queue chat prompts and collect replies. The MEGA password reaches only the login
+// call; Box tokens live only in the open store; nothing decrypted is persisted. Polls every 30 s while unlocked, online and not paused (desktop live over Host API).
 import { parsePair, type Pair } from "./enroll.ts";
 import { SyncCryptoError } from "./envelope.ts";
 import { prepareClaim, putClaim, readAck, readFirstWrap, readReply, readSnapshot, sendRequest, type BlobCache, type Enrolling } from "./device.ts";
 import { indexedDbKeyStore, memoryKeyStore, type KeyStore, type LinkedDevice } from "./keystore.ts";
 import type { Snapshot } from "./kinds.ts";
-import { openMegaStore, type OpenedStore } from "./mega-store.ts";
+import { openMegaStore, SyncStoreError, type OpenedStore } from "./mega-store.ts";
 import { openHttpsStore, WEB_HOST_RE } from "./https-store.ts";
 import { openBoxStore } from "./box-store.ts";
 import { takePairLink } from "./pair-fragment.ts";
@@ -64,12 +64,24 @@ export const TEXT: Record<string, string> = {
   bad_name: "The browser name is 1 to 64 characters.",
   bad_text: "A prompt is 1 to 4,000 characters.",
 };
+const BOX_TEXT: Record<string, string> = {
+  SYNC_AUTH_FAILED: "Box refused the sign-in. Connect Box again.",
+  SYNC_SESSION_EXPIRED: "The Box session ended. Connect Box again.",
+  SYNC_RATE_LIMITED: "Box asked us to slow down. Trying again later.",
+  SYNC_QUOTA: "The Box account is out of storage.",
+  SYNC_UNREACHABLE: "Box is not reachable. Check the network.",
+  SYNC_MISSING: "The sync folder was not found in this Box account. Sign in to the Box account the desktop uses.",
+  SYNC_BAD_CLIENT: "Box refused the app in this pairing link. Show a new code on the desktop.",
+  SYNC_POPUP_BLOCKED: "Allow pop-ups for this site, then try again: Box signs in in a small window.",
+  SYNC_AUTH_CANCELLED: "Box sign-in was cancelled.",
+};
 const codeOf = (e: unknown): string => (e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "");
-export function textOf(e: unknown): string {
+export function textOf(e: unknown, kind: "mega" | "box" = "mega"): string {
   const code = codeOf(e);
+  if (kind === "box" && BOX_TEXT[code]) return BOX_TEXT[code];
   if (TEXT[code]) return TEXT[code];
   if (e instanceof SyncCryptoError) return `Storage returned data that failed verification (${code}). Nothing from it was used.`;
-  if (code.startsWith("SYNC_")) return `Sync storage operation failed (${code}).`;
+  if (code.startsWith("SYNC_")) return `${kind === "box" ? "Box" : "Sync storage"} operation failed (${code}).`;
   return "Something went wrong.";
 }
 export function folderOf(st: string): string {
@@ -125,6 +137,8 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
   const texts = new Map<string, string>();
   const cache: BlobCache = new Map();
 
+  const kindNow = () => storeKindOf(pair?.st ?? device?.st ?? "mega:x");
+  const t = (e: unknown) => textOf(e, kindNow());
   const pendingView = (): QueuedPrompt[] => (device?.pending ?? []).map((p) => ({ ...p, text: texts.get(p.requestId) ?? null }));
   const clearTimer = () => { if (timer !== null) d.clearTimer(timer); timer = null; };
   const schedule = () => {
@@ -157,7 +171,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null, store: storeKindOf(p.st), login: needsLogin(p.st),
         notice: device ? "Pairing again replaces this browser's current sync link." : null });
       return true;
-    } catch (e) { set({ error: textOf(e) }); return false; }
+    } catch (e) { set({ error: t(e) }); return false; }
   }
 
   async function pairNow(i: { email: string; password: string; name: string }) {
@@ -188,7 +202,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     } catch (e) {
       if (s) await s.close().catch(() => {});
       if (run !== pairRun) return;
-      set({ busy: false, pairStep: null, sas: null, error: textOf(e), phase: pair ? "pairing" : device ? "locked" : "none", login: pair ? needsLogin(pair.st) : device ? needsLogin(device.st) : true });
+      set({ busy: false, pairStep: null, sas: null, error: textOf(e, storeKindOf(p.st)), phase: pair ? "pairing" : device ? "locked" : "none", login: pair ? needsLogin(pair.st) : device ? needsLogin(device.st) : true });
     }
   }
 
@@ -196,7 +210,8 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     if (!device || state.busy) return;
     set({ busy: true, error: null });
     try {
-      const s = storeKindOf(device.st) === "box" && device.box
+      if (storeKindOf(device.st) === "box" && !device.box) throw new SyncStoreError("SYNC_BAD_CLIENT"); // never fall through to MEGA
+      const s = device.box && storeKindOf(device.st) === "box"
         ? await d.openBox({ ...device.box, folder: folderOf(device.st) })
         : await d.openStore({ st: device.st, email: i.email, password: i.password });
       await closeStore();
@@ -205,7 +220,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       backoff = POLL_MS;
       set({ phase: "ready", busy: false, email: i.email, login: needsLogin(device.st) });
       await refresh();
-    } catch (e) { set({ busy: false, error: textOf(e) }); }
+    } catch (e) { set({ busy: false, error: t(e) }); }
   }
 
   async function refresh() {
@@ -232,17 +247,17 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       await save();
       backoff = POLL_MS;
       const shown = snap ?? state.snapshot;
-      set({ busy: false, snapshot: shown, stale: !!shown && d.now() > shown.validUntil, checkedAt: d.now(), error: problem ? textOf(problem) : null,
+      set({ busy: false, snapshot: shown, stale: !!shown && d.now() > shown.validUntil, checkedAt: d.now(), error: problem ? t(problem) : null,
         notice: shown ? null : "Waiting for the desktop's first snapshot.", pending: pendingView(), answered: [...answered, ...state.answered].slice(0, MAX_ANSWERED) });
     } catch (e) {
       const code = codeOf(e);
       await save();
       if (code === "removed") { await closeStore(); set({ busy: false, phase: "removed", snapshot: null, error: null }); return; }
       if (code === "SYNC_SESSION_EXPIRED" || code === "SYNC_AUTH_FAILED") {
-        await closeStore(); set({ busy: false, phase: "locked", snapshot: null, error: TEXT.SYNC_SESSION_EXPIRED }); return;
+        await closeStore(); set({ busy: false, phase: "locked", snapshot: null, error: t({ code: "SYNC_SESSION_EXPIRED" }) }); return;
       }
       if (code.startsWith("SYNC_")) backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-      set({ busy: false, error: textOf(e), checkedAt: d.now(), pending: pendingView() });
+      set({ busy: false, error: t(e), checkedAt: d.now(), pending: pendingView() });
     } finally { refreshing = false; schedule(); }
   }
 
@@ -256,7 +271,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       await save();
       set({ pending: pendingView(), error: null, notice: "Queued. It runs when the desktop is back." });
       return true;
-    } catch (e) { set({ error: textOf(e) }); return false; }
+    } catch (e) { set({ error: t(e) }); return false; }
   }
 
   return {
