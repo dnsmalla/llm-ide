@@ -35,6 +35,9 @@ use crate::proc_tree::ManagedChild;
 /// The user's live server. Only probed, never spawned over, never killed.
 const LIVE_PORT: u16 = 3456;
 /// Ports tried, in order, for the server this app spawns (a busy one is skipped).
+/// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
+/// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note.
+const SPAWNED_CORE_FLAGS: [(&str, &str); 3] = [("LLMIDE_ENGINE_PREWARM", "0"), ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"), ("LLMIDE_LIVE_ACK", "1")];
 const SPAWN_PORTS: [u16; 3] = [3457, 3458, 3459];
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -1168,9 +1171,8 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_JWT_SECRET", &secrets.jwt_secret)
         .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
         // Host-signed approvals (see host_approval.rs): the spawned core may verify them; never an adopted one.
-        .env("LLMIDE_HOST_APPROVAL_KEY", &approval_key)
-        .env("LLMIDE_ENGINE_PREWARM", "0")
-        .env("LLMIDE_BACKUP_INTERVAL_HOURS", "0");
+        .env("LLMIDE_HOST_APPROVAL_KEY", &approval_key);
+    for (k, v) in SPAWNED_CORE_FLAGS { cmd.env(k, v); }
     // Host prefs fixed at this launch (token switches default off; only the exact value `on`).
     let host_features = std::env::var("LLMIDE_FEATURES").ok();
     for (k, v) in crate::prefs::core_env_pairs(&p, host_features.as_deref()) {
@@ -1989,5 +1991,12 @@ process.on('SIGTERM', () => process.exit(0));
         // SAFETY: existence check only.
         assert!(all_dead(&[pid]), "core survived shutdown");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_spawned_core_holds_extension_captures_for_the_archivist() {
+        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_LIVE_ACK", "1")));
+        let host = vec![("LLMIDE_LIVE_ACK".to_string(), "0".to_string())];
+        assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
     }
 }

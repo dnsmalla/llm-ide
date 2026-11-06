@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Mutex, Once};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -185,6 +186,48 @@ impl CaptureRemote for HttpRemote {
     }
     fn ack(&self, id: &str, note_key: &str, hash: &str, lines: usize) -> Result<(), RemoteError> {
         self.call("POST", &format!("/kb/live/{id}/ack"), Some(&json!({ "noteKey": note_key, "hash": hash, "lines": lines })), CALL).map(|_| ())
+    }
+}
+type Bound = (crate::chat_cmds::CoreProvider, String);
+
+/// The signed-in session the archivist works for. The generation moves on every bind and unbind, so a pass started
+/// for one session never writes for the next one. The token lives in memory only.
+pub struct Slot { inner: Mutex<(u64, Option<Bound>)> }
+impl Slot {
+    pub const fn new() -> Self { Self { inner: Mutex::new((0, None)) } }
+    fn lock(&self) -> std::sync::MutexGuard<'_, (u64, Option<Bound>)> { self.inner.lock().unwrap_or_else(|e| e.into_inner()) }
+    pub fn bind(&self, core: crate::chat_cmds::CoreProvider, token: &str) { let mut g = self.lock(); g.0 += 1; g.1 = Some((core, token.to_string())); }
+    pub fn unbind(&self) { let mut g = self.lock(); g.0 += 1; g.1 = None; }
+    pub fn generation(&self) -> u64 { self.lock().0 }
+    /// The remote for the bound session, with the core URL re-resolved now (a restarted core may be on another port);
+    /// `None` when signed out or when the core is not the verified one this app spawned.
+    pub fn remote(&self) -> Option<(u64, HttpRemote)> {
+        let (gen, core, token) = { let g = self.lock(); let (c, t) = g.1.as_ref()?; (g.0, c.clone(), t.clone()) };
+        let url = core()?;
+        Some((gen, HttpRemote::new(&url, &token).ok()?))
+    }
+}
+static SLOT: Slot = Slot::new();
+#[cfg_attr(test, allow(dead_code))] static STARTED: Once = Once::new();
+/// Called by `ChatService::bind` with the session it just verified (`GET /auth/me`). Starts the thread once.
+pub fn bind(core: crate::chat_cmds::CoreProvider, token: &str) {
+    SLOT.bind(core, token);
+    #[cfg(not(test))] STARTED.call_once(|| { let _ = std::thread::Builder::new().name("llmide-archivist".into()).spawn(run_loop); });
+}
+/// Called by `ChatService::unbind` (sign-out): the token leaves the archivist too.
+pub fn unbind() { SLOT.unbind(); }
+#[cfg_attr(test, allow(dead_code))]
+fn run_loop() {
+    let mut archivist = Archivist::default();
+    loop {
+        std::thread::sleep(TICK);
+        let Some((gen, remote)) = SLOT.remote() else { continue };
+        let Ok(root) = crate::notes_fs::current_root() else { continue };
+        if let Ok(r) = archivist.tick(&remote, &root, &|| SLOT.generation() == gen) {
+            if r.archived + r.reused + r.failed > 0 {
+                eprintln!("capture archivist: archived {}, reused {}, failed {}, waiting {}", r.archived, r.reused, r.failed, r.waiting);
+            }
+        }
     }
 }
 
@@ -438,6 +481,16 @@ mod tests {
         assert_eq!(md_files(&root), 1, "the note stays; the next pass reuses it");
         let (url, _) = serve(vec![("GET", "/kb/live/unacked".into(), 401, json!({"error": {"code": "UNAUTHORIZED"}}))]);
         assert_eq!(Archivist::default().tick(&HttpRemote::new(&url, "tok").unwrap(), &root, &|| true), Err(RemoteError::Unauthorized));
+    }
+
+
+    #[test]
+    fn the_slot_binds_rebinds_and_forgets() {
+        let s = Slot::new(); assert!(s.remote().is_none());
+        let core: crate::chat_cmds::CoreProvider = Arc::new(|| Some("http://127.0.0.1:1".to_string()));
+        s.bind(core.clone(), "tok-1"); let (g1, _) = s.remote().unwrap(); s.bind(core, "tok-2"); let (g2, _) = s.remote().unwrap();
+        assert!(g2 > g1); s.unbind(); assert!(s.remote().is_none()); assert!(s.generation() > g2);
+        let unverified: crate::chat_cmds::CoreProvider = Arc::new(|| None); s.bind(unverified, "tok"); assert!(s.remote().is_none());
     }
 
 }

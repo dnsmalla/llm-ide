@@ -127,6 +127,8 @@ impl ChatService {
             let mut b = lock(&self.0.bound);
             *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone(), shared_with_mac: shared });
         }
+        // The same verified session archives finished extension captures (capture_archivist.rs).
+        crate::capture_archivist::bind(core.clone(), token);
         let first = lock(&self.0.swept).insert(user_id.clone());
         if first {
             let svc = self.clone();
@@ -148,6 +150,7 @@ impl ChatService {
     /// Forgets the session (sign-out). The token leaves host memory.
     pub fn unbind(&self) {
         *lock(&self.0.bound) = None;
+        crate::capture_archivist::unbind();
     }
 
     /// The quit run (once per process). Returns what it did, `None` when no session was bound or it
