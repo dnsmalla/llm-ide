@@ -44,7 +44,7 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
     return { url, tokens, connection, controller: createChatController(connection), read: createReadController(connection), compose: createComposeController(connection) };
   };
-  const shut = (s: Session) => { s.controller.dispose(); s.read.dispose(); s.connection.close(); };
+  const shut = (s: Session) => { s.controller.dispose(); s.read.dispose(); s.compose.dispose(); s.connection.close(); };
   const adopt = (s: Session | null, notice: string | null = null) => {
     offState?.(); offState = null;
     if (live && live !== s) shut(live);

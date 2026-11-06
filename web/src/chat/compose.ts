@@ -13,6 +13,23 @@ export interface ComposeState {
   attachments: readonly WebAttachment[]; error: string | null;
 }
 export const initialComposeState: ComposeState = { modes: [], models: [], mode: "auto", model: null, attachments: [], error: null };
+const KNOWN_MODES: readonly string[] = ["auto", "ask", "plan", "assist_plan", "review", "document"];
+const MAX_MODELS = 50;
+/** The host re-checks every pick, but a hostile or buggy reply must not reach the UI as-is: keep only well-formed entries. */
+export function decodeOptions(r: unknown): { modes: ComposeMode[]; models: ComposeModels } {
+  const o = (r && typeof r === "object" ? r : {}) as { modes?: unknown; models?: unknown };
+  const modes = Array.isArray(o.modes) ? o.modes.filter((m): m is ComposeMode => typeof m === "string" && KNOWN_MODES.includes(m)) : [];
+  const models: ComposeModels = [];
+  for (const m of Array.isArray(o.models) ? o.models : []) {
+    const id = m?.model;
+    const label = m?.label;
+    if (typeof id !== "string" || !id || id.length > 200) continue;
+    if (label !== undefined && typeof label !== "string") continue;
+    models.push(label === undefined ? { model: id } : { model: id, label });
+    if (models.length === MAX_MODELS) break;
+  }
+  return { modes, models };
+}
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.slice(0, 500) : "Something went wrong.");
 
 export function createComposeController(link: HostLink) {
@@ -20,12 +37,19 @@ export function createComposeController(link: HostLink) {
   const subs = new Set<() => void>();
   const set = (p: Partial<ComposeState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
   const can = () => link.capabilities.has("compose");
+  // A slow chat.options reply must not overwrite the answer to a newer request (or one that lands after dispose).
+  let seq = 0;
   const load = async () => {
+    const mine = ++seq;
     if (!can()) return set({ modes: [], models: [], mode: "auto", model: null });
     try {
-      const r = await link.send("chat.options", {}).done;
+      const r = decodeOptions(await link.send("chat.options", {}).done);
+      if (mine !== seq) return;
       set({ modes: r.modes, models: r.models, error: null, mode: r.modes.includes(state.mode) ? state.mode : "auto", model: state.model && r.models.some((m) => m.model === state.model) ? state.model : null });
-    } catch (e) { set({ modes: [], models: [], mode: "auto", model: null, error: messageOf(e) }); }
+    } catch (e) {
+      if (mine !== seq) return;
+      set({ modes: [], models: [], mode: "auto", model: null, error: messageOf(e) });
+    }
   };
   const offs = [link.onResync(() => { void load(); }), link.onEvent((e) => { if (e.command === "host.capabilities") void load(); })];
   return {
@@ -37,10 +61,10 @@ export function createComposeController(link: HostLink) {
     async addFiles(files: Iterable<FileLike>) {
       let list = [...state.attachments]; let error: string | null = null;
       for (const f of files) {
+        if (list.length >= ATTACH_LIMITS.maxFiles) { error = "At most 10 files per message."; break; }
         const used = list.reduce((n, a) => n + a.text.length, 0);
         const r = await readTextAttachment(f, used);
         if (!r.ok) { error = r.reason; continue; }
-        if (list.length >= ATTACH_LIMITS.maxFiles) { error = "At most 10 files per message."; break; }
         list = [...list, r.attachment];
       }
       set({ attachments: list, error });
@@ -49,8 +73,10 @@ export function createComposeController(link: HostLink) {
     extras(): SendExtras {
       return { ...(can() && state.mode !== "auto" ? { mode: state.mode } : {}), ...(can() && state.model ? { model: state.model } : {}), ...(state.attachments.length ? { attachments: state.attachments.map(({ name, text }) => ({ name, text })) } : {}) };
     },
+    /** Drops only the attachments that were sent; ones added while the turn was starting stay. */
+    removeSent(sent: readonly WebAttachment[]) { set({ attachments: state.attachments.filter((a) => !sent.includes(a)), error: null }); },
     clearAttachments() { set({ attachments: [], error: null }); },
-    dispose() { for (const off of offs) off(); subs.clear(); },
+    dispose() { seq += 1; for (const off of offs) off(); subs.clear(); },
   };
 }
 export type ComposeController = ReturnType<typeof createComposeController>;

@@ -25,10 +25,39 @@ test("attachments: capped at 10, refused files show a reason, remove and clear w
   const c = createComposeController(fakeLink({ "chat.options": OPTIONS }));
   await c.addFiles(Array.from({ length: 12 }, (_, i) => file(`t${i}`, `f${i}.md`)));
   assert.equal(c.getState().attachments.length, 10); assert.match(c.getState().error, /10 files/);
-  await c.addFiles([new File(["x"], "a.png", { type: "image/png" })]); assert.match(c.getState().error, /images/);
+  c.remove(9); await c.addFiles([new File(["x"], "a.png", { type: "image/png" })]); assert.match(c.getState().error, /images/);
   c.remove(0); assert.equal(c.getState().attachments[0].name, "f1.md"); c.clearAttachments(); assert.deepEqual(c.getState().attachments, []); assert.equal(c.getState().error, null);
 });
 test("an options error is shown and the picks fall back to the defaults", async () => {
   const c = createComposeController(fakeLink({ "chat.options": new Error("This device was not granted compose — pair again to grant it.") }));
   await c.load(); assert.match(c.getState().error, /pair again/); assert.equal(c.getState().mode, initialComposeState.mode);
+});
+test("a hostile chat.options reply is decoded strictly: unknown modes, bad labels and model-less entries are dropped", async () => {
+  const hostile = { modes: ["auto", "execute", 7, "plan"], models: [{ model: "ok", label: 5 }, { label: "no model" }, { model: "x".repeat(201) }, null, { model: "good", label: "Good" }, { model: "bare" }] };
+  const c = createComposeController(fakeLink({ "chat.options": hostile })); await c.load();
+  assert.deepEqual(c.getState().modes, ["auto", "plan"]);
+  assert.deepEqual(c.getState().models, [{ model: "good", label: "Good" }, { model: "bare" }]);
+  const bad = createComposeController(fakeLink({ "chat.options": "nope" })); await bad.load();
+  assert.deepEqual([bad.getState().modes, bad.getState().models], [[], []]);
+});
+test("a stale chat.options reply never overwrites a newer one, and nothing lands after dispose", async () => {
+  const replies = []; const link = fakeLink({ "chat.options": OPTIONS });
+  link.send = (command) => ({ id: "c", done: new Promise((res) => replies.push(res)) });
+  const c = createComposeController(link); const a = c.load(); const b = c.load();
+  replies[1]({ modes: ["auto", "plan"], models: [] }); await b;
+  replies[0]({ modes: ["auto", "ask"], models: [] }); await a;
+  assert.deepEqual(c.getState().modes, ["auto", "plan"]);
+  const d = c.load(); c.dispose(); replies[2](OPTIONS); await d;
+  assert.deepEqual(c.getState().modes, ["auto", "plan"]);
+});
+test("the 10-file cap is checked before a file is read", async () => {
+  const c = createComposeController(fakeLink({ "chat.options": OPTIONS }));
+  await c.addFiles(Array.from({ length: 10 }, (_, i) => file(`t${i}`, `f${i}.md`)));
+  let read = false; const spy = { name: "x.md", type: "text/markdown", size: 1, slice() { read = true; return { text: async () => "x" }; } };
+  await c.addFiles([spy]); assert.equal(read, false); assert.match(c.getState().error, /10 files/);
+});
+test("removeSent drops only the attachments that were sent", async () => {
+  const c = createComposeController(fakeLink({ "chat.options": OPTIONS })); await c.addFiles([file("1", "a.md")]);
+  const sent = c.getState().attachments; await c.addFiles([file("2", "b.md")]); c.removeSent(sent);
+  assert.deepEqual(c.getState().attachments.map((a) => a.name), ["b.md"]);
 });

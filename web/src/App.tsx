@@ -26,7 +26,10 @@ function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionS
   const cs = useSyncExternalStore(compose.subscribe, compose.getState, compose.getState);
   const capabilities = state.capabilities ?? c.capabilities;
   const canCompose = capabilities.has("compose");
-  const send = (t: string) => void controller.send(t, compose.extras()).then((ok) => { if (ok) compose.clearAttachments(); });
+  const send = (t: string) => {
+    const sent = compose.getState().attachments;
+    void controller.send(t, compose.extras()).then((ok) => { if (ok) compose.removeSent(sent); });
+  };
   const newChat = () => void controller.newChat().then((ok) => { if (ok) void read.refresh(); });
   return (
     <div className="web-shell">

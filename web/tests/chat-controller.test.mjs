@@ -142,3 +142,13 @@ test("newChat starts a fresh phone chat and empties the view; refused during a t
   assert.equal(link.calls.at(-1).command, "chat.new");
   assert.deepEqual(chat.getState().messages, []);
 });
+
+test("a frame over 1 MiB (attachments included) is refused up front with a clear notice", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true } });
+  const chat = createChatController(link);
+  // Control characters escape to 6 bytes each in JSON: 200,000 characters stay within the schema but not the frame.
+  const attachments = [{ name: "a.log", text: "\u0001".repeat(100_000) }, { name: "b.log", text: "\u0001".repeat(100_000) }];
+  assert.equal(await chat.send("hi", { attachments }), false);
+  assert.equal(link.calls.length, 0);
+  assert.match(chat.getState().notice, /1 MiB/);
+});

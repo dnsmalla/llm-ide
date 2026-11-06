@@ -1,9 +1,11 @@
 // Binds a HostLink (the connection, or a fake in tests) to the chat reducer. No React here.
 import type { SendExtras } from "./compose.ts";
 import type { HostLink } from "../host-api/connection.ts";
+import { HOST_API_LIMITS } from "../host-api/types.generated.ts";
 import { initialChatState, reduce, type ChatAction, type ChatState } from "./store.ts";
 
 export const MAX_SEND_CHARS = 100_000; // chat.send.text maxLength
+const FRAME_OVERHEAD_BYTES = 1024; // the envelope around the payload: version, id, type, command, ts
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.slice(0, 500) : "Something went wrong.");
 
 export function createChatController(link: HostLink, { historyLimit = 200 }: { historyLimit?: number } = {}) {
@@ -54,7 +56,13 @@ export function createChatController(link: HostLink, { historyLimit = 200 }: { h
       const t = text.trim();
       if (!t || state.turn) return false;
       if (t.length > MAX_SEND_CHARS) { dispatch({ type: "notice", text: "Keep a message under 100,000 characters." }); return false; }
-      const { id, done } = link.send("chat.send", { text: t, ...extra });
+      const payload = { text: t, ...extra };
+      // The connection refuses an oversize frame too, but only after the line is shown as sent; say it up front.
+      if (new TextEncoder().encode(JSON.stringify(payload)).length + FRAME_OVERHEAD_BYTES > HOST_API_LIMITS.maxFrameBytes) {
+        dispatch({ type: "notice", text: "This message with its attachments is larger than 1 MiB. Remove a file or shorten it." });
+        return false;
+      }
+      const { id, done } = link.send("chat.send", payload);
       dispatch({ type: "sent", commandId: id, text: t });
       try {
         const r = await done;
