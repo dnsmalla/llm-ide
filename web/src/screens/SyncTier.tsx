@@ -26,12 +26,16 @@ export const REPLY_TEXT: Record<string, string> = {
 
 function Frame({ children, hostPaired, onSources }: { children: ReactNode; hostPaired: boolean; onSources?: () => void }) {
   return (
-    <main className="web-app">
-      <header className="web-header">
-        <h1>LLM-IDE · offline sync</h1>
-        <span className="chat-spacer" />
-        {hostPaired && <span className="chat-muted">Desktop not reachable</span>}
-        {onSources && <button type="button" onClick={onSources}>Documents and code</button>}
+    <main className="web-app sync-app">
+      <header className="sync-topbar">
+        <div className="sync-brand">
+          <span className="sync-brand-mark" aria-hidden="true" />
+          <div><h1>Offline sync</h1><p>LLM-IDE · web companion</p></div>
+        </div>
+        <div className="sync-top-actions">
+          {hostPaired && <span className="sync-chip" data-tone="muted">Desktop not reachable</span>}
+          {onSources && <button type="button" className="sync-ghost" onClick={onSources}>Documents and code</button>}
+        </div>
       </header>
       {children}
     </main>
@@ -168,19 +172,27 @@ function ReadyView({ state, sync }: { state: SyncState; sync: Actions }) {
   const read = snapshotReadState(snap, openId);
   return (
     <>
-      <p role="status" aria-live="polite">{snap ? `Desktop last seen ${when(snap.generatedAt)}` : "No snapshot yet."}{state.checkedAt ? ` · checked ${when(state.checkedAt)}` : ""}</p>
+      <section className="sync-hero" aria-labelledby="sync-hero-title">
+        <div className="sync-hero-copy">
+          <span className="sync-chip" data-tone={state.online ? "live" : "muted"}><i aria-hidden="true" />{state.online ? "Connected" : "Offline"}</span>
+          <h2 id="sync-hero-title">Your desktop, in this browser</h2>
+          <p role="status" aria-live="polite">{snap ? `Desktop last seen ${when(snap.generatedAt)}` : "No snapshot yet."}{state.checkedAt ? ` · checked ${when(state.checkedAt)}` : ""}</p>
+        </div>
+        <div className="sync-hero-actions">
+          <button type="button" className="sync-primary" onClick={() => void sync.refresh()} disabled={state.busy || !state.online}>{state.busy ? "Checking…" : "Check now"}</button>
+          <button type="button" className="sync-ghost" onClick={() => void sync.lock()}>Lock</button>
+          <button type="button" className="sync-ghost sync-danger" onClick={() => void sync.forget()}>Forget browser</button>
+        </div>
+      </section>
       {snap && state.stale && <StatusBanner severity="warning" message={`Desktop offline or storage withholding updates. This snapshot was due for renewal at ${when(snap.validUntil)}.`} />}
       {!state.online && <StatusBanner severity="info" message="You are offline. Showing what was loaded in this session." />}
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       {state.error && <StatusBanner severity="error" message={state.error} />}
-      <div className="web-actions">
-        <button type="button" onClick={() => void sync.refresh()} disabled={state.busy || !state.online}>Check now</button>
-        <button type="button" onClick={() => void sync.lock()}>Lock</button>
-        <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
-      </div>
-      <div className="web-shell">
-        <ReadPanel capabilities={READ} state={read} onOpen={(id) => setOpenId(id)} onOlder={() => {}} onClose={() => setOpenId(null)} onMore={() => {}} />
-        {!read.open && <Inbox state={state} sync={sync} />}
+      <div className="sync-grid">
+        <section className="sync-panel sync-panel-main" aria-label="Desktop snapshot">
+          <ReadPanel capabilities={READ} state={read} onOpen={(id) => setOpenId(id)} onOlder={() => {}} onClose={() => setOpenId(null)} onMore={() => {}} />
+        </section>
+        {!read.open && <aside className="sync-panel sync-panel-side"><Inbox state={state} sync={sync} /></aside>}
       </div>
     </>
   );
