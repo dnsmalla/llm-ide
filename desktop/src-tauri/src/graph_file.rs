@@ -72,6 +72,9 @@ fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, Stri
     if !meta.is_file() || meta.len() > max {
         return Err("graph.json is not a regular file within the size limit".into());
     }
+    if crate::fs_ops::nlink(&file, &meta) > 1 {
+        return Err("graph file has several hard links; refusing to follow it".into());
+    }
     use std::io::Read;
     let mut body = String::new();
     // `take` bounds the read even if the file grows after fstat.
@@ -190,6 +193,19 @@ mod tests {
             fs::write(&p, "{}").unwrap();
             assert!(read_within(&root, p.to_str().unwrap()).is_ok(), "{name}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_linked_graph_is_refused() {
+        let root = scratch("hardlink");
+        fs::create_dir_all(root.join("system/graph")).unwrap();
+        let outside = root.parent().unwrap().join("llmide-gf-hardlink-outside.json");
+        fs::write(&outside, "{}").unwrap();
+        let g = root.join("system/graph/graph.json");
+        fs::hard_link(&outside, &g).unwrap();
+        assert!(read_within(&root, g.to_str().unwrap()).is_err());
+        let _ = fs::remove_file(&outside);
     }
 
     #[test]

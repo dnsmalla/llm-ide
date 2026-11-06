@@ -1,5 +1,5 @@
-//! Native pickers and detection for Server & Backend's source-checkout mode. The chosen paths are stored in prefs
-//! and only used to spawn the Node backend; they are never interpolated into a shell.
+//! Native pickers and detection for Server & Backend's source-checkout mode. The chosen paths are stored host-side
+//! (the webview cannot set them) and only used to spawn the Node backend; they are never interpolated into a shell.
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -16,7 +16,9 @@ pub async fn backend_pick_node() -> Result<Option<String>, String> {
     let Some(file) = rfd::AsyncFileDialog::new().set_title("Choose the node binary").pick_file().await else {
         return Ok(None);
     };
-    Ok(Some(file.path().to_string_lossy().into_owned()))
+    let path = file.path().to_string_lossy().into_owned();
+    crate::prefs::set_backend_paths(Some(path.clone()), None).map_err(|e| e.message)?;
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -24,7 +26,9 @@ pub async fn backend_pick_dir() -> Result<Option<String>, String> {
     let Some(dir) = rfd::AsyncFileDialog::new().set_title("Choose the extension folder (or the checkout)").pick_folder().await else {
         return Ok(None);
     };
-    Ok(Some(dir.path().to_string_lossy().into_owned()))
+    let path = dir.path().to_string_lossy().into_owned();
+    crate::prefs::set_backend_paths(None, Some(path.clone())).map_err(|e| e.message)?;
+    Ok(Some(path))
 }
 
 /// Best-effort defaults: the node the app would use, and the checkout's `extension` folder (the app records its

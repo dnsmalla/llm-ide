@@ -272,6 +272,33 @@ fn another_users_chat_is_invisible_and_never_overwritten() {
     assert_eq!(bob.archive_facts(ID1).unwrap().owned_by_user, false);
 }
 
+#[test]
+fn another_users_unparsable_or_oversized_chat_cannot_be_deleted_or_tombstoned() {
+    let t = Tmp::new("fc-del");
+    let _alice = store(&t, "alice");
+    let bob = store(&t, "bob");
+    // Unparsable: the owner cannot be read, so may_access(None) decides, and bob may not claim it.
+    put(&t, ID1, br#"{"ownerUserId":"alice","storeVersion":2, truncated"#);
+    assert_eq!(bob.delete(ID1).unwrap_err().code, "not_found");
+    // Oversized (past the old 32 MB read window, under the 64 MB cap): the owner sits beyond that window.
+    let mut big = br#"{"ownerUserId":"alice","storeVersion":2,"pad":""#.to_vec();
+    big.resize(40 * 1024 * 1024, b'x');
+    big.extend_from_slice(b"\"}");
+    put(&t, ID2, &big);
+    assert_eq!(bob.delete(ID2).unwrap_err().code, "not_found");
+    assert!(t.0.join("sessions").join(format!("{ID1}.json")).exists() && t.0.join("sessions").join(format!("{ID2}.json")).exists());
+    // enforce_tombstones: carol opens first and claims unowned chats, so an unknown owner would pass may_access(None).
+    let bob_first = Tmp::new("fc-tomb");
+    let carol = store(&bob_first, "carol");
+    let mut big = br#"{"ownerUserId":"alice","storeVersion":2,"pad":""#.to_vec();
+    big.resize(40 * 1024 * 1024, b'x');
+    big.extend_from_slice(b"\"}");
+    put(&bob_first, ID2, &big);
+    carol.add_tombstone(ID2).unwrap();
+    assert_eq!(carol.enforce_tombstones().unwrap(), 0);
+    assert!(bob_first.0.join("sessions").join(format!("{ID2}.json")).exists());
+}
+
 // ---- paging ------------------------------------------------------------------------------------
 
 #[test]

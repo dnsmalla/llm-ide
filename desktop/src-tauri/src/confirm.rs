@@ -267,11 +267,13 @@ pub async fn trust_confirm(path: String) -> Result<bool, FsError> {
     if !valid_trust_path(&path) {
         return Err(herr("invalid", "not an absolute folder path"));
     }
+    // Only an existing folder can be trusted, and the dialog names the resolved path, not the webview's text.
+    let folder = std::fs::canonicalize(&path).ok().filter(|p| p.is_dir()).ok_or_else(|| herr("invalid", "not an existing folder"))?;
     if !TRUST_LIMIT.allow() {
         return Err(herr("rate_limited", "too many confirmation requests"));
     }
     let _open = TRUST_OPEN.acquire().ok_or_else(|| herr("busy", "a confirmation is already open"))?;
-    let text = trust_text(&path);
+    let text = trust_text(&crate::fsutil::plain_path(&folder).to_string_lossy());
     let out = tauri::async_runtime::spawn_blocking(move || ask("Trust this folder?", &text, "Trust folder", true)).await;
     out.map_err(|e| herr("io", format!("task failed: {e}")))
 }
@@ -279,6 +281,12 @@ pub async fn trust_confirm(path: String) -> Result<bool, FsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trust_confirm_refuses_a_missing_folder_before_any_dialog() {
+        let err = tauri::async_runtime::block_on(trust_confirm("/ Your Mac is infected".into())).unwrap_err();
+        assert_eq!(err.code, "invalid");
+    }
 
     #[test]
     fn the_open_flag_is_released_on_drop_even_after_a_panic_or_early_return() {

@@ -204,24 +204,14 @@ function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => voi
     if (typeof port === "string") { setError(port); return; }
     setSaving(true); setError(null); setNotice(null);
     try {
-      const next = await host.setBackendConfig!({ source: cfg.source, node: cfg.node.trim(), dir: cfg.dir.trim(), port, autoStart: cfg.autoStart });
+      const next = await host.setBackendConfig!({ source: cfg.source, port, autoStart: cfg.autoStart });
       setCfg(next);
-      setNotice("Backend settings saved. Use Kill & Restart to apply the paths; the launch toggle applies on the next app start.");
+      setNotice("Backend settings saved. They apply on the next app start.");
       onSaved();
     } catch (e) {
       setError(componentError(e));
     } finally {
       setSaving(false);
-    }
-  };
-
-  const detect = async () => {
-    setError(null);
-    try {
-      const d = await host.detectBackend?.();
-      if (d) setCfg({ ...cfg, node: d.node || cfg.node, dir: d.dir || cfg.dir });
-    } catch (e) {
-      setError(componentError(e));
     }
   };
 
@@ -236,15 +226,15 @@ function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => voi
           <label className="st-field">
             <span className="st-label">Node binary</span>
             <div className="st-row">
-              <input className="st-input st-grow" value={cfg.node} placeholder="Auto-detect (/opt/homebrew/bin/node)" spellCheck={false} onChange={(e) => setCfg({ ...cfg, node: e.target.value })} />
-              {host.pickNode ? <Button onClick={() => void host.pickNode!().then((p) => p && setCfg({ ...cfg, node: p }))}>Browse…</Button> : null}
+              <input className="st-input st-grow" value={cfg.node} placeholder="Auto-detect (/opt/homebrew/bin/node)" spellCheck={false} readOnly />
+              {host.pickNode ? <Button onClick={() => void host.pickNode!().then((p) => p && load())}>Browse…</Button> : null}
             </div>
           </label>
           <label className="st-field">
             <span className="st-label">Project folder (extension)</span>
             <div className="st-row">
-              <input className="st-input st-grow" value={cfg.dir} placeholder="Auto-detect: <checkout>/extension" spellCheck={false} onChange={(e) => setCfg({ ...cfg, dir: e.target.value })} />
-              {host.pickBackendDir ? <Button onClick={() => void host.pickBackendDir!().then((p) => p && setCfg({ ...cfg, dir: p }))}>Browse…</Button> : null}
+              <input className="st-input st-grow" value={cfg.dir} placeholder="Auto-detect: <checkout>/extension" spellCheck={false} readOnly />
+              {host.pickBackendDir ? <Button onClick={() => void host.pickBackendDir!().then((p) => p && load())}>Browse…</Button> : null}
             </div>
           </label>
           <label className="st-field">
@@ -260,7 +250,6 @@ function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => voi
       </label>
       <div className="st-row">
         <Button disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save backend settings"}</Button>
-        {host.detectBackend ? <Button disabled={saving} onClick={() => void detect()}>Auto-detect</Button> : null}
       </div>
       {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       <ErrorText text={error} />

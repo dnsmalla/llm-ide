@@ -116,6 +116,7 @@ pub struct Prefs {
     /// The feature profile (an explicit subset of `FEATURE_KEYS`; empty = every feature, the historical behaviour).
     pub features: Vec<String>,
     // ---- backend (Server & Backend) ----
+    // The three paths below are written only by the native pickers (backend_pick.rs), never by set_prefs.
     /// False = the app's bundled core (the default); true = run the core from a source checkout.
     pub backend_source: bool,
     /// Source-checkout mode only: node binary (empty = auto-detect).
@@ -154,9 +155,8 @@ pub struct PrefsPatch {
     pub terminal: Option<bool>,
     pub theme: Option<Theme>,
     pub features: Option<Vec<String>>,
+    /// The toggle only: the node binary and checkout folder are host-picked (`set_backend_paths`), never patched.
     pub backend_source: Option<bool>,
-    pub backend_node: Option<String>,
-    pub backend_dir: Option<String>,
     pub backend_port: Option<u16>,
     pub backend_auto_start: Option<bool>,
     pub loop_defaults: Option<LoopDefaults>,
@@ -187,8 +187,6 @@ impl Prefs {
         if let Some(v) = p.terminal { n.terminal = v; }
         if let Some(v) = p.theme { n.theme = v; }
         if let Some(v) = p.backend_source { n.backend_source = v; }
-        if let Some(v) = &p.backend_node { n.backend_node = v.trim().to_string(); }
-        if let Some(v) = &p.backend_dir { n.backend_dir = v.trim().to_string(); }
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.loop_defaults {
@@ -227,15 +225,19 @@ pub fn parse(text: &str) -> Prefs {
     if text.len() > MAX_BYTES {
         return Prefs::default();
     }
-    serde_json::from_str::<Prefs>(text).map(|p| Prefs::default().patched(&PrefsPatch {
-        lta_mode: Some(p.lta_mode), router: Some(p.router), cap: Some(p.cap), compress: Some(p.compress),
-        learn: Some(p.learn), terminal: Some(p.terminal), theme: Some(p.theme),
-        // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
-        features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
-        backend_source: Some(p.backend_source), backend_node: Some(p.backend_node.clone()), backend_dir: Some(p.backend_dir.clone()),
-        backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
-        loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
-    })).unwrap_or_default()
+    serde_json::from_str::<Prefs>(text).map(|p| {
+        let mut out = Prefs::default().patched(&PrefsPatch {
+            lta_mode: Some(p.lta_mode), router: Some(p.router), cap: Some(p.cap), compress: Some(p.compress),
+            learn: Some(p.learn), terminal: Some(p.terminal), theme: Some(p.theme),
+            // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
+            features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
+            backend_source: Some(p.backend_source), backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
+            loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
+        });
+        out.backend_node = p.backend_node.trim().to_string();
+        out.backend_dir = p.backend_dir.trim().to_string();
+        out
+    }).unwrap_or_default()
 }
 
 pub fn load_from(dir: &Path) -> Prefs {
@@ -365,6 +367,24 @@ fn apply(patch: PrefsPatch) -> Result<PrefsView, FsError> {
     let mut g = state();
     let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
     let next = st.stored.patched(&patch);
+    if let Some(dir) = &st.dir {
+        save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?;
+    }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
+/// Host-side writer for the native pickers only: a picked checkout turns source mode on and stores the path.
+/// Takes effect at the next app start, like every other backend path (see `launch()`).
+pub(crate) fn set_backend_paths(node: Option<String>, folder: Option<String>) -> Result<PrefsView, FsError> {
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.backend_source = true;
+    if let Some(n) = node { next.backend_node = n.trim().to_string(); }
+    if let Some(d) = folder { next.backend_dir = d.trim().to_string(); }
     if let Some(dir) = &st.dir {
         save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?;
     }
@@ -506,6 +526,14 @@ mod tests {
         let block = &src[start..start + src[start..].find(']').unwrap()];
         let found: Vec<&str> = block.split('\'').skip(1).step_by(2).collect();
         assert_eq!(found, FEATURE_KEYS, "update prefs.rs FEATURE_KEYS to match config.mjs");
+    }
+
+    #[test]
+    fn the_webview_cannot_set_the_backend_paths() {
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"backendNode":"/bin/sh"}"#).is_err());
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"backendDir":"/tmp"}"#).is_err());
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"backendSource":true}"#).is_ok());
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"backendPort":3458}"#).is_ok());
     }
 
     #[test]

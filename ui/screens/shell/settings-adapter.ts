@@ -98,11 +98,10 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           return { source: p.backendSource, node: p.backendNode, dir: p.backendDir, port: p.backendPort, autoStart: p.backendAutoStart };
         },
         async setBackendConfig(patch) {
+          // Node and folder are host-only (set by the native pickers); the webview sends the source toggle, port and launch toggle.
           const cur = (await readPrefs()).stored;
           const next = {
             backendSource: patch.source ?? cur.backendSource,
-            backendNode: patch.node ?? cur.backendNode,
-            backendDir: patch.dir ?? cur.backendDir,
             backendPort: patch.port ?? cur.backendPort,
             backendAutoStart: patch.autoStart ?? cur.backendAutoStart,
           };

@@ -1004,8 +1004,12 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     if meta.is_file() {
         // create_new (O_EXCL) fails on ANY existing entry, including a dangling symlink, so the copy can
         // neither overwrite nor be redirected through a link to outside the root.
-        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dst)?;
         let mut input = std::fs::File::open(src)?;
+        // A hard link shares its bytes with a file outside the root; refuse it as open_verified does.
+        if nlink(&input, &input.metadata()?) > 1 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "file has several hard links; refusing to copy it"));
+        }
+        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dst)?;
         std::io::copy(&mut input, &mut out)?;
         out.set_permissions(meta.permissions())?; // fs::copy kept the mode bits; io::copy does not
         return Ok(());
@@ -1098,10 +1102,10 @@ pub fn read_image(root: &Path, path: &str) -> R<ImageResult> {
         "webp" => "image/webp",
         _ => return err("unsupported", "only PNG, JPEG, GIF and WebP images are previewed here"),
     };
-    let meta = std::fs::metadata(&canonical).map_err(|e| io_err("cannot read image", e))?;
-    if !meta.is_file() { return err("invalid_path", "not a file"); }
+    let (file, meta) = open_verified(root, &canonical)?;
     if meta.len() > MAX { return err("too_large", "image is larger than 25 MB"); }
-    let bytes = std::fs::read(&canonical).map_err(|e| io_err("cannot read image", e))?;
+    let mut bytes = Vec::new();
+    file.take(MAX + 1).read_to_end(&mut bytes).map_err(|e| io_err("cannot read image", e))?;
     let data = crate::repo_clone::base64(&bytes);
     Ok(ImageResult { mime: mime.into(), data_url: format!("data:{mime};base64,{data}"), size: meta.len() })
 }
@@ -1142,7 +1146,7 @@ pub async fn fs_open_pdf(path: String) -> R<()> {
             return err("invalid_path", "only PDF files can be opened in the system viewer");
         }
         let mut cmd = if cfg!(target_os = "macos") { std::process::Command::new("open") }
-            else if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", "start", ""]); c }
+            else if cfg!(windows) { std::process::Command::new("explorer.exe") }
             else { std::process::Command::new("xdg-open") };
         cmd.arg(&p).spawn().map_err(|e| io_err("cannot open the PDF", e))?;
         Ok(())
@@ -1182,6 +1186,20 @@ mod tests {
         assert!(read_image(&root, "a.svg").is_err());
         assert!(read_image(&root, "../outside.png").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_linked_files_are_refused_by_copy_and_image_preview() {
+        let root = scratch("hardlink-fs");
+        let outside = root.parent().unwrap().join("hardlink-fs-outside.png");
+        std::fs::write(&outside, [0x89, b'P', b'N', b'G', 1, 2, 3]).unwrap();
+        fs::hard_link(&outside, root.join("linked.png")).unwrap();
+        assert!(copy(&root, &CopyReq { from: "linked.png".into(), to: "copy.png".into() }).is_err());
+        assert!(!root.join("copy.png").exists(), "nothing written for a refused copy");
+        assert!(read_image(&root, "linked.png").is_err());
+        let _ = fs::remove_file(&outside);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

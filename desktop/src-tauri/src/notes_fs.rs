@@ -144,16 +144,10 @@ fn save_root(dir: &Path, root: &Path) -> Result<(), String> {
 /// The root to use now: the one accepted through `notes_root_choose` this session, else the
 /// persisted one (re-validated), else (debug builds only) `LLMIDE_NOTES_ROOT`.
 pub(crate) fn current_root() -> Result<PathBuf, String> {
-    // The active project's canonical `llm-doc` is the Library root (the Mac's ProjectLayout.notesDir).
-    // Settings → Paths owns that layout; the Library never chooses a separate notes folder while a project is open.
+    // While a project is open the Library root is its `llm-doc` and nothing else: never the cached or
+    // persisted root, and never written into the cache (it would outlive the project).
     if let Some(project) = crate::project::active_root() {
-        let notes = project.join("llm-doc");
-        if notes.is_dir() {
-            if let Ok(mut g) = ROOT.lock() {
-                *g = Some(notes.clone());
-            }
-            return Ok(notes);
-        }
+        return project_notes_dir(&project);
     }
     if let Some(r) = ROOT.lock().ok().and_then(|g| g.clone()) {
         return Ok(r);
@@ -171,6 +165,21 @@ pub(crate) fn current_root() -> Result<PathBuf, String> {
         return validate_notes_root(Path::new(&p));
     }
     Err(err("no_root", "no notes folder is configured"))
+}
+
+/// The active project's `llm-doc` (the Mac's ProjectLayout.notesDir), refused when it resolves outside the
+/// project (a symlinked `llm-doc`). Settings → Paths owns that layout.
+fn project_notes_dir(project: &Path) -> Result<PathBuf, String> {
+    let notes = project.join("llm-doc");
+    if !notes.is_dir() {
+        return Err(err("no_root", "the project has no llm-doc folder"));
+    }
+    let real = std::fs::canonicalize(&notes).map_err(|e| err("no_root", format!("notes folder is not available: {e}")))?;
+    let root = std::fs::canonicalize(project).map_err(|e| err("no_root", format!("project is not available: {e}")))?;
+    if !real.starts_with(&root) {
+        return Err(err("outside_root", "the project's llm-doc folder is outside the project"));
+    }
+    Ok(real)
 }
 
 // ---- hardened open ---------------------------------------------------------------------------
@@ -858,4 +867,39 @@ mod tests {
         println!("BENCH notes resume near the end: {} ms ({} entries)", t.elapsed().as_millis(), p.entries.len());
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
+
+    #[test]
+    fn active_project_root_never_touches_the_cache_or_falls_back_to_it() {
+        let _g = ROOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let base = scratch("proj-cache");
+        let project = base.parent().unwrap().join("proj");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("llm-doc")).unwrap();
+        let other = base.parent().unwrap().join("cached-other");
+        fs::create_dir_all(&other).unwrap();
+        let saved = ROOT.lock().unwrap().replace(other.clone());
+        let got = project_notes_dir(&project).unwrap();
+        assert_eq!(got, fs::canonicalize(project.join("llm-doc")).unwrap());
+        assert_eq!(ROOT.lock().unwrap().clone(), Some(other.clone()), "cache must not be overwritten");
+        // no llm-doc: refused, and the cached root is NOT used as a fallback
+        fs::remove_dir(project.join("llm-doc")).unwrap();
+        assert!(project_notes_dir(&project).unwrap_err().starts_with("no_root:"));
+        *ROOT.lock().unwrap() = saved;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_llm_doc_cannot_escape_the_project() {
+        let base = scratch("proj-escape");
+        let project = base.parent().unwrap().join("proj-escape-p");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(&project).unwrap();
+        let outside = base.parent().unwrap().join("proj-escape-out");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("llm-doc")).unwrap();
+        assert!(project_notes_dir(&project).unwrap_err().starts_with("outside_root:"));
+    }
+
+    /// Serialises the tests that touch the process-global `ROOT` cache.
+    static ROOT_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

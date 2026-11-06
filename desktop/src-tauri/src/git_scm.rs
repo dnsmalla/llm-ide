@@ -313,7 +313,15 @@ fn plan_discard(root: &Path, paths: &[String]) -> R<Vec<Plan>> {
         }
         match e.kind {
             "unmerged" => return gerr("conflict", format!("{rel} is in conflict; resolve it by editing")),
-            "untracked" => plan.push(Plan::Trash(rel)),
+            "untracked" => {
+                if has_nested_repo(&root.join(&rel)) {
+                    return gerr("nested_repo", format!("{rel} contains a nested git repository; discard it inside that repository"));
+                }
+                if let Some(why) = keep_reason(root, &rel).filter(|w| *w != "missing") {
+                    return gerr("kept", format!("{rel} is {why}; it is left in place"));
+                }
+                plan.push(Plan::Trash(rel))
+            }
             _ if e.worktree == '.' => return gerr("nothing_to_discard", format!("{rel} has only staged changes; unstage it instead")),
             _ => plan.push(Plan::Restore(rel)),
         }
@@ -1441,6 +1449,23 @@ fn keep_reason(root: &Path, rel: &str) -> Option<&'static str> {
     None
 }
 
+/// True when `dir` or any folder under it holds a `.git` (ignored folders included). Symlinks are not followed.
+fn has_nested_repo(dir: &Path) -> bool {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if d.join(".git").exists() {
+            return true;
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                stack.push(e.path());
+            }
+        }
+    }
+    false
+}
+
 /// Classifies every change from a fresh status. Nothing is touched here.
 fn plan_discard_all(root: &Path, include_untracked: bool) -> R<AllPlan> {
     if !has_head(root)? {
@@ -2059,6 +2084,24 @@ mod tests {
         let res = discard(&r, &["u.txt".into()], &yes).unwrap();
         assert_eq!(res.trashed, 1);
         assert!(!r.join("u.txt").exists());
+    }
+
+    #[test]
+    fn an_untracked_folder_holding_a_nested_repo_is_refused_and_not_moved() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("discard-nested");
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        g(&r, &["commit", "-q", "-m", "i"]);
+        fs::create_dir_all(r.join("outer/inner/deep")).unwrap();
+        g(&r.join("outer/inner/deep"), &["init", "-q"]);
+        fs::write(r.join("outer/f.txt"), "f\n").unwrap();
+        let trash = scratch("discard-nested-trash");
+        let res = discard_with(&r, &["outer/".into()], &yes, &crate::trash_guard::tests::FakeTrash::into(&trash));
+        assert_eq!(code(res), "nested_repo");
+        assert!(r.join("outer/f.txt").exists() && r.join("outer/inner/deep/.git").exists(), "nothing moved");
     }
 
     #[test]

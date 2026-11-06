@@ -1366,9 +1366,12 @@ impl ChatStore {
         let id = self.id_arg(raw_id)?;
         let _lock = self.lock()?;
         let path = self.file_path(&id);
-        if let Ok(b) = read_small(&path, SMALL_FILE_MAX) {
-            if let Ok(Value::Object(m)) = serde_json::from_slice::<Value>(&b) {
-                if !self.may_access(m.get("ownerUserId").and_then(Value::as_str)) {
+        // Fail closed: an unreadable, oversized or unparsable file has no owner, so may_access(None) decides.
+        match read_small(&path, MAX_WRITE_BYTES as u64 + 1) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            r => {
+                let owner = r.ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("ownerUserId").and_then(Value::as_str).map(str::to_owned));
+                if !self.may_access(owner.as_deref()) {
                     return Err(StoreError::new("not_found", "no such chat"));
                 }
             }
@@ -1483,7 +1486,7 @@ impl ChatStore {
             if let Ok(m) = std::fs::symlink_metadata(&path) {
                 if m.is_file() {
                     // Only this user's (or unowned) files; another user's tombstone is theirs to send.
-                    let owner = read_small(&path, SMALL_FILE_MAX).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("ownerUserId").and_then(Value::as_str).map(str::to_owned));
+                    let owner = read_small(&path, MAX_WRITE_BYTES as u64 + 1).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("ownerUserId").and_then(Value::as_str).map(str::to_owned));
                     if self.may_access(owner.as_deref()) && matches!(self.trash_file(&id), Ok(true)) {
                         n += 1;
                     }
