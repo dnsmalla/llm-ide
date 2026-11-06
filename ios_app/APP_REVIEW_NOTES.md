@@ -33,7 +33,7 @@ desktop, account or network connection. A banner labels it as demo data. Exit it
 from Settings → Reviewer demo → Exit demo.
 
 To review the live product, the app needs the LLM-IDE desktop app to pair with:
-on the desktop, Settings → Mobile Control shows a pairing QR code, which the
+on the desktop, Settings → Phone and browser → Host API pairing shows a pairing QR code, which the
 iPhone scans (**Scan QR Code** on the first screen). The desktop app is not
 distributed through the Mac App Store; the demo exists so the review does not
 depend on installing it.

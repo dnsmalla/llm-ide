@@ -66,5 +66,5 @@ CSP change) — recommended, keeps the extension's single fixed origin; (b) the 
 ## Later (not this weekend)
 
 Push notifications (needs a design: APNs from the desktop, Web Push), command bus S4/S5, Windows and Linux
-autobench, App Store submission (App Review now needs a real desktop: no demo mode), Chrome Web Store listing,
+autobench, App Store submission (the app side is ready: offline reviewer demo, privacy and support pages; UN-080), Chrome Web Store listing,
 plugin hash pinning, token-saving work gated on the bench (X1-X3).

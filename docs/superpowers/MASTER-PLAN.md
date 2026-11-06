@@ -126,7 +126,7 @@ Your decision, confirmation or real run (device, account, meeting, money). Comma
   - ~ Desktop gap worklist for all ten areas
   - ~ Windows host hardening for the desktop
 - **Mobile (iPhone native, PWA)**
-  - ~ App Store readiness: ios_app/APP_REVIEW_NOTES.md exists
+  - ~ App Store readiness: bundle id dotsoft.llmide.com
   - Phone sees archived chats and notes through the desktop
   - Host API v1 TLS on by default
 - **Web app and relay**
@@ -360,7 +360,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Phone capabilities, access switches, opt-in relay of tool/edit approvals to the phone (`b868756b`, `32eedf3e`, `224a9179`) (me)
 - [x] Loopback pairing script `scripts/mobile/verify-native-pairing.swift` and `ios-ci.yml` (me)
 - [x] Manual device verification list (`docs/mobile/verification.md`): written, no recorded run (you) Verified by you 2026-11-05: "iOS app is working".
-- [~] App Store readiness: `ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified (you)
+- [~] App Store readiness: bundle id `dotsoft.llmide.com` (`1f43789e`); offline reviewer demo (**Explore demo** on the first screen: local sample chat, one approval, history and usage, no network or Keychain; `fa8b2265`); privacy policy and support pages at `/app/privacy` and `/app/support` (`f26fa998`); review notes `ios_app/APP_REVIEW_NOTES.md`; open: App Store Connect record, screenshots, the privacy-policy and support URLs on your deployed site, and the submission itself (you)
 - [ ] Phone sees archived chats and notes through the desktop: Host API v1 History on the same network and the sync snapshots offline (SP4); verify on a real iPhone after a desktop capture is archived (you)
 - [ ] Push notifications (approvals, task done) (me)
 - [x] Background / reconnect behaviour verified on device: tested by you on a real iPhone 2026-11-05 (you)

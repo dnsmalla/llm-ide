@@ -183,7 +183,7 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [ ] **UN-077** Headless always-on core decision (design only for now, see UN-033). Trigger: before command-bus S6.
 - [ ] **UN-078** Push notifications for the phone. Trigger: after the relay exists.
 - [x] **UN-079** On-device TLS checks (ATS check, legacy cleartext path, packet capture). Trigger: when the TLS slice is built; list in [verification.md](../mobile/verification.md). Status: done 2026-11-05, you tested on a real iPhone.
-- [ ] **UN-080** App Store submission state check (`ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified). Trigger: when you want the iPhone app released.
+- [ ] **UN-080** App Store submission: the app side is ready (bundle id `dotsoft.llmide.com`, offline **Explore demo** for the reviewer, review notes `ios_app/APP_REVIEW_NOTES.md`, privacy and support pages at `/app/privacy` and `/app/support`). You: create the App Store Connect record, deploy the web app so those two URLs are public, add screenshots, archive and submit from Xcode. Trigger: when you want the iPhone app released.
 - [ ] **UN-081** Chrome Web Store listing, review and the publishing step in the extension release. Trigger: when the extension is meant for other people.
 - [x] **UN-082** Retire cleartext `:3006` and PIN pairing once the relay reaches parity. Trigger: relay parity (R9). Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
 - [ ] **UN-083** Delete legacy duplicate rows (destructive: export, backup, rollback drill) and switch the Library read path to `note_index`. Trigger: 7 clean shadow days on real meeting notes (UN-076).
