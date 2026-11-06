@@ -134,7 +134,9 @@ final class SpeechRecognizer: ObservableObject {
         }
         do {
             let session = AVAudioSession.sharedInstance()
-            previousCategory = session.category
+            // Keep the first capture: a session still winding down from finish() is in `.record`,
+            // and capturing that would make teardown restore `.record` instead of the app's category.
+            if previousCategory == nil { previousCategory = session.category }
             // No `.duckOthers`: it is a playback/mixing option and has no
             // meaning for a `.record` category.
             try session.setCategory(.record, mode: .measurement)

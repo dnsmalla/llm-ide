@@ -113,8 +113,11 @@ final class DemoResponder {
             stream(commandId: commandId, reply: Self.reply(to: obj["text"] as? String ?? ""))
 
         case MobileProtocol.Tag.toolApprovalAnswer:
-            send(ApprovalCleared(commandId: obj["commandId"] as? String ?? "",
+            let commandId = obj["commandId"] as? String ?? ""
+            send(ApprovalCleared(commandId: commandId,
                                  requestId: obj["requestId"] as? String ?? "", reason: nil))
+            // The demo turn is parked on this approval; finish it so it does not time out.
+            stream(commandId: commandId, reply: "**Demo reply.** Edit approved. On the Mac this change would now be applied to `Engine.swift` and the turn would continue.")
 
         case MobileProtocol.Tag.llmIdeChatHistoryList:
             send(LlmIdeChatHistoryReply(messages: [

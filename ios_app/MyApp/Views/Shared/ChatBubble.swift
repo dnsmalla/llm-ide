@@ -77,7 +77,14 @@ struct ChatBubble: View {
     static func inlineMarkdown(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        var s = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        // Server-supplied links may carry any scheme (tel:, app schemes); only web links stay tappable.
+        for run in s.runs {
+            if let url = run.link, !["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                s[run.range].link = nil
+            }
+        }
+        return s
     }
 
     var body: some View {

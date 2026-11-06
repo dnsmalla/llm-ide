@@ -2,7 +2,7 @@ import Foundation
 import SharedProtocol
 
 struct DiscoveredDevice: Identifiable, Equatable {
-    var id: String { name }
+    var id: String { "\(name)@\(host)" }
     let name: String
     let host: String
     let port: Int
@@ -23,6 +23,7 @@ final class DeviceDiscovery: NSObject, ObservableObject {
     private var pending: [NetService] = []
 
     func start() {
+        devices = []
         isSearching = true
         browser.delegate = self
         browser.searchForServices(ofType: MobileProtocol.serviceType + ".", inDomain: "local.")
@@ -47,9 +48,11 @@ extension DeviceDiscovery: NetServiceBrowserDelegate {
     nonisolated func netServiceBrowser(_ browser: NetServiceBrowser,
                                        didRemove service: NetService,
                                        moreComing: Bool) {
+        let host = service.ipv4Address
         Task { @MainActor in
             self.pending.removeAll { $0 === service }
-            self.devices.removeAll { $0.name == service.name }
+            // A service whose address is gone cannot be told apart from its same-named peers; drop by name then.
+            self.devices.removeAll { $0.name == service.name && (host == nil || $0.host == host) }
         }
     }
 }
@@ -62,7 +65,7 @@ extension DeviceDiscovery: NetServiceDelegate {
         let device = DiscoveredDevice(name: sender.name, host: ip, port: sender.port,
                                       hostApiOffer: HostApiPairingOffer(port: field("h1port"), fingerprint: field("h1fp")))
         Task { @MainActor in
-            self.devices.removeAll { $0.name == sender.name }
+            self.devices.removeAll { $0.name == sender.name && $0.host == device.host }
             self.devices.append(device)
             self.onResolve?(device)
         }

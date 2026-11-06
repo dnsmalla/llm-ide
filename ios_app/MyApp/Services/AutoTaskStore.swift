@@ -320,8 +320,8 @@ final class AutoTaskStore: ObservableObject {
                     self.clearLogPollTask(generation: generation)
                     return
                 }
-                let shouldPoll = self.isRunLogPresented || self.autoTaskState?.isRunning == true
-                guard shouldPoll else {
+                // Only while the run log is on screen; the Mac also pushes state, and the open/send paths fetch once.
+                guard self.isRunLogPresented else {
                     self.clearLogPollTask(generation: generation)
                     return
                 }
@@ -349,7 +349,7 @@ final class AutoTaskStore: ObservableObject {
         seedLogGroupsFromState()
         if state.isRunning {
             startPollingIfNeeded()
-            startLogPollingIfNeeded()
+            if isRunLogPresented { startLogPollingIfNeeded() }
             if focusedLogTaskId == nil, let current = state.currentTask {
                 focusedLogTaskId = current
             }
@@ -430,7 +430,8 @@ final class AutoTaskStore: ObservableObject {
             autoTaskLogGroups = tasks.map { AutoTaskTaskLogs(id: $0.id, label: $0.label, lines: []) }
             return
         }
-        let existing = Dictionary(uniqueKeysWithValues: autoTaskLogGroups.map { ($0.id, $0) })
+        // Wire-supplied ids: a duplicate must not trap.
+        let existing = Dictionary(autoTaskLogGroups.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let merged = tasks.map { task in
             if let group = existing[task.id] {
                 return AutoTaskTaskLogs(id: task.id, label: task.label, lines: group.lines)

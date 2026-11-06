@@ -1,5 +1,4 @@
 import SwiftUI
-import PhotosUI
 import UIKit
 import PDFKit
 import UniformTypeIdentifiers
@@ -17,11 +16,10 @@ struct LlmIdeControlView: View {
 
     @StateObject private var speech = SpeechRecognizer()
     @State private var inputText: String = ""
-    @State private var pendingImages: [(data: Data, mediaType: String)] = []   // resized JPEGs, ready to send
     @State private var pendingFiles: [ChatFileText] = []                        // text extracted on-device
-    @State private var pickedItems: [PhotosPickerItem] = []
-    @State private var showPhotoPicker = false
-    @State private var showCamera = false
+    /// True while a dictation session is live or finishing. The recognizer's final transcript lands after
+    /// `finish()` has already cleared `isListening`, so the transcript handler gates on this instead.
+    @State private var dictating = false
     /// Guards the trash action — it also wipes the Mac's shared transcript.
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
@@ -29,10 +27,6 @@ struct LlmIdeControlView: View {
     @State private var generateSurface = "doc"
     @State private var showDocs = false
     @FocusState private var isInputFocused: Bool
-
-    /// Max images per send; the bridge caps a frame at 8 MiB so this keeps us
-    /// well under after resize/base64.
-    private let maxImages = 4
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
 
@@ -97,7 +91,11 @@ struct LlmIdeControlView: View {
                 }
             }
             .onChange(of: speech.transcript) { newValue in
-                if speech.isListening { inputText = newValue }
+                if dictating, !newValue.isEmpty {
+                    inputText = newValue
+                    // The result that arrives after stop is the final one: stop following so typing is not overwritten.
+                    if !speech.isListening { dictating = false }
+                }
             }
             .onChange(of: speech.errorMessage) { msg in
                 if let msg { connection.errorMessage = msg }
@@ -105,36 +103,6 @@ struct LlmIdeControlView: View {
             .onAppear { llmIdeStore.loadSharedHistory() }
             .onChange(of: connection.connectionStatus) { status in
                 if status == .connected { llmIdeStore.loadSharedHistory() }
-            }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItems,
-                          maxSelectionCount: maxImages, matching: .images)
-            .onChange(of: pickedItems) { items in
-                guard !items.isEmpty else { return }
-                Task {
-                    var loaded: [Data] = []
-                    for item in items {
-                        if let data = try? await item.loadTransferable(type: Data.self) {
-                            loaded.append(data)
-                        }
-                    }
-                    await MainActor.run {
-                        var added = 0
-                        for data in loaded {
-                            guard let ui = UIImage(data: data), let encoded = encodeForUpload(ui) else { continue }
-                            appendImage((data: encoded, mediaType: "image/jpeg")); added += 1
-                        }
-                        if added == 0 { connection.errorMessage = "Couldn't read that image." }
-                        pickedItems = []
-                    }
-                }
-            }
-            .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker { image in
-                    if let encoded = encodeForUpload(image) {
-                        appendImage((data: encoded, mediaType: "image/jpeg"))
-                    }
-                }
-                .ignoresSafeArea()
             }
             .fileImporter(isPresented: $showFilePicker,
                           allowedContentTypes: [.pdf, .plainText, .text]) { result in
@@ -254,7 +222,7 @@ struct LlmIdeControlView: View {
     private var inputBar: some View {
         VStack(spacing: 0) {
             Divider()
-            if !pendingImages.isEmpty || !pendingFiles.isEmpty {
+            if !pendingFiles.isEmpty {
                 attachmentChips
             }
             ChatInputBar(
@@ -311,11 +279,6 @@ struct LlmIdeControlView: View {
     private var attachmentChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: DesignSystem.Spacing.sm) {
-                ForEach(Array(pendingImages.enumerated()), id: \.offset) { idx, img in
-                    if let ui = UIImage(data: img.data) {
-                        imageChip(ui, index: idx)
-                    }
-                }
                 ForEach(Array(pendingFiles.enumerated()), id: \.offset) { idx, file in
                     fileChip(file, index: idx)
                 }
@@ -323,23 +286,6 @@ struct LlmIdeControlView: View {
             .padding(.horizontal, DesignSystem.Spacing.md)
             .padding(.vertical, DesignSystem.Spacing.sm)
         }
-    }
-
-    private func imageChip(_ ui: UIImage, index: Int) -> some View {
-        HStack(spacing: 6) {
-            Image(uiImage: ui)
-                .resizable().scaledToFill()
-                .frame(width: 36, height: 36)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            Button { removeImage(at: index); haptic(.light) } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(DesignSystem.Colors.textTertiary)
-            }
-        }
-        .padding(4)
-        .background(DesignSystem.Colors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func fileChip(_ file: ChatFileText, index: Int) -> some View {
@@ -365,7 +311,6 @@ struct LlmIdeControlView: View {
 
     private var canSend: Bool {
         (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !pendingImages.isEmpty
             || !pendingFiles.isEmpty)
             && isConnected
             && connection.supports(MobileProtocol.Capability.chat)
@@ -377,50 +322,21 @@ struct LlmIdeControlView: View {
     private func send() {
         guard canSend else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = pendingImages
         let files = pendingFiles
-        guard !text.isEmpty || !images.isEmpty || !files.isEmpty else { return }
+        guard !text.isEmpty || !files.isEmpty else { return }
+        dictating = false   // a late final transcript must not repopulate the composer after send
         if speech.isListening { speech.finish() }
         // Refused by the host's limits (a too-large file): keep the composer so the user can remove it.
         guard llmIdeStore.sendLlmideChat(text, files: files) else { return }
         inputText = ""
-        pendingImages = []
         pendingFiles = []
         isInputFocused = false
         haptic(.light)
     }
 
-    private func appendImage(_ img: (data: Data, mediaType: String)) {
-        if pendingImages.count >= maxImages {
-            connection.errorMessage = "Up to \(maxImages) images at a time."
-            return
-        }
-        pendingImages.append(img)
-    }
-
-    private func removeImage(at index: Int) {
-        guard pendingImages.indices.contains(index) else { return }
-        pendingImages.remove(at: index)
-    }
-
     private func removeFile(at index: Int) {
         guard pendingFiles.indices.contains(index) else { return }
         pendingFiles.remove(at: index)
-    }
-
-    /// Downscale to a sane max dimension and JPEG-encode, keeping the upload
-    /// small (and within the server's per-image cap).
-    private func encodeForUpload(_ image: UIImage, maxDimension: CGFloat = 1280) -> Data? {
-        let size = image.size
-        guard size.width > 0, size.height > 0 else { return nil }
-        let scale = min(1, maxDimension / max(size.width, size.height))
-        let target = CGSize(width: size.width * scale, height: size.height * scale)
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        let resized = UIGraphicsImageRenderer(size: target, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: target))
-        }
-        return resized.jpegData(compressionQuality: 0.7)
     }
 
     private func toggleVoice() {
@@ -429,39 +345,8 @@ struct LlmIdeControlView: View {
             inputText = speech.transcript
         } else {
             isInputFocused = false
+            dictating = true
             speech.start()
-        }
-    }
-}
-
-/// Thin wrapper over UIImagePickerController for taking a photo with the camera.
-struct CameraPicker: UIViewControllerRepresentable {
-    let onImage: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ parent: CameraPicker) { self.parent = parent }
-
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let image = info[.originalImage] as? UIImage { parent.onImage(image) }
-            parent.dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
         }
     }
 }

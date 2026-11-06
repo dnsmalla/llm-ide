@@ -40,6 +40,9 @@ final class ExplorerChatStore: ObservableObject {
     /// chat is one-in-flight, but a Set mirrors `LlmIdeChatStore` and is robust
     /// to overlapping done/stream frames.
     private var exploreCommandIds: Set<String> = []
+    /// The session each in-flight command was sent from. Output is shown only while that session is the
+    /// loaded one, so a reply finishing after the user switched sessions never lands in another transcript.
+    private var exploreCommandSessions: [String: String] = [:]
     /// The turn Stop should cancel — most recently minted commandId.
     private var currentCommandId: String?
 
@@ -135,6 +138,7 @@ final class ExplorerChatStore: ObservableObject {
             commandIds: &exploreCommandIds,
             userText: displayText
         )
+        exploreCommandSessions[id] = sessionId
         exploreCurrent?.history = messages
         isStreaming = true
         currentCommandId = id
@@ -330,39 +334,50 @@ final class ExplorerChatStore: ObservableObject {
     /// drops the commandId.
     func handleOutput(commandId: String?, payload: [String: Any]) {
         let owns = commandId.map { exploreCommandIds.contains($0) } ?? false
-        guard owns else { return }
+        guard owns, let id = commandId else { return }
         let done = payload["done"] as? Bool ?? false
         if let chunk = payload["stream"] as? String, !chunk.isEmpty {
-            guard var current = exploreCurrent else { return }
-            setLastAssistant(&current.history, chunk)
-            exploreCurrent = current
+            if isViewing(id), var current = exploreCurrent {
+                setLastAssistant(&current.history, chunk)
+                exploreCurrent = current
+            }
             // Every frame proves the Mac is alive and working, so restart
             // the timeout — an IDLE breaker, not a wall clock (the old
             // fire-once-from-send version cancelled healthy long turns at
             // 120 s even while progress was streaming). Same contract as
             // LlmIdeChatStore.handleOutput: ⏸ latches the long window for
             // this command until done.
-            if !done, let id = commandId {
+            // Only the turn the timeout tracks may restart it; an older turn's frames would re-arm it for the wrong id.
+            if !done {
                 if chunk.contains(LlmIdeChatStore.approvalPauseGlyph) {
                     approvalPausedCommandIds.insert(id)
                 }
-                startStreamTimeout(
-                    for: id,
-                    idleSeconds: approvalPausedCommandIds.contains(id) ? 960 : 120)
+                if id == currentCommandId {
+                    startStreamTimeout(
+                        for: id,
+                        idleSeconds: approvalPausedCommandIds.contains(id) ? 960 : 120)
+                }
             }
         }
         if done {
-            streamTimeoutTask?.cancel()
-            isStreaming = false
-            if let id = commandId {
-                exploreCommandIds.remove(id)
-                approvalPausedCommandIds.remove(id)
-                if currentCommandId == id { currentCommandId = nil }
-                // The turn is over, so its question can no longer be answered.
-                if pendingApproval?.commandId == id { pendingApproval = nil }
-                if pendingToolApproval?.commandId == id { pendingToolApproval = nil }
+            exploreCommandSessions[id] = nil
+            exploreCommandIds.remove(id)
+            approvalPausedCommandIds.remove(id)
+            if currentCommandId == id {
+                streamTimeoutTask?.cancel()
+                isStreaming = false
+                currentCommandId = nil
             }
+            // The turn is over, so its question can no longer be answered.
+            if pendingApproval?.commandId == id { pendingApproval = nil }
+            if pendingToolApproval?.commandId == id { pendingToolApproval = nil }
         }
+    }
+
+    /// True when the turn's session is the one currently loaded in the transcript.
+    private func isViewing(_ commandId: String) -> Bool {
+        guard let sessionId = exploreCommandSessions[commandId], let current = exploreCurrent else { return false }
+        return sessionId == current.id
     }
 
     func handleChatError(commandId: String? = nil) {
@@ -370,15 +385,18 @@ final class ExplorerChatStore: ObservableObject {
         isStreaming = false
         if let commandId {
             exploreCommandIds.remove(commandId)
+            exploreCommandSessions[commandId] = nil
             approvalPausedCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
             if pendingToolApproval?.commandId == commandId { pendingToolApproval = nil }
         } else {
+            exploreCommandSessions.removeAll()
             pendingToolApproval = nil
             // Connection-wide failure: every in-flight turn is dead. Orphans
             // left here would make a later Stop cancel a corpse and let a
             // replayed frame append into a live transcript.
             exploreCommandIds.removeAll()
+            exploreCommandSessions.removeAll()
             approvalPausedCommandIds.removeAll()
             currentCommandId = nil
         }
@@ -401,6 +419,7 @@ final class ExplorerChatStore: ObservableObject {
         isPreparingSession = false
         isStreaming = false
         exploreCommandIds.removeAll()
+        exploreCommandSessions.removeAll()
         approvalPausedCommandIds.removeAll()
         currentCommandId = nil
         pendingApproval = nil

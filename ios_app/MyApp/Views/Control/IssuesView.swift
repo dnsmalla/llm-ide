@@ -111,7 +111,7 @@ struct IssueDetailView: View {
                     }
                     if !d.labels.isEmpty { Text(d.labels.joined(separator: " · ")).font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary) }
-                    if let url = d.webUrl.flatMap(URL.init(string:)) {
+                    if let url = d.webUrl.flatMap(URL.init(string:)), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                         Link(destination: url) { Label("Open in browser", systemImage: "safari") }
                     }
                 }

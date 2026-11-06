@@ -126,7 +126,6 @@ final class ConnectionService: ObservableObject {
     /// `connected` frame of this pairing. A Mac that sends no list is a pre-handshake Mac and
     /// gets `Capability.legacy`, so screens for newer features hide instead of spinning.
     @Published private(set) var macCapabilities: Set<String>?
-    @Published private(set) var macProtocolVersion: Int?
     /// The transport the chat + approvals slice speaks (spec phase 4). It is v2 (today's socket, through
     /// `V2HostConnection`) unless negotiation found a v1 host. The other stores still use `sendEncodable` (v2).
     var host: HostConnection { v1Client ?? v2Host }
@@ -211,6 +210,9 @@ final class ConnectionService: ObservableObject {
     private(set) var userClosed = false
 
     private var directIP: String?
+    /// The Mac this app last pointed at. Unlike `directIP` it survives `disconnect(clearDirect: true)`
+    /// (revoke / auth_failed), so re-pairing with a different Mac still resets the stores.
+    private var lastConnectedIP: String?
     private var directPort: Int = 3006
     private var directPIN: String?
 
@@ -236,9 +238,10 @@ final class ConnectionService: ObservableObject {
         // one's transcripts, session ids and status. Left in place, the first
         // explorer send goes out with a sessionId that doesn't exist on the new
         // Mac, and the dashboard shows the old machine's data.
-        if let previous = directIP, previous != ip {
+        if let previous = lastConnectedIP, previous != ip {
             resetStoresForNewDevice()
         }
+        lastConnectedIP = ip
         directIP   = ip
         directPort = port
         directPIN  = pin
@@ -330,7 +333,6 @@ final class ConnectionService: ObservableObject {
             case .ready(let hello, let newToken):
                 self.v1Client = client
                 self.hostApiVersion = 1
-                self.macProtocolVersion = hello.protocolVersion
                 self.macCapabilities = client.capabilities
                 self.errorMessage = nil
                 self.reconnectAttempt = 0
@@ -454,7 +456,6 @@ final class ConnectionService: ObservableObject {
         issuesStore?.resetForNewDevice()
         // The next Mac may serve a different feature set; forget this one's until it says.
         macCapabilities = nil
-        macProtocolVersion = nil
     }
 
     /// Enter demo mode: no socket, no network, no stored credential. Drives
@@ -721,7 +722,6 @@ final class ConnectionService: ObservableObject {
             // The demo issues no token and must not write a device name to
             // UserDefaults — nothing about a fake Mac may outlive the session.
             if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
-                macProtocolVersion = connected.protocolVersion ?? 1
                 macCapabilities = connected.capabilities.map(Set.init) ?? MobileProtocol.Capability.legacy
             }
             if !isDemo, let connected = try? JSONDecoder().decode(Connected.self, from: data) {
