@@ -7,9 +7,10 @@ import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { loadSyncStatus, saveMega, saveSftp, testSync, setSyncEnabled, publishNow, syncErrorText, describeSyncError, storeSummary, isSftpStore,
-  type SyncStatus, type StoreKind, type SftpSetup } from "../sync-model.ts";
+  type SyncStatus, type StoreKind, type SftpSetup, STORE_CHOICES } from "../sync-model.ts";
 import SyncDevices from "./SyncDevices.tsx";
 import SyncOwnServer from "./SyncOwnServer.tsx";
+import SyncBoxForm from "./SyncBoxForm.tsx";
 
 export default function SyncSection(): ReactNode {
   const { client } = useEnv();
@@ -27,6 +28,7 @@ export default function SyncSection(): ReactNode {
   useEffect(() => { void loadSyncStatus(client).then((s) => {
     setStatus(s);
     if (s?.storeKind === "sftp") setKind("sftp");
+    else if (s?.storeKind === "box") setKind("box");
     else if (s?.store && !isSftpStore(s.store)) { const folder = s.store.folder; setForm((f) => ({ ...f, folder })); }
   }, (e) => setError(describeError(e))); }, [client]);
   if (status === null) return null;
@@ -44,10 +46,14 @@ export default function SyncSection(): ReactNode {
     <section className="st-stack" aria-labelledby="sync-title">
       <span className="st-label" id="sync-title">Phone and web sync</span>
       <p className="st-hint">With the desktop off, the phone and web app read an encrypted copy of your chats, meetings, plans and usage from your sync storage, and queue chat prompts that run when the desktop is back. The storage only ever holds ciphertext.</p>
-      <div className="st-row" role="radiogroup" aria-label="Sync storage">
-        <label className="st-row"><input type="radio" name="sync-kind" checked={kind === "mega"} onChange={() => setKind("mega")} /> MEGA</label>
-        <label className="st-row"><input type="radio" name="sync-kind" checked={kind === "sftp"} onChange={() => setKind("sftp")} /> Own server</label>
-      </div>
+      <fieldset className="st-stack">
+        <legend className="st-label">Storage</legend>
+        {STORE_CHOICES.map((c) => (
+          <label key={c.kind} className="st-row">
+            <input type="radio" name="sync-store" checked={kind === c.kind} disabled={!c.built} onChange={() => setKind(c.kind)} /> {c.label}{c.built ? "" : " (not available yet)"}
+          </label>
+        ))}
+      </fieldset>
       {kind === "mega" ? (
         <>
           <div className="st-stack" role="note">
@@ -67,7 +73,7 @@ export default function SyncSection(): ReactNode {
           <div className="st-row"><Button onClick={() => guarded(saveMegaNow)} disabled={!form.email.trim() || !form.password}>Save and test</Button></div>
         </>
       ) : (
-        <SyncOwnServer status={status} onSave={(cfg) => guarded(() => saveSftpNow(cfg))} />
+        kind === "box" ? <SyncBoxForm folder={status?.storeKind === "box" && status.store && "folder" in status.store ? status.store.folder : "llmide-sync"} switching={!!status?.storeKind && status.storeKind !== "box" && status.devices.length > 0} run={run} /> : <SyncOwnServer status={status} onSave={(cfg) => guarded(() => saveSftpNow(cfg))} />
       )}
       {pending && (
         <div className="st-dialog" role="alertdialog" aria-label="Switch sync storage">

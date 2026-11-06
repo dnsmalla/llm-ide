@@ -115,3 +115,29 @@ test("own-server error texts are about the server, MEGA texts stay", () => {
   assert.match(m.syncErrorText("SYNC_AUTH_FAILED"), /email or password/);
   assert.doesNotMatch(m.syncErrorText("SYNC_UNREACHABLE", "sftp"), /MEGA/);
 });
+
+test("Box start/poll decoders are strict and the calls hit the Box routes", async () => {
+  const url = "https://account.box.com/api/oauth2/authorize?response_type=code&client_id=cid";
+  assert.equal(m.decodeBoxStart({ authorizeUrl: url }).authorizeUrl, url);
+  assert.throws(() => m.decodeBoxStart({ authorizeUrl: "https://evil.example/authorize" }), "only Box's authorize page opens");
+  assert.deepEqual(m.decodeBoxPoll({ phase: "done", code: null }), { phase: "done", code: null });
+  assert.throws(() => m.decodeBoxPoll({ phase: "weird", code: null }));
+  const c = fake({ "POST /kb/sync/box/start": { status: 200, body: { authorizeUrl: url } } });
+  await m.startBoxConnect(c, { clientId: "cid0123456789abcdef", clientSecret: "s".repeat(32), folder: "llmide-sync" });
+  assert.ok(c.calls[0].startsWith("POST /kb/sync/box/start"));
+});
+test("waitBoxConnect polls until done or failed, and times out", async () => {
+  let n = 0;
+  const seq = [{ phase: "waiting", code: null }, { phase: "waiting", code: null }, { phase: "done", code: null }];
+  const c = { async request() { return { status: 200, body: seq[Math.min(n++, seq.length - 1)] }; } };
+  assert.deepEqual(await m.waitBoxConnect(c, { intervalMs: 1, sleep: async () => {} }), { phase: "done", code: null });
+  const stuck = { async request() { return { status: 200, body: { phase: "waiting", code: null } }; } };
+  let t = 0;
+  assert.equal((await m.waitBoxConnect(stuck, { intervalMs: 1, timeoutMs: 3, sleep: async () => {}, now: () => t++ })).phase, "timeout");
+});
+test("Box errors read as Box guidance; the chooser lists Own server as not built", () => {
+  assert.match(m.syncErrorText("SYNC_AUTH_FAILED", "box"), /Connect Box again/);
+  assert.match(m.syncErrorText("SYNC_AUTH_FAILED", "mega"), /email or password/);
+  assert.match(m.boxConnectFailureText("SYNC_BAD_CLIENT"), /client ID or secret/);
+  assert.deepEqual(m.STORE_CHOICES.map((s) => [s.kind, s.built]), [["mega", true], ["box", true], ["sftp", false]]);
+});

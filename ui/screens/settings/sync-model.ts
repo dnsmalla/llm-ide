@@ -4,7 +4,7 @@
 import { ApiError, call, type CoreClient } from "./core-api.ts";
 
 export interface MegaSetup { email: string; password: string; folder: string }
-export type StoreKind = "mega" | "sftp";
+export type StoreKind = "mega" | "box" | "sftp";
 export interface MegaStore { folder: string; account: string }
 export interface SftpSetup { host: string; port: number; username: string; hostFingerprint: string; webHost: string }
 export interface SftpStore extends SftpSetup { publicKey: string }
@@ -58,8 +58,8 @@ const SFTP_ERROR_TEXT: Record<string, string> = {
   SYNC_IO: "A file operation on your server failed. Check the folders with deploy/vps/check-sync.sh server; sync retries by itself.",
   SYNC_TIMEOUT: "Your server did not answer in time. Sync retries by itself.",
 };
-export const syncErrorText = (code: string, kind: string | null = "mega"): string | null =>
-  (kind === "sftp" ? SFTP_ERROR_TEXT[code] : undefined) ?? SYNC_ERROR_TEXT[code] ?? null;
+export const syncErrorText = (code: string, kind?: string | null): string | null =>
+  (kind === "box" ? BOX_ERROR_TEXT[code] : kind === "sftp" ? SFTP_ERROR_TEXT[code] : undefined) ?? SYNC_ERROR_TEXT[code] ?? null;
 export const describeSyncError = (e: unknown, kind: string | null = "mega"): string | null => (e instanceof ApiError ? syncErrorText(e.code, kind) : null);
 
 export async function loadSyncStatus(client: CoreClient): Promise<SyncStatus | null> {
@@ -124,3 +124,48 @@ export function pollEnrollSerially(client: CoreClient, onPoll: (p: EnrollPoll) =
 export const cancelEnroll = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/devices/enroll/cancel", {}); };
 export const revokeSyncDevice = async (client: CoreClient, deviceId: string) => decodeSyncStatus(await call(client, "DELETE", `/kb/sync/devices/${encodeURIComponent(deviceId)}`));
 export const rotateSyncKeys = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/rotate", {}));
+
+export const STORE_CHOICES: ReadonlyArray<{ kind: StoreKind; label: string; built: boolean }> = [
+  { kind: "mega", label: "MEGA", built: true },
+  { kind: "box", label: "Box", built: true },
+  { kind: "sftp", label: "Own server", built: false },
+];
+export const BOX_DESKTOP_REDIRECT = "http://127.0.0.1/kb/sync/box/callback";
+export interface BoxSetup { clientId: string; clientSecret: string; folder: string }
+export interface BoxConnectStart { authorizeUrl: string }
+export interface BoxConnectPoll { phase: "none" | "waiting" | "done" | "failed"; code: string | null }
+const BOX_PHASES = new Set(["none", "waiting", "done", "failed"]);
+export function decodeBoxStart(v: unknown): BoxConnectStart {
+  if (isRecord(v) && typeof v.authorizeUrl === "string" && v.authorizeUrl.startsWith("https://account.box.com/api/oauth2/authorize?")) return { authorizeUrl: v.authorizeUrl };
+  throw new ApiError(0, "BAD_RESPONSE");
+}
+export function decodeBoxPoll(v: unknown): BoxConnectPoll {
+  if (isRecord(v) && typeof v.phase === "string" && BOX_PHASES.has(v.phase) && strOrNull(v.code)) return { phase: v.phase as BoxConnectPoll["phase"], code: v.code as string | null };
+  throw new ApiError(0, "BAD_RESPONSE");
+}
+export const startBoxConnect = async (client: CoreClient, cfg: BoxSetup) => decodeBoxStart(await call(client, "POST", "/kb/sync/box/start", cfg));
+export const pollBoxConnect = async (client: CoreClient) => decodeBoxPoll(await call(client, "POST", "/kb/sync/box/poll", {}));
+export async function waitBoxConnect(client: CoreClient, { intervalMs = 2000, timeoutMs = 600_000, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), now = () => Date.now() }:
+  { intervalMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {}): Promise<{ phase: "done" | "failed" | "timeout"; code: string | null }> {
+  const until = now() + timeoutMs;
+  for (;;) {
+    const p = await pollBoxConnect(client);
+    if (p.phase === "done" || p.phase === "failed") return { phase: p.phase, code: p.code };
+    if (p.phase === "none" || now() >= until) return { phase: "timeout", code: null };
+    await sleep(intervalMs);
+  }
+}
+const BOX_ERROR_TEXT: Record<string, string> = {
+  SYNC_AUTH_FAILED: "Box no longer accepts the saved sign-in: it was revoked, or the desktop was off for more than 60 days. Connect Box again. Sync was turned off until then.",
+  SYNC_RATE_LIMITED: "Box asked LLM-IDE to slow down. Sync retries by itself in a few minutes.",
+  SYNC_QUOTA: "The Box account is out of storage.",
+  SYNC_UNREACHABLE: "Box could not be reached. Check the network; sync retries by itself.",
+  SYNC_IO: "A Box operation failed. Sync retries by itself.",
+};
+const BOX_CONNECT_TEXT: Record<string, string> = {
+  cancelled: "Box sign-in was cancelled. Nothing changed.",
+  SYNC_BAD_CLIENT: "Box refused the client ID or secret. Copy both again from your Box app's Configuration page.",
+  SYNC_AUTH_FAILED: "Box refused the sign-in. Check that your Box app lists the redirect URI shown here, then try again.",
+  SYNC_UNREACHABLE: "Box could not be reached. Check the network and try again.",
+};
+export const boxConnectFailureText = (code: string | null): string => BOX_CONNECT_TEXT[code ?? ""] ?? "Connecting Box stopped. Nothing changed.";
