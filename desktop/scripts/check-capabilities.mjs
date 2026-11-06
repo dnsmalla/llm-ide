@@ -56,8 +56,24 @@ function defaultHasSpike(cargoToml) {
   return /"spike"/.test(def);
 }
 
-export function check({ libRs, buildRs, capabilities, cargoToml, product = false }) {
+/** Source scans for the updater's two guarantees: registered only behind the config gate, and never downloads before the user confirms. */
+function updaterProblems(libRs, updaterRs) {
   const problems = [];
+  const builders = libRs.split('\n').filter((l) => l.includes('tauri_plugin_updater::Builder'));
+  if (builders.length > 1 || (builders.length === 1 && !/if\s+update_problem\.is_none\(\)\s*\{\s*builder\.plugin\(\s*tauri_plugin_updater::Builder/.test(builders[0]))) {
+    problems.push('tauri_plugin_updater::Builder must appear once, on the `.plugin(` line gated by `update_problem.is_none()`');
+  }
+  if (updaterRs !== undefined) {
+    const body = updaterRs.slice(updaterRs.indexOf('fn update_install'));
+    const ask = body.indexOf('confirm::ask(');
+    const dl = body.indexOf('.download(');
+    if (ask < 0 || dl < 0 || ask > dl) problems.push('update_install must call confirm::ask( before .download(');
+  }
+  return problems;
+}
+
+export function check({ libRs, buildRs, capabilities, cargoToml, updaterRs, product = false }) {
+  const problems = updaterProblems(libRs, updaterRs);
   const spike = spikeCommands(libRs);
   const nonSpikeCaps = Object.entries(capabilities).filter(([f]) => f !== 'spike.json');
   const grantedBy = (cmd, pred) => Object.entries(capabilities).some(([f, c]) => pred(f) && (c.permissions ?? []).includes(`allow-${toKebab(cmd)}`));
@@ -115,6 +131,7 @@ function main() {
   const problems = check({
     libRs: readFileSync(join(tauri, 'src', 'lib.rs'), 'utf8'),
     buildRs: readFileSync(join(tauri, 'build.rs'), 'utf8'),
+    updaterRs: readFileSync(join(tauri, 'src', 'updater.rs'), 'utf8'),
     cargoToml: (() => { try { return readFileSync(join(tauri, 'Cargo.toml'), 'utf8'); } catch { return undefined; } })(),
     capabilities,
     product,

@@ -31,7 +31,7 @@ test('remote scope and other windows fail', () => {
 test('the real repo config passes', () => {
   const t = join(import.meta.dirname, '..', 'src-tauri');
   const capabilities = Object.fromEntries(['default.json', 'spike.json'].map((f) => [f, JSON.parse(readFileSync(join(t, 'capabilities', f), 'utf8'))]));
-  const base = { libRs: readFileSync(join(t, 'src/lib.rs'), 'utf8'), buildRs: readFileSync(join(t, 'build.rs'), 'utf8'), cargoToml: readFileSync(join(t, 'Cargo.toml'), 'utf8'), capabilities };
+  const base = { updaterRs: readFileSync(join(t, 'src/updater.rs'), 'utf8'), libRs: readFileSync(join(t, 'src/lib.rs'), 'utf8'), buildRs: readFileSync(join(t, 'build.rs'), 'utf8'), cargoToml: readFileSync(join(t, 'Cargo.toml'), 'utf8'), capabilities };
   assert.deepEqual(check(base), []);
   assert.deepEqual(check({ ...base, product: true }), []);
 });
@@ -114,6 +114,7 @@ test('the CLI exits 1 on a bad tree and 0 on a good one, from a path with spaces
     mkdirSync(join(tauri, 'capabilities'), { recursive: true });
     copyFileSync(join(import.meta.dirname, 'check-capabilities.mjs'), join(scripts, 'check-capabilities.mjs'));
     writeFileSync(join(tauri, 'src', 'lib.rs'), libRs);
+    copyFileSync(join(import.meta.dirname, '..', 'src-tauri', 'src', 'updater.rs'), join(tauri, 'src', 'updater.rs'));
     writeFileSync(join(tauri, 'build.rs'), buildRs);
     const capFile = join(tauri, 'capabilities', 'default.json');
     writeFileSync(capFile, JSON.stringify(cap(['allow-ping', 'allow-thing-two', 'allow-core-status'])));
@@ -131,4 +132,17 @@ test('the CLI exits 1 on a bad tree and 0 on a good one, from a path with spaces
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('updater plugin must stay behind the config gate and the install must confirm before downloading', () => {
+  const t = join(import.meta.dirname, '..', 'src-tauri');
+  const lib = readFileSync(join(t, 'src/lib.rs'), 'utf8');
+  const upd = readFileSync(join(t, 'src/updater.rs'), 'utf8');
+  assert.deepEqual(check({ ...ok(), libRs: lib, updaterRs: upd, capabilities: { 'a.json': cap(['allow-ping']) } }).filter((p) => /updater|confirm::ask/.test(p)), []);
+  const ungated = lib.replace('if update_problem.is_none() { builder.plugin(', 'if true { builder.plugin(');
+  assert.ok(check({ ...ok(), libRs: ungated, updaterRs: upd }).some((p) => p.includes('update_problem')));
+  const noConfirm = upd.replace('confirm::ask(', 'confirm::skip(');
+  assert.ok(check({ ...ok(), libRs: lib, updaterRs: noConfirm }).some((p) => p.includes('confirm::ask')));
+  const late = upd.replace('confirm::ask(', 'confirm::skip(') + '\n// confirm::ask(';
+  assert.ok(check({ ...ok(), libRs: lib, updaterRs: late }).some((p) => p.includes('confirm::ask')));
 });
