@@ -66,13 +66,17 @@ export function waitForCode(state: string, channel: ChannelLike, o: { timeoutMs?
   });
 }
 
-const WIDE = /(^|\s)(api|write_repository|root_readwrite)(\s|$)/;
-export function parseTokens(json: unknown, now: number): Tokens {
+// Allowlist, not a blocklist: a granted scope outside the requested set (for example GitLab's `sudo`) is refused. GitLab
+// always reports its scope, so a missing one is refused too; Box's token response has no scope field, so Box passes.
+export function parseTokens(json: unknown, now: number, requested: string, requireScope: boolean): Tokens {
   const j = json as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; scope?: unknown } | null;
   const access = j?.access_token, refresh = j?.refresh_token, exp = j?.expires_in;
   if (typeof access !== "string" || access.length < 8 || access.length > 4096) throw new OAuthError("bad_token_response");
   if (refresh != null && (typeof refresh !== "string" || refresh.length > 4096)) throw new OAuthError("bad_token_response");
-  if (typeof j?.scope === "string" && WIDE.test(j.scope)) throw new OAuthError("scope_too_wide");
+  if (typeof j?.scope === "string") {
+    const ok = requested.split(" ");
+    if (j.scope.split(/\s+/).some((s) => s !== "" && !ok.includes(s))) throw new OAuthError("scope_too_wide");
+  } else if (requireScope) throw new OAuthError("scope_too_wide");
   const ttl = typeof exp === "number" && exp > 0 ? Math.min(exp, 86_400) : 3600;
   return { access, refresh: typeof refresh === "string" ? refresh : null, expiresAt: now + ttl * 1000 - 60_000 };
 }
@@ -92,14 +96,14 @@ export async function exchangeCode(p: Provider, cfg: ProviderConfig, code: strin
   const form: Record<string, string> = { grant_type: "authorization_code", code, client_id: cfg.clientId, redirect_uri: redirectUri, code_verifier: verifier };
   // Box documents no PKCE and requires its secret (spec 8.2); the verifier is sent anyway and is harmless.
   if (p === "box") form.client_secret = cfg.clientSecret ?? "";
-  return parseTokens(await post(ENDPOINTS[p].token, form, fetchImpl), now());
+  return parseTokens(await post(ENDPOINTS[p].token, form, fetchImpl), now(), ENDPOINTS[p].scope, p === "gitlab");
 }
 
 export async function refreshTokens(p: Provider, cfg: ProviderConfig, refresh: string, redirectUri: string, fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<Tokens> {
   const form: Record<string, string> = { grant_type: "refresh_token", refresh_token: refresh, client_id: cfg.clientId };
   if (p === "gitlab") form.redirect_uri = redirectUri;
   else form.client_secret = cfg.clientSecret ?? "";
-  return parseTokens(await post(ENDPOINTS[p].token, form, fetchImpl), now());
+  return parseTokens(await post(ENDPOINTS[p].token, form, fetchImpl), now(), ENDPOINTS[p].scope, p === "gitlab");
 }
 
 /** Best effort: a failed revoke still ends the session here, and the token expires on its own. */

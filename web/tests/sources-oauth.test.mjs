@@ -59,18 +59,21 @@ test('waitForCode: ignores other states, resolves the matching code, rejects clo
   await assert.rejects(d, code('sign_in_cancelled'));
 });
 
+const GL_SCOPE = 'read_api read_repository';
 test('tokens: strict parse, wide scopes refused, expiry a minute early', () => {
-  const t = parseTokens({ access_token: 'acc-12345678', refresh_token: 'ref-1', expires_in: 7200, scope: 'read_api read_repository' }, 1000);
+  const t = parseTokens({ access_token: 'acc-12345678', refresh_token: 'ref-1', expires_in: 7200, scope: 'read_api read_repository' }, 1000, GL_SCOPE, true);
   assert.deepEqual(t, { access: 'acc-12345678', refresh: 'ref-1', expiresAt: 1000 + 7200_000 - 60_000 });
-  assert.throws(() => parseTokens({ access_token: 'acc-12345678', scope: 'api read_api' }, 0), code('scope_too_wide'));
-  assert.throws(() => parseTokens({ access_token: 'acc-12345678', scope: 'root_readwrite' }, 0), code('scope_too_wide'));
-  assert.throws(() => parseTokens({ access_token: 3 }, 0), code('bad_token_response'));
-  assert.equal(parseTokens({ access_token: 'acc-12345678' }, 0).refresh, null);
+  assert.throws(() => parseTokens({ access_token: 'acc-12345678', scope: 'api read_api' }, 0, GL_SCOPE, true), code('scope_too_wide'));
+  assert.throws(() => parseTokens({ access_token: 'acc-12345678', scope: 'read_api read_repository sudo' }, 0, GL_SCOPE, true), code('scope_too_wide'));
+  assert.throws(() => parseTokens({ access_token: 'acc-12345678' }, 0, GL_SCOPE, true), code('scope_too_wide'), 'GitLab without a scope field is refused');
+  assert.throws(() => parseTokens({ access_token: 'acc-12345678', scope: 'root_readwrite' }, 0, 'root_readonly', false), code('scope_too_wide'));
+  assert.throws(() => parseTokens({ access_token: 3 }, 0, GL_SCOPE, true), code('bad_token_response'));
+  assert.equal(parseTokens({ access_token: 'acc-12345678' }, 0, 'root_readonly', false).refresh, null, 'Box returns no scope field');
 });
 
 test('exchange, refresh and revoke post the right forms; Box adds its secret, GitLab never has one', async () => {
   const seen = [];
-  const fetchImpl = async (url, init) => { seen.push({ url, form: Object.fromEntries(new URLSearchParams(init.body)), init }); return new Response(JSON.stringify({ access_token: 'acc-12345678', refresh_token: 'r2', expires_in: 3600 }), { status: 200 }); };
+  const fetchImpl = async (url, init) => { seen.push({ url, form: Object.fromEntries(new URLSearchParams(init.body)), init }); return new Response(JSON.stringify({ access_token: 'acc-12345678', refresh_token: 'r2', expires_in: 3600, ...(url.includes('gitlab') ? { scope: 'read_api read_repository' } : {}) }), { status: 200 }); };
   await exchangeCode('gitlab', GL, 'good-code-123', 'verif', 'https://x/cb', fetchImpl, () => 0);
   assert.equal(seen[0].url, 'https://gitlab.com/oauth/token');
   assert.deepEqual(seen[0].form, { grant_type: 'authorization_code', code: 'good-code-123', client_id: GL.clientId, redirect_uri: 'https://x/cb', code_verifier: 'verif' });
