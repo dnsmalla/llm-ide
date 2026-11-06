@@ -1,0 +1,10 @@
+import { test, before } from "node:test";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
+const HERE=dirname(fileURLToPath(import.meta.url)),LIVE=resolve(HERE,".."),req=createRequire(join(resolve(LIVE,"../../../desktop"),"package.json"));const {createElement:h}=req("react");const {renderToStaticMarkup:html}=req("react-dom/server");let M;
+before(async()=>{const {build}=req("esbuild");const outfile=join(bundleDir("live-recovery"),"recovery.mjs");await build({entryPoints:[join(LIVE,"RecoveryList.tsx")],outfile,bundle:true,format:"esm",platform:"node",packages:"external",jsx:"automatic",logLevel:"silent"});M=await import(pathToFileURL(outfile).href)});
+test("lists",()=>{const out=html(h(M.RecoveryList,{capture:{},active:true,initial:[{id:"m-a-b",startedAtMs:Date.UTC(2026,10,5,9,30),rows:12}]}));assert.match(out,/not finished/);assert.match(out,/12 lines/);assert.match(out,/Finish into a note/);assert.match(out,/Move to Trash/)});
+test("empty",()=>{assert.equal(html(h(M.RecoveryList,{capture:{},active:true,initial:[]})),"")});
