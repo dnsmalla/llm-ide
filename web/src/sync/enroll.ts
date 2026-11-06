@@ -8,8 +8,8 @@ const subtle: any = globalThis.crypto.subtle;
 export const ID22 = /^[A-Za-z0-9_-]{22}$/;
 export const NAME_MAX = 64;
 const FP43 = /^[A-Za-z0-9_-]{43}$/;
-const ST_RE = /^((mega|box):[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/;
-const BOX_APP_RE = /^[A-Za-z0-9]{16,128}$/; // memory: is the test adapter only; the controller refuses it
+const ST_RE = /^((mega|box):[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/; // memory: is the test adapter only; the controller refuses it
+const BOX_APP_RE = /^[A-Za-z0-9]{16,128}$/;
 const USER_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const PAIR_FIELDS = ["sid", "sfp", "dir", "slot", "es", "st"] as const;
 export type Tier = "web" | "ios";

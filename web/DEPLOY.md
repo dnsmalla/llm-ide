@@ -27,7 +27,7 @@ Keep the Node server on loopback and let Caddy own DNS, certificates and HTTPS.
 The bundle is static, so any static host works; the CSP header below must be
 sent by the proxy or the server. The two MEGA hosts in `connect-src` are for offline sync; MEGA's
 transfer hosts (`*.userstorage.mega.co.nz`) are not yet confirmed to allow browser
-(CORS) access — see README "Offline sync" before relying on the browser tier. The four Box/GitLab hosts are for reading documents and code at the source. `https://llm-ide.com` is the own sync server (`/sync/`, deploy/vps/sync-sftp.md); if you run your sync server on another host, put that host here instead, in all three places.
+(CORS) access — see README "Offline sync" before relying on the browser tier. `https://api.box.com https://upload.box.com https://*.boxcloud.com` are for the Box sync store, and the PWA origin must be listed in the Box app's CORS domains. The four Box/GitLab hosts are for reading documents and code at the source. `https://llm-ide.com` is the own sync server (`/sync/`, deploy/vps/sync-sftp.md); if you run your sync server on another host, put that host here instead, in all three places.
 
 ```caddyfile
 web.example.com {

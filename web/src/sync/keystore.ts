@@ -1,6 +1,8 @@
 // This browser's sync identity (design 5.1): P-256 ECDH and ECDSA pairs generated non-extractable, and one device record
 // in IndexedDB holding CryptoKey objects (structured clone keeps them non-extractable), public SPKIs, the pinned desktop
-// SPKI, the epoch, the wrap keys and counters. Never the MEGA password, never decrypted content.
+// SPKI, the epoch, the wrap keys and counters. Never the MEGA password, never a Box token, never decrypted content. For a
+// Box store it keeps the user's own Box app id and secret from the pairing link (SP6 D2): not a user credential, useless
+// without the user's Box login.
 import type { WrapKeys } from "./envelope.ts";
 
 const subtle: any = globalThis.crypto.subtle;

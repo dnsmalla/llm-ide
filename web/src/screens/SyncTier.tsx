@@ -1,4 +1,4 @@
-// The offline sync tier (design 6): pair this browser, unlock MEGA for this session, read the desktop's last verified
+// The offline sync tier (design 6): pair this browser, unlock MEGA or Box for this session, read the desktop's last verified
 // snapshot with its age, and queue chat prompts that run when the desktop is back. Every string renders as text.
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
