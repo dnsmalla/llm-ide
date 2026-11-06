@@ -21,6 +21,10 @@ const SKIP_DIRS = new Set(['node_modules', 'tests', 'src', 'dist', 'coverage', '
 
 const RULES = {
   bareFetch: /(^|[^.\w$])fetch\s*\(/g,
+  // fetch passed or stored as a value (`fetchFn = fetch`, `f: fetch`), optional calls and bracket access.
+  fetchRef: /(^|[^.\w$'"`/|-])fetch\b(?![\s(.:|-])/g,
+  fetchOptional: /\bfetch\?\.\(/g,
+  globalBracket: /\b(globalThis|global)\[\s*['"`]fetch['"`]\s*\]/g,
   globalFetch: /\b(globalThis|global)\.fetch\b/g,
   httpRequest: /\bhttps?\.(request|get)\s*\(/g,
   undici: /['"`]undici['"`]/g,

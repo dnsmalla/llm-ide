@@ -22,6 +22,14 @@ import {
   send, readJson, readRawBody, clientIp, safeAudit, publicMessageFor,
 } from '../server/route-http.mjs';
 import { isCatalogRoute, handleCatalogRoute } from './extensions-catalog.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
+
+/** The MCP registry version lookup, with its pinned fetch: only the npm and PyPI registries, no redirects, 2 MiB. */
+async function registryVersions() {
+  const m = await import('../mcp/registry-versions.mjs');
+  m.useRegistryFetch((url, init) => fixedHostFetch(url, init, { hosts: ['registry.npmjs.org', 'pypi.org'], maxBytes: 2 * 1024 * 1024 }));
+  return m;
+}
 import { isWorkspaceTrustRoute, handleWorkspaceTrustRoute } from './workspace-trust.mjs';
 
 // Redact an MCP plugin's env VALUES for a client response — key names are
@@ -935,7 +943,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
       // outage must never block the add — it just lands unpinned.
       const { catalogEntry } = await import('../mcp/catalog.mjs');
       const { parseRunnerSpec } = await import('../mcp/package-spec.mjs');
-      const { latestVersion } = await import('../mcp/registry-versions.mjs');
+      const { latestVersion } = await registryVersions();
       const catalogParsed = parseRunnerSpec(catalogEntry(body.catalogId) || {});
       let pin = null;
       if (catalogParsed) pin = await latestVersion(catalogParsed);
@@ -1036,7 +1044,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
     // Forced checks are admin-only; for anyone else it quietly degrades to the cached check.
     if (force) { try { requireAdmin(req); } catch { force = false; } }
     const { readMcpRegistry, managedPackageOf } = await import('../mcp/state.mjs');
-    const { latestVersion } = await import('../mcp/registry-versions.mjs');
+    const { latestVersion } = await registryVersions();
     const servers = await Promise.all(readMcpRegistry().map(async (p) => {
       const parsed = managedPackageOf(p);
       if (!parsed) return null;
@@ -1078,7 +1086,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
       }
       let version = body?.to;
       if (version === undefined || version === null) {
-        const { latestVersion } = await import('../mcp/registry-versions.mjs');
+        const { latestVersion } = await registryVersions();
         const found = await latestVersion(parsed, { force: true });
         if (found.error) { fail(502, 'REGISTRY_UNAVAILABLE', found.error); return; }
         version = found.version;

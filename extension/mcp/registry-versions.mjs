@@ -58,7 +58,13 @@ export function _setRegistryFetchForTests(fn) {
   testFetch = typeof fn === 'function' ? fn : null;
 }
 
-export async function latestVersion({ runner, name } = {}, { fetchFn = testFetch ?? fetch, now = Date.now, force = false } = {}) {
+// The pinned registry fetch (only registry.npmjs.org and pypi.org, no redirects, a size cap) is handed in by the
+// route layer (routes/extension-routes.mjs), because this layer may not import server/. Never a bare fetch.
+let registryFetch = null;
+export function useRegistryFetch(fn) { registryFetch = typeof fn === 'function' ? fn : null; }
+
+export async function latestVersion({ runner, name } = {}, { fetchFn = testFetch ?? registryFetch, now = Date.now, force = false } = {}) {
+  if (!fetchFn) return { error: 'registry lookup is not configured' };
   if ((runner !== 'npx' && runner !== 'uvx') || !isValidName(runner, name)) {
     return { error: 'invalid package name' };
   }

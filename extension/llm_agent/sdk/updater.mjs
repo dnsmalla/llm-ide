@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scrubbedChildEnv } from '../../core/child-env.mjs';
 import { agentBusySummary } from '../../core/agent-busy.mjs';
+import { fixedHostFetch } from '../../server/fixed-host-fetch.mjs';
 
 const PKG = '@anthropic-ai/claude-agent-sdk';
 // The dist-tags document only: the package's full registry document is
@@ -52,7 +53,10 @@ function readDeclaredVersion(dir = EXTENSION_DIR) {
 
 let latestCache = null;
 
-export async function fetchLatestVersion({ force = false, fetchFn = fetch, now = Date.now } = {}) {
+// Pinned like every other outbound call: only registry.npmjs.org, no redirects, a size cap.
+const registryFetch = (url, init) => fixedHostFetch(url, init, { hosts: ['registry.npmjs.org'], maxBytes: 64 * 1024 });
+
+export async function fetchLatestVersion({ force = false, fetchFn = registryFetch, now = Date.now } = {}) {
   if (!force && latestCache && now() - latestCache.at < LATEST_CACHE_MS) return latestCache;
   const res = await fetchFn(REGISTRY_URL, {
     redirect: 'error',
