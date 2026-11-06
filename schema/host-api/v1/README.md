@@ -57,9 +57,9 @@ All 17 commands are listed below.
 | `chat.history` | read | yes | — |
 | `usage.get` | read | yes | `usage_get` |
 
-`compose` is opt-in and never relayed: the desktop switch is `LLMIDE_HOST_API_COMPOSE=1` (default off), and a paired browser must re-pair after it is enabled. It serves the allowed modes and Claude models (`chat.options`) and starts a fresh phone chat (`chat.new`); `chat.send` may then carry `mode` and `model`, re-checked by `startHostTurn` and never taken from HTTP. Modes are exactly `auto`, `ask`, `plan`, `assist_plan`, `review`, `document` (`auto` runs `auto_read_only`); `execute` and permission modes are refused. Attachments are text only, at most 10 files, 80,000 characters each and 200,000 in total.
-
 `read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes only `LLMIDE_HOST_API_TLS` and `LLMIDE_HOST_API_WEB_ORIGINS` to a core it starts (`desktop/src-tauri/src/core_env.rs` drops every other `LLMIDE_*`), so `read` works only on a core you start yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`), which the app then adopts; it fails closed otherwise. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.
+
+`compose` is the web chat's turn options: `chat.options` lists the modes a client may pick (read-only ones only: `auto`, which runs `auto_read_only`, `ask`, `plan`, `assist_plan`, `review`, `document`) and the account's Claude models; `chat.send` may then carry `mode` and `model`, which a host honours only for a session granted `compose` (`denied` with a re-pair hint otherwise) and re-checks against the same lists; `chat.new` starts a fresh phone chat (the previous one stays readable through `chat.history`). Served only when the host enables it (desktop: `LLMIDE_HOST_API_COMPOSE=1`, default off), never to a relay-bridged session, and only to a device paired while it was served. Bounds are pinned by `fixtures/security/compose.json`. Attachments stay under `chat`: text only, the host frames them as `{ path: name, content: text }` for the model.
 
 ## Events
 
@@ -101,7 +101,7 @@ are the desktop's host-specific rules; a future second host must document its di
   `chat.error` with a generic message and `retryable: false`.
 - **Snapshot trimming.** `chat.snapshot` / `host.snapshot` messages are trimmed to `maxListBytes` (see Limits): oldest
   dropped first, the newest always kept.
-- **Compose.** Only the desktop serves `compose` (`chat.options`, `chat.new`, and `mode` / `model` on `chat.send`), with `LLMIDE_HOST_API_COMPOSE=1`; models come from the account's Agent SDK list and are re-checked on every send; `chat.new` and `chat.options` use the turn and read buckets. The Mac gateway answers both commands `capability_unavailable` and ignores `mode` / `model` on `chat.send` (it never grants `compose`, so a client never sends them there). Both hosts accept `chat.send.attachments`; the desktop frames them for the engine as `{ path: name, content: text }`.
+- **Compose.** Only the desktop serves `compose` (`chat.options`, `chat.new`, and `mode` / `model` on `chat.send`), with `LLMIDE_HOST_API_COMPOSE=1`; models come from the account's Agent SDK list and are re-checked on every send; `chat.new` and `chat.options` use the turn and read buckets. The desktop accepts `chat.send.attachments` and frames them for the engine as `{ path: name, content: text }`.
 - **Which chat.** One server-side "Phone chat" per user (`host_api_quick_chat`).
 - **Switches.** `tool_approvals` is served only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`; `chat.history.clear` is
   `denied` unless `LLMIDE_HOST_API_CHAT_CLEAR=1`; `read` (`chat.sessions`, `chat.history`, `usage.get`) only with
