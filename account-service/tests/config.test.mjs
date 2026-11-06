@@ -17,8 +17,15 @@ test('sign-up opens only with ACCOUNTS_SIGNUP_OPEN=1', () => {
   assert.equal(loadConfig({ ACCOUNTS_SIGNUP_OPEN: '0' }).signupOpen, false);
 });
 
+test('ADR 0020: production refuses to start the retired service and relay without the explicit override', () => {
+  const env = { NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_MAIL_TRANSPORT: 'none' };
+  assert.throws(() => loadConfig(env), /retired/);
+  assert.throws(() => loadConfig({ ...env, ACCOUNTS_RELAY: '1' }), /retired/);
+  assert.equal(loadConfig({ ...env, ACCOUNTS_ALLOW_RETIRED: '1' }).relay.enabled, false);
+});
+
 test('production requires https, smtps and never the file mailer', () => {
-  const prod = { NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_SMTP_URL: 'smtps://u:p@smtp.example.com:465' };
+  const prod = { NODE_ENV: 'production', ACCOUNTS_ALLOW_RETIRED: '1', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_SMTP_URL: 'smtps://u:p@smtp.example.com:465' };
   const c = loadConfig(prod);
   assert.equal(c.rpId, 'accounts.llm-ide.com');
   assert.equal(c.secureCookies, true);
@@ -37,10 +44,10 @@ test('refuses a non-loopback bind, a non-bare origin and a foreign RP ID', () =>
 });
 
 test('N1: direct sign-up outside localhost needs an allowlist of exact addresses', () => {
-  const prod = { NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' };
+  const prod = { NODE_ENV: 'production', ACCOUNTS_ALLOW_RETIRED: '1', ACCOUNTS_ORIGIN: 'https://accounts.llm-ide.com', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' };
   assert.throws(() => loadConfig(prod), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
   assert.throws(() => loadConfig({ ACCOUNTS_ORIGIN: 'http://accounts.example.com', ACCOUNTS_DIRECT_SIGNUP: '1' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
-  assert.throws(() => loadConfig({ NODE_ENV: 'production', ACCOUNTS_ORIGIN: 'https://localhost', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
+  assert.throws(() => loadConfig({ NODE_ENV: 'production', ACCOUNTS_ALLOW_RETIRED: '1', ACCOUNTS_ORIGIN: 'https://localhost', ACCOUNTS_MAIL_TRANSPORT: 'none', ACCOUNTS_DIRECT_SIGNUP: '1' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
   assert.throws(() => loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP_EMAILS: 'not-an-address' }), /ACCOUNTS_DIRECT_SIGNUP_EMAILS/);
   const c = loadConfig({ ...prod, ACCOUNTS_DIRECT_SIGNUP_EMAILS: ' Ada@Example.com, bob@example.com ' });
   assert.equal(c.directSignup, true);
@@ -51,7 +58,7 @@ test('N1: direct sign-up outside localhost needs an allowlist of exact addresses
 });
 
 test('relay is off by default and its web origins are exact https origins, never the accounts origin', () => {
-  const base = { ACCOUNTS_ORIGIN: 'https://accounts.example.com', NODE_ENV: 'production', ACCOUNTS_MAIL_TRANSPORT: 'none' };
+  const base = { ACCOUNTS_ORIGIN: 'https://accounts.example.com', NODE_ENV: 'production', ACCOUNTS_ALLOW_RETIRED: '1', ACCOUNTS_MAIL_TRANSPORT: 'none' };
   assert.equal(loadConfig(base).relay.enabled, false);
   const on = loadConfig({ ...base, ACCOUNTS_RELAY: '1', ACCOUNTS_ALLOWED_WEB_ORIGINS: 'https://app.example.com' });
   assert.equal(on.relay.enabled, true);

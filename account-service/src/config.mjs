@@ -5,6 +5,11 @@ const flag = (env, name) => /^(1|true|yes|on)$/i.test(env[name] ?? '');
 
 export function loadConfig(env = process.env) {
   const prod = env.NODE_ENV === 'production';
+  // Retired by ADR 0020 (encrypted sync through the user's own storage): the service and its relay are parked code.
+  // ACCOUNTS_ALLOW_RETIRED=1 exists only so the parked code's production rules stay testable.
+  if (prod && !flag(env, 'ACCOUNTS_ALLOW_RETIRED')) {
+    throw new Error('the account service and relay are retired (ADR 0020) and do not start in production');
+  }
   const origin = env.ACCOUNTS_ORIGIN ?? 'http://localhost:3470';
   let url;
   try {

@@ -1,13 +1,16 @@
 ---
 title: "0019. Public accounts in the cloud, user data on the user's desktop"
-status: proposed
+status: superseded
+superseded_by: "0020"
 date: 2026-11-05
 amends: "0018 (decisions 3 and 5; the relay's one-organisation scope)"
 ---
 
 # ADR 0019: Public accounts in the cloud, user data on the user's desktop
 
-**Status:** Proposed (design approved by the user in brainstorming, 2026-11-05).
+**Status:** Superseded by [ADR 0020](0020-box-encrypted-sync.md) on 2026-11-05 (retired in sync SP8, 2026-11-06). The desktop needs no account; phones and browsers reach desktop data through encrypted sync in the user's own storage. The account service and relay code stay in the repository as parked code and refuse to start in production.
+
+_Originally:_ Proposed (design approved by the user in brainstorming, 2026-11-05).
 **Date:** 2026-11-05
 
 ## Context
