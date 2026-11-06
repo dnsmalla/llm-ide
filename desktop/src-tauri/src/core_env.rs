@@ -132,6 +132,19 @@ pub fn spawned_core_cors_origins() -> String {
     spawned_core_cors_origins_for(crate::fsutil::current_os())
 }
 
+/// The Chrome extension's stable ID (pinned by the manifest `key`; `extension/tests/manifest-key.test.mjs`).
+pub const EXTENSION_ID: &str = "ecojclccfoegmlffpiahbcenmkfhadlk";
+/// `EXTENSION_IDS_FILE` in `extension/core/extension-origins.mjs`, read from the core's `LLMIDE_DATA_DIR`.
+pub const EXTENSION_IDS_FILE: &str = "extension-ids.json";
+
+/// Pins the spawned core's CORS to our extension: writes `{"ids":[EXTENSION_ID]}` (0600, atomic) into the
+/// core's data dir. Without the file the core echoes any `chrome-extension://` origin.
+pub fn pin_extension_ids(core_data_dir: &Path) -> Result<(), String> {
+    let body = serde_json::json!({ "ids": [EXTENSION_ID] }).to_string();
+    crate::fsutil::write_private_atomic(&core_data_dir.join(EXTENSION_IDS_FILE), body.as_bytes(), 4096)
+        .map_err(|e| format!("cannot pin the extension origin: {e}"))
+}
+
 /// The full environment for a core child, secrets excluded (the caller adds them).
 pub fn core_env(
     os: Os,
@@ -150,6 +163,26 @@ pub fn core_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_extension_pin_names_only_our_extension_and_is_private() {
+        let dir = std::env::temp_dir().join(format!("llmide-extpin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(EXTENSION_IDS_FILE), "{\"ids\":[\"ponmlkjihgfedcbaponmlkjihgfedcba\"]}").unwrap();
+        pin_extension_ids(&dir).unwrap();
+        let text = std::fs::read_to_string(dir.join(EXTENSION_IDS_FILE)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v, serde_json::json!({ "ids": ["ecojclccfoegmlffpiahbcenmkfhadlk"] }), "replaced, not merged");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(EXTENSION_IDS_FILE)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        assert!(!dir.join("extension-ids.tmp").exists(), "no temp file left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn kv(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

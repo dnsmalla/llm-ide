@@ -1,5 +1,5 @@
-//! Node core host: adopts a running LLM-IDE server on :3456, or spawns
-//! `node extension/server.mjs` on a loopback port (3457..3459) against a DB in the
+//! Node core host: adopts a running LLM-IDE server on :3456 (only when adopting is on), or spawns
+//! `node extension/server.mjs` on a loopback port (3456 first, then 3457..3459) against a DB in the
 //! desktop data dir (`llm-ide-desktop`, see `fsutil::data_dir_for`). The live
 //! `kb/data.db` and the Mac app's `llm-ide/system` are never touched by this app.
 //!
@@ -32,13 +32,23 @@ use crate::foreign_core::{self, ForeignCore};
 use crate::fsutil;
 use crate::proc_tree::ManagedChild;
 
-/// The user's live server. Only probed, never spawned over, never killed.
+/// The port the Chrome extension talks to. Probed first: a server already there is adopted (when
+/// adopting is on) or reported as foreign; never spawned over, never killed. When it is free, this app
+/// spawns its own core there (decision D2), else on 3457..3459.
 const LIVE_PORT: u16 = 3456;
-/// Ports tried, in order, for the server this app spawns (a busy one is skipped).
-/// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
-/// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 3] = [("LLMIDE_ENGINE_PREWARM", "0"), ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"), ("LLMIDE_LIVE_ACK", "1")];
+/// Ports tried, in order, for the server this app spawns (a busy one is skipped). `:3456` first, so the
+/// Chrome extension reaches the desktop core.
 const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
+/// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
+/// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note; without it the extension
+/// keeps every draft in `no-ack` and an ack releases nothing. An adopted server keeps its own env.
+const SPAWNED_CORE_FLAGS: [(&str, &str); 3] = [
+    ("LLMIDE_ENGINE_PREWARM", "0"),
+    ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
+    ("LLMIDE_LIVE_ACK", "1"),
+];
+/// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
+const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Per-probe timeout on the spawned port (kept short so readiness isn't quantized).
@@ -342,7 +352,7 @@ impl CoreHost {
             }
             (s.url.clone(), s.nonce.clone()?)
         };
-        let port: u16 = url.strip_prefix("http://127.0.0.1:")?.parse().ok()?;
+        let port = url_port(&url)?;
         match probe(port, Duration::from_millis(800)) {
             Probe::Healthy { nonce: Some(got) } if ct_eq(&got, &nonce) => Some(url),
             _ => None,
@@ -370,7 +380,9 @@ impl CoreHost {
             foreign_core: s.foreign.clone(),
             error_code: s.error_code,
             ports_tried: s.ports_tried.clone(),
-            extension_reachable: s.state == Phase::Ready && !s.adopted && s.url.contains(":3456"),
+            extension_reachable: s.state == Phase::Ready
+                && !s.adopted
+                && url_port(&s.url) == Some(self.inner.tuning.live_port),
         }
     }
 
@@ -526,9 +538,11 @@ impl CoreHost {
 
         let mut policy = RestartPolicy::new(t);
         let mut first = true;
+        // The port our last core held: a restart waits briefly for it rather than moving off :3456.
+        let mut held: Option<u16> = None;
         loop {
             let began = if first { started } else { Instant::now() };
-            match self.start_once(&data_dir, began, !first) {
+            match self.start_once(&data_dir, began, held) {
                 Started::Closed => return,
                 // A first start that fails is reported as-is (no retry: a broken install or
                 // missing secret would only fail again). After a crash, a failed restart
@@ -536,6 +550,7 @@ impl CoreHost {
                 Started::Failed if first => return,
                 Started::Failed => {}
                 Started::Ready { port, nonce } => {
+                    held = Some(port);
                     self.refresh_claude();
                     match self.supervise(port, &nonce) {
                         Ended::Closing => return,
@@ -582,6 +597,20 @@ impl CoreHost {
         }
     }
 
+    /// Polls `port` until nothing listens on it, at most `max`; true when it became free.
+    fn wait_port_free(&self, port: u16, max: Duration) -> bool {
+        let end = Instant::now() + max;
+        while Instant::now() < end {
+            if !self.sleep_unless_closing(Duration::from_millis(100)) {
+                return false;
+            }
+            if !port_in_use(port) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Sleeps `d` in slices; false if the app began closing meanwhile.
     fn sleep_unless_closing(&self, d: Duration) -> bool {
         let end = Instant::now() + d;
@@ -594,8 +623,10 @@ impl CoreHost {
         !self.is_closing()
     }
 
-    /// One start: a fresh nonce, then the first free port that answers with it.
-    fn start_once(&self, data_dir: &Path, started: Instant, is_restart: bool) -> Started {
+    /// One start: a fresh nonce, then the first free port that answers with it. `held` is set on a supervised
+    /// restart: the port the core that just exited held, waited for (bounded) when it is still busy.
+    fn start_once(&self, data_dir: &Path, started: Instant, held: Option<u16>) -> Started {
+        let is_restart = held.is_some();
         let t = &self.inner.tuning;
         let nonce = match random_nonce() {
             Ok(n) => n,
@@ -617,7 +648,7 @@ impl CoreHost {
             if self.is_closing() {
                 return Started::Closed;
             }
-            if port_in_use(port) {
+            if port_in_use(port) && !(held == Some(port) && self.wait_port_free(port, RESTART_PORT_WAIT)) {
                 last = format!("port {port} is in use");
                 busy += 1;
                 continue;
@@ -919,6 +950,11 @@ fn spawn_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// The port of a `spawn_url`, or `None` for anything else.
+fn url_port(url: &str) -> Option<u16> {
+    url.strip_prefix("http://127.0.0.1:")?.parse().ok()
+}
+
 /// 32 random bytes, hex.
 pub(crate) fn random_nonce() -> Result<String, String> {
     let mut buf = [0u8; 32];
@@ -1161,6 +1197,9 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     let rt = runtime_for(&p)?;
     eprintln!("core: runtime={} node={} root={} port={}", rt.mode, rt.node.display(), rt.root.display(), ctx.port);
     let db_dir = fsutil::private_dir(&ctx.data_dir.join("core"))?;
+    // Before the spawn: the core reads its extension pin once at boot, and on :3456 it must echo CORS for our
+    // extension only, never any chrome-extension:// origin.
+    crate::core_env::pin_extension_ids(&db_dir)?;
     // Fail closed: no secrets, no sidecar. Values go in the child's env only.
     let secrets = crate::secrets::default_backend()
         .and_then(|b| crate::secrets::load_or_create(b.as_ref()))
@@ -1176,7 +1215,9 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
         // Host-signed approvals (see host_approval.rs): the spawned core may verify them; never an adopted one.
         .env("LLMIDE_HOST_APPROVAL_KEY", &approval_key);
-    for (k, v) in SPAWNED_CORE_FLAGS { cmd.env(k, v); }
+    for (k, v) in SPAWNED_CORE_FLAGS {
+        cmd.env(k, v);
+    }
     // Host prefs fixed at this launch (token switches default off; only the exact value `on`).
     let host_features = std::env::var("LLMIDE_FEATURES").ok();
     for (k, v) in crate::prefs::core_env_pairs(&p, host_features.as_deref()) {
@@ -1602,7 +1643,8 @@ mod tests {
     /// A stand-in for server.mjs: serves /health with the nonce header, spawns a grandchild
     /// `sleep` (pid in `<dir>/child-<run>.pid`), and misbehaves per MODE:
     /// `ok`, `crash:K` (exit 1 shortly after ready on the first K runs), `always-crash`,
-    /// `hang:K` (stop answering after ready on the first K runs), `slow` (listen after 3 s).
+    /// `hang:K` (stop answering after ready on the first K runs), `slow` (listen after 3 s),
+    /// `linger:K` (on the first K runs, crash while a detached process keeps the port for 1.5 s).
     const FAKE_SERVER: &str = r#"
 const http = require('http'), fs = require('fs'), cp = require('child_process'), path = require('path');
 const dir = process.env.FAKE_DIR, mode = process.env.FAKE_MODE || 'ok';
@@ -1620,7 +1662,18 @@ const srv = http.createServer((req, res) => {
 const go = () => srv.listen(Number(process.env.LLMIDE_PORT), '127.0.0.1', () => {
   if (kind === 'always-crash' || (kind === 'crash' && runs < k)) setTimeout(() => process.exit(1), 400);
   if (kind === 'hang' && runs < k) setTimeout(() => { hung = true; }, 300);
+  if (kind === 'linger' && runs < k) setTimeout(linger, 400);
 });
+function linger() {
+  const bound = path.join(dir, 'linger-' + runs);
+  const code = "require('http').createServer((q, r) => r.end()).listen(" + process.env.LLMIDE_PORT
+    + ", '127.0.0.1', () => { require('fs').writeFileSync(" + JSON.stringify(bound) + ", '1');"
+    + " setTimeout(() => process.exit(0), 1500); });";
+  srv.close(() => {
+    cp.spawn(process.execPath, ['-e', code], { detached: true, stdio: 'ignore' }).unref();
+    const t = setInterval(() => { if (fs.existsSync(bound)) { clearInterval(t); process.exit(1); } }, 10);
+  });
+}
 if (kind === 'slow') setTimeout(go, 3000); else go();
 process.on('SIGTERM', () => process.exit(0));
 "#;
@@ -1628,6 +1681,8 @@ process.on('SIGTERM', () => process.exit(0));
     struct Fake {
         dir: PathBuf,
         host: CoreHost,
+        /// Every port the launcher was asked to spawn on (the only path that hands a core its secrets).
+        launched: Arc<Mutex<Vec<u16>>>,
     }
 
     impl Fake {
@@ -1640,7 +1695,10 @@ process.on('SIGTERM', () => process.exit(0));
             std::fs::write(&script, FAKE_SERVER).unwrap();
             let mode = mode.to_string();
             let fdir = dir.clone();
+            let launched = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&launched);
             let launcher: Launcher = Arc::new(move |ctx: &LaunchCtx<'_>| {
+                lock(&seen).push(ctx.port);
                 let mut cmd = Command::new(&node);
                 cmd.arg(&script)
                     .env("LLMIDE_PORT", ctx.port.to_string())
@@ -1657,7 +1715,7 @@ process.on('SIGTERM', () => process.exit(0));
             });
             let host = CoreHost::with(tuning, launcher, probe);
             host.start_in_background(Some(dir.clone()));
-            Some(Fake { dir, host })
+            Some(Fake { dir, host, launched })
         }
 
         fn wait_for(&self, what: &str, secs: u64, mut f: impl FnMut(&CoreStatus) -> bool) -> CoreStatus {
@@ -1762,6 +1820,49 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(hits.load(std::sync::atomic::Ordering::SeqCst) >= 1);
         assert!(f.host.verified_url().is_some(), "only the spawned core gets credentials");
         assert!(s.error_code.is_none());
+    }
+
+    #[test]
+    fn a_nonce_less_listener_on_the_live_port_is_never_used_and_the_core_spawns_on_the_next() {
+        let (live, hits) = fake(|| ok_with(""));
+        let mut ports = vec![live];
+        ports.extend(free_ports(1));
+        let t = Tuning { live_port: ports[0], adopt: false, ..tuning_fast(ports.clone()) };
+        let Some(f) = Fake::new("live-squat", "ok", t) else { return };
+        let s = f.wait_for("ready", 15, |s| s.state == Phase::Ready);
+        assert!(!s.adopted && s.trust == "spawned", "{s:?}");
+        assert_eq!(s.url, format!("http://127.0.0.1:{}", ports[1]), "fell back to the next port");
+        assert_eq!(*lock(&f.launched), vec![ports[1]], "no core (and no secret) was ever launched for the squatted port");
+        assert_eq!(f.host.verified_url(), Some(format!("http://127.0.0.1:{}", ports[1])), "credentials go to our own core only");
+        assert!(hits.load(std::sync::atomic::Ordering::SeqCst) >= 1, "the squatter was probed");
+        let fc = s.foreign_core.expect("the squatter is reported");
+        assert_eq!(fc.port, ports[0]);
+        assert!(!s.extension_reachable, "the extension's port belongs to someone else");
+    }
+
+    #[test]
+    fn a_free_live_port_gets_our_core_and_the_extension_can_reach_it() {
+        let ports = free_ports(2);
+        let t = Tuning { live_port: ports[0], adopt: false, ..tuning_fast(ports.clone()) };
+        let Some(f) = Fake::new("live-free", "ok", t) else { return };
+        let s = f.wait_for("ready", 15, |s| s.state == Phase::Ready);
+        assert_eq!(s.url, format!("http://127.0.0.1:{}", ports[0]));
+        assert!(s.foreign_core.is_none(), "{s:?}");
+        assert!(s.extension_reachable);
+        assert_eq!(serde_json::to_value(&s).unwrap()["extensionReachable"], true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_supervised_restart_waits_for_the_live_port_instead_of_moving_off_it() {
+        let ports = free_ports(2);
+        let t = Tuning { live_port: ports[0], adopt: false, ..tuning_fast(ports.clone()) };
+        let Some(f) = Fake::new("linger", "linger:1", t) else { return };
+        let s = f.wait_for("ready after the crash", 30, |s| s.state == Phase::Ready && s.restarts == 1);
+        assert!(f.dir.join("linger-0").exists(), "the port really was still busy at the restart");
+        assert_eq!(s.url, format!("http://127.0.0.1:{}", ports[0]), "restarted on the live port");
+        assert_eq!(*lock(&f.launched), vec![ports[0], ports[0]]);
+        assert!(s.extension_reachable);
     }
 
     #[test]
