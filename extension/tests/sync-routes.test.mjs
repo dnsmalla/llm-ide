@@ -14,6 +14,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const kb = await import('../kb/db.mjs');
+const { listActivity } = await import('../kb/activity.mjs');
 const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
 const st = await import('../kb/sync-state.mjs');
@@ -240,3 +241,16 @@ test('storeFor builds a Box store and persists rotated refresh tokens', async ()
   } finally { globalThis.fetch = real; }
 });
 test('Box secrets are server-internal', () => { for (const k of ['sync.boxClientSecret','sync.boxRefreshToken']) { assert.equal(vault.isUserSettableVaultKey(k), false); assert.ok(!vault.VAULT_KEYS.includes(k)); } });
+
+test('a setup failure records one sync_attention activity row with no account or host in it; a transient one records none', () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'mega', storeConfig: { folder: 'llmide-sync' } });
+  st.setSyncEnabled(u, true);
+  const backoff = new Map();
+  recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_UNREACHABLE' }), { now: 1000, backoff });
+  assert.equal(listActivity(u, {}).filter((r) => r.kind === 'sync_attention').length, 0);
+  recordCycleFailure(u, Object.assign(new Error('x'), { code: 'SYNC_HOST_KEY_CHANGED' }), { now: 2000, backoff });
+  const rows = listActivity(u, {}).filter((r) => r.kind === 'sync_attention');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, 'Sync was turned off and needs your attention in Settings');
+});

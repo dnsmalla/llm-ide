@@ -22,6 +22,7 @@ export const ACTIVITY_KINDS = new Set([
   'slack_fetched',
   'model_fallback',
   'sync_device_removed',
+  'sync_attention',
 ]);
 
 const TITLE_CAP = 200;

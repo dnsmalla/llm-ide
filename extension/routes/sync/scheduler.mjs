@@ -6,6 +6,7 @@
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
+import { recordActivity } from '../../kb/activity.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { withTimeouts } from '../../connectors/sync-store/index.mjs';
 import { createSftpStore } from '../../connectors/sync-store/sftp.mjs';
@@ -112,6 +113,8 @@ export function recordCycleFailure(userId, e, { now, backoff }) {
   recordPublish(userId, { at: now, error: code });
   if (SETUP_ERRORS.has(code)) {
     setSyncEnabled(userId, false);
+    // The desktop turns this row into a generic "Sync needs your attention" notification; the code says why.
+    recordActivity({ userId, kind: 'sync_attention', title: 'Sync was turned off and needs your attention in Settings', detail: { code } });
     backoff.delete(userId);
     void dropStore(userId);
     return 0;
