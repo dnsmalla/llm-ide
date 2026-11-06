@@ -57,10 +57,19 @@ struct MegaCryptoTests {
     }
 
     @Test("big integers: small known values")
-    func bigInt() {
-        let r = MegaBigUInt.modPow(MegaBigUInt(Data([4])), MegaBigUInt(Data([13])), MegaBigUInt(Data([0x01, 0xf1])))
+    func bigInt() throws {
+        let r = try MegaBigUInt.modPow(MegaBigUInt(Data([4])), MegaBigUInt(Data([13])), MegaBigUInt(Data([0x01, 0xf1])))
         #expect(r.bigEndianBytes == Data([0x01, 0xbd]))
         #expect((MegaBigUInt(Data([0xff, 0xff])) * MegaBigUInt(Data([0x01, 0x00, 0x01]))).bigEndianBytes == Data([0xff, 0xff, 0xff, 0xff]))
         #expect(MegaBigUInt(Data([0, 0, 7])).bigEndianBytes == Data([7]))
+    }
+
+    @Test("a malformed login reply (even or empty RSA modulus) throws badResponse instead of crashing")
+    func malformedModulus() throws {
+        func mpi(_ b: [UInt8]) -> [UInt8] { [UInt8(b.count * 8 >> 8), UInt8(b.count * 8 & 0xff)] + b }
+        let even = mpi([0x02]) + mpi([0x02]) + mpi([0x03])
+        #expect(throws: MegaClient.Failure.badResponse) { _ = try MegaCrypto.sessionId(csid: Data(mpi([0x05])), privk: Data(even)) }
+        let empty = mpi([]) + mpi([]) + mpi([0x03])
+        #expect(throws: MegaClient.Failure.badResponse) { _ = try MegaCrypto.sessionId(csid: Data(mpi([0x05])), privk: Data(empty)) }
     }
 }

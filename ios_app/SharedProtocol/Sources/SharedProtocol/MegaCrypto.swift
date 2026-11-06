@@ -123,7 +123,7 @@ enum MegaCrypto {
         let (q, r2) = try mpi(r1)
         let (d, _) = try mpi(r2)
         let (c, _) = try mpi([UInt8](csid)[...])
-        let m = MegaBigUInt.modPow(MegaBigUInt(c), MegaBigUInt(d), MegaBigUInt(p) * MegaBigUInt(q)).bigEndianBytes
+        let m = try MegaBigUInt.modPow(MegaBigUInt(c), MegaBigUInt(d), MegaBigUInt(p) * MegaBigUInt(q)).bigEndianBytes
         guard m.count >= 43 else { throw MegaClient.Failure.badResponse }
         return SyncB64.encode(m.prefix(43))
     }
@@ -220,9 +220,9 @@ struct MegaBigUInt: Equatable {
     }
 
     /// Montgomery (CIOS) modPow for an odd modulus, R = 2^(32·limbCount).
-    static func modPow(_ base: MegaBigUInt, _ exp: MegaBigUInt, _ m: MegaBigUInt) -> MegaBigUInt {
+    static func modPow(_ base: MegaBigUInt, _ exp: MegaBigUInt, _ m: MegaBigUInt) throws -> MegaBigUInt {
         let n = m.limbs
-        precondition(!n.isEmpty && n[0] & 1 == 1, "odd modulus")
+        guard !n.isEmpty, n[0] & 1 == 1 else { throw MegaClient.Failure.badResponse } // the modulus comes from MEGA
         let k = n.count
         var inv: UInt32 = 1
         for _ in 0..<5 { inv = inv &* (2 &- n[0] &* inv) }
