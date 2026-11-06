@@ -45,13 +45,16 @@ export default function SyncSection(): ReactNode {
     <section className="st-stack" aria-labelledby="sync-title">
       <span className="st-label" id="sync-title">Phone and web sync</span>
       <p className="st-hint">With the desktop off, the phone and web app read an encrypted copy of your chats, meetings, plans and usage from your sync storage, and queue chat prompts that run when the desktop is back. The storage only ever holds ciphertext.</p>
-      <fieldset className="st-stack">
+      <fieldset className="st-store-picker">
         <legend className="st-label">Storage</legend>
-        {STORE_CHOICES.map((c) => (
-          <label key={c.kind} className="st-row">
-            <input type="radio" name="sync-store" checked={kind === c.kind} onChange={() => setKind(c.kind)} /> {c.label}
-          </label>
-        ))}
+        <div className="st-store-grid">
+          {STORE_CHOICES.map((c) => (
+            <label key={c.kind} className="st-store-option" data-on={kind === c.kind}>
+              <input type="radio" name="sync-store" checked={kind === c.kind} onChange={() => setKind(c.kind)} />
+              <span>{c.label}</span>
+            </label>
+          ))}
+        </div>
       </fieldset>
       {kind === "mega" ? (
         <>
@@ -60,16 +63,20 @@ export default function SyncSection(): ReactNode {
             <p className="st-hint">Turn off two-factor login on that account: the desktop logs in by itself in the background. Keep two-factor on for your personal account.</p>
             <p className="st-hint">The email and password are kept in this computer's encrypted vault and are never shown again.</p>
           </div>
-          <label className="st-field">MEGA email
-            <input className="st-input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} aria-label="MEGA email" autoComplete="off" spellCheck={false} />
-          </label>
-          <label className="st-field">MEGA password
-            <input className="st-input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} aria-label="MEGA password" autoComplete="new-password" />
-          </label>
-          <label className="st-field">Folder name
-            <input className="st-input" value={form.folder} onChange={(e) => setForm({ ...form, folder: e.target.value })} aria-label="Folder name" spellCheck={false} />
-          </label>
-          <div className="st-row"><Button onClick={() => guarded(saveMegaNow)} disabled={!form.email.trim() || !form.password}>Save and test</Button></div>
+          <div className="st-grid-2">
+            <label className="st-field">MEGA email
+              <input className="st-input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} aria-label="MEGA email" autoComplete="off" spellCheck={false} />
+            </label>
+            <label className="st-field">MEGA password
+              <input className="st-input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} aria-label="MEGA password" autoComplete="new-password" />
+            </label>
+          </div>
+          <div className="st-grid-2">
+            <label className="st-field">Folder name
+              <input className="st-input" value={form.folder} onChange={(e) => setForm({ ...form, folder: e.target.value })} aria-label="Folder name" spellCheck={false} />
+            </label>
+            <div className="st-field st-field-action"><span className="st-label">&nbsp;</span><Button onClick={() => guarded(saveMegaNow)} disabled={!form.email.trim() || !form.password}>Save and test</Button></div>
+          </div>
         </>
       ) : (
         kind === "box" ? <SyncBoxForm folder={status?.storeKind === "box" && status.store && "folder" in status.store ? status.store.folder : "llmide-sync"} switching={!!status?.storeKind && status.storeKind !== "box" && status.devices.length > 0} run={run} onConnect={guarded} /> : <SyncOwnServer status={status} onSave={(cfg) => guarded(() => saveSftpNow(cfg))} />
@@ -88,9 +95,11 @@ export default function SyncSection(): ReactNode {
         <div className="st-stack">
           <p className="st-hint">{storeSummary(status)}</p>
           <p className="st-hint">Desktop signing key fingerprint: <code>{status.signingFingerprint}</code></p>
-          <div className="st-row"><Button onClick={() => run(() => testSync(client), working)}>Test connection</Button></div>
-          <label className="st-row"><input type="checkbox" checked={status.enabled} onChange={(e) => run(() => setSyncEnabled(client, e.target.checked))} /> Sync on</label>
-          <div className="st-row"><Button onClick={() => run(() => publishNow(client), "Published.")} disabled={!status.enabled}>Publish now</Button></div>
+          <div className="st-actions-inline">
+            <Button onClick={() => run(() => testSync(client), working)}>Test connection</Button>
+            <label className="st-switch"><input type="checkbox" checked={status.enabled} onChange={(e) => run(() => setSyncEnabled(client, e.target.checked))} /> Sync on</label>
+            <Button onClick={() => run(() => publishNow(client), "Published.")} disabled={!status.enabled}>Publish now</Button>
+          </div>
           {status.enabled ? <SyncDevices status={status} onStatus={(s) => setStatus(s)} /> : <p className="st-hint">Turn sync on to add a phone or browser.</p>}
           <p className="st-hint" aria-live="polite">{status.lastError ? `Last error: ${syncErrorText(status.lastError, status.storeKind) ?? status.lastError}` : status.lastPublishAt ? `Last published ${new Date(status.lastPublishAt).toLocaleString()}` : "Not published yet."} · {status.devices.length} device(s)</p>
         </div>

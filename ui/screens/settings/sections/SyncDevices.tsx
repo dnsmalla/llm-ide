@@ -97,9 +97,9 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
       )}
       <span className="st-label">Sync devices</span>
       {status.devices.length === 0 ? <p className="st-hint">No devices yet.</p> : (
-        <ul className="st-stack" aria-label="Sync devices">
+        <ul className="st-device-list" aria-label="Sync devices">
           {status.devices.map((d) => (
-            <li key={d.deviceId} className="st-stack">
+            <li key={d.deviceId} className="st-device-card">
               <div className="st-row">
                 <span className="st-grow">{d.name} · {d.tier === "ios" ? "iPhone app" : "browser"}</span>
                 <span className="st-hint">added {new Date(d.addedAt).toLocaleString()} · folder {d.folderHint}…</span>

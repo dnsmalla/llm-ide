@@ -39,13 +39,9 @@ export function WorkspaceSection() {
   const project = host.activeProjectPath?.() ?? null;
   return (
     <div className="st-stack">
-      <div className="st-stack">
-        <span className="st-label">Active project</span>
-        {host.activeProjectPath ? <p>{project ?? "No project is open."}</p> : <NeedsHost what="The active project" />}
-      </div>
-      <div className="st-stack">
-        <span className="st-label">Notes folder</span>
-        {host.notesFolderPath ? <p>{asked ? notes ?? "Not chosen yet." : "Loading..."}</p> : <NeedsHost what="The notes folder" />}
+      <div className="st-grid-2">
+        <div className="st-info-card"><span className="st-label">Active project</span>{host.activeProjectPath ? <p>{project ?? "No project is open."}</p> : <NeedsHost what="The active project" />}</div>
+        <div className="st-info-card"><span className="st-label">Notes folder</span>{host.notesFolderPath ? <p>{asked ? notes ?? "Not chosen yet." : "Loading..."}</p> : <NeedsHost what="The notes folder" />}</div>
       </div>
       <label className="st-field">
         <span className="st-label">Home page</span>
