@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz"];
+const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz", "https://api.box.com", "https://upload.box.com", "https://*.boxcloud.com"];
 // Direct reads (SP7): exactly the hosts the sources clients may call (web/src/sources/http.ts ALLOWED_HOSTS).
 const SOURCE_CONNECT = ["https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com", "https://llm-ide.com"];
 

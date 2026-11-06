@@ -93,3 +93,5 @@ Install needs HTTPS, except on `localhost`/`127.0.0.1`, where browsers allow it 
 
 - `npm test`: unit and server-render tests.
 - `npm run test:e2e`: starts the real core and binds local ports (run it unsandboxed).
+
+The CSP adds exactly `https://g.api.mega.co.nz https://*.userstorage.mega.co.nz` (MEGA) and `https://api.box.com https://upload.box.com https://*.boxcloud.com` (Box) to `connect-src`.
