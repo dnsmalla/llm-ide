@@ -12,46 +12,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Initial setup (install deps, verify tools, enable git hooks)
 ./setup.sh
 
-# Extension development (other scripts: extension/package.json)
+# Extension + core development (other scripts: extension/package.json)
 cd extension
-npm run server        # Start the local Node server (127.0.0.1:3456)
+npm run server        # Start the local Node core (127.0.0.1:3456)
 
-# macOS app development
-cd mac
-swift build           # Build the app
-LLMIDE_KEYCHAIN_BACKEND=memory swift test   # Run the tests (XCTest + swift-testing) — see Running Tests
-make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
-make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt/Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
+# Desktop app (Tauri: desktop/ host + ui/ screens)
+cd desktop
+npm run tauri dev     # app window (starts Vite)
+npm test              # desktop + ui/screens node tests
+
+# Web app
+cd web && npm run dev
 
 # Testing (lint/format/docs targets: see Makefile)
-make test             # Run extension tests (Node test runner)
-make test-mac         # Run macOS app tests (sets the memory keychain for you)
-make regression       # Pre-push regression gate
-```
-
-### Running Tests
-
-```bash
-# macOS app tests (XCTest + swift-testing). ALWAYS set the memory keychain
-# (make test-mac does): without it KeychainStore uses the real login keychain,
-# and from a terminal a SecItem call blocks in securityd waiting for a prompt
-# nobody answers — one test then takes minutes and fails, and a full run
-# stretches from ~60 s to 10+ min. Pipe output to a file, not `| grep`.
-cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test          # All tests (~60 s)
-LLMIDE_KEYCHAIN_BACKEND=memory swift test --filter testAuthFlow   # Filter by name
-
-# Mac↔iOS shared wire types (swift-testing in a standalone SPM package)
-make test-shared-protocol                         # builds + tests ios_app/SharedProtocol
+make test             # Extension/core tests (Node test runner)
+make test-desktop     # Desktop node checks + cargo test --lib
+make regression       # Pre-push regression gate (contracts, desktop/ui/web, agent/v2, graph-kit)
+make test-shared-protocol   # iOS wire types (ios_app/SharedProtocol)
 ```
 
 ## Architecture Overview
 
-LLM-IDE is a **local-first AI meeting intelligence system** comprising four surfaces that share a single backend:
+LLM-IDE is a **local-first AI meeting intelligence system**: several surfaces share one Node core.
 
 1. **Chrome Extension** (React 18 + TypeScript + Vite) — Meeting capture via platform captions, side panel UI
-2. **macOS App** (SwiftUI) — Native capture via Accessibility API, full KB + Issues + Gantt + Code Assistant
-3. **Local Server** (Node 20+, pure HTTP) — Bound to 127.0.0.1:3456, handles AI orchestration and data persistence
-4. **Mobile Control** (iOS + Mac native) — iPhone companion for chat, explorer, and auto-tasks
+2. **Desktop app** (Tauri: Rust host in `desktop/src-tauri/`, React screens in `ui/`) — macOS, Windows, Linux; spawns and supervises the core; full KB + Issues + Gantt + Code Assistant
+3. **Local core** (`extension/`, Node 20+, pure HTTP) — Bound to 127.0.0.1, handles AI orchestration and data persistence
+4. **Web app** (`web/`) and **iPhone app** (`ios_app/`) — pair with the desktop over Host API v1 and read encrypted sync snapshots when it is off (ADR 0020)
+
+The Swift Mac app (`mac/`) was removed on 2026-11-06 (it is in git history); the desktop app replaces it.
 
 ### Core Data Flow
 
@@ -69,10 +58,11 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0047)
-- **Runtime feature set → server** — the Mac app writes the user's active features (active ∩ compiled, `agent_chat` always) into the backend child's env as `LLMIDE_FEATURES` (sorted `AppFeature` raw values; unset/empty → all, same as `mac/Package.swift`) via `BackendManager.featureKeysProvider`, which Shell installs in `LlmIdeMacApp.init`; an inherited `LLMIDE_FEATURES` is always dropped (`BackendManager.childEnvironment`). Disabled route groups answer 404 `feature_disabled`. A toggle applies on the NEXT backend start — never auto-restart the backend on a feature change (it kills in-flight Loop/agent work); an adopted external server keeps its own env.
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/`
+- **Runtime feature set → core** — the desktop host passes the user's enabled features to the core it spawns as `LLMIDE_FEATURES` (`desktop/src-tauri/src/prefs.rs`, `core_env.rs`; unset/empty → all). Disabled route groups answer 404 `feature_disabled`. A toggle applies on the NEXT core start — never auto-restart the core on a feature change (it kills in-flight Loop/agent work); an adopted external core keeps its own env.
+- **Encrypted sync, no accounts** — phones and browsers read encrypted snapshots from user-owned storage (MEGA, own server SFTP, Box) and queue prompts; the desktop needs no login (ADR 0020; `extension/CLAUDE.md` "Sync"). The relay v1 byte format (`schema/relay/v1`) survives only as sync's envelope format.
 
-Project layout, the extension/macOS folder tree, and the `Core/Contracts` map: [docs/reference/project-structure.md](docs/reference/project-structure.md).
+Project layout and folder tree: [docs/reference/project-structure.md](docs/reference/project-structure.md).
 
 ### Central skills (all agents)
 
@@ -111,32 +101,8 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 - **`server/`** — HTTP routing, request pipeline (CORS → JWT → rate-limit → route)
 - **`kb/`** — SQLite access, every state-mutating helper takes `userId` first; `sources.mjs` owns the non-meeting source hub
 - **`agents/`** — Server pipeline modules (`.mjs`, not skills): planner, risk, codegen/codegen-apply, dispatcher, outcome-watcher, meeting-agent, summarize, …
-- **`graphkit/`** — Code-graph primitives (graph model, layouts, memory writer); consumed by `agents/planner.mjs` + `agents/code-sync.mjs`, rendered by the Mac app
+- **`graphkit/`** — Code-graph primitives (graph model, layouts, memory writer); consumed by `agents/planner.mjs` + `agents/code-sync.mjs`, rendered by the desktop Graph screen
 - **`plugins/`** — Discovers/loads/install extension plugins; `claude-adapter.mjs` bridges the plugin tool surface to the agent runtime
-
-### Module Boundaries (macOS app)
-
-Rule: **`Shell → Features → Core`**. A feature may import `Core`. A feature must **never** reference another feature, and never `Shell`.
-
-Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regression`), because Swift has one module here — nothing at the compiler level stops one feature folder from importing another.
-
-Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Extensions, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`). Menu items that one key excludes together **and** that reference each other are one folder, not several: `doc_gen` excludes the single `Features/Generation/` (shared generation views + `DocGen/` + `Visual/`), `gantt_issues` the single `Features/Issues/` (+ `Gantt/`). As separate folders their mutual references were cross-feature cycles that no seal could ever pass; inside one folder they are intra-feature. The menu items themselves stay separate (`ShellSection.backingFeature`).
-
-**The gate ENFORCES the feature/feature rule only for sealed features.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`. All 17 features are sealed today (zero outgoing cross-feature edges, so any new one FAILS the build): **CodeGraph, Search, Issues, ReviewConflicts, Terminal, Explorer, SourceControl, Generation, Settings, Chat, Live, Library, Extensions, AutoTask, Loop, MobileControl, System**. The gate's cross-feature `warn` count is 0. "Sealed" covers feature → feature; **feature → Shell is enforced separately, for every feature, by check 8 below** — no `Features/` file may name a top-level type declared under `Shell/` (its `FEATURE_SHELL_ALLOWLIST` is empty). The Shell types features used to name — the feature runtime (`AppFeature`, `ProfilePreset`, `FeatureRegistry`, `AppModule`, `FeatureService`), `ShellState`, `TerminalPanelState` and the section chrome (`SectionChromeBar`/`SectionToggle`, `PanelSectionTabs`, `WindowHeightKey`) — live in `Core/` (`FeatureToggles/`, `Platform/`, `DesignSystem/`), and what features used to call on the composition root `FeatureCatalog` now arrives through Core seams Shell installs at boot: "is feature X in this build" reads `FeatureRegistry.shared.compiledFeatures` (assigned first thing in `LlmIdeMacApp.init`); Issues' picker and recent issues, Explorer's project memory viewer and the Terminal dock go through `IssueSeamRegistry` / `ProjectMemoryRegistry` / `TerminalPanelRegistry` (installed by `FeatureCatalog.installFeatureSeams()`, each under its owner's `#if FEATURE_*`, so a compiled-out owner leaves the `EmptyView` / `[]` fallback); and AutoTask's Loop runner provider and "push state to iPhone" action are properties Shell sets on `AutoCodeUpdateService` (`loopRunnerProvider` in `bootAutoTask`, `pushStateToMobile` in `wireMobileFeatureBridges`).
-
-The gate's eight checks that **do** fail the build (exit 1) today:
-1. Any **always-compiled layer** (`Shell`, `Core`, `ClaudeLink`, Chat, Library, Extensions, Live, Settings, ReviewConflicts — derived from `feature-map.txt` minus the excludable folders, not hard-coded) referencing a symbol owned by a build-excludable `Features/` folder without the matching `#if FEATURE_*` guard. Before, only `Shell`/`Core` were scanned, so an unguarded edge from an unsealed always-compiled feature passed the gate and surfaced only as a compile error in a reduced build.
-2. An `#elseif` anywhere in an always-compiled layer (flag-guard code must fail closed, not branch on an untracked condition).
-3. Every `libExcludes` path in `mac/Package.swift` must exist on disk — SwiftPM itself only *warns* on a bad exclude path and still exits 0, so this is the only thing that catches a moved file silently rejoining a build it should be excluded from.
-4. Every `testExcludes` entry in `mac/Package.swift` must exist under `mac/Tests/LlmIdeMacTests/`, for the same reason.
-5. Every `mac/Sources/LlmIdeMac/….swift` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` must exist — a move never breaks Swift (one module), but it silently breaks anything outside Swift that names a path.
-6. Every test file that references a build-excludable feature's top-level type must be in that feature's `testExcludes` in `mac/Package.swift` — the test target is only ever compiled with all features, so a missing entry otherwise stays invisible until someone runs `swift build --build-tests` under a reduced `LLMIDE_FEATURES`.
-7. **Core is a leaf:** no `Core`-layer file (`Core/`, `ClaudeLink/`) may name a top-level type declared under `Shell/` or any `Features/` folder; the one deliberate seam (`Core/Contracts/LoopRunning.swift` → `LoopEngineConfig`, `#if FEATURE_AUTOTASK`-guarded) sits in the script's `CORE_LEAF_ALLOWLIST`, and an allowlist row that no longer matches a real reference fails too, so the list cannot rot.
-8. **Features never name Shell:** no `Features/` file may name a top-level type declared under `Shell/` (names also declared in `Core`/`Features` excluded, comments and strings stripped — same machinery as check 7). `FEATURE_SHELL_ALLOWLIST` in the script is empty and has the same stale-row rule; a feature that needs something from Shell gets a `Core/Contracts/` seam that Shell installs.
-
-Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Notes/` is Library's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`. Check 7 closes the other direction — `Core` → feature/`Shell` edges now fail the build — so what remains invisible is only feature → `Core`-code-that-belongs-to-another-feature, which is by design.
-
-Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `MobileBridgeHosting` (what the Auto Task / Loop phone bridges — which live in `Features/AutoTask/` and `Features/Loop/` — may ask of the mobile manager, with Foundation-only request/reply enums so they never import `SharedProtocol`), `MobileChatHosting` / `MobileChatTurnEngine` (everything Mobile Control asks of Chat — phone quick-chat and Explorer-chat turns, Explorer session list/load/new/rename/delete, parked-approval relay — in Core types; Chat's `ChatMobileHost` implements it and owns the phone's off-screen engine pool `ExplorerMobileEngineResolver`, `ChatEngine` conforms to the turn-engine protocol, and Shell sets `manager.chatHost` in `FeatureCatalog.bootMobile`), `LoopLaneControlling` (the AutoTask loop lane the Loop's phone bridge drives), `ProjectNotesProviding`, `SourceIngesting` (+`SourceIngestResult` / `SourceIngestTarget`: AutoTask's Source Update drives Library's ingestion through it; Library's `LibrarySourceIngester` conforms), `LoopSweepPlanning` (+`LoopSweepPlan` / `LoopSweepTarget`: Loop's `LoopSweepPlanner` picks the loops AutoTask's Loop Engineering sweep runs and posts its completion banner; both seams are injected into `AutoCodeUpdateService` by `FeatureCatalog.bootAutoTask`), `LoopRunnerProviding` (+`SweepOutcome`: Loop's `LoopRunnerProvider` builds the runners AutoTask schedules and runs its standalone Regression sweep, so the regression runner and fault verify/repair stay in `Features/Loop/` and drop out of `auto_tasks`-off builds), `ChatTransport` (Chat's engine ↔ transport contract, implemented by Chat's `CodeAssistTransport` and ClaudeLink's `AgentV2Transport`), `ChatScope`, `SettingsSectionRegistry` / `SettingsSectionSlot`, `ChatEnginePreference` (the Agent v2 toggle's UserDefaults key, shared by Chat and Settings), `ChatPanelProviding` (`ChatPanelRequest` / `ChatPanelRegistry` / `ChatPanelView`, plus `CodeWorkflowSheetRequest` / `CodeWorkflowSheetView` for the code-change sheets), `ChatOutputProviding` / `ChatOutputRegistry` (the latest finished chat reply for a scope), `LiveCaptureProviding` (`LiveCaptureGateRequest` / `LiveCaptureRegistry` / `LiveCaptureGate`: Library's meeting detail wraps its content in the gate and Live decides when its recording banner + transcript take over; installed by `FeatureCatalog.installLiveSeams()`), `ExtensionsLibraryProviding` (`ExtensionsLibraryRegistry` / `ExtensionsLibrarySectionView` / `ExtensionsDetailView`: Library's sidebar Plugins / LLM Sources / MCP Plugins sections and their detail panes come from Extensions; installed by `FeatureCatalog.installFeatureSeams()` via `ExtensionsSeams.install()`), `IssueSeams` (`ExistingIssuePickerRequest` / `IssueSeamRegistry` / `ExistingIssuePickerView` + `RecentIssuesProviding`: Chat's code-change sheets open Issues' existing-issue picker, and Chat + Mobile Control ground agent turns in Issues' recent issues; Issues' `RecentIssuesResolverProvider` conforms), `ProjectMemoryProviding` (`ProjectMemoryRequest` / `ProjectMemoryRegistry` / `ProjectMemorySectionView`: Chat's Code Assistant opens Explorer's project memory viewer), `TerminalPanelProviding` (`TerminalPanelRegistry` / `TerminalPanelSlot`: Explorer embeds the Terminal dock, sharing Shell's dock sessions) — these three installed by `FeatureCatalog.installFeatureSeams()`, `EditAcceptanceMode` (the chat permission mode Mobile Control also reads; its `ChipMenuOption` conformance stays in Chat), `ShellSection` / `LibrarySelection` (the section and Library-row enums Core must name; Shell keeps `ShellState.Section` / `ShellState.LibrarySelection` as typealiases for existing call sites — new code and all Core code use the Core names). Quit-time work a feature owns is registered by Shell through `AppTerminationHooks` (Core/Platform) rather than named in `AppDelegate`; likewise feature cache side effects Core triggers (graph-engine cache invalidation, Mobile PIN warm/clear) go through `FeatureCacheHooks` (Core/Platform), which Shell installs at boot via `FeatureCatalog.installFeatureCacheHooks()`. Features contribute settings cards through `SettingsSectionRegistry` (`Core/Contracts/`, one `SettingsSectionSlot` per insertion point); Shell registers them at boot (`FeatureCatalog.registerSettingsSections`, inside the matching `#if FEATURE_*`); Settings only renders slots and never names a feature. Likewise features never name Chat's `CodeAssistantPanel` / `CodeWorkflowSheet` / `QuickFixSheet` / `ChatEngine`: they embed the chat panel with `ChatPanelView(request: ChatPanelRequest(…))`, open the code-change sheets with `CodeWorkflowSheetView`, and read chat output through `ChatOutputRegistry`; Shell installs Chat's makers/provider at boot (`FeatureCatalog.installChatSeams()`). The derivation of the agent's active project lives in Core (`Core/Project/ActiveProjectResolver.swift`) for the same reason — Chat and Issues both need it. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
 
 ## Critical Invariants
 
@@ -170,9 +136,11 @@ Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWrit
 - **AbortController on every request** — Cancel-on-unmount via `useEffect` cleanup
 - **Strict response validation** — `typeof data?.notes !== 'string'` → throw
 
-## Mobile Control System
+## Mobile and web
 
-Mac app ↔ iPhone companion (WebSocket `:3006`, Bonjour, PIN pairing). Details: [`mac/Sources/LlmIdeMac/Features/MobileControl/CLAUDE.md`](mac/Sources/LlmIdeMac/Features/MobileControl/CLAUDE.md) and `docs/mobile/quick-start.md`.
+- **Host API v1** (`schema/host-api/v1`, gateway `extension/routes/host-api/`): the desktop's pinned WSS listener the iPhone and web app pair with; see `extension/CLAUDE.md` "Host API v1 (desktop)".
+- **Sync** (`schema/sync/v1`): see `extension/CLAUDE.md` "Sync".
+- **iPhone** (`ios_app/`): wire types and sync envelope in `ios_app/SharedProtocol/` (`make test-shared-protocol`). Its v2 Mac link (`:3006`, Bonjour, PIN) is dead since the Mac app's removal and is scheduled for removal.
 
 ## Entry Points for Development
 
@@ -181,30 +149,28 @@ Mac app ↔ iPhone companion (WebSocket `:3006`, Bonjour, PIN pairing). Details:
 | I want to… | Touch these files |
 |---|---|
 | Support new meeting platform | `extension/src/content/caption-scraper.ts` (add reader), `detectPlatform()` |
-| Add new AI feature | New server endpoint in `extension/server.mjs` + add to `ALL_ENDPOINTS` (a route owned by one excludable Mac feature: own route module registered in `extension/routes/feature-routes.mjs`) + bump `SERVER_API_VERSION` + add to `REQUIRED_ENDPOINTS` in `extension/src/sidepanel/App.tsx` + new hook under `extension/src/sidepanel/hooks/` (with `language` param + AbortController) |
+| Add new AI feature | New server endpoint in `extension/server.mjs` + add to `ALL_ENDPOINTS` (a route owned by one excludable feature: own route module registered in `extension/routes/feature-routes.mjs`) + bump `SERVER_API_VERSION` + add to `REQUIRED_ENDPOINTS` in `extension/src/sidepanel/App.tsx` + new hook under `extension/src/sidepanel/hooks/` (with `language` param + AbortController) |
 | Add new UI language | `LANGUAGE_NAMES` in `extension/server.mjs` + `HEADING_LABELS` for questions + LanguageSelector option |
 | Change server port | `extension/src/lib/config.ts` default + `extension/server.mjs` `PORT` + CORS origin list |
 | Persist UI state | `chrome.storage.local` via the owning hook; do NOT add new store |
 | Add new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + new panel block |
 | Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()` |
 | Install agent skills into a user project | Auto on New Project / Rebuild via `POST /kb/project/install-skills` (`extension/kb/install-project-skills.mjs`); kit lives in `.skills` |
-| Add mobile control feature | `mac/Sources/LlmIdeMac/Features/MobileControl/Services/MobileControlManager.swift` (Mac dispatch) + `ios_app/MyApp/Services/ConnectionService.swift` (iOS client) + `ios_app/SharedProtocol/` (wire types) |
-| Extend LLM-IDE mobile API | Add endpoint to `extension/server.mjs` + expose via `LlmIdeAPIClient` on Mac (mobile chat proxies through Mac app) |
+| Add a desktop screen or section | `ui/screens/<section>/` + `ui/screens/shell/sections.ts`; host commands in `desktop/src-tauri/src/` (registered in `lib.rs`, listed in `build.rs` COMMANDS, granted in `capabilities/default.json`) |
+| Add a Host API v1 command | `schema/host-api/v1` + `node scripts/generate-host-api.mjs` + `extension/routes/host-api/` + the web/iOS clients |
 
 ### Starting Points for Reading
 
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
-- **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
+- **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): `extension/llm_agent/sdk/` + `extension/providers/` own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
-- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) — and `mac/Sources/LlmIdeMac/Features/CodeGraph/` (app side). graph-kit is a **separate repository, and it stays one** (user decision 2026-10-28, reusable by other consumers). Changes are commits in that repo; then `make graphkit-bump` (`COMMIT=1` to commit) pushes graph-kit `main` and moves the one pin, the submodule gitlink. `make graphkit-pin-check` (offline in `make regression`, `ONLINE=1` for the remote) must pass. Workflow: [`docs/how-to/graph-kit-workflow.md`](docs/how-to/graph-kit-workflow.md)
-- **Chat slice** — `mac/Sources/LlmIdeMac/Features/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **a Command-Line-Tools-only toolchain has no XCTest, so there `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too — with full Xcode the suite runs, and the lab still gates the lifted logic. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
+- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md). Everything graph lives in `graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` — and `ui/screens/graph/` (app side). graph-kit is a **separate repository, and it stays one** (user decision 2026-10-28, reusable by other consumers). Changes are commits in that repo; then `make graphkit-bump` (`COMMIT=1` to commit) pushes graph-kit `main` and moves the one pin, the submodule gitlink. `make graphkit-pin-check` (offline in `make regression`, `ONLINE=1` for the remote) must pass. Workflow: [`docs/how-to/graph-kit-workflow.md`](docs/how-to/graph-kit-workflow.md)
 - **Graph layout** — `graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd graph-kit && swift run -c release graph-layout-lab --compare` (an executable, so the gate also runs on a toolchain without XCTest). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
-- **Mac app entry** — `mac/Sources/LlmIdeMac/Shell/LlmIdeMacApp.swift`
-- **Mac services** — `mac/Sources/LlmIdeMac/Core/` (leaf infrastructure) and each `Features/<Name>/Services/` (follow suffix taxonomy)
-- **Mobile control** — `docs/mobile/quick-start.md` → `mac/Sources/LlmIdeMac/Features/MobileControl/Services/MobileControlManager.swift` → `ios_app/SharedProtocol/`
+- **Desktop host** — `desktop/src-tauri/src/lib.rs` (commands), `core_host.rs` (core spawn/supervision); packaging `desktop/PACKAGING.md`
+- **Desktop UI** — `ui/screens/shell/Shell.tsx` → `ui/screens/<section>/`; shared components `ui/kit/`
 
 ## Testing Checklist
 
@@ -217,7 +183,7 @@ Comprehensive docs at https://grid-devs.gitlab.io/personal/dinesh/notes-extensio
 - **System architecture** — [`docs/explanation/architecture.md`](docs/explanation/architecture.md)
 - **Engineering invariants** — [`docs/explanation/invariants.md`](docs/explanation/invariants.md)
 - **API reference** — [`docs/reference/api/overview.md`](docs/reference/api/overview.md)
-- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0018)
+- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0020)
 - **How-to guides** — [`docs/how-to/`](docs/how-to/)
 
 ### Other root-level guides
@@ -227,7 +193,7 @@ Comprehensive docs at https://grid-devs.gitlab.io/personal/dinesh/notes-extensio
 
 ## Branch + Commit Conventions
 
-- **Conventional Commits** — `feat(mac):`, `fix(server):`, `docs:`, `refactor:`, `chore:`, `test:`
+- **Conventional Commits** — `feat(ui):`, `fix(server):`, `docs:`, `refactor:`, `chore:`, `test:`
 - **One concern per commit** — If subject line has "and", split it
 - **Link issue/task in body** when applicable
 - **Ask before pushing to `main`** — Reviewer may want branch first

@@ -22,7 +22,7 @@ quit.
 |---|---|---|
 | Self-contained (bundled node + server + the Agent SDK's `claude` binary) | 386 MB | **160 MB** |
 | Same, without the SDK's bundled `claude` binary | 147 MB | **67 MB** |
-| Swift app today (`mac/LlmIdeMac.app`, no node/server inside) | 37 MB | — |
+| Retired Swift app (`LlmIdeMac.app`, no node/server inside; removed 2026-11-06) | 37 MB | — |
 
 Breakdown of the self-contained `.app`: `@anthropic-ai/claude-agent-sdk-darwin-arm64`
 (the bundled `claude` CLI) 239 MB, `node` 86 MB, rest of `node_modules`

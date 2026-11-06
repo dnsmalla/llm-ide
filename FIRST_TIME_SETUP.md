@@ -13,8 +13,8 @@ cd llm-ide
 # 3. Start the Node server
 cd extension && npm run server
 
-# 4. In another terminal, build the macOS app
-cd mac && swift build
+# 4. In another terminal, run the desktop app
+cd desktop && npm ci && npm run tauri dev
 ```
 
 ---
@@ -51,7 +51,7 @@ This ensures:
 | Full setup | `./setup.sh` |
 | Just install deps | `cd extension && npm install` |
 | Start Node server | `cd extension && npm run server` |
-| Build macOS app | `cd mac && swift build` |
+| Run desktop app | `cd desktop && npm run tauri dev` |
 | Run tests | `cd extension && npm test` |
 
 ---
@@ -79,7 +79,7 @@ rtk gain                               # tokens saved so far
 rtk init -g --uninstall                # remove it again
 ```
 
-In the Mac app, **Settings → Token Saving → Install rtk** runs `brew install rtk`
+In the desktop app, **Settings → Token Saving → Install rtk** runs `brew install rtk`
 for you. It installs the binary only; turning on the hook is still the
 `rtk init` step above, because the hook auto-approves every command it
 rewrites (`git push --force` included) and skips Claude Code's permission prompt.

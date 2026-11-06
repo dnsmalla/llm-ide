@@ -697,4 +697,3 @@ against the same working tree, whichever trigger starts it.
 
 - [Engineering invariants](invariants.md) — the do-not-regress list, including the
   three Loop Engineering entries.
-- [macOS app](macos-app.md) — where the Loop Engine sits in the app.

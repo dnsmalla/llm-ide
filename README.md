@@ -9,7 +9,7 @@
 
 ## What this is
 
-A **Chrome extension**, **native macOS app**, **iPhone companion**, and **local Node server** that share one knowledge base and per-user SQLite store. Capture from meetings, email, Slack, and files; search and plan; run scheduled **Auto Tasks** (review, implement, regression, doc gen, **Loop Engineering**); visualize code and issues; dispatch work when you approve it.
+A **Chrome extension**, a **desktop app** (Tauri: macOS, Windows, Linux), a **web app**, an **iPhone app** and a **local Node core** that share one knowledge base and per-user SQLite store. Capture from meetings, email, Slack, and files; search and plan; run scheduled **Auto Tasks** (review, implement, regression, doc gen, **Loop Engineering**); visualize code and issues; dispatch work when you approve it.
 
 **Local by default.** Data and AI orchestration stay on your machine. Optional per-user API keys (Claude, OpenAI, Google, OpenAI-compatible) live in an encrypted vault; when none are set, the server falls back to your logged-in **Claude CLI**. Outbound dispatch (PRs, tickets, Slack) is always opt-in.
 
@@ -25,7 +25,7 @@ A **Chrome extension**, **native macOS app**, **iPhone companion**, and **local 
   <img src="docs/assets/data-flow.svg" alt="LLM-IDE pipeline: Capture → Library → Plan → Automate → Dispatch → Outcomes" width="860"/>
 </p>
 
-| Pillar | What you get | Mac | Extension | iPhone |
+| Pillar | What you get | Desktop | Extension | iPhone / web |
 |--------|----------------|-----|-----------|--------|
 | **Sources** | Meet · Teams · Zoom · live mic · **Email** · **Slack** · Box · **MCP** → notes in Library | ✅ full ingest | ✅ web CC capture | — |
 | **Library** | Unified notes, code, data, plugins · FTS5 search · re-summarize | ✅ hub | ✅ meetings | — |
@@ -67,7 +67,7 @@ flowchart LR
   LE --> CG
 ```
 
-**Built-in Auto Tasks (13, cron-schedulable on Mac, mirrored on iPhone):**
+**Built-in Auto Tasks (13, cron-schedulable on the desktop):**
 
 | Pipeline | Tasks |
 |----------|--------|
@@ -82,7 +82,7 @@ flowchart LR
 
 ## Architecture
 
-Four surfaces share one local backend. All traffic stays on `127.0.0.1` unless you set `LLMIDE_ALLOW_REMOTE=1`.
+The surfaces share one local core. All traffic stays on `127.0.0.1` unless you set `LLMIDE_ALLOW_REMOTE=1`.
 
 ```mermaid
 flowchart TB
@@ -90,32 +90,38 @@ flowchart TB
         CC[Caption scraper 800ms]
         SP[Side panel UI]
     end
-    subgraph srv [Node Server :3456]
-        KB[(SQLite WAL+FTS5<br/>31 migrations)]
+    subgraph desk [Desktop app Tauri]
+        HOST[Rust host: core supervisor, secrets, files, git, PTY]
+        UI[React screens ui/]
+    end
+    subgraph srv [Node core]
+        KB[(SQLite WAL+FTS5)]
         AI[Provider router<br/>CLI or vaulted API keys]
         GR[Guardrails + tool approvals]
+        HA[Host API v1 + sync producer]
     end
-    subgraph mac [Mac App]
-        AX[AX caption capture]
-        MC[MobileControlManager :3006]
-        API[LlmIdeAPIClient]
-    end
-    subgraph ios [iPhone App]
-        WS[ConnectionService]
+    subgraph remote [Phone and browser]
+        IOS[iPhone app]
+        WEB[Web app]
     end
     CC --> srv
     SP --> srv
-    AX --> srv
-    WS -->|WebSocket + PIN| MC
-    MC --> API --> srv
+    HOST -->|spawns| srv
+    UI --> srv
+    IOS -->|Host API v1 pinned WSS| HA
+    WEB -->|Host API v1| HA
+    HA -->|encrypted snapshots| STORE[(Your storage: own server, Box, MEGA)]
+    STORE --> IOS
+    STORE --> WEB
 ```
 
-| Surface | Role | Default port |
-|---------|------|--------------|
-| Chrome extension | Meet/Teams/Zoom web CC capture + side panel | talks to `:3456` |
-| Node server | Auth, KB, AI orchestration, persistence, connectors | `127.0.0.1:3456` |
-| macOS app | Full KB, code assistant, AX capture, mobile server | `:3456` client; `:3006` mobile |
-| iPhone app | Companion — chat, explorer, auto-tasks, Loop control | WebSocket to Mac `:3006` |
+| Surface | Role | Talks to |
+|---------|------|----------|
+| Chrome extension | Meet/Teams/Zoom web CC capture + side panel | the core on `127.0.0.1` |
+| Node core (`extension/`) | Auth, KB, AI orchestration, persistence, connectors | — |
+| Desktop app (`desktop/` + `ui/`) | Full KB, Explorer + Code Assistant, Issues, Gantt, Graph, Auto Tasks, Loop | spawns and supervises the core |
+| Web app (`web/`) | Chat, history, approvals; offline reads from encrypted sync | Host API v1 or your sync storage |
+| iPhone app (`ios_app/`) | Chat, history; offline reads from encrypted sync | Host API v1 or your sync storage |
 
 **AI routing:** `extension/providers/` prefers each user's vaulted API key when present; otherwise shells out to the operator's Claude/Codex/Gemini CLI. See [ADR-0015](docs/decisions/0015-multi-provider-vaulted-api-keys.md).
 
@@ -129,8 +135,8 @@ Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Server 
 |---------|------|---------|
 | User-visible brand | **LLM-IDE** | menus, extension title, docs |
 | Repo / package slug | **llm-ide** | `github.com/…/llm-ide`, npm package |
-| Code identifiers | **LlmIde** | `LlmIdeMac`, `LlmIdeAPIClient` |
-| Wire / bundle | **llmide** | `com.llmide.macapp`, `llmide://` |
+| Code identifiers | **LlmIde** | `LlmIdeAPIClient` |
+| Wire / bundle | **llmide** | `com.llmide.desktop`, `llmide://` |
 
 ## Quick Start (3 Minutes)
 
@@ -145,10 +151,8 @@ cd extension && npm run server
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
 
 > Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
-> submodules (`.skills` and `graph-kit`). The Mac build no longer needs
-> the graph-kit submodule — SwiftPM fetches that (public) package from GitHub itself, so a
-> cold resolve needs only network access — but `make regression`'s graph gates run from
-> it and it is where you edit the engine, so keep it initialized.
+> submodules (`.skills` and `graph-kit`). The desktop build and `make regression`'s graph
+> gates read the graph-kit checkout, so keep it initialized.
 
 ---
 
@@ -156,12 +160,13 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 
 ### Prerequisites
 
-- **macOS 14+** (for native macOS app; iPhone app needs Xcode + physical device)
+- **macOS, Windows or Linux** for the desktop app (the iPhone app needs Xcode + a physical device)
 - **Node.js 20+** — [Download](https://nodejs.org/)
 - **Claude CLI** — [Install guide](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`)
-- **Git** — pre-installed on macOS
+- **Git**
+- **Rust** (stable, via rustup) — for the desktop app
 - **Chrome** — for the extension
-- **Xcode** (optional) — required for `swift test` / full Mac unit tests; `swift build` works with Command Line Tools
+- **Xcode** (optional) — for the iPhone app and `make test-shared-protocol`
 
 **Check what you have:**
 
@@ -170,7 +175,7 @@ node --version        # v20+
 npm --version         # v10+
 claude --version      # should work
 git --version
-swift --version       # optional, for Mac app
+cargo --version       # for the desktop app
 ```
 
 ### Step 1: Clone the Repository
@@ -178,7 +183,7 @@ swift --version       # optional, for Mac app
 ```bash
 git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
-ls -la   # docs/ extension/ mac/ ios_app/ .skills/ setup.sh
+ls -la   # docs/ extension/ desktop/ ui/ web/ ios_app/ graph-kit/ .skills/ setup.sh
 ```
 
 ### Step 2: Run Setup
@@ -188,7 +193,7 @@ ls -la   # docs/ extension/ mac/ ios_app/ .skills/ setup.sh
 # ✅ Node.js, npm, backend deps (better-sqlite3)
 # ✅ Claude CLI
 # ✅ .skills submodule + agent symlinks (Claude / Cursor / Codex / …)
-# ✅ git hooks (pre-push runs make regression when mac/ changes)
+# ✅ git hooks (pre-push runs the gates for what changed)
 ```
 
 If setup fails, see [Troubleshooting](#troubleshooting).
@@ -216,14 +221,14 @@ Keep this terminal running.
 3. **Load unpacked** → select `llm-ide/extension/dist/`
 4. Pin the extension icon in the toolbar
 
-### Step 6: Build macOS App
+### Step 6: Run the Desktop App
 
 ```bash
-cd mac && swift build
-swift run LlmIdeMac    # or open .build/debug/LlmIdeMac
+cd desktop && npm ci && npm run tauri dev
+# release bundle: npm run tauri build (see desktop/PACKAGING.md)
 ```
 
-Small and fast is a product goal: `make build-mac-lite` (Chat, Auto Tasks, Mobile, Live, Library) and `make build-mac-min` (Chat only) compile unused features out of the binary, and Settings → Workspace → **Apply & Rebuild** does the same for the feature profile you pick in the app. See [Feature builds](mac/README.md#feature-builds).
+The desktop app starts its own core; Settings → Features switches features off (applied on the next core start).
 
 ---
 
@@ -234,21 +239,19 @@ Small and fast is a product goal: `make build-mac-lite` (Chat, Auto Tasks, Mobil
 - Extension captures **live captions** (not microphone audio)
 - Side panel: notes, questions, entities, DOCX export
 
-### macOS App
-- Native AX caption capture, full Library, Issues, Gantt, Code Assistant
+### Desktop App
+- Full Library, Issues, Gantt, Graph, Explorer + Code Assistant, Live capture
 - **Auto Tasks** page: built-in + custom tasks, cron schedules, Loop Engineering
-- **Explorer** + codegen workflows with guardrails and tool-approval gates
-- **Plugins** — install zip bundles (skills, slash commands, subagents)
-- **MCP connectors** — add MCP-backed sources from Library
-- **SCIP ingestion** — compiler-derived symbol graph via `POST /kb/ingest-scip`
+- **Plugins**, **MCP connectors**, **SCIP ingestion** (`POST /kb/ingest-scip`)
+- Settings → Phone and web sync: encrypted sync to your own server, Box or MEGA
 
-### iPhone Companion
-- Pair via Bonjour or Direct IP + PIN (Mac Settings → Mobile Control)
-- Chat, Explorer sessions, Auto Task monitor/run, **Loop** start/stop + live log
-- See [Mobile quick start](docs/mobile/quick-start.md)
+### iPhone and Web
+- Pair with the desktop (Settings → Phone and web sync, or Host API v1 pairing)
+- Chat, history and approvals; offline reads from encrypted snapshots when the desktop is off
+- See [ADR 0020](docs/decisions/0020-box-encrypted-sync.md)
 
 ### Server API
-- REST on `http://127.0.0.1:3456` — used by extension, Mac, and mobile proxy
+- REST on `http://127.0.0.1:3456` — used by the extension and the desktop app
 - Wire protocol version tracked in `SERVER_API_VERSION` (`extension/server.mjs`, currently **39**)
 - [API Reference](docs/reference/api/overview.md) · [OpenAPI spec](docs/reference/api/openapi.yaml)
 
@@ -276,14 +279,14 @@ cd extension && npm run server
 # Terminal 2: Extension dev (hot reload)
 cd extension && npm run dev
 
-# Terminal 3: Mac app
-cd mac && swift run LlmIdeMac
+# Terminal 3: Desktop app
+cd desktop && npm run tauri dev
 
 # Tests
 make test                  # extension (Node test runner)
-make test-mac              # macOS (requires full Xcode)
-make test-shared-protocol  # Mac↔iOS wire types (ios_app/SharedProtocol)
-make regression            # pre-push gate (build + tests where available)
+make test-desktop          # desktop node checks + cargo test --lib
+make test-shared-protocol  # iOS wire types (ios_app/SharedProtocol)
+make regression            # pre-push gate (contracts, desktop/ui/web, agent/v2, graph-kit)
 
 # Lint / docs
 make lint && make format
@@ -323,15 +326,6 @@ lsof -i :3456 && kill -9 <PID>
 cd extension && npm run server
 ```
 
-### ❌ "Swift build fails"
-```bash
-xcode-select --install
-cd mac && swift build
-```
-
-### ❌ "No such module 'XCTest'" when running swift test
-Full **Xcode** is required (Command Line Tools alone is not enough). `swift build` still works.
-
 ### ❌ Chrome extension not updating
 Run `cd extension && npm run build`, refresh on `chrome://extensions`, then hard-reload the meeting tab (Cmd+Shift+R).
 
@@ -369,12 +363,13 @@ llm-ide/
 │   ├── mcp/            MCP server config + connector catalog
 │   ├── src/            React side panel + content scripts
 │   └── dist/           Built extension (load in Chrome; gitignored)
-├── mac/                SwiftUI macOS app
-│   ├── Sources/LlmIdeMac/
-│   └── Tests/
-├── ios_app/            iPhone companion (SwiftUI + SharedProtocol)
+├── desktop/            Tauri desktop app (Rust host in src-tauri/)
+├── ui/                 React screens + ui-kit shared by desktop and web
+├── web/                Browser app (Host API v1 + encrypted sync)
+├── graph-kit/          Graph engine submodule (separate repo)
+├── ios_app/            iPhone app (SwiftUI + SharedProtocol)
 ├── .skills/            Central agent skills submodule
-├── scripts/            setup helpers, gitlab.sh, mobile verify, install-skills
+├── scripts/            setup helpers, contract generators, gitlab.sh, install-skills
 ├── docs/               MkDocs site (architecture, API, ADRs)
 ├── kb/                 Runtime SQLite (gitignored content)
 ├── setup.sh            One-shot install + skills wiring
@@ -382,24 +377,6 @@ llm-ide/
 ```
 
 Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`, `llm-doc/`, `code/`, `system/`, etc. See [Project folder layout](docs/reference/project-layout.md).
-
----
-
-## Mobile Control
-
-Native Mac WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing). No external Node agent.
-
-| Feature | Description |
-|---------|-------------|
-| **LLM-IDE Chat** | Ask from iPhone; Mac proxies to `:3456` |
-| **Explorer** | List and chat with Mac explorer sessions; attach files from phone |
-| **Auto Tasks** | Toggle, run, stop, and inspect scheduled tasks + history |
-| **Loop** | Start/stop Loop runs, watch live log, read finished runs (Mac executes) |
-| **Pairing** | QR / PIN from Mac Settings → Mobile Control |
-
-📱 [docs/mobile/quick-start.md](docs/mobile/quick-start.md)
-
-**Loopback check:** `swift scripts/mobile/verify-native-pairing.swift`
 
 ---
 
@@ -423,8 +400,8 @@ Native Mac WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing). N
 ## Next Steps
 
 1. ✅ Setup done → [Record your first meeting](docs/tutorials/01-first-meeting.md)
-2. Configure Auto Tasks → Mac app → **Auto Tasks** (built-in + custom)
-3. Pair iPhone → [Mobile quick start](docs/mobile/quick-start.md)
+2. Configure Auto Tasks → desktop app → **Auto Tasks** (built-in + custom)
+3. Pair a phone or browser → desktop Settings → Phone and web sync
 4. Understand the system → [Architecture overview](docs/explanation/architecture.md)
 
 ---

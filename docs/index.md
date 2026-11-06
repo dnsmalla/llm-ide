@@ -35,4 +35,4 @@ If you write a new page, copy a template from `docs/_templates/` and place it in
 - **Explanation** (`explanation/`) — understand, navigate, port, and safely change the system.
 - **Spec** (`spec/`) — rebuild-grade contracts. Read these when reproducing a subsystem exactly.
 
-The `spec/` set covers all six subsystems: knowledge base, API & server, agent runtime, Chrome extension, macOS app, and cross-cutting concerns.
+The `spec/` set covers the knowledge base, API & server, agent runtime, Chrome extension and cross-cutting concerns (the macOS app spec went with the Swift app on 2026-11-06).

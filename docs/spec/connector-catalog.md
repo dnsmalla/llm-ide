@@ -20,10 +20,8 @@ Not covered: Box, Slack, Email and Git ingestion internals (see [knowledge-base]
 | Catalog routes | `extension/server/auth-routes.mjs` | `/auth/me/connectors*` |
 | MCP routes | `extension/server/auth-routes.mjs`, `extension/routes/router.mjs` | `/auth/mcp-connector/*` and `/kb/mcp-connector/*` |
 | Dedup table | `extension/kb/migrations/0031_mcp_connector_state.sql` | `mcp_connector_seen` |
-| Mac client | `mac/Sources/LlmIdeMac/Core/Networking/API/LlmIdeAPIClient+Connectors.swift`, `LlmIdeAPIClient+McpConnector.swift` | HTTP wrappers |
-| Mac Library | `mac/Sources/LlmIdeMac/Features/Library/Views/ConnectorAddSheet.swift`, `ConnectorDetailView.swift`, `ConnectorRow.swift` | "Add from catalog" list and detail |
-| Mac Settings | `mac/Sources/LlmIdeMac/Features/Library/Views/Settings/ConnectionsSettingsSection.swift` | Selection-gated cards (`ConnectionsSelection.visibleCardIds(selected:)`) |
-| Mac adapter and manifests | `mac/Sources/LlmIdeMac/Features/Library/Services/McpConnectorAdapter.swift`, `mac/Sources/LlmIdeMac/Resources/source_connectors/miro.json`, `gdrive.json`, `gcal.json` | Fetch, classify, write to the inbox folder |
+| Desktop client | `ui/screens/library/sources/source-actions.ts` | HTTP wrappers and the Library source panes |
+| Desktop Settings | `ui/screens/settings/sections/ConnectionsSection.tsx` | Selection-gated connection cards |
 
 ## §2 The catalog
 

@@ -212,6 +212,5 @@ A one-time `SourceFolderMigration` (run at launch) moves legacy raw locations
 
 ## See also
 
-- [macOS app spec](../spec/macos-app.md) — the services behind scaffolding and notes
 - [Database schema](database-schema.md) — server-side storage
 - [Agent skills](agent-skills.md) — the symlinked skills kit under `.claude/`

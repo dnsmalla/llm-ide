@@ -42,10 +42,10 @@ The extension stores nothing of its own except an unfinished capture draft (`tra
 
 ## Feature pruning
 
-The server honours `LLMIDE_FEATURES`, the comma-separated list of ENABLED feature keys the Mac app was built with (`mac/Package.swift`; unset or empty = every feature). `core/config.mjs#parseFeatures` reads it once into `config.features`.
+The server honours `LLMIDE_FEATURES`, the comma-separated list of ENABLED feature keys the desktop host passes from its feature prefs (unset or empty = every feature). `core/config.mjs#parseFeatures` reads it once into `config.features`.
 
 - **Feature-owned routes** live in `routes/feature-routes.mjs` (`FEATURE_ROUTE_GROUPS`): `auto_tasks` → `/kb/loop/*`, `gantt_issues` → `/kb/issue-schedule`, `code_graph_3d` → `/kb/ingest-code-graph`, `doc_gen` → `/generate-doc` (exact match; `/generate-docx` is not in the group). A disabled group's module is never imported, and its paths answer `404 {"error":"feature_disabled","feature":"<key>"}`.
-- **Prune only single-owner routes** — a group may move into the table only when every caller (grep `src/` and the Mac `LlmIdeAPIClient*`) belongs to that feature. `/generate-docx` stays always-on because the Chrome extension's ExportMenu calls it.
+- **Prune only single-owner routes** — a group may move into the table only when every caller (grep `src/`, `ui/screens/` and `web/src/`) belongs to that feature. `/generate-docx` stays always-on because the Chrome extension's ExportMenu calls it.
 - **Never import a feature route module statically** from `routes/router.mjs` or `server.mjs`; dispatch through `featureHandlers.<key>?.(…)` at the route's position.
 - **The outcome poller stays unconditional** — `/kb/dispatch` and review approvals (always-on) are what write the dispatched tasks it polls.
 - Tests: `tests/feature-config.test.mjs`, `tests/feature-routes.test.mjs`, `tests/server-features-health.test.mjs` (spawns `server.mjs`; needs local listen).

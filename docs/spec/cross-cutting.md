@@ -92,7 +92,7 @@ Do not restate the full env-var table here — consult [`../reference/env-vars.m
 
 ## §4 Build, run & deploy
 
-Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md) (`setup.sh`, `mac/Scripts/run.sh`, and supporting scripts).
+Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md) (`setup.sh` and supporting scripts).
 
 ### Makefile targets
 
@@ -104,8 +104,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 | `test` | `cd extension && npm test` | 11 |
 | `lint` | `cd extension && npm run lint && npm run format:check` | 6 |
 | `format` | `cd extension && npm run format && npm run lint:fix` | 9 |
-| `test-mac` | `cd mac && swift build && swift test` | 27 |
-| `regression` | Alias for `test-mac`; intended as pre-upgrade gate | 34 |
+| `regression` | graph-kit pin, contract gates, desktop/ui/web node suites, agent/v2 wire, graph-kit labs; the pre-push gate | 84 |
 | `hooks` | `git config core.hooksPath .githooks` — enables pre-push hook | 40 |
 | `docs-deps` | Creates `.venv-docs` and installs `docs-requirements.txt` | 52 |
 | `docs-serve` | `mkdocs serve -a 127.0.0.1:8000` | 57 |
@@ -121,8 +120,8 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 
 ### Client builds
 
-- macOS desktop app: [`../how-to/build-the-macos-app.md`](../how-to/build-the-macos-app.md)
-- Production (extension zip + server bundle): [`../how-to/ship-production-build.md`](../how-to/ship-production-build.md)
+- Desktop app (Tauri): [`../how-to/desktop-release.md`](../how-to/desktop-release.md)
+- Extension zip: [`../how-to/release.md`](../how-to/release.md)
 
 ### Production systemd
 
@@ -207,7 +206,7 @@ Detail: [`knowledge-base.md`](knowledge-base.md) (§1 source files, db.mjs).
 - [`../explanation/invariants.md`](../explanation/invariants.md) — full engineering invariants catalogue
 - [`../explanation/server-internals.md`](../explanation/server-internals.md) — narrative request flow, shutdown, background tasks
 
-Subsystem specs: [`api-server.md`](api-server.md) · [`knowledge-base.md`](knowledge-base.md) · [`agent-runtime.md`](agent-runtime.md) · [`chrome-extension.md`](chrome-extension.md) · [`macos-app.md`](macos-app.md)
+Subsystem specs: [`api-server.md`](api-server.md) · [`knowledge-base.md`](knowledge-base.md) · [`agent-runtime.md`](agent-runtime.md) · [`chrome-extension.md`](chrome-extension.md)
 
 Reference pages: [`../reference/env-vars.md`](../reference/env-vars.md) · [`../reference/configuration.md`](../reference/configuration.md) · [`../reference/guardrail-rules.md`](../reference/guardrail-rules.md) · [`../reference/rate-limit-profiles.md`](../reference/rate-limit-profiles.md) · [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 

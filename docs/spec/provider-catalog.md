@@ -26,9 +26,8 @@ Not covered here: the Claude path (`llm_agent/sdk/`, see [claude-linker](../expl
 | `extension/llm_agent/adapter/tool-bridge.mjs` | Our tool registry as the adapter's tools, behind our permission gate |
 | `extension/llm_agent/adapter/provider-turn.mjs` | One provider-backed turn |
 | `extension/routes/provider-catalog.mjs` | The eight routes |
-| `mac/Sources/LlmIdeMac/Features/Settings/Views/ProvidersSection.swift`, `ProviderForms.swift` | Settings → Providers: the one list of every connection (catalog, custom providers, built-in keys), with Add |
-| `mac/Sources/LlmIdeMac/Features/Settings/Services/ProviderRows.swift`, `ProvidersModel.swift` | The pure row/dedupe rules and the model that routes each edit to the store that owns the row |
-| `mac/Sources/LlmIdeMac/Features/Settings/Views/ModelRoutingSection.swift`, `ModelRoutingSwitches.swift` | Settings → Model routing: tiers, roles, fallback order and the router / cap / tools switches |
+| `ui/screens/settings/sections/ProvidersSection.tsx`, `BuiltinProviders.tsx` | Settings → Providers: the one list of every connection (catalog, custom providers, built-in keys), with Add |
+| `ui/screens/settings/sections/RoutingSection.tsx` | Settings → Model routing: tiers, roles, fallback order and the router / cap / tools switches |
 
 ## §2 Adapter decision
 
@@ -184,7 +183,7 @@ Settings has two sections for models, replacing four (Model Providers, Custom Pr
 
 ## §10 Tests
 
-`extension/tests/ip-classifier.test.mjs`, `pinned-fetch.test.mjs` (a real local server, a fake resolver, a rebinding sequence), `eslint-ai-sdk-fence.test.mjs` and `provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.
+`extension/tests/ip-classifier.test.mjs`, `pinned-fetch.test.mjs` (a real local server, a fake resolver, a rebinding sequence), `eslint-ai-sdk-fence.test.mjs` and `provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes). No test reaches a real provider.
 
 ## Regeneration checklist
 

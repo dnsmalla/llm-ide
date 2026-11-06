@@ -10,7 +10,7 @@ System-wide architecture for LLM-IDE. For server-internal details (request pipel
 ## Goals
 
 - **Local-first.** All data and AI calls run through a server bound to `127.0.0.1`. Nothing leaves the machine unless the user approves a delivery action (GitHub PR, Slack webhook, ticket dispatch).
-- **Multi-surface, one backend.** A Chrome extension and a native macOS app talk to the same local HTTP API and the same SQLite knowledge base.
+- **Multi-surface, one backend.** A Chrome extension, the Tauri desktop app (macOS, Windows, Linux), a web app and an iPhone app share one core: the local HTTP API and one SQLite knowledge base.
 - **AI as a tool, not a service.** The Claude CLI is the always-available baseline — the server shells out to it when a user has no stored key. Users may **optionally** add a per-user API key (Claude / OpenAI / Google / OpenAI-compatible) via the encrypted vault, which the server then prefers so multi-user installs bill each user's own account. See [ADR-0015](../decisions/0015-multi-provider-vaulted-api-keys.md).
 - **Outcome-aware.** Dispatched work (PRs, tickets) is polled and the result lands back in the KB, so future planning is grounded in what actually happened.
 
@@ -20,14 +20,14 @@ System-wide architecture for LLM-IDE. For server-internal details (request pipel
 flowchart TB
     subgraph Surfaces
         EXT[Chrome extension MV3<br/>React 18 + TS + Vite<br/>side panel + popup]
-        MAC[macOS app SwiftUI<br/>Swift 5.9 · Accessibility API<br/>KB · Issues · Gantt · Review]
+        DESK[Desktop app Tauri<br/>Rust host + React ui/<br/>KB · Issues · Gantt · Review]
     end
     SERVER[Local server server.mjs<br/>Node 20+ · zero framework<br/>CORS → JWT → rate-limit → route]
     DB[(SQLite WAL+FTS5<br/>per-user vault)]
     CLI[Claude CLI claude -p]
     EXT3[External opt-in<br/>GitHub · GitLab · Backlog · Linear · Slack]
     EXT --> |HTTP Bearer JWT<br/>127.0.0.1:3456| SERVER
-    MAC --> |HTTP Bearer JWT<br/>127.0.0.1:3456| SERVER
+    DESK --> |HTTP Bearer JWT<br/>127.0.0.1| SERVER
     SERVER --> DB
     SERVER --> CLI
     SERVER --> EXT3
@@ -96,7 +96,7 @@ SQLite, WAL mode, FTS5, foreign keys on. There is no single schema-version numbe
 
 - **Pure Node `http`, no framework.** Reduces dependency surface and keeps cold start fast. Trade-off: routing and middleware are hand-rolled in `server.mjs`.
 - **Claude CLI shell-out instead of API.** Users keep one auth (their Claude login). The server cannot accept an API key. Trade-off: prompt size capped at 500 k chars; concurrency capped by what the CLI can absorb.
-- **One SQLite database per install, not per surface.** The macOS app and Chrome extension see the same data because they share the server.
+- **One SQLite database per install, not per surface.** The desktop app and Chrome extension see the same data because they share the server.
 - **Side panel and floating popup mount the same React bundle** and synchronise via `chrome.storage.local` + `chrome.runtime.onMessage`. No separate component tree. (The floating popup was subsequently removed; the pop-out button now deep-links into the native macOS app via `/launch-app` — see ADR-0010.)
 
 ## Surface-by-surface
@@ -128,17 +128,15 @@ description says to start.
 - **`extension/src/`** — React 18 + TS + Vite. The side panel mounts
   the bundle (the floating popup was removed — ADR-0010). Start at
   `src/main.tsx`.
-- **`mac/Sources/LlmIdeMac/`** — SwiftUI app, layered
-  **Shell → Features → Core**: `Shell/` is the composition root,
-  `Features/<Name>/` holds one folder per section (a feature never
-  references another feature, so build-excludable ones can be
-  compiled out via `LLMIDE_FEATURES`), and `Core/` (plus
-  `ClaudeLink/`) is shared infrastructure every layer may use. The
-  folder → layer map is
-  [`mac/Scripts/feature-map.txt`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/feature-map.txt).
-  Types follow the suffix taxonomy in `CLAUDE.md` (`*Store`,
-  `*Service`, `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
-  `Shell/LlmIdeMacApp.swift`. See [`spec/macos-app.md`](../spec/macos-app.md) for rebuild-grade detail.
+- **`desktop/` + `ui/`** — the Tauri desktop app: `desktop/src-tauri/`
+  is the Rust host (spawns and supervises the core, OS secrets, file and
+  git access, PTY), `ui/screens/` holds one folder per section (shared
+  with the web app) and `ui/kit/` the shared React components and
+  tokens. Start at `desktop/src-tauri/src/lib.rs` and
+  `ui/screens/shell/Shell.tsx`. (The SwiftUI Mac app under `mac/` was
+  removed on 2026-11-06; it is in git history.)
+- **`web/`** — the browser app (Host API v1 pairing and encrypted sync).
+- **`ios_app/`** — the iPhone app and its wire types (`SharedProtocol`).
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user
   vault payloads. Never read this directly from code; go through
   `extension/kb/db.mjs`.
@@ -147,7 +145,7 @@ description says to start.
 
 ### HTTP routes by client
 
-The Chrome extension and the Mac app speak to the same server.
+The Chrome extension and the desktop app speak to the same server.
 The split below is not enforced — either client could call any
 route — but reflects what's actually wired today.
 
@@ -161,14 +159,8 @@ route — but reflects what's actually wired today.
 - `POST /agents/<name>/dispatch` — ticket / PR / webhook delivery
 - `GET  /kb/outcomes/<sessionId>` — poll outcome-watcher results
 
-**Mac app** uses (subset; full list in
-`LlmIdeAPIClient.swift`):
-
-- `POST /auth/{login,refresh}`
-- `GET  /kb/sessions` — list captured meetings
-- `POST /code-assist` — Code Assistant chat turn
-- `POST /kb/generate-plan`
-- `GET  /kb/library` — meeting note library index
+**Desktop app** (`ui/screens/`) uses most of the rest; the per-route
+callers are listed in `schema/http/INVENTORY.md`.
 
 All routes accept `Authorization: Bearer <jwt>` and return JSON.
 Errors carry `{ error: { code, message } }`; see
@@ -195,7 +187,7 @@ How-to: `docs/how-to/add-an-agent-skill.md`.
 
 ### `pendingTool` JSON
 
-The Mac app's Code Assistant emits tool-use intents back over a
+The Code Assistant emits tool-use intents back over a
 WebSocket-style channel. Each `pendingTool` message has the shape:
 
 ```json

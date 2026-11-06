@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 59 open, 35 done, 94 total
+Open count: 52 open, 42 done, 94 total
 
 ## How to use this file
 
@@ -27,7 +27,7 @@ Open count: 59 open, 35 done, 94 total
   - Why you: reads your real database; agents must not read it.
   - How: `node scripts/auto-task-usage.mjs --db "$HOME/Library/Application Support/llm-ide/system/data.db"` and tell the agent the counts. Read-only.
   - Effort: 2 minutes. Blocks: UN-032 (which Auto Tasks are cut or merged). Status: not run.
-- [ ] **UN-004** Swift app manual checks (about 30 minutes).
+- [x] **UN-004** Swift app manual checks (about 30 minutes). Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
   - Why you: needs the real Mac app and your providers.
   - How: [USER-CHECKLIST section B](USER-CHECKLIST.md#b-manual-app-checks-about-30-minutes): basics, Providers, DeepSeek chat, chat cap chip, Plugin/MCP/LLM-source screens (this also covers the Extensions screen real-app check), the 12-step quit-and-relaunch with `lta.mode` on, and the extension "Mac app not running" state. Safe mode: `defaults write com.llmide.macapp lta.mode shadow`.
   - Effort: 30 minutes. Blocks: turning live-then-archive `lta.mode` on by default, closing Mac K1 work, the Extensions screen check. Status: not run.
@@ -132,7 +132,7 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent; it goes in `extension-ids.json` in the server's data dir (Mac: `~/Library/Application Support/llm-ide/system/`; desktop: `~/Library/Application Support/llm-ide-desktop/core/`), then restart the server. Effort: 2 minutes. Status: mechanism built 2026-11-05. You have not installed the extension yet (2026-11-05), so there is no id and nothing to pin; without the file the server accepts any extension, as before. Do it when you load it unpacked (`extension/dist`, id shown on `chrome://extensions`) or publish it (store id; the manifest `key` route fits then, with no old local data to lose).
 - [ ] **UN-045** Flag-off `no-ack` capture retention (up to 50 captures) until the ack protocol is on by default.
   - Source: [extension storage audit](plans/2026-10-31-extension-storage-audit.md). Recommended: accept for now, turn the ack default on after the real-meeting check (UN-016).
-- [ ] **UN-046** Status audit decisions: write the missing connector-catalog spec and schedule catalog phase 3 and a real Miro run; close the 51 private-wrapper decode-lab skips before more Mac routes switch.
+- [x] **UN-046** Status audit decisions: write the missing connector-catalog spec and schedule catalog phase 3 and a real Miro run; close the 51 private-wrapper decode-lab skips before more Mac routes switch. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
   - Source: [status audit](plans/2026-10-31-status-audit.md). Recommended: yes to both, in that order.
 - [ ] **UN-047** Automation-kit A5 and capture-kit C2: may a repair outside a loop's scope be approved from the phone (recommended: Mac only), and retire `/extract-entities` after UN-040 Q5.
   - Source: [automation-kit section 7](../kits/automation-kit.md), [capture-kit section 7](../kits/capture-kit.md).
@@ -140,7 +140,7 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Source: [docs-kit section 7](../kits/docs-kit.md). Recommended: data types yes, seams for services.
 - [ ] **UN-049** Remaining numbered kit decisions in the ui-kit, work-kit, workspace-kit, os-kit and agent-kit maps that no one has answered.
   - Source: the "Decisions needed" and "Open questions" sections of each kit map in `docs/kits/` (ui-kit U1 to U6 are delegated and provisional, see C). Recommended: go through each file once, answer in one message. Effort: 20 minutes.
-- [ ] **UN-050** Swift feature freeze: define the trigger and scope (status audit item d); the inferred freeze is in force until you confirm.
+- [x] **UN-050** Swift feature freeze: define the trigger and scope (status audit item d); the inferred freeze is in force until you confirm. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
   - Source: Phase 3 plan section 10. Recommended: confirm as inferred.
 - [ ] **UN-051** Company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5).
   - Why you: your money and your account. Recommended: yes before any team use.
@@ -166,7 +166,7 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 
 ## D. Later needs (not now; each has a trigger)
 
-- [ ] **UN-110** Mac auto-update keys: run Sparkle's `generate_keys` on your Mac (the private key stays in your Keychain, never in the repo or CI), then add GitHub secrets `MAC_SU_PUBLIC_KEY` (the public half) and `MAC_SU_FEED_URL` (the appcast address; GitHub Releases works, no domain needed), then one signed build-to-build update. Trigger: the first Mac release you give to anyone else; until then a CI release refuses to build without them (decided 2026-11-05, security first: no long-lived signing key before it is needed). How: [release-with-auto-update](../how-to/release-with-auto-update.md). Effort: 30 minutes.
+- [x] **UN-110** Mac auto-update keys: run Sparkle's `generate_keys` on your Mac (the private key stays in your Keychain, never in the repo or CI), then add GitHub secrets `MAC_SU_PUBLIC_KEY` (the public half) and `MAC_SU_FEED_URL` (the appcast address; GitHub Releases works, no domain needed), then one signed build-to-build update. Trigger: the first Mac release you give to anyone else; until then a CI release refuses to build without them (decided 2026-11-05, security first: no long-lived signing key before it is needed). How: [release-with-auto-update](../how-to/release-with-auto-update.md). Effort: 30 minutes. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
 - [ ] **UN-070** Windows and Linux full passes (build, signing, packaging, manual check). Trigger: the macOS Tauri app reaches parity and daily use. Effort: a day per OS.
 - [ ] **UN-071** macOS signing and notarisation credentials for the desktop release. Trigger: before the first public desktop release. How: [desktop-release.md, One-time setup](../how-to/desktop-release.md#2-one-time-setup). The seven existing `MAC_*` secrets (shared with `mac-release.yml`) are reused: nothing new if they are set.
 - [x] **UN-072** Windows signing: decided unsigned 2026-11-05 (no paid certificate); Linux formats decided (deb + AppImage). Windows signing stays built behind the `windows_signed` dispatch input and the six `DESKTOP_WIN_*` secrets, never needed by a tag release. To reverse: [desktop-signing-decisions.md, decision 2](../how-to/desktop-signing-decisions.md#2-windows-signing) (Azure Artifact Signing if eligible: organisations in US/CA/EU/UK with 3+ years of history, individuals in US/CA; otherwise OV in a cloud HSM). Status: closed by decision.
@@ -187,11 +187,11 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [x] **UN-079** On-device TLS checks (ATS check, legacy cleartext path, packet capture). Trigger: when the TLS slice is built; list in [verification.md](../mobile/verification.md). Status: done 2026-11-05, you tested on a real iPhone.
 - [ ] **UN-080** App Store submission state check (`ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified). Trigger: when you want the iPhone app released.
 - [ ] **UN-081** Chrome Web Store listing, review and the publishing step in the extension release. Trigger: when the extension is meant for other people.
-- [ ] **UN-082** Retire cleartext `:3006` and PIN pairing once the relay reaches parity. Trigger: relay parity (R9).
+- [x] **UN-082** Retire cleartext `:3006` and PIN pairing once the relay reaches parity. Trigger: relay parity (R9). Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
 - [ ] **UN-083** Delete legacy duplicate rows (destructive: export, backup, rollback drill) and switch the Library read path to `note_index`. Trigger: 7 clean shadow days on real meeting notes (UN-076).
-- [ ] **UN-084** Phase 6: one release with both apps, then the Swift app goes to maintenance. Trigger: Tauri macOS parity and daily use.
-- [ ] **UN-108** Host API v1 manual checks: Mac loopback (`scripts/mobile/verify-host-api-v1.swift` against a DEBUG app with `LLMIDE_HOST_API_DEV=1`), the web client in a real browser (`web/MANUAL-CHECK.md`), on-device pinned pairing with Tailscale (part of UN-079), shared v2/v1 PIN throttle and the desktop QR. Trigger: product stage, before TLS is on by default.
-- [ ] **UN-109** Parity checklist: every row verified against the Mac app, including Home and toolbar navigation (`plans/2026-10-31-tauri-parity-checklist.md`). Trigger: after the UN-001 follow-up runs.
+- [x] **UN-084** Phase 6: one release with both apps, then the Swift app goes to maintenance. Trigger: Tauri macOS parity and daily use. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
+- [ ] **UN-108** Host API v1 manual checks: the web client in a real browser (`web/MANUAL-CHECK.md`), on-device pinned pairing with Tailscale (part of UN-079), shared v2/v1 PIN throttle and the desktop QR. Trigger: product stage, before TLS is on by default.
+- [x] **UN-109** Parity checklist: every row verified against the Mac app, including Home and toolbar navigation (`plans/2026-10-31-tauri-parity-checklist.md`). Trigger: after the UN-001 follow-up runs. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
 - [ ] **UN-085** Source Control hosted actions (PRs, issues) need a core route plan. Trigger: after the Issues core.
 
 - [x] **UN-111** Device linking desktop card check. Status: retired 2026-11-06 — the account service, device linking and relay were removed from the repo (ADR 0020); phones and browsers enroll through encrypted sync.
