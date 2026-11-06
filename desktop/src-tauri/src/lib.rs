@@ -9,6 +9,7 @@ mod capture_model;
 mod capture_readers;
 mod capture_store;
 mod capture_ax_macos;
+mod capture_session;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;
