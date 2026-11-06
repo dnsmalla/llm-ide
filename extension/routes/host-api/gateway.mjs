@@ -1,4 +1,4 @@
-// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 15 commands (chat, approvals, and the `read` slice) — the structural
+// Host API v1 on the desktop core: per-connection sessions, auth, `rev`, and the 17 commands (chat, approvals, the `read` slice and `compose`) — the structural
 // twin of the Mac's HostApiV1Gateway.swift. Chat runs in process (startHostTurn) on one server-side "Phone chat"
 // per user. The engine, decisions and chat-session modules load lazily, so this file stays off the boot path.
 // Never log frame content, tokens or PINs: type and size only.
@@ -9,7 +9,7 @@ import { PairingThrottle, peerKey } from './throttle.mjs';
 import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
-import { attachmentsToFiles, optionsOf } from './compose.mjs';
+import { attachmentsToFiles, optionsOf, offersModel } from './compose.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -275,6 +275,16 @@ export function createGateway(overrides) {
     return p;
   }
 
+  // A chat.send that picks a mode or model needs `compose` (served ∩ granted), like a command of that capability.
+  function composeRefused(s, entry, id) {
+    if (entry.grants?.has('compose') && deps.capabilities().includes('compose')) return false;
+    if (!deps.capabilities().includes('compose')) { fail(s, id, 'capability_unavailable', 'This computer does not serve compose right now.'); return true; }
+    const { userId: u, deviceId: d } = entry.state;
+    audit('scope_denied', { peer: entry.peer, userId: u, deviceId: d, detail: 'compose', dedupeKey: `${d}:compose` });
+    fail(s, id, 'denied', 'This device was not granted compose — pair again to grant it.');
+    return true;
+  }
+
   async function lines(userId, limit) {
     return messagesOf(await deps.history(userId, limit), limit);
   }
@@ -322,7 +332,7 @@ export function createGateway(overrides) {
       } catch (e) { deps.log(`Host API v1 engine event ${ev?.type ?? '?'} dropped (${e?.code ?? 'error'})`); }
     };
     Promise.resolve()
-      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), onEvent }))
+      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), mode: p.mode ?? 'auto', model: p.model ?? null, onEvent }))
       // An aborted turn resolves without a terminal event: end it here (a cancelled done when the client asked).
       .then(() => push({ type: 'error', message: 'The turn ended without a reply.', retryable: true }))
       .catch((err) => {
@@ -441,10 +451,20 @@ export function createGateway(overrides) {
         return respond(s, id, command, { messages: await lines(userId, limit) });
       }
       case 'chat.send': {
+        const picks = p.mode !== undefined || p.model !== undefined;
+        if (picks && composeRefused(s, entry, id)) return;
         const wait = rate.turn(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         if (owned.has(internalId(entry.num, id))) return fail(s, id, 'busy', 'That request id is still running.');
         if ([...owned.values()].some((o) => o.session === s)) return fail(s, id, 'busy', 'A chat turn is already running on this connection.');
+        if (p.model !== undefined && !offersModel(await modelsFor(userId), p.model)) {
+          return fail(s, id, 'denied', 'That model is not offered on this computer — pick another.');
+        }
+        if (picks) {
+          const deviceId = entry.state.deviceId;
+          audit('compose_send', { peer: entry.peer, userId, deviceId, detail: `mode=${p.mode ?? 'auto'} model=${p.model ?? 'default'} files=${p.attachments?.length ?? 0}`,
+            dedupeKey: `${deviceId}:${p.mode ?? 'auto'}:${p.model ?? ''}` });
+        }
         const chatSessionId = await quickChatFor(userId);
         if (sessions.get(s) !== entry) return;
         return startTurn(s, entry, id, p, chatSessionId);
@@ -492,6 +512,16 @@ export function createGateway(overrides) {
       case 'usage.get': {
         if (readRefused(s, entry, id)) return;
         return respond(s, id, command, usageOf(await deps.read.usage(userId)));
+      }
+      case 'chat.new': {
+        const wait = rate.turn(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
+        await creatingQuickChat.get(userId);
+        const sessionId = await deps.quickChat.create(userId);
+        deps.quickChat.set(userId, sessionId);
+        audit('chat_new', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
+        return respond(s, id, command, { sessionId });
       }
       default:
         return fail(s, id, 'unknown_command', 'This host does not serve that command.');

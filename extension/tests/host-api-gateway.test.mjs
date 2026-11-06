@@ -564,3 +564,53 @@ test('hostApiCapabilities: compose only with LLMIDE_HOST_API_COMPOSE=1', async (
   assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_COMPOSE: '1' }), ['host', 'chat', 'approvals', 'compose']);
   assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_COMPOSE: '1', LLMIDE_HOST_API_READ: '1' }), ['host', 'chat', 'approvals', 'read', 'compose']);
 });
+
+test('compose send: without compose, a mode or model is refused before any turn (old sends unchanged)', async () => {
+  const t = harness(); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'plan' }));
+  assert.equal(t.lastError(), 'capability_unavailable'); assert.equal(t.turns.length, 0);
+  await t.g.receive(s, req('c-2', 'chat.send', { text: 'hi' })); await flush();
+  assert.equal(t.turns.length, 1); assert.equal(t.turns[0].mode, 'auto'); assert.equal(t.turns[0].model, null);
+});
+test('compose send: a device paired before compose was served is denied with a re-pair hint and audited', async () => {
+  const t = harness(); await t.paired({ n: 1 }); const token = t.last().result.token;
+  const t2 = harness({ compose: true }); t2.tokens.set(token, t.tokens.get(token)); const s2 = { n: 2 };
+  t2.g.opened(s2, '127.0.0.1'); await t2.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t2.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  await t2.g.receive(s2, req('c-1', 'chat.send', { text: 'hi', model: 'claude-sonnet-5-5' }));
+  assert.equal(t2.lastError(), 'denied'); assert.match(t2.last().error.message, /pair again/); assert.equal(t2.turns.length, 0);
+  assert.equal(t2.audits.at(-1)[0], 'scope_denied'); assert.equal(t2.audits.at(-1)[1].detail, 'compose');
+});
+test('compose send: granted — the mode and a listed model reach the turn; the audit has no text', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'secret plan text', mode: 'plan', model: 'claude-sonnet-5-5', attachments: [{ name: 'a.md', text: 'body' }] })); await flush();
+  assert.equal(t.turns[0].mode, 'plan'); assert.equal(t.turns[0].model, 'claude-sonnet-5-5');
+  const row = t.audits.find(([e]) => e === 'compose_send');
+  assert.equal(row[1].detail, 'mode=plan model=claude-sonnet-5-5 files=1');
+  assert.equal(JSON.stringify(t.audits).includes('secret'), false); assert.equal(JSON.stringify(t.audits).includes('a.md'), false);
+});
+test('compose send: a model the desktop does not list is denied, no turn starts', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', model: 'claude-opus-9' }));
+  assert.equal(t.lastError(), 'denied'); assert.equal(t.turns.length, 0);
+});
+test('compose send: execute never passes the schema', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' }));
+  assert.equal(t.lastError(), 'invalid_payload'); assert.equal(t.turns.length, 0);
+});
+test('chat.new: starts a fresh phone chat; the next send goes there; audited', async () => {
+  const t = harness({ compose: true, read: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-0', 'chat.send', { text: 'first' })); await flush(); assert.equal(t.turns[0].chatSessionId, 'chat-1');
+  await t.g.receive(s, req('c-1', 'chat.new', {})); assert.deepEqual(t.last().result, { sessionId: 'chat-2' }); assert.equal(t.audits.at(-1)[0], 'chat_new');
+  await t.g.receive(s, req('c-2', 'chat.send', { text: 'second' })); await flush(); assert.equal(t.turns[1].chatSessionId, 'chat-2');
+});
+test('chat.new: refused busy while a turn of this user runs', async () => {
+  const t = harness({ compose: true, hold: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-0', 'chat.send', { text: 'long' })); await flush();
+  await t.g.receive(s, req('c-1', 'chat.new', {})); assert.equal(t.lastError(), 'busy'); assert.equal(t.last().error.retryable, true);
+});
+test('chat.new: not served without compose', async () => {
+  const t = harness(); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.new', {})); assert.equal(t.lastError(), 'capability_unavailable');
+});
