@@ -32,6 +32,9 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 // The desktop nonce chosen by THIS app for each pending link; never trusted from a service reply.
 static LINK_NONCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static LINK_PINS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+// Serializes every read-modify-write of the account token, device-key and relay registry secrets. Never hold it
+// across a call that takes it again (access_token and device_keys both take it).
+pub(crate) static STORE_LOCK: Mutex<()> = Mutex::new(());
 fn link_nonces() -> &'static Mutex<HashMap<String, String>> { LINK_NONCES.get_or_init(|| Mutex::new(HashMap::new())) }
 fn link_pins() -> &'static Mutex<HashMap<String, (String, String)>> { LINK_PINS.get_or_init(|| Mutex::new(HashMap::new())) }
 
@@ -295,6 +298,7 @@ fn desktop_proof(keys: &DeviceKeys, access_token: &str) -> Result<String, String
 /// Generate once, keep the private halves only in the OS store. The public halves go to the account
 /// service; the relay will use the private halves for signed wraps later.
 fn device_keys(backend: &dyn SecretBackend) -> Result<DeviceKeys, String> {
+    let _store = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(raw) = backend.get(DEVICE_KEYS_ACCOUNT).map_err(|e| e.to_string())? {
         return serde_json::from_str(&raw).map_err(|_| "stored desktop keys are unreadable".to_string());
     }
@@ -313,11 +317,16 @@ fn keys_from(signing: &SecretKey, ecdh: &SecretKey) -> Result<DeviceKeys, String
 }
 
 fn access_token(origin: &Url, backend: &dyn SecretBackend) -> Result<String, String> {
+    // Held across the refresh, and the tokens are read only after taking it, so a second caller
+    // reuses the first caller's refresh instead of spending the same refresh token again.
+    let _store = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut tokens = load_tokens(backend)?.ok_or_else(|| "Sign in to LLM-IDE first.".to_string())?;
     if tokens.expires_at > now_secs() + 60 {
         return Ok(tokens.access_token);
     }
+    // Bounded: STORE_LOCK is held across this call, so a hung account service must not block every writer.
     let response = ureq::post(&format!("{origin}v1/oauth/token"))
+        .timeout(Duration::from_secs(15))
         .set("content-type", "application/x-www-form-urlencoded")
         .send_form(&[
             ("grant_type", "refresh_token"),
@@ -593,9 +602,15 @@ fn link_confirm_blocking(request_id: String, sas: String, pin: String, core: Str
         Some(serde_json::json!({ "requestId": request_id, "sas": expected, "proof": proof })))?;
     let token = crate::relay::bridge::pair(&core, tier, &r.label, &pin)
         .map_err(|e| format!("Linked, but this computer could not finish setup ({e}). Revoke the device and link again."))?;
+    // Fetched before the store lock: access_token takes that lock itself.
+    let acct = if crate::relay::registry::load(backend.as_ref())?.desktop_id.is_empty() {
+        Some(account_json(&o, "v1/desktop/account", "GET", &access_token(&o, backend.as_ref())?, None)?)
+    } else {
+        None
+    };
+    let _store = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut reg = crate::relay::registry::load(backend.as_ref())?;
-    if reg.desktop_id.is_empty() {
-        let acct = account_json(&o, "v1/desktop/account", "GET", &access_token(&o, backend.as_ref())?, None)?;
+    if let Some(acct) = acct.filter(|_| reg.desktop_id.is_empty()) {
         reg.user_id = acct["id"].as_str().unwrap_or_default().to_string();
         reg.desktop_id = acct["desktopId"].as_str().ok_or("Register this desktop first.")?.to_string();
     }
@@ -644,6 +659,7 @@ pub async fn account_register_desktop(replace: Option<bool>) -> Result<AccountSt
 #[tauri::command]
 pub async fn account_sign_out() -> Result<AccountStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
+        crate::relay::stop_running();
         let backend = store()?;
         // Best effort: revoke the refresh family before dropping the local copy. Local sign-out still
         // completes if the account service is unreachable.
@@ -681,6 +697,50 @@ mod tests {
         assert!(account_origin(Some("http://accounts.llm-ide.com")).is_err());
         assert!(account_origin(Some("https://accounts.llm-ide.com/x")).is_err());
         assert!(account_origin(Some("https://user:pw@accounts.llm-ide.com")).is_err());
+    }
+
+    #[test]
+    fn https_account_requests_have_a_tls_backend() {
+        let err = account_json(&Url::parse("https://127.0.0.1:1/").unwrap(), "v1/x", "GET", "t", None).unwrap_err();
+        assert!(!err.contains("TLS backend"), "{err}");
+    }
+
+    #[test]
+    fn concurrent_refreshes_spend_the_refresh_token_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = Url::parse(&format!("http://127.0.0.1:{}/", listener.local_addr().unwrap().port())).unwrap();
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                // Read the whole form body (Content-Length) before answering, so the client sees a clean reply.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                let head_end = loop {
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") { break i + 4; }
+                    match stream.read(&mut chunk) { Ok(n) if n > 0 => buf.extend_from_slice(&chunk[..n]), _ => break buf.len() }
+                };
+                let head = String::from_utf8_lossy(&buf[..head_end.min(buf.len())]).to_lowercase();
+                let len: usize = head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+                while buf.len() < head_end + len {
+                    match stream.read(&mut chunk) { Ok(n) if n > 0 => buf.extend_from_slice(&chunk[..n]), _ => break }
+                }
+                counter.fetch_add(1, Ordering::SeqCst);
+                let body = r#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":900}"#;
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", body.len(), body);
+            }
+        });
+        let backend = MemoryBackend::default();
+        backend.set(TOKENS_ACCOUNT, &serde_json::to_string(&Tokens { access_token: "old".into(), refresh_token: "r0".into(), expires_at: 1 }).unwrap()).unwrap();
+        let (a, b) = std::thread::scope(|s| {
+            let a = s.spawn(|| access_token(&origin, &backend));
+            let b = s.spawn(|| access_token(&origin, &backend));
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert_eq!(a.unwrap(), "new-access");
+        assert_eq!(b.unwrap(), "new-access");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "one refresh for two callers");
     }
 
     #[test]

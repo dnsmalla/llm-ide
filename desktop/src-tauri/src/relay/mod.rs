@@ -15,6 +15,11 @@ use crate::core_host::CoreHost;
 static HANDLE: OnceLock<Mutex<Option<client::RelayHandle>>> = OnceLock::new();
 fn handle_slot() -> &'static Mutex<Option<client::RelayHandle>> { HANDLE.get_or_init(|| Mutex::new(None)) }
 
+/// Stops the running relay connection, if any (account sign-out).
+pub(crate) fn stop_running() {
+    if let Some(old) = handle_slot().lock().unwrap_or_else(|e| e.into_inner()).take() { old.stop(); }
+}
+
 #[tauri::command]
 pub async fn relay_status() -> Result<client::RelayStatus, String> {
     let enabled = crate::account_oauth::relay_store().and_then(|s| registry::load(s.as_ref())).map(|r| r.enabled).unwrap_or(false);
@@ -27,6 +32,7 @@ pub async fn relay_status() -> Result<client::RelayStatus, String> {
 #[tauri::command]
 pub async fn relay_set_enabled(enabled: bool, host: tauri::State<'_, CoreHost>) -> Result<client::RelayStatus, String> {
     let mut store = crate::account_oauth::relay_store()?;
+    let store_lock = crate::account_oauth::STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut reg = registry::load(store.as_ref())?;
     if enabled {
         let core = host.verified_url().filter(|_| host.status().trust == "spawned")
@@ -34,6 +40,7 @@ pub async fn relay_set_enabled(enabled: bool, host: tauri::State<'_, CoreHost>) 
         if reg.desktop_id.is_empty() { return Err("Register this desktop first.".to_string()); }
         reg.enabled = true;
         registry::save(store.as_ref(), &reg)?;
+        drop(store_lock);
         let (signer, spki) = crate::account_oauth::desktop_signing()?;
         let signing_spki = URL_SAFE_NO_PAD.decode(spki).map_err(|_| "bad signing key".to_string())?;
         let token = Arc::new(crate::account_oauth::relay_access_token);

@@ -388,8 +388,19 @@ impl CoreHost {
         if let Ok(mut s) = self.inner.status.try_lock() {
             s.closing = true;
         }
+        let mut killed = false;
         if let Ok(mut slot) = self.inner.child.try_lock() {
+            killed = slot.is_some();
             terminate_child(&mut slot, self.inner.tuning.term_grace);
+        }
+        if killed {
+            // The core is gone: core_status must not keep reporting it ready.
+            if let Ok(mut s) = self.inner.status.try_lock() {
+                s.state = Phase::Failed;
+                s.pid = None;
+                s.error = Some("the core was stopped after an app error".into());
+                s.error_code = None;
+            }
         }
     }
 
@@ -587,7 +598,7 @@ impl CoreHost {
             }
         };
         lock(&self.inner.literals).push(nonce.clone());
-        let prefs_now = crate::prefs::load_from(data_dir);
+        let prefs_now = crate::prefs::launch();
         let ports = if prefs_now.backend_source && prefs_now.backend_port > 0 {
             vec![prefs_now.backend_port]
         } else {
@@ -956,8 +967,15 @@ fn redact_token(tok: &str) -> String {
 /// Only the last `LOG_TAIL_LINES` lines are retained.
 fn drain<R: Read + Send + 'static>(pipe: R, log: Arc<Mutex<VecDeque<String>>>) {
     thread::spawn(move || {
-        for line in BufReader::new(pipe).lines() {
-            let Ok(line) = line else { break };
+        let mut reader = BufReader::new(pipe);
+        loop {
+            let line = match read_log_line(&mut reader) {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                // Only a transient error keeps the pipe; anything else (EBADF, EIO) ends it.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            };
             let mut buf = lock(&log);
             if buf.len() == LOG_TAIL_LINES {
                 buf.pop_front();
@@ -965,6 +983,27 @@ fn drain<R: Read + Send + 'static>(pipe: R, log: Arc<Mutex<VecDeque<String>>>) {
             buf.push_back(line);
         }
     });
+}
+
+/// Longest child output line kept in the log tail; the rest of a longer line is read and discarded.
+const LOG_LINE_MAX: usize = 8 * 1024;
+
+/// One line, at most `LOG_LINE_MAX` bytes, decoded lossily. `None` at end of input.
+fn read_log_line<R: BufRead>(r: &mut R) -> std::io::Result<Option<String>> {
+    let mut buf = Vec::new();
+    if r.by_ref().take(LOG_LINE_MAX as u64).read_until(b'\n', &mut buf)? == 0 {
+        return Ok(None);
+    }
+    if buf.len() == LOG_LINE_MAX && buf.last() != Some(&b'\n') {
+        let mut rest = Vec::new();
+        while r.by_ref().take(LOG_LINE_MAX as u64).read_until(b'\n', &mut rest)? > 0 && rest.last() != Some(&b'\n') {
+            rest.clear();
+        }
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
 }
 
 /// Stop the child tree in `slot`, if any (graceful, then forced). No-op if none.
@@ -1111,7 +1150,7 @@ pub(crate) fn runtime_for(p: &crate::prefs::Prefs) -> Result<Runtime, String> {
 /// The spawn used in production: the bundled (or repo) node running `server.mjs` with a
 /// scrubbed environment, the two secrets, and the data dir. Fails closed without secrets.
 fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
-    let p = crate::prefs::load_from(ctx.data_dir);
+    let p = crate::prefs::launch();
     let rt = runtime_for(&p)?;
     eprintln!("core: runtime={} node={} root={} port={}", rt.mode, rt.node.display(), rt.root.display(), ctx.port);
     let db_dir = fsutil::private_dir(&ctx.data_dir.join("core"))?;
@@ -1192,7 +1231,7 @@ process.stdout.write('\\nLLMIDE_CLAUDE_PROBE ' + JSON.stringify({ found: Boolean
 /// Runs the server's own `claude-path.mjs` under the core's node and environment, so the
 /// answer is exactly what the engine will find. Any failure is `unknown`, never `missing`.
 fn real_claude_probe(data_dir: &Path) -> ClaudeInfo {
-    let prefs = crate::prefs::load_from(data_dir);
+    let prefs = crate::prefs::launch();
     let Ok(rt) = runtime_for(&prefs) else { return ClaudeInfo::unknown() };
     let Ok(db_dir) = fsutil::private_dir(&data_dir.join("core")) else { return ClaudeInfo::unknown() };
     let mut cmd = core_command(&rt, &db_dir);
@@ -1447,6 +1486,38 @@ mod tests {
         p.backend_dir = dir.join("missing").to_string_lossy().into_owned();
         assert!(runtime_for(&p).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drain_keeps_reading_past_bad_utf8_and_an_overlong_line() {
+        let mut bytes = b"first\n".to_vec();
+        bytes.extend_from_slice(&[0xFF, b'\n']);
+        bytes.extend(std::iter::repeat(b'a').take(1 << 20));
+        bytes.extend_from_slice(b"\nlast\n");
+        let log = Arc::new(Mutex::new(VecDeque::new()));
+        drain(std::io::Cursor::new(bytes), log.clone());
+        let end = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < end && !lock(&log).iter().any(|l| l == "last") {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let lines: Vec<String> = lock(&log).iter().cloned().collect();
+        assert_eq!(lines[0], "first");
+        assert_eq!(lines[1], "\u{FFFD}", "invalid UTF-8 is replaced, not fatal");
+        assert_eq!(lines[2].len(), LOG_LINE_MAX, "the over-long line is capped");
+        assert_eq!(lines.last().map(String::as_str), Some("last"), "reading went on after both");
+    }
+
+    #[test]
+    fn a_panic_kill_leaves_the_core_failed_not_ready() {
+        let host = CoreHost::with(tuning_fast(vec![1]), never_launcher(), no_claude());
+        host.set_ready("http://127.0.0.1:1".into(), false, 1, "spawned", None);
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30").stdin(Stdio::null());
+        *lock(&host.inner.child) = Some(ManagedChild::spawn(&mut cmd).unwrap());
+        host.shutdown_from_panic();
+        let s = host.status();
+        assert_eq!(s.state, Phase::Failed);
+        assert!(s.error.is_some() && s.pid.is_none());
     }
 
     #[test]

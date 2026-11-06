@@ -301,10 +301,10 @@ fn run_loop(cfg: ClientConfig, status: Arc<Mutex<RelayStatus>>, stop: Arc<Atomic
                         }
                     }
                     if now_ms().saturating_sub(last_auth) > 9 * 60_000 {
-                        if let Ok(token) = (cfg.token)() {
-                            let proof = auth_proof(&cfg.signer, &challenge, &token);
-                            let _ = send_text(&mut ws, serde_json::json!({ "t": "auth", "token": token, "proof": proof }).to_string());
-                        }
+                        // A failed re-auth ends the connection; the outer loop reconnects with backoff.
+                        let Ok(token) = (cfg.token)() else { break; };
+                        let proof = auth_proof(&cfg.signer, &challenge, &token);
+                        let _ = send_text(&mut ws, serde_json::json!({ "t": "auth", "token": token, "proof": proof }).to_string());
                         last_auth = now_ms();
                     }
                     match ws.read() {
@@ -315,11 +315,14 @@ fn run_loop(cfg: ClientConfig, status: Arc<Mutex<RelayStatus>>, stop: Arc<Atomic
                                 Some("env") => {
                                     let Ok(env) = serde_json::from_value::<Envelope>(v["env"].clone()) else { continue; };
                                     let outs = desktop.on_env(env, now_ms());
-                                    if let Ok(mut current) = super::registry::load(cfg.store.as_ref()) {
-                                        for d in desktop.reg.devices.clone() { current.add(d); }
-                                        current.enabled = desktop.reg.enabled;
-                                        let _ = super::registry::save(cfg.store.as_ref(), &current);
-                                        desktop.reg = current;
+                                    {
+                                        let _store = crate::account_oauth::STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                                        if let Ok(mut current) = super::registry::load(cfg.store.as_ref()) {
+                                            for d in desktop.reg.devices.clone() { current.add(d); }
+                                            current.enabled = desktop.reg.enabled;
+                                            let _ = super::registry::save(cfg.store.as_ref(), &current);
+                                            desktop.reg = current;
+                                        }
                                     }
                                     for out in outs {
                                         match out {

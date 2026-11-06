@@ -1,7 +1,7 @@
 //! Loopback client for the core's /host-api/relay-bridge (relay plan R-4/R-5). Sends the bus host proof and the
 //! device tier; the core treats the connection as an ordinary Host API session. Never logs frames.
 use std::net::TcpStream;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::Duration;
 
 use tungstenite::client::IntoClientRequest;
@@ -35,8 +35,13 @@ impl BridgeSession {
         let (to_core, from_main) = channel::<Option<String>>();
         let (to_main, rx) = channel::<String>();
         std::thread::spawn(move || loop {
-            while let Ok(item) = from_main.try_recv() {
-                match item { Some(t) => { if ws.send(Message::text(t)).is_err() { return; } } None => { let _ = ws.close(None); return; } }
+            loop {
+                match from_main.try_recv() {
+                    Ok(Some(t)) => { if ws.send(Message::text(t)).is_err() { return; } }
+                    // Explicit close, or every sender dropped (the session was dropped): close the socket and stop.
+                    Ok(None) | Err(TryRecvError::Disconnected) => { let _ = ws.close(None); return; }
+                    Err(TryRecvError::Empty) => break,
+                }
             }
             match ws.read() {
                 Ok(Message::Text(t)) => { if to_main.send(t.to_string()).is_err() { return; } }
@@ -51,6 +56,10 @@ impl BridgeSession {
     pub fn send(&self, frame: &str) -> bool { self.tx.send(Some(frame.to_string())).is_ok() }
     pub fn try_recv(&self) -> Option<String> { self.rx.try_recv().ok() }
     pub fn close(&self) { let _ = self.tx.send(None); }
+}
+
+impl Drop for BridgeSession {
+    fn drop(&mut self) { self.close(); }
 }
 
 /// Pairs a relay device with the core through the bridge and returns its Host API device token (capped to `tier`).
@@ -76,6 +85,28 @@ pub fn pair(core_url: &str, tier: &str, label: &str, pin: &str) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dropping_a_session_closes_its_bridge_socket() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (closed_tx, closed_rx) = channel::<()>();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            let mut ws = tungstenite::accept(stream).unwrap();
+            loop {
+                match ws.read() {
+                    Ok(Message::Close(_)) | Err(_) => { let _ = closed_tx.send(()); return; }
+                    Ok(_) => {}
+                }
+            }
+        });
+        let session = BridgeSession::connect(&format!("http://127.0.0.1:{port}/"), "web").unwrap();
+        drop(session);
+        closed_rx.recv_timeout(Duration::from_secs(3)).expect("the pump thread closed the socket");
+    }
+
     #[test]
     fn bridge_url_is_loopback_only() {
         assert_eq!(bridge_url("http://127.0.0.1:3456/").unwrap(), "ws://127.0.0.1:3456/host-api/relay-bridge");

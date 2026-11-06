@@ -152,6 +152,7 @@ pub fn build_matcher(q: &Query) -> R<Regex> {
     }
     RegexBuilder::new(&pat)
         .case_insensitive(!q.case_sensitive)
+        .multi_line(true)
         .size_limit(REGEX_SIZE_LIMIT)
         .dfa_size_limit(REGEX_DFA_LIMIT)
         .nest_limit(REGEX_NEST_LIMIT)
@@ -856,6 +857,16 @@ mod tests {
         r.regex = true;
         let (f, _) = run(&root, &r);
         assert!(f.is_empty(), "a pattern that only matches the empty string yields nothing");
+    }
+
+    #[test]
+    fn caret_and_dollar_match_per_line_in_the_whole_text_prefilter() {
+        // Line 1 does not start with TODO; line 3 does. The prefilter must still find it.
+        let text = "x TODO\ny\nTODO here\n";
+        let mut re = q("^TODO");
+        re.regex = true;
+        let re = build_matcher(&re).unwrap();
+        assert!(scan_text(text, &re, "f").is_some_and(|h| h.hits.len() == 1));
     }
 
     #[test]
