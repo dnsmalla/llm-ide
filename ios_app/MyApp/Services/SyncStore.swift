@@ -263,6 +263,9 @@ final class SyncStore: ObservableObject {
     }
     private static func write<T: Encodable>(_ value: T, _ name: String) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var d = dir  // the queue holds prompt text and the cache the snapshot: keep both out of device and iCloud backups
+        var v = URLResourceValues(); v.isExcludedFromBackup = true
+        try? d.setResourceValues(v)
         guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: dir.appendingPathComponent(name), options: [.atomic, .completeFileProtection])
     }
