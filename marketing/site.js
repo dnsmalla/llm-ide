@@ -61,12 +61,12 @@
       steps.forEach((s, n) => { s.hidden = n !== index; });
       dots.replaceChildren(...steps.map((_, n) => { const d = document.createElement('i'); if (n <= index) d.className = 'on'; return d; }));
       back.disabled = index === 0;
-      next.textContent = index === steps.length - 1 ? 'Create account' : 'Next';
+      next.textContent = index === steps.length - 1 ? 'Get started' : 'Next';
       label.textContent = `Step ${index + 1} of ${steps.length}`;
       history.replaceState(null, '', `#step-${index + 1}`);
     };
     next.addEventListener('click', () => {
-      if (index === steps.length - 1) location.href = 'https://accounts.llm-ide.com/';
+      if (index === steps.length - 1) location.href = 'guide.html';
       else show(index + 1);
     });
     back.addEventListener('click', () => show(index - 1));

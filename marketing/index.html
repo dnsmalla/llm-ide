@@ -15,7 +15,7 @@
 <li><a href="why.html">Why LLM-IDE</a></li>
 <li><a href="security.html">Security</a></li>
 </ul>
-<div class="nav-actions"><a class="cta ghost" href="/app/">Open app</a><a class="cta" href="https://accounts.llm-ide.com/">Sign in</a></div>
+<div class="nav-actions"><a class="cta ghost" href="/app/">Open app</a><a class="cta" href="guide.html">Get started</a></div>
 </div></header>
 <main>
 <section class="hero-pro"><div class="wrap hero-grid">
@@ -23,7 +23,7 @@
 <p class="eyebrow">Local-first AI workspace</p>
 <h1>Your work.<br>Your machine.<br><span style="color:var(--accent)">Your AI.</span></h1>
 <p class="lead">Meetings, code, documents and project memory in one place — with AI that runs on your computer.</p>
-<div class="actions"><a class="button" href="https://accounts.llm-ide.com/">Create your account</a><a class="button secondary" href="how-it-works.html">See how it works</a></div>
+<div class="actions"><a class="button" href="guide.html">Get started</a><a class="button secondary" href="how-it-works.html">See how it works</a></div>
 <div class="hero-pills"><span>No data upload</span><span>Your Claude login</span><span>Local SQLite</span><span>Approval-first agents</span></div>
 </div>
 <div class="hero-visual" aria-label="LLM-IDE workspace preview">
@@ -38,7 +38,7 @@
 <div class="win-chat me"><div class="bubble">Two handlers changed. One test is missing; I prepared a review.</div></div>
 <div class="win-graph"><svg viewBox="0 0 260 92" aria-hidden="true"><g fill="none" stroke="#31485d" stroke-width="1"><path d="M30 48 75 24 124 46 168 20 225 43M75 24l10 44 39-22 32 37 29-36 40-2"/></g><g fill="#7cc4ff"><circle cx="30" cy="48" r="3"/><circle cx="75" cy="24" r="3"/><circle cx="124" cy="46" r="4"/><circle cx="168" cy="20" r="3"/><circle cx="225" cy="43" r="3"/></g><g fill="#9b8cff"><circle cx="85" cy="68" r="3"/><circle cx="134" cy="68" r="3"/><circle cx="193" cy="41" r="3"/></g></svg></div>
 </div></div></div>
-<div class="float-card float-a"><b>Passkey linked</b>Browser approved by desktop</div>
+<div class="float-card float-a"><b>Device linked</b>Confirmed with a 6-digit code</div>
 <div class="float-card float-b"><b>Local core</b>127.0.0.1 · no public port</div>
 </div>
 </div></section>
@@ -71,26 +71,26 @@
 </div></section>
 
 <section class="section"><div class="wrap">
-<p class="eyebrow">Interactive architecture</p><h2>Follow the data.</h2><p class="lead">Click a stage to see what crosses the boundary.</p>
+<p class="eyebrow">Interactive architecture</p><h2>Follow the data.</h2><p class="lead">Click a stage to see what leaves the desktop.</p>
 <div class="pipeline" role="tablist" aria-label="Architecture stages">
-<button class="pipe-btn" role="tab" aria-selected="true" data-stage="account"><b>01 · Account</b><span>Identity only</span></button>
-<button class="pipe-btn" role="tab" aria-selected="false" data-stage="desktop"><b>02 · Desktop</b><span>Project + AI</span></button>
-<button class="pipe-btn" role="tab" aria-selected="false" data-stage="relay"><b>03 · Relay</b><span>Encrypted envelopes</span></button>
-<button class="pipe-btn" role="tab" aria-selected="false" data-stage="device"><b>04 · Browser / phone</b><span>Approved access</span></button>
+<button class="pipe-btn" role="tab" aria-selected="true" data-stage="desktop"><b>01 · Desktop</b><span>Your data, local core</span></button>
+<button class="pipe-btn" role="tab" aria-selected="false" data-stage="encrypt"><b>02 · Encrypt</b><span>Signed snapshots</span></button>
+<button class="pipe-btn" role="tab" aria-selected="false" data-stage="storage"><b>03 · Your storage</b><span>Ciphertext only</span></button>
+<button class="pipe-btn" role="tab" aria-selected="false" data-stage="device"><b>04 · Phone / browser</b><span>Linked by QR</span></button>
 </div>
 <div class="pipe-line"></div>
-<div class="pipe-detail" data-detail="account"><div><h3>Account service</h3><p>Email, display name, passkey public keys, sessions and device labels. No meetings, code, chats or provider keys.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--accent2)"><use href="icons.svg#shield"/></svg><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Cloud identity</div></div></div>
-<div class="pipe-detail" data-detail="desktop" hidden><div><h3>Your desktop</h3><p>The local core, project database, model credentials and all agent actions. The core binds to loopback, not the internet.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--green)"><use href="icons.svg#desktop"/></svg><div class="mock-bar b"></div><div class="mock-bar a"></div><div class="mock-tag">Local SQLite</div></div></div>
-<div class="pipe-detail" data-detail="relay" hidden><div><h3>Encrypted relay</h3><p>Queues opaque, end-to-end encrypted envelopes between approved devices. The relay cannot read project data.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--violet)"><use href="icons.svg#relay"/></svg><div class="mock-bar c"></div><div class="mock-bar b"></div><div class="mock-tag">No plaintext</div></div></div>
-<div class="pipe-detail" data-detail="device" hidden><div><h3>Your browser or phone</h3><p>A passkey signs in; the desktop approves the device and limits what it can ask for. No public copy of your project.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--rose)"><use href="icons.svg#plan"/></svg><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Desktop approved</div></div></div>
+<div class="pipe-detail" data-detail="desktop"><div><h3>Your desktop</h3><p>The local core, project database, model credentials and all agent actions. The core binds to loopback, not the internet. No account, no login.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--green)"><use href="icons.svg#desktop"/></svg><div class="mock-bar b"></div><div class="mock-bar a"></div><div class="mock-tag">Local SQLite</div></div></div>
+<div class="pipe-detail" data-detail="encrypt" hidden><div><h3>Encrypted on the desktop</h3><p>If you turn sync on, the desktop writes snapshots of your meetings, plans and chats, signs them and encrypts them before anything leaves the machine.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--accent2)"><use href="icons.svg#shield"/></svg><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Signed + encrypted</div></div></div>
+<div class="pipe-detail" data-detail="storage" hidden><div><h3>Storage you own</h3><p>MEGA today; your own server over SFTP and Box are coming. The provider sees only ciphertext. LLM-IDE runs no server that holds your data.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--violet)"><use href="icons.svg#relay"/></svg><div class="mock-bar c"></div><div class="mock-bar b"></div><div class="mock-tag">No plaintext</div></div></div>
+<div class="pipe-detail" data-detail="device" hidden><div><h3>Your phone or browser</h3><p>Linked by scanning a QR and confirming a 6-digit code on both screens. It reads the last snapshot even when the desktop is off, and queues prompts for later.</p></div><div class="feature-visual" style="min-height:150px"><svg class="icon lg" style="color:var(--rose)"><use href="icons.svg#plan"/></svg><div class="mock-bar a"></div><div class="mock-bar c"></div><div class="mock-tag">Remove any time</div></div></div>
 </div></section>
 
 <section class="section"><div class="wrap"><div class="visual-band">
-<div><p class="eyebrow">Local-first by architecture</p><h2>The cloud knows your account. Not your work.</h2><p class="lead">Most AI tools move the project to their servers. We keep the database on your desk and let the account service do identity only.</p><a class="button secondary" href="why.html">Why this is different</a></div>
-<div class="local-visual"><div class="local-box cloud"><h3><svg class="icon"><use href="icons.svg#shield"/></svg>Cloud</h3><ul><li>Email + passkeys</li><li>Device list</li><li>Session hashes</li><li>Encrypted envelopes</li></ul></div><div class="local-box desktop"><h3><svg class="icon"><use href="icons.svg#desktop"/></svg>Your desktop</h3><ul><li>Meetings + notes</li><li>Source + code</li><li>Chats + documents</li><li>AI credentials</li></ul></div></div>
+<div><p class="eyebrow">Local-first by architecture</p><h2>No account. No server holding your work.</h2><p class="lead">Most AI tools move the project to their servers. We keep the database on your desk. Phones and browsers read encrypted snapshots from storage you own.</p><a class="button secondary" href="why.html">Why this is different</a></div>
+<div class="local-visual"><div class="local-box cloud"><h3><svg class="icon"><use href="icons.svg#shield"/></svg>Cloud</h3><ul><li>Encrypted snapshots in your own storage</li></ul></div><div class="local-box desktop"><h3><svg class="icon"><use href="icons.svg#desktop"/></svg>Your desktop</h3><ul><li>Meetings + notes</li><li>Source + code</li><li>Chats + documents</li><li>AI credentials</li></ul></div></div>
 </div></div></section>
 
-<section class="section"><div class="wrap" style="text-align:center"><p class="eyebrow">Start local</p><h2>Bring your work. Keep your data.</h2><p class="lead" style="margin:0 auto 24px">Create your account, open a project, and let AI work where the project already lives.</p><div class="actions" style="justify-content:center"><a class="button" href="https://accounts.llm-ide.com/">Create your account</a><a class="button secondary" href="features.html">Explore features</a></div></div></section>
+<section class="section"><div class="wrap" style="text-align:center"><p class="eyebrow">Start local</p><h2>Bring your work. Keep your data.</h2><p class="lead" style="margin:0 auto 24px">Install the app, open a project, and let AI work where the project already lives. No account needed.</p><div class="actions" style="justify-content:center"><a class="button" href="guide.html">Get started</a><a class="button secondary" href="features.html">Explore features</a></div></div></section>
 </main>
 <footer class="site"><div class="wrap foot footer-grid">
 <div class="footer-brand"><a class="brand" href="index.html">LLM-IDE</a><p>Local-first AI workspace.<br>Your work stays on your machine.</p></div>
