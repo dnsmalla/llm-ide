@@ -43,6 +43,26 @@ jobs:
           else
             echo "version=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
           fi
+      - name: Check required secrets (signed runs)
+        if: env.SIGNED == 'true'
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          MAC_CI_KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+          MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          MAC_NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
+          MAC_NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
+          MAC_NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+        run: |
+          missing=()
+          for n in MAC_CERT_P12_BASE64 MAC_CERT_PASSWORD MAC_CI_KEYCHAIN_PASSWORD MAC_SIGN_IDENTITY \
+                   MAC_NOTARY_APPLE_ID MAC_NOTARY_PASSWORD MAC_NOTARY_TEAM_ID; do
+            [ -z "${!n}" ] && missing+=("$n")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]} (see docs/how-to/desktop-release.md)"
+            exit 1
+          fi
 
   bundle:
     name: Bundle (${{ matrix.target }})
@@ -63,6 +83,7 @@ jobs:
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
       BUNDLE: desktop/src-tauri/target/release/bundle
+      KEYCHAIN_NAME: desktop-release-ci.keychain-db
     steps:
       - uses: actions/checkout@v7
       - name: Check out graph-kit submodule (System page web source)
@@ -101,12 +122,61 @@ jobs:
         run: |
           node desktop/scripts/check-core-deps.mjs
           node desktop/scripts/smoke-core.mjs
-      # (Task 6 inserts macOS signing here; Task 7 inserts Windows signing here.)
+      - name: Import the Developer ID certificate into an ephemeral keychain
+        if: runner.os == 'macOS' && env.SIGNED == 'true'
+        env:
+          CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_NAME"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          p12="$RUNNER_TEMP/cert.p12"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$p12"
+          security import "$p12" -k "$KEYCHAIN_NAME" -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security list-keychains -d user -s "$KEYCHAIN_NAME" $(security list-keychains -d user | tr -d '"')
+          rm -f "$p12"
+      - name: Sign the core's nested binaries (Developer ID, hardened runtime)
+        if: runner.os == 'macOS' && env.SIGNED == 'true'
+        env:
+          IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+        run: |
+          desktop/release/macos-sign-nested.sh desktop/resources/core "$IDENTITY"
+          # The hardened-runtime node must still run the core (JIT entitlement check).
+          node desktop/scripts/check-core-deps.mjs
+          node desktop/scripts/smoke-core.mjs
+      # (Task 7 inserts Windows signing here.)
       - name: Build bundles
         working-directory: desktop
         env:
           LLMIDE_OMIT_SOURCE_ROOT: '1'
+          APPLE_SIGNING_IDENTITY: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_TEAM_ID || '' }}
         run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Sign, notarize and staple the dmg; Gatekeeper check
+        if: runner.os == 'macOS' && env.SIGNED == 'true'
+        env:
+          IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+        run: |
+          app="$BUNDLE/macos/LLM-IDE.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl -a -vvv -t exec "$app"
+          dmg=$(ls "$BUNDLE"/dmg/*.dmg | head -n1)
+          codesign --force --timestamp --sign "$IDENTITY" "$dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID" --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl -a -vvv -t open --context context:primary-signature "$dmg"
+      - name: Clean up the ephemeral keychain
+        if: always() && runner.os == 'macOS'
+        run: security delete-keychain "$KEYCHAIN_NAME" || true
       - name: Verify the macOS bundle
         if: runner.os == 'macOS'
         run: node desktop/scripts/verify-bundle.mjs "$BUNDLE/macos/LLM-IDE.app"

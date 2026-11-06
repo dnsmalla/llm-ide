@@ -46,3 +46,20 @@ test('the Windows step re-checks the installed core for the SDK binary before sm
   assert.ok(i > 0);
   assert.ok(i < wf.indexOf('smoke-app.mjs', wf.indexOf('(Windows)')));
 });
+
+const MAC_SECRETS = ['MAC_CERT_P12_BASE64', 'MAC_CERT_PASSWORD', 'MAC_CI_KEYCHAIN_PASSWORD', 'MAC_SIGN_IDENTITY', 'MAC_NOTARY_APPLE_ID', 'MAC_NOTARY_PASSWORD', 'MAC_NOTARY_TEAM_ID'];
+
+test('a signed run checks every macOS secret before building', () => {
+  const wf = rel();
+  const check = wf.slice(wf.indexOf('Check required secrets'), wf.indexOf('bundle:'));
+  for (const s of MAC_SECRETS) assert.match(check, new RegExp(`\\b${s}\\b`));
+});
+
+test('macOS: nested binaries signed before the build, dmg notarized and stapled, Gatekeeper checked', () => {
+  const wf = rel();
+  assert.ok(wf.indexOf('macos-sign-nested.sh') < wf.indexOf('npm run tauri build'));
+  assert.match(wf, /xcrun notarytool submit .*--wait/);
+  assert.match(wf, /xcrun stapler staple/);
+  assert.match(wf, /spctl -a -vvv -t exec/);
+  assert.match(wf, /security delete-keychain/);
+});

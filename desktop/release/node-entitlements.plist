@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- V8 JIT in the bundled node under the hardened runtime. better_sqlite3.node is signed with the same team
+       identity, so library validation passes without disable-library-validation. Add an entitlement only when
+       the signed smoke test proves it is needed, and record why here. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>
