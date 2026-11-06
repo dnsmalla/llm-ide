@@ -1,5 +1,5 @@
 // SyncStore: opaque encrypted files under validated relative paths (design 2.1). Adapters know nothing about keys or
-// formats. Every adapter calls checkPath before any I/O.
+// formats. Every adapter calls checkPath before any I/O. Optional ensureDir(dir) (own server only) creates the folders a device will write into.
 export const MAX_FILE_BYTES = 1048576 + 4096;
 const SEGMENT = /^[A-Za-z0-9_.-]{1,64}$/;
 

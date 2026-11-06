@@ -1,4 +1,7 @@
 // SFTP to the user's own server: pinned ed25519 host key, ed25519 user key from the vault, lazy ssh2.
+// One connection per store, reused; operations run one at a time; a connection lost mid-operation is replaced once.
+// put writes a hidden temp file next to the target and renames it over the target with posix-rename@openssh.com, so a
+// reader (the desktop or nginx) sees the old bytes or the new, never a mix. removeTree unlinks symlinks, never follows.
 import { createHash, randomBytes } from 'node:crypto';
 import { checkPath, checkSize, MAX_FILE_BYTES } from './index.mjs';
 export const DEFAULT_SFTP_ROOT='/data',DEFAULT_SFTP_USER='llmidesync',DEFAULT_WEB_HOST='llm-ide.com';
