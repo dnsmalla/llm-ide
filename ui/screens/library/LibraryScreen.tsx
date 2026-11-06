@@ -275,7 +275,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             <div className="lib-empty" role="status">
               <div className="lib-empty-icon" aria-hidden="true"><DocIcon /></div>
               <p className="lib-empty-title">Select an Item</p>
-              <p className="lib-muted">Choose a meeting, file, plugin, or LLM source from the list.</p>
+              <p className="lib-muted">Choose an item from the sidebar.</p>
             </div>
           )}
         </main>

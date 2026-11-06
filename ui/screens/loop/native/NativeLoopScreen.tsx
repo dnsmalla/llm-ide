@@ -816,7 +816,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         setNotice(e instanceof Error ? e.message : "The default loops could not be created.");
       } finally { setSaving(false); }
     };
-    return <div className="loop-native-empty"><h1>No Loop configuration</h1><p>This project has no <code>system/loop.json</code> yet. Create the native starter loops here; no Mac app is needed.</p><button type="button" className="loop-btn loop-btn-primary" disabled={saving} onClick={() => void create()}>{saving ? "Creating…" : "Create default loops"}</button>{notice ? <p className="loop-native-hint">{notice}</p> : null}</div>;
+    return <div className="loop-native-empty"><h1>No loops yet</h1><p>Create starter loops for this project.</p><button type="button" className="loop-btn loop-btn-primary" disabled={saving} onClick={() => void create()}>{saving ? "Creating…" : "Create starter loops"}</button>{notice ? <p className="loop-native-hint">{notice}</p> : null}</div>;
   }
   if (load.kind === "corrupt") return <div className="loop-native-empty"><StatusBanner severity="error" message={load.message} /><p className="loop-native-hint">The file was not overwritten. Recover or remove it in the Mac app.</p></div>;
   if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;
