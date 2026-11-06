@@ -101,6 +101,8 @@ struct SettingsView: View {
                     }
                 }
 
+                SyncSettingsCard()
+
                 if connection.supports(MobileProtocol.Capability.usage) || connection.servesV1Read {
                     NavigationLink { UsageView() } label: {
                         HStack(spacing: DesignSystem.Spacing.md) {

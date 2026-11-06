@@ -9,6 +9,13 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        // The enrollment sheet sits above both branches: a sync QR can be scanned from the pairing screen too.
+        shell.sheet(isPresented: Binding(get: { syncStore.enrollStep != nil }, set: { if !$0 { syncStore.cancelEnrollment() } })) {
+            SyncEnrollSheet().environmentObject(syncStore)
+        }
+    }
+
+    @ViewBuilder private var shell: some View {
         // `isDemo` joins `hasDevice` here because demo mode deliberately saves
         // no device — without it the demo would be bounced straight back to the
         // pairing screen on the next render.
@@ -51,9 +58,6 @@ struct ContentView: View {
                         // Live socket, but the snapshot may be minutes old.
                         macStatusStore.requestMacStatus()
                     }
-                }
-                .sheet(isPresented: Binding(get: { syncStore.enrollStep != nil }, set: { if !$0 { syncStore.cancelEnrollment() } })) {
-                    SyncEnrollSheet().environmentObject(syncStore)
                 }
         } else {
             NavigationStack {

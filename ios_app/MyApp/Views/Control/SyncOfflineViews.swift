@@ -22,7 +22,10 @@ struct SyncOfflineSections: View {
                 Section("Plans") { ForEach(snap.plans) { p in NavigationLink(p.title) { SyncPlanView(plan: p) } } }
             }
         } else {
-            Section { Text(syncStore.refreshing ? "Loading…" : "No snapshot yet. Turn sync on in Settings.").foregroundColor(.secondary) }
+            Section { Text(syncStore.refreshing ? "Loading…" : "No snapshot yet. The desktop sends one within a minute of being on.").foregroundColor(.secondary) }
+        }
+        if syncStore.phase == .needsPassword {
+            Section { Text("Sign in to MEGA again in Settings → Sync.").foregroundColor(.secondary) }
         }
         if syncStore.phase == .ready {
             Section("Ask the desktop") {
@@ -51,28 +54,65 @@ struct SyncOfflineSections: View {
     }
 }
 
-struct SyncQueuedRow: View {
-    let q: SyncStore.Queued
-    var body: some View { Text(q.answer ?? q.code.map(SyncStore.replyText) ?? q.text) }
-}
-
+/// Settings → Sync: status, sign in again after MEGA ended the session, refresh, scan a sync QR, remove.
 struct SyncSettingsCard: View {
     @EnvironmentObject var syncStore: SyncStore
+    @State private var email = ""
+    @State private var password = ""
+    @State private var signingIn = false
+    @State private var showScanner = false
+    @State private var confirmRemove = false
+
     var body: some View {
-        Section("Sync") {
-            switch syncStore.phase {
-            case .off: Text("Add this iPhone from the desktop: Settings → Add a phone or browser.")
-            case .needsPassword: Text("Sign in to MEGA again from the sync enrollment sheet.")
-            case .ready: Text("On. \(syncStore.queued.filter(\.isPending).count) prompt(s) waiting.")
-            case .removed: Text("This iPhone was removed from sync.").foregroundColor(.red)
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            Text("SYNC")
+                .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+                .padding(.leading, DesignSystem.Spacing.xs)
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                switch syncStore.phase {
+                case .off: Text("Add this iPhone from the desktop: Settings → Phone and web sync → Add a phone or browser, then scan the code here.")
+                case .needsPassword:
+                    Text("MEGA ended the sign-in. Sign in again to the dedicated sync account.")
+                    TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress)
+                        .autocapitalization(.none).textFieldStyle(.roundedBorder)
+                    SecureField("Password", text: $password).textContentType(.password).textFieldStyle(.roundedBorder)
+                    Button(signingIn ? "Signing in…" : "Sign in") {
+                        let (e, p) = (email, password)
+                        password = ""; signingIn = true
+                        Task { await syncStore.signIn(email: e, password: p); signingIn = false }
+                    }.disabled(email.isEmpty || password.isEmpty || signingIn)
+                case .ready: Text("On. \(syncStore.queued.filter(\.isPending).count) prompt(s) waiting.")
+                case .removed: Text("This iPhone was removed from sync.").foregroundColor(DesignSystem.Colors.danger)
+                }
+                if let e = syncStore.lastError {
+                    Text(e).font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.textSecondary)
+                }
+                if syncStore.phase == .ready || syncStore.phase == .removed {
+                    Button(syncStore.refreshing ? "Refreshing…" : "Refresh now") { Task { await syncStore.refresh() } }
+                        .disabled(syncStore.refreshing)
+                }
+                Button("Scan a sync code") { showScanner = true }
+                if syncStore.phase != .off {
+                    Button("Remove sync from this iPhone", role: .destructive) { confirmRemove = true }
+                }
             }
-            if let e = syncStore.lastError { Text(e).font(.footnote).foregroundColor(.secondary) }
-            Button("Refresh now") { Task { await syncStore.refresh() } }.disabled(syncStore.phase != .ready)
-            Button("Remove sync from this iPhone", role: .destructive) { Task { await syncStore.removeFromPhone() } }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DesignSystem.Spacing.md)
+            .background(DesignSystem.Colors.surface)
+            .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+        }
+        .onAppear { if email.isEmpty { email = syncStore.megaEmail } }
+        .sheet(isPresented: $showScanner) {
+            QRScannerSheet { scan in if let pair = scan.sync { syncStore.startEnrollment(pair) } }
+        }
+        .confirmationDialog("Remove sync from this iPhone?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { Task { await syncStore.removeFromPhone() } }
+        } message: {
+            Text("The snapshot, queued prompts and keys on this iPhone are deleted. Revoke it on the desktop too.")
         }
     }
 }
-
 
 struct SyncChatView: View {
     let chat: SyncChat

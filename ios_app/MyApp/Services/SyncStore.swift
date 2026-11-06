@@ -180,13 +180,15 @@ final class SyncStore: ObservableObject {
         } catch { fail(error) }
     }
 
-    func signIn(password: String) async {
+    /// After MEGA ended the session (ESID): sign in again with the same account. The email is not kept once the
+    /// session is gone, so the user types it again.
+    func signIn(email: String, password: String) async {
         guard let device else { return }
         let folder = String(device.state.pair.st.dropFirst("mega:".count))
         do {
-            let session = try await MegaClient.login(email: megaEmail, password: password)
-            _ = Keychain.save(StoredMega(email: megaEmail, folder: folder, session: session), .mega)
-            mega = MegaClient(folder: folder, session: session)
+            let session = try await MegaClient.login(email: email, password: password)
+            _ = Keychain.save(StoredMega(email: email, folder: folder, session: session), .mega)
+            mega = MegaClient(folder: folder, session: session); megaEmail = email
             phase = .ready; lastError = nil
             await refresh()
         } catch { lastError = Self.message(for: error) }
