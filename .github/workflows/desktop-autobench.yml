@@ -1,0 +1,68 @@
+name: desktop-autobench
+
+# Opt-in Phase 0 autobench (UN-009 helper). Builds a SPIKE build (bench commands compiled in; never a release),
+# runs LLMIDE_POC_AUTOBENCH=all and keeps the BENCH lines. Runner numbers are indicative only: no GPU, so the
+# graph fps gate (>= 30) still needs your Windows machine. Same commands work locally (docs/how-to/desktop-release.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        type: choice
+        options: [windows-latest, ubuntu-latest, macos-latest]
+        default: windows-latest
+
+permissions:
+  contents: read
+
+jobs:
+  autobench:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - run: git submodule update --init mac/LocalPackages/graph-kit
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config file xvfb \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - run: |
+          for d in desktop extension ui/kit web mac/LocalPackages/graph-kit/web; do npm ci --prefix "$d"; done
+      - name: Stage the core and build the frontend
+        env:
+          LLMIDE_STAGE_RELEASE: '1'
+        run: |
+          node desktop/scripts/stage-core.mjs
+          npm run build --prefix desktop
+      - name: Build the spike binary
+        working-directory: desktop/src-tauri
+        run: cargo build --release --locked --features spike
+      # No LLMIDE_POC_BUNDLED: a bare (non-.app) binary has no Resources dir next to it, so forcing the bundle
+      # would error; the repo-checkout runtime (extension/ + the runner's node) is fine for a bench.
+      - name: Run the autobench
+        env:
+          LLMIDE_POC_AUTOBENCH: all
+          LLMIDE_KEYCHAIN_BACKEND: memory
+        run: |
+          exe=desktop/src-tauri/target/release/llmide-desktop-poc
+          [ "$RUNNER_OS" = "Windows" ] && exe="$exe.exe"
+          run="$exe"; [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a $exe"
+          timeout 1500 $run 2>&1 | tee autobench.log || true
+          grep '^BENCH' autobench.log > bench.txt || { echo "::error::no BENCH lines"; exit 1; }
+          cat bench.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: autobench-${{ inputs.os }}
+          path: |
+            bench.txt
+            autobench.log
+          retention-days: 30

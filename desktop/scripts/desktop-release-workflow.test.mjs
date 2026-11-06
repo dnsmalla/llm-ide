@@ -139,3 +139,12 @@ test('a tag release never requires or uses a DESKTOP_WIN_* secret and has exactl
   assert.equal((pub.match(/sha256sum /g) ?? []).length, 1);
   assert.match(pub, /name: SHA256SUMS \(unsigned dry run only\)\n\s+if: env\.SIGNED != 'true'/);
 });
+
+test('autobench: manual only, spike feature never in the release workflow', () => {
+  const ab = readFileSync(join(WF, 'desktop-autobench.yml'), 'utf8');
+  assert.match(ab, /workflow_dispatch:/);
+  assert.doesNotMatch(ab, /\bpush:|pull_request:/);
+  assert.match(ab, /--features spike/);
+  assert.match(ab, /LLMIDE_POC_AUTOBENCH: all/);
+  assert.doesNotMatch(rel(), /--features spike/);
+});
