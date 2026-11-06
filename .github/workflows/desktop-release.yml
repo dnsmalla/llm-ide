@@ -1,96 +1,176 @@
-name: desktop-release (UNSIGNED DRAFT)
+name: desktop-release
 
-# DRAFT. Manual dispatch only. Builds UNSIGNED, un-notarised Tauri bundles on
-# macOS, Windows and Linux and uploads them as workflow artifacts. It does not
-# create a GitHub release, does not publish, and references no signing secrets:
-# signing, notarisation and the update channel are pending user decisions, see
-# docs/how-to/desktop-signing-decisions.md. Do not distribute these artifacts.
+# Release pipeline for the Tauri desktop app (desktop/). See docs/how-to/desktop-release.md.
+# - workflow_dispatch: dry run. Unsigned unless `signed: true` (then every signing secret is required and the
+#   artifacts are signed, but nothing is published). Artifacts live 7 days and must not be distributed.
+# - push of a desktop-vX.Y.Z tag (added in Task 11): signed, notarized, updater artifacts, DRAFT GitHub Release.
+# Secrets are listed in the preflight job; a signed run fails there, before any build, if one is missing.
 
 on:
   workflow_dispatch:
+    inputs:
+      signed:
+        description: 'Sign and notarize (needs every signing secret); never publishes'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SIGNED: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || inputs.signed == true }}
+
 jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Version
+        id: v
+        run: |
+          if [ "$SIGNED" = "true" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            node desktop/scripts/release-version.mjs "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
   bundle:
-    name: UNSIGNED bundle (${{ matrix.name }})
+    name: Bundle (${{ matrix.target }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Each runner stages and tests its OWN target (native node, native smoke test);
-          # cross-staging is not used. macos-15-intel is the x64 runner.
-          - name: macOS-arm64
-            os: macos-latest
-            bundles: app,dmg
-          - name: macOS-x64
-            os: macos-15-intel
-            bundles: app,dmg
-          - name: Windows-x64
-            os: windows-latest
-            bundles: nsis
-          - name: Linux-x64
-            os: ubuntu-latest
-            bundles: deb,appimage
+          - { target: darwin-arm64, os: macos-latest, bundles: 'app,dmg' }
+          - { target: darwin-x64, os: macos-15-intel, bundles: 'app,dmg' }
+          - { target: win32-x64, os: windows-latest, bundles: nsis }
+          - { target: linux-x64, os: ubuntu-latest, bundles: 'deb,appimage' }
     defaults:
       run:
         shell: bash
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      BUNDLE: desktop/src-tauri/target/release/bundle
     steps:
       - uses: actions/checkout@v7
-
+      - name: Check out graph-kit submodule (System page web source)
+        run: git submodule update --init mac/LocalPackages/graph-kit
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
-
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config file \
+            build-essential pkg-config file xvfb \
             libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
             libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
-
       - name: Install Rust (stable)
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-
-      - name: Install npm dependencies (desktop and extension)
+      - name: Install npm dependencies
         run: |
           npm ci --prefix desktop
           npm ci --prefix extension
-
-      # The node that ships is the pinned official Node LTS for this runner's target
-      # (desktop/scripts/node-pin.json): downloaded from nodejs.org and SHA-256 verified
-      # against the repo pin AND nodejs.org's SHASUMS256.txt, fail closed. The runner's own
-      # node (setup-node above) only runs the scripts. LLMIDE_STAGE_RELEASE=1 refuses the
-      # LLMIDE_NODE_BIN dev override.
-      - name: Stage the Node core (pinned official node, verified)
+          npm ci --prefix ui/kit
+          npm ci --prefix web
+          npm ci --prefix mac/LocalPackages/graph-kit/web
+      # Pinned official Node for this runner's target, SHA-256 checked against the repo pin and nodejs.org,
+      # production deps only, the SDK's claude binary removed and re-verified (MASTER-PLAN S2 condition 2).
+      - name: Stage the Node core
         env:
           LLMIDE_STAGE_RELEASE: '1'
         run: node desktop/scripts/stage-core.mjs
-
-      # Imports every runtime dependency (incl. an in-memory better-sqlite3 open) with the
-      # STAGED node, then starts the staged core the way the host does and checks /health,
-      # the nonce echo, the data-dir DB and that no process survives the stop. No model call.
       - name: Smoke-test the staged core
         run: |
           node desktop/scripts/check-core-deps.mjs
           node desktop/scripts/smoke-core.mjs
-
-      - name: Build UNSIGNED bundles
+      # (Task 6 inserts macOS signing here; Task 7 inserts Windows signing here.)
+      - name: Build bundles
         working-directory: desktop
+        env:
+          LLMIDE_OMIT_SOURCE_ROOT: '1'
         run: npm run tauri build -- --bundles ${{ matrix.bundles }}
-
+      - name: Verify the macOS bundle
+        if: runner.os == 'macOS'
+        run: node desktop/scripts/verify-bundle.mjs "$BUNDLE/macos/LLM-IDE.app"
+      - name: Smoke-test the packaged app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          exe="$BUNDLE/macos/LLM-IDE.app/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$BUNDLE/macos/LLM-IDE.app/Contents/Info.plist")"
+          LLMIDE_CORE_DIR="$BUNDLE/macos/LLM-IDE.app/Contents/Resources/core" node desktop/scripts/smoke-core.mjs
+          node desktop/scripts/smoke-app.mjs "$exe"
+      - name: Install, smoke-test and uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem "$env:BUNDLE/nsis/*-setup.exe" | Select-Object -First 1
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S'
+          $dir = Join-Path $env:LOCALAPPDATA 'LLM-IDE'
+          $exe = Get-ChildItem "$dir/*.exe" | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+          node desktop/scripts/smoke-app.mjs $exe.FullName
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Start-Process -Wait -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S'
+      - name: Smoke-test the packaged app (Linux AppImage)
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          app=$(ls "$BUNDLE"/appimage/*.AppImage | head -n1)
+          chmod +x "$app"
+          xvfb-run -a node desktop/scripts/smoke-app.mjs "$app"
+      - name: Collect release files
+        run: |
+          signed=""; [ "$SIGNED" = "true" ] && signed="--signed"
+          node desktop/scripts/collect-release.mjs --target ${{ matrix.target }} --version "$VERSION" $signed "$BUNDLE" "dist-${{ matrix.target }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: llmide-desktop-UNSIGNED-${{ matrix.name }}
-          path: desktop/src-tauri/target/release/bundle/**
+          name: llmide-desktop-${{ matrix.target }}
+          path: dist-${{ matrix.target }}/
           if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Checksums and SBOM
+    needs: [preflight, bundle]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: llmide-desktop-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: (cd dist && sha256sum $(ls | grep -v '\.sig$' | sort) > SHA256SUMS && cat SHA256SUMS)
+      - name: SBOM of the shipped Node core and the desktop frontend (CycloneDX)
+        run: |
+          npm ci --prefix extension --omit dev --ignore-scripts
+          npm sbom --prefix extension --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_core.cdx.json"
+          npm sbom --prefix desktop --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_frontend.cdx.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llmide-desktop-release-${{ needs.preflight.outputs.version }}
+          path: dist/
           retention-days: 7
