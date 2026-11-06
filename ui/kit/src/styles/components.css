@@ -1,6 +1,6 @@
 /* ui-kit component styles. Styled only with the generated tokens (tokens.generated.css)
- * and the derived aliases (aliases.css); no raw colours. Metrics mirror
- * mac/Sources/LlmIdeMac/Core/DesignSystem/*. */
+ * and the derived aliases (aliases.css); no raw colours. Metrics were taken over from
+ * the retired Swift app's design system. */
 
 /* ---- Shared primitives ----------------------------------------------- */
 
@@ -209,6 +209,12 @@
 .ui-tree-chevron-static { width: 10px; flex: none; }
 .ui-tree-icon { width: 16px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
 .ui-tree-icon-file { font-size: 11px; }
+.ui-tree-icon[data-kind="folder"] { color: #e8b64c; }
+.ui-tree-icon[data-kind="code"] { color: #4c9aff; }
+.ui-tree-icon[data-kind="config"] { color: #e09a3d; }
+.ui-tree-icon[data-kind="doc"] { color: #72a7f0; }
+.ui-tree-icon[data-kind="image"] { color: #3ec7c7; }
+.ui-tree-icon[data-kind="data"] { color: #55c98a; }
 .ui-tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ui-tree-badge { font-size: 9px; font-weight: 600; color: var(--tok-color-text-muted); margin-left: 4px; }
 .ui-tree-spacer { flex: 1; }

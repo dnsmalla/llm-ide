@@ -18,6 +18,8 @@ interface Props {
   /** Ancestor levels; each adds one 14px indent guide (Mac TreeRowLabel). */
   depth: number;
   icon?: ReactNode;
+  /** File kind for the shared icon colours (folder, code, config, doc, image, data). */
+  kind?: string;
   badge?: string;
   gitStatus?: GitStatus;
   selected?: boolean;
@@ -33,6 +35,7 @@ export function FileTreeRow({
   isExpanded = false,
   depth,
   icon,
+  kind,
   badge,
   gitStatus,
   selected = false,
@@ -81,7 +84,7 @@ export function FileTreeRow({
       ) : (
         <span className="ui-tree-chevron-static" aria-hidden="true" />
       )}
-      <span className="ui-tree-icon ui-tree-icon-file" aria-hidden="true">
+      <span className="ui-tree-icon ui-tree-icon-file" data-kind={kind} aria-hidden="true">
         {icon}
       </span>
       <span className="ui-tree-name">{name}</span>

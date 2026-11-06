@@ -233,6 +233,7 @@ function TreeRow({ entry, depth, expanded, childrenOf, onToggle, onOpen, selecte
         isExpanded={open}
         depth={depth}
         icon={isDir ? <FolderIcon /> : <Icon name={fileKindIcon(kind)} size={11} />}
+        kind={kind}
         selected={!isDir && selected === entry.path}
         onClick={() => (isDir ? onToggle(entry.path) : onOpen(entry.path))}
         onToggle={isDir ? () => onToggle(entry.path) : undefined}

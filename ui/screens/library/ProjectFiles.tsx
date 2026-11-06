@@ -292,6 +292,7 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
         isExpanded={open}
         depth={depth}
         icon={dir ? <FolderIcon /> : <Icon name={fileKindIcon(kind)} size={11} />}
+        kind={kind}
         selected={!dir && selected === entry.path}
         onClick={() => (dir ? onToggle(entry.path) : onSelect(entry.path))}
         onToggle={dir ? () => onToggle(entry.path) : undefined}
