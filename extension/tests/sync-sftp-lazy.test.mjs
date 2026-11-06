@@ -1,0 +1,6 @@
+import { test } from 'node:test';import assert from 'node:assert/strict';import nodeModule from 'node:module';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+process.env.LLMIDE_JWT_SECRET='a'.repeat(48);process.env.LLMIDE_VAULT_KEY='b'.repeat(48);process.env.NODE_ENV='test';process.env.LLMIDE_LOG_FILE='none';process.env.LLMIDE_DB_PATH=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'llmide-sftp-lazy-')),'kb.db');
+const hooks=typeof nodeModule.registerHooks==='function';const loaded=[];if(hooks)nodeModule.registerHooks({load(url,ctx,next){loaded.push(url);return next(url,ctx)}});const ssh2Loaded=()=>loaded.some((u)=>u.includes('/node_modules/ssh2/'));
+await import('../connectors/sync-store/sftp.mjs');const afterImports=ssh2Loaded();
+test('import loads no ssh2',{skip:!hooks&&'needs registerHooks'},()=>assert.equal(afterImports,false));
+test('key generation loads ssh2',{skip:!hooks&&'needs registerHooks'},async()=>{const {generateSyncSshKey}=await import('../connectors/sync-store/sftp.mjs');const k=await generateSyncSshKey('llmide-sync-test');assert.match(k.publicKey,/^ssh-ed25519 [A-Za-z0-9+/=]+ llmide-sync-test$/);assert.match(k.privateKey,/^-----BEGIN OPENSSH PRIVATE KEY-----\n/);assert.equal(ssh2Loaded(),true)});

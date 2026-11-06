@@ -43,6 +43,7 @@
     "react-dom": "^19.2.8",
     "react-markdown": "^9.0.1",
     "rehype-sanitize": "^6.0.0",
+    "ssh2": "1.17.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -63,5 +64,5 @@
   "optionalDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.62.5"
   },
-  "//": "megajs 1.3.10 (exact): MEGA client for the first encrypted-sync adapter (connectors/sync-store/mega.mjs), user decision 2026-11-05. MEGA ships no Node SDK and no OAuth; megajs is MIT, unofficial, fetch-based, no native code. Exact pin because it handles the sync account's password. No other MEGA code in the repo."
+  "//": "megajs 1.3.10 (exact): MEGA client for the first encrypted-sync adapter (connectors/sync-store/mega.mjs), user decision 2026-11-05. MEGA ships no Node SDK and no OAuth; megajs is MIT, unofficial, fetch-based, no native code. ssh2 1.17.0 (exact): SFTP client for the own-server sync adapter (connectors/sync-store/sftp.mjs, SP5), MIT, pure JavaScript; its optional native speed-ups are stripped from the desktop stage. Both are lazy: never on the boot path. Exact pins because they handle the sync logins."
 }
