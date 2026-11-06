@@ -1,7 +1,7 @@
 {
   "version": 1,
   "limits": { "maxFrameBytes": 1048576, "defaultListItems": 100, "maxListItems": 500, "maxListBytes": 786432 },
-  "capabilities": ["host", "chat", "approvals", "tool_approvals", "read"],
+  "capabilities": ["host", "chat", "approvals", "tool_approvals", "read", "compose"],
   "commands": {
     "host.hello": {
       "capability": "host",
@@ -30,7 +30,7 @@
           "apiVersions": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1 },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read", "compose"] },
             "minItems": 1
           },
           "protocolVersion": { "type": "integer", "minimum": 1 },
@@ -60,7 +60,7 @@
           "token": { "type": "string", "minLength": 16, "maxLength": 512 },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read", "compose"] },
             "minItems": 1
           }
         }
@@ -86,7 +86,7 @@
         "properties": {
           "capabilities": {
             "type": "array",
-            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
+            "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read", "compose"] },
             "minItems": 1
           }
         }
@@ -197,6 +197,8 @@
         "required": ["text"],
         "properties": {
           "text": { "type": "string", "minLength": 1, "maxLength": 100000 },
+          "mode": { "type": "string", "enum": ["auto", "ask", "plan", "assist_plan", "review", "document"] },
+          "model": { "type": "string", "pattern": "^[A-Za-z0-9_.:\\[\\]-]{1,200}$" },
           "attachments": {
             "type": "array",
             "items": {
@@ -424,6 +426,36 @@
             }
           }
         }
+      }
+
+    },
+    "chat.options": {
+      "capability": "compose",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": { "type": "object", "additionalProperties": false, "properties": {} },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["modes", "models"],
+        "properties": {
+          "modes": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "string", "enum": ["auto", "ask", "plan", "assist_plan", "review", "document"] } },
+          "models": { "type": "array", "maxItems": 50, "items": { "type": "object", "additionalProperties": false, "required": ["model"], "properties": { "model": { "type": "string", "pattern": "^[A-Za-z0-9_.:\\[\\]-]{1,200}$" }, "label": { "type": "string", "minLength": 1, "maxLength": 200 } } } }
+        }
+      }
+    },
+    "chat.new": {
+      "capability": "compose",
+      "direction": "client_to_host",
+      "idempotent": false,
+      "v2Tag": null,
+      "request": { "type": "object", "additionalProperties": false, "properties": {} },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId"],
+        "properties": { "sessionId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" } }
       }
     }
   }

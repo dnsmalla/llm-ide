@@ -1,0 +1,42 @@
+{
+  "modes": {
+    "allowed": [
+      "auto",
+      "ask",
+      "plan",
+      "assist_plan",
+      "review",
+      "document"
+    ],
+    "refused": [
+      "execute",
+      "bypass",
+      "accept-edits",
+      "auto_read_only",
+      "manual",
+      ""
+    ]
+  },
+  "models": {
+    "allowed": [
+      "claude-sonnet-5-5",
+      "claude-opus-4-9[1m]",
+      "claude-haiku-4-5-20251001",
+      "claude-sonnet-5.5"
+    ],
+    "refused": [
+      "",
+      "a b",
+      "../etc/passwd",
+      "claude\nopus",
+      "x;rm -rf /"
+    ]
+  },
+  "attachments": {
+    "maxFiles": 10,
+    "maxNameChars": 300,
+    "maxCharsPerFile": 80000,
+    "maxCharsTotal": 200000,
+    "imagesAllowed": false
+  }
+}

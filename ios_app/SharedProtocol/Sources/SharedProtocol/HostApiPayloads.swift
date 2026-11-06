@@ -83,6 +83,46 @@ public struct HostApiChatHistoryClearResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiChatNewRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiChatNewResult: Codable, Equatable, Sendable {
+    public var sessionId: String
+
+    public init(sessionId: String) {
+        self.sessionId = sessionId
+    }
+}
+
+public struct HostApiChatOptionsRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiChatOptionsResultModelsItem: Codable, Equatable, Sendable {
+    public var label: String?
+    public var model: String
+
+    public init(label: String? = nil, model: String) {
+        self.label = label
+        self.model = model
+    }
+}
+
+public struct HostApiChatOptionsResult: Codable, Equatable, Sendable {
+    public var models: [HostApiChatOptionsResultModelsItem]
+    public var modes: [String]
+
+    public init(models: [HostApiChatOptionsResultModelsItem], modes: [String]) {
+        self.models = models
+        self.modes = modes
+    }
+}
+
 public struct HostApiChatSendRequestAttachmentsItem: Codable, Equatable, Sendable {
     public var name: String
     public var text: String
@@ -95,10 +135,14 @@ public struct HostApiChatSendRequestAttachmentsItem: Codable, Equatable, Sendabl
 
 public struct HostApiChatSendRequest: Codable, Equatable, Sendable {
     public var attachments: [HostApiChatSendRequestAttachmentsItem]?
+    public var mode: String?
+    public var model: String?
     public var text: String
 
-    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, text: String) {
+    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, mode: String? = nil, model: String? = nil, text: String) {
         self.attachments = attachments
+        self.mode = mode
+        self.model = model
         self.text = text
     }
 }

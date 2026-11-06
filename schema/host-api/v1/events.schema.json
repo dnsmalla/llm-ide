@@ -196,7 +196,7 @@
           "properties": {
             "capabilities": {
               "type": "array",
-              "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read"] },
+              "items": { "type": "string", "enum": ["host", "chat", "approvals", "tool_approvals", "read", "compose"] },
               "minItems": 1,
               "maxItems": 20
             }
