@@ -95,3 +95,47 @@ test('Windows signing is opt-in: unset windows_signed never checks or uses a DES
   const build = steps.find((x) => /name: Build bundles/.test(x));
   for (const s of WIN_SECRETS.slice(0, 3)) assert.match(build, new RegExp(`env\\.WIN_SIGNED == 'true' && runner\\.os == 'Windows' && secrets\\.${s}`));
 });
+
+const prom = () => readFileSync(join(WF, 'desktop-promote.yml'), 'utf8');
+
+test('tag trigger is desktop-vX.Y.Z only', () => {
+  assert.match(rel(), /tags:\s*\n\s+- 'desktop-v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+'/);
+});
+
+test('signed runs need the updater key, the committed pubkey, and verify every sig before latest.json', () => {
+  const wf = rel();
+  const check = wf.slice(wf.indexOf('Check required secrets'), wf.indexOf('bundle:'));
+  for (const s of ['DESKTOP_UPDATER_PRIVATE_KEY', 'DESKTOP_UPDATER_KEY_PASSWORD']) assert.match(check, new RegExp(`\\b${s}\\b`));
+  assert.match(check, /desktop\/release\/updater\.pubkey/);
+  assert.match(wf, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{/);
+  assert.match(wf, /release-config\.mjs \$flags --updater desktop\/release\/updater\.pubkey/);
+  assert.match(wf, /update-manifest\.mjs --version/);
+});
+
+test('publish: attestations, a DRAFT release that never becomes Latest, write permission only there', () => {
+  const wf = rel();
+  const pub = wf.slice(wf.indexOf('  publish:'));
+  assert.match(pub, /contents: write/);
+  assert.match(pub, /id-token: write/);
+  assert.match(pub, /attestations: write/);
+  assert.match(pub, /actions\/attest-build-provenance@/);
+  assert.match(pub, /gh release create .*--draft/);
+  assert.match(pub, /--latest=false/);
+});
+
+test('promote: manual, refuses drafts and prereleases, re-checks the manifest, clobbers desktop-stable', () => {
+  const wf = prom();
+  assert.match(wf, /workflow_dispatch:/);
+  assert.doesNotMatch(wf, /\bpush:/);
+  assert.match(wf, /isDraft/);
+  assert.match(wf, /update-manifest\.mjs --check/);
+  assert.match(wf, /gh release upload desktop-stable .*--clobber/);
+});
+
+test('a tag release never requires or uses a DESKTOP_WIN_* secret and has exactly one SHA256SUMS writer per mode', () => {
+  const wf = rel();
+  assert.doesNotMatch(wf, /WIN_SIGNED:.*refs\/tags/);
+  const pub = wf.slice(wf.indexOf('  publish:'));
+  assert.equal((pub.match(/sha256sum /g) ?? []).length, 1);
+  assert.match(pub, /name: SHA256SUMS \(unsigned dry run only\)\n\s+if: env\.SIGNED != 'true'/);
+});

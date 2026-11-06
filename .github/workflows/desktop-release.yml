@@ -3,10 +3,13 @@ name: desktop-release
 # Release pipeline for the Tauri desktop app (desktop/). See docs/how-to/desktop-release.md.
 # - workflow_dispatch: dry run. Unsigned unless `signed: true` (then every signing secret is required and the
 #   artifacts are signed, but nothing is published). Artifacts live 7 days and must not be distributed.
-# - push of a desktop-vX.Y.Z tag (added in Task 11): signed, notarized, updater artifacts, DRAFT GitHub Release.
+# - push of a desktop-vX.Y.Z tag: signed, notarized, updater artifacts, DRAFT GitHub Release.
 # Secrets are listed in the preflight job; a signed run fails there, before any build, if one is missing.
 
 on:
+  push:
+    tags:
+      - 'desktop-v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
       signed:
@@ -59,12 +62,16 @@ jobs:
           MAC_NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
           MAC_NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
           MAC_NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+          DESKTOP_UPDATER_PRIVATE_KEY: ${{ secrets.DESKTOP_UPDATER_PRIVATE_KEY }}
+          DESKTOP_UPDATER_KEY_PASSWORD: ${{ secrets.DESKTOP_UPDATER_KEY_PASSWORD }}
         run: |
           missing=()
           for n in MAC_CERT_P12_BASE64 MAC_CERT_PASSWORD MAC_CI_KEYCHAIN_PASSWORD MAC_SIGN_IDENTITY \
-                   MAC_NOTARY_APPLE_ID MAC_NOTARY_PASSWORD MAC_NOTARY_TEAM_ID; do
+                   MAC_NOTARY_APPLE_ID MAC_NOTARY_PASSWORD MAC_NOTARY_TEAM_ID \
+                   DESKTOP_UPDATER_PRIVATE_KEY DESKTOP_UPDATER_KEY_PASSWORD; do
             [ -z "${!n}" ] && missing+=("$n")
           done
+          [ -s desktop/release/updater.pubkey ] || missing+=("desktop/release/updater.pubkey (committed public key, UN-112)")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]} (see docs/how-to/desktop-release.md)"
             exit 1
@@ -190,11 +197,12 @@ jobs:
           "WIN_SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
           "WIN_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
           "WIN_METADATA=$meta" >> $env:GITHUB_ENV
-      - name: Write the release config overlay for Windows signing
-        if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
+      - name: Write the release config overlay (updater artifacts; Windows signing only when opted in)
+        if: env.SIGNED == 'true'
         run: |
-          flags="--windows-sign"
-          node desktop/scripts/release-config.mjs $flags > "$RUNNER_TEMP/release.conf.json"
+          flags=""
+          [ "$RUNNER_OS" = "Windows" ] && [ "$WIN_SIGNED" = "true" ] && flags="--windows-sign"
+          node desktop/scripts/release-config.mjs $flags --updater desktop/release/updater.pubkey > "$RUNNER_TEMP/release.conf.json"
           cat "$RUNNER_TEMP/release.conf.json"
       - name: Sign unsigned PE files inside the core on Windows
         if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
@@ -221,9 +229,11 @@ jobs:
           AZURE_CLIENT_ID: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_CLIENT_ID || '' }}
           AZURE_CLIENT_SECRET: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_CLIENT_SECRET || '' }}
           AZURE_TENANT_ID: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_TENANT_ID || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.SIGNED == 'true' && secrets.DESKTOP_UPDATER_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.SIGNED == 'true' && secrets.DESKTOP_UPDATER_KEY_PASSWORD || '' }}
         run: |
           cfg=""
-          [ "$RUNNER_OS" = "Windows" ] && [ "$WIN_SIGNED" = "true" ] && cfg="--config \"$RUNNER_TEMP/release.conf.json\""
+          [ "$SIGNED" = "true" ] && cfg="--config \"$RUNNER_TEMP/release.conf.json\""
           eval npm run tauri build -- --bundles ${{ matrix.bundles }} $cfg
       - name: Verify Authenticode signatures on Windows
         if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
@@ -300,9 +310,13 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Checksums and SBOM
+    name: Manifest, checksums, SBOM, provenance, draft release
     needs: [preflight, bundle]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
@@ -315,13 +329,33 @@ jobs:
           pattern: llmide-desktop-*
           path: dist
           merge-multiple: true
-      - name: SHA256SUMS
-        run: (cd dist && sha256sum $(ls | grep -v '\.sig$' | sort) > SHA256SUMS && cat SHA256SUMS)
       - name: SBOM of the shipped Node core and the desktop frontend (CycloneDX)
         run: |
           npm ci --prefix extension --omit dev --ignore-scripts
           npm sbom --prefix extension --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_core.cdx.json"
           npm sbom --prefix desktop --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_frontend.cdx.json"
+      # Signed runs: update-manifest.mjs is the ONLY SHA256SUMS writer (it covers latest.json and every SBOM above).
+      - name: Update manifest (every signature verified) and SHA256SUMS
+        if: env.SIGNED == 'true'
+        run: |
+          awk "/^## \\[desktop-${VERSION}\\]/{f=1;next}/^## /{f=0}f" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          node desktop/scripts/update-manifest.mjs --version "$VERSION" --pubkey desktop/release/updater.pubkey --notes "$RUNNER_TEMP/notes.md" dist
+          cat dist/SHA256SUMS
+      - name: SHA256SUMS (unsigned dry run only)
+        if: env.SIGNED != 'true'
+        run: (cd dist && sha256sum $(ls | grep -v '\.sig$' | sort) > SHA256SUMS && cat SHA256SUMS)
+      - name: Build provenance attestations
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+      - name: Create the DRAFT GitHub Release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --latest=false \
+            --title "LLM-IDE Desktop $VERSION" --notes-file "$RUNNER_TEMP/notes.md" dist/*
       - uses: actions/upload-artifact@v7
         with:
           name: llmide-desktop-release-${{ needs.preflight.outputs.version }}

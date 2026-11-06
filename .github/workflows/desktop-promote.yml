@@ -1,0 +1,44 @@
+name: desktop-promote
+
+# Puts a PUBLISHED desktop release on the update channel: copies its latest.json to the fixed release
+# `desktop-stable`, the only endpoint installed apps read (desktop/src-tauri/src/updater.rs CHANNEL_URL).
+# Run it after you published the draft and finished the real-run checklist (docs/how-to/desktop-release.md).
+# Stop a bad release: re-run with the previous good tag (installed apps only move forward; ship a fix as N+1).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Published release tag, e.g. desktop-v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Refuse a bad tag, a draft or a prerelease
+        run: |
+          [[ "$TAG" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$TAG is not desktop-vX.Y.Z"; exit 1; }
+          state=$(gh release view "$TAG" --json isDraft,isPrerelease -q '"\(.isDraft) \(.isPrerelease)"')
+          [ "$state" = "false false" ] || { echo "::error::$TAG is a draft or a prerelease ($state); publish it first"; exit 1; }
+      - name: Fetch and re-check its manifest
+        run: |
+          gh release download "$TAG" --pattern latest.json --dir "$RUNNER_TEMP"
+          node desktop/scripts/update-manifest.mjs --check "$RUNNER_TEMP/latest.json" --version "${TAG#desktop-v}"
+      - name: Point desktop-stable at it
+        run: |
+          gh release view desktop-stable >/dev/null 2>&1 || \
+            gh release create desktop-stable --prerelease --latest=false --title "LLM-IDE Desktop update channel (stable)" \
+              --notes "Holds latest.json for the desktop updater. Do not delete. Updated by desktop-promote.yml."
+          gh release upload desktop-stable "$RUNNER_TEMP/latest.json" --clobber
+          echo "desktop-stable now serves $TAG"
