@@ -1,11 +1,10 @@
-# Included inside nginx's http{} block (sites-enabled). Logs omit client IPs, headers, query strings and bodies.
+# accounts.llm-ide.com — RETIRED 2026-11-06 (ADR 0020). The account service and relay no longer run; this
+# vhost only answers 410 so old links and apps get a clear answer. Remove it once the certificate lapses.
 log_format llmide_accounts '$time_iso8601 "$request_method $uri" $status $body_bytes_sent $request_time';
-limit_req_zone $binary_remote_addr zone=llmide_accounts:10m rate=10r/s;
 
 server {
     listen 80;
     server_name accounts.llm-ide.com;
-    root /var/www/llm-ide-accounts;
     location /.well-known/acme-challenge/ { root /var/www/llm-ide-accounts; }
     location / { return 301 https://$host$request_uri; }
 }
@@ -18,36 +17,12 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/accounts.llm-ide.com/privkey.pem;
 
     access_log /var/log/nginx/llm-ide-accounts.access.log llmide_accounts;
-    # The default error log can keep client IPs/URIs; rotate this one within the 72-hour retention window.
-    error_log /var/log/llmide-accounts/error.log warn;
-
-    root /var/www/llm-ide-accounts;
-    index index.html;
-
-    add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
     add_header X-Content-Type-Options nosniff always;
-    add_header X-Frame-Options DENY always;
     add_header Referrer-Policy no-referrer always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header Cache-Control "no-store" always;
 
-    client_max_body_size 64k;
-
-    location /v1/ {
-        limit_req zone=llmide_accounts burst=20 nodelay;
-        proxy_pass http://127.0.0.1:3470;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 30s;
-    }
-
-    location = /health {
-        proxy_pass http://127.0.0.1:3470;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
+    default_type text/plain;
+    location / { return 410 "LLM-IDE accounts are retired. The desktop needs no account; phones and browsers link through encrypted sync. See https://llm-ide.com/guide.html\n"; }
 }

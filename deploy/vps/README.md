@@ -11,7 +11,7 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 | Public core API | **closed** 2026-11-05: `https://llm-ide.com/api/*` answers 404 (see Known limits) |
 | Host API WebSocket | **retired** 2026-11-05; `/host-api/*` answers 404 (ADR 0019) |
 | Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide`; **disabled** 2026-11-05 |
-| Account service | `accounts.llm-ide.com`, `llmide-accounts.service`, data `/var/lib/llmide-accounts`; sign-up closed |
+| Account service | **retired** 2026-11-06 (ADR 0020): `llmide-accounts.service` stopped and disabled, `accounts.llm-ide.com` answers 410; the service refuses to start in production |
 | Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
 
 ## Install pieces
@@ -78,6 +78,20 @@ install -d -m 755 /var/www/llm-ide-accounts
 cd /srv/llm-ide/repo && git pull --ff-only
 cd account-service && chmod -R a+rX . && PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
 ```
+
+## Retire the account service (ADR 0020, sync SP8)
+
+```bash
+systemctl disable --now llmide-accounts
+cd /srv/llm-ide/repo && git pull --ff-only
+cp deploy/vps/accounts.llm-ide.com.nginx /etc/nginx/sites-available/accounts.llm-ide.com
+nginx -t && systemctl reload nginx
+curl -s -o /dev/null -w '%{http_code}\n' https://accounts.llm-ide.com/   # 410
+# Keep /var/lib/llmide-accounts until you decide to delete it (it holds the account rows and audit log).
+```
+
+The install steps below are kept for the parked code only. With `NODE_ENV=production` the service now
+refuses to start unless `ACCOUNTS_ALLOW_RETIRED=1` is set.
 
 `/etc/llm-ide/accounts.env`:
 
