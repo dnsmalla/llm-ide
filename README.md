@@ -337,9 +337,6 @@ Your data is safe — only code is pulled:
 - Meetings/KB: `kb/` (gitignored per install)
 - User settings: `~/.llmide/`
 
-### ❌ GitLab CLI auth from terminal agents
-Use `./scripts/gitlab.sh` (reads the same PAT as **Settings → GitLab**). Do not run `glab auth login` separately.
-
 ---
 
 ## Project Structure
@@ -369,7 +366,7 @@ llm-ide/
 ├── graph-kit/          Graph engine submodule (separate repo)
 ├── ios_app/            iPhone app (SwiftUI + SharedProtocol)
 ├── .skills/            Central agent skills submodule
-├── scripts/            setup helpers, contract generators, gitlab.sh, install-skills
+├── scripts/            setup helpers, contract generators, install-skills
 ├── docs/               MkDocs site (architecture, API, ADRs)
 ├── kb/                 Runtime SQLite (gitignored content)
 ├── setup.sh            One-shot install + skills wiring
