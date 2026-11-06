@@ -23,6 +23,10 @@ const MANUAL_GAP_MS: u64 = 30_000;
 /// None = valid. A missing section must read as a problem (never use `cfg?`, which would return None = valid).
 pub fn config_problem(cfg: Option<&serde_json::Value>) -> Option<&'static str> {
     let Some(c) = cfg.and_then(|v| v.as_object()) else { return Some("no_update_config") };
+    // Nothing else may ride in (e.g. dangerousInsecureTransportProtocol, dangerousAcceptInvalidCerts).
+    if c.keys().any(|k| !matches!(k.as_str(), "pubkey" | "endpoints" | "windows")) {
+        return Some("bad_update_config");
+    }
     if c.get("pubkey").and_then(|v| v.as_str()).map_or(true, |k| k.trim().len() < 40) {
         return Some("no_update_key");
     }
@@ -40,7 +44,7 @@ pub fn install_kind(os: &str, appimage: Option<&str>) -> InstallKind {
 }
 
 pub fn notes_text(body: Option<&str>) -> String {
-    body.unwrap_or("").chars().filter(|c| *c == '\n' || !c.is_control()).take(NOTES_MAX).collect()
+    body.unwrap_or("").chars().filter(|c| *c == '\n' || !(c.is_control() || crate::tray::is_invisible_format(*c))).take(NOTES_MAX).collect()
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -78,6 +82,7 @@ struct Inner {
     last_checked_ms: Option<u64>,
     error: Option<String>,
     checking: bool,
+    installing: bool,
 }
 static STATE: Mutex<Option<Inner>> = Mutex::new(None);
 
@@ -136,18 +141,33 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
         return Err(herr("package_managed", "This copy was installed from a package. Update it with your package manager."));
     }
     let update = with(|s| s.pending.clone()).ok_or_else(|| herr("no_update", "Check for updates first."))?;
+    if with(|s| std::mem::replace(&mut s.installing, true)) {
+        return Err(herr("busy", "an update install is already running"));
+    }
+    let _guard = InstallGuard;
     let text = format!("Install LLM-IDE {}?\n\nThe app downloads the update, checks its signature, closes, installs it and opens again. Unsaved terminal output is lost.", confirm::sanitize_line(&update.version, 40));
     let ok = tauri::async_runtime::spawn_blocking(move || confirm::ask("Install update", &text, "Install and Restart", false)).await.unwrap_or(false);
     if !ok { return Ok(false); }
     // The plugin verifies the signature here; nothing is stopped until a verified payload is on disk.
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| herr("download_failed", confirm::sanitize_line(&e.to_string(), 200)))?;
-    host.shutdown();
-    crate::pty::kill_all();
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| {
+        eprintln!("updater: download failed: {}", confirm::sanitize_line(&e.to_string(), 200));
+        herr("download_failed", "The update could not be downloaded.")
+    })?;
+    // Same order as a normal quit (the Windows installer exits the process without running the exit handler),
+    // then stop() so the state is Stopped, node.exe has exited, and a failure path can start() again.
+    crate::exit_cleanup(&app);
+    let _ = host.stop();
     if let Err(e) = update.install(bytes) {
+        eprintln!("updater: install failed: {}", confirm::sanitize_line(&e.to_string(), 200));
         let _ = host.start();
-        return Err(herr("install_failed", confirm::sanitize_line(&e.to_string(), 200)));
+        return Err(herr("install_failed", "The update could not be installed."));
     }
     app.restart();
+}
+
+struct InstallGuard;
+impl Drop for InstallGuard {
+    fn drop(&mut self) { with(|s| s.installing = false); }
 }
 
 /// Once a minute after launch, then daily, while the pref is on. Check only: never installs.
@@ -179,6 +199,19 @@ mod tests {
         assert_eq!(config_problem(Some(&json!({"pubkey": KEY, "endpoints": ["http://github.com/x"]}))), Some("bad_update_endpoint"));
         assert_eq!(config_problem(Some(&json!({"pubkey": KEY, "endpoints": [CHANNEL_URL, "https://evil.example/l.json"]}))), Some("bad_update_endpoint"));
         assert_eq!(config_problem(Some(&json!({"pubkey": KEY, "endpoints": [CHANNEL_URL]}))), None);
+    }
+
+    #[test]
+    fn unknown_updater_keys_are_rejected() {
+        let c = json!({"pubkey": KEY, "endpoints": [CHANNEL_URL], "dangerousInsecureTransportProtocol": true});
+        assert_eq!(config_problem(Some(&c)), Some("bad_update_config"));
+        let ok = json!({"pubkey": KEY, "endpoints": [CHANNEL_URL], "windows": {"installMode": "passive"}});
+        assert_eq!(config_problem(Some(&ok)), None);
+    }
+
+    #[test]
+    fn notes_drop_bidi_overrides() {
+        assert_eq!(notes_text(Some("a\u{202E}b")), "ab");
     }
 
     #[test]

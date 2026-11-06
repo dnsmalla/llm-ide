@@ -1417,6 +1417,16 @@ mod tests {
     }
 
     #[test]
+    fn stop_leaves_stopped_where_shutdown_leaves_ready_so_start_can_run_again() {
+        let host = CoreHost::new();
+        lock(&host.inner.status).state = Phase::Ready;
+        host.shutdown();
+        assert!(matches!(lock(&host.inner.status).state, Phase::Ready));
+        host.stop().unwrap();
+        assert!(matches!(lock(&host.inner.status).state, Phase::Stopped));
+    }
+
+    #[test]
     fn failure_message_never_carries_the_raw_tail_and_log_is_private() {
         let host = CoreHost::new();
         let dir = std::env::temp_dir().join(format!("llmide-core-fail-{}", std::process::id()));

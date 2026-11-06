@@ -589,18 +589,23 @@ pub fn run() {
         // activation takes effect; the bench needs no external activation step.
         RunEvent::Ready if autobench_env().is_some() => bring_to_front(app_handle),
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
-            capture_host::shutdown();
-            // Live-then-archive first (the core must still be up), capped at 6 s, once per process.
-            let _ = app_handle.state::<chat_cmds::ChatService>().quit_archive_default();
-            app_handle.state::<CoreHost>().shutdown();
-            pty::kill_all();
-            #[cfg(feature = "spike")]
-            sse_replay::stop();
-            graph_gen::graph_cancel();
+            exit_cleanup(app_handle);
             crash_report::clear_own_on_clean_exit();
         }
         _ => {}
     });
+}
+
+/// The pre-exit steps, in order: capture, live-then-archive chat while the core is still up (capped, once per
+/// process), core, terminals, graph. Idempotent: the exit handler may run again after the updater already ran it.
+pub(crate) fn exit_cleanup(app: &tauri::AppHandle) {
+    capture_host::shutdown();
+    let _ = app.state::<chat_cmds::ChatService>().quit_archive_default();
+    app.state::<CoreHost>().shutdown();
+    pty::kill_all();
+    #[cfg(feature = "spike")]
+    sse_replay::stop();
+    graph_gen::graph_cancel();
 }
 
 #[cfg(test)]
