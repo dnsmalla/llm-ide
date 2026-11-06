@@ -15,14 +15,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 9 | 2 | 7 | 18 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 24 | 43 | 9 | 76 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every Mac section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
 | Mobile (iPhone native, PWA) | 15 | 5 | 7 | 27 | Native chat/explorer/auto-task client works through the Mac; the web client is now an installable PWA; push notifications do not exist |
-| Web app and relay | 7 | 10 | 9 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; public account service deployed (sub-project 1, sign-in pages) with desktop sign-in broken (review Critical) and sign-up open early (S9); device linking, relay and launch gates not built |
+| Web app and relay | 7 | 11 | 8 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; public account service deployed (sub-project 1, sign-in pages) with desktop sign-in broken (review Critical) and sign-up open early (S9); device linking, relay and launch gates not built |
 | Chrome extension | 7 | 3 | 6 | 16 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 3 | 5 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 121 | 74 | 68 | 263 |  |
+| Total | 121 | 75 | 67 | 263 |  |
 
 ## How the surfaces connect
 
@@ -252,7 +252,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Sync SP5, own-server SFTP adapter (me)
 - [ ] Sync SP6, Box adapter (desktop and devices) (me)
 - [ ] Sync SP7, direct reads of Box documents and GitLab code from the phone and web (me)
-- [ ] Sync SP8, park and retire: ADR 0019 superseded header, production refusal for `ACCOUNTS_RELAY` and the account service, nginx accounts vhost off, site copy (me)
+- [~] Sync SP8, park and retire: done 2026-11-06 — ADR 0019 marked superseded, the account service (and so the relay) refuses to start in production unless `ACCOUNTS_ALLOW_RETIRED=1`, `accounts.llm-ide.com` vhost answers 410, site copy rewritten for no-account + encrypted sync; open: run the retire steps on the VPS (`deploy/vps/README.md` "Retire the account service") and redeploy `marketing/` (you)
 - [ ] Sync setup: create a separate MEGA account just for LLM-IDE (two-factor off on that account only) and enter it in Settings, Sync (you)
 - [~] Public LLM-IDE site: marketing pages under `marketing/` with a guide and product tour, and the web app mounted at `/app` (`77e5df3e`, `2ca46173`, `d72b4324`); PWA tests and asset pruning fixed for the `/app` base path (`03fa55c3`) (me)
 
