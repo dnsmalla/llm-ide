@@ -1,7 +1,8 @@
 // Review Conflicts: the Mac's tree + viewer + Code Assistant layout over the project's code and llm-doc folders.
 // It is deliberately read-only — reviewing is a conversation with the assistant; editing belongs in Explorer.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { FileTreeRow, FolderIcon, Icon, StatusBanner } from "@llmide/ui-kit";
+import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import type { SectionProps } from "../shell/sections";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { shellBus } from "../shell/bus";
@@ -223,14 +224,21 @@ function TreeRow({ entry, depth, expanded, childrenOf, onToggle, onOpen, selecte
 }): ReactNode {
   const isDir = entry.kind === "dir";
   const open = expanded.has(entry.path);
+  const kind = fileKind(entry.name, isDir);
   return (
-    <li className="rv-row" style={{ paddingLeft: depth * 12 }} role="treeitem" aria-expanded={isDir ? open : undefined} aria-selected={!isDir && selected === entry.path}>
-      <button type="button" className={isDir ? "rv-dir" : "rv-file"} data-on={!isDir && selected === entry.path || undefined} onClick={() => (isDir ? onToggle(entry.path) : onOpen(entry.path))}>
-        <span className="rv-caret" aria-hidden="true">{isDir ? (open ? "▾" : "▸") : "·"}</span>
-        {entry.name}
-      </button>
+    <li className="rv-row" role="none">
+      <FileTreeRow
+        name={entry.name}
+        isFolder={isDir}
+        isExpanded={open}
+        depth={depth}
+        icon={isDir ? <FolderIcon /> : <Icon name={fileKindIcon(kind)} size={11} />}
+        selected={!isDir && selected === entry.path}
+        onClick={() => (isDir ? onToggle(entry.path) : onOpen(entry.path))}
+        onToggle={isDir ? () => onToggle(entry.path) : undefined}
+      />
       {isDir && open ? (
-        <ul className="rv-list">
+        <ul className="rv-list" role="group">
           {childrenOf(entry.path).map((c) => (
             <TreeRow key={c.path} entry={c} depth={depth + 1} expanded={expanded} childrenOf={childrenOf} onToggle={onToggle} onOpen={onOpen} selected={selected} />
           ))}

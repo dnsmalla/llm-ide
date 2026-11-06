@@ -3,7 +3,7 @@
 // With `mutate` (desktop app) a row can be moved to the Trash, and a category's "+" adds a text file or an empty
 // folder. Every change is confirmed or explicit; the rules live in project-ops.ts.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CodeIcon, FolderIcon, Icon, TableIcon } from "@llmide/ui-kit";
+import { CodeIcon, FileTreeRow, FolderIcon, Icon, TableIcon } from "@llmide/ui-kit";
 import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { shellBus } from "../shell/bus";
 import { Dialog } from "./write/Dialog";
@@ -279,21 +279,25 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
 }): ReactNode {
   const dir = entry.kind === "dir";
   const open = expanded.has(entry.path);
+  const kind = fileKind(entry.name, dir);
   return (
-    <li className="lib-project-row" style={{ paddingLeft: depth * 14 }} role="treeitem" aria-expanded={dir ? open : undefined} aria-selected={!dir && selected === entry.path}>
-      <button
-        type="button"
-        className={dir ? "lib-project-dir" : "lib-project-file"}
-        data-on={!dir && selected === entry.path || undefined}
+    <li
+      className="lib-project-row"
+      role="none"
+      onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(entry, e.clientX, e.clientY); } : undefined}
+    >
+      <FileTreeRow
+        name={entry.name}
+        isFolder={dir}
+        isExpanded={open}
+        depth={depth}
+        icon={dir ? <FolderIcon /> : <Icon name={fileKindIcon(kind)} size={11} />}
+        selected={!dir && selected === entry.path}
         onClick={() => (dir ? onToggle(entry.path) : onSelect(entry.path))}
-        onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(entry, e.clientX, e.clientY); } : undefined}
-      >
-        <span className="lib-project-caret" aria-hidden="true">{dir ? (open ? "▾" : "▸") : null}</span>
-        <span className="lib-project-icon" data-kind={fileKind(entry.name, dir)} aria-hidden="true">{dir ? <FolderIcon /> : <Icon name={fileKindIcon(fileKind(entry.name))} size={11} />}</span>
-        {entry.name}
-      </button>
+        onToggle={dir ? () => onToggle(entry.path) : undefined}
+      />
       {dir && open ? (
-        <ul className="lib-project-list">
+        <ul className="lib-project-list" role="group">
           {childrenOf(entry.path).map((c) => (
             <ProjectRow key={c.path} entry={c} depth={depth + 1} childrenOf={childrenOf} expanded={expanded} onToggle={onToggle} onSelect={onSelect} selected={selected} onMenu={onMenu} />
           ))}
