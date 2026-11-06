@@ -94,6 +94,11 @@ server {
         default_type application/manifest+json;
         try_files $uri =404;
     }
+    # The OAuth callback carries ?code=&state= in its query: never write it to the access log.
+    location = /app/oauth-callback.html {
+        access_log off;
+        try_files $uri =404;
+    }
     location = /sw.js {
         add_header Cache-Control "no-cache" always;
         try_files $uri =404;
