@@ -104,7 +104,7 @@ test('chat.send runs a turn on the quick chat and routes delta + done', async ()
   assert.equal(t.turns[0].userId, 'u1');
   assert.equal(t.turns[0].chatSessionId, 'chat-1');
   assert.equal(t.turns[0].message, 'hello');
-  assert.deepEqual(t.turns[0].files, [{ name: 'a.md', text: 'x' }]);
+  assert.deepEqual(t.turns[0].files, [{ path: 'a.md', content: 'x' }]);
   assert.equal('permissionMode' in t.turns[0], false);
   const events = t.sent.filter(([, f]) => f.type === 'event').map(([, f]) => f);
   assert.deepEqual(events.map((f) => f.command), ['chat.delta', 'chat.done']);

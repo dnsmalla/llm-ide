@@ -9,6 +9,7 @@ import { PairingThrottle, peerKey } from './throttle.mjs';
 import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
+import { attachmentsToFiles } from './compose.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -313,7 +314,7 @@ export function createGateway(overrides) {
       } catch (e) { deps.log(`Host API v1 engine event ${ev?.type ?? '?'} dropped (${e?.code ?? 'error'})`); }
     };
     Promise.resolve()
-      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: p.attachments ?? [], onEvent }))
+      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), onEvent }))
       // An aborted turn resolves without a terminal event: end it here (a cancelled done when the client asked).
       .then(() => push({ type: 'error', message: 'The turn ended without a reply.', retryable: true }))
       .catch((err) => {
