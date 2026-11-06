@@ -53,7 +53,7 @@ Open count: 52 open, 42 done, 94 total
   - Effort: 60 minutes. Blocks: Phase 3 exit, any Windows work. Status: not run.
 - [ ] **UN-010** Grant Accessibility to measure caption read cadence.
   - Why you: a macOS permission dialog only you can approve.
-  - How: System Settings > Privacy & Security > Accessibility > allow the app, then run the cadence measurement in the Phase 0 report.`` (delete)
+  - How: System Settings > Privacy & Security > Accessibility > allow the app, then run the cadence measurement in the Phase 0 report.
   - Effort: 5 minutes. Blocks: Phase 3 exit measurement. Status: not run.
 - [ ] **UN-011** Token bench go-ahead, plumbing and cheap sanity run.
   - Why you: runs count against your plan limits and need your `claude` login.
@@ -106,11 +106,11 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Source: [Issues and Gantt plan section 13](plans/2026-10-31-issues-gantt-core-plan.md). Recommended: (a) with (b), overlay only, yes. If you wait: IC0 cannot start, so the Issues and Gantt screens wait.
 - [ ] **UN-032** Auto Tasks T1 to T6: remove generateKnowledge, generateDoc, updatePlanStatus after UN-003 shows zero runs; fold the five merges with an alias table; template save, config set and toggle desktop-only; phone starts implement or ship only through desktop approval; `--yolo` not the default for codex and gemini; write tasks on a bare API key only if you need it.
   - Source: [Auto Tasks audit section 8](plans/2026-10-31-auto-tasks-audit.md). Recommended: the answers in the table; confirm T6 (do you need API-key-only write tasks, or is login enough). If you wait: the Node port keeps all 13 tasks. Depends on UN-003.
-- [ ] **UN-033** Command bus Q2 to Q6: `` (delete)explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
+- [ ] **UN-033** Command bus Q2 to Q6: explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
   - Source: [command bus spec section 11](plans/2026-10-31-command-bus-spec.md). Recommended: yes to all. If you wait: S2 and S6 scope stays fuzzy.
 - [ ] **UN-034** Mobile TLS Q1 to Q4: ship TLS before the bus; one release of cleartext fallback; "Reset security identity" as the only rotation; keep `NSAllowsLocalNetworking` for one release.
   - Source: [TLS design section 10](plans/2026-10-31-mobile-tls-pinning-design.md). Recommended: yes to all. If you wait: the cleartext link and open ATS stay.
-- [ ] **UN-035** Phase 5 macOS plan: 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after)`` (delete); Windows then Linux order.
+- [ ] **UN-035** Phase 5 macOS plan: 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after); Windows then Linux order.
   - Source: [Phase 5 plan section 15 items 1 and 2](plans/2026-10-31-tauri-phase5-macos-plan.md). Recommended: yes to both. If you wait: the 3D graph and the Windows/Linux order cannot be scheduled.
 - [ ] **UN-036** Phase 3 plan: desktop chat store (same file format, in the desktop's own data dir); run the Windows measurement in week 1 of Phase 3 (see UN-009); a deferred row for Source Control hosted actions.
   - Source: [Phase 3 plan section 12](plans/2026-10-31-tauri-phase3-plan.md). Recommended: yes to all. If you wait: the chat store is undecided.
