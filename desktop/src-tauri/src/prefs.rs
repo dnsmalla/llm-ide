@@ -120,7 +120,7 @@ pub struct Prefs {
     pub backend_node: String,
     /// Source-checkout mode only: the checkout's `extension` folder (empty = auto-detect).
     pub backend_dir: String,
-    /// Source-checkout mode only: loopback port (0 = the app's 3457-3459 range).
+    /// Source-checkout mode only: loopback port (0 = the app's 3456-3459 range).
     pub backend_port: u16,
     /// Start the core when the app starts (false leaves it stopped until Start).
     pub backend_auto_start: bool,

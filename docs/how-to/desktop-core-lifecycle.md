@@ -46,9 +46,9 @@ make that work, all exact and none wider than needed:
   applied in `core_host::real_launch`). The server still echoes `Origin` only for listed origins and
   never sends `*`. An adopted `:3456` server, the Mac app's server and the extension are untouched, and
   the variable is never copied from the host's own environment.
-- **CSP:** the release `connect-src` is `'self' ipc: http://ipc.localhost` plus `http://127.0.0.1:3457`,
-  `:3458`, `:3459`, the ports the host may spawn on (`SPAWN_PORTS`); a test fails if the two drift.
-  The Vite dev origin (5173) exists only in `devCsp`. The adoptable `:3456` is deliberately not allowed.
+- **CSP:** the release `connect-src` is `'self' ipc: http://ipc.localhost` plus `http://127.0.0.1:3456`,
+  `:3457`, `:3458`, `:3459`, the ports the host may spawn on (`SPAWN_PORTS`); a test fails if the two drift.
+  The Vite dev origin (5173) exists only in `devCsp`.
 - **Binding:** the core stays on `127.0.0.1`; the webview never gets a filesystem or http plugin.
 
 Tests: `desktop/scripts/check-csp.test.mjs`, `core_env::tests`, `extension/tests/server-cors-webview-origins.test.mjs`.

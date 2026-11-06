@@ -240,7 +240,7 @@ function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => voi
           <label className="st-field">
             <span className="st-label">Server URL</span>
             <input className="st-input" value={url} spellCheck={false} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:3457" />
-            <span className="st-hint">Loopback only. The source backend listens on this port; the bundled core uses 3457-3459.</span>
+            <span className="st-hint">Loopback only. The source backend listens on this port; the bundled core uses 3456-3459.</span>
           </label>
         </>
       ) : null}
