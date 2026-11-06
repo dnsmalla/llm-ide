@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
+import { invokeHost, isHostAvailable } from "../../shell/host.ts";
 import { PairingQr } from "./HostApiPairing.tsx";
 import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
@@ -24,6 +25,8 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLink, setShowLink] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { host } = useEnv();
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true); setError(null);
@@ -67,9 +70,25 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
         </div>
       ) : (
         <div className="st-stack" role="status">
-          <PairingQr payload={start.qr} />
-          <p className="st-hint">{start.tier === "ios" ? "Scan with the LLM-IDE iPhone app." : "Open this link in the browser you want to add."} The QR is replaced by the comparison code as soon as the device scans it. The code works for 2 minutes and once only. Keep this screen out of view of others.</p>
-          {status.storeKind !== "box" || showLink
+          {start.tier === "ios" ? (
+            <>
+              <PairingQr payload={start.qr} />
+              <p className="st-hint">Scan with the LLM-IDE iPhone app. The QR is replaced by the comparison code as soon as the iPhone claims it. The code works for 2 minutes and once only. Keep this screen out of view of others.</p>
+            </>
+          ) : (
+            <>
+              <p className="st-hint">Open the pairing link in the browser you want to add. There is nothing to scan with a camera.</p>
+              <div className="st-row">
+                <Button tone="primary" disabled={busy} onClick={() => void run(async () => {
+                  if (isHostAvailable()) await invokeHost("open_external_url", { url: start.qr });
+                  else globalThis.open?.(start.qr, "_blank", "noopener,noreferrer");
+                })}>Open in browser</Button>
+                <Button disabled={busy} onClick={() => void host.copyText(start.qr).then(() => setCopied(true), () => setCopied(false))}>{copied ? "Copied" : "Copy link"}</Button>
+              </div>
+              <p className="st-hint">The link opens the web app and starts the same MEGA sign-in. It is replaced by the comparison code as soon as the browser claims it.</p>
+            </>
+          )}
+          {status.storeKind !== "box" || showLink || start.tier === "web"
             ? <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p> // for Box the link carries the client secret
             : <div className="st-row"><Button onClick={() => setShowLink(true)}>Show link</Button></div>}
           <div className="st-row"><Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Cancel</Button></div>
