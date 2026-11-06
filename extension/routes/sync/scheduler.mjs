@@ -1,8 +1,8 @@
 // Timers for every user with sync on: producer every 60 s +/- 15 s, consumer every 30 s; one cycle per user at a time;
 // failures back off exponentially up to 15 min and are recorded as a code only. A refused login (SYNC_AUTH_FAILED,
 // SYNC_MFA_REQUIRED) or a changed server host key (SYNC_HOST_KEY_CHANGED) turns sync off instead of retrying, so a changed
-// password never locks the MEGA account and a swapped server is never written to. One store (one MEGA session or one
-// SSH connection) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
+// password never locks the MEGA account and a swapped server is never written to. One store (a logged-in MEGA session, one
+// SSH connection, or a Box session holding the latest refresh token) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
@@ -59,6 +59,9 @@ function openStore(userId, state) {
   if (state.storeKind === 'box') {
     const clientSecret = getSecret(db, userId, 'sync.boxClientSecret');
     const refreshToken = getSecret(db, userId, 'sync.boxRefreshToken');
+    // Box refresh tokens are single use: the rotated one is in the vault before its access token is used.
+    // shortcut: a store recreated while the old one's refresh is in flight reads the older token and fails once
+    // (SYNC_AUTH_FAILED turns sync off, Settings says reconnect); serialize store creation per user if it shows up.
     if (!clientSecret || !refreshToken) return null;
     return createBoxStore(state.storeConfig, { clientSecret, refreshToken }, { onRefreshToken: (t) => setSecret(getDb(), userId, 'sync.boxRefreshToken', t) });
   }

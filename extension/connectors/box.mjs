@@ -1,4 +1,5 @@
 // Box document source — Pattern A connector (peer of git.mjs).
+// The same HTTP layer serves the sync adapter (connectors/sync-store/box.mjs): any method, uploads, token forms.
 // Client-Credentials-Grant auth → recursive folder list → per-file
 // extracted_text representation → chunk → ingest into `sources` (kind='doc').
 // Every request goes through the pinned fetch (server/pinned-fetch.mjs): DNS is
