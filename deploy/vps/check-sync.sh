@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Read-only checks for the own-server sync setup. Probe PUTs target random, non-existent folders and must be refused.
-#   check-sync.sh remote <web-host> <ssh-host> [ssh-port]
-#   check-sync.sh server
+# Checks the own-server sync setup (deploy/vps/sync-sftp.md; design 8.1 and 13). Read-only: the probe PUTs below must
+# all be refused, and they target random folder names that do not exist.
+#   deploy/vps/check-sync.sh remote <web-host> <ssh-host> [ssh-port]   from any machine, e.g. remote llm-ide.com 72.62.76.92
+#   deploy/vps/check-sync.sh server                                    on the VPS, as root
 set -u
 fail=0
 ok() { echo "ok   $1"; }
@@ -41,11 +42,17 @@ server() {
   want "llmidesync:llmidesync 2770" "$(stat -c '%U:%G %a' /srv/llmide-sync/data)" "data folder"
   want "www-data:llmidesync 2770" "$(stat -c '%U:%G %a' /srv/llmide-sync-tmp)" "nginx PUT temp folder"
   want "root:root 644" "$(stat -c '%U:%G %a' /etc/ssh/authorized_keys/llmidesync)" "authorized key file is root-owned"
-  [[ "$(stat -c %d /srv/llmide-sync-tmp)" == "$(stat -c %d /srv/llmide-sync/data)" ]] && ok "temp and data on one filesystem" || bad "temp and data on different filesystems"
+  want "root:root 755" "$(stat -c '%U:%G %a' /etc/ssh/authorized_keys)" "sshd can read the key folder as the sync user"
+  [[ "$(stat -c %d /srv/llmide-sync-tmp)" == "$(stat -c %d /srv/llmide-sync/data)" ]] && ok "temp and data on one filesystem (atomic rename)" || bad "temp and data on different filesystems"
   id -nG www-data | tr ' ' '\n' | grep -qx llmidesync && ok "www-data in group llmidesync" || bad "www-data not in group llmidesync"
   nginx -t 2>/dev/null && ok "nginx -t" || bad "nginx -t"
   nginx -V 2>&1 | grep -q http_dav_module && ok "nginx has the DAV module" || bad "nginx lacks http_dav_module"
   if grep -qs ' /sync/' /var/log/nginx/access.log; then bad "/sync/ paths in the access log"; else ok "no /sync/ paths in the access log"; fi
 }
-case "${1:-}" in remote) shift; remote "$@" ;; server) server ;; *) echo "usage: $0 remote <web-host> <ssh-host> [ssh-port] | server"; exit 2 ;; esac
+
+case "${1:-}" in
+  remote) shift; remote "$@" ;;
+  server) server ;;
+  *) echo "usage: $0 remote <web-host> <ssh-host> [ssh-port] | server"; exit 2 ;;
+esac
 exit $fail

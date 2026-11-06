@@ -12,6 +12,7 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 | Host API WebSocket | **retired** 2026-11-05; `/host-api/*` answers 404 (ADR 0019) |
 | Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide`; **disabled** 2026-11-05 |
 | Account service | **retired** 2026-11-06 (ADR 0020): `llmide-accounts.service` stopped and disabled, `accounts.llm-ide.com` answers 410; the service refuses to start in production |
+| Own-server sync | SFTP user `llmidesync` (chroot `/srv/llmide-sync`), nginx `https://llm-ide.com/sync/`; setup [sync-sftp.md](sync-sftp.md) |
 | Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
 
 ## Install pieces

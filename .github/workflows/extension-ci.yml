@@ -9,10 +9,12 @@ on:
     branches: [main]
     paths:
       - 'extension/**'
+      - 'deploy/vps/**'   # tests/sync-own-server.test.mjs reads the vhost and sshd block
       - '.github/workflows/extension-ci.yml'
   pull_request:
     paths:
       - 'extension/**'
+      - 'deploy/vps/**'   # tests/sync-own-server.test.mjs reads the vhost and sshd block
       - '.github/workflows/extension-ci.yml'
 
 concurrency:
