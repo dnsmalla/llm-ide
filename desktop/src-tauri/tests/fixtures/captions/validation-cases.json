@@ -1,0 +1,27 @@
+{
+  "sanitize": [
+    { "in": "Tanaka & 2 others", "out": "Tanaka" },
+    { "in": "Bob ＆ 3 more", "out": "Bob" },
+    { "in": "田中 他2名", "out": "田中" },
+    { "in": "  Alice\u0007  Smith ", "out": "Alice Smith" },
+    { "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  ],
+  "valid": [
+    { "speaker": "Tanaka", "text": "はい。", "valid": true },
+    { "speaker": "Callum", "text": "Let's start.", "valid": true },
+    { "speaker": "Alice", "text": "Moreover, the plan is fine.", "valid": true },
+    { "speaker": "Bob", "text": "Share your screen, please.", "valid": true },
+    { "speaker": "Unknown", "text": "Thanks, everyone.", "valid": true },
+    { "speaker": "Turn off microphone", "text": "Hello.", "valid": false },
+    { "speaker": "Alice", "text": "Turn off captions", "valid": false },
+    { "speaker": "Alice", "text": "Share screen", "valid": false },
+    { "speaker": "8:41", "text": "Hello there.", "valid": false },
+    { "speaker": "ume-xkgs-oqf", "text": "Hello.", "valid": false },
+    { "speaker": "Live captions", "text": "Hello.", "valid": false },
+    { "speaker": "Alice", "text": "frame_person", "valid": false },
+    { "speaker": "Alice", "text": "+81 3-4545-0450", "valid": false },
+    { "speaker": "Alice", "text": "42", "valid": false },
+    { "speaker": "Alice", "text": "", "valid": false },
+    { "speaker": "", "text": "Hello.", "valid": false }
+  ]
+}

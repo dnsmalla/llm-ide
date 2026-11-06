@@ -3,6 +3,7 @@ mod relay;
 mod attach;
 #[cfg(feature = "spike")]
 mod ax_probe;
+mod capture_validate;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;
