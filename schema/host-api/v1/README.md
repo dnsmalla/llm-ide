@@ -88,18 +88,25 @@ Swift clients build requests with `HostApiFrame.request` and parse host frames w
 
 ## Host differences
 
-The Mac and desktop hosts serve the same commands, codes and shapes. Where they legitimately differ:
+The desktop (Tauri app with the Node core) is the only host since the Swift Mac app was removed (2026-11-06). These
+are the desktop's host-specific rules; a future second host must document its differences here.
 
-- **Gate prose.** Refusal messages say "This Mac…" on the Mac and "This computer…" on the desktop; the error `code`s (and `retryable`) are identical. Clients branch on `code`, never on message text.
-- **Engine rejections.** On the desktop, a turn refusal whose code it does not know (anything but `TURN_IN_PROGRESS`, `SDK_UPDATING`, `PLUGIN_UPDATING`, `ROUTE_UNAVAILABLE`, `SESSION_TOKEN_LIMIT`, `SLASH_COMMAND_FAILED`) becomes a `chat.error` with a generic message and `retryable: false`. The Mac turns its v2 `CommandError` into a `chat.error` carrying that message (`HostApiV2ChatBridge`), with no `retryable` flag.
-- **Snapshot trimming.** Both hosts trim `chat.snapshot` / `host.snapshot` messages to `maxListBytes` the same way (see Limits): oldest dropped first, the newest always kept.
-- **Which chat.** The Mac serves its shared quick chat (the same one the iPhone's v2 chat uses); the desktop serves one server-side "Phone chat" per user. On the Mac a chat history that cannot be read answers `capability_unavailable`; the desktop has no such state.
-- **Switches.** `tool_approvals` is served on the desktop only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`, on the Mac per its setting; `chat.history.clear` is `denied` on the desktop unless `LLMIDE_HOST_API_CHAT_CLEAR=1`. The Mac also applies its phone tier gate to `chat.send` and both approval answers (`denied`).
-- **Reads.** Only the desktop serves `read` (`chat.sessions`, `chat.history`, `usage.get`). Its chats are the server `chat_sessions` rows, and the per-user "Phone chat" is flagged `phoneChat`. The Mac does not serve `read` yet, so its gate answers `capability_unavailable`. The desktop also rate-limits reads per device (20-read bucket at 2/s); the Mac has no read bucket.
-- **`hello`.** `hostKind` is `mac` or `desktop`; `protocolVersion` is the Mac's v2 protocol version on the Mac and `1` on the desktop.
-- **Upgrade paths.** The desktop refuses an upgrade to any path but `/host-api/v1`. The Mac can't: Network.framework exposes no path.
-- **Peer on refusals.** On the Mac, `origin_refused` has peer `-` (no connection is handed to the request handler), so it is de-duplicated as one row per minute.
-- **Audit.** The desktop writes `audit_log` rows named `host_api.<event>` with an outcome. The Mac writes JSONL rows (`~/Library/Application Support/llm-ide/host-api-audit.jsonl`, mode 0600, rotated at 512 KiB) with no outcome column. Mac-only events: `connection_limit` and `handshake_timeout`. The Mac write cap closes by cancelling the connection; the desktop closes with 1013.
-- **v2 tokens.** On the Mac, a token minted by the plaintext v2 link (`ws://…:3006`) also authenticates on v1, with the legacy scopes only (never `tool_approvals`). The v2 server and the v1 gateway share one PIN throttle (one instance owned by `MobileControlManager`, keyed by `peerKey`, one global cap): a wrong PIN on either path counts against both, and a correct PIN clears the record on both. Token throttles stay separate per path. The desktop has no v2 link.
-- **Bind.** In TLS mode the desktop binds IPv4 `0.0.0.0` only; the Mac listener is dual-stack.
-- **Phone pairing.** The phone pins only from a QR scan. Both hosts show the `llmide://pair` QR in TLS mode. The Mac's carries its v2 `port` too; the desktop's Settings pairing card (`ui/screens/settings/sections/HostApiPairing.tsx`) shows `ip`, `pin`, `h1port`, `h1fp` and `api=1` with no `port`, since the desktop has no v2 link and a pinned phone dials only v1. `ip` is the first of the PIN answer's `addresses` (Tailscale first, then LAN). The card also shows the fingerprint and the payload as text.
+- **Gate prose.** Refusal messages say "This computer…"; clients branch on `code` (and `retryable`), never on text.
+- **Engine rejections.** A turn refusal whose code the desktop does not know (anything but `TURN_IN_PROGRESS`,
+  `SDK_UPDATING`, `PLUGIN_UPDATING`, `ROUTE_UNAVAILABLE`, `SESSION_TOKEN_LIMIT`, `SLASH_COMMAND_FAILED`) becomes a
+  `chat.error` with a generic message and `retryable: false`.
+- **Snapshot trimming.** `chat.snapshot` / `host.snapshot` messages are trimmed to `maxListBytes` (see Limits): oldest
+  dropped first, the newest always kept.
+- **Which chat.** One server-side "Phone chat" per user (`host_api_quick_chat`).
+- **Switches.** `tool_approvals` is served only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`; `chat.history.clear` is
+  `denied` unless `LLMIDE_HOST_API_CHAT_CLEAR=1`; `read` (`chat.sessions`, `chat.history`, `usage.get`) only with
+  `LLMIDE_HOST_API_READ=1`, rate-limited per device (20-read bucket at 2/s). Chats are the server `chat_sessions`
+  rows; the per-user "Phone chat" is flagged `phoneChat`.
+- **`hello`.** `hostKind` is `desktop`; `protocolVersion` is `1`.
+- **Upgrade paths.** The desktop refuses an upgrade to any path but `/host-api/v1`.
+- **Audit.** `audit_log` rows named `host_api.<event>` with an outcome; the write cap closes with 1013.
+- **Bind.** In TLS mode the desktop binds IPv4 `0.0.0.0` only.
+- **Phone pairing.** The phone pins only from a QR scan. The desktop's Settings pairing card
+  (`ui/screens/settings/sections/HostApiPairing.tsx`) shows the `llmide://pair` QR with `ip`, `pin`, `h1port`, `h1fp`
+  and `api=1`; `ip` is the first of the PIN answer's `addresses` (Tailscale first, then LAN). The card also shows the
+  fingerprint and the payload as text.
