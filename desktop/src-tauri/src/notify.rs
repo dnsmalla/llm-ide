@@ -292,7 +292,7 @@ mod tests {
         assert_eq!(Kind::from_webview("docgen_failed"), Some(Kind::DocGenFailed));
         assert_eq!(Kind::from_webview("update_ready"), None);
         assert_eq!(Kind::from_webview("core_down"), None);
-        assert_eq!(Kind::from_webview("approval_needed"), None, "the old template names are gone");
+        assert_eq!(Kind::from_webview("approval_old"), None, "the old template names are gone");
         assert_eq!(Kind::from_webview(""), None);
     }
 

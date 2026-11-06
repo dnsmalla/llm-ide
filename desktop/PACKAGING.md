@@ -204,16 +204,7 @@ reachable for the current launch, so the host must store a security-scoped bookm
 `startAccessingSecurityScopedResource` when reopening it. Not implemented; recent
 entries rely on normal filesystem access.
 
-**Tray and notifications** (`src-tauri/src/tray.rs`). Tauri `tray-icon` feature plus
-`tauri-plugin-notification` 2.4.0 (newest release that resolves against the pinned
-`tauri` 2.11.6; 2.5+ require tauri 2.12). The plugin is used from Rust only: no
-`notification:*` permission is granted, and `check-capabilities` now forbids
-`notification:`/`autostart:` grants. Tray menu: Show window, the active project name
-(label), Quit; left-click toggles the window. Close-to-tray is off by default
-(`tray-settings.json` in the app data dir) and is refused when no tray icon exists.
-The `notify` command accepts only the templates `approval_needed` and `task_done` with an
-optional detail (control chars and `<>&"` removed, 80 chars max) and is rate limited.
-There is no auto-start.
+**Tray and notifications** (`src-tauri/src/tray.rs`, `src-tauri/src/notify.rs`). Tauri `tray-icon` plus `tauri-plugin-notification` 2.4.0, used from Rust only: no `notification:*` permission is granted and `check-capabilities` forbids it. Tray menu: backend status (+ "Recording"), approvals waiting (opens Chat or the inbox), Show window, the active project (label), Start/Stop live capture (macOS), Pause/Resume sync, Quit; left-click toggles the window. The count also shows beside the menu-bar icon (macOS, Linux) and in the tooltip (Windows). Close-to-tray is off by default and refused without a tray icon. Notifications: the webview calls `notify_user(kind, key?, count?)` with a kind from a fixed table; the host raises `update_ready` and `core_down` itself. The host writes every word, skips a kind whose Settings switch is off or whose place the focused window shows, shows each key once and at most one per kind per 10 s. A 2 s in-memory watcher keeps the tray in step. There is no auto-start.
 
 Per-OS caveats:
 
@@ -319,7 +310,7 @@ An independent review of the Tauri host drove these changes (all covered by test
 - **Build gates.** `check-capabilities` no longer fails open (it compared `import.meta.url` to `file://argv[1]`, false for paths with spaces or a symlinked prefix), allowlists `core:*` permissions, rejects unknown permissions and `#[cfg]`-gated handlers, and `--product` fails if `capabilities/spike.json` exists. `stage-core` copies only `.mjs/.json/.sql` under `kb/`, drops symlinks, and re-walks the finished stage failing on `*.db*`, `*.pre-move`, `*.bak`, `.dev-secrets*`, `server.log`, `backups/`, secrets, non-source files under `kb/` and any symlink leaving the tree (`scripts/stage-filter.mjs`).
 - **Too-broad roots** now also refuse `~/.ssh`, `~/.aws`, `~/.gnupg` (and anything inside), `~/.config` itself, `/proc`, `/dev`, `/sys`, `/boot` (and inside), `/root` itself and the `/private/var/folders/xx/yyyy[/T]` temp roots; Rust (`project.rs`) and `extension/core/broad-root.mjs` stay in step.
 - **Server side.** git/npm/skills helper children spawned by `llm-sources/registry.mjs`, `kb/install-project-skills.mjs` and `llm_agent/sdk/updater.mjs` use `core/child-env.mjs` (`scrubbedChildEnv`): no `LLMIDE_*`, `MEETNOTES_*`, `ANTHROPIC_*` or provider keys; PATH, HOME, proxy and locale pass through.
-- Notification detail also drops bidi/format characters and links; `secrets_status` is cached for 60 s (invalidated when secrets are created) so the webview cannot hammer the OS credential store.
+- Notifications carry no webview text at all (a kind, an opaque key and a count); `secrets_status` is cached for 60 s (invalidated when secrets are created) so the webview cannot hammer the OS credential store.
 
 ## Security hardening round 2 (compromised-webview review)
 
