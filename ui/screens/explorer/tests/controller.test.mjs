@@ -456,3 +456,25 @@ test("copyInto (alt-drag) never copies a folder into itself or its own descendan
   assert.equal(c.getSnapshot().notice.severity, "warning");
   assert.deepEqual([...fs.files.keys()].sort(), ["d/sub/x.txt"]);
 });
+
+test("a superseded init whose folder check resolves late does not overwrite the newer project", async () => {
+  const { fs, c } = await setup({ "code/a.txt": "a", "b.txt": "b" });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const list = fs.list;
+  fs.list = async (path, o) => { if (path === "code") await gate; return list(path, o); };
+  const first = c.init("/one", "code");
+  await c.init("/two");
+  release();
+  await first;
+  await settle();
+  assert.equal(c.getSnapshot().root, "/two");
+  assert.deepEqual(rows(c), ["code", "b.txt"]);
+});
+
+test("a pending session save is written before a project switch", async () => {
+  const { c, kv } = await setup({ "src/main.rs": "m", "a.txt": "a" });
+  await c.toggleDir("src", true);
+  await c.init("/two");
+  assert.match([...kv.m.values()].join(" "), /src/);
+});

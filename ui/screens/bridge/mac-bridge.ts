@@ -124,11 +124,11 @@ export class MacBridge {
   private token: string | null = null;
 
   constructor() {
-    let saved: { deviceId?: string; token?: string } = {};
+    let saved: { deviceId?: string } = {};
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as typeof saved; } catch { /* fresh */ }
     this.deviceId = typeof saved.deviceId === "string" && saved.deviceId ? saved.deviceId : randomId();
-    this.token = typeof saved.token === "string" && saved.token ? saved.token : null;
-    if (!saved.deviceId) this.save();
+    // The pairing token is kept in memory only; saving rewrites the store without any token left over from older builds.
+    this.save();
   }
 
   subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
@@ -136,7 +136,7 @@ export class MacBridge {
   get paired(): boolean { return this.token !== null; }
 
   private save(): void {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ deviceId: this.deviceId, token: this.token })); } catch { /* session only */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ deviceId: this.deviceId })); } catch { /* session only */ }
   }
   private emit(patch: Partial<BridgeSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
@@ -156,6 +156,7 @@ export class MacBridge {
     ws.onmessage = (ev) => this.onMessage(ev.data);
     ws.onerror = () => this.emit({ phase: "error", error: "The Mac app is not reachable on port 3006." });
     ws.onclose = () => {
+      if (this.ws !== ws) return; // a replaced socket closing must not clear the current one
       this.stopHeartbeat();
       this.ws = null;
       if (this.snapshot.phase !== "error") this.emit({ phase: this.token ? "idle" : "needs-pin" });

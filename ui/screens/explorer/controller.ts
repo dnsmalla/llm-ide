@@ -150,6 +150,7 @@ export class ExplorerController {
    */
   async init(root: string | null, treeBase = ""): Promise<void> {
     const gen = ++this.gen;
+    this.flushSession(); // save the previous project's session before its timer is cleared
     this.clearTimers();
     void this.fs.watchStop().catch(() => undefined);
     this.pendingText.clear();
@@ -160,6 +161,7 @@ export class ExplorerController {
       } catch {
         base = "";
       }
+      if (gen !== this.gen) return; // superseded while the folder check was in flight
     }
     this.treeBase = base;
     this.snap = this.blank(root);
