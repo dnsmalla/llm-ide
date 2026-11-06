@@ -109,21 +109,22 @@
 @media (prefers-reduced-motion: reduce) { .lib-screen * { transition: none !important; animation: none !important; } }
 /* Library > Project files (Mac Code/Data categories). */
 .lib-project { border-top: 1px solid var(--tok-color-border); margin-top: var(--tok-space-sm); padding-top: var(--tok-space-sm); }
-.lib-project-root + .lib-project-root { margin-top: var(--tok-space-md); }
+.lib-project-root + .lib-project-root { margin-top: var(--tok-space-sm); }
 .lib-project-head { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 .lib-project-list { list-style: none; margin: 0; padding: 0; }
-.lib-project-row { line-height: 28px; }
-.lib-project-caret { display: inline-block; width: 14px; color: var(--tok-color-text-muted); }
-.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: 13px; text-align: left; cursor: pointer; padding: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
-.lib-project-dir { color: var(--tok-color-text-muted); }
-.lib-project-icon { width: 13px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
+.lib-project-row { line-height: 22px; }
+.lib-project-caret { display: inline-flex; width: 12px; flex: none; justify-content: center; color: var(--tok-color-text-muted); font-size: 10px; }
+.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); text-align: left; cursor: default; padding: 0 var(--tok-space-xs) 0 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; height: 22px; box-sizing: border-box; }
+.lib-project-dir:hover, .lib-project-file:hover { background: color-mix(in srgb, var(--tok-color-text) 5%, transparent); }
+.lib-project-dir { color: var(--tok-color-text); }
+.lib-project-icon { width: 16px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
 .lib-project-icon[data-kind="folder"] { color: #e8b64c; }
 .lib-project-icon[data-kind="code"] { color: #4c9aff; }
 .lib-project-icon[data-kind="config"] { color: #e09a3d; }
 .lib-project-icon[data-kind="doc"] { color: #72a7f0; }
 .lib-project-icon[data-kind="image"] { color: #3ec7c7; }
 .lib-project-icon[data-kind="data"] { color: #55c98a; }
-.lib-project-file[data-on] { background: var(--tok-color-accent); color: var(--tok-color-body); }
+.lib-project-file[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); color: inherit; }
 .lib-project-note { margin: 2px 0 2px 14px; font-size: var(--tok-type-caption-size); }
 .lib-project-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .lib-project-view-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }

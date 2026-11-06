@@ -280,7 +280,7 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
   const dir = entry.kind === "dir";
   const open = expanded.has(entry.path);
   return (
-    <li className="lib-project-row" style={{ paddingLeft: depth * 12 }} role="treeitem" aria-expanded={dir ? open : undefined} aria-selected={!dir && selected === entry.path}>
+    <li className="lib-project-row" style={{ paddingLeft: depth * 14 }} role="treeitem" aria-expanded={dir ? open : undefined} aria-selected={!dir && selected === entry.path}>
       <button
         type="button"
         className={dir ? "lib-project-dir" : "lib-project-file"}
