@@ -7,7 +7,6 @@ import { SHELL, load, React, renderToStaticMarkup } from "./helpers.mjs";
 const h = React.createElement;
 const html = (el) => renderToStaticMarkup(el);
 const REPO = resolve(SHELL, "../../..");
-const MAC = join(REPO, "mac/Sources/LlmIdeMac");
 
 const tb = await load("toolbar-model.ts");
 const nav = await load("sections.ts");
@@ -15,48 +14,14 @@ const plat = await load("platform.ts");
 const { SectionToolbar } = await load("Toolbar.tsx");
 const { accountMenuItems, SignOutDialog, AccountMenu, SIGN_OUT_TITLE, SIGN_OUT_BODY } = await load("AccountMenu.tsx");
 
-// ---- drift against the Mac source -------------------------------------------------------------------------------
-
-/** `ShellSection.toolbarOrder` case names, parsed from the Swift source (like scripts/extract-settings-groups.mjs). */
-function macToolbarOrder() {
-  const src = readFileSync(join(MAC, "Core/Contracts/ShellSection.swift"), "utf8");
-  const m = /static let toolbarOrder: \[ShellSection\] = \[([\s\S]*?)\]/.exec(src);
-  assert.ok(m, "toolbarOrder not found in ShellSection.swift (the parser needs updating)");
-  return [...m[1].matchAll(/\.(\w+)/g)].map((x) => x[1]);
-}
-
-function macLabels() {
-  const src = readFileSync(join(MAC, "Core/Contracts/ShellSection.swift"), "utf8");
-  const body = /var label: String \{([\s\S]*?)\n    \}/.exec(src)[1];
-  return new Map([...body.matchAll(/case \.(\w+):\s*return "([^"]+)"/g)].map((x) => [x[1], x[2]]));
-}
-
-test("toolbar order equals the Mac's ShellSection.toolbarOrder ", () => {
-  const order = macToolbarOrder();
-  assert.ok(order.length >= 10);
-  for (const c of order) assert.ok(Object.hasOwn(tb.MAC_CASE_TO_ID, c), `Mac toolbar item "${c}" has no desktop mapping: add it to MAC_CASE_TO_ID`);
-  const expected = order.map((c) => tb.MAC_CASE_TO_ID[c]).filter((id) => id !== null);
-  assert.deepEqual([...tb.TOOLBAR_IDS], expected);
-  assert.deepEqual(tb.toolbarSections(false).map((d) => d.id), expected);
+test("toolbar sections follow TOOLBAR_IDS; developer tools append Spike", () => {
+  assert.deepEqual(tb.toolbarSections(false).map((d) => d.id), [...tb.TOOLBAR_IDS]);
   assert.equal(tb.toolbarSections(true).at(-1).id, "spike", "developer tools append Spike");
-  assert.equal(tb.toolbarSections(true).length, expected.length + 1);
+  assert.equal(tb.toolbarSections(true).length, tb.TOOLBAR_IDS.length + 1);
 });
 
-test("toolbar labels equal the Mac's section labels", () => {
-  const labels = macLabels();
-  for (const [mac, id] of Object.entries(tb.MAC_CASE_TO_ID)) {
-    if (id === null) continue;
-    assert.equal(nav.SECTIONS.find((s) => s.id === id).label, labels.get(mac), `label of ${mac}`);
-  }
-});
-
-test("account menu rows and the sign-out dialog use the Mac's wording and order", () => {
-  const src = readFileSync(join(MAC, "Shell/Chrome/HeaderAccountMenu.swift"), "utf8");
-  const macRows = [...src.matchAll(/Label\("([^"]+)", systemImage/g)].map((m) => m[1]);
-  const macSignOut = /Button\("Sign out", role: \.destructive\)/.test(src);
-  assert.deepEqual(macRows, ["Settings…", "Help & Guide", "Permissions…"]);
-  assert.ok(macSignOut);
-  assert.ok(src.includes(`"${SIGN_OUT_TITLE}"`), "dialog title drifted from the Mac");
+test("account menu rows and their order", () => {
+  const macRows = ["Settings…", "Help & Guide", "Permissions…"];
   const noop = () => {};
   const items = accountMenuItems({ id: "1", email: "a@b.c", displayName: "Ada" }, { openSettings: noop, openHelp: noop, openPermissions: noop, askSignOut: noop }, true);
   const actions = items.filter((i) => !("kind" in i)).map((i) => i.label);

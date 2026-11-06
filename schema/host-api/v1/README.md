@@ -4,7 +4,7 @@ The machine-checked contract for Mac, desktop, iOS and web clients. Design:
 [`docs/superpowers/specs/2026-11-03-host-api-design.md`](../../../docs/superpowers/specs/2026-11-03-host-api-design.md).
 
 This directory contains the frame envelope, command registry, event schemas and
-fixtures. The Mac host adapter is `mac/Sources/LlmIdeMac/Features/MobileControl/Services/HostApi/` (development listener only until TLS lands); Swift validation and payload types are generated into `ios_app/SharedProtocol`.
+fixtures. The host is the core's gateway (`extension/routes/host-api/`), run by the desktop app; Swift validation and payload types are generated into `ios_app/SharedProtocol`.
 
 ## Limits
 

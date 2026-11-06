@@ -8,7 +8,7 @@ import { redact } from '../core/redact-object.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
 import { getAgentDb } from './agent-db.mjs';
 
-// The v1 event-kind allow-list (shared contract; Swift mirrors this).
+// The v1 event-kind allow-list (the clients report only these kinds).
 export const ACTIVITY_KINDS = new Set([
   'knowledge_updated',
   'regression_done',

@@ -1,4 +1,4 @@
-// Host API v1 desktop gateway — scenarios ported from mac/Tests/LlmIdeMacTests/HostApiV1GatewayTests.swift,
+// Host API v1 desktop gateway — scenarios ported from the retired Swift app's HostApiV1GatewayTests.swift,
 // driven with injected fakes (no engine, no DB, no network).
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';

@@ -2,31 +2,18 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadChat, h, renderToStaticMarkup as html, fakeCore, CHAT, REPO } from "./helpers.mjs";
-import { pathToFileURL } from "node:url";
+import { loadChat, h, renderToStaticMarkup as html, fakeCore, CHAT } from "./helpers.mjs";
 
-let c, ext;
+let c;
 before(async () => {
   c = await loadChat("slash");
-  ext = await import(pathToFileURL(join(REPO, "scripts/extract-chat-slash-builtins.mjs")).href);
 });
 
 const asJson = (b) => ({ label: b.label, aliases: [...b.aliases], description: b.description, insert: b.insert, action: b.action.kind === "openSection" ? { kind: "openSection", section: b.action.section } : { kind: b.action.kind } });
 
-test("built-ins match the Swift list (drift guard)", () => {
-  const swift = ext.extractBuiltins();
-  assert.deepEqual(c.BUILTINS.map(asJson), swift, "slash/builtins.ts drifted from ChatSlashCommands.builtins; update the port and fixture");
+test("built-ins match the pinned list (slash/fixtures/builtins.swift.json, taken over from the retired Swift app)", () => {
   const fixture = JSON.parse(readFileSync(join(CHAT, "slash/fixtures/builtins.swift.json"), "utf8"));
-  assert.deepEqual(fixture, swift, "run: node scripts/extract-chat-slash-builtins.mjs --write ui/screens/chat/slash/fixtures/builtins.swift.json");
-});
-
-test("the extractor notices a changed Swift list", () => {
-  const src = readFileSync(ext.SWIFT_SOURCE, "utf8");
-  const changed = ext.extractBuiltins(src.replace('description: "Open Settings"', 'description: "Open the Settings"'));
-  assert.notDeepEqual(c.BUILTINS.map(asJson), changed);
-  const added = ext.extractBuiltins(src.replace('Builtin(label: "/hooks"', 'Builtin(label: "/zap", description: "x", action: .clearChat),\n        Builtin(label: "/hooks"'));
-  assert.equal(added.length, c.BUILTINS.length + 1);
-  assert.throws(() => ext.extractBuiltins("nothing here"));
+  assert.deepEqual(c.BUILTINS.map(asJson), fixture, "slash/builtins.ts drifted from the pinned list; update both on purpose");
 });
 
 test("built-in recognisers: case and whitespace tolerant, aliases, /model argument", () => {

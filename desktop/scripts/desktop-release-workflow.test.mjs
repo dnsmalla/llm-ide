@@ -1,5 +1,5 @@
 // desktop/scripts/desktop-release-workflow.test.mjs
-// Text asserts on the desktop release workflows (house pattern: extension/tests/scripts-build-number.test.mjs).
+// Text asserts on the desktop release workflows (plain text asserts over the workflow files).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

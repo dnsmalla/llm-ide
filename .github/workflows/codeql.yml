@@ -3,8 +3,8 @@ name: codeql
 # Static security analysis (CodeQL) for the extension's JavaScript/TypeScript
 # — the side panel (src/) and the Node backend (server, agents, kb, …), which
 # is the real attack surface. Results appear under the repo's Security tab.
-# Free on this public repo. Swift (mac/) is not scanned here (it needs a build
-# step and is a desktop client, not an exposed service).
+# Free on this public repo. Swift (ios_app/) and Rust (desktop/) are not scanned
+# here (they need a build step and are clients, not exposed services).
 
 on:
   push:

@@ -1,7 +1,7 @@
 /* Desktop shell chrome (toolbar, status bar, layout). Kit components live in @llmide/ui-kit. */
 
 /* Shared chrome, styled only with the generated tokens (tokens.css).
- * Metrics mirror mac/Sources/LlmIdeMac/Core/DesignSystem/* and Shell/*. */
+ * Metrics were taken over from the retired Swift app's design system and shell. */
 
 body {
   margin: 0;

@@ -1,5 +1,5 @@
 // The ONE place that knows where a project's generated knowledge lives on disk.
-// Mirrors the Mac app's `GeneratedDataLocator` (mac/.../Core/Project), decision D1
+// Same rule as the retired Swift app's `GeneratedDataLocator`, decision D1
 // of 2026-10-28: generated data ALWAYS lives in the PROJECT's own `system/`,
 // never in a cloned repo's `system/` under `code/<child>/`. The cloned repo is
 // only the input being graphed.

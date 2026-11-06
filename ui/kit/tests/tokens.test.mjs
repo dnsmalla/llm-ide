@@ -58,7 +58,7 @@ test("spacing, radius and the full type scale are in :root", () => {
   assert.ok(root.get("--tok-type-mono-family").includes("monospace"));
 });
 
-test("the legacy outputs keep their shape (os-view bundle stays valid): no web-only variables", () => {
+test("the non-web outputs (schema/design/tokens.css, the extension copy) keep their shape: no web-only variables", () => {
   const legacy = gen.generateCss(src);
   assert.ok(!legacy.includes("--tok-type-sans-family"));
   assert.equal(lf(readFileSync(join(REPO, "schema/design/tokens.css"), "utf8")), legacy);
@@ -93,20 +93,6 @@ test("every var(--tok-*) used by kit CSS and components is defined", () => {
 test("components use no raw colours (hex / rgb / hsl literals)", () => {
   const css2 = read("src/styles/components.css").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.doesNotMatch(css2, /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
-});
-
-test("aliases.css mirrors the derived colours declared in Theme.swift", () => {
-  const swift = lf(readFileSync(join(REPO, "mac/Sources/LlmIdeMac/Core/Platform/Theme.swift"), "utf8"));
-  const aliases = parseBlocks(read("src/styles/aliases.css")).get(":root");
-  let n = 0;
-  for (const m of swift.matchAll(/^\s*var (\w+): Color \{ (\w+)(?:\.opacity\(([\d.]+)\))? \}/gm)) {
-    const [, name, ref, alpha] = m;
-    const target = `var(--tok-color-${kebab(ref)})`;
-    const want = alpha ? `color-mix(in srgb, ${target} ${Math.round(Number(alpha) * 100)}%, transparent)` : target;
-    assert.equal(aliases.get(`--tok-color-${kebab(name)}`), want, name);
-    n++;
-  }
-  assert.equal(aliases.size, n, "aliases.css has an alias Theme.swift does not");
 });
 
 const GRAPHKIT_PENDING_LIGHT_TEXT_MUTED = "rgb(42% 46% 55%)";

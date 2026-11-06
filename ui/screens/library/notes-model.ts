@@ -2,7 +2,7 @@
 // facts (frontmatter, read lazily in batches), classification into sections, filtering, sorting
 // and the flattened rows the virtualised list renders. Pure; tested with node.
 //
-// Layout it understands (the Mac app's, mac/.../Core/Notes + ProjectLayout):
+// Layout it understands (the project layout the retired Swift app also wrote):
 //   source/<raw dir>/YYYY/MM/<file>   raw captures and fetched items (meetings, emails, slack, ...)
 //   llm-doc/<type dir>/<...>/<file>   generated notes, grouped by type dir
 //   anything else                     notes-folder layout (meeting files, user notes)

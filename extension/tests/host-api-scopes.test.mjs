@@ -1,4 +1,4 @@
-// Host API v1 token scopes (Plan 6 Task 7) — the Node twin of mac/Tests/LlmIdeMacTests/HostApiV1ScopesTests.swift.
+// Host API v1 token scopes (Plan 6 Task 7) — the Node twin of the retired Swift app's HostApiV1ScopesTests.swift.
 // A token carries the capabilities served when it was paired; a session's effective set is served ∩ granted.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

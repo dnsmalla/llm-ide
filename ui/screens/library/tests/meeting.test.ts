@@ -9,7 +9,7 @@ import { parseMeetingBody, parseTranscript, speakerCounts } from "../meeting.ts"
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 test("the Mac fixture's transcript parses into speakers and times", () => {
-  const text = readFileSync(join(REPO, "mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-with-platform.md"), "utf8");
+  const text = readFileSync(join(REPO, "ui/screens/library/fixtures/lta/meeting-with-platform.md"), "utf8");
   const m = parseMeetingBody(parseNote(text).body);
   assert.equal(m.hasTranscript, true);
   assert.deepEqual(m.transcript, [{ time: "10:00:01", speaker: "Alice", text: "we should raise the budget" }]);

@@ -3,7 +3,7 @@
  "cases": [
   {
    "name": "mac fixture lta/meeting-with-platform.md (Yams output)",
-   "source": "mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-with-platform.md",
+   "source": "ui/screens/library/fixtures/lta/meeting-with-platform.md",
    "input": "---\nid: m-fixture-1\ntitle: Budget review\nstarted_at: '2026-08-01T10:00:00Z'\nended_at: '2026-08-01T10:30:00Z'\nduration_seconds: 1800\nparticipants:\n- Alice\n- Bob\nplatform: chrome-extension\nlanguage: en\ntldr: []\n---\n\n## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n",
    "hasFrontmatter": true,
    "data": {
@@ -24,7 +24,7 @@
   },
   {
    "name": "mac fixture lta/meeting-without-platform.md (Q19: no platform key)",
-   "source": "mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-without-platform.md",
+   "source": "ui/screens/library/fixtures/lta/meeting-without-platform.md",
    "input": "---\nid: m-fixture-1\ntitle: Budget review\nstarted_at: '2026-08-01T10:00:00Z'\nended_at: '2026-08-01T10:30:00Z'\nduration_seconds: 1800\nparticipants:\n- Alice\n- Bob\nlanguage: en\ntldr: []\n---\n\n## Transcript\n\n[10:00:01] **Alice**: we should raise the budget\n",
    "hasFrontmatter": true,
    "data": {
@@ -44,7 +44,7 @@
   },
   {
    "name": "LibraryItemStoreSourceScanTests: double-quoted platform",
-   "source": "mac/Tests/LlmIdeMacTests/LibraryItemStoreSourceScanTests.swift",
+   "source": "retired Swift app test LibraryItemStoreSourceScanTests.swift (in git history)",
    "input": "---\nplatform: \"meet\"\n---\nhi",
    "hasFrontmatter": true,
    "data": {

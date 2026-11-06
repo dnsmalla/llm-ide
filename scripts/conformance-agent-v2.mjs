@@ -1,34 +1,26 @@
 #!/usr/bin/env node
 // agent/v2 wire conformance gate.
 //
-// Schema + fixtures alone only prove that a payload DECODES. They never prove
-// the two sides AGREE — which is how `error.retryable` came to be emitted by
-// the server and silently dropped by the Mac for as long as nobody looked.
-// (graph-kit learned the same lesson the same way; see the Makefile's note on
-// conformance-memory.mjs.)
-//
-// So this runner does field-set diffing:
+// Validity, coverage and roster checks over schema/agent-v2:
 //
 //   1. VALIDITY  — every fixture matches exactly one schema variant, carries
 //                  its required keys, and no key the schema does not declare.
 //   2. COVERAGE  — every field path the schema declares is exercised by at
 //                  least one fixture, so nothing is checked only in theory.
-//   3. DECODE GAP— for each fixture, the paths it actually carries minus the
-//                  paths `chat-contract-lab --decode` says Swift kept. A
-//                  non-empty difference must be listed in ALLOWED_UNDECODED
-//                  with a reason, or this exits 1.
-//   4. ROSTER    — every `type:` literal emitted under llm_agent/ or routes/
+//   3. ROSTER    — every `type:` literal emitted under llm_agent/ or routes/
 //                  exists in the schema, so a new emitter cannot appear
 //                  outside the linker unnoticed. server/ai-routes.mjs is out
 //                  of scope: it serves the LEGACY /code-assist wire.
+//   4. MODELS    — the default Claude model is an entry of the fallback chain.
+//
+// (The Swift decode-gap check ran against the Mac app's chat-contract-lab and
+// was removed with the Mac app.)
 //
 // The generic parts (schema walking, variant matching, validity, coverage, the
 // report) live in scripts/lib/conformance.mjs, shared with conformance-http.mjs.
-// What stays here is agent/v2-specific: ALLOWED_UNDECODED, the Swift decode step,
-// the emitter roster scan and the model-id check.
+// What stays here is agent/v2-specific: the emitter roster scan and the model check.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJson, listJson, makeSchemaWalker, variantFor, checkDoc, createCoverage, createReport } from './lib/conformance.mjs';
@@ -36,26 +28,6 @@ import { readJson, listJson, makeSchemaWalker, variantFor, checkDoc, createCover
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCHEMA_PATH = join(ROOT, 'schema/agent-v2/agent-v2.schema.json');
 const FIXTURE_DIR = join(ROOT, 'schema/agent-v2/fixtures');
-
-// Field paths the server sends and the Mac deliberately (or knowingly) does not
-// decode. Every entry needs a reason — and the matching row in SCHEMA.md.
-// REMOVE an entry the moment the Swift side starts decoding the field; a stale
-// entry here is how a fixed drift silently reopens.
-const ALLOWED_UNDECODED = Object.freeze({
-  'sdk.json': {
-    subtype: 'Observation channel only — the Mac keeps sdkType. AgentV2Event.swift SdkWire.',
-    raw: 'Same: the raw SDK message is not modelled on the Mac.',
-  },
-  'notice.json': {
-    data: 'Machine-readable detail for the server and observers (audit, limits); the Mac renders only kind/level/text, like the sdk raw payload.',
-  },
-  'error.json': {
-    retryable: 'REAL DRIFT, not a choice: ErrorWire has no such field, so the Mac infers retryability from code == "SESSION_UNRESUMABLE" alone. Remove this entry when ErrorWire gains it.',
-  },
-  'approval_request_question.json': {
-    'questions.options.preview': 'REAL DRIFT: the SDK sends option previews, AgentV2ApprovalOption has no field for them, so they cannot render.',
-  },
-});
 
 const report = createReport();
 const note = (msg) => report.note(msg);
@@ -71,7 +43,6 @@ const walker = makeSchemaWalker(schema, { rootSkip: ['type'] });
 const fixtures = listJson(FIXTURE_DIR);
 if (fixtures.length === 0) { console.error('no fixtures found'); process.exit(1); }
 
-const docs = new Map();
 const coverage = createCoverage();
 
 for (const name of fixtures) {
@@ -83,7 +54,6 @@ for (const name of fixtures) {
   const { present, problems } = checkDoc({ walker, node: variant, doc, name, label: `the schema variant "${variant.title}"` });
   for (const msg of problems) note(msg);
   coverage.exercise(variant.title, present);
-  docs.set(name, { doc, variant, present });
 }
 
 // A duplicate variant title would merge two variants' coverage sets and let an
@@ -102,49 +72,7 @@ for (const variant of schema.oneOf) {
   for (const msg of coverage.check(variant.title, walker.schemaPaths(variant), `on "${variant.title}"`)) note(msg);
 }
 
-// ---------------------------------------------------------------- swift side
-
-let decoded;
-try {
-  const raw = execFileSync(
-    'swift', ['run', 'chat-contract-lab', '--decode', FIXTURE_DIR],
-    { cwd: join(ROOT, 'mac'), encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' }, maxBuffer: 32 * 1024 * 1024 },
-  );
-  decoded = new Map(
-    raw.split('\n').filter((l) => l.startsWith('{')).map((l) => {
-      const row = JSON.parse(l);
-      return [row.file, row];
-    }),
-  );
-} catch (err) {
-  console.error('conformance-agent-v2: could not run `swift run chat-contract-lab --decode`');
-  console.error(err.stderr || err.message);
-  process.exit(1);
-}
-
-// 3. DECODE GAP
-for (const [name, { present }] of docs) {
-  const row = decoded.get(name);
-  if (!row) { note(`${name}: chat-contract-lab reported nothing for this fixture`); continue; }
-  if (!row.decoded) { note(`${name}: Swift failed to decode — ${row.error}`); continue; }
-
-  const captured = new Set(row.captured);
-  const allowed = Object.hasOwn(ALLOWED_UNDECODED, name) ? ALLOWED_UNDECODED[name] : {};
-  for (const path of present) {
-    if (captured.has(path)) continue;
-    if (Object.hasOwn(allowed, path)) continue;   // NOT `in` — that walks Object.prototype
-    note(`${name}: server sends "${path}" but Swift does not keep it (add the field, or explain it in ALLOWED_UNDECODED)`);
-  }
-  for (const path of Object.keys(allowed)) {
-    if (captured.has(path)) {
-      note(`${name}: ALLOWED_UNDECODED lists "${path}" but Swift now decodes it — delete the stale entry`);
-    } else if (!present.has(path)) {
-      note(`${name}: ALLOWED_UNDECODED lists "${path}" but no fixture carries it — stale entry`);
-    }
-  }
-}
-
-// 4. ROSTER — every emitted `type:` literal must be in the schema.
+// 3. ROSTER — every emitted `type:` literal must be in the schema.
 const known = new Set(schema.oneOf.map((v) => v.properties?.type?.const).filter(Boolean));
 
 // Object literals carrying a `type` key that are NOT wire events. Keep this
@@ -217,25 +145,11 @@ for (const core of ['init', 'delta', 'tool_use_start', 'tool_args_delta', 'tool_
 
 // ------------------------------------------------------------ model ids
 //
-// The fourth drift class: Claude model ids. Node reads
-// schema/models/anthropic-models.json directly. The Mac keeps NO Claude model
-// list or retired-id table (0cf88d8e): ids, names and the default come only
-// from the account's live list via the backend. So the Mac-side check is that
-// nothing crept back in, rather than that two lists agree.
-
+// Claude model ids: Node reads schema/models/anthropic-models.json directly.
 const MODELS_PATH = join(ROOT, 'schema/models/anthropic-models.json');
-const CLAUDE_CLI_PATH = join(ROOT, 'mac/Sources/LlmIdeMac/ClaudeLink/ClaudeCLI.swift');
 const models = JSON.parse(readFileSync(MODELS_PATH, 'utf8'));
-const swiftSource = readFileSync(CLAUDE_CLI_PATH, 'utf8');
 
-for (const pattern of [/fallbackModels\s*[:=]/, /retiredModelIds\s*[:=]/, /"claude-[a-z0-9.-]+"/]) {
-  if (pattern.test(swiftSource)) {
-    note(`ClaudeCLI.swift matches ${pattern} — the Mac must not hardcode Claude models; use the live list`);
-  }
-}
-
-// The server's chain and the Mac's picker are different lists (see the JSON's
-// _comment). What must hold is that the DEFAULT is a chain entry — anything
+// What must hold is that the DEFAULT is a chain entry — anything
 // else means the server's fallback ladder cannot reach its own default.
 const chainIds = models.chain.map((c) => c.id);
 if (!chainIds.includes(models.default)) {
@@ -243,49 +157,10 @@ if (!chainIds.includes(models.default)) {
 }
 if (models.chain.filter((c) => c.fast).length > 1) note('more than one chain entry is flagged fast');
 
-// --------------------------------------------------- generation ownership
-//
-// The Doc Gen / Visual generation surfaces must RESOLVE their view model from
-// GenerationRegistry, never construct one. Owning it with
-// `@StateObject private var vm = GenerationViewModel()` is the bug: AppShell
-// renders sections from a `switch`, so leaving the section destroyed the model
-// and returning built a fresh, empty one while the generation itself carried on
-// writing into the old object.
-//
-// A source check rather than a behavioural one because there is no UI test
-// harness here and `swift test` does not run on this toolchain. It is crude, but
-// it fails on exactly the edit that reintroduces the bug — which the registry's
-// own unit assertions do not.
-for (const rel of [
-  'mac/Sources/LlmIdeMac/Features/Generation/DocGen/Views/DocGenView.swift',
-  'mac/Sources/LlmIdeMac/Features/Generation/Visual/Views/VisualView.swift',
-]) {
-  // Strip comments first: the fix's own explanatory doc comment QUOTES the
-  // broken line, and a naive scan flags it — which it did, on the first run.
-  const src = readFileSync(join(ROOT, rel), 'utf8')
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
-  // Forbid CONSTRUCTION outright, and require the exact resolve. The first
-  // version keyed on `@StateObject ... = GenerationViewModel(` and on the file
-  // merely MENTIONING the registry somewhere — review defeated both at once
-  // with `@State private var vm = GenerationViewModel()` plus an unused
-  // computed property that referenced the registry. A different wrapper, an
-  // explicit `init`, a `Self.freshModel()` helper, or a line break before the
-  // `=` all slipped through. Neither view names the type outside a `///`
-  // comment, which the strip above already removes, so a blanket ban is exact.
-  if (/GenerationViewModel\s*\(/.test(src)) {
-    note(`${rel} constructs a GenerationViewModel — resolve it from GenerationRegistry.shared.model(for:) instead, or a generation stops being visible after a section switch`);
-  }
-  if (!/@StateObject\s+private\s+var\s+vm\s*=\s*GenerationRegistry\.shared\.model\(for:/.test(src)) {
-    note(`${rel} no longer resolves its view model from GenerationRegistry`);
-  }
-}
-
 // ---------------------------------------------------------------- report
 
 report.finish({
   title: 'agent/v2 conformance',
   footer: 'See schema/agent-v2/SCHEMA.md.',
-  ok: `agent/v2 conformance: ${fixtures.length} fixtures, ${known.size} variants — Swift and the wire agree`,
+  ok: `agent/v2 conformance: ${fixtures.length} fixtures, ${known.size} variants — the fixtures, schema and emitters agree`,
 });

@@ -55,13 +55,12 @@ test('dev origins live only in devCsp, which keeps the same lockdown', () => {
   assert.deepEqual(d['frame-src'], ['about:']);
 });
 
-test('the mermaid pin is internally consistent and matches the Mac app pin', () => {
+test('the mermaid pin is internally consistent', () => {
   assert.match(pin.sha256, /^[0-9a-f]{64}$/);
   assert.equal(Buffer.from(pin.sha256, 'hex').toString('base64'), pin.sha256_base64);
   assert.equal(pin.url, `https://cdn.jsdelivr.net/npm/mermaid@${pin.version}/dist/mermaid.min.js`);
   assert.equal(pin.license, 'MIT');
-  const mac = readFileSync(join(import.meta.dirname, '..', '..', 'mac', 'Sources', 'LlmIdeMac', 'Core', 'Editor', 'Mermaid.swift'), 'utf8');
-  assert.ok(mac.includes(`"${pin.version}"`) && mac.includes(`"${pin.sha256}"`) && mac.includes(String(pin.bytes).replace(/(\d)(?=(\d{3})+$)/g, '$1_')), 'same release, hash and size as the Mac pin');
+  assert.ok(Number.isInteger(pin.bytes) && pin.bytes > 0);
 });
 
 test('the JS prototypes are frozen before page scripts run', () => {

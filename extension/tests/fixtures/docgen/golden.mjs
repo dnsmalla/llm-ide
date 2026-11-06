@@ -1,5 +1,5 @@
-// Golden bytes for what HEAD's Swift renderedMarkdown() writes (docs-kit K1).
-// The Swift side asserts the same literals in mac/Tests/LlmIdeMacTests/DocGenServerParityTests.swift.
+// Golden bytes for what the template renderer writes (docs-kit K1; taken over from
+// the retired Swift app's renderedMarkdown()).
 // Plain module (no tests) so other test files can import it without re-running suites.
 
 export const GOLDEN_VISUAL_TEMPLATE =

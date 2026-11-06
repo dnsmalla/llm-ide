@@ -1,19 +1,13 @@
 #!/usr/bin/env node
 // Generates the design-token outputs from schema/design/tokens.json:
 //
-//   mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift  plain Swift values;
-//                                                           Theme.swift builds Color/Font
 //   schema/design/tokens.css                               CSS custom properties, one
 //                                                           block per theme (Tauri)
 //   extension/src/styles/tokens.generated.css              the same CSS, bundled by the
 //                                                           side panel (Vite)
-//   ui/os-view/src/tokens.generated.css                    the same CSS, bundled by the
-//                                                           System view host (Vite); the
-//                                                           page itself is graph-kit's web/
-//
 //   ui/kit/src/styles/tokens.generated.css                 the same CSS, shipped by the
 //                                                           shared React package ui/kit
-//                                                           (desktop, phone PWA, relay web)
+//                                                           (desktop and web)
 //   ui/kit/src/themes.generated.ts                         theme ids/names for the kit's
 //                                                           theme switcher (TypeScript)
 //
@@ -30,10 +24,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = join(ROOT, 'schema/design/tokens.json');
-const SWIFT_OUT = join(ROOT, 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift');
 const CSS_OUT = join(ROOT, 'schema/design/tokens.css');
 const EXT_CSS_OUT = join(ROOT, 'extension/src/styles/tokens.generated.css');
-const UI_CSS_OUT = join(ROOT, 'ui/os-view/src/tokens.generated.css');
 const KIT_CSS_OUT = join(ROOT, 'ui/kit/src/styles/tokens.generated.css');
 const KIT_THEMES_OUT = join(ROOT, 'ui/kit/src/themes.generated.ts');
 const CHECK = process.argv.includes('--check');
@@ -142,147 +134,6 @@ const pct = (x) => `${Number((x * 100).toFixed(4))}%`;
 
 const kebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 
-// ---------- Swift ----------
-
-function swiftSwatch(v) {
-  if (v.rgb) return `.rgb(${v.rgb.map(lit).join(', ')})`;
-  if ('white' in v) return `.white(${lit(v.white)})`;
-  return `.black(${lit(v.black)})`;
-}
-
-function swiftPalette(t, ind) {
-  const i = ind;
-  const lines = [
-    `${i}static let ${t.id} = Palette(`,
-    `${i}    id: ${JSON.stringify(t.id)},`,
-    `${i}    name: ${JSON.stringify(t.name)},`,
-    `${i}    isDark: ${t.isDark},`,
-    ...ROLES.map((r) => `${i}    ${r}: ${swiftSwatch(t.colors[r])},`),
-  ];
-  // Trailing comma on the last argument is not valid Swift; strip it.
-  lines[lines.length - 1] = lines[lines.length - 1].replace(/,$/, '');
-  lines.push(`${i})`);
-  return lines.join('\n');
-}
-
-function swiftType(k, t) {
-  const size = t.size === undefined ? 'nil' : lit(t.size);
-  const style = t.textStyle === undefined ? 'nil' : `.${t.textStyle}`;
-  const weight = t.weight === undefined ? 'nil' : `.${t.weight}`;
-  return `TypeToken(size: ${size}, textStyle: ${style}, weight: ${weight}, monospaced: ${t.monospaced === true})`;
-}
-
-function generateSwift(src) {
-  const themes = src.themes.map((t) => swiftPalette(t, '    ')).join('\n\n');
-  return `// GENERATED - do not edit.
-// Source: schema/design/tokens.json
-// Regenerate with \`node scripts/gen-design-tokens.mjs\` (or \`make design-tokens\`).
-// Check with \`node scripts/gen-design-tokens.mjs --check\` (part of \`make contract-gates\`).
-//
-// Plain values only (no SwiftUI, no dependencies). Core/Platform/Theme.swift
-// turns these into Color and Font, so every Theme value is the one written in
-// tokens.json.
-
-enum ThemeTokens {
-    /// One colour as authored in tokens.json: sRGB components, or Color.white /
-    /// Color.black at an opacity.
-    enum Swatch {
-        case rgb(Double, Double, Double)
-        case white(Double)
-        case black(Double)
-    }
-
-    /// One theme's colour roles.
-    struct Palette {
-        let id: String
-        let name: String
-        let isDark: Bool
-        let body: Swatch
-        let surface: Swatch
-        let surface2: Swatch
-        let border: Swatch
-        let text: Swatch
-        let textMuted: Swatch
-        let accent: Swatch
-        let accent2: Swatch
-        let accent3: Swatch
-        let accent4: Swatch
-        let danger: Swatch
-        let rowAlt: Swatch
-        let gridLine: Swatch
-        let categoryPurple: Swatch
-        let categoryTeal: Swatch
-        let categoryAmber: Swatch
-    }
-
-${themes}
-
-    /// Every theme, in the order Theme.all lists them.
-    static let palettes: [Palette] = [${src.themes.map((t) => t.id).join(', ')}]
-
-    struct SpacingScale {
-        let xs: Double
-        let sm: Double
-        let md: Double
-        let lg: Double
-        let xl: Double
-        let xxl: Double
-    }
-
-    static let spacing = SpacingScale(
-        xs: ${lit(src.spacing.xs)},
-        sm: ${lit(src.spacing.sm)},
-        md: ${lit(src.spacing.md)},
-        lg: ${lit(src.spacing.lg)},
-        xl: ${lit(src.spacing.xl)},
-        xxl: ${lit(src.spacing.xxl)}
-    )
-
-    struct RadiusScale {
-        let sm: Double
-        let md: Double
-        let lg: Double
-    }
-
-    static let radius = RadiusScale(
-        sm: ${lit(src.radius.sm)},
-        md: ${lit(src.radius.md)},
-        lg: ${lit(src.radius.lg)}
-    )
-
-    enum FontWeightToken {
-        case regular
-        case medium
-        case semibold
-        case bold
-    }
-
-    /// A platform text style (size comes from the system), used for the
-    /// empty-state and button roles.
-    enum TextStyleToken {
-        case callout
-        case caption
-    }
-
-    struct TypeToken {
-        /// Point size; nil when \`textStyle\` supplies the size.
-        let size: Double?
-        let textStyle: TextStyleToken?
-        let weight: FontWeightToken?
-        let monospaced: Bool
-    }
-
-    struct TypeScale {
-${TYPE.map((k) => `        let ${k}: TypeToken`).join('\n')}
-    }
-
-    static let typeScale = TypeScale(
-${TYPE.map((k, i) => `        ${k}: ${swiftType(k, src.typography[k])}${i === TYPE.length - 1 ? '' : ','}`).join('\n')}
-    )
-}
-`;
-}
-
 // ---------- CSS ----------
 
 function cssColour(v) {
@@ -371,14 +222,12 @@ export function loadSource(text = readFileSync(SOURCE, 'utf8')) {
   return src;
 }
 
-export { generateCss, generateSwift, generateThemesTs, validate };
+export { generateCss, generateThemesTs, validate };
 
 function buildOutputs(src) {
   return [
-    { file: SWIFT_OUT, text: generateSwift(src) },
     { file: CSS_OUT, text: generateCss(src) },
     { file: EXT_CSS_OUT, text: generateCss(src) },
-    { file: UI_CSS_OUT, text: generateCss(src) },
     { file: KIT_CSS_OUT, text: generateCss(src, { web: true }) },
     { file: KIT_THEMES_OUT, text: generateThemesTs(src) },
   ];

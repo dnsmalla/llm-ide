@@ -56,9 +56,7 @@ def build_checks() -> list[tuple[str, object, object, str]]:
     arch = _read("docs/explanation/architecture.md")
     server = _read("extension/server.mjs")
     config = _read("extension/core/config.mjs")
-    macos = _read("docs/spec/macos-app.md")
     chrome = _read("docs/spec/chrome-extension.md")
-    package_swift = _read("mac/Package.swift")
     metrics = _read("extension/server/metrics.mjs")
     sidepanel_app = _read("extension/src/sidepanel/App.tsx")
 
@@ -67,23 +65,6 @@ def build_checks() -> list[tuple[str, object, object, str]]:
     head = migration_head(Path("extension/kb/migrations"))
     api = first_int(server, r"SERVER_API_VERSION\s*=\s*(\d+)")
     body = first_int(config, r"LLMIDE_BODY_LIMIT_MB',\s*(\d+)")
-    # graph-kit consumption mechanism. It is a REMOTE dependency pinned by
-    # commit (`.package(url:, revision:)`), NOT the vendored `.package(path:)`
-    # it once was. Two consequences this check encodes: the submodule at
-    # graph-kit is now only the editing/lab working tree, so
-    # its CHANGELOG is not what the build resolves and must never be read as
-    # the shipped version; and the version itself is a commit sha the spec page
-    # deliberately elides (duplicating a sha in prose guarantees drift), so
-    # there is no version string to compare — the mechanism is what we lock.
-    # A revert to a path dep changes what the page must say, and fails here.
-    graphkit_mechanism = (
-        "url-pin"
-        if re.search(
-            r'\.package\(\s*url:\s*"[^"]*graph-kit\.git"\s*,\s*revision:',
-            package_swift,
-        )
-        else "path-dep"
-    )
     # Prometheus uptime metric name — renamed meetnotes_→llmide_; lock the name.
     uptime_metric = first_str(metrics, r"# TYPE (\w+_uptime_seconds) gauge")
     # Extension's server-version floor (separate value from SERVER_API_VERSION).
@@ -123,14 +104,6 @@ def build_checks() -> list[tuple[str, object, object, str]]:
         ("ADR range — AGENTS.md 'ADRs 0001–NNNN'",
          adr_head, first_int(_read("AGENTS.md"), r"ADRs 0001[–-]0*(\d+)"),
          "AGENTS.md"),
-        ("graph-kit consumption mechanism — macos-app.md dependency table",
-         graphkit_mechanism,
-         "url-pin" if re.search(
-             r'graph-kit \(`GraphKit` \+ `GraphCore`\) \| '
-             r'`\.package\(url: "[^"]*graph-kit\.git", revision:',
-             macos,
-         ) else None,
-         "docs/spec/macos-app.md"),
         ("uptime metric name — cross-cutting.md Prometheus section",
          uptime_metric, first_str(cross, r"server uptime \(`(\w+_uptime_seconds)`"),
          "docs/spec/cross-cutting.md"),

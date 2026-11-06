@@ -1,0 +1,52 @@
+{
+  "templates": {
+    "templates": [
+      {
+        "id": "D832BE2D-E12C-4AE9-BE7A-CBFFA8D9ADA7",
+        "name": "Retro",
+        "sections": [
+          "Went well",
+          "Improve"
+        ],
+        "rawContent": "# Retro\n\n<!-- llmide:doc-template -->\n\nDocument template for Doc Gen. Edit the `##` sections below to change structure.\n\n## Went well\n\n## Improve\n\n",
+        "isBuiltin": false,
+        "folderName": "v0-bare",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "9A2F317E-387E-4E9C-B866-DDAC548658E7",
+        "name": "Sprint Review",
+        "sections": [
+          "Summary",
+          "Decisions"
+        ],
+        "rawContent": "# Sprint Review\n\n<!-- llmide:doc-template surface=visual -->\n\nTemplate for Visual. Edit the `##` sections below to change structure.\n\n## Summary\n\n## Decisions\n\n",
+        "isBuiltin": false,
+        "folderName": "v2-visual",
+        "isProjectTemplate": true,
+        "surface": "visual"
+      }
+    ],
+    "count": 2,
+    "truncated": false,
+    "scannedFolders": 3
+  },
+  "commands": {
+    "commands": [
+      {
+        "id": "15B67D72-DEA8-43D4-9034-7A82F5113C4B",
+        "name": "Summarize",
+        "instruction": "Summarize the source into five bullet points.",
+        "rawContent": "# Summarize\n\n<!-- llmide:doc-command -->\n\nSummarize the source into five bullet points.\n",
+        "isBuiltin": false,
+        "folderName": "v0-bare",
+        "isProjectCommand": true,
+        "surface": "doc"
+      }
+    ],
+    "count": 1,
+    "truncated": false,
+    "scannedFolders": 1
+  }
+}

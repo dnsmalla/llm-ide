@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Feature matrix (Phase 1 kit gates): every removable Mac feature switched off,
-// one row at a time, checked on the server side and (with --mac) on the Mac side.
+// Feature matrix: every removable feature (LLMIDE_FEATURES, set by the desktop
+// host from its feature prefs) switched off, one row at a time, checked on the server side.
 //
 // Rows
 //   - one row per excludable key off alone: code_graph_3d, gantt_issues,
 //     terminal, doc_gen, mobile_sync, auto_tasks;
 //   - closure:file_explorer — file_explorer off, which also turns off
-//     code_graph_3d, gantt_issues and doc_gen (mac/Package.swift and
-//     config.mjs parseFeatures apply the same closure);
-//   - the pair quadrants lite / min / mobile-only (the same selections as the
-//     Makefile build-mac-* targets; the Mac side reuses those targets).
+//     code_graph_3d, gantt_issues and doc_gen (config.mjs parseFeatures applies
+//     the closure);
+//   - the quadrants lite / min / mobile-only (the reduced selections the retired
+//     Swift app built).
 //
 // Server side, per row (a fresh server on a free port with a temp DB and
 // LLMIDE_FEATURES = every key minus the row's off-keys):
@@ -30,11 +30,6 @@
 // the summary); the remaining rows still run. Temp dirs and child servers are
 // cleaned up on every path, including SIGINT/SIGTERM.
 //
-// Mac side (--mac, slow): `swift build` with the row's LLMIDE_FEATURES and
-// its own --scratch-path .build-fm-<row>, pinned to the same DEVELOPER_DIR and
-// SDKROOT the Makefile uses; or `make build-mac-<quadrant>`. --mac-only runs
-// only the Mac side (no server rows).
-//
 // Test hook: FM_SERVER_ENTRY overrides the server entry file (default
 // server.mjs). Pointing it at a missing file forces every row's boot to fail,
 // which exercises the boot-failure path.
@@ -42,12 +37,10 @@
 // Usage:
 //   node scripts/feature-matrix.mjs --all            every row, server side
 //   node scripts/feature-matrix.mjs --key doc_gen    one row (also: closure:file_explorer, lite, min, mobile-only)
-//   node scripts/feature-matrix.mjs --all --mac      also the Mac builds
-//   node scripts/feature-matrix.mjs --all --mac-only only the Mac builds
 // Exit 1 when any row fails; the summary table names what failed.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,7 +50,6 @@ import { FEATURE_ROUTE_GROUPS, routePathMatches } from '../extension/routes/feat
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(ROOT, 'extension');
-const MAC = path.join(ROOT, 'mac');
 
 const STOP_GRACE_MS = 5_000;
 const LIVE_TIMEOUT_MS = 120_000;
@@ -83,17 +75,17 @@ export function enabledAfter(off) {
 
 export const ROWS = [
   ...['code_graph_3d', 'gantt_issues', 'terminal', 'doc_gen', 'mobile_sync', 'auto_tasks'].map((k) => ({
-    id: k, label: `${k} off`, off: [k], mac: { kind: 'swift' },
+    id: k, label: `${k} off`, off: [k],
   })),
-  { id: 'closure:file_explorer', label: 'file_explorer off (closure: code_graph_3d, gantt_issues, doc_gen)', off: ['file_explorer'], mac: { kind: 'swift' } },
-  { id: 'lite', label: 'build-mac-lite quadrant', off: ['file_explorer', 'code_graph_3d', 'gantt_issues', 'doc_gen', 'terminal'], mac: { kind: 'make', target: 'build-mac-lite' } },
-  { id: 'min', label: 'build-mac-min quadrant', off: EXCLUDABLE, mac: { kind: 'make', target: 'build-mac-min' } },
-  { id: 'mobile-only', label: 'build-mac-mobile-only quadrant', off: ['file_explorer', 'code_graph_3d', 'gantt_issues', 'doc_gen', 'terminal', 'auto_tasks'], mac: { kind: 'make', target: 'build-mac-mobile-only' } },
+  { id: 'closure:file_explorer', label: 'file_explorer off (closure: code_graph_3d, gantt_issues, doc_gen)', off: ['file_explorer'] },
+  { id: 'lite', label: 'lite quadrant', off: ['file_explorer', 'code_graph_3d', 'gantt_issues', 'doc_gen', 'terminal'] },
+  { id: 'min', label: 'min quadrant', off: EXCLUDABLE },
+  { id: 'mobile-only', label: 'mobile-only quadrant', off: ['file_explorer', 'code_graph_3d', 'gantt_issues', 'doc_gen', 'terminal', 'auto_tasks'] },
 ].map((row) => {
   const enabled = enabledAfter(row.off);
   const disabled = ALL_KEYS.filter((k) => !enabled.includes(k));
   // The LLMIDE_FEATURES a launcher would pass: every key minus the row's off-keys.
-  // Closure dependents are passed too; the server and Package.swift drop them.
+  // Closure dependents are passed too; the server drops them.
   const features = ALL_KEYS.filter((k) => !row.off.includes(k)).join(',');
   return { ...row, enabled, disabled, features };
 });
@@ -314,61 +306,13 @@ export function liveContract(row) {
   return { ok, detail: `${pass} pass / ${fail} fail`, problems: failed.slice(0, 5) };
 }
 
-// ---------------------------------------------------------------- Mac side
-
-/**
- * The toolchain the Makefile pins (Makefile DEVELOPER_DIR / SDKROOT): the
- * system-selected Xcode, ignoring any value inherited from the caller, and the
- * macOS SDK from that same developer dir.
- */
-export function xcodeEnv(src = process.env) {
-  const base = { ...src };
-  delete base.DEVELOPER_DIR;
-  delete base.SDKROOT;
-  const dev = spawnSync('xcode-select', ['-p'], { env: base, encoding: 'utf8' }).stdout?.trim();
-  if (!dev) throw new Error('xcode-select -p returned no developer dir');
-  const sdk = spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {
-    env: { ...base, DEVELOPER_DIR: dev }, encoding: 'utf8',
-  }).stdout?.trim();
-  if (!sdk) throw new Error('xcrun --sdk macosx --show-sdk-path returned nothing');
-  return { DEVELOPER_DIR: dev, SDKROOT: sdk };
-}
-
-function macBuild(row) {
-  const started = Date.now();
-  const logPath = path.join(os.tmpdir(), `feature-matrix-${slug(row.id)}.log`);
-  let res;
-  try {
-    const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', LLMIDE_FEATURES: row.features };
-    if (row.mac.kind === 'make') {
-      res = spawnSync('make', [row.mac.target], { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-    } else {
-      const scratch = `.build-fm-${slug(row.id)}`;
-      res = spawnSync('swift', ['build', '--manifest-cache', 'none', '--scratch-path', scratch], {
-        cwd: MAC, env: { ...env, ...xcodeEnv(env) }, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
-      });
-    }
-  } catch (err) {
-    return { ok: false, secs: Math.round((Date.now() - started) / 1000), problems: [`mac build did not start: ${err.message}`] };
-  }
-  const secs = Math.round((Date.now() - started) / 1000);
-  const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
-  const ok = res.status === 0;
-  writeFileSync(logPath, out);
-  const errors = out.split('\n').filter((l) => /error:/.test(l)).slice(0, 3);
-  const spawnErr = res.error ? [res.error.message] : [];
-  return { ok, secs, problems: ok ? [] : [...spawnErr, ...errors, `full log: ${logPath}`] };
-}
-
 // ---------------------------------------------------------------- driver
 
 export function parseArgs(argv) {
-  const args = { keys: [], all: false, mac: false, macOnly: false };
+  const args = { keys: [], all: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--all') args.all = true;
-    else if (a === '--mac') args.mac = true;
-    else if (a === '--mac-only') { args.mac = true; args.macOnly = true; }
     else if (a === '--key') {
       const k = argv[++i];
       if (!k) throw new Error('--key needs a row id');
@@ -390,7 +334,7 @@ export function select(args) {
 }
 
 export function isFailed(r) {
-  return Boolean((r.server && !r.server.ok) || (r.live && !r.live.ok) || (r.mac && !r.mac.ok));
+  return Boolean((r.server && !r.server.ok) || (r.live && !r.live.ok));
 }
 
 export function table(results) {
@@ -399,9 +343,8 @@ export function table(results) {
     r.row.disabled.join(',') || '-',
     r.server ? (r.server.ok ? 'ok' : `FAIL (${r.server.problems.length})`) : '-',
     r.live ? (r.live.ok ? `ok (${r.live.detail})` : `FAIL (${r.live.detail})`) : '-',
-    r.mac ? (r.mac.ok ? `ok ${r.mac.secs}s` : `FAIL ${r.mac.secs}s`) : '-',
   ]);
-  const head = ['row', 'disabled', 'server', 'live contract', 'mac build'];
+  const head = ['row', 'disabled', 'server', 'live contract'];
   const width = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
   const line = (cells) => cells.map((c, i) => c.padEnd(width[i])).join('  ');
   return [line(head), line(width.map((w) => '-'.repeat(w))), ...rows.map(line)].join('\n');
@@ -422,7 +365,7 @@ function installCleanup() {
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
-    console.log('usage: node scripts/feature-matrix.mjs [--all | --key <row>] [--mac | --mac-only]');
+    console.log('usage: node scripts/feature-matrix.mjs [--all | --key <row>]');
     return 0;
   }
   installCleanup();
@@ -430,26 +373,18 @@ export async function main(argv = process.argv.slice(2)) {
   const results = [];
   for (const row of rows) {
     console.log(`\n== ${row.id}: ${row.label} (LLMIDE_FEATURES=${row.features})`);
-    let server = null;
-    let live = null;
-    if (!args.macOnly) {
-      server = await serverChecks(row);
-      for (const p of server.problems) console.log(`  server: ${p}`);
-      live = liveContract(row);
-      console.log(`  live contract (assert mode): ${live.ok ? 'ok' : 'FAIL'} ${live.detail}`);
-      for (const p of live.problems) console.log(`    ${p}`);
-    }
-    const mac = args.mac ? macBuild(row) : null;
-    if (mac) console.log(`  mac build: ${mac.ok ? 'ok' : 'FAIL'} in ${mac.secs}s`);
-    if (mac) for (const p of mac.problems) console.log(`    ${p}`);
-    results.push({ row, server, live, mac });
+    const server = await serverChecks(row);
+    for (const p of server.problems) console.log(`  server: ${p}`);
+    const live = liveContract(row);
+    console.log(`  live contract (assert mode): ${live.ok ? 'ok' : 'FAIL'} ${live.detail}`);
+    for (const p of live.problems) console.log(`    ${p}`);
+    results.push({ row, server, live });
   }
   console.log(`\n${table(results)}`);
   const failed = results.filter(isFailed);
-  const scope = args.macOnly ? '(mac only)' : args.mac ? '(server + mac)' : '(server; --mac not run)';
   console.log(failed.length
     ? `\nfeature-matrix: ${failed.length} of ${results.length} row(s) FAILED: ${failed.map((r) => r.row.id).join(', ')}`
-    : `\nfeature-matrix: all ${results.length} row(s) ok ${scope}`);
+    : `\nfeature-matrix: all ${results.length} row(s) ok`);
   return failed.length ? 1 : 0;
 }
 

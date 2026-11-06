@@ -548,8 +548,8 @@ function isValidRef(ref) {
   return typeof ref === 'string' && !ref.startsWith('-') && REF_RE.test(ref);
 }
 
-// Only public https git URLs are allowed. Mirrors
-// mac/Sources/LlmIdeMac/Features/Extensions/Services/PluginGitInstaller.swift normalize().
+// Only public https git URLs are allowed (the rule of the retired Swift app's
+// PluginGitInstaller.normalize()).
 export function normalizeGitUrl(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return { ok: false, error: 'url is required' };
   const u = raw.trim();

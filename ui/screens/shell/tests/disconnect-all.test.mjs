@@ -152,10 +152,7 @@ test("the sign-out dialog offers the third variant only when wired, and the two 
   assert.ok(wired.includes(A.DISCONNECT_NOTE) && !plain.includes(A.DISCONNECT_NOTE), "the Mac's note appears only with the option");
 });
 
-test("the Mac's third variant and the wipe it performs are the ones this mirrors", () => {
-  const src = readFileSync(join(REPO, "mac/Sources/LlmIdeMac/Shell/Chrome/HeaderAccountMenu.swift"), "utf8");
-  assert.ok(src.includes('Button("Sign out and disconnect all accounts", role: .destructive)'));
-  assert.ok(src.includes("KeychainStore.wipeAllSecrets()"));
+test("every key the disconnect wipes is in the core allowlist", () => {
   const vault = readFileSync(join(REPO, "extension/server/vault.mjs"), "utf8");
   for (const k of D.DISCONNECT_KEYS) assert.ok(vault.includes(`'${k.key}'`), `${k.key} is in the core allowlist`);
 });

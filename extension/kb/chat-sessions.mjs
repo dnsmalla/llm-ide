@@ -1,7 +1,6 @@
 // Unified chat session store — per-user threads, exposed via routes/chat.mjs.
-// SURFACES includes 'mac' for forward compatibility, but as of 2026-08 the Mac
-// app does not call these routes — it uses its own local ChatSessionStore
-// (mac/Sources/LlmIdeMac/Chat/Session/ChatSessionStore.swift), not this table.
+// SURFACES keeps 'mac' (migration 0023's CHECK) for rows the retired Swift app
+// may have written; that app used its own local chat store, not this table.
 import crypto from 'node:crypto';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 import { redactSecretsForStorage } from '../core/redact-secrets.mjs';

@@ -1,5 +1,4 @@
-// The Settings page's groups: the SAME list, order, titles and icons as the Mac's one "App" page
-// (mac/.../Features/Settings/Views/SettingsView.swift; drift is a test failure, see tests/groups.test.ts).
+// The Settings page's groups: list, order, titles and icons (taken over from the retired Swift app's one "App" page).
 // Pure: no React, no DOM. The page renders these as collapsible rows; a group's body comes from the registry.
 import type { IconName } from "@llmide/ui-kit";
 

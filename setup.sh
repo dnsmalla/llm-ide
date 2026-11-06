@@ -77,18 +77,15 @@ if ! claude --version &> /dev/null; then
     echo "    run: claude login"
 fi
 
-# Enable the repo's git hooks (same as `make hooks`). The pre-push hook runs
-# `make regression` when mac/ changes; bypass with `git push --no-verify`.
+# Enable the repo's git hooks (same as `make hooks`). The pre-push hook runs the
+# gates for what changed; bypass with `git push --no-verify`.
 if [ -d "$REPO_ROOT/.githooks" ]; then
     git -C "$REPO_ROOT" config core.hooksPath .githooks
     echo "✅ git hooks enabled (.githooks)"
 fi
 
-# 4b. graph-kit — the graph engine. `mac/Package.swift` depends on it by URL
-# (pinned by revision), so the Mac build does NOT need this submodule: SwiftPM
-# fetches the package itself. The submodule is still checked out here because
-# it is where you edit the engine and run its labs (graph-layout-lab /
-# graph-engine-lab) against a real working tree.
+# 4b. graph-kit — the graph engine (submodule). The desktop build reads its web
+# package and CLI, and `make graph-gates` runs its labs from the checkout.
 if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = graph-kit' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
     echo ""
     echo "⚙️  Fetching graph-kit (graph engine submodule)..."

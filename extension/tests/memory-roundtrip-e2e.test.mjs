@@ -1,5 +1,5 @@
 // End-to-end for the memory half, against the EXACT tree the Mac app generates
-// (verified by mac/Tests/LlmIdeMacTests/KnowledgeGraphEndToEndTests.swift):
+// (verified by the retired Swift app's KnowledgeGraphEndToEndTests.swift):
 //
 //   system/graph/index.md          overview
 //   system/memory/graph-notes.md   cross-links + hubs

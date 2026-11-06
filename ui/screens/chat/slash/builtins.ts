@@ -1,6 +1,6 @@
-// Built-in "/" commands: a port of `ChatSlashCommands.builtins` (mac/Sources/LlmIdeMac/Core/Editor/ChatSlashCommands.swift).
-// The Swift list is the single source of truth. `scripts/extract-chat-slash-builtins.mjs` reads it, and the test
-// "built-ins match the Swift list" fails when this module drifts (names, aliases, descriptions, inserts, actions).
+// Built-in "/" commands (a port of the retired Swift app's `ChatSlashCommands.builtins`). The list is pinned by
+// `slash/fixtures/builtins.swift.json`; the test "built-ins match the pinned list" fails when this module drifts
+// (names, aliases, descriptions, inserts, actions).
 // Built-ins are CLIENT actions, never sent to the model; a plugin command with a colliding trigger is dropped
 // from the menu because the built-in would intercept it first.
 

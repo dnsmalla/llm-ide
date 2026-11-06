@@ -8,7 +8,7 @@ import { fakeClient, REPO } from "./helpers.ts";
 
 const KEY = "sk-ant-test-123456";
 
-test("the built-in key rows are the Mac's: Anthropic, Jev (API 73+), SerpAPI, with the Mac's vault names", () => {
+test("the built-in key rows: Anthropic, Jev (API 73+), SerpAPI, with their vault names", () => {
   assert.deepEqual(BUILTIN_KEYS.map((k) => [k.id, k.vaultKey, k.verifyAs, k.minApiVersion ?? null]), [
     ["anthropic", "claude.apiKey", "anthropic", null],
     ["jev", "jev.apiKey", "jev", 73],
@@ -16,13 +16,9 @@ test("the built-in key rows are the Mac's: Anthropic, Jev (API 73+), SerpAPI, wi
   ]);
 });
 
-test("every vault name is in the core allowlist, and the Mac's rows use the same names", () => {
+test("every vault name is in the core allowlist", () => {
   const vault = readFileSync(`${REPO}/extension/server/vault.mjs`, "utf8");
-  const swift = readFileSync(`${REPO}/mac/Sources/LlmIdeMac/Core/Platform/ProviderCatalog.swift`, "utf8");
-  for (const k of BUILTIN_KEYS) {
-    assert.ok(vault.includes(`'${k.vaultKey}'`), `${k.vaultKey} missing from the core allowlist`);
-    assert.ok(swift.includes(`"${k.vaultKey}"`) || k.id === "anthropic", `${k.vaultKey} drifted from the Mac`);
-  }
+  for (const k of BUILTIN_KEYS) assert.ok(vault.includes(`'${k.vaultKey}'`), `${k.vaultKey} missing from the core allowlist`);
 });
 
 test("Jev is hidden unless the server reports API 73 or later (unknown version hides it)", () => {

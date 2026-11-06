@@ -1,6 +1,6 @@
-// LLMIDE_FEATURES parsing (core/config.mjs#parseFeatures). The Mac app passes
-// the same comma-separated ENABLED-feature list it builds with (mac/Package.swift),
-// so the server must read it with the same semantics: unset/empty = all
+// LLMIDE_FEATURES parsing (core/config.mjs#parseFeatures). The desktop host passes
+// the user's comma-separated ENABLED-feature list, so the server must read it with
+// fixed semantics: unset/empty = all
 // features, the file_explorer dependency closure applied, agent_chat always on.
 
 import { test } from 'node:test';
@@ -46,7 +46,7 @@ test('parseFeatures: unknown keys are ignored with exactly one warning line', ()
   assert.match(lines[0], /also_bogus/);
 });
 
-test('parseFeatures: features that need file_explorer are dropped without it (mac/Package.swift closure)', () => {
+test('parseFeatures: features that need file_explorer are dropped without it (the dependency closure)', () => {
   const { warn, lines } = collectWarnings();
   const features = parseFeatures('gantt_issues,code_graph_3d,doc_gen,terminal', warn);
   assert.deepEqual([...features].sort(), ['agent_chat', 'terminal']);

@@ -29,8 +29,8 @@ const U = users.registerUser(conn, { email: `manifest-${Date.now()}@example.test
 const PROJECT = 'lta-manifest';
 
 // The committed Mac fixture (written by FrontmatterCoder in LtaOldFormatFixtureTests).
-const MAC_FIXTURE = path.join(__dirname, '../../mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-with-platform.md');
-const MAC_NO_PLATFORM = path.join(__dirname, '../../mac/Tests/LlmIdeMacTests/Fixtures/lta/meeting-without-platform.md');
+const MAC_FIXTURE = path.join(__dirname, 'fixtures/lta/meeting-with-platform.md');
+const MAC_NO_PLATFORM = path.join(__dirname, 'fixtures/lta/meeting-without-platform.md');
 
 test.after(() => {
   db.closeDb();

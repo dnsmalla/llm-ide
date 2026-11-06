@@ -1,9 +1,8 @@
 name: ios-ci
 
-# The iPhone companion and the Mac↔iOS wire types. Nothing built or tested
-# them in CI: a change to a SharedProtocol message could compile on the Mac
-# (which links the package) and still break the iPhone app, and only a manual
-# Xcode build would ever notice.
+# The iPhone companion and its wire types (SharedProtocol): the package tests
+# and an unsigned iphoneos build, so a SharedProtocol change that breaks the
+# iPhone app fails here rather than in a manual Xcode build.
 
 on:
   push:

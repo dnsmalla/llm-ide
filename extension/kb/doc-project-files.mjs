@@ -1,8 +1,8 @@
 // Doc Gen project-folder IO: scan, write, delete and seed `templates/<folder>/
 // template.md` and `commands/<folder>/command.md` under a project root.
 //
-// Confinement follows the Mac System bridge (mac/.../Features/System/Services/
-// SystemBridge.swift, `confinedFile` / `openRegularFile`):
+// Confinement follows the retired Swift app's System bridge (`confinedFile` /
+// `openRegularFile`):
 //   - the root must be a real directory, not a symlink, not over-broad
 //     (`isOverBroadRoot`), and carry the LLM-IDE project marker;
 //   - every path is resolved and must stay inside the root;

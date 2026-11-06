@@ -3,7 +3,7 @@ name: Release
 # Tag-driven release: push a `v*` tag (e.g. `v3.0.0`) and this workflow
 # verifies the extension version matches, re-runs the extension gates,
 # packages the extension zip, and attaches it to a GitHub Release.
-# The mac app DMG is built/signed locally (see docs/how-to/release.md).
+# The desktop app is released by desktop-release.yml.
 
 on:
   push:

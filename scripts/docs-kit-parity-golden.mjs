@@ -3,15 +3,10 @@
 // project-marker fixtures, built into a temp project folder.
 //
 // Run `node scripts/docs-kit-parity-golden.mjs` to rewrite
-// mac/Tests/LlmIdeMacTests/Fixtures/docgen/server-scan.golden.json.
-// Two tests keep the two sides honest:
-//   - extension/tests/docs-server-golden.test.mjs fails if the checked-in
-//     file is stale (run this script to fix it);
-//   - mac/Tests/LlmIdeMacTests/DocGenServerStoreParityTests.swift builds the
-//     same project from the same fixtures, runs the Swift scan, and decodes
-//     this file through the Mac's response types.
-// The file holds the response bodies the server gives, so the Mac decodes
-// them with the models it uses on the wire.
+// extension/tests/fixtures/docgen/server-scan.golden.json;
+// extension/tests/docs-server-golden.test.mjs fails if the checked-in file is
+// stale. (The fixtures and golden were vendored from the retired Swift app's
+// tests, which ran the same scan on the Swift side.)
 
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,14 +16,13 @@ import { scanCommandsPage, scanTemplatesPage } from '../extension/kb/doc-project
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** The K1a fixtures (Swift side reads the same files). */
-export const FIXTURE_DIR = join(here, '..', 'mac', 'Tests', 'LlmIdeMacTests', 'Fixtures', 'docgen', 'project');
-export const GOLDEN_PATH = join(here, '..', 'mac', 'Tests', 'LlmIdeMacTests', 'Fixtures', 'docgen', 'server-scan.golden.json');
+/** The K1a fixtures. */
+export const FIXTURE_DIR = join(here, '..', 'extension', 'tests', 'fixtures', 'docgen', 'project');
+export const GOLDEN_PATH = join(here, '..', 'extension', 'tests', 'fixtures', 'docgen', 'server-scan.golden.json');
 
 /**
  * The project both sides build, as [path inside project, fixture name].
- * Keep in step with `DocGenServerStoreParityTests.layout`. The `auto_task`
- * folder is in the layout so both sides prove they skip it.
+ * The `auto_task` folder is in the layout to prove the scan skips it.
  */
 export const LAYOUT = Object.freeze([
   ['templates/v0-bare/template.md', 'template-md.v0-bare-marker.md'],

@@ -74,20 +74,19 @@ function envIntClamped(name, fallback, min, max) {
 
 // --- Feature set (LLMIDE_FEATURES) ---------------------------------------
 //
-// The Mac app can build without some features (mac/Package.swift reads the
-// same variable) and passes its ENABLED list to the server it spawns, so the
-// server stops loading and serving what that app can no longer call. Keys are
-// the Mac's AppFeature raw values; agent_chat cannot be excluded, so it is
-// always in the set. Unset / empty = every feature (null), which is also what
+// The desktop host passes the user's ENABLED feature list to the core it
+// spawns (desktop/src-tauri/src/prefs.rs), so the server stops loading and
+// serving what the app has switched off. Keys are the feature ids the retired
+// Swift app also used; agent_chat cannot be excluded, so it is always in the set. Unset / empty = every feature (null), which is also what
 // the Chrome-extension-only setup and every pre-existing deployment get.
 export const FEATURE_KEYS = Object.freeze([
   'agent_chat', 'file_explorer', 'code_graph_3d', 'gantt_issues',
   'terminal', 'doc_gen', 'mobile_sync', 'auto_tasks',
 ]);
 
-// Restates AppFeature.requiredDependencies, the closure mac/Package.swift also
-// applies: a hand-typed list naming one of these without file_explorer builds
-// a Mac app WITHOUT it, so the server must not keep serving it either.
+// The feature dependency closure: a hand-typed list naming one of these
+// without file_explorer means that feature is off too, so the server must not
+// keep serving it either.
 const FEATURE_REQUIRES = Object.freeze({
   code_graph_3d: ['file_explorer'],
   gantt_issues:  ['file_explorer'],

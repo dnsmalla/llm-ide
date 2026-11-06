@@ -1,7 +1,7 @@
 // Feature-owned route groups — the server half of LLMIDE_FEATURES.
 //
-// The Mac app can be built without some features (mac/Package.swift) and
-// passes the enabled list to the server it spawns (core/config.mjs →
+// The desktop app can switch features off and passes the enabled list to the
+// core it spawns (core/config.mjs →
 // config.features). A group listed here is imported ONLY when its feature is
 // enabled: a disabled feature's code is neither loaded at boot nor reachable,
 // and its paths answer 404 { error: 'feature_disabled', feature } so a client

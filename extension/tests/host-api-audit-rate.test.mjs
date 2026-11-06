@@ -1,5 +1,5 @@
 // Host API v1 audit log + per-session rate limits (Plan 6 Task 8) — the Node twin of
-// mac/Tests/LlmIdeMacTests/HostApiV1AuditRateTests.swift (same scenarios, same constants).
+// the retired Swift app's HostApiV1AuditRateTests.swift (same scenarios, same constants).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

@@ -31,7 +31,10 @@ const OUT_REL = 'schema/http/INVENTORY.md';
 const SERVER_REL = 'extension/server.mjs';
 const FEATURE_ROUTES_REL = 'extension/routes/feature-routes.mjs';
 const AUTH_REL = 'extension/server/auth.mjs';
-const MAC_DIR_REL = 'mac/Sources/LlmIdeMac';
+// The desktop and web app clients (the Swift Mac app was retired 2026-11-06).
+const APP_DIRS_REL = ['ui/screens', 'ui/kit/src', 'desktop/src', 'web/src'];
+const isAppSource = (f) => /\.(ts|tsx)$/.test(f) && !/\.d\.ts$/.test(f) && !/\.generated\.ts$/.test(f);
+const appSources = () => APP_DIRS_REL.flatMap((d) => walk(d, isAppSource)).filter((rel) => !/\/tests?\//.test(rel));
 const EXT_SRC_REL = 'extension/src';
 
 // Files that dispatch routes. A handler match is attributed to the first file
@@ -57,7 +60,12 @@ const ALLOWLIST = {
     '/auth/me/mcp-plugins/:id/resync': 'dispatched by the regex mcpVersionMatch in extension/routes/extension-routes.mjs (/^\\/auth\\/me\\/mcp-plugins\\/…\\/(update|resync)$/), which the literal scanner cannot see',
     '/kb/sync/devices/:id': 'dispatched by DEVICE_RE in extension/routes/sync/http-routes.mjs (/^\\/kb\\/sync\\/devices\\/([A-Za-z0-9_-]{22})$/)',
   },
-  clientNotInRoster: {},
+  clientNotInRoster: {
+    '/auth/me/extensions': 'the BASE prefix ui/screens/library/extensions/api.ts builds its /auth/me/extensions/* calls from, not a call',
+    '/kb/issues/create': 'desktop Issues write actions with no core route yet (MASTER-PLAN: hosted issue actions need a core route plan); found when the inventory started scanning the desktop client',
+    '/kb/issues/comment': 'same as /kb/issues/create',
+    '/kb/issues/close': 'same as /kb/issues/create',
+  },
   duplicate: {},
 };
 
@@ -313,7 +321,7 @@ function collectClients(relFiles) {
 
 // Where a roster path is mentioned when no client calls it. Tests are any
 // occurrence under extension/tests; comments/docs are an occurrence in docs/,
-// a root *.md, or a comment line of extension/ or mac/ source (handler files
+// a root *.md, or a comment line of extension/ or app source (handler files
 // included: their version-history comments name the routes).
 function pathRegex(e) {
   const body = e.split('/').map((seg) => (seg.startsWith(':') ? "[^'\"`\\s/?]+" : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/');
@@ -326,7 +334,7 @@ function loadCorpus() {
     .map((rel) => ({ rel, lines: read(rel).split('\n') }));
   const codeFiles = [
     ...walk('extension', (f) => /\.(mjs|ts|tsx|js)$/.test(f) && !/\.d\.ts$/.test(f)).filter((rel) => !rel.startsWith('extension/tests/') && !rel.includes('/node_modules/')),
-    ...walk(MAC_DIR_REL, (f) => f.endsWith('.swift')),
+    ...appSources(),
   ];
   const commentLines = codeFiles.map((rel) => ({
     rel,
@@ -355,11 +363,10 @@ function build() {
   const pub = parsePublic(read(AUTH_REL));
   const { cands, subMethods } = collectHandlerCandidates();
 
-  const macFiles = walk(MAC_DIR_REL, (f) => f.endsWith('.swift'));
-  const macResourceFiles = walk(`${MAC_DIR_REL}/Resources`, (f) => f.endsWith('.json'));
+  const appFiles = appSources();
   // api-types.ts is generated from these same routes; counting it as a caller would hide the gaps.
   const extFiles = walk(EXT_SRC_REL, (f) => /\.(ts|tsx)$/.test(f) && !/\.d\.ts$/.test(f) && !/(^|\/)api-types\.ts$/.test(f));
-  const macClients = collectClients([...macFiles, ...macResourceFiles]);
+  const appClients = collectClients(appFiles);
   const extClients = collectClients(extFiles);
 
   const errors = [];
@@ -411,9 +418,9 @@ function build() {
     const shape = rosterShape(e);
     const isPublic = pub.paths.has(e) || pub.prefixes.some((p) => e.startsWith(p) || shape.prefix.startsWith(p));
     const group = groups.find((g) => g.prefixes.some((p) => e.startsWith(p) || shape.prefix.startsWith(p)));
-    const macHere = [...new Set(macClients.filter((c) => clientMatchesRoster(c.path, e)).map((c) => basename(c.file)))].sort();
+    const appHere = [...new Set(appClients.filter((c) => clientMatchesRoster(c.path, e)).map((c) => basename(c.file)))].sort();
     const extHere = [...new Set(extClients.filter((c) => clientMatchesRoster(c.path, e)).map((c) => basename(c.file)))].sort();
-    const noCaller = macHere.length === 0 && extHere.length === 0;
+    const noCaller = appHere.length === 0 && extHere.length === 0;
     return {
       path: e,
       roster: r.roster,
@@ -422,7 +429,7 @@ function build() {
       auth: isPublic ? 'public' : 'token',
       feature: group ? group.key : 'core',
       handler: best ? `${best.file}:${best.line}` : '-',
-      mac: macHere,
+      app: appHere,
       ext: extHere,
       line: r.line,
     };
@@ -431,7 +438,7 @@ function build() {
   // Client paths that match no roster entry.
   const unmatched = new Map();
   const unresolvableList = new Map();
-  for (const c of [...macClients.map((x) => ({ ...x, src: 'Mac' })), ...extClients.map((x) => ({ ...x, src: 'extension' }))]) {
+  for (const c of [...appClients.map((x) => ({ ...x, src: 'app' })), ...extClients.map((x) => ({ ...x, src: 'extension' }))]) {
     if (unresolvable(c.path)) {
       if (!unresolvableList.has(c.path)) unresolvableList.set(c.path, []);
       unresolvableList.get(c.path).push(`${c.src} ${c.file}:${c.line}`);
@@ -465,7 +472,7 @@ function build() {
   }
 
   const unresolvableOut = [...unresolvableList.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([path, where]) => ({ path, where }));
-  return { rows, groups, errors, allowedUnmatched, unresolvableOut, macFiles, extFiles, roster };
+  return { rows, groups, errors, allowedUnmatched, unresolvableOut, appFiles, extFiles, roster };
 }
 
 function basename(rel) {
@@ -475,7 +482,7 @@ function basename(rel) {
 // ---------------------------------------------------------------- render
 
 function render(model) {
-  const { rows, groups, errors, allowedUnmatched, unresolvableOut, macFiles, extFiles } = model;
+  const { rows, groups, errors, allowedUnmatched, unresolvableOut, appFiles, extFiles } = model;
   const total = rows.length;
   const count = (arr, key) => arr.reduce((acc, r) => {
     const k = key(r);
@@ -485,7 +492,7 @@ function render(model) {
   const bySeg = count(rows, (r) => r.path.split('/')[1]);
   const byGroup = count(rows, (r) => r.feature);
   const byAuth = count(rows, (r) => r.auth);
-  const noClientRows = rows.filter((r) => r.mac.length === 0 && r.ext.length === 0);
+  const noClientRows = rows.filter((r) => r.app.length === 0 && r.ext.length === 0);
   const noClient = noClientRows.map((r) => r.path);
   const refKinds = count(noClientRows, (r) => r.noCallerRef);
   const noHandler = rows.filter((r) => r.handler === '-').map((r) => r.path);
@@ -499,7 +506,7 @@ function render(model) {
   out.push('Source of truth: `ALL_ENDPOINTS` in `extension/server.mjs`, and the public + auth roster');
   out.push('(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs`, `extension/routes/extension-routes.mjs`, `extension/routes/extensions-catalog.mjs` and `extension/routes/workspace-trust.mjs`).');
   out.push('Feature groups from `extension/routes/feature-routes.mjs`.');
-  out.push('Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` string literals.');
+  out.push('Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `web/src`, non-test `*.ts(x)`) and `extension/src/**/*.ts(x)` string literals.');
   out.push('`*` in a client path = an interpolated or `:param` segment. Method `ANY` = no method check found.');
   out.push('');
   out.push('## Summary');
@@ -508,7 +515,7 @@ function render(model) {
   out.push(`- Public + auth roster (pre-routing public paths and the auth namespace; not advertised by \`/health\`): **${rows.filter((r) => r.roster === 'public+auth').length}**`);
   out.push(`- Auth: ${byAuth.token || 0} token, ${byAuth.public || 0} public`);
   out.push(`- Handler found: ${total - noHandler.length}; no handler found: ${noHandler.length}`);
-  out.push(`- No Mac and no extension caller: ${noClient.length} (tests only: ${refKinds['tests only'] || 0}, comments/docs only: ${refKinds['comments/docs only'] || 0}, no reference: ${refKinds['no reference'] || 0})`);
+  out.push(`- No app and no extension caller: ${noClient.length} (tests only: ${refKinds['tests only'] || 0}, comments/docs only: ${refKinds['comments/docs only'] || 0}, no reference: ${refKinds['no reference'] || 0})`);
   out.push('');
   out.push('By first path segment:');
   out.push('');
@@ -529,16 +536,16 @@ function render(model) {
   out.push('');
   out.push('## Endpoints');
   out.push('');
-  out.push('| path | roster | methods | auth | feature | handler | Mac callers | extension callers | no-caller reference |');
+  out.push('| path | roster | methods | auth | feature | handler | app callers | extension callers | no-caller reference |');
   out.push('|---|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
     const list = (xs) => (xs.length ? xs.map((x) => `\`${x}\``).join(', ') : '-');
-    out.push(`| \`${r.path}\` | ${r.roster} | ${r.methods} | ${r.auth} | ${r.feature} | ${r.handler === '-' ? '-' : `\`${r.handler}\``} | ${list(r.mac)} | ${list(r.ext)} | ${r.noCallerRef} |`);
+    out.push(`| \`${r.path}\` | ${r.roster} | ${r.methods} | ${r.auth} | ${r.feature} | ${r.handler === '-' ? '-' : `\`${r.handler}\``} | ${list(r.app)} | ${list(r.ext)} | ${r.noCallerRef} |`);
   }
   out.push('');
   out.push('## Consistency');
   out.push('');
-  out.push(`Checked: ${total} roster entries, ${macFiles.length} Swift files, ${extFiles.length} extension source files.`);
+  out.push(`Checked: ${total} roster entries, ${appFiles.length} app source files, ${extFiles.length} extension source files.`);
   out.push('');
   // One line per allowlist key; a glob key lists the distinct paths it covers.
   const groupsOut = new Map();

@@ -1,9 +1,7 @@
 // Doc Gen template and command logic — PURE (no disk, no DB).
 //
-// Port of the Swift models that own the project-folder file format:
-//   mac/Sources/LlmIdeMac/Core/Generation/Models/DocTemplate.swift
-//   mac/Sources/LlmIdeMac/Core/Generation/Models/DocCommand.swift
-//   mac/Sources/LlmIdeMac/Core/Generation/Models/TemplateSurface.swift
+// Port of the retired Swift app's models that owned the project-folder file
+// format (DocTemplate, DocCommand, TemplateSurface; in git history).
 // Every function names the Swift function it mirrors. The on-disk bytes are
 // the contract: an older Mac build must read what this module writes (see
 // docs/kits/docs-kit.md §5a), so `renderTemplateMarkdown` /

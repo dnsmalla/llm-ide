@@ -1,35 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL_GROUPS, APP_GROUPS, ExpandedGroups, MERGED_MAC_CARDS, PROJECT_GROUPS, expandedKey, resolveAnchor } from "../groups.ts";
+import { ALL_GROUPS, ExpandedGroups, expandedKey, resolveAnchor } from "../groups.ts";
 import { NOTICES, PARTIAL_NOTES } from "../notices.ts";
-// @ts-expect-error plain .mjs script
-import { extractSettingsGroups } from "../../../../scripts/extract-settings-groups.mjs";
-
-type MacCard = { title: string; sf: string };
-const mac = extractSettingsGroups() as { app: MacCard[]; project: MacCard[] };
-const withoutMerged = (cards: MacCard[]) => cards.filter((c) => !(c.title in MERGED_MAC_CARDS));
-
-test("parity: the desktop App groups are the Mac's App page, same titles in the same order (drift fails here)", () => {
-  assert.deepEqual(APP_GROUPS.map((g) => g.title), withoutMerged(mac.app).map((c) => c.title));
-});
-
-test("parity: the Project groups match the Mac's Project block", () => {
-  assert.deepEqual(PROJECT_GROUPS.map((g) => g.title), withoutMerged(mac.project).map((c) => c.title));
-});
-
-test("parity: the recorded SF Symbol of every group is the Mac's", () => {
-  const macSf = new Map([...mac.app, ...mac.project].map((c) => [c.title, c.sf]));
-  for (const g of ALL_GROUPS) assert.equal(g.sf, macSf.get(g.title), g.title);
-});
-
-test("parity: every folded Mac card names a real desktop group", () => {
-  const ids = new Set(ALL_GROUPS.map((g) => g.id));
-  for (const [card, id] of Object.entries(MERGED_MAC_CARDS)) {
-    assert.ok(ids.has(id), `${card} -> ${id}`);
-    assert.ok([...mac.app, ...mac.project].some((c) => c.title === card), `${card} is no longer on the Mac page`);
-  }
-});
-
 test("group ids are unique and storage-safe; every non-working group has a notice, every partial one a note", () => {
   const ids = ALL_GROUPS.map((g) => g.id);
   assert.equal(new Set(ids).size, ids.length);

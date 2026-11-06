@@ -1,7 +1,7 @@
 // Frontmatter for note files: the header between the leading `---` fences. Pure (no I/O, no DOM).
 //
-// Conformance: `splitFrontmatter` mirrors `MarkdownFrontmatter.split` in the Mac app
-// (mac/Sources/LlmIdeMac/Core/Notes/Models/MarkdownFrontmatter.swift), quirks included, and
+// Conformance: `splitFrontmatter` mirrors `MarkdownFrontmatter.split` of the retired Swift app, quirks
+// included (notes it wrote are still on disk), and
 // `parseHeader` reads what Yams writes for `MeetingFrontmatter` (single-quoted ISO dates,
 // block lists `- Alice`, `tldr: []`) plus the hand-written forms the Mac reader accepts
 // (double quotes with `\"` and `\\`). The shared fixtures are `fixtures/frontmatter.json`

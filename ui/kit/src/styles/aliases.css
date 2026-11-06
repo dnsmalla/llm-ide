@@ -1,7 +1,5 @@
-/* Derived colour roles: aliases of tokens.json roles, mirroring the single-line
- * `var x: Color { role }` / `{ role.opacity(a) }` declarations in
- * mac/Sources/LlmIdeMac/Core/Platform/Theme.swift. tokens.json deliberately does not
- * store them; tests/aliases.test.mjs fails when this file and Theme.swift disagree. */
+/* Derived colour roles: aliases of tokens.json roles (taken over from the retired
+ * Swift app's Theme.swift). tokens.json deliberately does not store them. */
 :root {
   --tok-color-success: var(--tok-color-accent3);
   --tok-color-warning: var(--tok-color-accent4);

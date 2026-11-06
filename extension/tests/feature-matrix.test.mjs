@@ -5,15 +5,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   ALL_KEYS, ROWS, cleanInherited, enabledAfter, groupOf, isFailed,
   liveEnv, parseArgs, select, serverEnv, table,
 } from '../../scripts/feature-matrix.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const rowById = (id) => ROWS.find((r) => r.id === id);
 
 test('enabledAfter with nothing off returns every key, sorted', () => {
@@ -58,19 +54,6 @@ test('row.features lists every key minus the row off-keys (closure dependents in
   const list = rowById('terminal').features.split(',');
   assert.equal(list.includes('terminal'), false);
   assert.equal(list.length, ALL_KEYS.length - 1);
-});
-
-test('quadrant rows carry the same enabled sets as the Makefile build-mac-* targets', () => {
-  const makefile = fs.readFileSync(path.join(ROOT, 'Makefile'), 'utf8');
-  const featuresFor = (target) => {
-    const block = makefile.split(`\n${target}:`)[1] ?? '';
-    const m = /LLMIDE_FEATURES=([a-z_,]+)/.exec(block.split('\n')[0] + block.split('\n')[1]);
-    assert.ok(m, `no LLMIDE_FEATURES for ${target}`);
-    return m[1].split(',').sort();
-  };
-  assert.deepEqual(rowById('lite').enabled, featuresFor('build-mac-lite'));
-  assert.deepEqual(rowById('min').enabled, featuresFor('build-mac-min'));
-  assert.deepEqual(rowById('mobile-only').enabled, featuresFor('build-mac-mobile-only'));
 });
 
 test('groupOf maps feature-owned route prefixes and leaves always-on routes alone', () => {
@@ -119,12 +102,10 @@ test('select returns every row, or the named ones (file_explorer maps to its clo
   assert.throws(() => select({ keys: ['nope'] }), /unknown row nope/);
 });
 
-test('parseArgs: --mac-only implies --mac and has no server side', () => {
-  const args = parseArgs(['--all', '--mac-only']);
-  assert.equal(args.all, true);
-  assert.equal(args.mac, true);
-  assert.equal(args.macOnly, true);
-  assert.equal(parseArgs(['--all']).mac, false);
+test('parseArgs reads --all and --key', () => {
+  assert.equal(parseArgs(['--all']).all, true);
+  assert.deepEqual(parseArgs(['--key', 'lite']).keys, ['lite']);
+  assert.throws(() => parseArgs(['--mac']), /unknown argument/);
 });
 
 test('parseArgs rejects an unknown flag and a dangling --key', () => {
@@ -132,16 +113,14 @@ test('parseArgs rejects an unknown flag and a dangling --key', () => {
   assert.throws(() => parseArgs(['--key']), /needs a row id/);
 });
 
-test('isFailed treats boot/server, live and mac failures as failed and skipped sides as passing', () => {
+test('isFailed treats server and live failures as failed and a skipped side as passing', () => {
   const row = rowById('terminal');
-  assert.equal(isFailed({ row, server: { ok: true }, live: { ok: true }, mac: null }), false);
-  assert.equal(isFailed({ row, server: { ok: false }, live: null, mac: null }), true);
-  assert.equal(isFailed({ row, server: null, live: { ok: false }, mac: null }), true);
-  assert.equal(isFailed({ row, server: null, live: null, mac: { ok: false } }), true);
-  assert.equal(isFailed({ row, server: null, live: null, mac: { ok: true } }), false);
+  assert.equal(isFailed({ row, server: { ok: true }, live: { ok: true } }), false);
+  assert.equal(isFailed({ row, server: { ok: false }, live: null }), true);
+  assert.equal(isFailed({ row, server: null, live: { ok: false } }), true);
 });
 
-test('table shows - for sides that did not run (mac-only)', () => {
-  const out = table([{ row: rowById('terminal'), server: null, live: null, mac: { ok: true, secs: 12 } }]);
-  assert.match(out, /terminal\s+.*-\s+-\s+ok 12s/);
+test('table shows - for a side that did not run', () => {
+  const out = table([{ row: rowById('terminal'), server: { ok: true, problems: [] }, live: null }]);
+  assert.match(out, /terminal\s+\S+\s+ok\s+-/);
 });
