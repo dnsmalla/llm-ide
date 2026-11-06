@@ -35,7 +35,7 @@ export async function load(entryRel) {
     plugins: [{
       name: "test-screen-stubs",
       setup(b) {
-        b.onResolve({ filter: /^\.\.\/(welcome|chat|library|settings|explorer|graph|docgen)\/(index|visual)\.tsx$/ }, (args) => ({ path: args.path, namespace: "screen-stub" }));
+        b.onResolve({ filter: /^\.\.\/(welcome|chat|library|settings|explorer|graph|docgen|live)\/(index|visual)\.tsx$/ }, (args) => ({ path: args.path, namespace: "screen-stub" }));
         b.onResolve({ filter: /^\.\.\/chat\/dock\.tsx$/ }, (args) => ({ path: args.path, namespace: "screen-stub" }));
         b.onLoad({ filter: /.*/, namespace: "screen-stub" }, () => ({ contents: "export default function Stub(){ return null; }", loader: "jsx" }));
       },
