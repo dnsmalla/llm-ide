@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/issues/close",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "group/sub/project",
+      "number": 3
+    }
+  },
+  "response": {
+    "error": {
+      "code": "UNAUTHENTICATED",
+      "message": "Sign in first"
+    }
+  }
+}

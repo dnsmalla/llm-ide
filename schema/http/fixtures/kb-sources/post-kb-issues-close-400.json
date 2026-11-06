@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/issues/close",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "group/sub/project",
+      "number": 0
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "number must be a positive integer",
+      "details": {
+        "field": "number"
+      }
+    }
+  }
+}

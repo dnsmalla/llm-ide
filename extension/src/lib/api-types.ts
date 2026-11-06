@@ -1264,6 +1264,19 @@ export type SearchHit = {
   durationSec?: number;
 };
 
+/** A hosted issue write the provider accepted (extension/routes/issue-writes.mjs). Never carries the token. */
+export type IssueWriteOk = {
+  ok: true;
+  /** The provider's id of the issue, comment or note */
+  id: number | null;
+  /** The provider's web URL for it */
+  url: string | null;
+  /** The issue state after the write; null for a comment */
+  state: string | null;
+  /** create only: true when this answer replays an earlier create with the same idem */
+  deduped?: boolean;
+};
+
 export type Issue = {
   id: string;
   title: string;
@@ -5310,6 +5323,77 @@ export type PostKbReposCheckTokenResponse401 = CommonError;
 export type PostKbReposCheckTokenResponse403 = CommonError;
 
 export type PostKbReposCheckTokenResponse502 = CommonError;
+
+/** Request parts for `POST /kb/issues/create` (schema/http/kb-sources.schema.json). */
+export type PostKbIssuesCreateRequest = {
+  body: {
+    provider: "github" | "gitlab";
+    /** GitHub owner/name, or a GitLab project path of 2 to 20 segments; at most 200 characters; no . or .. segment */
+    repo: string;
+    /** 1 to 255 characters after trimming */
+    title: string;
+    /** At most 20 000 characters; default empty */
+    body?: string;
+    /** 16 to 64 of [A-Za-z0-9_-]; one key per issue the user means to create */
+    idem: string;
+  };
+};
+
+export type PostKbIssuesCreateResponse200 = IssueWriteOk;
+
+export type PostKbIssuesCreateResponse400 = CommonError;
+
+export type PostKbIssuesCreateResponse401 = CommonError;
+
+export type PostKbIssuesCreateResponse403 = CommonError;
+
+export type PostKbIssuesCreateResponse409 = CommonError;
+
+export type PostKbIssuesCreateResponse502 = CommonError;
+
+/** Request parts for `POST /kb/issues/comment` (schema/http/kb-sources.schema.json). */
+export type PostKbIssuesCommentRequest = {
+  body: {
+    provider: "github" | "gitlab";
+    /** As in POST /kb/issues/create */
+    repo: string;
+    /** The issue number (GitLab iid), a positive integer */
+    number: number;
+    /** 1 to 20 000 characters, not only whitespace */
+    body: string;
+  };
+};
+
+export type PostKbIssuesCommentResponse200 = IssueWriteOk;
+
+export type PostKbIssuesCommentResponse400 = CommonError;
+
+export type PostKbIssuesCommentResponse401 = CommonError;
+
+export type PostKbIssuesCommentResponse403 = CommonError;
+
+export type PostKbIssuesCommentResponse502 = CommonError;
+
+/** Request parts for `POST /kb/issues/close` (schema/http/kb-sources.schema.json). */
+export type PostKbIssuesCloseRequest = {
+  body: {
+    provider: "github" | "gitlab";
+    /** As in POST /kb/issues/create */
+    repo: string;
+    /** The issue number (GitLab iid), a positive integer */
+    number: number;
+  };
+};
+
+export type PostKbIssuesCloseResponse200 = IssueWriteOk;
+
+export type PostKbIssuesCloseResponse400 = CommonError;
+
+export type PostKbIssuesCloseResponse401 = CommonError;
+
+export type PostKbIssuesCloseResponse403 = CommonError;
+
+export type PostKbIssuesCloseResponse502 = CommonError;
 
 /** Request parts for `POST /kb/connect-git` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectGitRequest = {
@@ -9595,6 +9679,37 @@ export interface ApiEndpoints {
       401: PostKbReposCheckTokenResponse401;
       403: PostKbReposCheckTokenResponse403;
       502: PostKbReposCheckTokenResponse502;
+    };
+  };
+  "POST /kb/issues/create": {
+    request: PostKbIssuesCreateRequest;
+    responses: {
+      200: PostKbIssuesCreateResponse200;
+      400: PostKbIssuesCreateResponse400;
+      401: PostKbIssuesCreateResponse401;
+      403: PostKbIssuesCreateResponse403;
+      409: PostKbIssuesCreateResponse409;
+      502: PostKbIssuesCreateResponse502;
+    };
+  };
+  "POST /kb/issues/comment": {
+    request: PostKbIssuesCommentRequest;
+    responses: {
+      200: PostKbIssuesCommentResponse200;
+      400: PostKbIssuesCommentResponse400;
+      401: PostKbIssuesCommentResponse401;
+      403: PostKbIssuesCommentResponse403;
+      502: PostKbIssuesCommentResponse502;
+    };
+  };
+  "POST /kb/issues/close": {
+    request: PostKbIssuesCloseRequest;
+    responses: {
+      200: PostKbIssuesCloseResponse200;
+      400: PostKbIssuesCloseResponse400;
+      401: PostKbIssuesCloseResponse401;
+      403: PostKbIssuesCloseResponse403;
+      502: PostKbIssuesCloseResponse502;
     };
   };
   "POST /kb/connect-git": {

@@ -11,10 +11,10 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 
 ## Summary
 
-- Endpoints in `ALL_ENDPOINTS`: **193**
+- Endpoints in `ALL_ENDPOINTS`: **196**
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
-- Auth: 263 token, 13 public
-- Handler found: 273; no handler found: 3
+- Auth: 266 token, 13 public
+- Handler found: 276; no handler found: 3
 - No app and no extension caller: 93 (tests only: 77, comments/docs only: 16, no reference: 0)
 
 By first path segment:
@@ -35,16 +35,16 @@ By first path segment:
 | `/generate-questions` | 1 |
 | `/health` | 1 |
 | `/host-api` | 3 |
-| `/kb` | 162 |
+| `/kb` | 165 |
 | `/launch-app` | 1 |
 
 By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 265 |
+| core | 264 |
 | code_graph_3d | 1 |
-| gantt_issues | 1 |
+| gantt_issues | 5 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
@@ -175,36 +175,39 @@ Endpoints with no client caller (93):
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:330` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:155` | - | `App.tsx` | - |
 | `/kb/search` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:293` | - | `App.tsx`, `kb.ts` | - |
-| `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:447` | `issue-paging.ts` | `kb.ts` | - |
-| `/kb/meeting/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:499` | - | - | tests only |
-| `/kb/entity/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:522` | - | - | tests only |
-| `/kb/project/:id/export` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:540` | `PathsSection.tsx` | - | - |
-| `/kb/project/install-skills` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:563` | `model.ts` | - | - |
-| `/kb/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:590` | - | `kb.ts` | - |
-| `/kb/export-all` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1360` | - | - | tests only |
-| `/kb/system/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:595` | - | - | tests only |
+| `/kb/issues` | ALL_ENDPOINTS | GET | token | gantt_issues | `extension/routes/router.mjs:378` | `issue-paging.ts` | `kb.ts` | - |
+| `/kb/issues/create` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:130` | `IssuesScreen.tsx` | - | - |
+| `/kb/issues/comment` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:131` | `IssueDetail.tsx` | - | - |
+| `/kb/issues/close` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:132` | `IssueDetail.tsx` | - | - |
+| `/kb/meeting/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:430` | - | - | tests only |
+| `/kb/entity/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:453` | - | - | tests only |
+| `/kb/project/:id/export` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:471` | `PathsSection.tsx` | - | - |
+| `/kb/project/install-skills` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:494` | `model.ts` | - | - |
+| `/kb/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:521` | - | `kb.ts` | - |
+| `/kb/export-all` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1291` | - | - | tests only |
+| `/kb/system/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:526` | - | - | tests only |
 | `/kb/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/router.mjs:282` | - | - | tests only |
-| `/kb/connect-git` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:627` | `source-actions.ts` | `App.tsx`, `kb.ts` | - |
-| `/kb/ingest-scip` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:654` | - | - | tests only |
+| `/kb/connect-git` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:558` | `source-actions.ts` | `App.tsx`, `kb.ts` | - |
+| `/kb/ingest-scip` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:585` | - | - | tests only |
 | `/kb/ingest-code-graph` | ALL_ENDPOINTS | POST | token | code_graph_3d | `extension/routes/code-graph.mjs:21` | - | - | tests only |
-| `/kb/connect-github-issues` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:681` | `IssuesScreen.tsx`, `RepositoriesSection.tsx`, `source-actions.ts` | `kb.ts` | - |
+| `/kb/connect-github-issues` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:612` | `IssuesScreen.tsx`, `RepositoriesSection.tsx`, `source-actions.ts` | `kb.ts` | - |
 | `/kb/repos/check-token` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:327` | `RepositoriesSection.tsx` | - | - |
-| `/kb/connect-tickets-json` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:703` | - | - | comments/docs only |
-| `/kb/connect-qa` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1584` | - | `kb.ts` | - |
-| `/kb/email/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:723` | `source-actions.ts` | - | - |
-| `/kb/email/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:723` | `ingest.ts` | - | - |
-| `/kb/email/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:844` | `ingest.ts` | - | - |
-| `/kb/email/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1314` | - | - | tests only |
-| `/kb/slack/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:861` | `source-actions.ts` | - | - |
-| `/kb/slack/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:861` | `ingest.ts` | - | - |
-| `/kb/slack/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:935` | `ingest.ts` | - | - |
-| `/kb/slack/conversations` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:921` | `source-actions.ts` | - | - |
-| `/kb/box/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:954` | `source-actions.ts` | - | - |
-| `/kb/connect-box` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:954` | `source-actions.ts` | - | - |
-| `/kb/mcp-connector/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `source-actions.ts` | - | - |
-| `/kb/mcp-connector/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `ingest.ts` | - | - |
-| `/kb/mcp-connector/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | `ingest.ts` | - | - |
-| `/kb/mcp-connector/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1010` | - | - | tests only |
+| `/kb/connect-tickets-json` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:634` | - | - | comments/docs only |
+| `/kb/connect-qa` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1515` | - | `kb.ts` | - |
+| `/kb/email/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:654` | `source-actions.ts` | - | - |
+| `/kb/email/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:654` | `ingest.ts` | - | - |
+| `/kb/email/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:775` | `ingest.ts` | - | - |
+| `/kb/email/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1245` | - | - | tests only |
+| `/kb/slack/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:792` | `source-actions.ts` | - | - |
+| `/kb/slack/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:792` | `ingest.ts` | - | - |
+| `/kb/slack/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:866` | `ingest.ts` | - | - |
+| `/kb/slack/conversations` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:852` | `source-actions.ts` | - | - |
+| `/kb/box/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:885` | `source-actions.ts` | - | - |
+| `/kb/connect-box` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:885` | `source-actions.ts` | - | - |
+| `/kb/mcp-connector/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:941` | `source-actions.ts` | - | - |
+| `/kb/mcp-connector/fetch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:941` | `ingest.ts` | - | - |
+| `/kb/mcp-connector/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:941` | `ingest.ts` | - | - |
+| `/kb/mcp-connector/classify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:941` | - | - | tests only |
 | `/kb/google/start` | ALL_ENDPOINTS | POST | token | core | `extension/routes/google-connectors.mjs:143` | `google-core.ts` | - | - |
 | `/kb/google/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:156` | `google-core.ts` | - | - |
 | `/kb/google/accounts` | ALL_ENDPOINTS | GET | token | core | `extension/routes/google-connectors.mjs:163` | `bus-api.ts`, `google-core.ts` | - | - |
@@ -219,22 +222,22 @@ Endpoints with no client caller (93):
 | `/kb/calendar-ical/sources/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/calendar-ical.mjs:147` | `ical-api.ts` | - | - |
 | `/kb/calendar-ical/sync` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:172` | `ical-api.ts` | - | - |
 | `/kb/calendar-ical/options` | ALL_ENDPOINTS | POST | token | core | `extension/routes/calendar-ical.mjs:160` | `ical-api.ts` | - | - |
-| `/kb/activity` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/router.mjs:1117` | `activity-store.ts` | - | - |
-| `/kb/activity/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1127` | `activity-store.ts` | - | - |
-| `/kb/usage/limits` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/router.mjs:1156` | `ModelLimitsPanel.tsx` | - | - |
-| `/kb/usage/summary` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1178` | `ModelLimitsPanel.tsx` | - | - |
-| `/kb/usage/resolve` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1185` | `usage.ts` | - | - |
-| `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1212` | - | - | tests only |
-| `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1197` | `ModelLimitsPanel.tsx` | - | - |
-| `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1206` | - | - | tests only |
+| `/kb/activity` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/router.mjs:1048` | `activity-store.ts` | - | - |
+| `/kb/activity/seen` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1058` | `activity-store.ts` | - | - |
+| `/kb/usage/limits` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/router.mjs:1087` | `ModelLimitsPanel.tsx` | - | - |
+| `/kb/usage/summary` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1109` | `ModelLimitsPanel.tsx` | - | - |
+| `/kb/usage/resolve` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1116` | `usage.ts` | - | - |
+| `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1143` | - | - | tests only |
+| `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1128` | `ModelLimitsPanel.tsx` | - | - |
+| `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1137` | - | - | tests only |
 | `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | `agent-history-model.ts` | - | - |
 | `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | `agent-history-model.ts` | - | - |
 | `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | `agent-history-model.ts` | - | - |
 | `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | `agent-history-model.ts` | - | - |
 | `/kb/generate-plan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:34` | - | `App.tsx` | - |
 | `/kb/analyze-risks` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:60` | - | - | tests only |
-| `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1262` | `adapter.ts` | - | - |
-| `/kb/conflict-questions` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1603` | - | `kb.ts` | - |
+| `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1193` | `adapter.ts` | - | - |
+| `/kb/conflict-questions` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1534` | - | `kb.ts` | - |
 | `/kb/providers/verify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:171` | `builtin-keys-model.ts`, `builtin-providers.ts` | - | - |
 | `/kb/providers/models` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:222` | `builtin-providers.ts`, `route.ts` | - | - |
 | `/kb/providers/catalog` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:87` | `providers-model.ts`, `route.ts` | - | - |
@@ -257,18 +260,18 @@ Endpoints with no client caller (93):
 | `/kb/plan/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/planning.mjs:154` | - | - | comments/docs only |
 | `/kb/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:182` | - | `App.tsx` | - |
 | `/kb/generate-code` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:324` | - | `App.tsx` | - |
-| `/kb/issue-schedule` | ALL_ENDPOINTS | DELETE, GET, PUT | token | gantt_issues | `extension/routes/issue-schedule.mjs:24` | `GanttScreen.tsx`, `ScheduleEditor.tsx`, `gantt-model.ts` | - | - |
+| `/kb/issue-schedule` | ALL_ENDPOINTS | DELETE, GET, PUT | token | gantt_issues | `extension/routes/issue-schedule.mjs:26` | `GanttScreen.tsx`, `ScheduleEditor.tsx`, `gantt-model.ts` | - | - |
 | `/kb/review/submit` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:59` | - | `App.tsx` | - |
 | `/kb/review/list` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:93` | - | `App.tsx` | - |
 | `/kb/review/get/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:102` | - | - | tests only |
 | `/kb/review/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:129` | - | `App.tsx` | - |
 | `/kb/review/reject` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:110` | - | - | tests only |
 | `/kb/review/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/review.mjs:265` | - | - | tests only |
-| `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1538` | - | `App.tsx` | - |
-| `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1475` | - | `App.tsx` | - |
-| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1524` | - | - | comments/docs only |
-| `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1507` | - | - | comments/docs only |
-| `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1518` | - | - | comments/docs only |
+| `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1469` | - | `App.tsx` | - |
+| `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1406` | - | `App.tsx` | - |
+| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1455` | - | - | comments/docs only |
+| `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1438` | - | - | comments/docs only |
+| `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1449` | - | - | comments/docs only |
 | `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:118` | - | `useRemoteSessions.ts` | - |
 | `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:223` | - | `useRemoteSessions.ts` | - |
 | `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:73` | - | `useLiveSync.ts` | - |
@@ -342,7 +345,7 @@ Endpoints with no client caller (93):
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | `sync-model.ts` | - | - |
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:865` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:870` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:107` | `core.ts` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:132` | `core.ts` | `config.ts` | - |
@@ -353,7 +356,7 @@ Endpoints with no client caller (93):
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:331` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:376` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:896` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:901` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:423` | `core.ts` | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:605` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:620` | - | - | tests only |
@@ -427,14 +430,11 @@ Endpoints with no client caller (93):
 
 ## Consistency
 
-Checked: 276 roster entries, 546 app source files, 52 extension source files.
+Checked: 279 roster entries, 546 app source files, 52 extension source files.
 
-Allowlisted client paths outside the roster (4 distinct paths, 4 reasons):
+Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 
 - `/auth/me/extensions` (app) — the BASE prefix ui/screens/library/extensions/api.ts builds its /auth/me/extensions/* calls from, not a call
-- `/kb/issues/close` (app) — same as /kb/issues/create
-- `/kb/issues/comment` (app) — same as /kb/issues/create
-- `/kb/issues/create` (app) — desktop Issues write actions with no core route yet (MASTER-PLAN: hosted issue actions need a core route plan); found when the inventory started scanning the desktop client
 
 Unresolvable client paths (0): first segment only, not matched to any route:
 

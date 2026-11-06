@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/issues/comment",
+  "status": 403,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "octo/repo",
+      "number": 42,
+      "body": "Fixed on main."
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

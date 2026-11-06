@@ -213,6 +213,18 @@
         }
       }
     },
+    "IssueWriteOk": {
+      "type": "object",
+      "description": "A hosted issue write the provider accepted (extension/routes/issue-writes.mjs). Never carries the token.",
+      "required": ["ok", "id", "url", "state"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "type": ["integer", "null"], "description": "The provider's id of the issue, comment or note" },
+        "url": { "type": ["string", "null"], "description": "The provider's web URL for it" },
+        "state": { "type": ["string", "null"], "description": "The issue state after the write; null for a comment" },
+        "deduped": { "type": "boolean", "x-optional": true, "description": "create only: true when this answer replays an earlier create with the same idem" }
+      }
+    },
     "Issue": {
       "type": "object",
       "required": [
@@ -1126,6 +1138,36 @@
         "403": { "$ref": "_common#/$defs/Error" },
         "502": { "$ref": "_common#/$defs/Error" }
       }
+    },
+    "POST /kb/issues/create": {
+      "description": "Desktop only: JWT + bus host proof (403 HOST_PROOF_REQUIRED first); feature gantt_issues. Creates an issue in a repo already on the caller's board (an imported ticket row whose URL is on github.com / gitlab.com, else 403 REPO_NOT_ALLOWED) with the vault token on the fixed host. A repeat with the same idem within 10 minutes replays the first answer (deduped: true); other content under that idem is 409 IDEM_CONFLICT. Provider refusals: 403 TOKEN_UNAUTHORIZED | TOKEN_FORBIDDEN, 400 PROVIDER_REJECTED, 502 PROVIDER_ERROR | PROVIDER_UNREACHABLE. 'dispatch' bucket.",
+      "request": { "body": { "type": "object", "required": ["provider", "repo", "title", "idem"], "properties": {
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
+        "repo": { "type": "string", "description": "GitHub owner/name, or a GitLab project path of 2 to 20 segments; at most 200 characters; no . or .. segment" },
+        "title": { "type": "string", "description": "1 to 255 characters after trimming" },
+        "body": { "type": "string", "x-optional": true, "description": "At most 20 000 characters; default empty" },
+        "idem": { "type": "string", "description": "16 to 64 of [A-Za-z0-9_-]; one key per issue the user means to create" }
+      } } },
+      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "409": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+    },
+    "POST /kb/issues/comment": {
+      "description": "Desktop only, as POST /kb/issues/create. Adds a comment (GitLab: a note) to an issue on the caller's board; a PR or MR is 400 NOT_AN_ISSUE.",
+      "request": { "body": { "type": "object", "required": ["provider", "repo", "number", "body"], "properties": {
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
+        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
+        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" },
+        "body": { "type": "string", "description": "1 to 20 000 characters, not only whitespace" }
+      } } },
+      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+    },
+    "POST /kb/issues/close": {
+      "description": "Desktop only, as POST /kb/issues/create. Closes an issue on the caller's board and marks its board row closed; a PR or MR is 400 NOT_AN_ISSUE.",
+      "request": { "body": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
+        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
+        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" }
+      } } },
+      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
     },
     "POST /kb/connect-git": {
       "request": {

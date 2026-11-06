@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/issues/close",
+  "status": 403,
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "group/sub/project",
+      "number": 3
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TOKEN_UNAUTHORIZED",
+      "message": "401 Unauthorized"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/issues/close",
+  "status": 502,
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "group/sub/project",
+      "number": 3
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_ERROR",
+      "message": "GitLab answered 503."
+    }
+  }
+}

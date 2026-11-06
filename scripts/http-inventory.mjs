@@ -62,9 +62,6 @@ const ALLOWLIST = {
   },
   clientNotInRoster: {
     '/auth/me/extensions': 'the BASE prefix ui/screens/library/extensions/api.ts builds its /auth/me/extensions/* calls from, not a call',
-    '/kb/issues/create': 'desktop Issues write actions with no core route yet (MASTER-PLAN: hosted issue actions need a core route plan); found when the inventory started scanning the desktop client',
-    '/kb/issues/comment': 'same as /kb/issues/create',
-    '/kb/issues/close': 'same as /kb/issues/create',
   },
   duplicate: {},
 };

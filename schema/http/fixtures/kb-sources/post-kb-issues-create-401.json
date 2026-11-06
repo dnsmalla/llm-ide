@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/issues/create",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "octo/repo",
+      "title": "Crash on save",
+      "body": "Steps: open, save.",
+      "idem": "f3b1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "UNAUTHENTICATED",
+      "message": "Sign in first"
+    }
+  }
+}

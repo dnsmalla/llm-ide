@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/issues/comment",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "octo/repo",
+      "number": 42,
+      "body": "Fixed on main."
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": 2002,
+    "url": "https://github.com/octo/repo/issues/42#issuecomment-2002",
+    "state": null
+  }
+}

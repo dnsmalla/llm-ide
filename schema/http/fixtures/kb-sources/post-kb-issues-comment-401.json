@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/issues/comment",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "octo/repo",
+      "number": 42,
+      "body": "Fixed on main."
+    }
+  },
+  "response": {
+    "error": {
+      "code": "UNAUTHENTICATED",
+      "message": "Sign in first"
+    }
+  }
+}

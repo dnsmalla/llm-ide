@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/issues/close",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "gitlab",
+      "repo": "group/sub/project",
+      "number": 3
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": 3003,
+    "url": "https://gitlab.com/group/sub/project/-/issues/3",
+    "state": "closed"
+  }
+}

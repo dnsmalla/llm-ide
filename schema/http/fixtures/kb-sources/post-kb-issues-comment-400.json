@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/issues/comment",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "octo/repo",
+      "number": 42,
+      "body": " "
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "body is required",
+      "details": {
+        "field": "body"
+      }
+    }
+  }
+}
