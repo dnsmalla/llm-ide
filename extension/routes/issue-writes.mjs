@@ -66,8 +66,9 @@ export function providerCall(w) {
 
 /** A provider refusal as the client sees it. Never 401: the desktop treats any 401 as its own expired session. */
 export function mapProviderFailure(provider, status, data) {
-  const said = typeof data?.message === 'string' ? data.message : typeof data?.error === 'string' ? data.error : '';
-  const message = (said || `${NAME[provider]} answered ${status}.`).slice(0, 300);
+  // Fixed text only: the provider's own wording never reaches the client (data is not read here).
+  void data;
+  const message = `${NAME[provider]} answered ${status}.`;
   if (status === 401) return { status: 403, code: 'TOKEN_UNAUTHORIZED', message };
   if (status === 403 || status === 404) return { status: 403, code: 'TOKEN_FORBIDDEN', message };
   if (status === 400 || status === 422) return { status: 400, code: 'PROVIDER_REJECTED', message };

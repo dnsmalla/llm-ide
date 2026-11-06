@@ -89,6 +89,8 @@ test('setup: a user', () => {
 test('featureDisabledFor maps a disabled group\'s paths to its feature key', () => {
   assert.equal(featureDisabledFor('/kb/loop/agent-run', CHAT_ONLY), 'auto_tasks');
   assert.equal(featureDisabledFor('/kb/issue-schedule?provider=github&repo=o/r', CHAT_ONLY), 'gantt_issues');
+  for (const p of ['/kb/issues/create', '/kb/issues/comment', '/kb/issues/close']) assert.equal(featureDisabledFor(p, CHAT_ONLY), 'gantt_issues', p);
+  assert.equal(featureDisabledFor('/kb/issues?provider=github', CHAT_ONLY), null, 'the board read stays always-on');
   assert.equal(featureDisabledFor('/kb/ingest-code-graph', CHAT_ONLY), 'code_graph_3d');
   assert.equal(featureDisabledFor('/kb/search', CHAT_ONLY), null, 'always-on route');
   assert.equal(featureDisabledFor('/kb/loop/agent-run', null), null, 'null = all features');
@@ -112,6 +114,9 @@ test('with only agent_chat, feature routes answer 404 feature_disabled', async (
   const sched = await call('GET', '/kb/issue-schedule?provider=github&repo=o/r', null, userId);
   assert.equal(sched.status, 404);
   assert.deepEqual(sched.body, { error: 'feature_disabled', feature: 'gantt_issues' });
+  const write = await call('POST', '/kb/issues/comment', { provider: 'github', repo: 'o/r', number: 1, body: 'x' }, userId);
+  assert.equal(write.status, 404);
+  assert.deepEqual(write.body, { error: 'feature_disabled', feature: 'gantt_issues' });
 
   const graph = await call('POST', '/kb/ingest-code-graph', { repoPath: '/x', graph: {} }, userId);
   assert.equal(graph.status, 404);
@@ -130,6 +135,7 @@ test('with only agent_chat, the disabled route modules were never imported', { s
   assert.equal(wasLoaded('/routes/loop-agent.mjs'), false);
   assert.equal(wasLoaded('/llm_agent/sdk/loop-agent.mjs'), false);
   assert.equal(wasLoaded('/routes/issue-schedule.mjs'), false);
+  assert.equal(wasLoaded('/routes/issue-writes.mjs'), false);
   assert.equal(wasLoaded('/routes/code-graph.mjs'), false);
   assert.equal(wasLoaded('/connectors/structure-graph.mjs'), false);
   assert.deepEqual(loadedGroups(), []);

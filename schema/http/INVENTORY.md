@@ -42,9 +42,9 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 265 |
+| core | 266 |
 | code_graph_3d | 1 |
-| gantt_issues | 5 |
+| gantt_issues | 4 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
@@ -176,10 +176,10 @@ Endpoints with no client caller (94):
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:330` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:155` | - | `App.tsx` | - |
 | `/kb/search` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:293` | - | `App.tsx`, `kb.ts` | - |
-| `/kb/issues` | ALL_ENDPOINTS | GET | token | gantt_issues | `extension/routes/router.mjs:378` | `issue-paging.ts` | `kb.ts` | - |
-| `/kb/issues/create` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:130` | `IssuesScreen.tsx` | - | - |
-| `/kb/issues/comment` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:131` | `IssueDetail.tsx` | - | - |
-| `/kb/issues/close` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:132` | `IssueDetail.tsx` | - | - |
+| `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:378` | `issue-paging.ts` | `kb.ts` | - |
+| `/kb/issues/create` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:131` | `IssuesScreen.tsx` | - | - |
+| `/kb/issues/comment` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:132` | `IssueDetail.tsx` | - | - |
+| `/kb/issues/close` | ALL_ENDPOINTS | POST | token | gantt_issues | `extension/routes/issue-writes.mjs:133` | `IssueDetail.tsx` | - | - |
 | `/kb/meeting/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:430` | - | - | tests only |
 | `/kb/entity/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:453` | - | - | tests only |
 | `/kb/project/:id/export` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:471` | `PathsSection.tsx` | - | - |
@@ -432,7 +432,7 @@ Endpoints with no client caller (94):
 
 ## Consistency
 
-Checked: 280 roster entries, 546 app source files, 52 extension source files.
+Checked: 280 roster entries, 544 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

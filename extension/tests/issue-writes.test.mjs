@@ -51,12 +51,12 @@ test("providerCall builds one fixed-host call per operation", () => {
 });
 
 test("mapProviderFailure never answers 401 and keeps token refusals apart from provider faults", () => {
-  assert.deepEqual(mapProviderFailure("github", 401, { message: "Bad credentials" }), { status: 403, code: "TOKEN_UNAUTHORIZED", message: "Bad credentials" });
+  assert.deepEqual(mapProviderFailure("github", 401, { message: "Bad credentials" }), { status: 403, code: "TOKEN_UNAUTHORIZED", message: "GitHub answered 401." }, "the provider's own text never reaches the client");
   assert.equal(mapProviderFailure("github", 403, {}).code, "TOKEN_FORBIDDEN");
   assert.equal(mapProviderFailure("github", 404, {}).code, "TOKEN_FORBIDDEN", "GitHub hides a repo the token cannot see behind 404");
   assert.deepEqual(mapProviderFailure("gitlab", 422, { message: { title: ["is too long"] } }), { status: 400, code: "PROVIDER_REJECTED", message: "GitLab answered 422." });
   assert.deepEqual(mapProviderFailure("github", 500, null), { status: 502, code: "PROVIDER_ERROR", message: "GitHub answered 500." });
-  assert.equal(mapProviderFailure("github", 500, { message: "x".repeat(400) }).message.length, 300);
+  assert.equal(mapProviderFailure("github", 500, { message: "x".repeat(400) }).message, "GitHub answered 500.", "a long provider message is never passed through");
 });
 
 test("onceForIdem runs a create once per key, replays it, refuses other content and frees a failed key", async () => {

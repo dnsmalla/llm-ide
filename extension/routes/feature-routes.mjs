@@ -30,9 +30,10 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
     prefixes: Object.freeze(['/kb/ingest-code-graph']),
     load: async () => (await import('./code-graph.mjs')).handleCodeGraphRoutes,
   }),
-  // Gantt schedule overlay (Features/Issues, incl. Issues/Gantt, only).
+  // Gantt schedule overlay and the hosted issue writes (create, comment, close), Issues/Gantt only.
+  // GET /kb/issues (the board read) stays always-on: the Chrome extension's chat grounds on it.
   gantt_issues: Object.freeze({
-    prefixes: Object.freeze(['/kb/issue-schedule', '/kb/issues']),
+    prefixes: Object.freeze(['/kb/issue-schedule', '/kb/issues/create', '/kb/issues/comment', '/kb/issues/close']),
     load: async () => (await import('./issue-schedule.mjs')).handleIssueScheduleRoutes,
   }),
   // Doc Gen's /generate-doc (Features/Generation, Mac only). Prefix-matched
