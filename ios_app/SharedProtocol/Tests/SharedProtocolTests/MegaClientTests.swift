@@ -72,4 +72,14 @@ struct MegaClientTests {
         await #expect(throws: MegaClient.Failure.rateLimited) { _ = try await c.get("hello.bin") }
         #expect(waits == [2, 4, 8, 16].map { UInt64($0) * 1_000_000_000 })
     }
+
+    @Test("pinned: two blob reads and a missing file share one tree fetch")
+    func pinnedTree() async throws {
+        let s = FakeMegaServer(); let c = client(s)
+        let store = try await c.pinned()
+        #expect(try await store.get("hello.bin") == SV.hex(SV.d(SV.mega["upload"])["plaintextHex"]))
+        #expect(try await store.get("big.bin") != nil)
+        #expect(try await store.get("nope.bin") == nil)
+        #expect(s.commands.filter { $0["a"] as? String == "f" }.count == 1)
+    }
 }

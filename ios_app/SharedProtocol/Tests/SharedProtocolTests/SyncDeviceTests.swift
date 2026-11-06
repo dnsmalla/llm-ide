@@ -27,7 +27,6 @@ struct SyncDeviceTests {
         #expect(device.state.pair.es == "" && device.state.epoch == 1 && device.state.isEnrolled)
         let s = try #require(await device.readSnapshot(store, nowMs: 1_762_300_060_000))
         #expect(s.chats.map(\.id) == ["c1", "c2"])
-        #expect(s.sessions.first { $0.id == "c2" }?.phoneChat == true)
         #expect(s.chats[0].messages.map(\.content) == ["hi", "hello"])
         #expect(s.meetings.first?.notes.count == 2 && s.truncated == ["meetings"])
         #expect(s.plans.first?.tasks.first?.status == "doing")
@@ -167,5 +166,29 @@ struct SyncDeviceTests {
         let missing = SyncB64.newId22()
         let got = try await device.readReplies(store, requestIds: [a, b, d, e, missing], nowMs: 5)
         #expect(got == [e: .answered(text: "fine", finishedAt: 9)])
+    }
+
+    @Test("a retried writeClaim with the same bytes puts once: a second claim node would kill the slot")
+    func claimNoDuplicate() async throws {
+        let inner = SyncDictionaryStore(), desk = SyncTestDesktop()
+        let store = CountingStore(inner)
+        let pair = try SyncEnroll.parsePair(desk.openSlot(inner))
+        let device = try await SyncDevice.prepare(pair: pair, name: "Retry", keys: SoftwareSyncDeviceKeys(), store: store, nowMs: 1)
+        try await device.writeClaim(store)
+        try await device.writeClaim(store)
+        #expect(store.puts.filter { $0.contains("/e/") }.count == 1)
+    }
+}
+
+/// Records every put (the dictionary store alone would hide a second write to the same path).
+@MainActor
+final class CountingStore: SyncRemoteStore {
+    let inner: SyncDictionaryStore
+    var puts: [String] = []
+    init(_ inner: SyncDictionaryStore) { self.inner = inner }
+    func get(_ path: String) async throws -> Data? { try await inner.get(path) }
+    func put(_ path: String, _ bytes: Data, createFolders: Int) async throws {
+        puts.append(path)
+        try await inner.put(path, bytes, createFolders: createFolders)
     }
 }

@@ -70,9 +70,6 @@ public struct SyncSnapshot: Equatable, Sendable {
 
     public init(manifest: SyncManifest) { self.manifest = manifest }
 
-    public var sessions: [HostApiChatSessionsResultSessionsItem] {
-        chats.map { .init(id: $0.id, phoneChat: $0.phoneChat, title: $0.title, updatedAt: Int($0.updatedAt ?? 0)) }
-    }
     public var usageState: UsageState? { usage.map(HostApiReadMapping.usageState) }
 }
 

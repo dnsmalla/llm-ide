@@ -136,7 +136,9 @@ enum MegaCrypto {
         var buf = [UInt8](repeating: 0, count: 4 + 262_144 * 48)
         let t = [UInt8](token)
         for i in 0..<262_144 { buf.replaceSubrange((4 + i * 48)..<(4 + i * 48 + 48), with: t) }
-        while true {
+        // shortcut: a generous cap (MEGA's real challenges need far fewer), so a hostile challenge cannot spin forever.
+        for _ in 0..<(1 << 20) {
+            if Task.isCancelled { throw CancellationError() }
             let h = Array(SHA256.hash(data: buf))
             if (UInt32(h[0]) << 24 | UInt32(h[1]) << 16 | UInt32(h[2]) << 8 | UInt32(h[3])) <= threshold {
                 return "1:\(parts[3]):\(SyncB64.encode(Data(buf[0..<4])))"
@@ -144,6 +146,7 @@ enum MegaCrypto {
             var j = 0
             while true { buf[j] &+= 1; if buf[j] != 0 { break }; j += 1 }
         }
+        throw MegaClient.Failure.badResponse
     }
 }
 

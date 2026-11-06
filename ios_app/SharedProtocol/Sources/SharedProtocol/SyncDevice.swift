@@ -129,7 +129,10 @@ public final class SyncDevice {
 
     public func writeClaim(_ store: SyncRemoteStore) async throws {
         guard let claimBytes else { throw SyncCryptoError("not_enrolling") }
-        try await store.put("\(slotDir)/\(state.claimName).bin", claimBytes, createFolders: 2)
+        let path = "\(slotDir)/\(state.claimName).bin"
+        // A retry must not add a second claim node: MEGA keeps duplicate names, and the desktop kills a slot with two claims.
+        if try await store.get(path) == claimBytes { return }
+        try await store.put(path, claimBytes, createFolders: 2)
     }
 
     /// Contract 4d: nil until the desktop answered, then the 6-digit SAS.

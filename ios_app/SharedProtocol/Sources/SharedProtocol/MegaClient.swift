@@ -65,7 +65,9 @@ public final class MegaClient: SyncRemoteStore {
             let (data, resp) = try await transport(req)
             if let challenge = resp.value(forHTTPHeaderField: "X-Hashcash"), challenges < 2 {
                 challenges += 1
-                hashcash = try await Task.detached(priority: .userInitiated) { try MegaCrypto.hashcash(challenge) }.value
+                // Detached so the hashing stays off the main actor; cancellation is forwarded into it.
+                let work = Task.detached(priority: .userInitiated) { try MegaCrypto.hashcash(challenge) }
+                hashcash = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
                 continue
             }
             var result: Any?
@@ -148,9 +150,15 @@ public final class MegaClient: SyncRemoteStore {
             .max { ($0.element.ts, $0.offset) < ($1.element.ts, $1.offset) }?.element
     }
 
-    public func get(_ path: String) async throws -> Data? {
+    public func get(_ path: String) async throws -> Data? { try await get(path, nodes: try await tree()) }
+
+    /// A store whose reads all use one tree listing: a refresh pins once instead of listing the tree per file.
+    public func pinned() async throws -> SyncRemoteStore {
+        PinnedMegaStore(client: self, nodes: try await tree())
+    }
+
+    func get(_ path: String, nodes: [Node]) async throws -> Data? {
         let segs = try SyncPath.check(path)
-        let nodes = try await tree()
         guard let dir = folderHandle(nodes, Array(segs.dropLast())), let file = newestFile(nodes, in: dir, named: segs.last!),
               let key = file.key, key.count == 32 else { return nil }
         guard file.s <= SyncPath.maxFileBytes else { throw Failure.tooLarge }
@@ -201,4 +209,14 @@ public final class MegaClient: SyncRemoteStore {
                                                       "a": MegaCrypto.encryptAttributes(name: segs.last!, key16: aes),
                                                       "k": SyncB64.encode(MegaCrypto.ecbEncrypt(session.masterKey, nodeKey))]]])
     }
+}
+
+/// Reads from one tree listing (see `MegaClient.pinned()`); writes still go to the client.
+@MainActor
+final class PinnedMegaStore: SyncRemoteStore {
+    private let client: MegaClient
+    private let nodes: [MegaClient.Node]
+    init(client: MegaClient, nodes: [MegaClient.Node]) { self.client = client; self.nodes = nodes }
+    func get(_ path: String) async throws -> Data? { try await client.get(path, nodes: nodes) }
+    func put(_ path: String, _ bytes: Data, createFolders: Int) async throws { try await client.put(path, bytes, createFolders: createFolders) }
 }

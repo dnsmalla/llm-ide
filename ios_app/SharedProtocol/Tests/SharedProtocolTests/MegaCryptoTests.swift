@@ -72,4 +72,14 @@ struct MegaCryptoTests {
         let empty = mpi([]) + mpi([]) + mpi([0x03])
         #expect(throws: MegaClient.Failure.badResponse) { _ = try MegaCrypto.sessionId(csid: Data(mpi([0x05])), privk: Data(empty)) }
     }
+
+    @Test("hashcash stops promptly once its task is cancelled (this challenge needs about 2^29 hashes)")
+    func hashcashCancel() async throws {
+        let hard = "1:0:1:" + SyncB64.encode(Data(repeating: 7, count: 48))
+        let t = Task.detached { try MegaCrypto.hashcash(hard) }
+        t.cancel()
+        let start = Date()
+        await #expect(throws: CancellationError.self) { _ = try await t.value }
+        #expect(Date().timeIntervalSince(start) < 10)
+    }
 }

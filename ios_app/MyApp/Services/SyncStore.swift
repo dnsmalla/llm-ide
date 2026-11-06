@@ -120,11 +120,16 @@ final class SyncStore: ObservableObject {
                 UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.")
             }
             _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(c, nowMs: self.nowMs) ? true : nil }
+            // `c` stays the live session (`mega = c` below), so it is not logged out here; only a superseded `mega` is.
+            let saved = Keychain.save(stored, .keys) && Keychain.save(d.state, .state)
+                && Keychain.save(StoredMega(email: email, folder: folder, session: session), .mega)
+            guard saved else {
+                await c.logout()
+                enrollStep = .failed("This phone couldn't save the sign-in to its Keychain. Try again.")
+                return
+            }
             prepared = nil; pendingPair = nil
             await mega?.logout()
-            _ = Keychain.save(stored, .keys)
-            _ = Keychain.save(d.state, .state)
-            _ = Keychain.save(StoredMega(email: email, folder: folder, session: session), .mega)
             attach(d); mega = c; megaEmail = email
             queued = []; Self.write(queued, "queue.json")
             phase = .ready; enrollStep = .done
@@ -146,14 +151,15 @@ final class SyncStore: ObservableObject {
         guard phase == .ready || phase == .removed, let device, let mega, !refreshing else { return }
         refreshing = true; defer { refreshing = false }
         do {
-            let rec = SyncRecordingStore(remote: mega)
+            let store = try await mega.pinned()  // one tree listing for the whole refresh
+            let rec = SyncRecordingStore(remote: store)
             if let s = try await device.readSnapshot(rec, nowMs: nowMs) {  // nil: the first snapshot is not there yet
                 snapshot = s
                 Self.write(rec.fetched, "snapshot-cache.json")
             }
             phase = .ready
             var resend: [String] = []
-            let replies = try await device.readReplies(mega, requestIds: queued.filter(\.isPending).map(\.id), nowMs: nowMs)
+            let replies = try await device.readReplies(store, requestIds: queued.filter(\.isPending).map(\.id), nowMs: nowMs)
             for i in queued.indices {
                 guard let r = replies[queued[i].id] else { continue }
                 switch r {

@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 
 /// Entry screen — discovers Macs automatically; falls back to manual IP + PIN entry.
 struct ConnectView: View {
