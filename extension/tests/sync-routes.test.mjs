@@ -18,7 +18,8 @@ const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
 const st = await import('../kb/sync-state.mjs');
 const { handleSyncRoute, isSyncRoute } = await import('../routes/sync/http-routes.mjs');
-const { recordCycleFailure, publishNow, withUserLock } = await import('../routes/sync/scheduler.mjs');
+const { recordCycleFailure, publishNow, withUserLock, storeFor, dropStore } = await import('../routes/sync/scheduler.mjs');
+const { createFakeBox } = await import('./helpers/fake-box.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
 const { createReferenceDevice } = await import('./helpers/sync-device.mjs');
 const { _resetEnrollmentsForTest } = await import('../routes/sync/enroll.mjs');
@@ -229,3 +230,13 @@ test('setup refuses while a sync cycle holds the lock', async () => {
     assert.equal(m.status, 409); assert.equal(m.body.error.code, 'SYNC_BUSY');
   });
 });
+
+test('storeFor builds a Box store and persists rotated refresh tokens', async () => {
+  const fake = createFakeBox(); const real = globalThis.fetch; globalThis.fetch = fake.fetch;
+  try { const u = user(); st.ensureSyncState(u, { storeKind: 'box', storeConfig: { clientId: fake.clientId, folder: 'llmide-sync', account: 's***@example.com' } });
+    assert.equal(storeFor(u), null); const first = fake.grant(); vault.setSecret(kb.getDb(), u, 'sync.boxClientSecret', fake.clientSecret); vault.setSecret(kb.getDb(), u, 'sync.boxRefreshToken', first);
+    const s = storeFor(u); assert.equal(s.describe().kind, 'box'); await s.put('x/a.bin', Buffer.from('1'));
+    const now = vault.getSecret(kb.getDb(), u, 'sync.boxRefreshToken'); assert.ok(now && now !== first); await dropStore(u);
+  } finally { globalThis.fetch = real; }
+});
+test('Box secrets are server-internal', () => { for (const k of ['sync.boxClientSecret','sync.boxRefreshToken']) { assert.equal(vault.isUserSettableVaultKey(k), false); assert.ok(!vault.VAULT_KEYS.includes(k)); } });

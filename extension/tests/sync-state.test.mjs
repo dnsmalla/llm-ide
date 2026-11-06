@@ -67,3 +67,9 @@ test('sync vault keys are internal: storable by the server, not client-settable'
     assert.ok(!vault.VAULT_KEYS.includes(k));
   }
 });
+
+test('forgetSyncDevices drops devices and publish rows', () => {
+  const u = user(); st.ensureSyncState(u, { storeKind: 'memory', storeConfig: {} });
+  for (const [i, id] of ['dev-forget-1','dev-forget-2'].entries()) { st.addSyncDevice(u, { deviceId: id, dir: String(i).repeat(22), tier: 'web', name: 'B', ecdhSpki: Buffer.from([1]), signingSpki: Buffer.from([2]), now: 1 }); st.setPublished(u, id, 'chats', { file: 's/x.bin', seq: 1, fileSha256: 'a', plainSha256: 'b', epoch: 1 }); }
+  assert.equal(st.forgetSyncDevices(u), 2); assert.deepEqual(st.listSyncDevices(u), []); assert.deepEqual(st.getPublished(u, 'dev-forget-1'), {}); assert.equal(st.forgetSyncDevices(u), 0);
+});

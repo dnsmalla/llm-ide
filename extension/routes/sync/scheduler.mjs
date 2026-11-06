@@ -4,11 +4,12 @@
 // password never locks the MEGA account and a swapped server is never written to. One store (one MEGA session or one
 // SSH connection) per user is cached while the core runs. LLMIDE_SYNC=off starts nothing.
 import { getDb } from '../../kb/db.mjs';
-import { getSecret } from '../../server/vault.mjs';
+import { getSecret, setSecret } from '../../server/vault.mjs';
 import { getSyncState, listEnabledSyncUsers, recordPublish, setSyncEnabled } from '../../kb/sync-state.mjs';
 import { createMegaStore } from '../../connectors/sync-store/mega.mjs';
 import { withTimeouts } from '../../connectors/sync-store/index.mjs';
 import { createSftpStore } from '../../connectors/sync-store/sftp.mjs';
+import { createBoxStore } from '../../connectors/sync-store/box.mjs';
 import { publishOnce } from './producer.mjs';
 import { rotateKeys } from './keys.mjs';
 import { drainOnce, sweepStuckRequests } from './consumer.mjs';
@@ -54,6 +55,12 @@ function openStore(userId, state) {
   if (state.storeKind === 'sftp') {
     const privateKey = getSecret(db, userId, 'sync.sshKey');
     return privateKey ? createSftpStore(state.storeConfig, { privateKey }) : null;
+  }
+  if (state.storeKind === 'box') {
+    const clientSecret = getSecret(db, userId, 'sync.boxClientSecret');
+    const refreshToken = getSecret(db, userId, 'sync.boxRefreshToken');
+    if (!clientSecret || !refreshToken) return null;
+    return createBoxStore(state.storeConfig, { clientSecret, refreshToken }, { onRefreshToken: (t) => setSecret(getDb(), userId, 'sync.boxRefreshToken', t) });
   }
   return null;
 }

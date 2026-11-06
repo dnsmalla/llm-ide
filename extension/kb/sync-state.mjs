@@ -133,3 +133,13 @@ export function setPublishedMany(userId, deviceId, entries) {
   const db = getDb();
   db.transaction(() => { for (const [kind, e] of Object.entries(entries)) setPublished(userId, deviceId, kind, e); })();
 }
+
+/** A storage-kind switch: every device's pairing names the old storage, so all go; request history stays. */
+export function forgetSyncDevices(userId) {
+  requireUser(userId);
+  const db = getDb();
+  return db.transaction(() => {
+    db.prepare('DELETE FROM sync_published WHERE user_id = ?').run(userId);
+    return db.prepare('DELETE FROM sync_devices WHERE user_id = ?').run(userId).changes;
+  })();
+}
