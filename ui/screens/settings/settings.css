@@ -100,3 +100,12 @@
 .st-hide-help .st-hint:not([role="status"]):not([role="alert"]) { display: none; }
 .st-hide-help .st-field { gap: 5px; }
 .st-hide-help .st-stack { gap: 10px; }
+
+/* Explanations are opt-in: long note blocks and help paragraphs leave the compact view. */
+.st-hide-help .st-note[role="note"] { display: none; }
+.st-hide-help .st-group .ui-card { padding: 14px 15px 16px; }
+.st-hide-help .st-group .st-stack { gap: 9px; }
+.st-hide-help .st-group .st-field { gap: 4px; }
+.st-hide-help .st-group .st-btn { min-height: 32px; }
+.st-hide-help .st-group .st-input, .st-hide-help .st-group .st-select { min-height: 34px; }
+.st-hide-help .st-group .st-row { gap: 8px; }

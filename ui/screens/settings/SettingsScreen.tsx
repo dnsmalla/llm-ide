@@ -6,7 +6,7 @@ import type { SettingsRegistry, Loader } from "./registry.ts";
 import { settingsRegistry, type SectionComponent } from "./registry-default.ts";
 import { SettingsEnvProvider } from "./context.tsx";
 import type { SettingsEnv } from "./host.ts";
-import { ExpandedGroups, resolveAnchor } from "./groups.ts";
+import { APP_GROUPS, ExpandedGroups, resolveAnchor } from "./groups.ts";
 import { SettingsGroup } from "./SettingsGroup.tsx";
 
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -80,7 +80,8 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   }, [target]);
 
   const hasProject = Boolean(env.host.activeProjectPath?.());
-  const app = registry.sectionsIn("app").filter((s) => matches(s.title));
+  const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only").map((g) => g.id));
+  const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title));
   const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title)) : [];
   const row = (s: ReturnType<SettingsRegistry<SectionComponent>["sections"]>[number]) => {
     const open = store.current!.isOpen(s.id) || q.length > 0;
