@@ -2,7 +2,7 @@
 // user, in memory only: es never touches the database, the vault, a log or the store, and is zeroed when it ends. The
 // claim is pinned the first time it is seen and never fetched again; the tier is the one the user picked here.
 import { randomBytes } from 'node:crypto';
-import { enrollKeys, newId22, openClaim, sealAck, sasCode, pairUrl } from '../../core/sync-enroll.mjs';
+import { enrollKeys, newId22, openClaim, sealAck, sasCode, pairUrl, BOX_APP_RE } from '../../core/sync-enroll.mjs';
 import { getSyncState, listSyncDevices, addSyncDevice, nextSeq } from '../../kb/sync-state.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
@@ -55,13 +55,15 @@ async function startOne(userId, { store, tier, now = Date.now(), env = process.e
   if (!state?.enabled) throw codeErr('SYNC_OFF');
   const old = pending.get(userId);
   if (old) await kill(old, 'replaced');
-  const keys = ensureSyncKeys(userId);
   const d = store.describe();
+  const boxSecret = d.kind === 'box' ? getSecret(getDb(), userId, 'sync.boxClientSecret') : null;
+  if (d.kind === 'box' && !(BOX_APP_RE.test(state.storeConfig?.clientId ?? '') && BOX_APP_RE.test(boxSecret ?? ''))) throw codeErr('SYNC_NOT_SET_UP');
+  const keys = ensureSyncKeys(userId);
   const es = randomBytes(16);
   const pair = { sid: state.syncId, sfp: keys.fingerprint, dir: newId22(), slot: newId22(), es: es.toString('base64url'), st: `${d.kind}:${d.root}` };
   // Box (SP6 D2): the device needs the user's own Box app id and secret before it can read anything, so they travel in
   // the optical QR, never through storage.
-  if (d.kind === 'box') { pair.bi = state.storeConfig.clientId ?? ''; pair.bs = getSecret(getDb(), userId, 'sync.boxClientSecret') ?? ''; }
+  if (d.kind === 'box') { pair.bi = state.storeConfig.clientId; pair.bs = boxSecret; }
   const p = { pair, es, keys: enrollKeys(es, pair.sid, pair.slot), tier, store, openedAt: now, phase: 'waiting', code: null, claim: null, claimAt: 0, sas: null, timer: null };
   pending.set(userId, p);
   const qr = pairUrl(pair, tier, webOrigin(env));

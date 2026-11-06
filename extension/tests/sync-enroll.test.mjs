@@ -196,3 +196,11 @@ test('parsePair: box needs valid bi and bs; mega ignores them', () => {
   assert.throws(() => E.parsePair(url({ st: 'box:llmide-sync' })), (e) => e.code === 'bad_pair');
   assert.equal(E.parsePair(url({ st: 'mega:llmide-sync' })).bs, undefined);
 });
+
+test('a Box store without the Box app in the vault refuses to build a QR', async () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'box', storeConfig: { clientId: 'cid0123456789abcdef', folder: 'llmide-sync', account: 's***@example.com' } });
+  st.setSyncEnabled(u, true);
+  const store = { ...createMemoryStore(), describe: () => ({ kind: 'box', root: 'llmide-sync', account: 's***@example.com' }) };
+  await assert.rejects(startEnrollment(u, { store, tier: 'ios', now: T }), (e) => e.code === 'SYNC_NOT_SET_UP');
+});
