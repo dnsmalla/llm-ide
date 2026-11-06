@@ -527,9 +527,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before, async () => {
         await invokeHost("graph_generate", { mode: "code", target: repoPrefix || undefined });
       });
-      let warnings: number | null = null;
-      try { warnings = await invokeHost<number | null>("loop_boundary_warnings"); } catch { warnings = null; }
-      return { ok: r.passed, output: `${r.output}${warnings === null ? "\nboundary warnings: unavailable" : `\nboundary warnings: ${warnings}`}` };
+      return { ok: r.passed, output: r.output };
     }
     if (s.kind === "artifactCheck") {
       if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
