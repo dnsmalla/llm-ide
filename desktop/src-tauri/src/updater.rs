@@ -124,6 +124,10 @@ async fn check_now(app: &tauri::AppHandle) -> Result<UpdateStatus, FsError> {
             Err(e) => s.error = Some(confirm::sanitize_line(&e, 200)),
         }
     });
+    // One notification per offered version (notify.rs de-duplicates by key).
+    if let Some(v) = with(|s| s.pending.as_ref().map(|u| u.version.clone())) {
+        crate::notify::fire_host(app, crate::notify::Kind::UpdateReady, Some(&v));
+    }
     Ok(snapshot())
 }
 

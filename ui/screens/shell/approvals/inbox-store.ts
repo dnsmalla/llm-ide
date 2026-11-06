@@ -1,11 +1,10 @@
-// The pending bus approvals, polled while the status-bar inbox is mounted. A NEW pending id raises the host's fixed
-// `approval_needed` notification with our own kind title (never server text); the host sanitises and rate-limits it.
+// The pending bus approvals, polled while the status-bar inbox is mounted. A NEW pending id raises the host's
+// `approval_job` notification with that id as an opaque de-dup key and the pending count; the host builds the words.
 import { core } from "../runtime";
 import { invokeHost, isHostAvailable } from "../host";
 import { busApi, type PendingApproval } from "./bus-api";
-import { kindTitle } from "./summary";
 
-export interface InboxDeps { approvals(): Promise<PendingApproval[]>; notify(detail: string): void | Promise<void> }
+export interface InboxDeps { approvals(): Promise<PendingApproval[]>; notify(info: { key: string; count: number }): void | Promise<void> }
 export interface InboxSnapshot { items: PendingApproval[]; error: string | null }
 
 export function createInboxStore(d: InboxDeps) {
@@ -22,7 +21,7 @@ export function createInboxStore(d: InboxDeps) {
       if (seen.size > 500) for (const id of [...seen].slice(0, seen.size - 500)) seen.delete(id);
       snap = { items, error: null };
       if (fresh.length) {
-        try { await d.notify(fresh.length === 1 ? kindTitle(fresh[0].kind) : `${fresh.length} jobs`); } catch { /* notifications are best effort */ }
+        try { await d.notify({ key: fresh[0].id, count: items.length }); } catch { /* notifications are best effort */ }
       }
     } catch (e) {
       snap = { items: [], error: e && typeof e === "object" && "code" in e && typeof e.code === "string" ? e.code : "UNAVAILABLE" };
@@ -41,5 +40,5 @@ export function createInboxStore(d: InboxDeps) {
 /** The app's inbox: approvals from the core, notifications through the host (none in a plain browser). */
 export const inboxStore = createInboxStore({
   approvals: () => busApi((path, init) => core.requestRaw(path, init ?? {})).approvals(),
-  notify: async (detail) => { if (isHostAvailable()) await invokeHost("notify", { kind: "approval_needed", detail }); },
+  notify: async ({ key, count }) => { if (isHostAvailable()) await invokeHost("notify_user", { kind: "approval_job", key, count }); },
 });

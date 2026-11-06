@@ -195,6 +195,86 @@ pub fn section_id(s: &str) -> Option<&'static str> {
     SECTIONS.iter().copied().find(|x| *x == s)
 }
 
+// ---- process state and commands --------------------------------------------------------------------------------
+
+use std::sync::{Mutex, MutexGuard};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_notification::{NotificationExt, PermissionState};
+
+static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+static ACTIVE_SECTION: Mutex<&'static str> = Mutex::new("welcome");
+static PENDING_ROUTE: Mutex<Option<(&'static str, u64)>> = Mutex::new(None);
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn main_focused(app: &AppHandle) -> bool {
+    app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
+}
+
+/// Shows `kind` unless its switch is off, the user is already looking, or the gate drops it. Ok(true) = shown.
+/// No lock is held across a window or notification call.
+fn fire(app: &AppHandle, kind: Kind, key: Option<&str>, count: u32) -> Result<bool, String> {
+    if !enabled(kind, &crate::prefs::stored().notifications) {
+        return Ok(false);
+    }
+    let focused = main_focused(app);
+    let active = *lock(&ACTIVE_SECTION);
+    if suppressed(kind, focused, active) {
+        return Ok(false);
+    }
+    let now = crate::confirm::now_ms();
+    if !lock(&GATE).get_or_insert_with(Gate::default).admit(kind, key, now) {
+        return Ok(false);
+    }
+    let n = app.notification();
+    let mut state = n.permission_state().map_err(|e| e.to_string())?;
+    if state == PermissionState::Prompt || state == PermissionState::PromptWithRationale {
+        state = n.request_permission().map_err(|e| e.to_string())?;
+    }
+    if state != PermissionState::Granted {
+        return Err("notification permission not granted".into());
+    }
+    n.builder().title(TITLE).body(kind.body(count)).show().map_err(|e| e.to_string())?;
+    if !focused {
+        *lock(&PENDING_ROUTE) = Some((kind.route(), now));
+    }
+    Ok(true)
+}
+
+/// A host-side fact (update found, backend down). Failures are logged, never raised.
+pub fn fire_host(app: &AppHandle, kind: Kind, key: Option<&str>) {
+    if let Err(e) = fire(app, kind, key, 1) {
+        eprintln!("notify: {}: {e}", kind.wire());
+    }
+}
+
+/// The webview names a kind (never text), an optional opaque de-dup key and a count.
+#[tauri::command]
+pub fn notify_user(app: AppHandle, kind: String, key: Option<String>, count: Option<u32>) -> Result<bool, String> {
+    let k = Kind::from_webview(&kind).ok_or("unknown notification kind")?;
+    if key.as_deref().is_some_and(|x| !valid_key(x)) {
+        return Err("invalid notification key".into());
+    }
+    fire(&app, k, key.as_deref(), count.unwrap_or(1).min(999))
+}
+
+/// The section the main window shows (for "already looking" suppression).
+#[tauri::command]
+pub fn notify_focus(section: String) -> Result<(), String> {
+    *lock(&ACTIVE_SECTION) = section_id(&section).ok_or("unknown section")?;
+    Ok(())
+}
+
+/// The main window gained focus or the tray opened it: hand a fresh notification's route to the webview once.
+pub fn on_main_focused(app: &AppHandle) {
+    let route = take_route(&mut lock(&PENDING_ROUTE), crate::confirm::now_ms());
+    if let Some(r) = route {
+        let _ = app.emit("tray-action", format!("route:{r}"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

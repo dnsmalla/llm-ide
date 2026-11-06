@@ -379,7 +379,8 @@ macro_rules! product_handlers {
                 git_scm::git_merge_abort,
                 git_scm::git_commit_amend,
                 git_scm::git_discard_all,
-                tray::notify,
+                notify::notify_user,
+                notify::notify_focus,
                 tray::tray_status,
                 tray::tray_set_close_to_tray,
                 tray::tray_set_icon_visible,
@@ -508,6 +509,9 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(true) = event {
+                if window.label() == "main" { notify::on_main_focused(window.app_handle()); }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Opt-in close-to-tray (default off); only when a tray icon exists.
                 if window.label() == "main" && tray::should_hide_on_close() {
@@ -581,6 +585,9 @@ pub fn run() {
             exit_cleanup(app_handle);
             crash_report::clear_own_on_clean_exit();
         }
+        // macOS: a Dock click brings the hidden window back.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { has_visible_windows: false, .. } => tray::show_main(app_handle),
         _ => {}
     });
 }

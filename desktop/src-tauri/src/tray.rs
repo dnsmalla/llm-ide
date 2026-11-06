@@ -216,15 +216,19 @@ pub fn set_project_label(_app: &AppHandle, name: Option<&str>) {
     }
 }
 
+/// Shows, restores and focuses the main window, then hands it a fresh notification's route (notify.rs).
+pub fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus();
+    }
+    crate::notify::on_main_focused(app);
+}
+
 fn toggle_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
             let _ = w.hide();
-        } else {
-            let _ = w.show();
-            let _ = w.unminimize();
-            let _ = w.set_focus();
-        }
+        } else { show_main(app); }
     }
 }
 
@@ -260,13 +264,7 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "tray_show" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.unminimize();
-                    let _ = w.set_focus();
-                }
-            }
+            "tray_show" => show_main(app),
             "tray_quit" => app.exit(0),
             _ => {}
         })

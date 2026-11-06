@@ -139,15 +139,15 @@ test("scheduler: one failing schedule does not stop the others; errors carry the
 
 const inbox = await load("approvals/inbox-store.ts");
 
-test("inbox: notifies once per new pending id with our own kind title; a 403 is a quiet error", async () => {
+test("inbox: notifies once per new pending id with an opaque key and the pending count, never server text; a 403 is a quiet error", async () => {
   let list = [item()];
   const notes = [];
-  const s = inbox.createInboxStore({ approvals: async () => list, notify: (d) => { notes.push(d); } });
+  const s = inbox.createInboxStore({ approvals: async () => list, notify: (n) => { notes.push(n); } });
   await s.refresh(); await s.refresh();
-  assert.deepEqual(notes, ["Sync connected sources"], "once per id");
+  assert.deepEqual(notes, [{ key: "7c1d2e3f-0000-4000-8000-0000000000a2", count: 1 }], "once per id");
   list = [item(), item({ id: "7c1d2e3f-0000-4000-8000-0000000000b9", kind: "evil‮" }), item({ id: "7c1d2e3f-0000-4000-8000-0000000000c9" })];
   await s.refresh();
-  assert.deepEqual(notes, ["Sync connected sources", "2 jobs"]);
+  assert.deepEqual(notes.at(-1), { key: "7c1d2e3f-0000-4000-8000-0000000000b9", count: 3 });
   assert.equal(s.getSnapshot().items.length, 3);
   const denied = inbox.createInboxStore({ approvals: async () => { throw new api.BusCallError(403, "TIER_DENIED"); }, notify: () => assert.fail("no notification") });
   await denied.refresh();
