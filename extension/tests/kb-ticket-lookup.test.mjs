@@ -8,7 +8,7 @@ process.env.LLMIDE_JWT_SECRET = "a".repeat(48); process.env.LLMIDE_VAULT_KEY = "
 const HERE = path.dirname(fileURLToPath(import.meta.url)); const DB = path.join(HERE, "_kb-ticket-lookup-test.db"); process.env.LLMIDE_DB_PATH = DB;
 const db = await import("../kb/db.mjs"); const users = await import("../server/users.mjs"); const { indexTicketsJson } = await import("../connectors/issues.mjs");
 const GH = "https://github.com";
-function reset() { db.closeDb(); for (const f of [DB, `${DB}-shm`, `${DB}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { } } db.getDb(); }
+function reset() { db.closeDb(); for (const f of [DB, `${DB}-shm`, `${DB}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } } db.getDb(); }
 const user = (tag) => users.registerUser(db.getDb(), { email: `${tag}-${Date.now()}@example.com`, password: "CorrectHorseBattery", displayName: tag }).id;
 function seed(u) { indexTicketsJson(u, { provider: "github", tickets: [
   { url: "https://github.com/o/r/issues/7", title: "Seven", meta: { repo: "o/r", number: 7, state: "open", isPR: false } },
