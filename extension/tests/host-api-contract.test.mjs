@@ -135,3 +135,22 @@ test("generated Host API schemas mirror every request and result verbatim", asyn
     assert.deepEqual(HOST_API_SCHEMAS[name], { request: c.request, result: c.result }, name);
   }
 });
+
+test("host-api compose: capability compose, closed shapes, the shared vector matches the schema", () => {
+  assert.ok(commands.capabilities.includes("compose"));
+  assert.equal(commandEntry("chat.options").capability, "compose");
+  assert.equal(commandEntry("chat.options").idempotent, true);
+  assert.equal(commandEntry("chat.new").capability, "compose");
+  assert.equal(commandEntry("chat.new").idempotent, false);
+  const vector = json("fixtures/security/compose.json");
+  const send = commandEntry("chat.send").request;
+  assert.deepEqual(send.properties.mode.enum, vector.modes.allowed);
+  assert.deepEqual(commandEntry("chat.options").result.properties.modes.items.enum, vector.modes.allowed);
+  for (const mode of vector.modes.refused) {
+    assert.ok(validate(send, { text: "hi", mode }, { defs: envelope.$defs }).length > 0, `mode ${JSON.stringify(mode)} refused`);
+  }
+  for (const model of vector.models.allowed) assert.deepEqual(validate(send, { text: "hi", model }, { defs: envelope.$defs }), [], model);
+  for (const model of vector.models.refused) assert.ok(validate(send, { text: "hi", model }, { defs: envelope.$defs }).length > 0, `model ${JSON.stringify(model)} refused`);
+  assert.equal(send.properties.attachments.maxItems, vector.attachments.maxFiles);
+  assert.equal(send.properties.attachments.items.properties.name.maxLength, vector.attachments.maxNameChars);
+});

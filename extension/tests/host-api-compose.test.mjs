@@ -1,7 +1,7 @@
 // Host API v1 compose helpers on the desktop host: attachment framing, the allowed modes and the model list.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attachmentsToFiles } from '../routes/host-api/compose.mjs';
+import { attachmentsToFiles, isBinaryAttachment } from '../routes/host-api/compose.mjs';
 import { selectAttachments } from '../core/prompt-framing.mjs';
 
 test('attachmentsToFiles: the wire {name, text} becomes the engine {path, content}, and the engine keeps it', () => {
@@ -26,3 +26,11 @@ test('optionsOf: the SDK list as {model, label}, ids checked, de-duplicated, at 
 });
 test('offersModel: only an id the list offers', () => { const e = [{ id: 'claude-sonnet-5-5' }]; assert.equal(offersModel(e, 'claude-sonnet-5-5'), true); assert.equal(offersModel(e, 'claude-opus-4-9'), false); assert.equal(offersModel([], 'claude-sonnet-5-5'), false); });
 test('compose audit events are successes', () => { for (const e of ['chat_options', 'chat_new', 'compose_send']) assert.equal(auditOutcome(e), 'success', e); });
+
+test('attachments: images are refused, as the shared vector says; binary framing never becomes an engine file', () => {
+  assert.equal(vector.attachments.imagesAllowed, false);
+  const image = { name: 'p.png', text: '[binary:image/png]\nAAAA' };
+  assert.equal(isBinaryAttachment(image), true);
+  assert.equal(isBinaryAttachment({ name: 'a.md', text: 'plain' }), false);
+  assert.deepEqual(attachmentsToFiles([image, { name: 'a.md', text: 'plain' }]), [{ path: 'a.md', content: 'plain' }]);
+});

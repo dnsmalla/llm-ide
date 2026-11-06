@@ -540,15 +540,15 @@ test('compose: not served by default — chat.options is capability_unavailable,
   await t.g.receive(s, req('c-1', 'chat.options', {}));
   assert.equal(t.lastError(), 'capability_unavailable'); assert.equal(t.modelCalls, 0);
 });
-test('compose: served and granted — chat.options lists modes and models, audited per call', async () => {
+test('compose: served and granted — chat.options lists the read-only modes and the SDK models, audited once a minute', async () => {
   const t = harness({ compose: true }); const s = {}; await t.paired(s);
   assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'compose']);
   await t.g.receive(s, req('c-1', 'chat.options', {}));
   assert.deepEqual(t.last().result, { modes: ['auto', 'ask', 'plan', 'assist_plan', 'review', 'document'], models: [{ model: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] });
   await t.g.receive(s, req('c-2', 'chat.options', {}));
   const rows = t.audits.filter(([e]) => e === 'chat_options');
-  assert.equal(rows.length, 2); assert.equal(rows[0][1].dedupeKey, rows[0][1].deviceId);
-  assert.equal(JSON.stringify(rows).includes('Sonnet'), false);
+  assert.equal(rows.length, 2, 'the sink de-duplicates; the gateway passes a dedupeKey'); assert.equal(rows[0][1].dedupeKey, rows[0][1].deviceId);
+  assert.equal(JSON.stringify(rows).includes('Sonnet'), false, 'no list content in audit');
 });
 test('compose: an SDK that cannot list models still answers, with no models', async () => {
   const t = harness({ compose: true, models: new Error('not logged in') }); const s = {}; await t.paired(s);
@@ -597,6 +597,11 @@ test('compose send: a model the desktop does not list is denied, no turn starts'
 test('compose send: execute never passes the schema', async () => {
   const t = harness({ compose: true }); const s = {}; await t.paired(s);
   await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' }));
+  assert.equal(t.lastError(), 'invalid_payload'); assert.equal(t.turns.length, 0);
+});
+test('chat.send: an image attachment is invalid_payload and no turn starts', async () => {
+  const t = harness(); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', attachments: [{ name: 'p.png', text: '[binary:image/png]\nAAAA' }] }));
   assert.equal(t.lastError(), 'invalid_payload'); assert.equal(t.turns.length, 0);
 });
 test('chat.new: starts a fresh phone chat; the next send goes there; audited', async () => {
