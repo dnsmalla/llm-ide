@@ -5,6 +5,8 @@ mod attach;
 mod ax_probe;
 mod capture_validate;
 mod capture_delta;
+mod capture_model;
+mod capture_readers;
 mod chat_archive;
 mod chat_cmds;
 mod chat_hash;

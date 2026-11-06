@@ -1,0 +1,1 @@
+{"name":"zoom ja","reader":"zoom","app":{"bundleId":"us.zoom.xos","windows":[{"role":"AXWindow","title":"字幕","children":[{"role":"AXStaticText","value":"田中 他2名\nはい。"},{"role":"AXStaticText","value":"佐藤\n了解です。"}]}]},"raw":[["田中 他2名","はい。"],["佐藤","了解です。"]],"clean":[["田中","はい。"],["佐藤","了解です。"]]}

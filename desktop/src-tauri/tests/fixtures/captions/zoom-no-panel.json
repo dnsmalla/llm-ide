@@ -1,0 +1,1 @@
+{"name":"zoom no panel","reader":"zoom","app":{"bundleId":"us.zoom.xos","windows":[{"role":"AXWindow","title":"Zoom Meeting","children":[{"role":"AXStaticText","value":"Tanaka"}]}]},"raw":null,"clean":null}

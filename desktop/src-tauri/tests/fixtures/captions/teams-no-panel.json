@@ -1,0 +1,1 @@
+{"name":"teams no panel","reader":"teams","app":{"bundleId":"com.microsoft.teams2","windows":[{"role":"AXWindow","title":"Chat","children":[{"role":"AXGroup","description":"Chat list"}]}]},"raw":null,"clean":null}
