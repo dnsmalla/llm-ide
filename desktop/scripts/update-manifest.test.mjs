@@ -6,7 +6,7 @@ import { buildManifest, manifestProblems, sha256Sums, PLATFORMS, RELEASE_BASE } 
 const V = '0.2.0';
 const names = ['LLM-IDE_0.2.0_aarch64.app.tar.gz', 'LLM-IDE_0.2.0_x64.app.tar.gz', 'LLM-IDE_0.2.0_x64-setup.exe', 'LLM-IDE_0.2.0_amd64.AppImage'];
 const files = [...names, ...names.map((n) => `${n}.sig`), 'LLM-IDE_0.2.0_amd64.deb', 'LLM-IDE_0.2.0_aarch64.dmg'];
-const read = (n) => Buffer.from(n.endsWith('.sig') ? `SIG:${n}` : `BODY:${n}`);
+const read = (n) => Buffer.from(n.endsWith('.sig') ? `SIG:${n}`.padEnd(120, '=') : `BODY:${n}`);
 const okVerify = () => ({ ok: true });
 
 test('every platform gets its url and signature text', () => {
@@ -14,7 +14,7 @@ test('every platform gets its url and signature text', () => {
   assert.deepEqual(problems, []);
   assert.deepEqual(Object.keys(manifest.platforms).sort(), PLATFORMS.map((p) => p.key).sort());
   assert.equal(manifest.platforms['windows-x86_64'].url, `${RELEASE_BASE}desktop-v0.2.0/LLM-IDE_0.2.0_x64-setup.exe`);
-  assert.equal(manifest.platforms['linux-x86_64'].signature, 'SIG:LLM-IDE_0.2.0_amd64.AppImage.sig');
+  assert.equal(manifest.platforms['linux-x86_64'].signature, 'SIG:LLM-IDE_0.2.0_amd64.AppImage.sig'.padEnd(120, '='));
   assert.deepEqual(manifestProblems(manifest, V), []);
 });
 
@@ -44,4 +44,9 @@ test('SHA256SUMS lists every non-sig file, sorted, sha256sum format', () => {
   assert.equal(lines.length, 2);
   assert.match(lines[0], /^[0-9a-f]{64} {2}a\.dmg$/);
   assert.match(lines[1], /^[0-9a-f]{64} {2}b\.deb$/);
+});
+
+test('the default verifier is wired in: an invalid key makes every platform a problem', () => {
+  const { problems } = buildManifest({ version: V, notes: '', pubDate: 'x', files, read, pubkey: 'k' });
+  for (const p of PLATFORMS) assert.match(problems.join('\n'), new RegExp(p.key));
 });

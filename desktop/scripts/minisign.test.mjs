@@ -36,3 +36,18 @@ test('a signature made by the Tauri CLI verifies; tampering, another key and gar
   assert.equal(verifyMinisign(a.pub, 'not base64 at all', bytes).ok, false);
   assert.equal(verifyMinisign('', sig, bytes).ok, false);
 });
+
+const reBox = (sig, edit) => Buffer.from(edit(Buffer.from(sig, 'base64').toString('utf8').split('\n')).join('\n')).toString('base64');
+
+test('a rewritten trusted comment, a missing comment line or non-base64 noise is refused', { skip: !have && 'desktop/node_modules missing' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'minisign-'));
+  const a = keypair(dir, 'a.key');
+  const file = join(dir, 'payload.bin');
+  writeFileSync(file, Buffer.from('LLM-IDE update payload'));
+  const sig = sign(file, a.key);
+  const bytes = readFileSync(file);
+  assert.match(verifyMinisign(a.pub, reBox(sig, (l) => { l[2] = 'trusted comment: forged'; return l; }), bytes).reason, /trusted-comment/);
+  assert.equal(verifyMinisign(a.pub, reBox(sig, (l) => { l[0] = 'bogus'; return l; }), bytes).ok, false);
+  assert.match(verifyMinisign(a.pub, reBox(sig, (l) => { l[2] = 'timestamp:1'; return l; }), bytes).reason, /trusted-comment/);
+  assert.equal(verifyMinisign(a.pub, `${sig}\n!!`, bytes).ok, false);
+});
