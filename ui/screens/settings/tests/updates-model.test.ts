@@ -1,7 +1,7 @@
 // ui/screens/settings/tests/updates-model.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeUpdateStatus, updateSummary } from "../updates-model.ts";
+import { decodeUpdateStatus, updateErrorText, updateSummary } from "../updates-model.ts";
 
 const base = { configured: true, reason: null, installKind: "self", available: null, lastCheckedMs: null, error: null };
 
@@ -22,4 +22,12 @@ test("summary text for each state", () => {
   assert.match(updateSummary(decodeUpdateStatus({ ...base, lastCheckedMs: 1, available: { version: "0.3.0", notes: "" } })), /0\.3\.0 is available/);
   assert.match(updateSummary(decodeUpdateStatus({ ...base, error: "offline" })), /could not check/i);
   assert.match(updateSummary(null), /reading/i);
+});
+
+test("host error objects show their message, not [object Object]", () => {
+  assert.equal(updateErrorText({ code: "download_failed", message: "The update could not be downloaded." }), "The update could not be downloaded.");
+  assert.equal(updateErrorText(new Error("x")), "x");
+  assert.equal(updateErrorText("plain"), "plain");
+  assert.equal(updateErrorText({ code: "x" }), "The update action failed.");
+  assert.equal(updateErrorText({ message: "y".repeat(500) }).length, 200);
 });

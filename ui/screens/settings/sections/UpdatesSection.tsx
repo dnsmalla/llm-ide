@@ -3,7 +3,7 @@ import AboutSection from "./AboutSection.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 import { useEnv } from "../context.tsx";
 import { Switch, ErrorText } from "../ui.tsx";
-import { updateSummary, type UpdateStatusView } from "../updates-model.ts";
+import { updateErrorText, updateSummary, type UpdateStatusView } from "../updates-model.ts";
 
 /** The Mac's "Updates & About" group: the signed-update switch, Check now and Install, then version and diagnostics. */
 export default function UpdatesSection() {
@@ -20,7 +20,7 @@ export default function UpdatesSection() {
   }, [host]);
   const run = async (f: () => Promise<void>) => {
     setBusy(true); setErr(null);
-    try { await f(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await f(); } catch (e) { setErr(updateErrorText(e)); } finally { setBusy(false); }
   };
   const usable = status?.configured === true && status.installKind === "self";
   return (

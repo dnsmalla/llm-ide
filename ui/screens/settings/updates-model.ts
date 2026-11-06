@@ -36,3 +36,9 @@ export function updateSummary(s: UpdateStatusView | null): string {
   if (s.lastCheckedMs === null) return "Not checked yet.";
   return `Up to date (checked ${new Date(s.lastCheckedMs).toLocaleString()}).`;
 }
+
+/** Host errors are plain `{code, message}` objects (not Error instances); show their message, never "[object Object]". */
+export function updateErrorText(e: unknown): string {
+  const m = typeof e === "string" ? e : (e as { message?: unknown } | null)?.message;
+  return typeof m === "string" && m ? m.slice(0, 200) : "The update action failed.";
+}
