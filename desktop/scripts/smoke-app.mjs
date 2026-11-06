@@ -1,5 +1,5 @@
 // desktop/scripts/smoke-app.mjs
-// Launches the PACKAGED app (no repo checkout), waits for the core it spawns on 3457..3459 (a 200 /health that
+// Launches the PACKAGED app (no repo checkout), waits for the core it spawns on 3456..3459 (a 200 /health that
 // echoes a launch nonce), stops the app the way the OS would, and asserts no bundled-node core process survives.
 // Memory keychain + a temp data dir, so the runner's keychain and real user data are never touched. No model call.
 //   node scripts/smoke-app.mjs <app executable>      (Linux: run under xvfb-run; AppImage: APPIMAGE_EXTRACT_AND_RUN=1)
@@ -8,7 +8,7 @@ import { mkdtempSync, openSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-export const CORE_PORTS = [3457, 3458, 3459];
+export const CORE_PORTS = [3456, 3457, 3458, 3459];
 const WIN = process.platform === 'win32';
 const START_MS = 120_000;
 const STOP_MS = 20_000;

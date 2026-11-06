@@ -1,9 +1,13 @@
 // desktop/scripts/smoke-app.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isHostCore, coreProcesses, coreProcessesWin } from './smoke-app.mjs';
+import { isHostCore, coreProcesses, coreProcessesWin, CORE_PORTS } from './smoke-app.mjs';
 
 const NONCE = 'a'.repeat(64);
+test('probes the same ports the host spawns on, :3456 first', () => {
+  assert.deepEqual(CORE_PORTS, [3456, 3457, 3458, 3459]);
+});
+
 test('only a 200 /health with a 64-hex launch nonce is the app-spawned core', () => {
   assert.equal(isHostCore(200, { 'x-llmide-nonce': NONCE }), true);
   assert.equal(isHostCore(200, {}), false);
