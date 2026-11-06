@@ -2,7 +2,9 @@
 // Text asserts on the desktop release workflows (plain text asserts over the workflow files).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync as readRaw } from 'node:fs';
+// Windows checks the workflows out with CRLF; the asserts are written against LF.
+const readFileSync = (p, enc) => readRaw(p, enc).replace(/\r\n/g, '\n');
 import { join } from 'node:path';
 
 const WF = join(import.meta.dirname, '..', '..', '.github', 'workflows');

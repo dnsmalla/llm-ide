@@ -12,12 +12,12 @@ const have = existsSync(CLI);
 
 function keypair(dir, name) {
   const key = join(dir, name);
-  // --ci: no prompt; empty password.
-  execFileSync(CLI, ['signer', 'generate', '--ci', '-p', '', '-w', key], { stdio: 'pipe', shell: process.platform === 'win32' });
+  // --ci: no prompt. A throwaway non-empty password: on Windows the CLI runs through a shell, which drops an empty '' argument.
+  execFileSync(CLI, ['signer', 'generate', '--ci', '-p', 'test-only-pass', '-w', key], { stdio: 'pipe', shell: process.platform === 'win32' });
   return { key, pub: readFileSync(`${key}.pub`, 'utf8').trim() };
 }
 function sign(file, key) {
-  execFileSync(CLI, ['signer', 'sign', '-f', key, '-p', '', file], { stdio: 'pipe', shell: process.platform === 'win32' });
+  execFileSync(CLI, ['signer', 'sign', '-f', key, '-p', 'test-only-pass', file], { stdio: 'pipe', shell: process.platform === 'win32' });
   return readFileSync(`${file}.sig`, 'utf8').trim();
 }
 
