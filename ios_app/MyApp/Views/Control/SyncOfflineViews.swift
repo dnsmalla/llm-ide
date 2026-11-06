@@ -7,6 +7,7 @@ struct SyncOfflineSections: View {
     @State private var draft = ""
 
     var body: some View {
+        SourceRootSection()
         if let snap = syncStore.snapshot {
             Section {
                 Text(freshness(snap)).font(.footnote).foregroundColor(.secondary)
