@@ -86,3 +86,10 @@ nothing. The pairing token is stored in the Keychain; the Mac's address is
 stored in `UserDefaults`. This matches the bundled privacy manifest
 (`PrivacyInfo.xcprivacy`), which declares no tracking and no collected data
 types.
+
+## Box and GitLab reading
+
+Settings → Box and GitLab lets the user sign in to their own Box and gitlab.com accounts with OAuth
+(ASWebAuthenticationSession), with read-only scopes, to read their documents and code. Tokens are kept in the Keychain
+on this device only. Files are shown as text or in PDFKit; nothing is executed or stored. Reviewers need their own
+Box/GitLab account and app IDs to try it; the rest of the app works without it.
