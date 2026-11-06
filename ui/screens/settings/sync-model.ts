@@ -74,6 +74,12 @@ const ENROLL_FAILURES: Record<string, string> = {
   expired: "The code expired. Nothing was added. Start again.",
   store: "The sync storage could not be reached. Nothing was added.",
 };
+/** Which enrollment screen to show. "none" mid-enrollment means the backend restarted and lost it: back to the start. */
+export function enrollScreen(start: EnrollStart | null, poll: EnrollPoll | null): "start" | "qr" | "confirm" | "failed" {
+  if (!start || poll?.phase === "none") return "start";
+  if (poll?.phase === "confirm") return "confirm";
+  return poll?.phase === "failed" || poll?.phase === "expired" ? "failed" : "qr";
+}
 export const enrollFailureText = (code: string | null): string => ENROLL_FAILURES[code ?? ""] ?? "Adding the device stopped. Nothing was added.";
 export const startEnroll = async (client: CoreClient, tier: "web" | "ios") => decodeEnrollStart(await call(client, "POST", "/kb/sync/devices/enroll", { tier }));
 export const pollEnroll = async (client: CoreClient) => decodeEnrollPoll(await call(client, "POST", "/kb/sync/devices/enroll/poll", {}));

@@ -6,7 +6,7 @@ import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { PairingQr } from "./HostApiPairing.tsx";
-import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, describeSyncError,
+import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
 
 export default function SyncDevices({ status, onStatus }: { status: SyncStatus; onStatus: (s: SyncStatus) => void }): ReactNode {
@@ -30,16 +30,20 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   useEffect(() => () => { if (active.current) void cancelEnroll(client).catch(() => {}); }, [client]);
   const stop = () => { setStart(null); setPoll(null); };
   const begin = (tier: "web" | "ios") => run(async () => { setPoll(null); setStart(await startEnroll(client, tier)); });
+  const screen = enrollScreen(start, poll);
+  useEffect(() => { // the backend restarted mid-enrollment: its QR is dead, so stop polling and say so
+    if (start && screen === "start") { setStart(null); setPoll(null); setError("Adding the device stopped because LLM-IDE restarted. Start again."); }
+  }, [start, screen]);
 
   return (
     <div className="st-stack" role="group" aria-label="Sync devices">
       <span className="st-label">Add a phone or browser</span>
-      {!start ? (
+      {screen === "start" || !start ? (
         <div className="st-row">
           <Button tone="primary" disabled={busy} onClick={() => void begin("ios")}>iPhone app</Button>
           <Button disabled={busy} onClick={() => void begin("web")}>Browser</Button>
         </div>
-      ) : poll?.phase === "confirm" ? (
+      ) : screen === "confirm" && poll ? (
         <div className="st-stack" role="status">
           <p className="st-hint">Does <strong>{poll.name}</strong> show this code?</p>
           <p className="st-pre" aria-label="Code to compare"><strong>{poll.sas}</strong></p>
@@ -49,7 +53,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
             <Button tone="danger" disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Codes differ</Button>
           </div>
         </div>
-      ) : poll?.phase === "failed" || poll?.phase === "expired" ? (
+      ) : screen === "failed" && poll ? (
         <div className="st-stack" role="alert">
           <p className="st-hint">{enrollFailureText(poll.code)}</p>
           <div className="st-row"><Button onClick={stop}>OK</Button></div>

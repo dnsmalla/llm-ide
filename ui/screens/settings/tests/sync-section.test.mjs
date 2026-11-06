@@ -73,3 +73,15 @@ test("enrollment polls one at a time: a slow poll is never overlapped", async ()
   assert.ok(polls <= after + 1, "stop ends the loop");
   assert.ok(seen.every((p) => p === "waiting"));
 });
+
+test("enrollScreen: after a backend restart (phase none) the card is back at the start, never the old QR", () => {
+  const start = { qr: "llmide://pair?sv=1", expiresAt: 1, tier: "ios" };
+  const poll = (phase) => ({ phase, sas: phase === "confirm" ? "012345" : null, name: null, code: null });
+  assert.equal(m.enrollScreen(null, null), "start");
+  assert.equal(m.enrollScreen(start, null), "qr", "before the first poll the new QR shows");
+  assert.equal(m.enrollScreen(start, poll("waiting")), "qr");
+  assert.equal(m.enrollScreen(start, poll("confirm")), "confirm");
+  assert.equal(m.enrollScreen(start, poll("failed")), "failed");
+  assert.equal(m.enrollScreen(start, poll("expired")), "failed");
+  assert.equal(m.enrollScreen(start, poll("none")), "start");
+});
