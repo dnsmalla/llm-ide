@@ -54,6 +54,7 @@ mod source_pick;
 mod sse_replay;
 mod trash_guard;
 mod updater;
+mod notify;
 mod tray;
 
 use std::sync::OnceLock;
