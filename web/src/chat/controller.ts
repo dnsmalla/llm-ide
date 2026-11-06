@@ -1,4 +1,5 @@
 // Binds a HostLink (the connection, or a fake in tests) to the chat reducer. No React here.
+import type { SendExtras } from "./compose.ts";
 import type { HostLink } from "../host-api/connection.ts";
 import { initialChatState, reduce, type ChatAction, type ChatState } from "./store.ts";
 
@@ -49,18 +50,23 @@ export function createChatController(link: HostLink, { historyLimit = 200 }: { h
     getState: () => state,
     subscribe: (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn); }; },
     resync,
-    async send(text: string) {
+    async send(text: string, extra: SendExtras = {}): Promise<boolean> {
       const t = text.trim();
-      if (!t || state.turn) return;
-      if (t.length > MAX_SEND_CHARS) return dispatch({ type: "notice", text: "Keep a message under 100,000 characters." });
-      const { id, done } = link.send("chat.send", { text: t });
+      if (!t || state.turn) return false;
+      if (t.length > MAX_SEND_CHARS) { dispatch({ type: "notice", text: "Keep a message under 100,000 characters." }); return false; }
+      const { id, done } = link.send("chat.send", { text: t, ...extra });
       dispatch({ type: "sent", commandId: id, text: t });
       try {
         const r = await done;
-        if (!r.accepted) dispatch({ type: "sendFailed", commandId: id, message: "The host did not accept the message." });
-      } catch (e) {
-        dispatch({ type: "sendFailed", commandId: id, message: messageOf(e) });
-      }
+        if (r.accepted) return true;
+        dispatch({ type: "sendFailed", commandId: id, message: "The host did not accept the message." });
+      } catch (e) { dispatch({ type: "sendFailed", commandId: id, message: messageOf(e) }); }
+      return false;
+    },
+    async newChat(): Promise<boolean> {
+      if (state.turn) return false;
+      try { await link.send("chat.new", {}).done; dispatch({ type: "cleared" }); return true; }
+      catch (e) { dispatch({ type: "notice", text: messageOf(e) }); return false; }
     },
     async cancel() {
       if (!state.turn) return;

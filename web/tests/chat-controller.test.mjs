@@ -122,3 +122,23 @@ test("capabilities apply before any snapshot, so an unserved tool approval is ig
   link.emit({ command: "toolApproval.request", payload: { requestId: "t-1", commandId: "c-1", toolName: "Edit", truncated: false }, rev: 1, replyTo: "c-1" });
   assert.equal(chat.getState().approvals.length, 0);
 });
+
+test("send carries compose extras and reports whether the host accepted it", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true } });
+  const chat = createChatController(link);
+  const ok = await chat.send("hi", { mode: "plan", attachments: [{ name: "a.md", text: "x" }] });
+  assert.equal(ok, true);
+  assert.deepEqual(link.calls[0].payload, { text: "hi", mode: "plan", attachments: [{ name: "a.md", text: "x" }] });
+  const refused = createChatController(fakeLink({ "chat.send": new Error("That model is not offered on this computer — pick another.") }));
+  assert.equal(await refused.send("hi", { model: "x" }), false);
+});
+test("newChat starts a fresh phone chat and empties the view; refused during a turn", async () => {
+  const link = fakeLink({ "chat.send": { accepted: true }, "chat.new": { sessionId: "chat-2" }, "chat.snapshot": { messages: [] } });
+  const chat = createChatController(link);
+  await chat.send("hi");
+  assert.equal(await chat.newChat(), false, "a turn is running");
+  link.emit({ command: "chat.done", payload: { requestId: "c-1" }, rev: 1, replyTo: "c-1" });
+  assert.equal(await chat.newChat(), true);
+  assert.equal(link.calls.at(-1).command, "chat.new");
+  assert.deepEqual(chat.getState().messages, []);
+});

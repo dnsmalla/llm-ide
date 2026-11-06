@@ -40,7 +40,11 @@ export function createReadController(link: HostLink) {
       run(() => link.send("usage.get", {}).done, (r) => ({ usage: r.providers })),
     ]);
   };
-  const offs = [link.onResync(() => { void refresh(); })];
+  const offs = [
+    link.onResync(() => { void refresh(); }),
+    // A finished reply changed the counters: refresh the usage strip only (one read from the 20-read bucket).
+    link.onEvent((e) => { if (e.command === "chat.done") void run(() => link.send("usage.get", {}).done, (r) => ({ usage: r.providers })); }),
+  ];
 
   return {
     getState: () => state,

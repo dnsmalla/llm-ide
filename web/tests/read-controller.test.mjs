@@ -18,6 +18,7 @@ function fakeLink(results = {}, caps = ["host", "chat", "read"]) {
     onResync: (fn) => (ls.resync.add(fn), () => ls.resync.delete(fn)),
     onState: (fn) => (ls.state.add(fn), () => ls.state.delete(fn)),
     resync: () => ls.resync.forEach((fn) => fn()),
+    emit: (e) => ls.event.forEach((fn) => fn(e)),
   };
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -106,4 +107,13 @@ test("a failed reply for a chat the user already left shows no error", async () 
   await first;
   assert.equal(r.getState().open?.id, "b");
   assert.equal(r.getState().error, null);
+});
+
+test("a finished reply refreshes the usage strip", async () => {
+  const link = fakeLink({ "usage.get": { providers: [{ provider: "anthropic", status: "ok", models: [] }] } });
+  const r = createReadController(link);
+  link.emit({ command: "chat.done", payload: { requestId: "c-1" }, rev: 1, replyTo: "c-1" });
+  await tick();
+  assert.deepEqual(link.calls, [{ command: "usage.get", payload: {} }]);
+  assert.equal(r.getState().usage[0].provider, "anthropic");
 });
