@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 62 open, 32 done, 94 total
+Open count: 59 open, 35 done, 94 total
 
 ## How to use this file
 
@@ -194,18 +194,9 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [ ] **UN-109** Parity checklist: every row verified against the Mac app, including Home and toolbar navigation (`plans/2026-10-31-tauri-parity-checklist.md`). Trigger: after the UN-001 follow-up runs.
 - [ ] **UN-085** Source Control hosted actions (PRs, issues) need a core route plan. Trigger: after the Issues core.
 
-- [ ] **UN-111** Device linking: run the desktop Settings approval card in a real window.
-  - Why you: the Rust commands, permissions and UI compile and are unit-tested, but the card has not been opened in a real desktop window.
-  - How: [USER-CHECKLIST D step 1](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later): build the updated app, sign in/register the desktop, start a link at `accounts.llm-ide.com/link.html`, allow it, compare the six-digit SAS and confirm; then deny a second request.
-  - Effort: 15 minutes. Blocks: closing the device-linking GUI check. Status: not run.
-- [ ] **UN-112** Device linking: complete one real production browser/desktop link.
-  - Why you: the browser end-to-end run used a local in-memory account service; it needs your real account, browser and desktop.
-  - How: [USER-CHECKLIST D step 2](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later); also verify the 10-minute expiry and the mismatched-commitment refusal.
-  - Effort: 15 minutes. Blocks: calling the production link verified. Status: not run.
-- [ ] **UN-113** Decide when account creation reopens.
-  - Why you: direct sign-up is deliberately off on the live service after the account-takeover fixes; only you can choose the launch/allowlist timing.
-  - How: [USER-CHECKLIST D step 3](USER-CHECKLIST.md#d-device-linking-v1-checks-do-these-later). Current state: `signupOpen:false, directSignup:false`.
-  - Effort: 5 minutes. Blocks: public account growth and launch sign-up copy. Status: open decision.
+- [x] **UN-111** Device linking desktop card check. Status: retired 2026-11-06 — the account service, device linking and relay were removed from the repo (ADR 0020); phones and browsers enroll through encrypted sync.
+- [x] **UN-112** Device linking production link. Status: retired 2026-11-06 with UN-111.
+- [x] **UN-113** Decide when account creation reopens. Status: retired 2026-11-06 — there are no public accounts (ADR 0020).
 
 ## E. Done by you (history and recorded answers)
 

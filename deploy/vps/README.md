@@ -11,7 +11,7 @@ This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive:
 | Public core API | **closed** 2026-11-05: `https://llm-ide.com/api/*` answers 404 (see Known limits) |
 | Host API WebSocket | **retired** 2026-11-05; `/host-api/*` answers 404 (ADR 0019) |
 | Core service | `llmide-core.service`, user `llmide`, data `/var/lib/llmide`; **disabled** 2026-11-05 |
-| Account service | **retired** 2026-11-06 (ADR 0020): `llmide-accounts.service` stopped and disabled, `accounts.llm-ide.com` answers 410; the service refuses to start in production |
+| Account service + relay | **retired** 2026-11-06 (ADR 0020) and removed from the repo; see [Retire the account service](#retire-the-account-service-adr-0020-sync-sp8-run-once) |
 | Own-server sync | SFTP user `llmidesync` (chroot `/srv/llmide-sync`), nginx `https://llm-ide.com/sync/`; setup [sync-sftp.md](sync-sftp.md) |
 | Core runtime | `/opt/node22/bin/node` (the system Node remains 20 for the existing apps) |
 
@@ -55,131 +55,22 @@ certbot certonly --webroot -w /var/www/llm-ide-web \
   -d llm-ide.com -d www.llm-ide.com
 ```
 
-`/host-api/` was a temporary SSH-tunnel path; it now answers 404. The relay design replaces it
-with an outbound-only connection from the desktop.
+`/host-api/` was a temporary SSH-tunnel path; it now answers 404. Phones and browsers reach the
+desktop's data through encrypted sync (ADR 0020).
 
-## Account service (`accounts.llm-ide.com`)
+## Retire the account service (ADR 0020, sync SP8) — run once
 
-Public accounts (ADR 0019; design `docs/superpowers/specs/2026-11-05-accounts-and-device-linking-design.md`).
-Its own system user, database and loopback process; **sign-up is closed** until the external review.
-It never runs the core, AI or agents.
-
-| Piece | Location |
-|---|---|
-| Service | `llmide-accounts.service`, user `llmide-accounts`, `127.0.0.1:3470` |
-| Data | `/var/lib/llmide-accounts/accounts.db` |
-| Config | `/etc/llm-ide/accounts.env` (`0600`, root-owned) |
-| nginx | [accounts.llm-ide.com.nginx](accounts.llm-ide.com.nginx); access log has no IPs, error log kept 3 days |
-
-```bash
-useradd --system --home /var/lib/llmide-accounts --shell /usr/sbin/nologin llmide-accounts
-install -d -m 700 -o root -g root /etc/llm-ide
-install -d -m 700 -o llmide-accounts -g llmide-accounts /var/lib/llmide-accounts
-install -d -m 755 /var/www/llm-ide-accounts
-cd /srv/llm-ide/repo && git pull --ff-only
-cd account-service && chmod -R a+rX . && PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
-```
-
-## Retire the account service (ADR 0020, sync SP8)
+The account service and relay are removed from the repo (their code, units and vhost stay in git history,
+last at commit `7724aa79`). If the VPS still runs them, run this once:
 
 ```bash
 systemctl disable --now llmide-accounts
-cd /srv/llm-ide/repo && git pull --ff-only
-cp deploy/vps/accounts.llm-ide.com.nginx /etc/nginx/sites-available/accounts.llm-ide.com
-nginx -t && systemctl reload nginx
-curl -s -o /dev/null -w '%{http_code}\n' https://accounts.llm-ide.com/   # 410
+rm -f /etc/systemd/system/llmide-accounts.service /etc/logrotate.d/llmide-accounts && systemctl daemon-reload
+# Either keep the 410 vhost (git show 7724aa79:deploy/vps/accounts.llm-ide.com.nginx) until the
+# certificate lapses, or drop the site:
+rm -f /etc/nginx/sites-enabled/accounts.llm-ide.com && nginx -t && systemctl reload nginx
 # Keep /var/lib/llmide-accounts until you decide to delete it (it holds the account rows and audit log).
 ```
-
-The install steps below are kept for the parked code only. With `NODE_ENV=production` the service now
-refuses to start unless `ACCOUNTS_ALLOW_RETIRED=1` is set.
-
-`/etc/llm-ide/accounts.env`:
-
-```dotenv
-NODE_ENV=production
-ACCOUNTS_HOST=127.0.0.1
-ACCOUNTS_PORT=3470
-ACCOUNTS_ORIGIN=https://accounts.llm-ide.com
-ACCOUNTS_TRUST_PROXY=1
-ACCOUNTS_DB_PATH=/var/lib/llmide-accounts/accounts.db
-# Until a mail provider exists, use none (sign-up must stay closed). Switch to smtp when configured.
-ACCOUNTS_MAIL_TRANSPORT=none
-# ACCOUNTS_SMTP_URL=smtps://<user>:<password>@<provider-host>:465
-ACCOUNTS_MAIL_FROM=LLM-IDE <no-reply@llm-ide.com>
-# Do NOT set ACCOUNTS_SIGNUP_OPEN=1 before sub-project 5 (external review, legal gates).
-# Direct sign-up (no email link) proves nothing about the address, so in production the service
-# refuses to start with ACCOUNTS_DIRECT_SIGNUP=1 unless ACCOUNTS_DIRECT_SIGNUP_EMAILS names the exact
-# addresses allowed (comma-separated, case-insensitive). Leave both unset once the first account exists.
-# ACCOUNTS_DIRECT_SIGNUP=1
-# ACCOUNTS_DIRECT_SIGNUP_EMAILS=you@example.com
-```
-
-```bash
-# Write the environment file from the dotenv block above, then:
-chown root:root /etc/llm-ide/accounts.env
-chmod 600 /etc/llm-ide/accounts.env
-cp deploy/vps/llmide-accounts.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now llmide-accounts
-certbot certonly --webroot -w /var/www/llm-ide-accounts -d accounts.llm-ide.com
-install -d -m 700 -o root -g root /var/log/llmide-accounts
-cp deploy/vps/accounts.llm-ide.com.nginx /etc/nginx/sites-available/accounts.llm-ide.com
-ln -s /etc/nginx/sites-available/accounts.llm-ide.com /etc/nginx/sites-enabled/
-cp deploy/vps/llmide-accounts.logrotate /etc/logrotate.d/llmide-accounts
-nginx -t && systemctl reload nginx
-```
-
-The DNS `A` record for `accounts.llm-ide.com` must point at the VPS before `certbot`. Until the
-certificate exists, enable only the port-80 server block.
-
-Verify:
-
-```bash
-curl -s https://accounts.llm-ide.com/health
-# {"ok":true,"service":"account-service","signupOpen":false,"directSignup":false}
-curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Origin: https://accounts.llm-ide.com' \
-  -H 'Content-Type: application/json' -d '{"email":"a@example.com","displayName":"A"}' \
-  https://accounts.llm-ide.com/v1/signup
-# 403 (signup_closed)
-curl -s -o /dev/null -w '%{http_code}\n' https://llm-ide.com/api/health
-# 404
-systemctl show llmide-accounts -p User
-# User=llmide-accounts
-```
-
-## Device linking (v1)
-
-The browser link page is served by the account service at `/link.html`; the desktop polls the same
-service for pending requests. Public keys, commitments and nonces are stored; private keys and the
-device token never leave the device.
-
-- Migration `0004_link_requests.sql` creates `link_requests` and the unique device-token hash index.
-- Endpoints: `POST /v1/link/requests`, `GET /v1/link/requests/status`, `POST /v1/link/requests/keys`
-  (web session); `GET /v1/link/requests`, `POST /v1/link/requests/{approve,deny,confirm}` (desktop Bearer).
-- The six-digit SAS is computed by both sides from the committed device keys, the desktop signing key,
-  and both nonces. Confirm only when the codes match.
-- Link requests expire after 10 minutes. The account service can refuse service but cannot read project
-  data; the relay is still a later sub-project.
-
-Deploy after pulling:
-
-```bash
-cd /srv/llm-ide/repo
-git fetch origin main && git reset --hard origin/main
-cd account-service
-chmod -R a+rX .
-PATH=/opt/node22/bin:$PATH npm ci --omit=dev --no-audit --no-fund
-PATH=/opt/node22/bin:$PATH npm test          # 95/95
-rsync -a --delete public/ /var/www/llm-ide-accounts/
-chown -R root:root /var/www/llm-ide-accounts
-systemctl restart llmide-accounts
-curl -fsS https://accounts.llm-ide.com/health
-# {"ok":true,"service":"account-service","signupOpen":false,"directSignup":false}
-curl -s -o /dev/null -w '%{http_code}\n' https://accounts.llm-ide.com/link.html  # 200
-```
-
-Confirm direct sign-up stays off. The fixed service requires `ACCOUNTS_DIRECT_SIGNUP_EMAILS` if direct
-sign-up is ever re-enabled in production; leaving it off is the safe default.
 
 ## Verify
 
@@ -195,31 +86,10 @@ curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
   until `claude login` or a per-user API key is configured.
 - `/api/*` is closed (404) and `llmide-core` is disabled (2026-11-05). It exposed the full core to the
   internet, and every core user is an admin (agents, MCP stdio, plugin installs), so one leaked login meant
-  code execution on the VPS. Do not reopen it: public accounts come from the separate `account-service`
-  (ADR 0019, `docs/superpowers/specs/2026-11-05-accounts-and-device-linking-design.md`). Keep the admin
+  code execution on the VPS. Do not reopen it: phones and browsers use encrypted sync (ADR 0020). Keep the admin
   credentials in a password manager, not in `/root/llm-ide-admin.txt`.
 - DNS was moved from Squarespace; old resolvers may serve the old A records until the 30-minute TTL
   expires. Flush the Mac cache with `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
-
-## Relay (`/relay/v1`, sub-project 3) — NOT PUBLIC
-
-The relay unit runs inside `llmide-accounts` and is **off** (`ACCOUNTS_RELAY` unset). It must stay unreachable
-from the internet until the external security review (relay design D9, gate G-EXT) is complete and its findings are
-resolved or accepted in writing. Do **not** add a `location /relay/` block to `accounts.llm-ide.com.nginx` and do
-not set `ACCOUNTS_RELAY=1` on this host before then. Since ADR 0020 the relay is retired and parked; local
-testing only:
-
-```bash
-ACCOUNTS_RELAY=1 ACCOUNTS_ALLOWED_WEB_ORIGINS=http://localhost:5173 node bin/account-service.mjs
-```
-
-The relay forwards ciphertext only, makes no LLM call, runs no code and makes no outbound connection. The core's
-loopback bridge is `/host-api/relay-bridge` and is private to the bus host proof.
-
-When G-EXT closes (later slice R8), the nginx block is: `location = /relay/v1 { proxy_pass http://127.0.0.1:3470;
-proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
-proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 120s; }`, with
-`ACCOUNTS_ALLOWED_WEB_ORIGINS=https://app.llm-ide.com`.
 
 ## Own-server sync
 

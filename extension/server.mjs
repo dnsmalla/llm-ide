@@ -530,7 +530,7 @@ const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 let bus = null;
 // Host API v1 listener (config.hostApiMode 'tls' or 'dev'); { gateway, listener, fingerprint } once started.
 let hostApi = null;
-// One Host API gateway for the LAN/dev listener and the relay bridge (lazy: off the boot path).
+// One Host API gateway for the LAN/dev listener (lazy: off the boot path).
 let gatewayPromise = null;
 function ensureHostApiGateway() {
   if (hostApi?.gateway) return Promise.resolve(hostApi.gateway);
@@ -1117,9 +1117,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 });
-if (config.hostApiRelay) {
-  void import('./server/relay-bridge.mjs').then((m) => m.attachRelayBridge(server, { ensureGateway: ensureHostApiGateway }));
-}
 
 
 const SERVER_STARTED_AT = Date.now();

@@ -321,8 +321,8 @@ Endpoints with no client caller (89):
 | `/bus/schedules` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/bus/bus-routes.mjs:196` | - | - | tests only |
 | `/bus/schedules/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/bus/bus-routes.mjs:218` | - | - | tests only |
 | `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:67` | - | - | tests only |
-| `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:78` | - | - | tests only |
-| `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:82` | - | - | tests only |
+| `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:77` | - | - | tests only |
+| `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:81` | - | - | tests only |
 | `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:90` | - | - | tests only |
 | `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:91` | - | - | tests only |
 | `/kb/sync/sftp` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:110` | - | - | tests only |

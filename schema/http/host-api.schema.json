@@ -39,7 +39,7 @@
             },
             "port": {
               "type": "integer",
-              "description": "the v1 listener's bound port (wss://<host>:<port>/host-api/v1 in TLS mode, ws://127.0.0.1:<port>/host-api/v1 in dev mode) or, when only the relay bridge is on, the core's own port (ws://127.0.0.1:<port>/host-api/relay-bridge)"
+              "description": "the v1 listener's bound port (wss://<host>:<port>/host-api/v1 in TLS mode, ws://127.0.0.1:<port>/host-api/v1 in dev mode)"
             },
             "fingerprint": {
               "type": [

@@ -268,7 +268,7 @@ test('a client that claims desktop-ui without host proof is capped at extension;
     assert.equal(resolveClient({ headers: { 'x-llmide-client': 'phone-pwa' } }).client, 'phone-pwa', 'it may lower itself');
     assert.equal(resolveClient({ headers: {} }).client, 'extension');
     assert.equal(resolveClient({ headers: { 'x-llmide-client': 'bogus' } }).client, 'extension');
-    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'relay-bridge' } }).client, 'phone-pwa');
+    assert.equal(resolveClient({ headers: { 'x-llmide-client': 'relay-bridge' } }).client, 'extension', 'the retired relay bridge is not a class');
     // Over HTTP: the claim does not open the desktop-only routes.
     assert.equal((await call('PUT', '/bus/kinds/review', { enabled: true }, hdr({}))).status, 403);
     // Host proof: HMAC(approval key, "bus-host-proof/v1"), never the /health nonce (tests/bus-host-proof.test.mjs).

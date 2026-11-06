@@ -1185,8 +1185,6 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
             cmd.env(key, v);
         }
     }
-    // Relay bridge path (relay plan R-4): inert unless this host connects with its bus proof, which only it holds.
-    cmd.env("LLMIDE_HOST_API_RELAY", "1");
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
 }
 

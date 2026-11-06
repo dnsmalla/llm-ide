@@ -12,8 +12,6 @@
 //     own UI as `desktop-ui`), so the declared class is used as is;
 //   - without proof the declared class is capped at `extension`: it may declare a LOWER class, never a higher one, and
 //     an absent or unknown header is `extension`;
-//   - `relay-bridge` is not a class: a bridge declares the class of the real client behind it (with proof), so an
-//     undeclared bridge is the lowest class;
 //   - LLMIDE_HOST_APPROVAL_KEY unset or malformed (a standalone dev server): nobody can prove host, `desktop-ui` is
 //     unreachable, so nothing can be approved. The opt-in LLMIDE_BUS_TRUST_CLIENT_HEADER=1 treats the declared class as
 //     proven; it is for loopback development and tests only, /health does not advertise it, and it is REFUSED when the
@@ -39,10 +37,9 @@ function hostProven(req) {
 /** @returns {{ client: string, declared: string|null, proven: boolean }} */
 export function resolveClient(req) {
   const raw = req.headers?.['x-llmide-client'];
-  const declared = typeof raw === 'string' && classInfo(raw.trim()) ? raw.trim() : (raw === 'relay-bridge' ? 'relay-bridge' : null);
+  const declared = typeof raw === 'string' && classInfo(raw.trim()) ? raw.trim() : null;
   const proven = hostProven(req);
   const rank = (c) => classInfo(c)?.rank ?? 1;
-  if (declared === 'relay-bridge') return { client: 'phone-pwa', declared, proven };
   if (!declared) return { client: 'extension', declared, proven };
   if (proven) return { client: declared, declared, proven };
   const capped = rank(declared) <= rank('extension') ? declared : 'extension';

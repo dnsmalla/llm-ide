@@ -58,26 +58,6 @@ Tell me which steps fail, or "all fine". Any problem: switch back to `lta.mode` 
 Q19 (notes without `platform` are invisible in Library), Q16 (search latency at 50k notes), knowledge-kit Q1-Q14 (unanswered), ledger step B go/no-go. Meeting work waits until you use meetings.
 
 
-## D. Device linking v1 checks (do these later)
+## D. Device linking v1 checks
 
-These are the real-user checks for the browser/desktop device-link work. The API, browser page and Settings approval card are built and deployed; the checks below confirm the parts only you can see.
-
-1. **Desktop Settings approval card (UN-111).**
-   - Build and open the updated desktop app: `scripts/build-desktop-mac.sh`, then open the bundle.
-   - Settings → LLM-IDE account: sign in with the passkey and register this desktop if it is not already registered.
-   - Open `https://accounts.llm-ide.com/link.html` in a signed-in browser and click **Start linking**.
-   - The desktop should show **This browser** with **Allow**. Click it.
-   - Compare the six digits on both screens. Click **Codes match — confirm** on the desktop.
-   - Expected: the browser says **This browser is linked**; the account device list shows the browser; the desktop does not expose a token.
-   - Also click **Deny** on a second request and confirm the browser says denied/unlinked.
-
-2. **Real production link, no local harness (UN-112).**
-   - Use the real `accounts.llm-ide.com` and the real desktop, not the local test harness.
-   - Confirm the request expires if you wait more than 10 minutes without approving.
-   - Confirm the browser refuses to display a code when the commitment does not match (this should fail closed; do not approve a mismatched request).
-
-3. **Account creation policy (UN-113).**
-   - Confirm direct sign-up stays **off** until launch review, or decide when to reopen it with an address allowlist.
-   - Current live state is `signupOpen:false, directSignup:false`; the existing account can still sign in with its passkey.
-
-Report pass/fail per item. If the desktop card is missing, check that the app was rebuilt from `main` after the device-link commits.
+Retired 2026-11-06: the account service, device linking and relay were removed (ADR 0020). Devices enroll through encrypted sync (Settings, Phone and web sync).

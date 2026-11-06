@@ -20,9 +20,9 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Shared server and core | 20 | 4 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 10 | 3 | 5 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
+| Security | 10 | 3 | 4 | 17 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 4 | 5 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 122 | 76 | 65 | 263 |  |
+| Total | 122 | 76 | 64 | 262 |  |
 
 ## What to do next
 
@@ -127,7 +127,7 @@ Code and docs an agent (or I) can do now, from the linked plans.
   - ~ Tauri release workflow: tag-driven
   - ~ Auto-update for Tauri, signed
 
-### Needs you (49)
+### Needs you (48)
 
 Your decision, confirmation or real run (device, account, meeting, money). Commands and steps: [USER-NEEDS.md](USER-NEEDS.md).
 
@@ -183,7 +183,6 @@ Your decision, confirmation or real run (device, account, meeting, money). Comma
 - **Security**
   - ~ Pin extension origin instead of chrome-extension://*
   - One company API key with per-user caps replaces any shared personal subscription
-  - Account sign-up is open in production early
 - **Release and CI**
   - Install the nightly push job
   - CI result checked after every push
@@ -443,7 +442,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Sync SP5, own-server SFTP adapter (me)
 - [ ] Sync SP6, Box adapter (desktop and devices) (me)
 - [ ] Sync SP7, direct reads of Box documents and GitLab code from the phone and web (me)
-- [~] Sync SP8, park and retire: done 2026-11-06 — ADR 0019 marked superseded, the account service (and so the relay) refuses to start in production unless `ACCOUNTS_ALLOW_RETIRED=1`, `accounts.llm-ide.com` vhost answers 410, site copy rewritten for no-account + encrypted sync; open: run the retire steps on the VPS (`deploy/vps/README.md` "Retire the account service") and redeploy `marketing/` (you)
+- [~] Sync SP8, park and retire: done 2026-11-06 — ADR 0019 marked superseded, site copy rewritten for no-account + encrypted sync; then the account service, relay (desktop `relay/`, `account_oauth.rs`, core relay bridge) and their UI, CI and VPS units were removed from the repo (history keeps them); the relay v1 envelope crypto stays as sync v1's byte format (`schema/relay/v1`, `scripts/relay-reference.mjs`). Follow-up (you): run the one-time retire note on the VPS (`deploy/vps/README.md` "Retire the account service") and redeploy `marketing/` (you)
 - [ ] Sync setup: create a separate MEGA account just for LLM-IDE (two-factor off on that account only) and enter it in Settings, Sync (you)
 - [~] Public LLM-IDE site: marketing pages under `marketing/` with a guide and product tour, and the web app mounted at `/app` (`77e5df3e`, `2ca46173`, `d72b4324`); PWA tests and asset pruning fixed for the `/app` base path (`03fa55c3`) (me)
 
@@ -575,7 +574,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
 - [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
-- [ ] Account sign-up is open in production early: `https://accounts.llm-ide.com/health` still reports `directSignup: true` on the deployed (pre-fix) build, 2026-11-05. The fixed code refuses to start with `ACCOUNTS_DIRECT_SIGNUP=1` unless `ACCOUNTS_DIRECT_SIGNUP_EMAILS` names the allowed addresses. Decide and deploy: remove the flag (recommended until sub-project 5) or set the allowlist to your own address Simplest now: stop the account service on the VPS, since ADR 0020 retires it (you)
+- [-] Account sign-up open in production early: moot 2026-11-06, the account service is removed (ADR 0020); stop it on the VPS with the retire note in `deploy/vps/README.md`.
 
 ## S10. Release and CI
 

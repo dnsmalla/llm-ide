@@ -1,5 +1,3 @@
-mod account_oauth;
-mod relay;
 mod attach;
 #[cfg(feature = "spike")]
 mod ax_probe;
@@ -318,16 +316,6 @@ macro_rules! product_handlers {
                 core_log::core_log_read,
                 core_log::core_log_clear,
                 secrets::secrets_status,
-                account_oauth::account_status,
-                account_oauth::account_sign_in,
-                account_oauth::account_sign_out,
-                account_oauth::account_register_desktop,
-                account_oauth::account_link_requests,
-                account_oauth::account_link_approve,
-                account_oauth::account_link_deny,
-                account_oauth::account_link_confirm,
-                relay::relay_status,
-                relay::relay_set_enabled,
                 read_graph_file,
                 project::project_open,
                 project::project_open_recent,

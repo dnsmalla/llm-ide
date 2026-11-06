@@ -35,7 +35,7 @@ server {
     client_max_body_size 8m;
 
     # Closed 2026-11-05: /api/ exposed a full core (every user is an admin, which means code
-    # execution) to the internet. Public accounts come from account-service (ADR 0019).
+    # execution) to the internet. Phones and browsers use encrypted sync instead (ADR 0020).
     location = /api { return 404; }
     location /api/ { return 404; }
 

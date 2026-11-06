@@ -2,7 +2,6 @@
 // twin of the Mac's HostApiV1Gateway.swift. Chat runs in process (startHostTurn) on one server-side "Phone chat"
 // per user. The engine, decisions and chat-session modules load lazily, so this file stays off the boot path.
 // Never log frame content, tokens or PINs: type and size only.
-import { relayCap } from '../../core/host-api-relay.mjs';
 import { parseRequest, response, event, errorFrame, clamp } from './frame.mjs';
 import { HostApiSession, helloRefusal, internalId } from './session.mjs';
 import { createTranslator } from './translator.mjs';
@@ -100,9 +99,8 @@ export function createGateway(overrides) {
 
   // A session's capabilities are served ∩ granted (the token's scopes), in served order; `host` is always granted.
   const effective = (entry) => deps.capabilities().filter((c) => entry.grants?.has(c));
-  function grant(entry, scopes, s) {
-    const cap = relayCap(s?.relayTier);
-    entry.grants = new Set(['host', ...scopes.filter((c) => !cap || cap.has(c))]);
+  function grant(entry, scopes) {
+    entry.grants = new Set(['host', ...scopes]);
     const caps = effective(entry);
     entry.lastSent = JSON.stringify(caps);
     return caps;
@@ -390,13 +388,12 @@ export function createGateway(overrides) {
         }
         pairThrottle.success(entry.peer);
         // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
-        const cap = relayCap(s.relayTier);
-        const scopes = [...new Set(['host', ...served])].filter((c) => !cap || cap.has(c));
+        const scopes = [...new Set(['host', ...served])];
         const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
         entry.state.authenticated(pinUser, deviceId);
         clearTimeout(entry.timer);
         audit('pair_ok', { peer: entry.peer, userId: pinUser, deviceId, clientName: entry.state.phase.clientName });
-        return respond(s, id, command, { token, capabilities: grant(entry, scopes, s) });
+        return respond(s, id, command, { token, capabilities: grant(entry, scopes) });
       }
       case 'host.auth.token': {
         if (throttled(s, id, entry.peer, tokenThrottle, 'token_throttled')) return;
@@ -409,7 +406,7 @@ export function createGateway(overrides) {
         tokenThrottle.success(entry.peer);
         entry.state.authenticated(auth.userId, auth.deviceId);
         clearTimeout(entry.timer);
-        return respond(s, id, command, { capabilities: grant(entry, auth.scopes ?? LEGACY_SCOPES, s) });
+        return respond(s, id, command, { capabilities: grant(entry, auth.scopes ?? LEGACY_SCOPES) });
       }
       case 'host.auth.revoke': {
         const auth = deps.devices.authenticateDeviceToken(p.token, deps.now());

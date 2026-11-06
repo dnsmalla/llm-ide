@@ -57,7 +57,7 @@ export async function handleHostApiRoute(req, res, opts = {}) {
   }
 }
 
-async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off' || config.hostApiRelay, env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces }) {
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
@@ -66,8 +66,7 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
 
   if (req.method === 'POST' && path === '/host-api/pin') {
     const api = hostApi();
-    // Relay mode has no listener: pairing happens over the relay bridge on the main core port.
-    const port = api?.listener?.port ?? (config.hostApiRelay ? config.port : null);
+    const port = api?.listener?.port ?? null;
     if (!port) return fail(res, 503, 'HOST_API_UNAVAILABLE', 'The Host API listener is not running');
     const { pin, expiresAt } = mintPin(userId);
     const fingerprint = api.fingerprint ?? null;
