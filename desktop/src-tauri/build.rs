@@ -130,6 +130,7 @@ const COMMANDS: &[&str] = &[
     "sse_replay_stop",
     "sse_channel_stream",
     "ax_probe",
+    "capture_dump_tree",
     "chat_bind_session",
     "chat_unbind_session",
     "chat_list",
