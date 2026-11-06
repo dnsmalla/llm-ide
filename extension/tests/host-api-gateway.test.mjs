@@ -8,11 +8,12 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, readCalls: [], pending: [] };
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null } = {}) {
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0 };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   let quick = null;
+  let made = 0;
   t.tokens = tokens;
   t.devices = {
     issueDeviceToken(userId, _name, _now, scopes) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId, scopes }); return { deviceId, token }; },
@@ -24,12 +25,14 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     close: (s) => t.closed.push(s),
     hostName: () => 'Test Computer',
     certificateFingerprint: () => fingerprint,
-    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : [])],
+    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : []), ...(t.compose ? ['compose'] : [])],
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
     devices: t.devices,
-    quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => 'chat-1' },
+    quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => `chat-${++made}` },
+    models: async () => { t.modelCalls += 1; if (models instanceof Error) throw models; return models ?? [{ id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }]; },
+    audit: (event, fields) => t.audits.push([event, fields]),
     history: history ?? (async () => [{ role: 'user', content: 'hi' }, { role: 'tool', content: 'x' }, { role: 'assistant', content: 'yo' }]),
     turn: (args) => {
       t.turns.push(args);
@@ -530,4 +533,34 @@ test('hostApiCapabilities: read only with LLMIDE_HOST_API_READ=1', async () => {
   assert.deepEqual(hostApiCapabilities({}), ['host', 'chat', 'approvals']);
   assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_READ: '1' }), ['host', 'chat', 'approvals', 'read']);
   assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_READ: '1', LLMIDE_HOST_API_TOOL_APPROVALS: '1' }), ['host', 'chat', 'approvals', 'tool_approvals', 'read']);
+});
+
+test('compose: not served by default — chat.options is capability_unavailable, no model list is asked', async () => {
+  const t = harness(); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.options', {}));
+  assert.equal(t.lastError(), 'capability_unavailable'); assert.equal(t.modelCalls, 0);
+});
+test('compose: served and granted — chat.options lists modes and models, audited per call', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'compose']);
+  await t.g.receive(s, req('c-1', 'chat.options', {}));
+  assert.deepEqual(t.last().result, { modes: ['auto', 'ask', 'plan', 'assist_plan', 'review', 'document'], models: [{ model: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] });
+  await t.g.receive(s, req('c-2', 'chat.options', {}));
+  const rows = t.audits.filter(([e]) => e === 'chat_options');
+  assert.equal(rows.length, 2); assert.equal(rows[0][1].dedupeKey, rows[0][1].deviceId);
+  assert.equal(JSON.stringify(rows).includes('Sonnet'), false);
+});
+test('compose: an SDK that cannot list models still answers, with no models', async () => {
+  const t = harness({ compose: true, models: new Error('not logged in') }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.options', {})); assert.deepEqual(t.last().result.models, []);
+});
+test('compose: chat.options uses the per-device read bucket', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  for (let i = 0; i < 20; i += 1) await t.g.receive(s, req(`c-${i}`, 'chat.options', {}));
+  await t.g.receive(s, req('c-x', 'chat.options', {})); assert.equal(t.lastError(), 'rate_limited');
+});
+test('hostApiCapabilities: compose only with LLMIDE_HOST_API_COMPOSE=1', async () => {
+  const { hostApiCapabilities } = await import('../routes/host-api/gateway.mjs');
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_COMPOSE: '1' }), ['host', 'chat', 'approvals', 'compose']);
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_COMPOSE: '1', LLMIDE_HOST_API_READ: '1' }), ['host', 'chat', 'approvals', 'read', 'compose']);
 });

@@ -11,7 +11,7 @@ export const AUDIT_DETAIL_MAX = 200;
 /** Hard ceiling per event type, across all peers, per AUDIT_DEDUPE_WINDOW_MS: a flood past it is counted, not written. */
 export const AUDIT_EVENT_CAP_PER_MINUTE = 60;
 const MAX_DEDUPE_KEYS = 1024;
-const SUCCESS = new Set(['pair_ok', 'revoke_self', 'revoke_host', 'identity_created', 'identity_reset']);
+const SUCCESS = new Set(['pair_ok', 'revoke_self', 'revoke_host', 'identity_created', 'identity_reset', 'chat_options', 'chat_new', 'compose_send']);
 const DENIED = new Set(['origin_refused', 'plaintext_refused', 'scope_denied']);
 
 export const auditOutcome = (event) => (SUCCESS.has(event) ? 'success' : DENIED.has(event) ? 'denied' : 'failure');

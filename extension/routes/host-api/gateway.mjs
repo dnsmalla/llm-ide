@@ -9,7 +9,7 @@ import { PairingThrottle, peerKey } from './throttle.mjs';
 import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
-import { attachmentsToFiles } from './compose.mjs';
+import { attachmentsToFiles, optionsOf } from './compose.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -24,7 +24,8 @@ const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILE
 export function hostApiCapabilities(env = process.env) {
   return ['host', 'chat', 'approvals',
     ...(env.LLMIDE_HOST_API_TOOL_APPROVALS === '1' ? ['tool_approvals'] : []),
-    ...(env.LLMIDE_HOST_API_READ === '1' ? ['read'] : [])]; // default off: a device gets read only if paired while served
+    ...(env.LLMIDE_HOST_API_READ === '1' ? ['read'] : []), // default off: a device gets read only if paired while served
+    ...(env.LLMIDE_HOST_API_COMPOSE === '1' ? ['compose'] : [])]; // default off, as read
 }
 
 const agentV2 = () => import('../agent-v2.mjs');
@@ -53,6 +54,8 @@ function defaultDeps() {
         return usageSummary(getDb(), userId);
       },
     },
+    // The account's Claude models, in process and cached by the SDK module (never HTTP). Lazy: off the boot path.
+    models: async (userId) => (await import('../../llm_agent/sdk/models.mjs')).listSdkModels(userId),
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
@@ -276,6 +279,11 @@ export function createGateway(overrides) {
     return messagesOf(await deps.history(userId, limit), limit);
   }
 
+  // The SDK may be logged out or slow to answer: compose then offers the desktop default only, never an error.
+  async function modelsFor(userId) {
+    try { return await deps.models(userId); } catch (e) { deps.log(`Host API v1 model list unavailable (${e?.code ?? 'error'})`); return []; }
+  }
+
   function startTurn(s, entry, id, p, chatSessionId) {
     const iid = internalId(entry.num, id);
     const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, chatSessionId,
@@ -440,6 +448,11 @@ export function createGateway(overrides) {
         const chatSessionId = await quickChatFor(userId);
         if (sessions.get(s) !== entry) return;
         return startTurn(s, entry, id, p, chatSessionId);
+      }
+      case 'chat.options': {
+        if (readRefused(s, entry, id)) return;
+        audit('chat_options', { peer: entry.peer, userId, deviceId: entry.state.deviceId, dedupeKey: entry.state.deviceId });
+        return respond(s, id, command, optionsOf(await modelsFor(userId)));
       }
       case 'chat.cancel': {
         const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);
