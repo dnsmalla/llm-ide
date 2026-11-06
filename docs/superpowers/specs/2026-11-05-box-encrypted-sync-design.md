@@ -377,7 +377,7 @@ the bearer capability. Serving it on the PWA's own origin means no CORS at all.
 
 ```nginx
 # GET: the device's own manifest, key, wrap, snapshots and replies. Nothing else, no listing.
-location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/d/(?<dir>[A-Za-z0-9_-]{22})/(?<f>key\.bin|wrap\.bin|manifest\.bin|s/[0-9a-f]{32}\.bin|out/[A-Za-z0-9_-]{22}\.bin)$" {
+location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/(?<f>d/[A-Za-z0-9_-]{22}/(?:key\.bin|wrap\.bin|manifest\.bin|s/[0-9a-f]{32}\.bin|out/[A-Za-z0-9_-]{22}\.bin)|e/[A-Za-z0-9_-]{22}/ack\.bin)$" {
     limit_except GET { deny all; }
     alias /srv/llmide-sync/data/$sid/d/$dir/$f;
     access_log off;                        # the path is a capability
@@ -395,11 +395,13 @@ location ~ "^/sync/(?<sid>[A-Za-z0-9_-]{22})/(?<f>d/[A-Za-z0-9_-]{22}/in/[0-9]{1
     access_log off;
     limit_req zone=llmidesync burst=10 nodelay;
 }
-location ^~ /sync/ { return 404; }
+location /sync/ { access_log off; return 404; }
 # in the http block: limit_req_zone $binary_remote_addr zone=llmidesync:1m rate=2r/s;
 ```
 
 nginx writes the PUT body to a temporary file and renames it, so readers never see a partial request.
+
+As built (SP5): the vhost file is normative; see `docs/superpowers/plans/2026-11-06-sync-sp5-sftp.md` "Spec corrections" for the `^~` shadowing, the ack GET, the PUT temp folder group, desktop-made folders, CORS and the inbox cap.
 Ubuntu's `nginx` package includes the DAV module; check with `nginx -V 2>&1 | grep -o http_dav_module`.
 
 Risks, stated plainly:
@@ -639,7 +641,7 @@ setup, but it is the account password.
 | SP2 | Enrollment and device registry: QR sync fields, slot flow with SAS, `wrap.bin`, revoke, rotate, missing-folder detection | SP1 | devices can be added and removed |
 | SP3 | PWA sync tier: WebCrypto envelope (reuses `web/src/relay/crypto.ts` patterns), read views with staleness, queued prompt + reply, CSP; **MEGA client in the browser (megajs, password per app session)** | SP2 | web works with the desktop off — **plan written** (docs/superpowers/plans/2026-11-06-sync-sp3-web.md) |
 | SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (own HTTPS client in SharedProtocol, Keychain session)** | SP2 | iPhone works with the desktop off |
-| SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server |
+| SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server — **implemented (desktop, web, iPhone, 2026-11-06)** (docs/superpowers/plans/2026-11-06-sync-sp5-sftp.md) |
 | SP6 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users of Box |
 | SP7 | Direct reads: Box documents and GitLab code in the PWA and the iPhone app (GitLab OAuth PKCE) | SP3/SP4 shells | docs and code with the desktop off — **implemented (web + iPhone, 2026-11-06)** (docs/superpowers/plans/2026-11-06-sync-sp7-direct-reads.md; owns the shared device OAuth module that SP6 reuses) |
 | SP8 | Park and retire: ADR 0019 header "superseded by 0020", production refusal for `ACCOUNTS_RELAY` and the account service, nginx accounts vhost off, MASTER-PLAN Q-WEB-1/2, docs | — | one design in the docs |
