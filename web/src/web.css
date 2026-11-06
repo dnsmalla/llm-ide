@@ -306,3 +306,43 @@ body {
 .web-chat-app .web-assistant { max-width: 94%; background: #0e1a24; border-color: #263d50; }
 .web-chat-app .web-user { max-width: 82%; }
 .web-chat-app .chat-composer, .web-chat-app .chat-compose { margin-top: 6px; }
+
+/* Documents & code: source dashboard */
+.sources-app { max-width: 1180px; padding: 26px 28px 52px; gap: 14px; }
+.sources-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 13px 16px; border: 1px solid #24394b; border-radius: 14px; background: linear-gradient(140deg, rgba(18,30,42,.96), rgba(10,18,26,.96)); box-shadow: 0 14px 36px rgba(0,0,0,.22); }
+.sources-brand { display: flex; align-items: center; gap: 11px; }
+.sources-brand > .web-mark { width: 30px; height: 30px; border-radius: 9px; }
+.sources-brand span { display: block; color: #7f98ad; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.sources-brand h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: -.02em; color: #f2f8ff; }
+.sources-top-actions { display: flex; align-items: center; gap: 8px; }
+.sources-hero { padding: 18px 2px 12px; max-width: 700px; }
+.sources-hero h2 { margin: 8px 0 8px; font-size: clamp(26px, 3vw, 34px); line-height: 1.08; letter-spacing: -.04em; color: #f4f9ff; }
+.sources-hero p:last-child { margin: 0; color: #93a9bd; font-size: 13px; line-height: 1.55; }
+.sources-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.source-card { padding: 18px; border: 1px solid #24394b; border-radius: 16px; background: linear-gradient(155deg, #101d28, #0b141d); box-shadow: 0 14px 38px rgba(0,0,0,.22); }
+.source-card-head { display: flex; align-items: center; gap: 11px; }
+.source-logo { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.source-logo[data-provider="gitlab"] { color: #ffb28a; background: rgba(252,109,38,.13); border: 1px solid rgba(252,109,38,.3); }
+.source-logo[data-provider="box"] { color: #8fc8ff; background: rgba(36,129,255,.13); border: 1px solid rgba(36,129,255,.3); }
+.source-card-title { min-width: 0; flex: 1; }
+.source-card-title h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; color: #eef6ff; }
+.source-card-title p { margin: 2px 0 0; color: #879fb3; font-size: 11px; }
+.source-status { flex: none; border: 1px solid #2b4358; border-radius: 999px; padding: 3px 8px; font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #93a9bd; }
+.source-status[data-state="live"] { color: #9ff0cf; border-color: #245a4a; background: #0d1d1a; }
+.source-status[data-state="ready"] { color: #9fc9ee; border-color: #2b4d68; background: #0c1b27; }
+.source-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.source-primary, .source-quiet { min-height: 34px; padding: 0 12px; border-radius: 9px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.source-primary { border: 0; background: linear-gradient(180deg, #9ad7ff, #6bb8ee); color: #06131e; box-shadow: 0 7px 18px rgba(80,160,220,.18); }
+.source-quiet { border: 1px solid #2c4357; background: #0e1a24; color: #b9cadb; }
+.source-primary:disabled, .source-quiet:disabled { opacity: .5; cursor: default; }
+.source-setup { border-top: 1px solid #213545; margin-top: 6px; padding-top: 12px; }
+.source-setup > summary { cursor: pointer; color: #9fc4e2; font-size: 12px; font-weight: 650; }
+.source-note { margin: 8px 0; color: #91a7bb; font-size: 11px; line-height: 1.5; }
+.source-setup > p { color: #8fa5ba; font-size: 11px; line-height: 1.55; }
+.source-setup code { color: #b9d9f2; overflow-wrap: anywhere; }
+.source-setup form { margin-top: 10px; padding: 12px; border: 1px solid #213545; border-radius: 11px; background: rgba(7,14,20,.5); }
+.source-setup label { display: block; margin: 8px 0 4px; color: #8da4b9; font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.source-setup input { width: 100%; height: 36px; box-sizing: border-box; border: 1px solid #2a4054; border-radius: 8px; background: #080f16; color: #eaf2fb; padding: 0 10px; font: inherit; font-size: 12px; }
+.source-setup input:focus { outline: none; border-color: #5ea9de; box-shadow: 0 0 0 3px rgba(94,169,222,.13); }
+.sources-app > .web-read { width: min(100%, 900px); margin: 0 auto; background: linear-gradient(155deg, #101d28, #0b141d); border-color: #24394b; border-radius: 16px; padding: 20px; }
+@media (max-width: 860px) { .sources-grid { grid-template-columns: 1fr; } .sources-app { padding: 16px; } }

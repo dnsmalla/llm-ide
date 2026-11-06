@@ -37,16 +37,20 @@ function ProviderCard({ p, state, sources }: { p: Provider; state: SourcesState;
     if (await sources.configure(p, p === "box" ? { clientId: id.trim(), clientSecret: sec.trim() } : { clientId: id.trim() })) setId("");
   };
   return (
-    <section className="web-form web-read" aria-labelledby={ids[2]}>
-      <h2 id={ids[2]}>{p === "gitlab" ? "GitLab code" : "Box documents"}</h2>
-      <p className="chat-muted">{signed ? "Signed in for this session." : configured ? "Set up. Sign in to browse." : "Not set up."}</p>
-      <div className="web-actions">
-        {configured && !signed && <button type="button" disabled={state.busy || !state.online} onClick={() => void sources.signIn(p)}>Sign in to {NAME[p]}</button>}
-        {signed && <button type="button" onClick={() => void sources.choose(p)}>Browse</button>}
-        {signed && <button type="button" onClick={() => void sources.signOut(p)}>Sign out</button>}
+    <article className="source-card" aria-labelledby={ids[2]}>
+      <header className="source-card-head">
+        <span className="source-logo" data-provider={p} aria-hidden="true">{p === "gitlab" ? "GL" : "BX"}</span>
+        <div className="source-card-title"><h2 id={ids[2]}>{p === "gitlab" ? "GitLab code" : "Box documents"}</h2><p>{p === "gitlab" ? "Repositories, files and code search" : "Folders, documents and extracted text"}</p></div>
+        <span className="source-status" data-state={signed ? "live" : configured ? "ready" : "off"}>{signed ? "Connected" : configured ? "Ready" : "Not set up"}</span>
+      </header>
+      <div className="source-card-actions">
+        {configured && !signed && <button type="button" className="source-primary" disabled={state.busy || !state.online} onClick={() => void sources.signIn(p)}>Sign in to {NAME[p]}</button>}
+        {signed && <button type="button" className="source-primary" onClick={() => void sources.choose(p)}>Browse {NAME[p]}</button>}
+        {signed && <button type="button" className="source-quiet" onClick={() => void sources.signOut(p)}>Sign out</button>}
       </div>
-      <details open={!configured}>
-        <summary>App settings</summary>
+      <details className="source-setup" open={!configured}>
+        <summary>{configured ? "App settings" : "Set up app"}</summary>
+        <p className="source-note">{signed ? "Signed in for this browser session." : configured ? "App settings saved. Sign in to browse." : "One-time setup with your own OAuth app."}</p>
         <p>{HELP[p]}</p>
         <p>Redirect URI to register: <code>{sources.redirectUri()}</code></p>
         <form className="web-form" onSubmit={(e) => void save(e)}>
@@ -58,13 +62,13 @@ function ProviderCard({ p, state, sources }: { p: Provider; state: SourcesState;
               <input id={ids[1]} type="password" value={secret} autoComplete="off" maxLength={128} required onChange={(e) => setSecret(e.target.value)} />
             </>
           )}
-          <div className="web-actions">
-            <button type="submit">Save</button>
-            {configured && <button type="button" onClick={() => void sources.forgetConfig(p)}>Forget app settings</button>}
+          <div className="source-card-actions">
+            <button type="submit" className="source-primary">Save app</button>
+            {configured && <button type="button" className="source-quiet" onClick={() => void sources.forgetConfig(p)}>Forget app</button>}
           </div>
         </form>
       </details>
-    </section>
+    </article>
   );
 }
 
@@ -143,18 +147,23 @@ function FileView({ o, provider, onClose }: { o: Opened; provider: Provider; onC
 
 export function SourcesScreen({ state, sources, onBack }: SourcesScreenProps) {
   return (
-    <main className="web-app">
-      <header className="web-header">
-        <h1>LLM-IDE · documents and code</h1>
-        <span className="chat-spacer" />
-        <button type="button" onClick={state.provider ? () => void sources.choose(null) : onBack}>{state.provider ? "All sources" : "Back"}</button>
+    <main className="web-app sources-app">
+      <header className="sources-topbar">
+        <div className="sources-brand"><span className="web-mark" aria-hidden="true" /><div><span>LLM-IDE</span><h1>Documents &amp; code</h1></div></div>
+        <div className="sources-top-actions"><span className="sync-chip" data-tone="muted">Read-only</span><button type="button" className="source-quiet" onClick={state.provider ? () => void sources.choose(null) : onBack}>{state.provider ? "All sources" : "Back"}</button></div>
       </header>
-      <p className="chat-muted">Read live from your own Box and GitLab accounts, read-only. Nothing is copied to this device or through sync.</p>
+      {!state.provider && (
+        <section className="sources-hero">
+          <p className="web-kicker">Live from the source</p>
+          <h2>Your documents and code, without the desktop</h2>
+          <p>Read directly from your own GitLab and Box accounts, read-only. Nothing is copied into sync or stored on this device.</p>
+        </section>
+      )}
       {!state.online && <StatusBanner severity="info" message={TEXT.offline} />}
       <p className="web-status" role="status" aria-live="polite">{state.status}</p>
       {state.error && <StatusBanner severity="error" message={state.error} />}
       {!state.provider ? (
-        <div className="web-shell">
+        <div className="sources-grid">
           <ProviderCard p="gitlab" state={state} sources={sources} />
           <ProviderCard p="box" state={state} sources={sources} />
         </div>
