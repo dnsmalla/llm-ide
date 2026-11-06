@@ -100,6 +100,7 @@ const COMMANDS: &[&str] = &[
     "git_discard_all",
     "notify_user",
     "notify_focus",
+    "tray_report",
     "tray_status",
     "tray_set_close_to_tray",
     "tray_set_icon_visible",

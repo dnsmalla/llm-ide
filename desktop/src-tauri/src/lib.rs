@@ -381,6 +381,7 @@ macro_rules! product_handlers {
                 git_scm::git_discard_all,
                 notify::notify_user,
                 notify::notify_focus,
+                tray::tray_report,
                 tray::tray_status,
                 tray::tray_set_close_to_tray,
                 tray::tray_set_icon_visible,
@@ -548,6 +549,7 @@ pub fn run() {
                 core_host::set_resource_dir(res);
             }
             tray::setup(app.handle());
+        tray::start_watch(app.handle().clone());
             menu::setup(app.handle())?;
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();

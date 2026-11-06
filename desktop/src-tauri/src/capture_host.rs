@@ -51,6 +51,11 @@ fn valid_language(s: &str) -> bool {
 fn take_active() -> Option<Active> {
     ACTIVE.lock().ok().and_then(|mut g| g.take())
 }
+
+/// True while a capture runs (the tray's status line and Start/Stop item).
+pub fn is_recording() -> bool {
+    ACTIVE.lock().map(|g| g.is_some()).unwrap_or(false)
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureStatus {
