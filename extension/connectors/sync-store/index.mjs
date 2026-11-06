@@ -31,7 +31,7 @@ export function withTimeouts(store, ms = STORE_OP_TIMEOUT_MS) {
     return Promise.race([fn(...args), timeout]).finally(() => clearTimeout(timer));
   };
   const out = { ...store };
-  for (const k of ['put', 'get', 'list', 'remove', 'removeTree']) if (typeof store[k] === 'function') out[k] = wrap(store[k].bind(store));
+  for (const k of ['put', 'get', 'list', 'remove', 'removeTree', 'ensureDir']) if (typeof store[k] === 'function') out[k] = wrap(store[k].bind(store));
   return out;
 }
 
