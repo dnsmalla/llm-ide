@@ -85,3 +85,28 @@ test("enrollScreen: after a backend restart (phase none) the card is back at the
   assert.equal(m.enrollScreen(start, poll("expired")), "failed");
   assert.equal(m.enrollScreen(start, poll("none")), "start");
 });
+
+const SFTP_STORE = { host: "sync.example.com", port: 22, username: "llmidesync", hostFingerprint: "SHA256:iNnnGvKXwwL9PllrTyYK6feetKxNfZbbuvlUdZSnbtM", webHost: "llm-ide.com",
+  publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGUNOIRsIwfOOUYhJwIlBFBb0cxkQq1Ete227Z9GE+lv llmide-sync-BBBBBBBBBBBBBBBBBBBBBB" };
+test("own server: status decodes sftp strictly", () => {
+  const s = m.decodeSyncStatus({ ...STATUS, storeKind: "sftp", store: SFTP_STORE });
+  assert.deepEqual(s.store, SFTP_STORE);
+  assert.ok(m.isSftpStore(s.store));
+  assert.equal(m.decodeSyncStatus({ ...STATUS, storeKind: "sftp", store: { ...SFTP_STORE, publicKey: "ssh-ed25519 AAAA'; rm -rf / #" } }).store, null);
+  assert.equal(m.decodeSyncStatus({ ...STATUS, storeKind: "sftp", store: { ...SFTP_STORE, port: "22" } }).store, null);
+  assert.equal(m.decodeSyncStatus(STATUS).store.folder, "llmide-sync");
+});
+test("own server: save, key command, summary", async () => {
+  const c = fake({ "POST /kb/sync/sftp": { status: 200, body: { ...STATUS, storeKind: "sftp", store: SFTP_STORE } } });
+  const cfg = { host: "sync.example.com", port: 22, username: "llmidesync", hostFingerprint: SFTP_STORE.hostFingerprint, webHost: "llm-ide.com" };
+  assert.equal((await m.saveSftp(c, cfg)).storeKind, "sftp");
+  assert.equal(c.calls[0], `POST /kb/sync/sftp ${JSON.stringify(cfg)}`);
+  assert.equal(m.authorizedKeysCommand(SFTP_STORE.publicKey, "llmidesync"), `printf 'restrict %s\\n' '${SFTP_STORE.publicKey}' > /etc/ssh/authorized_keys/llmidesync`);
+  assert.match(m.storeSummary(m.decodeSyncStatus({ ...STATUS, storeKind: "sftp", store: SFTP_STORE })), /llmidesync@sync\.example\.com:22.*https:\/\/llm-ide\.com\/sync\//);
+});
+test("own-server error texts", () => {
+  assert.match(m.syncErrorText("SYNC_HOST_KEY_CHANGED", "sftp"), /identity changed/);
+  assert.match(m.syncErrorText("SYNC_AUTH_FAILED", "sftp"), /authorized_keys/);
+  assert.match(m.syncErrorText("SYNC_AUTH_FAILED"), /email or password/);
+  assert.doesNotMatch(m.syncErrorText("SYNC_UNREACHABLE", "sftp"), /MEGA/);
+});

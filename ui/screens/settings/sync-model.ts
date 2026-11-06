@@ -1,13 +1,17 @@
 // Settings → Phone and web sync: the model for the /kb/sync/* routes (schema/http/sync.schema.json). Strict decoding;
 // the card hides when the core does not serve these routes to this UI (no bus host proof). The MEGA password is sent
-// once, on Save, and is never read back: no route returns it, and the decoder keeps only folder + masked account.
+// once, on Save, and is never read back; the own server's SSH private key never leaves the core (the status carries only its public line).
 import { ApiError, call, type CoreClient } from "./core-api.ts";
 
 export interface MegaSetup { email: string; password: string; folder: string }
+export type StoreKind = "mega" | "sftp";
 export interface MegaStore { folder: string; account: string }
+export interface SftpSetup { host: string; port: number; username: string; hostFingerprint: string; webHost: string }
+export interface SftpStore extends SftpSetup { publicKey: string }
+export const isSftpStore = (s: MegaStore | SftpStore | null): s is SftpStore => !!s && "publicKey" in s;
 export interface SyncDevice { deviceId: string; name: string; tier: "web" | "ios"; addedAt: number; folderHint: string }
 export interface SyncStatus {
-  configured: boolean; enabled: boolean; storeKind: string | null; store: MegaStore | null;
+  configured: boolean; enabled: boolean; storeKind: string | null; store: MegaStore | SftpStore | null;
   syncId: string | null; epoch: number | null; signingFingerprint: string | null; devices: SyncDevice[]; rotationPending: boolean;
   lastPublishAt: number | null; lastError: string | null;
 }
@@ -16,12 +20,20 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const strOrNull = (v: unknown) => v === null || typeof v === "string";
 const intOrNull = (v: unknown) => v === null || Number.isInteger(v);
 
+const PUBLIC_KEY_RE = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [A-Za-z0-9_.@-]{1,80})?$/;
+function decodeSftpStore(s: unknown): SftpStore | null {
+  if (!isRecord(s) || typeof s.host !== "string" || !Number.isInteger(s.port) || typeof s.username !== "string" || typeof s.hostFingerprint !== "string"
+    || typeof s.webHost !== "string" || typeof s.publicKey !== "string" || !PUBLIC_KEY_RE.test(s.publicKey)) return null;
+  return { host: s.host, port: s.port as number, username: s.username, hostFingerprint: s.hostFingerprint, webHost: s.webHost, publicKey: s.publicKey };
+}
+
 export function decodeSyncStatus(v: unknown): SyncStatus {
   if (!isRecord(v) || typeof v.configured !== "boolean" || typeof v.enabled !== "boolean" || !strOrNull(v.storeKind)
     || !strOrNull(v.syncId) || !intOrNull(v.epoch) || !strOrNull(v.signingFingerprint) || !Array.isArray(v.devices)
     || !intOrNull(v.lastPublishAt) || !strOrNull(v.lastError)) throw new ApiError(0, "BAD_RESPONSE");
   const s = v.store;
-  const store = isRecord(s) && typeof s.folder === "string" && typeof s.account === "string" ? { folder: s.folder, account: s.account } : null;
+  const store = v.storeKind === "sftp" ? decodeSftpStore(s)
+    : isRecord(s) && typeof s.folder === "string" && typeof s.account === "string" ? { folder: s.folder, account: s.account } : null;
   const devices = (v.devices as unknown[]).filter((d): d is SyncDevice => isRecord(d) && typeof d.deviceId === "string" && typeof d.name === "string"
     && (d.tier === "web" || d.tier === "ios") && typeof d.addedAt === "number")
     .map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: typeof d.folderHint === "string" ? d.folderHint : "" }));
@@ -39,14 +51,28 @@ const SYNC_ERROR_TEXT: Record<string, string> = {
   SYNC_IO: "A MEGA operation failed. Sync retries by itself.",
   SYNC_BUSY: "Sync is finishing a cycle. Try again in a moment.",
 };
-export const syncErrorText = (code: string): string | null => SYNC_ERROR_TEXT[code] ?? null;
-export const describeSyncError = (e: unknown): string | null => (e instanceof ApiError ? syncErrorText(e.code) : null);
+const SFTP_ERROR_TEXT: Record<string, string> = {
+  SYNC_HOST_KEY_CHANGED: "The server's identity changed: it showed a different host key than the fingerprint you pasted, so the desktop did not connect and sync was turned off. If you reinstalled the server, read its new fingerprint on it and Save again. Otherwise, do not connect: someone may be in between.",
+  SYNC_AUTH_FAILED: "The server refused this desktop's key. Run the command below on the server as root (it writes /etc/ssh/authorized_keys/llmidesync), then Test connection. Sync was turned off until then.",
+  SYNC_UNREACHABLE: "Your server could not be reached. Check the address, the SSH port and the network; sync retries by itself.",
+  SYNC_IO: "A file operation on your server failed. Check the folders with deploy/vps/check-sync.sh server; sync retries by itself.",
+  SYNC_TIMEOUT: "Your server did not answer in time. Sync retries by itself.",
+};
+export const syncErrorText = (code: string, kind: string | null = "mega"): string | null =>
+  (kind === "sftp" ? SFTP_ERROR_TEXT[code] : undefined) ?? SYNC_ERROR_TEXT[code] ?? null;
+export const describeSyncError = (e: unknown, kind: string | null = "mega"): string | null => (e instanceof ApiError ? syncErrorText(e.code, kind) : null);
 
 export async function loadSyncStatus(client: CoreClient): Promise<SyncStatus | null> {
   try { return decodeSyncStatus(await call(client, "GET", "/kb/sync/status")); }
   catch (e) { if (e instanceof ApiError && e.code === "HOST_PROOF_REQUIRED") return null; throw e; }
 }
 export const saveMega = async (client: CoreClient, cfg: MegaSetup) => decodeSyncStatus(await call(client, "POST", "/kb/sync/mega", cfg));
+export const saveSftp = async (client: CoreClient, cfg: SftpSetup) => decodeSyncStatus(await call(client, "POST", "/kb/sync/sftp", cfg));
+export const authorizedKeysCommand = (publicKey: string, user: string) => `printf 'restrict %s\\n' '${publicKey}' > /etc/ssh/authorized_keys/${user}`;
+export function storeSummary(s: SyncStatus): string {
+  if (isSftpStore(s.store)) return `Server ${s.store.username}@${s.store.host}:${s.store.port}. Phones and browsers use https://${s.store.webHost}/sync/.`;
+  return s.store ? `Connected account ${s.store.account}, folder ${s.store.folder} in its Cloud Drive.` : "";
+}
 export const testSync = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/test", {}); };
 export const setSyncEnabled = async (client: CoreClient, enabled: boolean) => decodeSyncStatus(await call(client, "POST", "/kb/sync/enabled", { enabled }));
 export const publishNow = async (client: CoreClient) => call(client, "POST", "/kb/sync/publish", {});
