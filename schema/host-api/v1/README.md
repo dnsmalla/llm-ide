@@ -101,6 +101,7 @@ are the desktop's host-specific rules; a future second host must document its di
   `chat.error` with a generic message and `retryable: false`.
 - **Snapshot trimming.** `chat.snapshot` / `host.snapshot` messages are trimmed to `maxListBytes` (see Limits): oldest
   dropped first, the newest always kept.
+- **Compose.** Only the desktop serves `compose` (`chat.options`, `chat.new`, and `mode` / `model` on `chat.send`), with `LLMIDE_HOST_API_COMPOSE=1`; models come from the account's Agent SDK list and are re-checked on every send; `chat.new` and `chat.options` use the turn and read buckets. The Mac gateway answers both commands `capability_unavailable` and ignores `mode` / `model` on `chat.send` (it never grants `compose`, so a client never sends them there). Both hosts accept `chat.send.attachments`; the desktop frames them for the engine as `{ path: name, content: text }`.
 - **Which chat.** One server-side "Phone chat" per user (`host_api_quick_chat`).
 - **Switches.** `tool_approvals` is served only with `LLMIDE_HOST_API_TOOL_APPROVALS=1`; `chat.history.clear` is
   `denied` unless `LLMIDE_HOST_API_CHAT_CLEAR=1`; `read` (`chat.sessions`, `chat.history`, `usage.get`) only with
