@@ -27,14 +27,14 @@ Keep the Node server on loopback and let Caddy own DNS, certificates and HTTPS.
 The bundle is static, so any static host works; the CSP header below must be
 sent by the proxy or the server. The two MEGA hosts in `connect-src` are for offline sync; MEGA's
 transfer hosts (`*.userstorage.mega.co.nz`) are not yet confirmed to allow browser
-(CORS) access — see README "Offline sync" before relying on the browser tier. The four Box/GitLab hosts are for reading documents and code at the source.
+(CORS) access — see README "Offline sync" before relying on the browser tier. The four Box/GitLab hosts are for reading documents and code at the source. `https://llm-ide.com` is the own sync server (`/sync/`, deploy/vps/sync-sftp.md); if you run your sync server on another host, put that host here instead, in all three places.
 
 ```caddyfile
 web.example.com {
   root * /srv/llmide-web/dist
   try_files {path} /index.html
   header {
-    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz https://gitlab.com https://api.box.com https://dl.boxcloud.com https://public.boxcloud.com https://llm-ide.com; base-uri 'none'; form-action 'none'; object-src 'none'"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz https://api.box.com https://upload.box.com https://*.boxcloud.com https://gitlab.com https://dl.boxcloud.com https://public.boxcloud.com https://llm-ide.com; base-uri 'none'; form-action 'none'; object-src 'none'"
     X-Content-Type-Options nosniff
     X-Frame-Options DENY
     Referrer-Policy no-referrer

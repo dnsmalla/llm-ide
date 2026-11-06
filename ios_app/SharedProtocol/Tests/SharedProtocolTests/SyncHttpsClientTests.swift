@@ -58,6 +58,6 @@ struct SyncHttpsClientTests {
     func storeDescriptor() {
         #expect(SyncEnroll.isStore("sftp:llm-ide.com"))
         #expect(SyncEnroll.isStore("mega:llmide-sync"))
-        for st in ["sftp:", "sftp:LLM-IDE.com", "sftp:localhost", "sftp:llm-ide.com:8443", "sftp:72.62.76.92"] { #expect(!SyncEnroll.isStore(st)) }
+        for st in ["sftp:", "sftp:LLM-IDE.com", "sftp:localhost", "sftp:llm-ide.com:8443", "sftp:72.62.76.92", "sftp:a-.com"] { #expect(!SyncEnroll.isStore(st)) }
     }
 }

@@ -93,6 +93,12 @@ test('names, tiers and key types are validated', async () => {
   assert.match(W.newId22(), W.ID22);
 });
 
+test('parsePair: an sftp: store must be a lower-case DNS host', () => {
+  const q = (st) => `llmide://pair?sv=1&sid=${'A'.repeat(22)}&sfp=${'B'.repeat(43)}&dir=${'C'.repeat(22)}&slot=${'D'.repeat(22)}&es=${'E'.repeat(22)}&st=${encodeURIComponent(st)}`;
+  assert.equal(W.parsePair(q('sftp:llm-ide.com')).st, 'sftp:llm-ide.com');
+  for (const bad of ['sftp:evil.com:8443', 'sftp:localhost', 'sftp:1.2.3.4', 'sftp:a-.com']) assert.throws(() => W.parsePair(q(bad)), (e) => e.code === 'bad_pair', bad);
+});
+
 test('parsePair: box links carry the Box app; a bad or missing one is refused', () => {
   const q = (extra) => `llmide://pair?sv=1&sid=${'A'.repeat(22)}&sfp=${'B'.repeat(43)}&dir=${'C'.repeat(22)}&slot=${'D'.repeat(22)}&es=${'E'.repeat(22)}&st=box%3Allmide-sync${extra}`;
   const p = W.parsePair(q('&bi=cid0123456789abcdef&bs=csec0123456789abcdef'));

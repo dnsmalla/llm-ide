@@ -203,7 +203,7 @@ test('a retry after a transient failure once the claim landed reuses the same cl
   assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
 });
 
-test('own server: pairs with no login and reopens without unlock', async () => {
+test('own server: an sftp: link pairs with no login, and a reload opens the store by itself', async () => {
   const r = rig('sftp:llm-ide.com');
   r.link = await r.desk.open(T);
   await r.c.start();
@@ -217,6 +217,21 @@ test('own server: pairs with no login and reopens without unlock', async () => {
     openStore: async ({ st }) => { assert.equal(st, 'sftp:llm-ide.com'); return { get: (p) => r.store.get(p), put: (p, b) => r.store.put(p, b), close: async () => {} }; } });
   await again.start();
   assert.equal(again.getState().phase, 'ready', 'no unlock step for the own server');
+});
+
+test('a failed own-server re-pair on a MEGA device keeps the login form', async () => {
+  const r = rig();
+  r.link = await r.desk.open(T);
+  await r.c.start();
+  await r.c.pair({ email: EMAIL, password: PW, name: 'Laptop browser' });
+  assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+  const other = createFakeDesktop({ store: r.store, st: 'sftp:llm-ide.com' });
+  r.st = 'sftp:llm-ide.com';
+  assert.equal(r.c.acceptLink(await other.open(r.clock)), true);
+  assert.equal(r.c.getState().login, false);
+  await r.c.pair({ email: '', password: '', name: 'Laptop browser' }); // nobody answers: pair_timeout after the claim
+  assert.equal(r.c.getState().phase, 'locked');
+  assert.equal(r.c.getState().login, true, 'a MEGA device never shows the no-login Connect button');
 });
 
 test('a Box pairing link opens Box (not MEGA), stores the Box app on the device', async () => {

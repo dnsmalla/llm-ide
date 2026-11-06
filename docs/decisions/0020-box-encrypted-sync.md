@@ -168,3 +168,5 @@ design keep the approved name.
    two half-designs do not coexist.
 
 The iPhone uses its own minimal HTTPS client (SP4), not the official SDK; its saved session has the same power and the same custody (Keychain, this device only).
+
+SP6 (2026-11-06) builds Box with a one-time OAuth consent on the desktop (not CCG) and the user's own Box app on phone and web; see the SP6 plan.

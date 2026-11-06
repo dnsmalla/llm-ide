@@ -10,10 +10,11 @@ const version = (JSON.parse(readFileSync(new URL("./package.json", import.meta.u
 export const WEB_PORT = 5180;
 // connect-src: plaintext ws only to loopback (the dev listener); wss to any host the user enters (phase 6 hosts);
 // MEGA for offline sync (design 8.3): the API host and the transfer hosts it hands out per download/upload.
-// Box and GitLab read hosts for direct reads (design 9): API, token, and Box's download/representation hosts.
+// Box and GitLab read hosts for direct reads (design 9): API, token, and Box's download/representation hosts;
+// upload.box.com for the Box sync store; https://llm-ide.com for the own sync server (design 8.1; 'self' covers it on the deployed site, the dev server needs it named).
 export const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz https://api.box.com https://upload.box.com https://*.boxcloud.com https://gitlab.com https://api.box.com https://dl.boxcloud.com https://public.boxcloud.com https://llm-ide.com", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
+  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz https://api.box.com https://upload.box.com https://*.boxcloud.com https://gitlab.com https://dl.boxcloud.com https://public.boxcloud.com https://llm-ide.com", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
 ].join("; ");
 
 // Vite's dev server injects an inline React-refresh preamble, so the CSP meta goes into the built page only.

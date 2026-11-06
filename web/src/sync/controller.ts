@@ -1,5 +1,6 @@
-// Sync tier controller (design 6, 4.3-4.4, 12; no React): pair this browser, unlock MEGA for this session, read the
-// latest verified snapshot, queue chat prompts and collect replies. MEGA needs a password per session; the own server does not. The MEGA password reaches only the login call;
+// Sync tier controller (design 6, 4.3-4.4, 12; no React): pair this browser, open the sync storage for this session
+// (MEGA with a password typed each session, or the user's own server with no login), read the latest verified
+// snapshot, queue chat prompts and collect replies. The MEGA password reaches only the login call;
 // nothing decrypted is persisted. Polls every 30 s while unlocked, online and not paused (desktop live over Host API).
 import { parsePair, type Pair } from "./enroll.ts";
 import { SyncCryptoError } from "./envelope.ts";
@@ -187,7 +188,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     } catch (e) {
       if (s) await s.close().catch(() => {});
       if (run !== pairRun) return;
-      set({ busy: false, pairStep: null, sas: null, error: textOf(e), phase: pair ? "pairing" : device ? "locked" : "none" });
+      set({ busy: false, pairStep: null, sas: null, error: textOf(e), phase: pair ? "pairing" : device ? "locked" : "none", login: pair ? needsLogin(pair.st) : device ? needsLogin(device.st) : true });
     }
   }
 
@@ -268,7 +269,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       try { device = await d.keystore.load(); } catch { device = null; d.keystore = memoryKeyStore(); set({ notice: NOT_REMEMBERED }); }
       set({ phase: device ? "locked" : "none", email: device?.megaEmail ?? "", pending: pendingView(), login: device ? needsLogin(device.st) : true, store: device ? storeKindOf(device.st) : null });
       if (link) acceptLink(link);
-      else if (device && !needsLogin(device.st)) await unlock({ email: "", password: "" });
+      else if (device && !needsLogin(device.st)) await unlock({ email: "", password: "" }); // own server: nothing to type
     },
     acceptLink,
     pair: pairNow,

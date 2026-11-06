@@ -42,8 +42,9 @@ public enum SyncEnroll {
     static func isBoxApp(_ s: String?) -> Bool {
         s?.range(of: #"^[A-Za-z0-9]{16,128}$"#, options: .regularExpression) != nil
     }
+    /// Same pattern as extension/connectors/sync-store/sftp.mjs WEB_HOST_RE and web/src/sync/https-store.ts.
     public static func isOwnServerHost(_ h: String) -> Bool {
-        h.range(of: #"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9]?)\.)+[a-z]{2,63}$"#, options: .regularExpression) != nil
+        h.range(of: #"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"#, options: .regularExpression) != nil
     }
 
     /// `llmide://pair?…` or `<origin>/#pair=<encoded query>`. Unknown parameters (Host API fields) are ignored.
