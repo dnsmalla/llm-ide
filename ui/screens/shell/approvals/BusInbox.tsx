@@ -127,12 +127,15 @@ export const BusInbox = memo(function BusInbox() {
   useEffect(() => {
     if (!signedIn) return undefined;
     inboxStore.start();
-    // The tray's approvals line and an approval notification's click open this inbox.
+    return () => inboxStore.stop();
+  }, [signedIn]);
+
+  // The tray's approvals line and an approval notification's click open this inbox.
+  useEffect(() => {
     const show = () => setOpen(true);
     globalThis.addEventListener?.("llmide:open-inbox", show);
     return () => { globalThis.removeEventListener?.("llmide:open-inbox", show); };
-    return () => inboxStore.stop();
-  }, [signedIn]);
+  }, []);
 
   const reload = useCallback(async () => {
     await inboxStore.refresh();

@@ -354,7 +354,14 @@ pub fn refresh(app: &AppHandle) -> Phase {
     let sync = *lock(&SYNC);
     let v = tray_view(phase, crate::capture_host::is_recording(), crate::capture_ax_macos::SUPPORTED, CHAT_PENDING.load(Ordering::Relaxed), JOB_PENDING.load(Ordering::Relaxed), sync);
     let changed = { let mut last = lock(&LAST_VIEW); if last.as_ref() == Some(&v) { false } else { *last = Some(v.clone()); true } };
-    if changed { apply(app, &v); }
+    // The watcher thread and tray_report both refresh: every menu update runs on the main thread, and only the newest
+    // view is applied, so an older one can never land last and stick.
+    if changed {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if lock(&LAST_VIEW).as_ref() == Some(&v) { apply(&app2, &v); }
+        });
+    }
     phase
 }
 #[tauri::command]
