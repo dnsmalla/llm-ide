@@ -86,6 +86,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
       <footer className="web-foot">
         <span>LLM-IDE web companion</span>
         <span>Local-first · no account</span>
+        <span className="web-foot-links"><a href="/app/privacy">Privacy</a><a href="/app/support">Support</a></span>
       </footer>
     </main>
   );
