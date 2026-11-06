@@ -13,6 +13,10 @@ on:
         description: 'Sign and notarize (needs every signing secret); never publishes'
         type: boolean
         default: false
+      windows_signed:
+        description: 'Also Authenticode-sign the Windows build (needs the DESKTOP_WIN_* secrets); off by default, Windows ships unsigned'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,6 +27,8 @@ concurrency:
 
 env:
   SIGNED: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || inputs.signed == true }}
+  # Windows signing is opt-in only: never set by a tag release, so no DESKTOP_WIN_* secret is required by default.
+  WIN_SIGNED: ${{ inputs.windows_signed == true }}
 
 jobs:
   preflight:
@@ -63,6 +69,25 @@ jobs:
             echo "::error::Missing required secrets: ${missing[*]} (see docs/how-to/desktop-release.md)"
             exit 1
           fi
+      - name: Check required secrets (windows_signed runs)
+        if: env.WIN_SIGNED == 'true'
+        env:
+          DESKTOP_WIN_AZURE_CLIENT_ID: ${{ secrets.DESKTOP_WIN_AZURE_CLIENT_ID }}
+          DESKTOP_WIN_AZURE_CLIENT_SECRET: ${{ secrets.DESKTOP_WIN_AZURE_CLIENT_SECRET }}
+          DESKTOP_WIN_AZURE_TENANT_ID: ${{ secrets.DESKTOP_WIN_AZURE_TENANT_ID }}
+          DESKTOP_WIN_SIGN_ENDPOINT: ${{ secrets.DESKTOP_WIN_SIGN_ENDPOINT }}
+          DESKTOP_WIN_SIGN_ACCOUNT: ${{ secrets.DESKTOP_WIN_SIGN_ACCOUNT }}
+          DESKTOP_WIN_SIGN_PROFILE: ${{ secrets.DESKTOP_WIN_SIGN_PROFILE }}
+        run: |
+          missing=()
+          for n in DESKTOP_WIN_AZURE_CLIENT_ID DESKTOP_WIN_AZURE_CLIENT_SECRET DESKTOP_WIN_AZURE_TENANT_ID \
+                   DESKTOP_WIN_SIGN_ENDPOINT DESKTOP_WIN_SIGN_ACCOUNT DESKTOP_WIN_SIGN_PROFILE; do
+            [ -z "${!n}" ] && missing+=("$n")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]} (see docs/how-to/desktop-release.md)"
+            exit 1
+          fi
 
   bundle:
     name: Bundle (${{ matrix.target }})
@@ -84,6 +109,7 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
       BUNDLE: desktop/src-tauri/target/release/bundle
       KEYCHAIN_NAME: desktop-release-ci.keychain-db
+      AS_CLIENT_VERSION: '1.0.146'
     steps:
       - uses: actions/checkout@v7
       - name: Check out graph-kit submodule (System page web source)
@@ -147,7 +173,43 @@ jobs:
           # The hardened-runtime node must still run the core (JIT entitlement check).
           node desktop/scripts/check-core-deps.mjs
           node desktop/scripts/smoke-core.mjs
-      # (Task 7 inserts Windows signing here.)
+      - name: Prepare Windows signing (Artifact Signing dlib, signtool, overlay)
+        if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
+        shell: pwsh
+        env:
+          SIGN_ENDPOINT: ${{ secrets.DESKTOP_WIN_SIGN_ENDPOINT }}
+          SIGN_ACCOUNT: ${{ secrets.DESKTOP_WIN_SIGN_ACCOUNT }}
+          SIGN_PROFILE: ${{ secrets.DESKTOP_WIN_SIGN_PROFILE }}
+        run: |
+          $as = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          nuget install Microsoft.ArtifactSigning.Client -Version $env:AS_CLIENT_VERSION -x -OutputDirectory $as
+          $dlib = Get-ChildItem -Recurse "$as" -Filter Azure.CodeSigning.Dlib.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1
+          $meta = Join-Path $env:RUNNER_TEMP 'metadata.json'
+          @{ Endpoint = $env:SIGN_ENDPOINT; CodeSigningAccountName = $env:SIGN_ACCOUNT; CertificateProfileName = $env:SIGN_PROFILE; ExcludeCredentials = @('ManagedIdentityCredential') } | ConvertTo-Json | Set-Content $meta
+          "WIN_SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+          "WIN_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          "WIN_METADATA=$meta" >> $env:GITHUB_ENV
+      - name: Write the release config overlay for Windows signing
+        if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
+        run: |
+          flags="--windows-sign"
+          node desktop/scripts/release-config.mjs $flags > "$RUNNER_TEMP/release.conf.json"
+          cat "$RUNNER_TEMP/release.conf.json"
+      - name: Sign unsigned PE files inside the core on Windows
+        if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.DESKTOP_WIN_AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.DESKTOP_WIN_AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.DESKTOP_WIN_AZURE_TENANT_ID }}
+        run: |
+          Get-ChildItem -Recurse desktop/resources/core -Include *.exe,*.dll,*.node | ForEach-Object {
+            if ((Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid') {
+              & $env:WIN_SIGNTOOL sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib $env:WIN_DLIB /dmdf $env:WIN_METADATA $_.FullName
+              if ($LASTEXITCODE -ne 0) { exit 1 }
+            }
+          }
       - name: Build bundles
         working-directory: desktop
         env:
@@ -156,7 +218,23 @@ jobs:
           APPLE_ID: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ env.SIGNED == 'true' && runner.os == 'macOS' && secrets.MAC_NOTARY_TEAM_ID || '' }}
-        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+          AZURE_CLIENT_ID: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_CLIENT_SECRET || '' }}
+          AZURE_TENANT_ID: ${{ env.WIN_SIGNED == 'true' && runner.os == 'Windows' && secrets.DESKTOP_WIN_AZURE_TENANT_ID || '' }}
+        run: |
+          cfg=""
+          [ "$RUNNER_OS" = "Windows" ] && [ "$WIN_SIGNED" = "true" ] && cfg="--config \"$RUNNER_TEMP/release.conf.json\""
+          eval npm run tauri build -- --bundles ${{ matrix.bundles }} $cfg
+      - name: Verify Authenticode signatures on Windows
+        if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "$env:BUNDLE/nsis/*-setup.exe") + @(Get-ChildItem desktop/src-tauri/target/release/*.exe)
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { exit 1 }
+          }
       - name: Sign, notarize and staple the dmg; Gatekeeper check
         if: runner.os == 'macOS' && env.SIGNED == 'true'
         env:

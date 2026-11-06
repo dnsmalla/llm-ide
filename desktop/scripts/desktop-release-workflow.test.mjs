@@ -63,3 +63,35 @@ test('macOS: nested binaries signed before the build, dmg notarized and stapled,
   assert.match(wf, /spctl -a -vvv -t exec/);
   assert.match(wf, /security delete-keychain/);
 });
+
+const WIN_SECRETS = ['DESKTOP_WIN_AZURE_CLIENT_ID', 'DESKTOP_WIN_AZURE_CLIENT_SECRET', 'DESKTOP_WIN_AZURE_TENANT_ID', 'DESKTOP_WIN_SIGN_ENDPOINT', 'DESKTOP_WIN_SIGN_ACCOUNT', 'DESKTOP_WIN_SIGN_PROFILE'];
+
+test('a signed run checks every Windows signing secret', () => {
+  const wf = rel();
+  const check = wf.slice(wf.indexOf('Check required secrets'), wf.indexOf('bundle:'));
+  for (const s of WIN_SECRETS) assert.match(check, new RegExp(`\\b${s}\\b`));
+});
+
+test('Windows: pinned Artifact Signing client, overlay passed to tauri build, signatures verified', () => {
+  const wf = rel();
+  assert.match(wf, /Microsoft\.ArtifactSigning\.Client -Version \$env:AS_CLIENT_VERSION/);
+  assert.match(wf, /AS_CLIENT_VERSION: '\d+\.\d+\.\d+/);
+  assert.match(wf, /flags="--windows-sign"/);
+  assert.match(wf, /release-config\.mjs \$flags/);
+  assert.match(wf, /--config \\?"\$RUNNER_TEMP\/release\.conf\.json/);
+  assert.match(wf, /Get-AuthenticodeSignature/);
+});
+
+test('Windows signing is opt-in: unset windows_signed never checks or uses a DESKTOP_WIN_* secret', () => {
+  const wf = rel();
+  assert.match(wf, /windows_signed:[\s\S]*?default: false/);
+  assert.match(wf, /WIN_SIGNED: \$\{\{ inputs\.windows_signed == true \}\}/);
+  assert.doesNotMatch(wf, /WIN_SIGNED:.*refs\/tags/);
+  // every step that mentions a DESKTOP_WIN_* secret is gated on WIN_SIGNED (the env: expression form is gated inline)
+  const steps = wf.split(/\n      - /);
+  for (const st of steps.filter((x) => /secrets\.DESKTOP_WIN_/.test(x) && !/name: Build bundles/.test(x))) {
+    assert.match(st, /if: (runner\.os == 'Windows' && )?env\.WIN_SIGNED == 'true'/, st.split('\n')[0]);
+  }
+  const build = steps.find((x) => /name: Build bundles/.test(x));
+  for (const s of WIN_SECRETS.slice(0, 3)) assert.match(build, new RegExp(`env\\.WIN_SIGNED == 'true' && runner\\.os == 'Windows' && secrets\\.${s}`));
+});
