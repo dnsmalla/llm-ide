@@ -1,5 +1,5 @@
 // /kb/sync/* for the desktop Settings card: JWT + bus host proof (desktop UI only), per user. Never returns the MEGA
-// password, the full MEGA email, a private key, the root key or a folder capability; errors carry codes, never secrets.
+// password, the full MEGA email, the SSH private key, the root key or a folder capability; errors carry codes, never secrets.
 import { send, readJson } from '../../server/route-http.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
@@ -14,7 +14,18 @@ import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } 
 import { revokeDevice } from './registry.mjs';
 
 const sftpView = (c) => ({ host: c.host, port: c.port, username: c.username, hostFingerprint: c.hostFingerprint, webHost: c.webHost, publicKey: c.publicKey });
-async function leaveStoreKind(userId) { const db=getDb(); void cancelEnrollment(userId).catch(()=>{}); await dropStore(userId); for (const d of listSyncDevices(userId)) deleteSyncDevice(userId,d.deviceId); for (const k of ['sync.megaEmail','sync.megaPassword','sync.sshKey']) setSecret(db,userId,k,''); resetSyncPublish(userId); }
+/** Another storage kind is a place linked devices cannot follow (their pairing named the old one): drop a pending
+ *  enrollment, unlink every device (they pair again), forget the old storage's login, and reset the publish records
+ *  (the SP1 store-change reset). The old storage's files stay; Settings tells the user to delete them. Caller holds the
+ *  user lock. */
+async function leaveStoreKind(userId) {
+  const db = getDb();
+  void cancelEnrollment(userId).catch(() => {});
+  await dropStore(userId);
+  for (const d of listSyncDevices(userId)) deleteSyncDevice(userId, d.deviceId);
+  for (const k of ['sync.megaEmail', 'sync.megaPassword', 'sync.sshKey']) setSecret(db, userId, k, '');
+  resetSyncPublish(userId);
+}
 const DEVICE_RE = /^\/kb\/sync\/devices\/([A-Za-z0-9_-]{22})$/;
 const fail = (res, status, code, message, details) => { send(res, status, { error: { code, message, ...(details ? { details } : {}) } }); return true; };
 
@@ -52,11 +63,14 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       const before = getSyncState(userId);
       const oldEmail = getSecret(db, userId, 'sync.megaEmail');
       const changed = !!before && (before.storeKind !== 'mega' || before.storeConfig.folder !== cfg.folder || oldEmail !== cfg.email);
-      setSecret(db, userId, 'sync.megaEmail', cfg.email);
-      setSecret(db, userId, 'sync.megaPassword', cfg.password);
-      ensureSyncState(userId, { storeKind: 'mega', storeConfig: { folder: cfg.folder } });
-      if (changed) resetSyncPublish(userId);
-      await dropStore(userId);
+      await withUserLock(userId, async () => {
+        if (before && before.storeKind !== 'mega') await leaveStoreKind(userId);
+        setSecret(db, userId, 'sync.megaEmail', cfg.email);
+        setSecret(db, userId, 'sync.megaPassword', cfg.password);
+        ensureSyncState(userId, { storeKind: 'mega', storeConfig: { folder: cfg.folder } });
+        if (changed) resetSyncPublish(userId);
+        await dropStore(userId);
+      });
       send(res, 200, status(userId)); return true;
     }
     if (req.method === 'POST' && path === '/kb/sync/sftp') {

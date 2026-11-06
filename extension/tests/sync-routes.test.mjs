@@ -202,4 +202,30 @@ test('a changed SFTP host key turns sync off, and sync.sshKey is internal', () =
 
 const SFTP={host:'sync.example.com',hostFingerprint:'256 SHA256:iNnnGvKXwwL9PllrTyYK6feetKxNfZbbuvlUdZSnbtM root@vps (ED25519)'};
 test('own-server setup validates and keeps one generated key',async()=>{const u=user();const bad=await call('POST','/kb/sync/sftp',{userId:u,body:{...SFTP,hostFingerprint:'MD5:aa'}});assert.equal(bad.status,400);assert.equal(bad.body.error.details.field,'hostFingerprint');assert.equal((await call('POST','/kb/sync/sftp',{userId:u,body:{...SFTP,webHost:'localhost'}})).body.error.details.field,'webHost');const a=await call('POST','/kb/sync/sftp',{userId:u,body:SFTP});assert.equal(a.status,200);assert.equal(a.body.storeKind,'sftp');const{publicKey,...rest}=a.body.store;assert.deepEqual(rest,{host:'sync.example.com',port:22,username:'llmidesync',hostFingerprint:'SHA256:iNnnGvKXwwL9PllrTyYK6feetKxNfZbbuvlUdZSnbtM',webHost:'llm-ide.com'});assert.match(publicKey,new RegExp(`^ssh-ed25519 [A-Za-z0-9+/=]+ llmide-sync-${a.body.syncId}$`));const priv=vault.getSecret(kb.getDb(),u,'sync.sshKey');assert.match(priv,/^-----BEGIN OPENSSH PRIVATE KEY-----/);assert.ok(!JSON.stringify(a.body).includes('PRIVATE KEY'));const again=await call('POST','/kb/sync/sftp',{userId:u,body:{...SFTP,port:2222}});assert.equal(again.body.store.publicKey,publicKey);assert.equal(again.body.store.port,2222);assert.equal(vault.getSecret(kb.getDb(),u,'sync.sshKey'),priv)});
-test('switching storage kind unlinks devices and clears old login',async()=>{const u=user();await call('POST','/kb/sync/mega',{userId:u,body:MEGA});st.addSyncDevice(u,{deviceId:'sw-device-1',dir:'F'.repeat(22),tier:'web',name:'Phone',ecdhSpki:Buffer.from([1]),signingSpki:Buffer.from([2]),now:1});const s=await call('POST','/kb/sync/sftp',{userId:u,body:SFTP});assert.equal(s.status,200);assert.deepEqual(s.body.devices,[]);assert.equal(vault.getSecret(kb.getDb(),u,'sync.megaPassword'),null);assert.equal(vault.getSecret(kb.getDb(),u,'sync.megaEmail'),null)});
+test('switching storage kind unlinks devices, forgets the old login and resets publish state', async () => {
+  const u = user();
+  await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+  st.addSyncDevice(u, { deviceId: 'sw-device-1', dir: 'F'.repeat(22), tier: 'web', name: 'Phone', ecdhSpki: Buffer.from([1]), signingSpki: Buffer.from([2]), now: 1 });
+  st.setPublished(u, 'sw-device-1', 'chats', { file: 's/' + 'b'.repeat(32) + '.bin', seq: 1, fileSha256: 'f', plainSha256: 'p', epoch: 1 });
+  const s = await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
+  assert.equal(s.status, 200);
+  assert.deepEqual(s.body.devices, []);
+  assert.deepEqual(st.getPublished(u, 'sw-device-1'), {});
+  assert.equal(vault.getSecret(kb.getDb(), u, 'sync.megaPassword'), null);
+  assert.equal(vault.getSecret(kb.getDb(), u, 'sync.megaEmail'), null);
+  st.addSyncDevice(u, { deviceId: 'sw-device-2', dir: 'G'.repeat(22), tier: 'ios', name: 'Phone 2', ecdhSpki: Buffer.from([1]), signingSpki: Buffer.from([3]), now: 2 });
+  const m = await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+  assert.equal(m.body.storeKind, 'mega');
+  assert.deepEqual(m.body.devices, [], 'back to MEGA unlinks the own-server devices too');
+  assert.equal(vault.getSecret(kb.getDb(), u, 'sync.sshKey'), null, 'the SSH key goes with the own-server setup');
+});
+
+test('setup refuses while a sync cycle holds the lock', async () => {
+  const u = user();
+  await withUserLock(u, async () => {
+    const r = await call('POST', '/kb/sync/sftp', { userId: u, body: SFTP });
+    assert.equal(r.status, 409); assert.equal(r.body.error.code, 'SYNC_BUSY');
+    const m = await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+    assert.equal(m.status, 409); assert.equal(m.body.error.code, 'SYNC_BUSY');
+  });
+});

@@ -320,20 +320,20 @@ Endpoints with no client caller (86):
 | `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:67` | - | - | tests only |
 | `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:78` | - | - | tests only |
 | `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:82` | - | - | tests only |
-| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:45` | - | - | tests only |
-| `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:46` | - | - | tests only |
-| `/kb/sync/sftp` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:62` | - | - | tests only |
-| `/kb/sync/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:92` | - | - | tests only |
-| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:84` | - | - | tests only |
-| `/kb/sync/publish` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:92` | - | - | comments/docs only |
-| `/kb/sync/devices/enroll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:113` | - | - | tests only |
-| `/kb/sync/devices/enroll/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:121` | - | - | tests only |
-| `/kb/sync/devices/enroll/confirm` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:122` | - | - | tests only |
-| `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:127` | - | - | tests only |
+| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:56` | - | - | tests only |
+| `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:57` | - | - | tests only |
+| `/kb/sync/sftp` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:76` | - | - | tests only |
+| `/kb/sync/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:106` | - | - | tests only |
+| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:98` | - | - | tests only |
+| `/kb/sync/publish` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:106` | - | - | comments/docs only |
+| `/kb/sync/devices/enroll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:127` | - | - | tests only |
+| `/kb/sync/devices/enroll/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:135` | - | - | tests only |
+| `/kb/sync/devices/enroll/confirm` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:136` | - | - | tests only |
+| `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:141` | - | - | tests only |
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
-| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:134` | - | - | tests only |
+| `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:148` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:861` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:862` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -343,7 +343,7 @@ Endpoints with no client caller (86):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:892` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:893` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |
