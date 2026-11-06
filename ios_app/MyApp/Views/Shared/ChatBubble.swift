@@ -6,8 +6,7 @@ import UIKit
 /// image thumbnail above the text (used by the llm-ide surface; explorer
 /// messages never carry `imageData` so the `if let` is a clean no-op there).
 ///
-/// Factored from `LlmIdeControlView.bubble(_:)` and `ExplorerChatView.bubble(_:)`,
-/// which were identical modulo the image branch. Quirks preserved:
+/// Quirks preserved:
 /// - User bubble tints with `Colors.primary`; assistant uses `Colors.surface`
 ///   with a hairline `Colors.border` stroke.
 /// - 40pt min-length spacers push each bubble to its side.

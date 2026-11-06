@@ -19,11 +19,11 @@ public struct HostApiRevTracker: Sendable, Equatable {
     public mutating func reset() { rev = nil }
 }
 
-/// One connect attempt's v1-or-v2 decision (spec "Compatibility with MobileProtocol v2"). v2 is chosen only
-/// when no v1 host answered. After a v1 answer, every refusal is final for that attempt, so a revoked token
-/// can never be hidden by a v2 fallback.
+/// One connect attempt's hello/auth steps. `.unreachable` means no v1 host answered (silence, or a host that
+/// does not speak this version); the caller backs off and retries. After a v1 answer, every refusal is final
+/// for that attempt.
 public struct HostApiNegotiation: Sendable, Equatable {
-    public enum Phase: Sendable, Equatable { case idle, awaitingHello, awaitingAuth, v1, v2, failed }
+    public enum Phase: Sendable, Equatable { case idle, awaitingHello, awaitingAuth, v1, noHost, failed }
     public enum Input: Sendable, Equatable {
         case start(v1Endpoint: Bool)
         case helloAnswered(apiVersion: Int, requiresAuth: Bool)
@@ -33,7 +33,7 @@ public struct HostApiNegotiation: Sendable, Equatable {
         case authAnswered
         case authRefused(HostApiRejection)
     }
-    public enum Action: Sendable, Equatable { case openV1AndHello, sendAuth, ready, connectV2, fail(HostApiRejection), ignore }
+    public enum Action: Sendable, Equatable { case openV1AndHello, sendAuth, ready, unreachable, fail(HostApiRejection), ignore }
 
     public private(set) var phase: Phase = .idle
     public init() {}
@@ -41,20 +41,20 @@ public struct HostApiNegotiation: Sendable, Equatable {
     public mutating func handle(_ input: Input) -> Action {
         switch (phase, input) {
         case (.idle, .start(let v1)):
-            phase = v1 ? .awaitingHello : .v2
-            return v1 ? .openV1AndHello : .connectV2
+            phase = v1 ? .awaitingHello : .noHost
+            return v1 ? .openV1AndHello : .unreachable
         case (.awaitingHello, .helloAnswered(let version, let requiresAuth)):
-            guard version == HostApi.version else { phase = .v2; return .connectV2 }
+            guard version == HostApi.version else { phase = .noHost; return .unreachable }
             phase = requiresAuth ? .awaitingAuth : .v1
             return requiresAuth ? .sendAuth : .ready
         case (.awaitingHello, .helloRefused(let r)):
-            // A host that does not speak our version may still serve v2.
-            if r.code == "capability_unavailable" || r.code == "unknown_command" { phase = .v2; return .connectV2 }
+            // A host that does not speak our version: nothing to sign in to here.
+            if r.code == "capability_unavailable" || r.code == "unknown_command" { phase = .noHost; return .unreachable }
             phase = .failed
             return .fail(r)
         case (.awaitingHello, .silent):
-            phase = .v2
-            return .connectV2
+            phase = .noHost
+            return .unreachable
         case (.awaitingAuth, .authAnswered):
             phase = .v1
             return .ready
@@ -74,14 +74,6 @@ public struct HostApiNegotiation: Sendable, Equatable {
 /// What a failed v1 attempt may do to the phone's pairing. A transient outage or a non-auth refusal must
 /// never unpair it (Task 5 review I1, I2).
 public extension HostApiNegotiation {
-    /// After `.connectV2`: take the v2 path only with a v2 credential to present, or no v1 token to lose.
-    /// Otherwise an empty v2 `Pairing` earns `auth_failed`, whose credential wipe deletes the v1 token.
-    /// A pinned (`wss`) endpoint never falls back: the stored pin proves the host offered TLS, and silence on
-    /// its port must not become a cleartext v2 pairing (final review I1).
-    static func fallsBackToV2(hasV1Token: Bool, hasV2Credential: Bool, pinned: Bool) -> Bool {
-        !pinned && (!hasV1Token || hasV2Credential)
-    }
-
     /// Only the host saying the device is not paired (non-retryable `auth_failed`) clears the credentials.
     static func clearsCredentials(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }
 }
@@ -108,18 +100,18 @@ public struct HostApiEndpoint: Sendable, Equatable {
 
 /// When the phone ends a chat turn itself because no host event will (Task 6 review I1).
 public enum HostApiChatTurn {
-    /// After Stop: a v1 host that cancelled nothing (`cancelled: false`) or never answered (nil) emits no
-    /// `chat.error`, so the turn ends locally. v2 keeps waiting for the Mac's answering error frame.
-    public static func endsAfterCancel(apiVersion: Int, cancelled: Bool?) -> Bool { apiVersion == 1 && cancelled != true }
+    /// After Stop: a host that cancelled nothing (`cancelled: false`) or never answered (nil) emits no
+    /// `chat.error`, so the turn ends locally.
+    public static func endsAfterCancel(cancelled: Bool?) -> Bool { cancelled != true }
 }
 
 /// Makes a v1 `chat.send` from what the phone's composer allows, so the user never meets a schema error
 /// (final review I2). The limits equal `commands.json` `chat.send`; `HostApiChatSendPolicyTests` pins them.
 public enum HostApiChatSendPolicy {
     public static let maxTextUTF16 = 100_000, maxAttachments = 10, maxAttachmentTextUTF16 = 100_000, maxNameUTF16 = 300
-    public static let fileTooLarge = "That file is too large to send to this Mac."
+    public static let fileTooLarge = "That file is too large to send to this computer."
     public static let tooManyFiles = "You can attach up to \(maxAttachments) files to one message."
-    public static let textTooLong = "That message is too long to send to this Mac."
+    public static let textTooLong = "That message is too long to send to this computer."
 
     public enum Outcome: Sendable, Equatable { case send(HostApiChatSendRequest), refuse(String) }
 
@@ -150,16 +142,15 @@ public enum HostApiBackoff {
     }
 }
 
-/// Chat-slice texts and decisions shared by both transports, so v1 never changes what a v2 user sees.
+/// Chat-slice texts and decisions.
 public enum HostApiChatNotices {
-    /// The Mac's own v2 `ApprovalCleared` reason, verbatim: on v2 its capability frame lands first, so the
-    /// phone's text is the one the user reads (Task 6 review M1).
+    /// Shown when the host withdraws `tool_approvals` while a tool card is up (Task 6 review M1).
     public static let toolApprovalsOff = "Tool requests can no longer be approved from the phone."
-    public static let chatOff = "Chat from this phone was turned off on your Mac."
+    public static let chatOff = "Chat from this phone was turned off on your computer."
 
     /// Shown above a disabled composer when a connected host does not offer chat (nil capabilities = all).
     public static func composer(connected: Bool, capabilities: Set<String>?) -> String? {
-        guard connected, let capabilities, !capabilities.contains(MobileProtocol.Capability.chat) else { return nil }
+        guard connected, let capabilities, !capabilities.contains(HostApiCommand.chatSend.capability) else { return nil }
         return chatOff
     }
 

@@ -22,8 +22,8 @@ public final class HostApiV1Client: HostConnection {
     public enum ConnectOutcome: Sendable, Equatable {
         /// Authenticated. `token` is set when this connect paired with a PIN; the caller must store it.
         case ready(hello: HostApiHostHelloResult, token: String?)
-        /// No v1 answer: use the v2 transport.
-        case notV1
+        /// No v1 host answered (silence, or another API version): back off and retry.
+        case unreachable
         /// A v1 host refused: bad PIN, revoked token, throttle, busy.
         case refused(HostApiRejection)
     }
@@ -151,7 +151,7 @@ public final class HostApiV1Client: HostConnection {
         guard gen == generation else { return Self.superseded }
         teardown()
         switch action {
-        case .connectV2: return .notV1
+        case .unreachable: return .unreachable
         case .fail(let r): return .refused(r)
         default: return .refused(.init(replyTo: nil, code: "internal", message: "Host API negotiation reached an unexpected step."))
         }
@@ -228,7 +228,7 @@ public final class HostApiV1Client: HostConnection {
     private func socketEnded(_ gen: Int, _ reason: HostApiRejection? = nil) {
         guard gen == generation else { return }
         guard state == .connected else {
-            // connect is awaiting a reply: fail it, and connect decides (v2 fallback or refusal) and tears down.
+            // connect is awaiting a reply: fail it, and connect decides (unreachable or refusal) and tears down.
             let waiting = pending
             pending.removeAll()
             for (_, p) in waiting { p.continuation.resume(throwing: reason ?? Silence()) }

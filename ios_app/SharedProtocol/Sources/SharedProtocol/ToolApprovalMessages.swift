@@ -2,18 +2,13 @@ import Foundation
 
 // MARK: - Tool / edit permission prompts
 //
-// When a chat turn started from the phone needs permission to run a tool (edit a file, write one,
-// run a shell command), the Mac can relay the prompt here so the turn doesn't park for 15 minutes
-// waiting at the desk. The Mac only does this while "Approve or deny tool and edit requests" is ON
-// in Settings → Mobile Control → Phone access (default OFF).
-//
-// What the phone sees is exactly what the Mac's own approval card shows — the file path, the
-// before/after text or the command — redacted and capped. The answer is allow-once or deny:
-// "always allow" would persist a project rule, so it stays a Mac-only decision. The answer is
-// bound to a requestId the Mac issued and re-validated against the engine's live pending prompt.
+// When a chat turn started from the phone needs permission to run a tool (edit a file, write one, run a
+// shell command), the host relays the prompt (Host API v1 `toolApproval.request`, capability
+// `tool_approvals`) so the turn doesn't park waiting at the desk. The phone sees the file path, the
+// before/after text or the command, redacted and capped, and answers allow-once or deny
+// (`toolApprovals.answer`): "always allow" would persist a project rule, so it stays a desktop decision.
 
 public struct ToolApprovalRequest: Codable, Equatable, Identifiable {
-    public let type = MobileProtocol.Tag.toolApprovalRequest
     public let commandId: String
     public let requestId: String
     /// The tool's name, e.g. "Edit", "Write", "Bash".
@@ -49,22 +44,14 @@ public struct ToolApprovalRequest: Codable, Equatable, Identifiable {
         self.replaceAll = replaceAll
         self.overwrites = overwrites
     }
-    private enum CodingKeys: String, CodingKey {
-        case type, commandId, requestId, toolName, summary, filePath, oldString, newString
-        case contentPreview, command, truncated, replaceAll, overwrites
-    }
 }
 
-public struct ToolApprovalAnswer: Codable, Equatable {
-    public let type = MobileProtocol.Tag.toolApprovalAnswer
-    public let commandId: String
-    public let requestId: String
-    /// Allow this one call, or deny it. There is deliberately no "always allow".
-    public let allow: Bool
-    public init(commandId: String, requestId: String, allow: Bool) {
-        self.commandId = commandId
-        self.requestId = requestId
-        self.allow = allow
+public extension ToolApprovalRequest {
+    /// The Host API v1 `toolApproval.request` payload, as the tool card renders it.
+    init(event e: HostApiToolApprovalRequestEvent) {
+        self.init(commandId: e.commandId, requestId: e.requestId, toolName: e.toolName, summary: e.summary,
+                  filePath: e.filePath, oldString: e.oldString, newString: e.newString,
+                  contentPreview: e.contentPreview, command: e.command, truncated: e.truncated,
+                  replaceAll: e.replaceAll, overwrites: e.overwrites)
     }
-    private enum CodingKeys: String, CodingKey { case type, commandId, requestId, allow }
 }

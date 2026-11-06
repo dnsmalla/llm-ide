@@ -1,8 +1,8 @@
 import SwiftUI
 import SharedProtocol
 
-/// What the Mac's "Model & Limits" panel shows, read-only: per-model meters, Claude subscription
-/// windows, and the edit-permission mode the Mac's chat is running under.
+/// The desktop's usage, read-only (Host API v1 `usage.get`): per-model meters, Claude subscription
+/// windows, and the edit-permission mode the desktop's chat is running under.
 struct UsageView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var store: UsageStore
@@ -14,7 +14,7 @@ struct UsageView: View {
                     Section {
                         permissionRow(s.permissionMode)
                     } footer: {
-                        Text("Phone chats run under the Mac's setting. It can only be changed on the Mac.")
+                        Text("Phone chats run under the desktop's setting. It can only be changed on the desktop.")
                     }
                 }
                 if let error = s.error {
@@ -35,7 +35,7 @@ struct UsageView: View {
                 }
                 Section(s.provider.map { "Models · \($0)" } ?? "Models") {
                     if s.models.isEmpty {
-                        Text("No model limits are set on the Mac.")
+                        Text("No model limits are set on the desktop.")
                             .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                     } else {
@@ -79,7 +79,7 @@ struct UsageView: View {
     private func permissionRow(_ raw: String) -> some View {
         let label = UsageStore.permissionLabel(raw)
         return HStack {
-            Label("Mac permission mode", systemImage: "lock.shield")
+            Label("Desktop permission mode", systemImage: "lock.shield")
             Spacer()
             Text(label?.text ?? raw)
                 .font(DesignSystem.Typography.bodyFont.weight(.semibold))

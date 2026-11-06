@@ -1,12 +1,8 @@
 import Foundation
 import SharedProtocol
 
-/// Transcript + send/handle logic for the llm-ide chat surface (the "Chat"
-/// sheet). Owns its OWN `isStreaming` flag — distinct from
-/// `ExplorerChatStore.isStreaming` — so a streaming reply on one surface no
-/// longer disables the send button on the other (the shared-`llmStreaming`
-/// smell flagged in the audit). Holds a weak reference to the
-/// `ConnectionService` to send outbound frames.
+/// Transcript + send/handle logic for the Chat tab, spoken over `ConnectionService.host` (Host API v1).
+/// Holds a weak reference to the `ConnectionService`.
 @MainActor
 final class LlmIdeChatStore: ObservableObject {
     /// Transcript for the llm-ide chat sheet.
@@ -19,10 +15,10 @@ final class LlmIdeChatStore: ObservableObject {
     /// fast path, and typing is for when none of them is what you mean.
     /// Nil whenever nothing is waiting on an answer.
     @Published var pendingApproval: ApprovalRequest?
-    /// A tool/edit permission prompt relayed from the Mac (only when its "Phone access" switch is on).
+    /// A tool/edit permission prompt relayed from the host (only while it grants `tool_approvals`).
     @Published var pendingToolApproval: ToolApprovalRequest?
     /// Why the last question went away without this phone answering it
-    /// ("Answered on the Mac", "no longer open"). Shown once, then cleared.
+    /// ("Answered on the desktop", "no longer open"). Shown once, then cleared.
     @Published var approvalNotice: String?
 
     /// Command ids whose streamed reply belongs to this transcript.
@@ -32,20 +28,10 @@ final class LlmIdeChatStore: ObservableObject {
     /// cancellation needs a deterministic target.
     private var currentCommandId: String?
     // TO BE REPLACED IN S4 (command-bus spec R-C2, docs/superpowers/plans/2026-10-31-command-bus-spec.md
-    // section 8): the idle timeout below (which sends Cancel) and the sticky approval-pause window are
-    // phone-side retry/cancel policy that the core's replay and detach (`chat.attach` plus a transport
+    // section 8): the idle timeout below (which sends Cancel) is phone-side retry/cancel policy that the core's replay and detach (`chat.attach` plus a transport
     // heartbeat) will own. They are kept as they are for now; do not extend them. Tracked as the
     // "phone chat policy removed" row of the S4 exit checklist (docs/mobile/verification.md).
     private var streamTimeoutTask: Task<Void, Never>?
-    /// Commands that have shown the Mac's approval pause note — once seen,
-    /// every later idle-timeout restart for that command keeps the LONG
-    /// window until `done`. Sticky on purpose: an answered approval is
-    /// typically followed by an expensive tool run that can be legitimately
-    /// silent for more than the normal window, and timing out sends Cancel,
-    /// killing the very turn the user just approved on the Mac.
-    private var approvalPausedCommandIds: Set<String> = []
-    /// Turns whose bubble shows v2 status lines: the reply replaces them, as the v2 `done` chunk did.
-    private var progressCommandIds: Set<String> = []
     /// Turns this store sent a cancel for, so the host's answering `error` is dropped rather than shown or
     /// applied to a newer turn. Removed when that error (or a done) arrives.
     private var cancelledCommandIds: Set<String> = []
@@ -64,28 +50,24 @@ final class LlmIdeChatStore: ObservableObject {
     /// `HostEvent`s (`handle`), landing in `llmIdeMessages`.
     ///
     /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary. Returns false only when
-    /// a v1 host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
+    /// the host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
     @discardableResult
     func sendLlmideChat(_ text: String, files: [ChatFileText] = []) -> Bool {
         guard connection?.connectionStatus == .connected else {
-            connection?.errorMessage = "Not connected to your Mac — wait for Live status, then try again."
+            connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
             return true
         }
-        var request = HostApiChatSendRequest(attachments: files.isEmpty ? nil : files.map { .init(name: $0.name, text: $0.text) },
-                                             text: text)
-        // v1 validates against the schema; v2 sends exactly what it always did.
-        if connection?.host.apiVersion == 1 {
-            switch HostApiChatSendPolicy.request(text: text, files: files) {
-            case .send(let r): request = r
-            case .refuse(let message): connection?.errorMessage = message; return false
-            }
+        // Validated against the `chat.send` schema limits before any turn starts.
+        let request: HostApiChatSendRequest
+        switch HostApiChatSendPolicy.request(text: text, files: files) {
+        case .send(let r): request = r
+        case .refuse(let message): connection?.errorMessage = message; return false
         }
-        // The Mac's own session store is the transcript: the phone sends only the new text (and files),
-        // never a history window or images (the Mac ignored the first and refused the second).
-        let (id, _) = mintStreamingTurn(messages: &llmIdeMessages, commandIds: &llmIdeCommandIds, userText: text)
+        // The host's own session store is the transcript: the phone sends only the new text (and files).
+        let id = mintStreamingTurn(messages: &llmIdeMessages, commandIds: &llmIdeCommandIds, userText: text)
         isStreaming = true
         currentCommandId = id
-        startStreamTimeout(for: id, idleSeconds: idleWindow(for: id))
+        startStreamTimeout(for: id)
         Task { [weak self] in
             do {
                 _ = try await self?.connection?.host.send(.chatSend, request, id: id, as: HostApiChatSendResult.self)
@@ -96,18 +78,17 @@ final class LlmIdeChatStore: ObservableObject {
         return true
     }
 
-    /// Before the transport move, an encode failure set this message and disconnected; a host refusal
-    /// (v1 `denied`, `busy`, …) arrived as an `error` frame. Both end the turn the same way.
+    /// An encode failure disconnects; a host refusal (`denied`, `busy`, …) only ends the turn.
     private func chatSendFailed(_ id: String, _ error: Error) {
         let r = error as? HostApiRejection
         let local = HostApiChatNotices.disconnectsAfterSendFailure(error)
         connection?.errorMessage = r?.message ?? (local ? "Failed to encode chat message: \(error.localizedDescription)"
-                                                         : "Your Mac sent a reply this app could not read.")
+                                                         : "The desktop sent a reply this app could not read.")
         handleChatError(commandId: id)
         if local { connection?.disconnect() }
     }
 
-    /// Load the shared server transcript (same history as Mac llm-chat sheet).
+    /// Load the host's shared chat transcript (`chat.snapshot`).
     func loadSharedHistory() {
         Task { [weak self] in
             guard let result = try? await self?.connection?.host.send(
@@ -135,12 +116,12 @@ final class LlmIdeChatStore: ObservableObject {
                     self?.llmIdeMessages.removeAll()
                 }
             } catch let r as HostApiRejection where r.code != "host_unreachable" {
-                self?.connection?.errorMessage = r.message   // a v1 refusal; on v2 the Mac's error frame says it
+                self?.connection?.errorMessage = r.message
             } catch {}
         }
     }
 
-    /// Cancel the in-flight llm-ide chat turn on the Mac.
+    /// Cancel the in-flight chat turn on the host.
     func cancelStreaming() {
         // `Set.first` is nondeterministic — with two ids in flight Stop could
         // cancel the wrong turn. Track the live one explicitly.
@@ -148,15 +129,14 @@ final class LlmIdeChatStore: ObservableObject {
         sendCancel(id)
     }
 
-    /// `id` is the turn being cancelled. v1 `chat.cancel` names none and the v2 adapter targets its last
-    /// `chat.send`, which is this id; it is recorded so the host's answering error is dropped (see `handle`).
+    /// `id` is the turn being cancelled (`chat.cancel` names none); it is recorded so the host's answering
+    /// error is dropped (see `handle`).
     private func sendCancel(_ id: String) {
         cancelledCommandIds.insert(id)
         Task { [weak self] in
             let result = try? await self?.connection?.host.send(.chatCancel, HostApiChatCancelRequest(),
                                                                  as: HostApiChatCancelResult.self)
-            guard let self, let version = self.connection?.host.apiVersion,
-                  HostApiChatTurn.endsAfterCancel(apiVersion: version, cancelled: result?.cancelled) else { return }
+            guard let self, HostApiChatTurn.endsAfterCancel(cancelled: result?.cancelled) else { return }
             self.cancelledCommandIds.remove(id)
             // A late reply must not end the next turn's spinner.
             if self.currentCommandId == id { self.handleChatError(commandId: id) }
@@ -167,11 +147,10 @@ final class LlmIdeChatStore: ObservableObject {
 
     /// Answer the parked question. `selection` is the chosen labels per
     /// question index; a multi-select answer is sorted and comma-joined, which
-    /// is the wire form the Mac's own card produces and the server passes
-    /// through verbatim.
+    /// is the form the server passes through verbatim.
     ///
-    /// The card comes down immediately. The turn resumes on the Mac, and a
-    /// failure there is the Mac's to show — this surface cannot render a
+    /// The card comes down immediately. The turn resumes on the host, and a
+    /// failure there is the host's to show — this surface cannot render a
     /// decision error usefully, and leaving a tappable question up after the
     /// answer was sent invites a second answer to a question that is gone.
     func submitApproval(selection: [Int: Set<String>]) {
@@ -188,8 +167,6 @@ final class LlmIdeChatStore: ObservableObject {
         approvalNotice = nil
     }
 
-    /// Answer the parked tool prompt. The card comes down at once; the Mac re-checks the request id
-    /// against the turn's live prompt and the Phone access switch, and says so if it refuses.
     /// Drop any question / tool prompt: its turn is gone (connection lost or reset).
     func clearPendingPrompts() {
         pendingApproval = nil
@@ -219,22 +196,11 @@ final class LlmIdeChatStore: ObservableObject {
     func handle(_ event: HostEvent) {
         let d = JSONDecoder()
         switch event {
-        case .progress(let id, let text):
-            // v2 status line: appended, restarts the idle breaker, and the pause glyph makes the window sticky.
-            // Every frame proves the Mac is alive and working, so restart the timeout — it is an IDLE breaker,
-            // not a wall clock.
-            guard ownsCommand(id), !text.isEmpty else { return }
-            appendToLastAssistant(&llmIdeMessages, text)
-            progressCommandIds.insert(id)
-            if text.contains(Self.approvalPauseGlyph) { approvalPausedCommandIds.insert(id) }
-            startStreamTimeout(for: id, idleSeconds: idleWindow(for: id))
         case .event(.chatDelta, let payload, let replyTo?):
-            // No size cap here: a v2 `done` chunk carries the whole reply in one delta, however large.
+            // Every chunk proves the host is alive, so restart the timeout — it is an IDLE breaker, not a wall clock.
             guard ownsCommand(replyTo), let e = try? d.decode(HostApiChatDeltaEvent.self, from: payload), !e.text.isEmpty else { return }
-            // The reply replaces any status lines (the v2 `done` chunk did); later chunks append.
-            if progressCommandIds.remove(replyTo) != nil { setLastAssistant(&llmIdeMessages, e.text) }
-            else { appendToLastAssistant(&llmIdeMessages, e.text) }
-            startStreamTimeout(for: replyTo, idleSeconds: idleWindow(for: replyTo))
+            appendToLastAssistant(&llmIdeMessages, e.text)
+            startStreamTimeout(for: replyTo)
         case .event(.chatDone, let payload, _):
             guard let e = try? d.decode(HostApiChatDoneEvent.self, from: payload) else { return }
             cancelledCommandIds.remove(e.requestId)
@@ -243,7 +209,7 @@ final class LlmIdeChatStore: ObservableObject {
         case .event(.chatError, let payload, let replyTo):
             if let replyTo {
                 // The host's answer to our own Cancel: end the turn if Stop is still waiting on it, but say
-                // nothing, and never let it touch a newer turn (the bridge is stateless, so the store tracks it).
+                // nothing, and never let it touch a newer turn.
                 if cancelledCommandIds.remove(replyTo) != nil {
                     if ownsCommand(replyTo) { handleChatError(commandId: replyTo) }
                     return
@@ -253,22 +219,21 @@ final class LlmIdeChatStore: ObservableObject {
             } else {
                 handleChatError()
             }
-            // On v2, ConnectionService already showed the `error` frame's message; on v1 nobody else will.
-            if connection?.host.apiVersion == 1, let e = try? d.decode(HostApiChatErrorEvent.self, from: payload), e.message != "Cancelled" {
+            if let e = try? d.decode(HostApiChatErrorEvent.self, from: payload), e.message != "Cancelled" {
                 connection?.errorMessage = e.message
             }
         case .event(.approvalRequest, let payload, _):
-            // Only this surface's own turn: both stores see every approval frame on v2.
+            // Only this phone's own turn.
             guard let e = try? d.decode(HostApiApprovalRequestEvent.self, from: payload) else { return }
-            let request = HostApiV2ChatBridge.approvalRequest(e)
+            let request = ApprovalRequest(event: e)
             if !request.questions.isEmpty, ownsCommand(request.commandId) {
                 approvalNotice = nil
                 pendingApproval = request
             }
         case .event(.toolApprovalRequest, let payload, _):
-            // Same ownership rule as questions: only the surface whose turn this is.
+            // Same ownership rule as questions.
             guard let e = try? d.decode(HostApiToolApprovalRequestEvent.self, from: payload) else { return }
-            let request = HostApiV2ChatBridge.toolApprovalRequest(e)
+            let request = ToolApprovalRequest(event: e)
             if ownsCommand(request.commandId) {
                 approvalNotice = nil
                 pendingApproval = nil
@@ -276,13 +241,13 @@ final class LlmIdeChatStore: ObservableObject {
             }
         case .event(.approvalCleared, let payload, _):
             // Only for the card actually on screen: a late clear for an older question must not take down a
-            // NEWER one the agent has since asked — nor one belonging to the other surface.
+            // NEWER one the agent has since asked.
             guard let e = try? d.decode(HostApiApprovalClearedEvent.self, from: payload) else { return }
-            let cleared = HostApiV2ChatBridge.approvalCleared(e)
+            let cleared = ApprovalCleared(event: e)
             if pendingApproval?.requestId == cleared.requestId { pendingApproval = nil; approvalNotice = cleared.reason }
             if pendingToolApproval?.requestId == cleared.requestId { pendingToolApproval = nil; approvalNotice = cleared.reason }
         case .capabilities(let caps):
-            // The host withdrew tool approvals mid-session (Phone access switch): the card can no longer be
+            // The host withdrew tool approvals mid-session: the card can no longer be
             // answered, so take it down and say why instead of leaving a tap that would be refused.
             if pendingToolApproval != nil, !caps.contains(HostApiCommand.toolApprovalsAnswer.capability) {
                 pendingToolApproval = nil
@@ -321,20 +286,17 @@ final class LlmIdeChatStore: ObservableObject {
         }
     }
 
-    /// The end of a turn (v2 `done`, v1 `chat.done`), keyed by the finished request.
+    /// The end of a turn (`chat.done`), keyed by the finished request.
     private func finishTurn(_ id: String) {
         streamTimeoutTask?.cancel()
         isStreaming = false
         // The turn is over, so its question (if any) can no longer be
-        // answered — the requestId is dead server-side. The Mac sends an
-        // explicit clear too; this covers the frame arriving first. Scoped
-        // to THIS turn so a `done` for one command can't take down a
-        // question the other surface is showing.
+        // answered — the requestId is dead server-side. The host sends an
+        // explicit clear too; this covers the event arriving first. Scoped
+        // to THIS turn.
         if pendingApproval?.commandId == id { pendingApproval = nil }
         if pendingToolApproval?.commandId == id { pendingToolApproval = nil }
         llmIdeCommandIds.remove(id)
-        approvalPausedCommandIds.remove(id)
-        progressCommandIds.remove(id)
         if currentCommandId == id { currentCommandId = nil }
         loadSharedHistory()
     }
@@ -344,8 +306,6 @@ final class LlmIdeChatStore: ObservableObject {
         isStreaming = false
         if let commandId {
             llmIdeCommandIds.remove(commandId)
-            approvalPausedCommandIds.remove(commandId)
-            progressCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
             if pendingToolApproval?.commandId == commandId { pendingToolApproval = nil }
         } else {
@@ -356,23 +316,19 @@ final class LlmIdeChatStore: ObservableObject {
             // no longer exists, a late/replayed frame for that id appends into
             // the live transcript, and the set grows per dropped connection.
             llmIdeCommandIds.removeAll()
-            approvalPausedCommandIds.removeAll()
-            progressCommandIds.removeAll()
             cancelledCommandIds.removeAll()
             currentCommandId = nil
         }
         removeTrailingEmptyAssistant(&llmIdeMessages)
     }
 
-    /// Blank slate for a newly paired Mac. Without this the previous machine's
+    /// Blank slate for a newly paired host. Without this the previous machine's
     /// transcript stays on screen (and its in-flight ids stay routable).
     func resetForNewDevice() {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = nil
         isStreaming = false
         llmIdeCommandIds.removeAll()
-        approvalPausedCommandIds.removeAll()
-        progressCommandIds.removeAll()
         cancelledCommandIds.removeAll()
         currentCommandId = nil
         pendingApproval = nil
@@ -380,30 +336,18 @@ final class LlmIdeChatStore: ObservableObject {
         llmIdeMessages.removeAll()
     }
 
-    /// Glyph the Mac's approval pause note carries ("⏸ Question pending on
-    /// Mac…", `ChatEngine.externalApprovalNote`) — forwarded through the
-    /// same stream frames as ordinary progress. After it, the turn
-    /// legitimately goes silent while a human answers the card on the Mac
-    /// (up to the server's 15-minute decision TTL), so the idle breaker
-    /// must outlast that. If the Mac ever changes the glyph, the phone
-    /// merely degrades to the normal window — never worse than before.
-    static let approvalPauseGlyph = "⏸"
+    /// Idle window: long, because the host sends no progress events to restart it while a tool runs or a
+    /// question waits for an answer (Plan 4 decision 7).
+    static let idleSeconds: UInt64 = 960
 
-    /// Long window once `commandId` has parked on an approval (sticky until
-    /// done, see `approvalPausedCommandIds`), and always on Host API v1: it sends no progress frames to restart the
-    /// breaker, so the short window would cancel every turn longer than two minutes (Plan 4 decision 7).
-    func idleWindow(for commandId: String) -> UInt64 {
-        approvalPausedCommandIds.contains(commandId) || connection?.host.apiVersion == 1 ? 960 : 120
-    }
-
-    private func startStreamTimeout(for commandId: String, idleSeconds: UInt64 = 120) {
+    private func startStreamTimeout(for commandId: String) {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: idleSeconds * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: Self.idleSeconds * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.llmIdeCommandIds.contains(commandId) else { return }
             self.connection?.errorMessage =
-                "Timed out waiting for your Mac — check LLM-IDE backend and Mobile Control log."
+                "Timed out waiting for the desktop — check that LLM-IDE is running there."
             self.handleChatError(commandId: commandId)
             self.sendCancel(commandId)
         }

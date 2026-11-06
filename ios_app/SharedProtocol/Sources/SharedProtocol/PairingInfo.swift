@@ -1,69 +1,51 @@
 import Foundation
 
-/// Result of scanning the Mac app's pairing QR code
-/// (`llmide://pair?ip=…&port=…&pin=…`; also accepts the legacy `aicontrol://`).
+/// Result of scanning the desktop's Host API pairing QR code (Settings → Host API pairing:
+/// `llmide://pair?ip=…&pin=…&h1port=…&h1fp=…&api=1`; also accepts the legacy `aicontrol://` scheme).
+/// A sync enrollment QR shares the scheme; its fields are ignored here (`SyncEnroll.parsePair` reads them).
 ///
 /// Every field is VALIDATED before it is accepted. A scanned code — or any app
-/// invoking the `llmide://` scheme — silently re-points this phone at whatever
-/// host it names, and the receiving server can then push fabricated chat
-/// replies, session lists, and status frames while harvesting whatever the user
-/// types next. So the host must be a literal address on a local/private network
-/// (or an mDNS `.local` name), the PIN must have the exact shape `MobilePin`
-/// mints, and the port must be a real high port. Anything else is not a pairing
-/// code we are willing to act on.
+/// invoking the `llmide://` scheme — re-points this phone at whatever host it
+/// names. So the host must be a literal address on a local/private network
+/// (or an mDNS / Tailscale name), the PIN must have the exact shape the host
+/// mints, and the v1 listener must come with a well-formed certificate pin.
+/// Anything else is not a pairing code we are willing to act on.
 public struct PairingInfo {
     public let ip: String
-    public let port: Int
     public let pin: String
-    /// The host's v1 TLS listener and certificate pin (`h1port` + `h1fp`); nil while it serves only v2.
-    public let hostApiOffer: HostApiPairingOffer?
-
-    public static let defaultPort = 3006
+    /// The host's v1 TLS listener and certificate pin (`h1port` + `h1fp`). Required: the phone pins from a QR only.
+    public let hostApiOffer: HostApiPairingOffer
 
     public init?(from string: String) {
         guard let components = URLComponents(string: string),
               ["llmide", "aicontrol"].contains(components.scheme),
               let items = components.queryItems,
               let host = items.first(where: { $0.name == "ip" })?.value,
-              let pin = items.first(where: { $0.name == "pin" })?.value
-        else { return nil }
-        // An absent port means the default; a present one must be an integer, never silently replaced.
-        let port: Int
-        if let item = items.first(where: { $0.name == "port" }) {
-            guard let p = item.value.flatMap(Int.init) else { return nil }
-            port = p
-        } else {
-            port = Self.defaultPort
-        }
-        guard let canonicalHost = Self.canonicalPrivateHost(host),
-              Self.isWellFormedPin(pin), Self.isUsablePort(port)
+              let pin = items.first(where: { $0.name == "pin" })?.value,
+              let offer = HostApiPairingOffer(port: items.first(where: { $0.name == "h1port" })?.value,
+                                              fingerprint: items.first(where: { $0.name == "h1fp" })?.value),
+              let canonicalHost = Self.canonicalPrivateHost(host), Self.isWellFormedPin(pin)
         else { return nil }
         // Store the VALIDATED string, not the raw one: validating `bare` while
         // persisting `host` is a parser differential — `192.168.1.1%25evil.com`
         // validated as `192.168.1.1` and was saved with the suffix attached.
         self.ip = canonicalHost
         self.pin = pin
-        self.port = port
-        self.hostApiOffer = HostApiPairingOffer(port: items.first(where: { $0.name == "h1port" })?.value,
-                                                fingerprint: items.first(where: { $0.name == "h1fp" })?.value)
+        self.hostApiOffer = offer
     }
 
-    /// Exactly six ASCII digits — the shape `MobilePin.regenerate` produces.
+    /// Exactly six ASCII digits — the shape the host's pairing PIN has.
     /// Also stops a junk value from reaching the pairing frame at all.
     public static func isWellFormedPin(_ pin: String) -> Bool {
         pin.count == 6 && pin.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
-    static func isUsablePort(_ port: Int) -> Bool {
-        (1024...65_535).contains(port)
-    }
-
     /// A host this app is willing to be re-pointed at: a literal IPv4 in a
-    /// private/link-local/loopback range, Tailscale's CGNAT range (the Mac
-    /// PREFERS that address in the QR — see `MobileConnectionInfo`), a
+    /// private/link-local/loopback range, Tailscale's CGNAT range (the desktop
+    /// lists that address first in the QR), a
     /// link-local/ULA IPv6, or an mDNS `.local` name. Public addresses and
     /// arbitrary DNS names are refused, as is anything carrying URL syntax
-    /// (`/`, `?`, `@`, …) that would rewrite the WebSocket URL's path or query.
+    /// (`/`, `?`, `@`, …) that would rewrite the endpoint URL's path or query.
     public static func isPrivateHost(_ host: String) -> Bool {
         canonicalPrivateHost(host) != nil
     }

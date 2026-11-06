@@ -1,49 +1,30 @@
 import SwiftUI
 import SharedProtocol
 
-/// The paired-Mac shell: Chat first, everything project-related on its own tab.
-/// Chat is the surface people open the app for, so it is the landing tab and
-/// the only one that badges when the Mac needs an answer.
+/// The paired shell: Chat first, then the read-only History (Host API v1 `read` or offline sync) and
+/// Settings. Chat is the surface people open the app for, so it is the landing tab and the only one that
+/// badges when the desktop needs an answer.
 struct RootTabView: View {
     let deviceName: String
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
-    @EnvironmentObject var explorerStore: ExplorerChatStore
-    @EnvironmentObject var autoTaskStore: AutoTaskStore
-    @EnvironmentObject var loopStore: LoopStore
-    @EnvironmentObject var macStatusStore: MacStatusStore
-    @EnvironmentObject var activityStore: ActivityFeedStore
     @EnvironmentObject var usageStore: UsageStore
-    @EnvironmentObject var projectsStore: ProjectsStore
-    @EnvironmentObject var generationStore: GenerationStore
-    @EnvironmentObject var sourceControlStore: SourceControlStore
-    @EnvironmentObject var filesStore: FilesStore
-    @EnvironmentObject var issuesStore: IssuesStore
 
-    enum Tab: Hashable { case chat, project, history, activity, settings }
+    enum Tab: Hashable { case chat, history, settings }
     @State private var selection: Tab = .chat
-
-    private var isConnected: Bool { connection.connectionStatus == .connected }
 
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
                 LlmIdeControlView(embedded: true)
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        ContextBar(deviceName: deviceName) { selection = .project }
+                        ContextBar(deviceName: deviceName)
                     }
             }
             .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
-
-            if connection.hasProjectSections {
-                ProjectView(deviceName: deviceName)
-                    .tabItem { Label("Project", systemImage: "folder.fill") }
-                    .badge(explorerStore.pendingApproval == nil ? 0 : 1)
-                    .tag(Tab.project)
-            }
 
             if connection.servesV1Read || syncStore.phase != .off {
                 NavigationStack { ReadChatsView() }
@@ -51,149 +32,63 @@ struct RootTabView: View {
                     .tag(Tab.history)
             }
 
-            if connection.supports(MobileProtocol.Capability.activity) {
-                ActivityView()
-                    .tabItem { Label("Activity", systemImage: "bell.fill") }
-                    .badge(activityStore.unread)
-                    .tag(Tab.activity)
-            }
-
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(Tab.settings)
         }
         .tint(DesignSystem.Colors.primary)
-        .overlay(alignment: .bottom) {
-            if let status = autoTaskStore.actionStatus {
-                actionToast(status)
-                    .padding(.bottom, 64)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: autoTaskStore.actionStatus)
-        .onAppear { refreshMacData() }
+        .onAppear { refreshHostData() }
         .onChange(of: connection.connectionStatus) { status in
-            if status == .connected { refreshMacData() }
+            if status == .connected { refreshHostData() }
         }
-        // The Mac opened another project (from the phone or at the keyboard): everything the phone cached
-        // about the old one is stale. Keyed on the project id as well as the name — two projects can share
-        // a folder name — and the screens are re-requested, since their `.task` already ran.
-        .onChange(of: macStatusStore.macStatus?.projectName) { _ in projectDidChange() }
-        .onChange(of: projectsStore.active?.id) { _ in projectDidChange() }
-        // A Phone access switch flipped on the Mac, or a different Mac was paired.
-        .onChange(of: connection.macCapabilities) { _ in
-            if selection == .project, !connection.hasProjectSections { selection = .chat }
-            if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
-            if !connection.supports(MobileProtocol.Capability.usage), !connection.servesV1Read { usageStore.resetForNewDevice() }
-            if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
-            refreshMacData()
+        // The host granted or withdrew a capability, or a different desktop was paired.
+        .onChange(of: connection.hostCapabilities) { _ in
+            if !connection.servesV1Read { usageStore.resetForNewDevice() }
+            refreshHostData()
         }
-        // v1 dropped, or `read` revoked: the History tab is gone, so never leave the user on it.
+        // `read` gone and no sync: the History tab is gone, so never leave the user on it.
         .onChange(of: connection.servesV1Read) { on in
-            if !on, selection == .history { selection = .chat }
+            if !on, syncStore.phase == .off, selection == .history { selection = .chat }
         }
     }
 
-    private func projectDidChange() {
-        // These stores speak MobileProtocol v2 only; a Host API v1 host has no project screens to refresh.
-        guard connection.hostApiVersion == 2 else { return }
-        generationStore.invalidateProjectScopedCaches()
-        sourceControlStore.invalidate()
-        filesStore.invalidateAll()
-        issuesStore.invalidate()
-        refreshMacData()
-        sourceControlStore.refresh()
-        issuesStore.refresh()
-        filesStore.list("")
-        if connection.supports(MobileProtocol.Capability.llmDoc) { generationStore.list("") }
-    }
-
-    private func refreshMacData() {
-        guard isConnected else { return }
-        if connection.servesV1Read || syncStore.phase != .off {
-            usageStore.refresh()
-            Task { await connection.reads.refresh() }
-        }
-        // Host API v1 serves chat, approvals and read only; these stores still speak v2 and would send nothing.
-        guard connection.hostApiVersion == 2 else { return }
-        macStatusStore.requestMacStatus()
-        autoTaskStore.refreshAll()
-        loopStore.refreshAll()
-        explorerStore.exploreListSessions()
-        if connection.supports(MobileProtocol.Capability.activity) { activityStore.refresh() }
+    private func refreshHostData() {
+        guard connection.connectionStatus == .connected, connection.servesV1Read else { return }
         usageStore.refresh()
-        projectsStore.refresh()
-    }
-
-    private func actionToast(_ message: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(DesignSystem.Colors.success)
-            Text(message)
-                .font(DesignSystem.Typography.footnoteFont.weight(.medium))
-                .foregroundColor(.white)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial.opacity(0.9), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+        Task { await connection.reads.refresh() }
     }
 }
 
-// MARK: — Connection / project strip
+// MARK: — Connection strip
 
-extension ConnectionService {
-    /// False on Host API v1: every Project segment needs a v2 capability.
-    var hasProjectSections: Bool { ProjectView.Section.allCases.contains { supports($0.capability) } }
-}
-
-/// Slim strip under the Chat nav bar: which project the Mac is on, whether the
-/// link is live, and a one-tap Reconnect when it isn't. Tapping the project
-/// chip jumps to the Project tab.
+/// Slim strip under the Chat nav bar: which desktop this is, whether the link is live, and a one-tap
+/// Reconnect when it isn't.
 struct ContextBar: View {
     let deviceName: String
-    var onProjectTap: () -> Void
     @EnvironmentObject var connection: ConnectionService
-    @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var connectionStore: ConnectionStore
-    @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var usageStore: UsageStore
-
-    private var projectLabel: String {
-        if let name = macStatusStore.macStatus?.projectName, !name.isEmpty { return name }
-        return deviceName
-    }
 
     var body: some View {
         HStack(spacing: DesignSystem.Spacing.sm) {
-            if connection.hasProjectSections {
-            Button(action: onProjectTap) {
+            if !deviceName.isEmpty {
                 HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                    Text(projectLabel).lineLimit(1)
-                    if let branch = macStatusStore.macStatus?.gitBranch, !branch.isEmpty {
-                        Image(systemName: "arrow.triangle.branch")
-                        Text(branch).lineLimit(1)
-                    }
+                    Image(systemName: "desktopcomputer")
+                    Text(deviceName).lineLimit(1)
                 }
                 .font(DesignSystem.Typography.captionFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(DesignSystem.Colors.surfaceSecondary, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Project \(projectLabel). Opens the Project tab")
+                .accessibilityLabel("Desktop \(deviceName)")
             }
 
             Spacer(minLength: 0)
 
-            if connection.connectionStatus == .disconnected, !connection.isDemo {
+            if connection.connectionStatus == .disconnected, connectionStore.hasDevice {
                 Button("Reconnect") {
-                    connection.connectDirect(ip: connectionStore.deviceIP,
-                                             port: connectionStore.devicePort,
-                                             pin: connectionStore.devicePIN)
+                    connection.connect(ip: connectionStore.deviceIP, pin: connectionStore.devicePIN)
                 }
                 .font(DesignSystem.Typography.captionFont.weight(.semibold))
                 .buttonStyle(.bordered)
@@ -206,7 +101,7 @@ struct ContextBar: View {
                     .foregroundColor(mode.isRisky ? .white : DesignSystem.Colors.textSecondary)
                     .background(mode.isRisky ? DesignSystem.Colors.danger : DesignSystem.Colors.surfaceSecondary,
                                 in: Capsule())
-                    .accessibilityLabel("Mac permission mode: \(mode.text)")
+                    .accessibilityLabel("Desktop permission mode: \(mode.text)")
             }
             StatusPill(status: connection.connectionStatus)
         }

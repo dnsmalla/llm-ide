@@ -9,9 +9,9 @@ import Security
 public enum HostApiPinning {
     /// Client-local refusal codes; never on the wire. Both are non-retryable and leave credentials alone.
     public static let mismatch = HostApiRejection(
-        replyTo: nil, code: "pin_mismatch", message: "This Mac's security identity changed — pair again.")
+        replyTo: nil, code: "pin_mismatch", message: "This computer's security identity changed — pair again.")
     public static let missingPin = HostApiRejection(
-        replyTo: nil, code: "pin_missing", message: "This Mac's security identity is unknown — pair again.")
+        replyTo: nil, code: "pin_missing", message: "This computer's security identity is unknown — pair again.")
 
     /// DER prefix of a P-256 SPKI: SEQUENCE { SEQUENCE { id-ecPublicKey, prime256v1 }, BIT STRING (0 unused) }.
     /// Both hosts mint P-256 keys only.
@@ -57,23 +57,14 @@ public enum HostApiPinning {
     }
 
     /// The pin to keep after a pairing. Pinning is QR-only: the QR is the one channel the user sees come from
-    /// the Mac, so only `.qrScan` sets or replaces the pin (a v2-only QR, without `h1fp`, drops it). A typed or
-    /// saved PIN keeps the stored pin for the same host and never adopts a Bonjour TXT `h1fp`, which a spoofed
-    /// service with the Mac's name could carry. A pin is never carried to another host.
+    /// the host, so only `.qrScan` sets or replaces the pin (a QR without `h1fp` drops it). A typed PIN keeps
+    /// the stored pin for the same host. A pin is never carried to another host.
     public static func pinAfterOffer(stored: String?, offered: String?, source: HostApiPairingSource,
                                      sameHost: Bool) -> String? {
         switch source {
         case .qrScan: return offered.flatMap { isValidFingerprint($0) ? $0 : nil }
-        case .typedPin, .savedPin: return sameHost ? stored : nil
+        case .typedPin: return sameHost ? stored : nil
         }
-    }
-
-    /// The v1 port to keep after a Bonjour TXT offer. Hosts bind the first free port in 3016…3025, so the port
-    /// can move between starts. A TXT whose `h1fp` IS the stored pin may move it; anything else changes nothing.
-    /// Safe because the connection stays pinned: a spoofed TXT can only point at a port where the pin fails.
-    public static func portAfterOffer(storedPin: String?, storedPort: Int, offer: HostApiPairingOffer?) -> Int {
-        guard let offer, matches(offer.fingerprint, pin: storedPin) else { return storedPort }
-        return offer.port
     }
 
     /// The trust evaluator for `endpoint`: nil for loopback `ws://`; for `wss://` a pinned evaluator, or
@@ -87,12 +78,10 @@ public enum HostApiPinning {
 
 /// How the user started a pairing (`HostApiPinning.pinAfterOffer`).
 public enum HostApiPairingSource: Sendable, Equatable {
-    /// Scanned the Mac's pairing QR.
+    /// Scanned the desktop's pairing QR.
     case qrScan
-    /// Typed the PIN: a Bonjour card or manual entry.
+    /// Typed the PIN by hand.
     case typedPin
-    /// One tap on a known Mac, re-sending the saved, not yet exchanged PIN.
-    case savedPin
 }
 
 /// Accepts exactly the paired leaf key. System trust is never consulted: the host certificate is self-signed.
@@ -106,7 +95,7 @@ public struct HostApiPinnedTrust: HostApiTrustEvaluating {
     }
 }
 
-/// The v1 listener a host advertises at pairing: `h1port` + `h1fp` in the QR or the Bonjour TXT record.
+/// The v1 listener a host advertises at pairing: `h1port` + `h1fp` in the QR.
 public struct HostApiPairingOffer: Sendable, Equatable {
     public let port: Int
     public let fingerprint: String

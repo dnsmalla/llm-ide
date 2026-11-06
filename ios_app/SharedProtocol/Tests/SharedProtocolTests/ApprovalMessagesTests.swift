@@ -2,26 +2,13 @@ import Testing
 import Foundation
 import SharedProtocol
 
-/// Wire-shape guard for the mid-turn question channel. Both ends decode these,
-/// and a turn is PARKED on the other side of them — a field rename that slips
-/// through here doesn't degrade the feature, it hangs the turn until the
-/// server's 15-minute park expires.
-///
-/// swift-testing, not XCTest: this toolchain ships no XCTest, so the sibling
-/// XCTest suites in this directory compile but never RUN here (`swift test`
-/// reports "0 tests"). A guard that doesn't execute where the code is written
-/// is not a guard.
+/// The mid-turn question cards: the answer shape the host passes through to the SDK, and the mapping
+/// from the Host API v1 events.
 @Suite struct ApprovalMessagesTests {
 
     private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
         let data = try JSONEncoder().encode(value)
         return try JSONDecoder().decode(T.self, from: data)
-    }
-
-    @Test func tagsAreStable() {
-        #expect(MobileProtocol.Tag.approvalRequest == "approval_request")
-        #expect(MobileProtocol.Tag.approvalAnswer == "approval_answer")
-        #expect(MobileProtocol.Tag.approvalCleared == "approval_cleared")
     }
 
     @Test func requestRoundTripsWithEveryQuestionField() throws {
@@ -46,27 +33,16 @@ import SharedProtocol
         #expect(try roundTrip(request) == request)
     }
 
-    /// The `type` discriminator has to be ON the wire — the receive loop reads
-    /// it off the raw JSON before it knows which struct to decode.
-    @Test func typeIsEncoded() throws {
-        let data = try JSONEncoder().encode(
-            ApprovalAnswer(commandId: "c", requestId: "r", answers: ["q": "a"]))
-        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(json["type"] as? String == "approval_answer")
-        #expect(json["requestId"] as? String == "r")
-    }
-
-    /// Answers are keyed by the QUESTION TEXT, and a multi-select answer is
-    /// comma-joined — the contract the Mac's own card produces
-    /// (`ApprovalQuestionCard.answers`) and the server passes through verbatim
-    /// to the SDK. A phone answer that keyed by header or index would post
-    /// successfully and answer the wrong thing.
-    @Test func answerKeysAreQuestionTextAndMultiSelectIsCommaJoined() throws {
-        let answer = ApprovalAnswer(
-            commandId: "c", requestId: "r",
-            answers: ["Which areas?": "Extension,Mac"])
-        let restored = try roundTrip(answer)
-        #expect(restored.answers["Which areas?"] == "Extension,Mac")
+    /// Answers are keyed by the QUESTION TEXT, and a multi-select answer is sorted and comma-joined; the
+    /// server passes it through verbatim to the SDK.
+    @Test func answerKeysAreQuestionTextAndMultiSelectIsCommaJoined() {
+        let request = ApprovalRequest(commandId: "c", requestId: "r", questions: [
+            MobileApprovalQuestion(question: "Which areas?", header: nil,
+                                   options: [MobileApprovalOption(label: "Mac", description: nil),
+                                             MobileApprovalOption(label: "Extension", description: nil)],
+                                   multiSelect: true)])
+        #expect(request.answers(from: [0: ["Mac", "Extension"]]) == ["Which areas?": "Extension,Mac"])
+        #expect(request.answers(from: [0: []]).isEmpty)
     }
 
     @Test func clearedCarriesAnOptionalReason() throws {
@@ -75,5 +51,25 @@ import SharedProtocol
         let bare = ApprovalCleared(commandId: "c", requestId: "r")
         #expect(try roundTrip(bare) == bare)
         #expect(nil == bare.reason)
+    }
+
+    @Test func v1EventsMapOntoTheCardModels() throws {
+        let e = HostApiApprovalRequestEvent(commandId: "u-1", questions: [
+            .init(header: "Approve", multiSelect: false,
+                  options: [.init(description: "now", label: "Yes"), .init(description: nil, label: "No")], question: "Run it?")],
+                                            requestId: "r-1")
+        #expect(ApprovalRequest(event: e) == ApprovalRequest(commandId: "u-1", requestId: "r-1", questions: [
+            MobileApprovalQuestion(question: "Run it?", header: "Approve",
+                                   options: [MobileApprovalOption(label: "Yes", description: "now"),
+                                             MobileApprovalOption(label: "No", description: nil)],
+                                   multiSelect: false)]))
+        #expect(ApprovalCleared(event: HostApiApprovalClearedEvent(commandId: "u-1", reason: "Answered", requestId: "r-1"))
+                == ApprovalCleared(commandId: "u-1", requestId: "r-1", reason: "Answered"))
+        let t = HostApiToolApprovalRequestEvent(command: nil, commandId: "u-1", contentPreview: nil, filePath: "a.swift",
+                                                newString: "b", oldString: "a", overwrites: nil, replaceAll: false,
+                                                requestId: "r-2", summary: "Edit a.swift", toolName: "Edit", truncated: false)
+        #expect(ToolApprovalRequest(event: t) == ToolApprovalRequest(
+            commandId: "u-1", requestId: "r-2", toolName: "Edit", summary: "Edit a.swift", filePath: "a.swift",
+            oldString: "a", newString: "b", contentPreview: nil, command: nil, truncated: false, replaceAll: false, overwrites: nil))
     }
 }

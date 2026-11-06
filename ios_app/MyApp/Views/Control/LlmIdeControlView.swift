@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import SharedProtocol
 
 /// Companion chat with the LLM-IDE agent from the iPhone. Messages (typed,
-/// dictated, or with attachments) are proxied through the paired Mac to the
+/// dictated, or with attachments) go to the paired desktop over Host API v1 (`chat.send`) and the
 /// local `:3456` backend; streamed replies land in this transcript.
 struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
@@ -20,12 +20,9 @@ struct LlmIdeControlView: View {
     /// True while a dictation session is live or finishing. The recognizer's final transcript lands after
     /// `finish()` has already cleared `isListening`, so the transcript handler gates on this instead.
     @State private var dictating = false
-    /// Guards the trash action — it also wipes the Mac's shared transcript.
+    /// Guards the trash action — it also wipes the desktop's shared transcript.
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
-    @State private var showGenerate = false
-    @State private var generateSurface = "doc"
-    @State private var showDocs = false
     @FocusState private var isInputFocused: Bool
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -41,7 +38,7 @@ struct LlmIdeControlView: View {
                 }
                 chatTranscript
                 pinnedToolApproval
-                if let notice = HostApiChatNotices.composer(connected: isConnected, capabilities: connection.macCapabilities) {
+                if let notice = HostApiChatNotices.composer(connected: isConnected, capabilities: connection.hostCapabilities) {
                     Text(notice)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -63,18 +60,13 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if connection.supports(MobileProtocol.Capability.llmDoc) {
-                            Button { showDocs = true } label: {
-                                Label("Generated docs", systemImage: "folder")
-                            }
-                        }
-                        // This also clears the MAC's shared transcript
-                        // (LlmIdeChatHistoryClear) and cannot be undone, so it
+                        // This also clears the desktop's shared transcript
+                        // (`chat.history.clear`) and cannot be undone, so it
                         // sits behind a menu AND a confirmation.
                         Button(role: .destructive) {
                             showClearConfirm = true
                         } label: { Label("Clear chat history", systemImage: "trash") }
-                            .disabled(llmIdeStore.llmIdeMessages.isEmpty || !connection.supports(MobileProtocol.Capability.chat))
+                            .disabled(llmIdeStore.llmIdeMessages.isEmpty || !connection.supports(HostApiCommand.chatHistoryClear.capability))
                     } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Chat options")
                 }
@@ -118,13 +110,6 @@ struct LlmIdeControlView: View {
                 }
             }
             .onDisappear { speech.cancel() }
-            .sheet(isPresented: $showGenerate) { GenerateSheet(surface: generateSurface) }
-            .sheet(isPresented: $showDocs) {
-                NavigationStack {
-                    LlmDocBrowserView()
-                        .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done") { showDocs = false } } }
-                }
-            }
         }
     }
 
@@ -168,13 +153,13 @@ struct LlmIdeControlView: View {
             .confirmationDialog("Clear this chat?",
                                 isPresented: $showClearConfirm,
                                 titleVisibility: .visible) {
-                Button("Clear on this iPhone and Mac", role: .destructive) {
+                Button("Clear on this iPhone and the desktop", role: .destructive) {
                     llmIdeStore.clearLlmIdeChat()
                     haptic(.light)
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This deletes the shared llm-ide transcript on your Mac too. It can't be undone.")
+                Text("This deletes the shared llm-ide transcript on your desktop too. It can't be undone.")
             }
         }
     }
@@ -233,21 +218,11 @@ struct LlmIdeControlView: View {
                 onSend: send
             ) {
                 Menu {
-                    // No Photo Library / Camera here: the Mac refuses images in this chat ("Images aren't
-                    // supported"), so the phone no longer offers or sends them.
+                    // No Photo Library / Camera here: `chat.send` carries text attachments only.
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
                     }
-                    .disabled(!connection.supports(MobileProtocol.Capability.chat))
-                    if connection.supports(MobileProtocol.Capability.generation) {
-                        Divider()
-                        Button { generateSurface = "doc"; showGenerate = true } label: {
-                            Label("Generate Doc…", systemImage: "doc.richtext")
-                        }
-                        Button { generateSurface = "visual"; showGenerate = true } label: {
-                            Label("Generate Visual…", systemImage: "rectangle.on.rectangle.angled")
-                        }
-                    }
+                    .disabled(!connection.supports(HostApiCommand.chatSend.capability))
                 } label: {
                     Image(systemName: "paperclip")
                         .font(.system(size: 18))
@@ -313,7 +288,7 @@ struct LlmIdeControlView: View {
         (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !pendingFiles.isEmpty)
             && isConnected
-            && connection.supports(MobileProtocol.Capability.chat)
+            && connection.supports(HostApiCommand.chatSend.capability)
             && !llmIdeStore.isStreaming   // one question at a time
     }
 

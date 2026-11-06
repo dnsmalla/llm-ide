@@ -1,14 +1,11 @@
 import SwiftUI
 
 /// The shared input-bar spine: a multi-line text field + a send button, with a
-/// leading slot for surface-specific affordances (the llm-ide surface puts its
-/// paperclip menu + mic button there; the explorer surface passes nothing).
+/// leading slot for extra affordances (the chat screen puts its
+/// paperclip menu + mic button there).
 ///
-/// Factored from the duplicated `HStack { TextField; Button(send) }` block in
-/// `LlmIdeControlView.inputBar` and `ExplorerChatView.inputBar`. What stays in
-/// each caller: the wrapping `VStack { Divider(); … }` and any attachment-chip
-/// strip above — those differ enough across surfaces to not be worth forcing
-/// through here.
+/// What stays in the caller (`LlmIdeControlView.inputBar`): the wrapping
+/// `VStack { Divider(); … }` and any attachment-chip strip above.
 ///
 /// `canSend` gates both the send button's tint and its enabled state, matching
 /// the pre-refactor behavior. The focus binding lets the parent control

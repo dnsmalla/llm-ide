@@ -16,7 +16,7 @@ struct SettingsView: View {
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                         .padding(.leading, DesignSystem.Spacing.xs)
 
-                    if connectionStore.hasDevice || connection.isDemo {
+                    if connectionStore.hasDevice {
                         VStack(spacing: 0) {
                             HStack(spacing: DesignSystem.Spacing.md) {
                                 ZStack {
@@ -28,7 +28,7 @@ struct SettingsView: View {
                                         .foregroundColor(statusColor)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(connection.isDemo ? "Demo Mac" : connectionStore.deviceIP)
+                                    Text(connectionStore.deviceIP)
                                         .font(DesignSystem.Typography.bodyFont
                                             .weight(.semibold).monospaced())
                                         .foregroundColor(DesignSystem.Colors.textPrimary)
@@ -42,7 +42,7 @@ struct SettingsView: View {
                                     }
                                 }
                                 Spacer()
-                                Text(connection.isDemo ? "sample data" : ":\(connectionStore.devicePort)")
+                                Text(connectionStore.hostApiPort > 0 ? ":\(connectionStore.hostApiPort)" : "")
                                     .font(DesignSystem.Typography.footnoteFont.monospaced())
                                     .foregroundColor(DesignSystem.Colors.textTertiary)
                             }
@@ -50,15 +50,13 @@ struct SettingsView: View {
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
-                            macFeatures
+                            hostFeatures
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
                             Button {
                                 if connection.connectionStatus == .disconnected {
-                                    connection.connectDirect(ip: connectionStore.deviceIP,
-                                                             port: connectionStore.devicePort,
-                                                             pin: connectionStore.devicePIN)
+                                    connection.connect(ip: connectionStore.deviceIP, pin: connectionStore.devicePIN)
                                 } else {
                                     connection.closeConnection()
                                 }
@@ -85,7 +83,7 @@ struct SettingsView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "xmark.circle")
-                                    Text("Forget this Mac")
+                                    Text("Forget this desktop")
                                         .font(DesignSystem.Typography.bodyFont.weight(.medium))
                                 }
                                 .frame(maxWidth: .infinity)
@@ -105,7 +103,7 @@ struct SettingsView: View {
 
                 SourceReadSettingsCard()
 
-                if connection.supports(MobileProtocol.Capability.usage) || connection.servesV1Read {
+                if connection.servesV1Read {
                     NavigationLink { UsageView() } label: {
                         HStack(spacing: DesignSystem.Spacing.md) {
                             Image(systemName: "gauge.with.dots.needle.67percent")
@@ -166,7 +164,7 @@ struct SettingsView: View {
 
                     Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
-                    Text("LLM-IDE connects directly to your Mac over Wi‑Fi or Tailscale. No cloud, no account — your screen never leaves your network.")
+                    Text("LLM-IDE connects directly to your desktop over an encrypted, certificate-pinned link on Wi‑Fi or Tailscale. Offline sync and Box / GitLab reads go straight to the storage you chose — no LLM-IDE cloud.")
                         .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,25 +180,25 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.large)
     }
 
-    /// What the paired Mac says it can do, so a missing tab is explained rather than mysterious.
+    /// What the paired desktop says it serves, so a missing feature is explained rather than mysterious.
     @ViewBuilder
-    private var macFeatures: some View {
-        if let caps = connection.macCapabilities {
+    private var hostFeatures: some View {
+        if let caps = connection.hostCapabilities {
             let labels: [(String, String)] = [
-                (MobileProtocol.Capability.chat, "Chat"), (MobileProtocol.Capability.explorer, "Explorer"),
-                (MobileProtocol.Capability.autoTasks, "Auto Tasks"), (MobileProtocol.Capability.loop, "Loop"),
-                (MobileProtocol.Capability.generation, "Doc Gen"), (MobileProtocol.Capability.llmDoc, "Docs"),
+                (HostApiCommand.chatSend.capability, "Chat"), (HostApiCommand.approvalsAnswer.capability, "Questions"),
+                (HostApiCommand.toolApprovalsAnswer.capability, "Tool approvals"),
+                (HostApiCommand.chatSessions.capability, "History & usage"),
             ]
             let missing = labels.filter { !caps.contains($0.0) }.map(\.1)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Mac features")
+                Text("Desktop features")
                     .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
                     .foregroundColor(DesignSystem.Colors.textSecondary)
                 Text(labels.filter { caps.contains($0.0) }.map(\.1).joined(separator: " · "))
                     .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 if !missing.isEmpty {
-                    Text("Off or not supported on this Mac: \(missing.joined(separator: ", ")). Turn it on in the Mac's Settings → Mobile Control → Phone access, or update LLM-IDE on the Mac.")
+                    Text("Off or not supported on this desktop: \(missing.joined(separator: ", ")).")
                         .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }

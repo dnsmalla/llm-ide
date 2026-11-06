@@ -5,25 +5,12 @@ struct MyAppApp: App {
     @StateObject private var connectionStore: ConnectionStore
     @StateObject private var connection: ConnectionService
     @StateObject private var llmIdeStore: LlmIdeChatStore
-    @StateObject private var explorerStore: ExplorerChatStore
-    @StateObject private var autoTaskStore: AutoTaskStore
-    @StateObject private var loopStore: LoopStore
-    @StateObject private var macStatusStore: MacStatusStore
-    @StateObject private var generationStore: GenerationStore
-    @StateObject private var activityStore: ActivityFeedStore
     @StateObject private var usageStore: UsageStore
-    @StateObject private var projectsStore: ProjectsStore
-    @StateObject private var selfHealStore: SelfHealStore
-    @StateObject private var sourceControlStore: SourceControlStore
-    @StateObject private var filesStore: FilesStore
-    @StateObject private var issuesStore: IssuesStore
     @StateObject private var syncStore: SyncStore
     @StateObject private var sourceReadStore: SourceReadStore
 
     init() {
-        // ConnectionService is created first; each feature store is wired to it
-        // (and registers itself with it on init) so the receive loop can route
-        // inbound frames to the right store.
+        // ConnectionService is created first; each store it routes to registers itself with it on init.
         let connectionStore = ConnectionStore()
         _connectionStore = StateObject(wrappedValue: connectionStore)
 
@@ -32,18 +19,7 @@ struct MyAppApp: App {
         _connection = StateObject(wrappedValue: connection)
 
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
-        _explorerStore = StateObject(wrappedValue: ExplorerChatStore(connection: connection))
-        _autoTaskStore = StateObject(wrappedValue: AutoTaskStore(connection: connection))
-        _loopStore = StateObject(wrappedValue: LoopStore(connection: connection))
-        _macStatusStore = StateObject(wrappedValue: MacStatusStore(connection: connection))
-        _generationStore = StateObject(wrappedValue: GenerationStore(connection: connection))
-        _activityStore = StateObject(wrappedValue: ActivityFeedStore(connection: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
-        _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection))
-        _selfHealStore = StateObject(wrappedValue: SelfHealStore(connection: connection))
-        _sourceControlStore = StateObject(wrappedValue: SourceControlStore(connection: connection))
-        _filesStore = StateObject(wrappedValue: FilesStore(connection: connection))
-        _issuesStore = StateObject(wrappedValue: IssuesStore(connection: connection))
         _syncStore = StateObject(wrappedValue: SyncStore())
         _sourceReadStore = StateObject(wrappedValue: SourceReadStore())
     }
@@ -54,18 +30,7 @@ struct MyAppApp: App {
                 .environmentObject(connectionStore)
                 .environmentObject(connection)
                 .environmentObject(llmIdeStore)
-                .environmentObject(explorerStore)
-                .environmentObject(autoTaskStore)
-                .environmentObject(loopStore)
-                .environmentObject(macStatusStore)
-                .environmentObject(generationStore)
-                .environmentObject(activityStore)
                 .environmentObject(usageStore)
-                .environmentObject(projectsStore)
-                .environmentObject(selfHealStore)
-                .environmentObject(sourceControlStore)
-                .environmentObject(filesStore)
-                .environmentObject(issuesStore)
                 .environmentObject(syncStore)
                 .environmentObject(sourceReadStore)
         }

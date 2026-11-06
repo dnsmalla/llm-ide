@@ -2,10 +2,9 @@ import Foundation
 
 // MARK: - Usage & limits
 //
-// A read-only projection of what the Mac's "Model & Limits" panel shows: per-model meters for the
-// active provider, the Claude subscription windows, and the Mac's current edit-permission mode.
-// Only numbers and short labels cross the wire — never the Claude OAuth token, and never the
-// limit CONFIGURATION (saving limits stays on the Mac).
+// A read-only view of the host's usage meters and edit-permission mode, mapped from Host API v1
+// `usage.get` by `HostApiReadMapping.usageState`. Only numbers and short labels — never a token, and never
+// the limit configuration.
 
 /// One bar: a model's cap, or a subscription window.
 public struct UsageMeter: Codable, Equatable, Identifiable, Hashable {
@@ -28,14 +27,7 @@ public struct UsageMeter: Codable, Equatable, Identifiable, Hashable {
     }
 }
 
-public struct UsageGet: Codable, Equatable {
-    public let type = MobileProtocol.Tag.usageGet
-    public init() {}
-    private enum CodingKeys: String, CodingKey { case type }
-}
-
 public struct UsageState: Codable, Equatable {
-    public let type = MobileProtocol.Tag.usageState
     public let provider: String?
     /// "ok" | "degraded" | "paused" | "unconfigured".
     public let status: String?
@@ -60,9 +52,5 @@ public struct UsageState: Codable, Equatable {
         self.subscriptionNote = subscriptionNote
         self.permissionMode = permissionMode
         self.error = error
-    }
-    private enum CodingKeys: String, CodingKey {
-        case type, provider, status, statusReason, activeModel, models, subscription
-        case subscriptionNote, permissionMode, error
     }
 }

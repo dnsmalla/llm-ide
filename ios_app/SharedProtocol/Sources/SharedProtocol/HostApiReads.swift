@@ -5,7 +5,7 @@ import Foundation
 // Read-only. Nothing here sends a write, and opening a chat never changes where `chat.send` goes.
 // Behaviour mirrors web/src/read/controller.ts: same pages, caps, stale-reply ticket and in-flight guard.
 
-/// Whether the read screens exist at all. Not optimistic: no capability list means off, and v2 is always off.
+/// Whether the read screens exist at all. Not optimistic: no capability list means off.
 public enum HostApiReadGate {
     public static func isOn(apiVersion: Int, capabilities: Set<String>?) -> Bool {
         apiVersion == 1 && capabilities?.contains(HostApiCommand.chatSessions.capability) == true

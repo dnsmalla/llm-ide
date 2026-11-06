@@ -30,24 +30,24 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- WHY this is still ArbitraryLoads rather than the narrower
-	     NSAllowsLocalNetworking: the Mac PREFERS its Tailscale address in the
-	     pairing QR (MobileConnectionInfo), and 100.64.0.0/10 is RFC 6598
-	     shared address space — NOT one of the RFC 1918 / link-local / .local
-	     ranges NSAllowsLocalNetworking exempts. Narrowing the key would very
-	     likely block the primary documented pairing path over a tailnet.
-	     Blast radius is bounded: URLSession appears in exactly one file
-	     (ConnectionService) and reaches only the paired Mac.
-	     The REAL fix is to stop needing an ATS exemption at all — TLS with
-	     an SPKI hash carried in the QR and pinned here, or moving the socket
-	     to NWConnection (which ATS does not police). Tracked as the follow-up
-	     to this security pass; narrowing this key requires an on-device test
-	     over Tailscale first. -->
+	<!-- ATS is on. Every remote peer is TLS: the paired desktop over Host API v1
+	     wss:// (its self-signed P-256 certificate is pinned to the QR's h1fp by a
+	     custom server-trust decision, HostApiPinnedTrust, which replaces system
+	     trust), offline sync over https (MEGA with ssl=2, the user's own server,
+	     Box) and direct reads over https (Box, GitLab; code also refuses any
+	     non-https URL). NSAllowsLocalNetworking is the only exemption: the DEBUG
+	     dev listener is plaintext ws://127.0.0.1 (HostApiEndpoint allows ws://
+	     on loopback only), and it is the fallback the TLS design names should
+	     iOS refuse a pinned self-signed wss:// to a LAN address. It never
+	     relaxes ATS for internet hosts. NSAllowsArbitraryLoads stays false: it
+	     existed only for the retired cleartext ws:// Mac link. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<!-- Direct reads (SP7): ATS stays fully on for Box and GitLab, whatever the LAN exemption above allows. -->
+		<!-- Direct reads (SP7): ATS stays fully on for Box and GitLab, TLS 1.2 or later. -->
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>box.com</key>
@@ -79,16 +79,12 @@
 			</dict>
 		</dict>
 	</dict>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_llmide._tcp</string>
-	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
+	<string>LLM-IDE uses the camera to scan the pairing and sync QR codes shown on your desktop.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>LLM-IDE discovers your Mac on the local network to connect automatically.</string>
+	<string>LLM-IDE connects to the desktop you paired with on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>LLM-IDE uses the microphone so you can dictate chat messages to your Mac instead of typing them.</string>
+	<string>LLM-IDE uses the microphone so you can dictate chat messages to your desktop instead of typing them.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>LLM-IDE converts your speech to text on-device so dictated chat messages stay on your phone until you send them.</string>
 	<key>UIApplicationSceneManifest</key>

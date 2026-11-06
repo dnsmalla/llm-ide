@@ -86,13 +86,13 @@ struct HostApiV1ClientTests {
         #expect(socket.sentCommands == ["host.hello", "host.auth.token"])
     }
 
-    @Test("no answer to hello is notV1; so is a version refusal")
-    func notV1() async {
+    @Test("no answer to hello is unreachable; so is a version refusal")
+    func unreachable() async {
         let silent = await client().connect(.pin("123456"))
-        #expect(silent == .notV1)
+        #expect(silent == .unreachable)
 
         socket.reply = { _, id in [HostApiFrame.error(replyTo: id, code: "capability_unavailable", message: "v1 only", retryable: false, rev: 0)] }
-        #expect(await client().connect(.pin("123456")) == .notV1)
+        #expect(await client().connect(.pin("123456")) == .unreachable)
     }
 
     @Test("a v1 auth refusal is final, with the host's code and retryability")
@@ -237,7 +237,7 @@ struct HostApiV1ClientTests {
                                 makeSocket: { sockets.removeFirst() })
         _ = await d.connect(.token(Self.token))
         #expect(d.capabilities == ["host", "chat", "approvals"])
-        #expect(await d.connect(.token(Self.token)) == .notV1)
+        #expect(await d.connect(.token(Self.token)) == .unreachable)
         #expect(d.capabilities.isEmpty)
     }
 

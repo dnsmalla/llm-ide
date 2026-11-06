@@ -42,10 +42,10 @@ struct ToolApprovalCard: View {
             }
             .controlSize(.large)
             if request.truncated {
-                Text("Too long to review on the phone — deny, or approve it on the Mac.")
+                Text("Too long to review on the phone — deny, or approve it on the desktop.")
                     .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
             } else if !enabled {
-                Text("Reconnecting… answer when the Mac is back.")
+                Text("Reconnecting… answer when the desktop is back.")
                     .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
             }
         }

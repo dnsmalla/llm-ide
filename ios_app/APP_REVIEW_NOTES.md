@@ -8,82 +8,60 @@ it short and keep it current when the app changes.
 
 ## What this app is
 
-LLM-IDE is a companion for a Mac app of the same name. The iPhone app is a
-remote control: it connects to *the user's own Mac* over their local network
-(or their private Tailscale network) and lets them chat with the coding agent
-running there, browse sessions, and start or stop scheduled tasks.
+LLM-IDE is a companion for the LLM-IDE desktop app. The iPhone app connects to *the user's own computer* over their local network (or
+their private Tailscale network) and lets them chat with the coding agent
+running there, answer its questions, approve or deny its tool requests, and
+read their chat history and usage.
 
 There is no account, no sign-up, and no server operated by us. The phone talks
-only to the user's Mac, and, if the user turns on sync, to their own MEGA account.
+only to the user's own computer and, if the user turns them on, to their own
+sync storage and their own Box / GitLab accounts.
 
 ## Optional: sync with the desktop off
 
 Users can let the app read an encrypted copy of their own desktop data (recent chats, meeting notes, plans, usage)
-when the desktop is switched off, and queue a chat prompt that the desktop answers later. The copy lives in a MEGA
-cloud account **the user owns** (a dedicated one is recommended); we operate no server and have no access. Everything
-is encrypted on the desktop before upload with standard algorithms through Apple's CryptoKit; MEGA stores only
-ciphertext. Setup needs the user's desktop (it shows a QR code and a 6-digit code to compare), so the reviewer can
-evaluate the rest of the app in demo mode, which never contacts MEGA. The MEGA password is used once to sign in and
-is not stored.
+when the desktop is switched off, and queue a chat prompt that the desktop answers later. The copy lives in storage
+**the user owns**: a MEGA account (a dedicated one is recommended), their own HTTPS server, or a Box account. We
+operate no server and have no access. Everything is encrypted on the desktop before upload with standard algorithms
+through Apple's CryptoKit; the storage holds only ciphertext. Setup needs the user's desktop (it shows a QR code and a
+6-digit code to compare). The MEGA password is used once to sign in and is not stored.
 
-## How to review without a Mac — demo mode
+## How to review
 
-No pairing is required to evaluate the app.
-
-1. Launch the app.
-2. On the first screen, tap **"Explore the demo"** (directly under the
-   "Scan QR Code" button).
-
-That opens the full interface backed by sample data: Mac status, AI chat with
-streamed replies, explorer sessions, Auto Tasks (toggles work), and Loop
-(Start/Stop runs a scripted job with a live log). Demo mode runs entirely
-offline — it opens no network connection and stores nothing. Replies in demo
-mode are canned and are labelled "Demo reply."
-
-To leave demo mode, tap the **⋯** button in the top-right of the home screen
-and choose **Close Connection**. That returns you to the first screen.
+The app needs the LLM-IDE desktop app to pair with: on the desktop, Settings →
+Mobile Control shows a pairing QR code, which the iPhone scans (**Scan QR
+Code** on the first screen). There is no built-in demo mode.
 
 ## Permissions, and why each is requested
 
 | Permission | Why |
 |---|---|
-| Local Network | Discover the user's Mac via Bonjour (`_llmide._tcp`). Not used in demo mode. |
-| Camera | Scan the pairing QR code shown on the Mac. Optional — the user can type the address and PIN instead. |
+| Local Network | Connect to the desktop the user paired with, on their Wi‑Fi. |
+| Camera | Scan the pairing and sync QR codes shown on the desktop. |
 | Microphone + Speech Recognition | Dictating a chat message instead of typing. Optional; transcription is on-device. |
 
-## App Transport Security exception
+## App Transport Security
 
-`NSAllowsArbitraryLoads` is set, and we want to be explicit about why.
+`NSAllowsArbitraryLoads` is **false**. Every connection is TLS:
 
-The app connects to one destination only: a WebSocket on the user's own Mac,
-at an address the user supplies by scanning a QR code or typing it in. That
-Mac is on their LAN or on their private Tailscale network.
+- The desktop link is `wss://` to the address in the pairing QR. The desktop
+  uses a self-signed P-256 certificate whose fingerprint is carried in that QR;
+  the app pins it with a custom server-trust check and refuses any other
+  certificate. Pairing exchanges a one-time PIN for a per-device token held in
+  the Keychain (this device only).
+- Sync and Box / GitLab reads are `https://` only; Box and GitLab have explicit
+  `NSExceptionDomains` entries that keep TLS 1.2 or later and forbid plain HTTP.
 
-`NSAllowsLocalNetworking` would be the narrower key, but it does not cover
-this case: when Tailscale is running, the Mac advertises its Tailscale address,
-which falls in the CGNAT range `100.64.0.0/10`. That range is not RFC 1918,
-link-local, or `.local`, so `NSAllowsLocalNetworking` does not exempt it and
-the primary documented pairing path would break.
-
-The exception is narrow in practice:
-
-- `URLSession` is used in exactly one file (`ConnectionService.swift`), for
-  exactly one connection, to an address the user entered.
-- The app contacts no other host — no analytics, no ad networks, no
-  third-party SDKs of any kind.
-- The connection is authenticated: pairing exchanges a one-time PIN for a
-  per-device token, the PIN rotates immediately, and the token is held in the
-  Keychain.
-
-We intend to remove this exception by moving the socket to Network.framework,
-which is not governed by ATS.
+The only exemption is `NSAllowsLocalNetworking`, which covers a development
+build talking to a desktop on the same machine (`ws://127.0.0.1`). It never
+relaxes ATS for internet hosts.
 
 ## Privacy
 
-No data is collected. Chat messages, sessions and task state travel only
-between the phone and the user's own Mac; we operate no server and receive
-nothing. The pairing token is stored in the Keychain; the Mac's address is
-stored in `UserDefaults`. This matches the bundled privacy manifest
+No data is collected. Chat messages travel only between the phone and the
+user's own computer or their own sync storage; we operate no server and
+receive nothing. The pairing token is stored in the Keychain; the desktop's
+address is stored in `UserDefaults`. This matches the bundled privacy manifest
 (`PrivacyInfo.xcprivacy`), which declares no tracking and no collected data
 types.
 

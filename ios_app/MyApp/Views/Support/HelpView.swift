@@ -15,40 +15,38 @@ struct HelpView: View {
 
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                     HelpSection(
-                        title: "Getting started",
+                        title: "Pair with your desktop",
                         content: """
-                        1. On your Mac: LLM-IDE → Settings → Mobile Control → Start.
-                        2. Note the IP, port (:3006), and PIN (or scan the pairing QR).
-                        3. On iPhone: pick your Mac from the list, or enter IP + PIN manually.
-                        4. When status shows Live, use the Chat tab, or the Project tab and its Explorer / Auto Tasks / Loop control — the iPhone is a remote control, not a screen mirror.
+                        1. On the desktop: LLM-IDE → Settings → Mobile Control → "Pair a phone or web client". It shows a QR code and a PIN.
+                        2. On iPhone: tap Scan QR Code and point it at that QR. The QR carries the desktop's address and its security identity, which this iPhone pins.
+                        3. When status shows Live, use the Chat tab. History lists the desktop's chats read-only.
+                        """
+                    )
+                    HelpSection(
+                        title: "Offline sync",
+                        content: """
+                        • On the desktop: Settings → Mobile Control → Phone and web sync → Add a phone or browser shows an enrollment QR.
+                        • On iPhone: Settings → Sync → Scan a sync code. Chats, meetings and plans then arrive through the storage you chose (MEGA, your own server or Box), even while the desktop is off.
                         """
                     )
                     HelpSection(
                         title: "Permissions",
                         content: """
-                        • iPhone: Local Network (for Bonjour discovery) — iOS prompts on first launch.
-                        • Mac: Screen Recording and Accessibility are for meeting caption capture in the Mac app, not for iPhone pairing. You do not need to grant them to use Chat / Explore / Auto from your phone.
-                        """
-                    )
-                    HelpSection(
-                        title: "Chat, Explore, Auto",
-                        content: """
-                        • Chat — ask LLM-IDE questions; replies stream from your Mac's local server.
-                        • Explore — browse and chat with Mac explorer sessions.
-                        • Auto — toggle and inspect scheduled auto-code tasks.
+                        • Camera — to scan the pairing QR codes.
+                        • Local Network — to reach the desktop on your Wi‑Fi. iOS asks the first time.
+                        • Microphone and Speech Recognition — only to dictate chat messages.
                         """
                     )
                     HelpSection(
                         title: "Different networks",
-                        content: "Automatic discovery only works on the same Wi-Fi. For remote access, install Tailscale on both devices, then use your Mac's Tailscale IP (100.x.x.x) or scan the QR from Mobile Control settings."
+                        content: "Install Tailscale on both devices. The desktop lists its Tailscale address first in the pairing QR, so a QR scanned on the tailnet keeps working away from home."
                     )
                     HelpSection(
-                        title: "Mac not found?",
+                        title: "Can't connect?",
                         content: """
-                        • Mobile Control must show Running on the Mac (Settings → Mobile Control).
-                        • Same Wi-Fi or Tailscale; guest/corporate Wi-Fi often blocks Bonjour — use Direct IP + PIN.
-                        • Wrong PIN? Copy it again from Mac Settings → Mobile Control.
-                        • Port :3006 busy? Another process may be using it — on the Mac run `lsof -i :3006`, quit it, then restart Mobile Control.
+                        • LLM-IDE must be running on the desktop, on the same Wi‑Fi or Tailscale.
+                        • "Security identity changed": the desktop's certificate changed — scan its pairing QR again.
+                        • "Removed on the host": this iPhone was unpaired on the desktop — scan the QR again.
                         """
                     )
                 }

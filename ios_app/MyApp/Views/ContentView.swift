@@ -3,9 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
-    @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var syncStore: SyncStore
-    @State private var showSyncEnroll = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -16,48 +14,23 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var shell: some View {
-        // `isDemo` joins `hasDevice` here because demo mode deliberately saves
-        // no device — without it the demo would be bounced straight back to the
-        // pairing screen on the next render.
-        if connectionStore.hasDevice || connection.isDemo || syncStore.phase != .off {
-            // Already have saved connection — go straight to the tab shell
-            // (Chat first, Project, Settings). Each screen shows its own
+        if connectionStore.hasDevice || syncStore.phase != .off {
+            // A paired desktop or offline sync: go straight to the tab shell. Each screen shows its own
             // connecting/offline banner while (re)connecting.
-            RootTabView(deviceName: connection.isDemo ? DemoResponder.macName
-                                                       : connectionStore.displayName)
+            RootTabView(deviceName: connectionStore.displayName)
                 .onAppear {
-                    // Re-establish connection if not already connected —
-                    // but not if the user explicitly closed it via
-                    // closeConnection() (e.g. popping back from Settings
-                    // must not silently undo an intentional close).
-                    if connection.connectionStatus == .disconnected, !connection.userClosed,
-                       !connection.isDemo {
-                        connection.connectDirect(
-                            ip: connectionStore.deviceIP,
-                            port: connectionStore.devicePort,
-                            pin: connectionStore.devicePIN
-                        )
+                    // Re-establish the connection if not already connected — but not if the user explicitly
+                    // closed it via closeConnection() (popping back from Settings must not undo that).
+                    if connection.connectionStatus == .disconnected, !connection.userClosed, connectionStore.hasDevice {
+                        connection.connect(ip: connectionStore.deviceIP, pin: connectionStore.devicePIN)
                     }
                 }
-                // iOS suspends the WebSocket in the background, and
-                // `onAppear` does NOT re-fire on foregrounding — so
-                // recovery used to depend on whichever came first, a stale
-                // receive callback or the next heartbeat tick, with no
-                // resync of the mirrored Mac state.
+                // `onAppear` does NOT re-fire on foregrounding, and iOS suspends the socket in the background.
                 .onChange(of: scenePhase) { phase in
                     syncStore.setForeground(phase == .active)
-                    guard phase == .active, !connection.isDemo,
-                          connectionStore.hasDevice else { return }
-                    if connection.connectionStatus == .disconnected, !connection.userClosed {
-                        connection.connectDirect(
-                            ip: connectionStore.deviceIP,
-                            port: connectionStore.devicePort,
-                            pin: connectionStore.devicePIN
-                        )
-                    } else if connection.connectionStatus == .connected {
-                        // Live socket, but the snapshot may be minutes old.
-                        macStatusStore.requestMacStatus()
-                    }
+                    guard phase == .active, connectionStore.hasDevice,
+                          connection.connectionStatus == .disconnected, !connection.userClosed else { return }
+                    connection.connect(ip: connectionStore.deviceIP, pin: connectionStore.devicePIN)
                 }
         } else {
             NavigationStack {

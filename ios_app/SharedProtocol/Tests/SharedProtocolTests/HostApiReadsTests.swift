@@ -4,7 +4,7 @@ import SharedProtocol
 
 @Suite("HostApiReadGate + HostApiReadMapping")
 struct HostApiReadMappingTests {
-    @Test("the gate is on only for v1 with read granted; never optimistic, never on v2")
+    @Test("the gate is on only for v1 with read granted; never optimistic, never on another API version")
     func gate() {
         #expect(HostApiReadGate.isOn(apiVersion: 1, capabilities: ["host", "chat", "read"]))
         #expect(!HostApiReadGate.isOn(apiVersion: 1, capabilities: ["host", "chat"]))
@@ -91,7 +91,7 @@ struct HostApiReadControllerTests {
         await t.value
     }
 
-    @Test("sends nothing without a host, on v2, or without read")
+    @Test("sends nothing without a host, on another API version, or without read")
     func gated() async {
         let none = HostApiReadController(host: { nil })
         await none.refresh()

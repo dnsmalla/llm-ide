@@ -1,12 +1,13 @@
 import SwiftUI
 import SharedProtocol
 
-/// Entry screen — discovers Macs automatically; falls back to manual IP + PIN entry.
+/// Entry screen: pair with the desktop by scanning its Host API pairing QR (the only way this iPhone
+/// learns the desktop's certificate pin), or enroll offline sync with a sync QR. A PIN typed by hand
+/// re-pairs a desktop this iPhone already pinned from a QR.
 struct ConnectView: View {
     @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var connection: ConnectionService
-    @StateObject private var discovery = DeviceDiscovery()
 
     @State private var ip: String  = ""
     @State private var pin: String = ""
@@ -35,8 +36,15 @@ struct ConnectView: View {
                     .background(DesignSystem.Colors.danger.opacity(0.08))
                     .cornerRadius(DesignSystem.Layout.cornerRadiusM)
                 }
-                discoveredSection
-                if showManual || discovery.devices.isEmpty {
+                Button {
+                    withAnimation { showManual.toggle() }
+                } label: {
+                    Text(showManual ? "Hide manual entry" : "Enter a PIN manually")
+                        .font(DesignSystem.Typography.footnoteFont)
+                        .foregroundColor(DesignSystem.Colors.primary)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                if showManual {
                     manualSection
                 }
             }
@@ -48,17 +56,12 @@ struct ConnectView: View {
         .onAppear {
             ip  = connectionStore.deviceIP
             pin = connectionStore.devicePIN
-            // Carry over a failure that happened while another view was up —
-            // an `auth_failed` clears the saved PIN, which remounts this view,
-            // so its own onChange can never observe that transition.
+            // Carry over a failure that happened while another view was up — an `auth_failed` clears the
+            // saved credentials, which remounts this view, so its own onChange can never observe that.
             if let pending = connection.errorMessage { errorMessage = pending }
-            discovery.start()
         }
-        .onDisappear { discovery.stop() }
-        // Observe the MESSAGE, not only the status: the service sets
-        // .disconnected and then .connecting within one MainActor turn while
-        // auto-retrying, so SwiftUI coalesces them and the status-only path saw
-        // no failure at all — every error looked like "still connecting".
+        // Observe the MESSAGE, not only the status: the service sets .disconnected and then .connecting
+        // within one MainActor turn while auto-retrying, so SwiftUI coalesces them.
         .onChange(of: connection.errorMessage) { message in
             if let message, !message.isEmpty {
                 errorMessage = message
@@ -69,7 +72,7 @@ struct ConnectView: View {
             switch status {
             case .disconnected where connectAttempted:
                 errorMessage = connection.errorMessage
-                    ?? "Could not reach the Mac. Check it's on the same network (or Tailscale) and the agent is running."
+                    ?? "Could not reach the desktop. Check it's on the same network (or Tailscale) and LLM-IDE is running."
                 connectAttempted = false
             case .connected:
                 errorMessage = nil
@@ -92,10 +95,10 @@ struct ConnectView: View {
                     .font(.system(size: 36))
                     .foregroundColor(DesignSystem.Colors.primary)
             }
-            Text("Connect to Your Mac")
+            Text("Connect to Your Desktop")
                 .font(DesignSystem.Typography.titleFont.weight(.bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
-            Text("Start Mobile Control on your Mac (Settings → Mobile Control), then scan the QR or pick your Mac below.")
+            Text("On the desktop, open LLM-IDE → Settings → Mobile Control and scan its pairing QR — or a Phone and web sync code to read your chats offline.")
                 .font(DesignSystem.Typography.bodyFont)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -116,133 +119,50 @@ struct ConnectView: View {
                 .cornerRadius(DesignSystem.Layout.cornerRadiusM)
             }
             .padding(.top, DesignSystem.Spacing.xs)
-
-            // Demo entry. Deliberately on the FIRST screen and always visible:
-            // the app is useless without a paired Mac, so anyone who installs
-            // it before setting up their Mac — an App Store reviewer above all
-            // — needs a way in that does not depend on hardware they lack.
-            Button {
-                connection.startDemo()
-            } label: {
-                Text("Explore the demo")
-                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
-                    .foregroundColor(DesignSystem.Colors.primary)
-            }
-            Text("Browse the app with sample data — no Mac required. Nothing leaves your phone.")
-                .font(DesignSystem.Typography.footnoteFont)
-                .foregroundColor(DesignSystem.Colors.textSecondary)
-                .multilineTextAlignment(.center)
         }
         .padding(.top, DesignSystem.Spacing.lg)
         .sheet(isPresented: $showScanner) {
             QRScannerSheet { scan in
-                if let info = scan.mac {
+                if let info = scan.desktop {
                     errorMessage = nil
                     connectAttempted = true
-                    connectionStore.save(ip: info.ip, port: info.port, pin: info.pin, hostApiOffer: info.hostApiOffer,
-                                         source: .qrScan)
-                    connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
+                    connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan)
+                    connection.connect(ip: info.ip, pin: info.pin)
                 }
                 if let pair = scan.sync { syncStore.startEnrollment(pair) }
             }
         }
     }
 
-    private var discoveredSection: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-            if discovery.isSearching && discovery.devices.isEmpty {
-                HStack(spacing: DesignSystem.Spacing.sm) {
-                    ProgressView().scaleEffect(0.8)
-                    Text("Scanning for Macs on your network…")
-                        .font(DesignSystem.Typography.subheadlineFont)
-                        .foregroundColor(DesignSystem.Colors.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(DesignSystem.Spacing.md)
-                .background(DesignSystem.Colors.surface)
-                .cornerRadius(DesignSystem.Layout.cornerRadiusL)
-            }
-
-            ForEach(discovery.devices) { device in
-                DiscoveredDeviceCard(
-                    device: device,
-                    isKnown: connectionStore.deviceIP == device.host,
-                    isConnecting: isConnecting,
-                    savedPIN: connectionStore.devicePIN,
-                    onConnect: { resolvedPIN, typed in
-                        errorMessage = nil
-                        connectAttempted = true
-                        // `device.port` is what Bonjour resolved for THIS Mac;
-                        // the saved port may belong to another one. Fall back to
-                        // the saved/default only when discovery gave us none.
-                        let portToUse = device.port > 0
-                            ? device.port
-                            : (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
-                        connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN,
-                                             hostApiOffer: device.hostApiOffer,
-                                             source: typed ? .typedPin : .savedPin)
-                        connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
-                    }
-                )
-            }
-
-            if !discovery.devices.isEmpty {
-                Button {
-                    withAnimation { showManual.toggle() }
-                } label: {
-                    Text(showManual ? "Hide manual entry" : "Enter details manually")
-                        .font(DesignSystem.Typography.footnoteFont)
-                        .foregroundColor(DesignSystem.Colors.primary)
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
     private var manualSection: some View {
         VStack(spacing: DesignSystem.Spacing.lg) {
-            Text(discovery.devices.isEmpty ? "Enter your Mac's details" : "Manual entry")
+            Text("Re-pair a desktop this iPhone already scanned")
                 .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            inputField(label: "IP Address", placeholder: "192.168.0.100 or 192.168.0.100:3007",
+            inputField(label: "IP Address", placeholder: "192.168.0.100",
                        text: $ip, keyboard: .numbersAndPunctuation)
             inputField(label: "PIN", placeholder: "123456",
                        text: $pin, keyboard: .numberPad, isSecure: true)
 
             Button {
-                let raw = ip.trimmingCharacters(in: .whitespaces)
-                // Accept "host:port" — the Mac's server falls back to the
-                // next free port when its configured one is busy, and manual
-                // entry (unlike Bonjour or the QR) has no other way to learn
-                // a non-default port. A lone host keeps the saved/default.
-                var host = raw
-                var enteredPort: Int?
-                if let colon = raw.lastIndex(of: ":"), colon != raw.startIndex {
-                    let suffix = raw[raw.index(after: colon)...]
-                    if let p = Int(suffix), (1...65535).contains(p) {
-                        host = String(raw[..<colon])
-                        enteredPort = p
-                    }
-                }
+                let host = ip.trimmingCharacters(in: .whitespaces)
                 let code = pin.trimmingCharacters(in: .whitespaces)
-                // Same validation as a scanned code — a typo'd host would
-                // otherwise be saved and retried forever.
+                // Same validation as a scanned code — a typo'd host would otherwise be saved and retried forever.
                 guard PairingInfo.isPrivateHost(host) else {
-                    errorMessage = "Enter your Mac's local address (e.g. 192.168.0.100, optionally with :port, a 100.x Tailscale address, or name.local)."
+                    errorMessage = "Enter the desktop's local address (e.g. 192.168.0.100, a 100.x Tailscale address, or name.local)."
                     return
                 }
                 guard PairingInfo.isWellFormedPin(code) else {
-                    errorMessage = "The PIN is the 6 digits shown in LLM-IDE → Settings → Mobile Control."
+                    errorMessage = "The PIN is the 6 digits shown in the desktop's Settings → Mobile Control."
                     return
                 }
                 errorMessage = nil
                 connectAttempted = true
-                let port = enteredPort
-                    ?? (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
-                connectionStore.save(ip: host, port: port, pin: code, source: .typedPin)
-                connection.connectDirect(ip: host, port: port, pin: code)
+                // A typed PIN keeps this host's pin from an earlier QR scan; with none, connect asks for the QR.
+                connectionStore.save(ip: host, pin: code, source: .typedPin)
+                connection.connect(ip: host, pin: code)
             } label: {
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     if isConnecting { ProgressView().tint(.white).scaleEffect(0.85) }
@@ -288,110 +208,5 @@ struct ConnectView: View {
             .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
                 .stroke(DesignSystem.Colors.primary.opacity(0.2), lineWidth: 1))
         }
-    }
-}
-
-// MARK: — Discovered Device Card
-
-private struct DiscoveredDeviceCard: View {
-    let device: DiscoveredDevice
-    let isKnown: Bool          // IP matches saved connection
-    let isConnecting: Bool
-    let savedPIN: String
-    /// The PIN, and whether the user typed it (a fresh pairing) rather than reusing the saved one.
-    let onConnect: (String, Bool) -> Void
-
-    @State private var pinEntry: String = ""
-    @State private var showPINField: Bool = false
-    @FocusState private var pinFocused: Bool
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: DesignSystem.Spacing.md) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(DesignSystem.Colors.primary.opacity(0.12))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "apple.logo")
-                        .font(.system(size: 20))
-                        .foregroundColor(DesignSystem.Colors.primary)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name)
-                        .font(DesignSystem.Typography.bodyFont.weight(.semibold))
-                        .foregroundColor(DesignSystem.Colors.textPrimary)
-                    Text(device.host)
-                        .font(DesignSystem.Typography.footnoteFont.monospaced())
-                        .foregroundColor(DesignSystem.Colors.textSecondary)
-                }
-                Spacer()
-                if isKnown && !savedPIN.isEmpty {
-                    // Already paired — one tap to connect
-                    Button {
-                        onConnect(savedPIN, false)
-                    } label: {
-                        Text(isConnecting ? "Connecting…" : "Connect")
-                            .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(DesignSystem.Colors.primary)
-                            .cornerRadius(DesignSystem.Layout.cornerRadiusM)
-                    }
-                    .disabled(isConnecting)
-                } else {
-                    // First time — need PIN
-                    Button {
-                        withAnimation { showPINField.toggle() }
-                        if showPINField { pinFocused = true }
-                    } label: {
-                        Text("Enter PIN")
-                            .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
-                            .foregroundColor(DesignSystem.Colors.primary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(DesignSystem.Colors.primary.opacity(0.12))
-                            .cornerRadius(DesignSystem.Layout.cornerRadiusM)
-                    }
-                }
-            }
-            .padding(DesignSystem.Spacing.md)
-
-            if showPINField && !(isKnown && !savedPIN.isEmpty) {
-                Divider().padding(.horizontal, DesignSystem.Spacing.md)
-                HStack(spacing: DesignSystem.Spacing.sm) {
-                    SecureField("PIN from Mac Settings", text: $pinEntry)
-                        .focused($pinFocused)
-                        .keyboardType(.numberPad)
-                        .padding(DesignSystem.Spacing.sm)
-                        .background(DesignSystem.Colors.background)
-                        .cornerRadius(DesignSystem.Layout.cornerRadiusS)
-                    Button {
-                        guard !pinEntry.isEmpty else { return }
-                        onConnect(pinEntry, true)
-                    } label: {
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(pinEntry.isEmpty
-                                ? DesignSystem.Colors.primary.opacity(0.3)
-                                : DesignSystem.Colors.primary)
-                    }
-                    .disabled(pinEntry.isEmpty)
-                }
-                .padding([.horizontal, .bottom], DesignSystem.Spacing.md)
-                // v1 pinning is QR-only: a typed PIN pairs over the classic link, never adopting the TXT pin.
-                if device.hostApiOffer != nil {
-                    Text("Scan the QR code on the Mac to use the encrypted connection.")
-                        .font(DesignSystem.Typography.footnoteFont)
-                        .foregroundColor(DesignSystem.Colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding([.horizontal, .bottom], DesignSystem.Spacing.md)
-                }
-            }
-        }
-        .background(DesignSystem.Colors.surface)
-        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
-        .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacity),
-                radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
     }
 }

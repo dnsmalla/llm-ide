@@ -23,11 +23,11 @@ struct HostApiClientLogicTests {
         #expect(t.observe(event: 21) == .inOrder, "a response rev absorbs other sessions' events")
     }
 
-    @Test("negotiation: no v1 endpoint goes straight to v2")
+    @Test("negotiation: no v1 endpoint is unreachable")
     func noEndpoint() {
         var n = HostApiNegotiation()
-        #expect(n.handle(.start(v1Endpoint: false)) == .connectV2)
-        #expect(n.phase == .v2)
+        #expect(n.handle(.start(v1Endpoint: false)) == .unreachable)
+        #expect(n.phase == .noHost)
     }
 
     @Test("negotiation: hello then auth reaches v1")
@@ -39,7 +39,7 @@ struct HostApiClientLogicTests {
         #expect(n.phase == .v1)
     }
 
-    @Test("negotiation: silence, a foreign version or a version refusal falls back to v2")
+    @Test("negotiation: silence, a foreign version or a version refusal is unreachable")
     func fallbacks() {
         for input: HostApiNegotiation.Input in [
             .silent,
@@ -49,11 +49,11 @@ struct HostApiClientLogicTests {
         ] {
             var n = HostApiNegotiation()
             _ = n.handle(.start(v1Endpoint: true))
-            #expect(n.handle(input) == .connectV2, "\(input)")
+            #expect(n.handle(input) == .unreachable, "\(input)")
         }
     }
 
-    @Test("negotiation: once a v1 host answered, a refusal or silence never falls back to v2")
+    @Test("negotiation: once a v1 host answered, a refusal or silence is final")
     func noFallbackAfterV1Answered() {
         var a = HostApiNegotiation()
         _ = a.handle(.start(v1Endpoint: true))
@@ -129,21 +129,6 @@ struct HostApiClientLogicHardeningTests {
 
 @Suite("Host API client logic: pairing safety")
 struct HostApiPairingSafetyTests {
-    @Test("a v1-only phone never falls back to v2; a v2 credential or no v1 token does")
-    func fallback() {
-        #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: false, pinned: false))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: true, hasV2Credential: true, pinned: false))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: false, pinned: false))
-        #expect(HostApiNegotiation.fallsBackToV2(hasV1Token: false, hasV2Credential: true, pinned: false))
-    }
-
-    @Test("a pinned wss endpoint never falls back to cleartext v2, whatever credentials the phone holds")
-    func pinnedNeverDowngrades() {
-        for v1 in [false, true] { for v2 in [false, true] {
-            #expect(!HostApiNegotiation.fallsBackToV2(hasV1Token: v1, hasV2Credential: v2, pinned: true), "\(v1) \(v2)")
-        } }
-    }
-
     @Test("only a non-retryable auth_failed clears the credentials")
     func clears() {
         func r(_ code: String, _ retryable: Bool = false) -> HostApiRejection {
@@ -159,13 +144,11 @@ struct HostApiPairingSafetyTests {
 
 @Suite("HostApiChatTurn")
 struct HostApiChatTurnTests {
-    @Test("Stop ends a v1 turn locally unless the host cancelled it; v2 waits for the Mac")
+    @Test("Stop ends a turn locally unless the host cancelled it")
     func endsAfterCancel() {
-        #expect(HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: false))
-        #expect(HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: nil))
-        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 1, cancelled: true))
-        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 2, cancelled: false))
-        #expect(!HostApiChatTurn.endsAfterCancel(apiVersion: 2, cancelled: nil))
+        #expect(HostApiChatTurn.endsAfterCancel(cancelled: false))
+        #expect(HostApiChatTurn.endsAfterCancel(cancelled: nil))
+        #expect(!HostApiChatTurn.endsAfterCancel(cancelled: true))
     }
 }
 
@@ -254,7 +237,7 @@ struct HostApiChatNoticesTests {
         #expect(!HostApiChatNotices.disconnectsAfterSendFailure(HostApiRejection(replyTo: nil, code: "internal", message: "x")))
     }
 
-    @Test("the tool-approvals notice is the Mac's v2 ApprovalCleared reason, verbatim")
+    @Test("the tool-approvals notice text is stable")
     func macText() {
         #expect(HostApiChatNotices.toolApprovalsOff == "Tool requests can no longer be approved from the phone.")
     }

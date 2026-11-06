@@ -156,8 +156,8 @@ extension HostApiFrame {
         return data
     }
 
-    /// One frame from a host. Anything that is not a valid v1 response, event or error frame (a v2 frame on
-    /// this port, a newer host's unknown event) is a failure, which the client ignores.
+    /// One frame from a host. Anything that is not a valid v1 response, event or error frame (a foreign frame,
+    /// a newer host's unknown event) is a failure, which the client ignores.
     public static func parseInbound(_ data: Data) -> Result<HostApiInbound, HostApiRejection> {
         func bad(_ why: String) -> Result<HostApiInbound, HostApiRejection> {
             .failure(.init(replyTo: nil, code: "invalid_payload", message: "The host sent \(why)."))

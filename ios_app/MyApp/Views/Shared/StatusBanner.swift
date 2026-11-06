@@ -1,10 +1,8 @@
 import SwiftUI
 
-/// The identical connection / error banner strips that sat above both chat
-/// transcripts (`LlmIdeControlView.connectionBanner` / `errorBanner(_:)` and
-/// the mirrors in `ExplorerChatView`). One component, two cases — the error
+/// The connection / error banner strip above the chat transcript. One component, two cases — the error
 /// case carries an `onDismiss` so the caller controls how the message clears
-/// (both views set `connection.errorMessage = nil`).
+/// (`connection.errorMessage = nil`).
 struct StatusBanner: View {
     enum Content {
         /// Gray "wifi.slash" strip. `isConnecting` toggles the copy.
@@ -22,7 +20,7 @@ struct StatusBanner: View {
         case .connection(let isConnecting):
             HStack(spacing: 8) {
                 Image(systemName: "wifi.slash").font(.system(size: 13))
-                Text(isConnecting ? "Connecting to your Mac…" : "Not connected to your Mac")
+                Text(isConnecting ? "Connecting to your desktop…" : "Not connected to your desktop")
                     .font(DesignSystem.Typography.footnoteFont.weight(.medium))
                 Spacer()
             }

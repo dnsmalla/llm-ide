@@ -3,12 +3,14 @@ import SharedProtocol
 import AVFoundation
 
 struct ScanResult {
-    let mac: PairingInfo?
+    /// The desktop's Host API pairing (Settings → Mobile Control → Pair a phone or web client).
+    let desktop: PairingInfo?
+    /// An offline sync enrollment (Settings → Mobile Control → Phone and web sync → Add a phone or browser).
     let sync: SyncPair?
     init?(_ code: String) {
-        mac = PairingInfo(from: code)
+        desktop = PairingInfo(from: code)
         sync = code.hasPrefix("llmide://pair?") ? try? SyncEnroll.parsePair(code) : nil
-        if mac == nil && sync == nil { return nil }
+        if desktop == nil && sync == nil { return nil }
     }
 }
 
@@ -17,7 +19,7 @@ struct QRScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var permissionDenied = false
     /// Set when a scanned code parsed but failed validation (wrong scheme,
-    /// non-local host, malformed PIN/port).
+    /// non-local host, malformed PIN, no certificate pin).
     @State private var rejectionNotice: String?
 
     var body: some View {
@@ -51,7 +53,7 @@ struct QRScannerSheet: View {
                                 // so say so — the scanner keeps running.
                                 guard !code.isEmpty, rejectionNotice == nil else { return }
                                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                                rejectionNotice = "That isn't an LLM-IDE pairing code. Scan the QR in LLM-IDE → Settings (Mobile Control, or Sync → Add a phone or browser)."
+                                rejectionNotice = "That isn't an LLM-IDE pairing code. Scan the QR in the desktop's Settings → Mobile Control (Pair a phone, or Phone and web sync → Add a phone or browser)."
                                 return
                             }
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -68,7 +70,7 @@ struct QRScannerSheet: View {
                         RoundedRectangle(cornerRadius: 24)
                             .stroke(Color.white.opacity(0.8), lineWidth: 3)
                             .frame(width: 230, height: 230)
-                        Text("Point at the pairing QR in LLM-IDE on your Mac")
+                        Text("Point at the pairing QR in LLM-IDE on your desktop")
                             .font(DesignSystem.Typography.subheadlineFont)
                             .foregroundColor(.white.opacity(0.9))
                             .padding(.top, DesignSystem.Spacing.lg)

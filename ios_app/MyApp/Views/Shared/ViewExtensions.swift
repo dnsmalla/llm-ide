@@ -6,9 +6,7 @@ import SwiftUI
 
 extension View {
     /// Fire a one-shot impact haptic. No-op on hardware without a Taptic Engine
-    /// (UIKit handles the fallback). Replaces the private `haptic(_:)` helpers
-    /// that were copy-pasted across `LlmIdeControlView` and `AutoTaskView`, and
-    /// the one inline call left in `ExplorerChatView.send()`.
+    /// (UIKit handles the fallback).
     func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
@@ -17,17 +15,13 @@ extension View {
 // MARK: — Relative time
 
 extension Date {
-    /// Construct from epoch seconds — the wire format the Mac sends for
-    /// `lastUsedAt` / `lastRunDate` / `lastUpdated` (`timeIntervalSince1970`).
+    /// Construct from epoch seconds (`timeIntervalSince1970`).
     init(epochSeconds: Double) {
         self.init(timeIntervalSince1970: epochSeconds)
     }
 
-    /// Short localized relative string (e.g. "2h ago"). Replaces the private
-    /// `relativeTime(from:)` statics duplicated in `ExplorerChatView` and
-    /// `AutoTaskView`. A new `RelativeDateTimeFormatter` is allocated per call
-    /// (matching pre-refactor behavior); if this ever lands on a hot path,
-    /// cache a formatter on a static lazy.
+    /// Short localized relative string (e.g. "2h ago"). A new `RelativeDateTimeFormatter` is allocated per
+    /// call; if this ever lands on a hot path, cache a formatter on a static lazy.
     func relativeTimeShort() -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -38,9 +32,8 @@ extension Date {
 // MARK: — Embeddable navigation
 
 /// Wraps `content` in its own `NavigationStack` unless it is hosted inside one
-/// already. The Chat / Explorer / Auto Tasks / Loop screens used to be
-/// presented as sheets (each owning a stack and a "Done" button); in the tab
-/// shell they sit inside a stack the shell owns, and `embedded` tells them to
+/// already. A screen presented as a sheet owns a stack and a "Done" button; in the tab
+/// shell it sits inside a stack the shell owns, and `embedded` tells them to
 /// contribute their title and toolbar to it instead of nesting a second one.
 struct OptionalNavigationStack<Content: View>: View {
     let embedded: Bool
