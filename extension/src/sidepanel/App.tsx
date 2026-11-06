@@ -535,8 +535,8 @@ export default function App() {
       {!serverOnline && (
         <div className="error-message server-offline" role="alert">
           <span>
-            Desktop app not running. Open LLM-IDE to search, chat and sync captures. Nothing is stored in this browser while
-            it is closed except an unfinished capture, which is kept until the desktop app confirms it has a copy.
+            Desktop app not running. Open LLM-IDE to search, chat and sync captures. Nothing is stored in this browser
+            while it is closed except an unfinished capture, which is kept until the desktop app confirms it has a copy.
           </span>
           <div className="server-offline-actions">
             <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to the desktop app">
@@ -563,8 +563,8 @@ export default function App() {
         <div className="quota-warning" role="status">
           <span>
             {draftRelease.kept.length} capture{draftRelease.kept.length === 1 ? '' : 's'} kept in this browser because
-            the desktop app cannot confirm a complete copy (an old server, or longer than 2000 lines). Nothing is deleted
-            automatically.
+            the desktop app cannot confirm a complete copy (an old server, or longer than 2000 lines). Nothing is
+            deleted automatically.
           </span>
           <ul>
             {draftRelease.kept.map((d) => (

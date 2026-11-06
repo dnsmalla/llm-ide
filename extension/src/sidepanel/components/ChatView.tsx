@@ -118,8 +118,8 @@ export default function ChatView({
 
       {offline && (
         <div className="error-message quota-warning" role="alert">
-          Desktop app not running. Chat history lives in the desktop app; nothing is stored in this browser. Open LLM-IDE to
-          continue.
+          Desktop app not running. Chat history lives in the desktop app; nothing is stored in this browser. Open
+          LLM-IDE to continue.
         </div>
       )}
       {/* role="log" + aria-live so screen readers announce new messages.

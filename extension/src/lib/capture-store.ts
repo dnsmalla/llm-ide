@@ -844,7 +844,8 @@ export async function importLegacyTranscript(
             ? { ...base, outcome: 'copied' }
             : { ...base, outcome: 'error', detail: 'local delete could not be verified' };
         }
-        if (st.state === 'expired') return { ...base, outcome: 'error', detail: 'the desktop app did not confirm in time' };
+        if (st.state === 'expired')
+          return { ...base, outcome: 'error', detail: 'the desktop app did not confirm in time' };
         if (i < polls) await sleep(opts.pollMs ?? 2000);
       }
       return { ...base, outcome: 'waiting' };

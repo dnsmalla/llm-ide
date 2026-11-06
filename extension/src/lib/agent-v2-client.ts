@@ -137,7 +137,8 @@ async function errorFromResponse(res: Response): Promise<V2TurnError> {
     if (typeof e.message === 'string' && e.message.trim()) message = e.message;
   }
   if (code === 'TURN_IN_PROGRESS') {
-    message = 'Another side panel or the desktop app is still answering this chat. Wait for it to finish, then send again.';
+    message =
+      'Another side panel or the desktop app is still answering this chat. Wait for it to finish, then send again.';
   }
   return new V2TurnError(code, message, { status: res.status });
 }

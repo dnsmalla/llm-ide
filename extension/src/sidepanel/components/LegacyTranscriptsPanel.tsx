@@ -80,8 +80,9 @@ export default function LegacyTranscriptsPanel() {
     <section className="legacy-transcripts">
       <h3 className="settings-heading">Meetings saved in this browser (old)</h3>
       <p className="settings-hint">
-        The extension no longer keeps a meeting history. These were saved before. Copy them to the desktop app; each local
-        copy is removed only after the desktop app confirms it has the copy. Nothing is sent until you press the button.
+        The extension no longer keeps a meeting history. These were saved before. Copy them to the desktop app; each
+        local copy is removed only after the desktop app confirms it has the copy. Nothing is sent until you press the
+        button.
       </p>
       <ul className="kb-results">
         {items.map((t) => {
