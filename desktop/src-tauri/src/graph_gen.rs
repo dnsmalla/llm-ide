@@ -63,7 +63,7 @@ fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     let n = NEXT_COPY.fetch_add(1, Ordering::Relaxed);
     let temp = std::env::temp_dir().join(format!("llmide-graphkit-{}-{n}.cjs", std::process::id()));
     std::fs::copy(cli, &temp).map_err(|e| format!("cannot prepare the GraphKit CLI: {e}"))?;
-    let mut child = Command::new(node)
+    let child = Command::new(node)
         .arg(&temp)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")

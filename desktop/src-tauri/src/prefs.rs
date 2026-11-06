@@ -34,6 +34,7 @@ pub(crate) const FEATURE_KEYS: [&str; 8] = [
 ];
 
 /// True for a key the server knows (`FEATURE_KEYS`).
+#[allow(dead_code)]
 pub(crate) fn is_feature_key(k: &str) -> bool {
     FEATURE_KEYS.contains(&k)
 }
@@ -264,6 +265,7 @@ pub fn save_to(dir: &Path, prefs: &Prefs) -> Result<(), String> {
 
 /// `LLMIDE_FEATURES` for the core and the Terminal gate: the host's own value, minus `terminal` when
 /// the pref turns it off. `None` = leave it unset (every feature on). Unset or empty means all.
+#[allow(dead_code)]
 pub fn effective_features(host_env: Option<&str>, terminal: bool) -> Option<String> {
     effective_features_with(host_env, terminal, &[])
 }

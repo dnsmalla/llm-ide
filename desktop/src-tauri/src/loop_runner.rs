@@ -12,7 +12,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tauri::Emitter;
 
 use crate::proc_tree::ManagedChild;
 

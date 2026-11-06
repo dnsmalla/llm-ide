@@ -66,6 +66,7 @@ impl std::error::Error for SecretError {}
 pub trait SecretBackend: Send + Sync {
     fn get(&self, account: &str) -> Result<Option<String>, SecretError>;
     fn set(&self, account: &str, value: &str) -> Result<(), SecretError>;
+    #[allow(dead_code)]
     fn delete(&self, account: &str) -> Result<(), SecretError>;
     fn name(&self) -> &'static str;
 }

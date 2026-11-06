@@ -18,7 +18,7 @@ pub trait SnapshotSource: Send { fn trusted(&self)->bool; fn read(&mut self,bund
 pub struct MacSource;
 impl SnapshotSource for MacSource { fn trusted(&self)->bool{crate::capture_ax_macos::is_trusted()} fn read(&mut self,b:&str)->Result<Option<AxAppTree>,AxReadError>{crate::capture_ax_macos::read_app_tree(b)} }
 
-#[derive(Debug,Clone,Copy,PartialEq,Eq,Serialize)]#[serde(rename_all="snake_case")]pub enum CaptureState{Recording,NoSource,PermissionLost,Full,Stopped,Error}
+#[derive(Debug,Clone,Copy,PartialEq,Eq,Serialize)]#[serde(rename_all="snake_case")]pub enum CaptureState{Recording,NoSource,PermissionLost,Full,Stopped,#[allow(dead_code)] Error}
 #[derive(Debug,Clone,PartialEq,Serialize)]#[serde(tag="type",rename_all="snake_case")]pub enum CaptureEvent{State{state:CaptureState,platform:Option<String>,detail:Option<String>},Append{row:u64,time:String,speaker:String,text:String},Replace{row:u64,text:String},Closed{row:u64}}
 pub enum TickOutcome{Continue,PermissionLost,Full}
 #[derive(Debug,Clone,PartialEq,Serialize)]#[serde(rename_all="camelCase")]pub struct StopResult{pub note:Option<FinalizedNote>,pub kept_partial:bool,pub reason:Option<String>}

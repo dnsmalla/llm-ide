@@ -302,6 +302,7 @@ pub(crate) fn url_dialog_text(c: &Checked) -> String {
 /// Open a URL this module has already validated at the call site (the account OAuth authorize URL).
 /// Deliberately skips the "Open link?" first-use dialog: the host constructed the URL and the caller
 /// has restricted it to the configured account origin. Still no shell: the fixed per-OS opener.
+#[allow(dead_code)]
 pub(crate) fn spawn_url(raw: &str) -> Result<(), FsError> {
     let u = Url::parse(raw).map_err(|_| herr("url_refused", "the address is not a valid URL"))?;
     if u.scheme() != "http" && u.scheme() != "https" {

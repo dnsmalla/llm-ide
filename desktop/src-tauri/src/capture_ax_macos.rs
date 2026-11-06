@@ -3,7 +3,7 @@ use crate::capture_model::{AxAppTree, AxNode, AxReadError};
 
 #[cfg(target_os = "macos")] pub const SUPPORTED: bool = true;
 #[cfg(not(target_os = "macos"))] pub const SUPPORTED: bool = false;
-#[cfg(target_os = "macos")] pub use macos::{is_trusted, prompt_trust, read_app_tree, running_pid, cf_string, string_of};
+#[cfg(target_os = "macos")] pub use macos::{is_trusted, prompt_trust, read_app_tree, running_pid};
 #[cfg(not(target_os = "macos"))] pub fn is_trusted()->bool{false}
 #[cfg(not(target_os = "macos"))] pub fn prompt_trust()->bool{false}
 #[cfg(not(target_os = "macos"))] pub fn running_pid(_b:&str)->Option<i32>{None}
