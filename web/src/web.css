@@ -351,3 +351,9 @@ body {
 .web-unlock-form h2 { margin: 2px 0 6px; }
 .web-unlock-form p { margin: 0; color: #a8bccd; font-size: 13px; line-height: 1.55; }
 .web-unlock-form .web-muted { color: #8ba2b7; font-size: 12px; }
+
+.web-compose { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; min-width: 0; }
+.web-compose .chat-chip-row { flex-basis: 100%; }
+.web-attach { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.web-attach input[type="file"] { max-width: 100%; }
+.web-attach input[type="file"]:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }

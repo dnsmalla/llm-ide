@@ -8,6 +8,7 @@ import { createSourcesController, type SourcesController } from "./sources/contr
 import { SourcesEntry, SourcesScreen } from "./screens/SourcesScreen.tsx";
 import { PairingScreen } from "./screens/PairingScreen.tsx";
 import { WebChat } from "./screens/WebChat.tsx";
+import { ComposeBar } from "./screens/ComposeBar.tsx";
 import { ReadPanel } from "./screens/ReadPanel.tsx";
 import { SyncLinkEntry, SyncTier } from "./screens/SyncTier.tsx";
 
@@ -19,19 +20,28 @@ function useConnection(session: Session | null): ConnectionState | null {
 }
 
 function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionState; onForget: () => void }) {
-  const { connection: c, controller, read } = session;
+  const { connection: c, controller, read, compose } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
+  const cs = useSyncExternalStore(compose.subscribe, compose.getState, compose.getState);
   const capabilities = state.capabilities ?? c.capabilities;
+  const canCompose = capabilities.has("compose");
+  const send = (t: string) => void controller.send(t, compose.extras()).then((ok) => { if (ok) compose.clearAttachments(); });
+  const newChat = () => void controller.newChat().then((ok) => { if (ok) void read.refresh(); });
   return (
     <div className="web-shell">
       <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}
         onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
       {!readState.open && (
         <WebChat hostName={c.hello?.hostName ?? "Host"} connection={conn} capabilities={capabilities} state={state}
-          onSend={(t) => void controller.send(t)} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
+          onSend={send} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
           onForget={onForget} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
-          onTool={(r, d) => void controller.answerTool(r, d)} />
+          onTool={(r, d) => void controller.answerTool(r, d)} onNewChat={canCompose ? newChat : undefined}
+          compose={capabilities.has("chat") ? (
+            <ComposeBar state={cs} canChoose={canCompose} disabled={conn.kind !== "ready" || state.turn !== null}
+              onMode={compose.setMode} onModel={compose.setModel} onRemove={compose.remove}
+              onFiles={(f) => { if (f) void compose.addFiles(Array.from(f)); }} />
+          ) : null} />
       )}
     </div>
   );

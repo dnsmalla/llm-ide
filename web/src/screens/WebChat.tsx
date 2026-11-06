@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Chip, StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
 import { Composer } from "@llmide/screens/chat/Composer.tsx";
@@ -12,6 +12,10 @@ import { MAX_SEND_CHARS } from "../chat/controller.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 export interface WebChatProps {
+  /** Turn options rendered above the composer (ComposeBar); absent = none. */
+  compose?: ReactNode;
+  /** Start a fresh phone chat (capability compose); absent = no button. */
+  onNewChat?: () => void;
   hostName: string;
   connection: ConnectionState;
   capabilities: ReadonlySet<HostApiCapability>;
@@ -86,6 +90,7 @@ export function WebChat(p: WebChatProps) {
           <div><span className="web-chat-eyebrow">Connected desktop</span><h1>{p.hostName}</h1></div>
         </div>
         <div className="web-chat-actions">
+          {p.onNewChat && (<button type="button" className="web-chat-action" onClick={p.onNewChat} disabled={disabledReason !== null || state.turn !== null} title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : "Start a new phone chat; this one stays in the chat list")}>New chat</button>)}
           <Chip label={chipLabel(p.connection)} />
           <button type="button" className="web-chat-action" onClick={p.onClear} disabled={disabledReason !== null || state.turn !== null}
             title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : undefined)}>Clear history</button>
@@ -112,6 +117,7 @@ export function WebChat(p: WebChatProps) {
           <ToolApprovalCard key={a.requestId} approval={a} onDecide={(d) => p.onTool(a.requestId, d)} />
         ) : null)}
       {sendError && <p role="alert" className="web-error">{sendError}</p>}
+      {p.compose}
       <Composer draft={draft} onDraft={(t) => guard.current!.onDraft(t)} busy={state.turn !== null} aborting={false} queue={[]}
         history={msgs.filter((m) => m.role === "user").map((m) => m.text)}
         onSend={(t) => guard.current!.onSend(t)} onStop={p.onStop} onDropQueued={() => {}} disabledReason={disabledReason} />

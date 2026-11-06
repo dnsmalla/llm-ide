@@ -11,6 +11,7 @@ export function ToolApprovalCard({ approval: a, onDecide }: { approval: ToolAppr
       {a.summary && <pre className="web-summary">{a.summary}</pre>}
       {a.truncated && <p className="chat-muted">(shortened)</p>}
       {a.error && <StatusBanner severity="error" message={a.error} />}
+      <p className="chat-muted">Rules that skip this question are made and revoked on the desktop (Settings, Tool permissions).</p>
       <div className="web-actions">
         <button type="button" disabled={a.submitting} onClick={() => onDecide("allow_once")}>Allow once</button>
         <button type="button" disabled={a.submitting} onClick={() => onDecide("deny")}>Deny</button>

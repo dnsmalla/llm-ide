@@ -3,10 +3,11 @@
 import { HostApiError, HostConnection, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
 import { lastHostUrl, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
+import { createComposeController, type ComposeController } from "./chat/compose.ts";
 
 import { createReadController, type ReadController } from "./read/controller.ts";
 
-export interface Session { url: string; tokens: TokenStore; connection: HostConnection; controller: ChatController; read: ReadController }
+export interface Session { url: string; tokens: TokenStore; connection: HostConnection; controller: ChatController; read: ReadController; compose: ComposeController }
 export interface AppState { session: Session | null; busy: boolean; error: string | null; notice: string | null }
 
 export const REVOKED = "The desktop removed or expired this browser's access. Pair again with a new PIN from the desktop app's Settings.";
@@ -41,7 +42,7 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
   const open = (url: string): Session => {
     const tokens = d.tokensFor(url);
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
-    return { url, tokens, connection, controller: createChatController(connection), read: createReadController(connection) };
+    return { url, tokens, connection, controller: createChatController(connection), read: createReadController(connection), compose: createComposeController(connection) };
   };
   const shut = (s: Session) => { s.controller.dispose(); s.read.dispose(); s.connection.close(); };
   const adopt = (s: Session | null, notice: string | null = null) => {

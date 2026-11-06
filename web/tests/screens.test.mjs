@@ -115,3 +115,29 @@ test("read panel: an open chat is read-only with Show older and Back", () => {
   assert.doesNotMatch(out, /<b>q/);
   assert.doesNotMatch(out, /<textarea/);
 });
+
+const composeProps = (state, extra = {}) => ({ state: { ...UI.initialComposeState, ...state }, canChoose: true, disabled: false,
+  onMode: noop, onModel: noop, onFiles: noop, onRemove: noop, ...extra });
+test("compose bar: labelled mode and model selects with only offered options; never Execute or Bypass", () => {
+  const out = html(h(UI.ComposeBar, composeProps({ modes: ["auto", "ask", "plan"], models: [{ model: "claude-sonnet-5-5", label: "Sonnet 5.5" }] })));
+  assert.match(out, /aria-label="Mode"/); assert.match(out, /aria-label="Model"/); assert.match(out, />Plan</); assert.match(out, />Sonnet 5.5</);
+  assert.match(out, />Desktop default</); assert.doesNotMatch(out, /Execute|Bypass/); assert.match(out, /read-only on the desktop/);
+});
+test("compose bar: without compose only the attach input shows; chips have labelled remove buttons", () => {
+  const out = html(h(UI.ComposeBar, composeProps({ attachments: [{ name: "<b>a.md</b>", text: "xyz", truncated: true }] }, { canChoose: false })));
+  assert.doesNotMatch(out, /aria-label="Mode"/); assert.match(out, /type="file"/); assert.match(out, /Attach text files/);
+  assert.match(out, /aria-label="Remove &lt;b&gt;a.md&lt;\/b&gt;"/); assert.match(out, /cut to the limit/);
+});
+test("web chat: New chat only when offered, disabled during a turn; the compose slot renders", () => {
+  const idle = UI.initialChatState;
+  assert.doesNotMatch(html(h(UI.WebChat, chatProps(idle))), /New chat/);
+  const out = html(h(UI.WebChat, chatProps(idle, { onNewChat: noop, compose: h("p", null, "COMPOSE-SLOT") })));
+  assert.match(out, /New chat/); assert.match(out, /COMPOSE-SLOT/);
+  const busy = [{ type: "sent", commandId: "c-1", text: "hi" }].reduce(UI.reduce, UI.initialChatState);
+  assert.match(html(h(UI.WebChat, chatProps(busy, { onNewChat: noop }))), /<button[^>]*disabled=""[^>]*>New chat/);
+});
+test("tool approval card says where saved rules live, still offers no saved rule", () => {
+  const s = [{ type: "sent", commandId: "c-1", text: "hi" }, ev("toolApproval.request", { requestId: "r-1", commandId: "c-1", toolName: "Edit", summary: "edit a.txt", truncated: false })].reduce(UI.reduce, UI.initialChatState);
+  const out = html(h(UI.WebChat, chatProps(s, { capabilities: caps("chat", "approvals", "tool_approvals") })));
+  assert.match(out, /made and revoked on the desktop/); assert.doesNotMatch(out, /[Aa]lways/);
+});
