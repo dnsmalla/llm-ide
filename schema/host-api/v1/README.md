@@ -84,7 +84,7 @@ The web client is `web/` (`web/src/host-api/connection.ts`), and its types are g
 
 ## Clients
 
-Swift clients build requests with `HostApiFrame.request` and parse host frames with `HostApiFrame.parseInbound`. Event names are the generated `HostApiEvent`. `HostApiV1Client` is the reference client. The iOS v2 fallback maps the chat slice through `HostApiV2ChatBridge`. The phone pins the host's `h1fp` (`pin_mismatch` / `pin_missing`); see `fixtures/security/`, shared by the Node and Mac tests, for the origin rule and the fingerprint vector.
+Swift clients build requests with `HostApiFrame.request` and parse host frames with `HostApiFrame.parseInbound`. Event names are the generated `HostApiEvent`. `HostApiV1Client` is the reference client. The iPhone speaks v1 only (its v2 Mac link was removed); it maps the approval events onto its card models with `ApprovalRequest(event:)`, `ToolApprovalRequest(event:)` and `ApprovalCleared(event:)`. The phone pins the host's `h1fp` (`pin_mismatch` / `pin_missing`); see `fixtures/security/`, shared by the Node and Mac tests, for the origin rule and the fingerprint vector.
 
 ## Host differences
 

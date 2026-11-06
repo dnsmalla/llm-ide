@@ -1,201 +1,81 @@
-# Mobile Control System Verification Guide
+# iPhone app verification guide
 
-> Verification for the **native Mac pairing server**. The Mac app runs WebSocket
-> on `:3006` (or the next free port up to `3015`) and advertises `_llmide._tcp`. The iPhone is a remote control
-> and viewer (tabs **Chat**, **Project** with Explorer / Auto Tasks / Loop, **Settings**), not a remote desktop.
-> Screen Recording is **not** required for pairing or chat. The link is cleartext `ws://` today; see
-> [quick-start.md](./quick-start.md) "Transport security". This list is written, **no recorded run yet**.
+> Manual checks for the iPhone app against the LLM-IDE desktop: Host API v1 (pinned `wss://`), the
+> read-only History, offline sync and direct reads. The pairing steps are in [quick-start.md](./quick-start.md).
+> The MobileProtocol v2 link to the retired Swift Mac app (`ws://…:3006`, Bonjour) was removed on 2026-11-06,
+> and with it the old F1-F18 rows (Phone access switches, tiers and Mac dialogs); their last result is
+> UN-002 ("iOS app is working", 2026-11-05).
 
-## Quick verification (2 minutes)
-
-### 1. Confirm Mobile Control is running in the Mac app
-
-**Settings → Mobile Control** → Enable → **Start**. Expect **Running**, PIN,
-LAN/Tailscale IP, port `3006`, and pairing QR.
+## Automated gates
 
 ```bash
-lsof -i :3006    # expect LlmIdeMac
+make test-shared-protocol   # v1 client, pinning, QR parser, reads, sync, Box/GitLab clients
 ```
 
-### 2. Run the loopback pairing script
-
-```bash
-swift scripts/mobile/verify-native-pairing.swift
-```
-
-| Check | Client sends | Server reply |
-|-------|--------------|--------------|
-| 1 | `{"type":"pairing","pin":"<correct>"}` | `{"type":"connected","deviceName":"…"}` |
-| 2 | `{"type":"heartbeat"}` | `{"type":"heartbeat_ack","ts":…}` |
-| 3 | wrong PIN on fresh socket | `{"type":"auth_failed",…}` then close |
-
-Exit `0` = pass. The script pairs PIN-only (no `deviceId`), so no token is issued — but the PIN is one-time
-and **rotates after check 1**; the script reads the current PIN from the Keychain on each run (or pass the
-new PIN as the argument), so simply run it again.
-
-### 3. Confirm Bonjour
-
-```bash
-dns-sd -B _llmide._tcp local.
-```
-
-## Manual pairing (iPhone)
-
-### Bonjour discovery
-
-- [ ] Mac appears in iOS app within ~3 s on same LAN
-- [ ] PIN prompt after tap
-- [ ] Tailscale IP works when both sides are on Tailscale
-
-### Correct PIN pairs
-
-- [ ] Mac log: `Client paired (device xxxxxxxx…)` followed by `Pairing PIN rotated`
-- [ ] Mac Settings: the PIN row and QR show a **new** PIN; the phone appears under **Paired devices** as “Connected now”
-- [ ] iOS shows **Live** and the three tabs **Chat / Project / Settings** (Project has Explorer / Auto Tasks / Loop)
-- [ ] QR scan auto-fills and pairs
-
-### Token reconnect, revoke, replace
-
-- [ ] Kill the iOS app and relaunch: it reconnects **without** a PIN prompt (token auth); Mac log `Client paired (device …)` with no PIN rotation
-- [ ] Mac Settings → Paired devices → **Revoke**: the phone shows the revoke message and lands on the pairing screen; its next connect attempt is refused (`auth_failed`, not retryable) until it pairs with the current PIN
-- [ ] Pair a second phone while the first is connected: the first shows “Another device paired with this Mac” and does not auto-reconnect; Mac log `Replacing previously paired client`
-- [ ] Stop Mobile Control on the Mac: the phone shows “Mobile Control was stopped on the Mac” and retries with backoff
-
-### Wrong PIN rejected
-
-- [ ] `auth_failed` then socket close
-- [ ] Mac log: `Wrong PIN — rejecting`
-
-### Heartbeat
-
-- [ ] The phone sends `heartbeat` every ~10 s and the Mac answers `heartbeat_ack`
-- [ ] The Mac drops the session after about 25 s without a heartbeat
-
-### Port fallback
-
-- [ ] With something already on `:3006`, Mobile Control still starts on the next free port; the QR and Bonjour use it and the phone pairs
-- [ ] With ports 3006 to 3015 all taken, the Mac shows "ports 3006–3015 all failed to bind"
-
-## Backend (Chat / Explorer chat)
-
-Pairing does not need `:3456`; chat features do.
-
-```bash
-curl http://127.0.0.1:3456/health
-```
-
-- [ ] `/health` returns ok
-- [ ] Mac **Settings → Backend** shows Running (or adopt external server)
-- [ ] iOS **Chat** sends a question and receives a streamed reply
-- [ ] Switch to the Mac's chat panel: the question and answer are in the same session (the Mac's session is the history)
-
-## Phone access switches, tiers and desktop confirmations
-
-Run each row once on a paired phone and record the result. Defaults are shown; a switch that is off must give
-the "Turned off on the Mac" message and must not advertise the screen.
-
-| # | Row | Expect |
-|---|---|---|
-| F1 | Every Phone access switch at its default (Settings → Mobile Control → Phone access) | on: Switch projects, Browse files, Source Control, Issues; everything else off |
-| F2 | Files with the switch off, then on | denied message, then a listing; no `.git`, secret or key file shown |
-| F3 | Issues, Source Control, Usage, Activity | read OK; Comment on issues off by default and refused until enabled |
-| F4 | **Auto Task run with the task disabled on the Mac** (turn **Auto Task control** on, leave Implement issues off, tap Run) | phone shows "turned off on your Mac" (`task_disabled`); nothing starts |
-| F5 | Run a read-only task that is enabled (Review code, Review doc, Review conflicts) | starts without a dialog |
-| F6 | **Implement issues enabled on the Mac, Run from the phone** | phone shows "Waiting for you to approve this on your Mac"; a Mac dialog names the task, project and issue numbers, default button Cancel; Cancel gives "You cancelled this on your Mac"; no answer for 120 s denies; Allow once starts it |
-| F7 | Review & merge from the phone | same dialog naming the branches and target; nothing is pushed without Allow once |
-| F7a | **Every registry T1/T2 task from the phone:** Source update, Sources to issues, Update issues, Loop engineering, Generate doc; Loop Start and Start stage; Doc Gen run | each shows a Mac dialog naming the task and project (T2: implement issues and review & merge show the exact issue ids or branches; a list over 20 says "and N more (total)"); Cancel, no answer (120 s) or busy refuses and nothing runs. The Swift tier table is pinned to `schema/bus/registry.json` by `PhoneApprovalPolicyTests` |
-| F7b | **Custom tasks are desktop-only (user decision 2026-10-31):** create a custom task on the Mac (Auto Tasks), then look at the iPhone Auto Task list and run screen | the phone does not list the custom task or its log; it cannot start or edit one (a stale or forged custom id is refused with `tier_refused`, no Mac dialog, nothing runs); the Mac still runs and edits it normally. The extension and phone cannot start `custom.run` on the bus either (403 `KIND_NOT_ALLOWED_FOR_CLIENT`). **Needs an on-device test; the iOS app was not rebuilt for this change** |
-| F7b | **Run all from the phone** | refused with "Run one task at a time from your phone" (`tier_refused`); the phone runs one named task at a time. Run all still works on the Mac |
-| F7c | Approve Implement issues, but add a pending issue (or a fix branch) on the Mac while the dialog is up | after Allow once, "What this would run changed ... Ask again"; nothing runs; ask again to see the new list |
-| F8 | Spam three Run requests quickly (any task ids: the limit is per Mac, not per task) | one dialog at a time; a fourth within 5 minutes gives "asked too often" |
-| F9 | **Template edit attempt** (in the phone's Auto Task setup, edit and save a template, change a task's folder or skill, flip a task's toggle) | each fails with "only available on your Mac" (`desktop_only`); the Mac's template and settings are unchanged; the phone still lists templates and settings |
-| F10 | **Tier refusals:** a message type the Mac does not know (a newer phone), and a desktop-only type | answered with a refusal (`unknown_type`, `desktop_only`) in the phone's error text, never a silent drop; the Mac log shows "Tier gate refused" |
-| F11 | Explorer chat edit switch on while the Mac chip is **Bypass** | the phone turn still asks before edits and shell commands (never Bypass) |
-| F12 | Tool approval relay (switch on) | the phone shows the tool, summary and the same file/diff/command the Mac card shows; only Allow once and Deny exist; a truncated change cannot be allowed from the phone |
-| F13 | Self-Heal apply/discard from the phone | Mac dialog naming incident, branch and checkout; refused while Self-Heal is off on the Mac |
-| F14 | Start a Loop from the phone, then flip the switch off or change project before it starts | refused with a reason; nothing starts |
-| F15 | Project switch from the phone while a loop, task or chat is running | refused with a reason |
-| F16 | Loop start, stop, single stage; Doc Gen run | per switch; results appear on the phone |
-| F17 | Lock the phone, wait, unlock; kill and relaunch the app; revoke then reconnect | reconnects by token; revoked phone gets `auth_failed` |
-| F18 | 5,000-message chat, 100,000-file project | not yet run; record the result |
-
-**S4 exit checklist row:** the phone chat idle-timeout (which sends Cancel) and the sticky approval-pause window in
-`LlmIdeChatStore.swift` are removed when the core's replay/detach (`chat.attach`) replaces them; until then they are
-unchanged and documented as temporary. On a Host API v1 connection the idle breaker uses the 960 s window from the start (Plan 4 decision 7).
+The unsigned `iphoneos` build in `.github/workflows/ios-ci.yml` proves the app compiles against the current
+SharedProtocol.
 
 ## Host API v1 from the iPhone app (deferred to the product stage)
 
-User decision 2026-11-04: these are run at the product stage and do not gate Plan 4 or Plan 6. v1 over `wss://` works against a host with TLS on (`LLMIDE_HOST_API_TLS=1` on the desktop, `HostApiV1.tlsEnabled` on the Mac); `ws://` is accepted for loopback only, so the Simulator can still use a DEBUG host started with `LLMIDE_HOST_API_DEV=1` and `LLMIDE_HOST_API_URL=ws://127.0.0.1:3016/host-api/v1` in the Xcode scheme.
+User decision 2026-11-04: these are run at the product stage. v1 over `wss://` works against a desktop started
+with `LLMIDE_HOST_API_TLS=1`; `ws://` is accepted for loopback only, so the Simulator can use a DEBUG host
+started with `LLMIDE_HOST_API_DEV=1` and `LLMIDE_HOST_API_URL=ws://127.0.0.1:3016/host-api/v1` in the Xcode
+scheme.
 
 | # | Check | Expected |
 |---|---|---|
-| H1 | Fresh pair over v1 by QR scan (a typed PIN pairs over v2, keeping any existing pin for that host) | Chat tab only; the Mac log shows a Host API v1 connection; Keychain holds `host-api-token` and the pinned `h1fp`; the PIN is gone |
-| H2 | Send, Stop, clear history, answer a question, Allow once or Deny a tool prompt | Same results as on v2, with no status lines during the turn |
-| H3 | Quit and relaunch the host with v1 off | The phone falls back to v2 within about 3 s only if it was never paired over v1; a v1-paired phone stays on v1 and shows `host_unreachable` |
+| H1 | Fresh pair by QR scan (desktop Settings → Mobile Control → Pair a phone or web client) | Status Live; Keychain holds `host-api-token` and the pinned `h1fp`; the PIN is gone; the desktop lists the phone under Paired devices |
+| H2 | Send, Stop, clear history, answer a question, Allow once or Deny a tool prompt | Each works; the reply streams into the Chat tab; no status lines during the turn |
+| H3 | Quit the desktop, then start it again | The phone shows "Couldn't reach the desktop. Retrying…", backs off, and reconnects by token |
 | H4 | Background the app for 1 minute, then return | It reconnects by token and the transcript reloads |
-| H5 | Remove the device on the Mac | The phone gets `auth_failed` and returns to pairing |
-| H6 | Release build, or no `LLMIDE_HOST_API_URL` and no v1 port advertised | v2 exactly as before (rows F1-F17) |
-| H7 | Reset the security identity on the Mac, then reconnect | `pin_mismatch`; credentials are kept; only a new QR scan or typed PIN replaces the pin |
-| H8 | Pair over `wss://` and compare the fingerprint with the host's Settings | They match; a host with another certificate is refused before any frame |
+| H5 | Revoke the device on the desktop | The phone gets `auth_failed` and returns to pairing |
+| H6 | Type a PIN for an address the phone never scanned | "Scan the pairing QR code…"; no socket opens |
+| H7 | Reset the desktop's security identity (new certificate), then reconnect | `pin_mismatch`; credentials are kept; only a new QR scan replaces the pin |
+| H8 | Pair over `wss://` and compare the fingerprint with the desktop's card | They match; a host with another certificate is refused before any frame |
+| H9 | Pair over Tailscale (QR `ip` is a `100.x` address), then use the phone off the home Wi-Fi | Connects with ATS on (`NSAllowsArbitraryLoads` false) |
+
+**S4 exit checklist row ("phone chat policy removed"):** the phone chat idle timeout (960 s, which sends Cancel)
+in `LlmIdeChatStore.swift` is removed when the core's replay/detach (`chat.attach`) replaces it; until then it
+is unchanged and documented as temporary (Plan 4 decision 7).
 
 ## Host API v1 reads from the iPhone app (user-run)
 
-Setup: the desktop host with `LLMIDE_HOST_API_READ=1` (plus the DEBUG setup in the section above), and an iPhone paired over v1 **after** the switch was on (a device paired before it must re-pair to get `read`). Plan: `docs/superpowers/plans/2026-11-05-host-api-v1-reads-ios.md`.
+Setup: the desktop with `LLMIDE_HOST_API_READ=1`, and an iPhone paired **after** the switch was on (a device
+paired before it must re-pair to get `read`). Plan: `docs/superpowers/plans/2026-11-05-host-api-v1-reads-ios.md`.
 
 | # | Check | Expected |
 |---|---|---|
-| F19 | Pair over v1 to a host serving `read` | Tabs: Chat, History, Settings. History lists the host's chats newest first; the phone chat row says "Live chat · on the Chat tab" and does not open |
-| F20 | Same host without `LLMIDE_HOST_API_READ`, or a device paired before it was on | No History tab; Settings has no "Usage & limits"; nothing calls `chat.sessions`, `chat.history` or `usage.get` (host log) |
-| F21 | v2 pairing to the Mac (rows F1-F17) | No History tab; Usage & limits, the permission chip and every v2 screen behave exactly as before |
+| F19 | Pair to a desktop serving `read` | Tabs: Chat, History, Settings. History lists the desktop's chats newest first; the phone chat row says "Live chat · on the Chat tab" and does not open |
+| F20 | Same desktop without `LLMIDE_HOST_API_READ`, or a device paired before it was on | No History tab (unless offline sync is on); Settings has no "Usage & limits"; nothing calls `chat.sessions`, `chat.history` or `usage.get` (host log) |
 | F22 | More than 50 chats: tap More chats repeatedly and quickly | Each tap adds one page with no duplicate rows; the button disappears at the end or at 500 chats |
 | F23 | Open a long chat, tap Show older until it goes away | Older messages appear above; the view keeps at most the newest 2,000; there is no composer, no Stop, no Clear |
 | F24 | Open chat A and immediately go back and open chat B | Only B's messages show; no error from A appears on B or on the list |
-| F25 | After reading chat B, send a message from the Chat tab | It goes to the phone chat (visible on the host's phone chat), never to B |
-| F26 | Usage strip and Settings → Usage & limits on v1 | Up to 3 meters on the strip, all on the full screen; no permission row or chip; numbers match the web client's Usage |
-| F27 | Turn `read` off on the host (restart without the switch) while History is open; also lose the network | History content clears and the app returns to Chat; on reconnect without `read` the tab stays hidden |
+| F25 | After reading chat B, send a message from the Chat tab | It goes to the phone chat (visible on the desktop's phone chat), never to B |
+| F26 | Usage strip and Settings → Usage & limits | Up to 3 meters on the strip, all on the full screen; numbers match the web client's Usage |
+| F27 | Turn `read` off on the desktop (restart without the switch) while History is open; also lose the network | History content clears and the app returns to Chat; on reconnect without `read` the tab stays hidden |
 | F28 | VoiceOver on: History list, usage strip, a chat; then Settings → Accessibility → Larger Text at the largest size | Each row is read as one element (title + time, meter name + detail, "You:" / "Assistant:" + text, "title, read-only"); message text grows and wraps with no clipping; chat titles may truncate (2 lines in the list, 1 in the header) |
+
+## Offline sync and direct reads (user-run)
+
+| # | Check | Expected |
+|---|---|---|
+| Y1 | Enroll from the desktop's Phone and web sync → Add a phone or browser, compare the 6-digit code | "Sync is on"; the snapshot appears in History with the desktop off |
+| Y2 | Queue a prompt with the desktop off, then start the desktop | The prompt is answered and the answer appears after the next refresh |
+| Y3 | Remove sync on the phone; revoke it on the desktop | The snapshot, queue and keys are gone from the phone; a revoked phone shows "This iPhone was removed from sync" |
+| Y4 | Settings → Box and GitLab: sign in, browse, open a file | Read-only listing and file view; tokens in the Keychain; nothing is written |
 
 ## Security
 
-```bash
-lsof -i :3006 -P
-lsof -i :3456 -P   # expect 127.0.0.1:3456
-security find-generic-password -s 'com.llmide.macapp' -a 'mobile::pin' -w
-```
+- [ ] Pairing token and certificate pin in the Keychain (`com.llmide.device-pin`, accounts `host-api-token`,
+  `host-api-pin`), this device only
+- [ ] App Transport Security on: `NSAllowsArbitraryLoads` false, `NSAllowsLocalNetworking` only for the
+  loopback dev listener (`ios_app/MyApp/Supporting/Info.plist`)
+- [ ] No plaintext link to any other host; Box and GitLab keep TLS 1.2 or later
 
-- [ ] PIN in Keychain (`com.llmide.macapp` / `mobile::pin`), not a plaintext file
-- [ ] Backend on loopback only
-- [ ] No cloud dependency for pairing
-- [ ] **Not encrypted:** the link is cleartext `ws://` (ATS fully open); see quick-start "Transport security" and the TLS design. Do not claim otherwise
+## Permissions
 
-## Permissions (companion mode)
-
-| Permission | Required for iPhone? | Notes |
-|------------|---------------------|-------|
-| iOS Local Network | Yes (Bonjour) | Prompt on first discovery |
-| macOS Screen Recording | **No** | Mac meeting capture only; optional |
-| macOS Accessibility | **No** | Mac caption capture only; optional |
-
-- [ ] iOS Local Network granted (if using Bonjour)
-
-## Troubleshooting
-
-### Port 3006 not listening
-
-Enable **and** Start Mobile Control; check `lsof -i :3006`.
-
-### Chat not responding
-
-- `curl http://127.0.0.1:3456/health`
-- Restart backend: `cd extension && node server.mjs`
-- Confirm logged in on Mac if backend requires auth
-
-## Continuous verification
-
-**Weekly:** loopback script + iPhone pair + Chat smoke test.
-
-**Monthly:** PIN still in Keychain; `cd ios_app/SharedProtocol && swift test`; `cd mac && swift build`.
-
----
-
-**Loopback:** `swift scripts/mobile/verify-native-pairing.swift`
+| Permission | Required? | Notes |
+|------------|-----------|-------|
+| Camera | For pairing | Scans the desktop's pairing and sync QR codes |
+| Local Network | For a LAN desktop | iOS asks on the first connect |
+| Microphone + Speech Recognition | No | Dictation only; on-device |
