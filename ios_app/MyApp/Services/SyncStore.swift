@@ -283,7 +283,7 @@ final class SyncStore: ObservableObject {
     }
 
     enum Keychain {
-        enum Item: String { case state = "device-state", keys = "device-keys", mega = "mega-session" }
+        enum Item: String { case state = "device-state", keys = "device-keys", mega = "mega-session", sourceConfig = "source-config", sourceTokens = "source-tokens" }
         private static func base(_ item: Item) -> [String: Any] {
             [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.llmide.sync", kSecAttrAccount as String: item.rawValue]
         }

@@ -18,6 +18,7 @@ struct MyAppApp: App {
     @StateObject private var filesStore: FilesStore
     @StateObject private var issuesStore: IssuesStore
     @StateObject private var syncStore: SyncStore
+    @StateObject private var sourceReadStore: SourceReadStore
 
     init() {
         // ConnectionService is created first; each feature store is wired to it
@@ -44,6 +45,7 @@ struct MyAppApp: App {
         _filesStore = StateObject(wrappedValue: FilesStore(connection: connection))
         _issuesStore = StateObject(wrappedValue: IssuesStore(connection: connection))
         _syncStore = StateObject(wrappedValue: SyncStore())
+        _sourceReadStore = StateObject(wrappedValue: SourceReadStore())
     }
 
     var body: some Scene {
@@ -65,6 +67,7 @@ struct MyAppApp: App {
                 .environmentObject(filesStore)
                 .environmentObject(issuesStore)
                 .environmentObject(syncStore)
+                .environmentObject(sourceReadStore)
         }
     }
 }

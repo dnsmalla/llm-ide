@@ -50,6 +50,8 @@
 		C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */; };
 		C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */; };
 		C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */; };
+		C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */; };
+		C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */; };
 		C2E0A1B2C3D4E5F6000000A4 /* SyncEnrollSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */; };
 		C2E0A1B2C3D4E5F6000000A6 /* SyncOfflineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */; };
 		C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */; };
@@ -117,8 +119,10 @@
 		C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeControlView.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadChatsView.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStore.swift; sourceTree = "<group>"; };
+		C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceReadStore.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEnrollSheet.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncOfflineViews.swift; sourceTree = "<group>"; };
+		C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceReadViews.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		D7E8F9A0B1C2D304E5F6A702 /* AutoTaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskView.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
@@ -229,6 +233,7 @@
 				C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */,
 				C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */,
 				C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */,
+				C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */,
 				A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */,
 				A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */,
 				A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */,
@@ -272,6 +277,7 @@
 			isa = PBXGroup;
 			children = (
 				C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */,
+				C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */,
 				B756102E665E3C684611EF8D /* IssuesStore.swift */,
 				B7404713EF12A5B94AC7E89B /* FilesStore.swift */,
 				B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */,
@@ -396,8 +402,10 @@
 				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
 				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */,
+				C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A4 /* SyncEnrollSheet.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A6 /* SyncOfflineViews.swift in Sources */,
+				C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */,
 				B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */,
 				A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */,
 				A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */,
