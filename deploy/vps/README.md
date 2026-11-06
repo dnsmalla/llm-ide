@@ -205,9 +205,12 @@ curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
 The relay unit runs inside `llmide-accounts` and is **off** (`ACCOUNTS_RELAY` unset). It must stay unreachable
 from the internet until the external security review (relay design D9, gate G-EXT) is complete and its findings are
 resolved or accepted in writing. Do **not** add a `location /relay/` block to `accounts.llm-ide.com.nginx` and do
-not set `ACCOUNTS_RELAY=1` on this host before then. Local and private-network testing only:
+not set `ACCOUNTS_RELAY=1` on this host before then. Since ADR 0020 the relay is retired and parked; local
+testing only:
 
-    ACCOUNTS_RELAY=1 ACCOUNTS_ALLOWED_WEB_ORIGINS=http://localhost:5173 node bin/account-service.mjs
+```bash
+ACCOUNTS_RELAY=1 ACCOUNTS_ALLOWED_WEB_ORIGINS=http://localhost:5173 node bin/account-service.mjs
+```
 
 The relay forwards ciphertext only, makes no LLM call, runs no code and makes no outbound connection. The core's
 loopback bridge is `/host-api/relay-bridge` and is private to the bus host proof.

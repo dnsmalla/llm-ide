@@ -44,7 +44,7 @@ for one trusted machine and cannot become a public identity service.
 4. **Sign-in is email plus passkey.** Email is verified by a single-use 15-minute link
    (hash stored); after setup, sign-in is passkey only; the email link is the
    lost-passkey fallback and signs out every other session.
-5. **Access to data needs the desktop.** A device that signed in is only *pending*; the
+5. **Access to data needs the desktop.** A device that signed in is only _pending_; the
    desktop approves it after the user compares a 6-digit code computed over both sides'
    keys with a commitment, then sends a signed, tier-limited key wrap through the relay.
    One desktop per account in v1; replacing it needs a fresh passkey check and unlinks
