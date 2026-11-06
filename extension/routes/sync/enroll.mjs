@@ -13,6 +13,7 @@ const CLAIM_RE = /^[A-Za-z0-9_-]{22}\.bin$/;
 const ACK = 'ack.bin';
 const ORIGIN_RE = /^(https:\/\/[A-Za-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:[0-9]{1,5})?$/;
 const pending = new Map(); // userId -> enrollment
+const starting = new Map(); // userId -> the start in flight; starts run one at a time so none is left orphaned
 const codeErr = (code) => Object.assign(new Error(code), { code });
 const envBytes = (env) => Buffer.from(JSON.stringify(env));
 const slotDir = (p) => `${p.pair.sid}/e/${p.pair.slot}`;
@@ -38,7 +39,15 @@ const view = (p) => ({ phase: p?.phase === 'pinning' ? 'waiting' : p?.phase ?? '
 
 export function _resetEnrollmentsForTest() { for (const p of pending.values()) wipe(p); pending.clear(); }
 
-export async function startEnrollment(userId, { store, tier, now = Date.now(), env = process.env }) {
+export function startEnrollment(userId, opts) {
+  const run = (starting.get(userId) ?? Promise.resolve()).catch(() => {}).then(() => startOne(userId, opts));
+  starting.set(userId, run);
+  const done = () => { if (starting.get(userId) === run) starting.delete(userId); };
+  run.then(done, done);
+  return run;
+}
+
+async function startOne(userId, { store, tier, now = Date.now(), env = process.env }) {
   if (tier !== 'web' && tier !== 'ios') throw codeErr('VALIDATION_FAILED');
   const state = getSyncState(userId);
   if (!state?.enabled) throw codeErr('SYNC_OFF');
@@ -82,6 +91,7 @@ async function take(userId, p, now) {
   try {
     await p.store.put(`${slotDir(p)}/${ACK}`, envBytes(sealAck({ userId, pair: p.pair, tier: p.tier, claim, nD, keys: p.keys, signingKey: desk.signingKey, seq: nextSeq(userId, now), issuedAt: now })));
   } catch { nD.fill(0); return alive() ? kill(p, 'store') : undefined; }
+  p.acked = true; // from here a throw must kill the slot: going back to waiting would ack the same claim twice
   if (!alive()) { nD.fill(0); await p.store.removeTree(slotDir(p)).catch(() => {}); return; } // killed while uploading
   p.sas = sasCode(p.keys.sas, { ...p.pair, tier: p.tier, ...claim, nD });
   p.claim = { ...claim, file: f.name };
@@ -96,7 +106,9 @@ export async function pollEnrollment(userId, { now = Date.now() } = {}) {
   try {
     await withUserLock(userId, async () => {
       if (p.phase === 'waiting') {
-        try { await take(userId, p, now); } finally { if (p.phase === 'pinning') p.phase = 'waiting'; }
+        try { await take(userId, p, now); }
+        catch (e) { if (p.acked) await kill(p, 'store'); throw e; }
+        finally { if (p.phase === 'pinning') p.phase = 'waiting'; }
       } else if (p.phase === 'confirm') {
         if (now > p.claimAt + ENROLL.confirmMs) await kill(p, 'expired');
         else if ((await claimFiles(p)).some((f) => f.name !== p.claim.file)) await kill(p, 'contested');

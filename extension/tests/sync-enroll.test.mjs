@@ -118,3 +118,34 @@ test('cancel and a new start both clean up the old slot; enrollment needs sync o
   await assert.rejects(startEnrollment(u, { store, tier: 'ios', now: T }), (e) => e.code === 'SYNC_OFF');
   await assert.rejects(startEnrollment(u, { store, tier: 'android', now: T }), (e) => e.code === 'VALIDATION_FAILED');
 });
+
+test('a throw after the ack is uploaded kills the slot; it never goes back to waiting (review SP2-SP3 Minor)', async () => {
+  const { u, store, sid } = setup();
+  let acked = false;
+  const wrapped = Object.assign(Object.create(store), {
+    async put(p, b) { await store.put(p, b); if (p.endsWith('/ack.bin')) acked = true; },
+    async list(d) {
+      return (await store.list(d)).map((f) => ({ size: f.size, get name() { if (acked) throw new Error('boom'); return f.name; } }));
+    },
+  });
+  const { qr } = await startEnrollment(u, { store: wrapped, tier: 'ios', now: T });
+  const pair = E.parsePair(qr);
+  await createReferenceDevice().scanAndClaim(store, qr, { now: T });
+  await assert.rejects(pollEnrollment(u, { now: T + 1000 }), /boom/);
+  acked = false;
+  assert.equal((await pollEnrollment(u, { now: T + 1100 })).phase, 'failed');
+  assert.equal(await store.get(`${sid}/d/${pair.dir}/key.bin`), null);
+  assert.deepEqual(await store.list(`${sid}/e/${pair.slot}`), []);
+});
+
+test('two simultaneous starts leave one live enrollment and no orphan key.bin (review SP2-SP3 Minor)', async () => {
+  const { u, store, sid } = setup();
+  await startEnrollment(u, { store, tier: 'ios', now: T });
+  const [a, b] = await Promise.all([startEnrollment(u, { store, tier: 'ios', now: T }), startEnrollment(u, { store, tier: 'ios', now: T })]);
+  const keyBins = [...store.dump()].map(([p]) => p).filter((p) => p.startsWith(`${sid}/d/`) && p.endsWith('/key.bin'));
+  assert.equal(keyBins.length, 1, 'only the live enrollment keeps a key.bin');
+  const live = [a, b].filter((r) => keyBins[0] === `${sid}/d/${E.parsePair(r.qr).dir}/key.bin`);
+  assert.equal(live.length, 1);
+  await createReferenceDevice().scanAndClaim(store, live[0].qr, { now: T });
+  assert.equal((await pollEnrollment(u, { now: T + 1000 })).phase, 'confirm', 'the live QR can be confirmed');
+});
