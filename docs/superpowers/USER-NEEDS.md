@@ -53,7 +53,7 @@ Open count: 52 open, 42 done, 94 total
   - Effort: 60 minutes. Blocks: Phase 3 exit, any Windows work. Status: not run.
 - [ ] **UN-010** Grant Accessibility to measure caption read cadence.
   - Why you: a macOS permission dialog only you can approve.
-  - How: System Settings > Privacy & Security > Accessibility > allow the app, then run the cadence measurement in the Phase 0 report. Optional: a Swift cold-start comparison.
+  - How: System Settings > Privacy & Security > Accessibility > allow the app, then run the cadence measurement in the Phase 0 report.`` (delete)
   - Effort: 5 minutes. Blocks: Phase 3 exit measurement. Status: not run.
 - [ ] **UN-011** Token bench go-ahead, plumbing and cheap sanity run.
   - Why you: runs count against your plan limits and need your `claude` login.
@@ -89,7 +89,7 @@ Open count: 52 open, 42 done, 94 total
   - Effort: 5 minutes. Blocks: nothing. Status: not installed.
 - [ ] **UN-019** Clean up stale processes before starting the apps, if any remain.
   - Why you: agents never kill processes.
-  - How: list with `ps -axo pid,etime,command | grep -E 'server.mjs|node --test|swift-test' | grep -v grep`; port holders with `lsof -nP -iTCP:3456 -sTCP:LISTEN` and `lsof -nP -iTCP:3457 -sTCP:LISTEN`; then `kill <pid>` for ones you recognise. Do not kill the backend while the Swift app is in use. Details: [test-hangs.md](../how-to/test-hangs.md#stale-leftover-processes). You already did one clean-up (section E); re-check before UN-001 because the Tauri app adopts a 3456 core as "unverified".
+  - How: list with `ps -axo pid,etime,command | grep -E 'server.mjs|node --test' | grep -v grep`; port holders with `lsof -nP -iTCP:3456 -sTCP:LISTEN` and `lsof -nP -iTCP:3457 -sTCP:LISTEN`; then `kill <pid>` for ones you recognise. Do not kill the core while the desktop app is in use. Details: [test-hangs.md](../how-to/test-hangs.md#stale-leftover-processes). You already did one clean-up (section E); re-check before UN-001 because the Tauri app adopts a 3456 core as "unverified".
   - Effort: 5 minutes. Blocks: a clean UN-001 and UN-004. Status: re-check before the first run.
 - [ ] **UN-020** After each push, check CI.
   - Why you: your remote; agents are told not to push.
@@ -106,14 +106,14 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Source: [Issues and Gantt plan section 13](plans/2026-10-31-issues-gantt-core-plan.md). Recommended: (a) with (b), overlay only, yes. If you wait: IC0 cannot start, so the Issues and Gantt screens wait.
 - [ ] **UN-032** Auto Tasks T1 to T6: remove generateKnowledge, generateDoc, updatePlanStatus after UN-003 shows zero runs; fold the five merges with an alias table; template save, config set and toggle desktop-only; phone starts implement or ship only through desktop approval; `--yolo` not the default for codex and gemini; write tasks on a bare API key only if you need it.
   - Source: [Auto Tasks audit section 8](plans/2026-10-31-auto-tasks-audit.md). Recommended: the answers in the table; confirm T6 (do you need API-key-only write tasks, or is login enough). If you wait: the Node port keeps all 13 tasks. Depends on UN-003.
-- [ ] **UN-033** Command bus Q2 to Q6: interim Swift fixes (several shipped); explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
+- [ ] **UN-033** Command bus Q2 to Q6: `` (delete)explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
   - Source: [command bus spec section 11](plans/2026-10-31-command-bus-spec.md). Recommended: yes to all. If you wait: S2 and S6 scope stays fuzzy.
 - [ ] **UN-034** Mobile TLS Q1 to Q4: ship TLS before the bus; one release of cleartext fallback; "Reset security identity" as the only rotation; keep `NSAllowsLocalNetworking` for one release.
   - Source: [TLS design section 10](plans/2026-10-31-mobile-tls-pinning-design.md). Recommended: yes to all. If you wait: the cleartext link and open ATS stay.
-- [ ] **UN-035** Phase 5 macOS plan: 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after); approve the one Swift addition for the Live capture helper; Windows then Linux order.
-  - Source: [Phase 5 plan section 15 items 1 and 2](plans/2026-10-31-tauri-phase5-macos-plan.md). Recommended: yes to all three. If you wait: Live capture and 3D graph work cannot be scheduled.
-- [ ] **UN-036** Phase 3 plan: desktop chat store (same file format, use the Mac app's `sessions/` in place with a lock file on macOS); confirm the Swift feature freeze and its exceptions; run the Windows measurement in week 1 of Phase 3 (see UN-009); a deferred row for Source Control hosted actions.
-  - Source: [Phase 3 plan section 12](plans/2026-10-31-tauri-phase3-plan.md). Recommended: yes to all. If you wait: the freeze stays "inferred" and the chat store is undecided.
+- [ ] **UN-035** Phase 5 macOS plan: 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after)`` (delete); Windows then Linux order.
+  - Source: [Phase 5 plan section 15 items 1 and 2](plans/2026-10-31-tauri-phase5-macos-plan.md). Recommended: yes to both. If you wait: the 3D graph and the Windows/Linux order cannot be scheduled.
+- [ ] **UN-036** Phase 3 plan: desktop chat store (same file format, in the desktop's own data dir); run the Windows measurement in week 1 of Phase 3 (see UN-009); a deferred row for Source Control hosted actions.
+  - Source: [Phase 3 plan section 12](plans/2026-10-31-tauri-phase3-plan.md). Recommended: yes to all. If you wait: the chat store is undecided.
 - [ ] **UN-037** Phase 7 desktop control Q3, Q5, Q8, Q9: terminals and shell apps denied in the first release; grant lifetimes 15 minutes default, 4 hours maximum, 5 minutes idle; offer the sign-in handoff `ask_user`; review the shared clause together with the relay and the driver separately.
   - Source: [Phase 7 design section 12.2](plans/2026-10-31-phase7-desktop-control-design.md). Recommended: yes to all. If you wait: nothing is built before the spike; the defaults stay provisional.
 - [ ] **UN-038** Relay X1 and X2: no password at the relay (account bound to the desktop's signing key; say so if you want an extra login factor), and book the external security review during R0.
@@ -129,12 +129,12 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 - [ ] **UN-043** Tauri feature-off mechanism: build-time tree-shake plus runtime `/health features`.
   - Source: kit plan "Gates added". Recommended: yes, both.
 - [ ] **UN-044** Pin the Chrome extension origin instead of accepting every `chrome-extension://*` (ROADMAP Q22).
-  - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent; it goes in `extension-ids.json` in the server's data dir (Mac: `~/Library/Application Support/llm-ide/system/`; desktop: `~/Library/Application Support/llm-ide-desktop/core/`), then restart the server. Effort: 2 minutes. Status: mechanism built 2026-11-05. You have not installed the extension yet (2026-11-05), so there is no id and nothing to pin; without the file the server accepts any extension, as before. Do it when you load it unpacked (`extension/dist`, id shown on `chrome://extensions`) or publish it (store id; the manifest `key` route fits then, with no old local data to lose).
+  - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent; it goes in `extension-ids.json` in the server's data dir (`~/Library/Application Support/llm-ide-desktop/core/` on macOS), then restart the server. Effort: 2 minutes. Status: mechanism built 2026-11-05. You have not installed the extension yet (2026-11-05), so there is no id and nothing to pin; without the file the server accepts any extension, as before. Do it when you load it unpacked (`extension/dist`, id shown on `chrome://extensions`) or publish it (store id; the manifest `key` route fits then, with no old local data to lose).
 - [ ] **UN-045** Flag-off `no-ack` capture retention (up to 50 captures) until the ack protocol is on by default.
   - Source: [extension storage audit](plans/2026-10-31-extension-storage-audit.md). Recommended: accept for now, turn the ack default on after the real-meeting check (UN-016).
 - [x] **UN-046** Status audit decisions: write the missing connector-catalog spec and schedule catalog phase 3 and a real Miro run; close the 51 private-wrapper decode-lab skips before more Mac routes switch. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
   - Source: [status audit](plans/2026-10-31-status-audit.md). Recommended: yes to both, in that order.
-- [ ] **UN-047** Automation-kit A5 and capture-kit C2: may a repair outside a loop's scope be approved from the phone (recommended: Mac only), and retire `/extract-entities` after UN-040 Q5.
+- [ ] **UN-047** Automation-kit A5 and capture-kit C2: may a repair outside a loop's scope be approved from the phone (recommended: desktop only), and retire `/extract-entities` after UN-040 Q5.
   - Source: [automation-kit section 7](../kits/automation-kit.md), [capture-kit section 7](../kits/capture-kit.md).
 - [ ] **UN-048** Docs-kit open items 10 and 11: comment drift fix and whether other kits may name docs-kit data types.
   - Source: [docs-kit section 7](../kits/docs-kit.md). Recommended: data types yes, seams for services.
@@ -146,8 +146,6 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
   - Why you: your money and your account. Recommended: yes before any team use.
 - [ ] **UN-052** Real-corpus checks: platform-less note count, hidden-note semantics, iCloud placeholders (ROADMAP Loose ends).
   - Why you: reads your real notes, which agents must not. How: run the count commands the ROADMAP Loose ends list gives and report numbers only. Effort: 15 minutes.
-
-Desktop Live capture plan 2026-11-05 assumes no Swift helper; approving it changes only that plan's Task 5.
 
 ## C. Delegated decisions (revisit if wrong)
 
@@ -167,8 +165,8 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 ## D. Later needs (not now; each has a trigger)
 
 - [x] **UN-110** Mac auto-update keys: run Sparkle's `generate_keys` on your Mac (the private key stays in your Keychain, never in the repo or CI), then add GitHub secrets `MAC_SU_PUBLIC_KEY` (the public half) and `MAC_SU_FEED_URL` (the appcast address; GitHub Releases works, no domain needed), then one signed build-to-build update. Trigger: the first Mac release you give to anyone else; until then a CI release refuses to build without them (decided 2026-11-05, security first: no long-lived signing key before it is needed). How: [release-with-auto-update](../how-to/release-with-auto-update.md). Effort: 30 minutes. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
-- [ ] **UN-070** Windows and Linux full passes (build, signing, packaging, manual check). Trigger: the macOS Tauri app reaches parity and daily use. Effort: a day per OS.
-- [ ] **UN-071** macOS signing and notarisation credentials for the desktop release. Trigger: before the first public desktop release. How: [desktop-release.md, One-time setup](../how-to/desktop-release.md#2-one-time-setup). The seven existing `MAC_*` secrets (shared with `mac-release.yml`) are reused: nothing new if they are set.
+- [ ] **UN-070** Windows and Linux full passes (build, signing, packaging, manual check). Trigger: the macOS Tauri app reaches daily use. Effort: a day per OS.
+- [ ] **UN-071** macOS signing and notarisation credentials for the desktop release. Trigger: before the first public desktop release. How: [desktop-release.md, One-time setup](../how-to/desktop-release.md#2-one-time-setup). The seven existing `MAC_*` GitHub secrets are reused: nothing new if they are set.
 - [x] **UN-072** Windows signing: decided unsigned 2026-11-05 (no paid certificate); Linux formats decided (deb + AppImage). Windows signing stays built behind the `windows_signed` dispatch input and the six `DESKTOP_WIN_*` secrets, never needed by a tag release. To reverse: [desktop-signing-decisions.md, decision 2](../how-to/desktop-signing-decisions.md#2-windows-signing) (Azure Artifact Signing if eligible: organisations in US/CA/EU/UK with 3+ years of history, individuals in US/CA; otherwise OV in a cloud HSM). Status: closed by decision.
 - [ ] **UN-114** Real-run checklist per OS on the first draft desktop release.
   - Why you: needs the machines and your eyes.
