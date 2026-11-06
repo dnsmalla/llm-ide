@@ -208,16 +208,9 @@ entries rely on normal filesystem access.
 
 Per-OS caveats:
 
-- **Linux**: the tray needs `libayatana-appindicator3` (runtime) and its `-dev` package at
-  build time; CI owner: add `libayatana-appindicator3-dev` to the apt step of
-  `desktop-ci.yml` (not edited here). GNOME needs the AppIndicator extension, otherwise
-  the tray is absent and the app runs without it (close-to-tray then stays off). Tray
-  menus do not receive left-click events on most Linux hosts. Notifications use D-Bus.
-- **Windows**: notifications from an unpackaged exe show under the exe's name; an
-  installed (NSIS) build with an AppUserModelID is needed for correct attribution.
-- **macOS**: the first `notify` triggers the system permission prompt; the menu-bar icon
-  is a color icon unless a template image is supplied (icon polish open).
-
+- **Linux**: the tray needs `libayatana-appindicator3-1` (a deb dependency; the `-dev` package is in every CI apt step). GNOME needs the AppIndicator extension, otherwise the tray is absent, the app runs without it (close-to-tray stays off), and Settings > General > Notifications says so. Tray menus do not receive left-click events on most Linux hosts. Notifications use D-Bus; without a notification daemon they are dropped silently.
+- **Windows**: notifications from an unpackaged exe show under the exe's name; an installed (NSIS) build with an AppUserModelID is needed for correct attribution.
+- **macOS**: the first notification triggers the system permission prompt; the lock screen shows the app name only unless the user allows previews. Clicking a notification activates the app; the Dock reopen handler shows a window hidden to the tray. The menu-bar icon is a color icon unless a template image is supplied (icon polish open).
 ## Host prefs, neutral folder pick and trust confirmation
 
 **`prefs.json`** (`src-tauri/src/prefs.rs`, `get_prefs` / `set_prefs`). Bounded (16 KB), atomic, 0600, in the
