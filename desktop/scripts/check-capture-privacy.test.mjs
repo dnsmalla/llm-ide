@@ -16,6 +16,9 @@ test("no audio or screen-capture dependency or API", () => {
   for (const crate of ["cpal", "coreaudio", "rodio", "screencapturekit", "xcap", "scap", "nokhwa", "AVFoundation"]) assert.equal(cargo.includes(crate), false, `Cargo.toml must not depend on ${crate}`);
   for (const f of rustFiles) { const src = read(join("src", f)); for (const api of ["AVCapture", "AVAudio", "AudioQueue", "AudioUnit", "SCStream", "CGDisplayStream", "CGWindowListCreateImage", "NSSpeechRecognizer"]) assert.equal(src.includes(api), false, `${f} must not use ${api}`); }
 });
-test("capture modules never print caption text", () => {
-  for (const f of rustFiles.filter((n) => n.startsWith("capture_"))) { const src = read(join("src", f)).split("#[cfg(test)]")[0]; for (const l of src.split("\n").filter((l) => /\b(e?print(ln)?|dbg)!\s*\(/.test(l))) assert.equal(/speaker|text|value|caption|row/.test(l), false, `${f}: ${l.trim()}`); }
+// Every macro that can reach a log, the terminal or a crash report: print/dbg, log/tracing levels, panic and friends.
+const LOGGING = /\b(e?print(ln)?|dbg|panic|unreachable|todo|unimplemented|trace|debug|info|warn|error)!\s*\(/;
+test("capture modules never print or log caption text", () => {
+  assert.ok(LOGGING.test("log::warn!(") && LOGGING.test("tracing::info!(") && LOGGING.test("panic!("), "the guard covers log, tracing and panic");
+  for (const f of rustFiles.filter((n) => n.startsWith("capture_"))) { const src = read(join("src", f)).split("#[cfg(test)]")[0]; for (const l of src.split("\n").filter((l) => LOGGING.test(l))) assert.equal(/speaker|text|value|caption|row/.test(l), false, `${f}: ${l.trim()}`); }
 });
