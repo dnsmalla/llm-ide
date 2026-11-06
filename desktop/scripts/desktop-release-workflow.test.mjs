@@ -39,3 +39,10 @@ test('permissions default to read; nothing but publish can write', () => {
   const wf = rel();
   assert.match(wf, /^permissions:\s*\n\s+contents: read/m);
 });
+
+test('the Windows step re-checks the installed core for the SDK binary before smoke-app', () => {
+  const wf = rel();
+  const i = wf.indexOf('verify-installed-core.mjs');
+  assert.ok(i > 0);
+  assert.ok(i < wf.indexOf('smoke-app.mjs', wf.indexOf('(Windows)')));
+});

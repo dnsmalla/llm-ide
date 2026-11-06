@@ -123,6 +123,8 @@ jobs:
           $setup = Get-ChildItem "$env:BUNDLE/nsis/*-setup.exe" | Select-Object -First 1
           Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/S'
           $dir = Join-Path $env:LOCALAPPDATA 'LLM-IDE'
+          node desktop/scripts/verify-installed-core.mjs (Join-Path $dir 'core')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           $exe = Get-ChildItem "$dir/*.exe" | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
           node desktop/scripts/smoke-app.mjs $exe.FullName
           if ($LASTEXITCODE -ne 0) { exit 1 }
