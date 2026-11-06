@@ -1,0 +1,8 @@
+{
+  "endpoint": "POST /kb/sync/box/poll",
+  "status": 200,
+  "response": {
+    "phase": "failed",
+    "code": "cancelled"
+  }
+}

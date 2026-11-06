@@ -8133,6 +8133,38 @@ export type PostKbSyncSftpRequest = {
 
 export type PostKbSyncSftpResponse200 = EncryptedSyncStatus;
 
+/** Request parts for `POST /kb/sync/box/start` (schema/http/sync.schema.json). */
+export type PostKbSyncBoxStartRequest = {
+  body: {
+    clientId: string;
+    clientSecret: string;
+    folder?: string;
+  };
+};
+
+export type PostKbSyncBoxStartResponse200 = {
+  authorizeUrl?: string;
+};
+
+/** Request parts for `POST /kb/sync/box/poll` (schema/http/sync.schema.json). */
+export type PostKbSyncBoxPollRequest = Record<string, never>;
+
+export type PostKbSyncBoxPollResponse200 = {
+  phase?: "none" | "waiting" | "done" | "failed";
+  code?: string | null;
+};
+
+/** Request parts for `GET /kb/sync/box/callback` (schema/http/sync.schema.json). */
+export type GetKbSyncBoxCallbackRequest = {
+  query: {
+    code?: string;
+    state?: string;
+    error?: string;
+  };
+};
+
+export type GetKbSyncBoxCallbackResponse200 = string;
+
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
   "GET /kb/storage": {
@@ -10518,6 +10550,24 @@ export interface ApiEndpoints {
     request: PostKbSyncSftpRequest;
     responses: {
       200: PostKbSyncSftpResponse200;
+    };
+  };
+  "POST /kb/sync/box/start": {
+    request: PostKbSyncBoxStartRequest;
+    responses: {
+      200: PostKbSyncBoxStartResponse200;
+    };
+  };
+  "POST /kb/sync/box/poll": {
+    request: PostKbSyncBoxPollRequest;
+    responses: {
+      200: PostKbSyncBoxPollResponse200;
+    };
+  };
+  "GET /kb/sync/box/callback": {
+    request: GetKbSyncBoxCallbackRequest;
+    responses: {
+      200: GetKbSyncBoxCallbackResponse200;
     };
   };
 }

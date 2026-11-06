@@ -14294,6 +14294,86 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/sync/box/callback:
+    get:
+      tags:
+        - "sync"
+      parameters:
+        - name: "code"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "error"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            text/plain:
+              schema:
+                type: "string"
+  /kb/sync/box/poll:
+    post:
+      tags:
+        - "sync"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  phase:
+                    type: "string"
+                    enum:
+                      - "none"
+                      - "waiting"
+                      - "done"
+                      - "failed"
+                  code:
+                    type:
+                      - "string"
+                      - "null"
+  /kb/sync/box/start:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "clientId"
+                - "clientSecret"
+              properties:
+                clientId:
+                  type: "string"
+                clientSecret:
+                  type: "string"
+                folder:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  authorizeUrl:
+                    type: "string"
   /kb/sync/devices/enroll:
     post:
       tags:

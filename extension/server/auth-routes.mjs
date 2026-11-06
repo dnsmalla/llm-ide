@@ -43,12 +43,7 @@ function mcpPublicMessage(err) {
 // Shared OAuth-callback HTML response — both Google and Slack redirect here
 // after consent. A single copy so this HTML-escaping (a security control)
 // can't silently drift between the two provider callbacks.
-function oauthCallbackHtml(res, msg, status = 200) {
-  const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-  res.writeHead(status, { 'Content-Type': 'text/html' });
-  res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
-}
-import { send, readJson, clientIp, safeAudit, publicMessageFor } from './route-http.mjs';
+import { send, readJson, clientIp, safeAudit, publicMessageFor, oauthCallbackHtml } from './route-http.mjs';
 import { dropAllHeldSecretsForUser } from './review-secrets.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { getUserPrefs, setUserPrefs, revokeJti } from '../kb/db.mjs';

@@ -512,6 +512,8 @@ const ALL_ENDPOINTS = [
   '/kb/sync/status',
   '/kb/sync/mega',
   '/kb/sync/sftp',
+  '/kb/sync/box/poll',
+  '/kb/sync/box/start',
   '/kb/sync/test',
   '/kb/sync/enabled',
   '/kb/sync/publish',

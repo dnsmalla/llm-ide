@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/sync/box/start",
+  "status": 200,
+  "request": {
+    "body": {
+      "clientId": "cid0123456789abcdef",
+      "clientSecret": "csec0123456789abcdef",
+      "folder": "llmide-sync"
+    }
+  },
+  "response": {
+    "authorizeUrl": "https://account.box.com/api/oauth2/authorize?response_type=code&client_id=cid0123456789abcdef"
+  }
+}

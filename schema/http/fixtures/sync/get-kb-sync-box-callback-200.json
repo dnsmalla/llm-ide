@@ -1,0 +1,12 @@
+{
+  "endpoint": "GET /kb/sync/box/callback",
+  "status": 200,
+  "request": {
+    "query": {
+      "code": "x",
+      "state": "nope",
+      "error": "access_denied"
+    }
+  },
+  "response": "<!doctype html><meta charset=utf-8><body><p>This Box sign-in link has expired.</p></body>"
+}

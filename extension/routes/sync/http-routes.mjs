@@ -1,17 +1,20 @@
 // /kb/sync/* for the desktop Settings card: JWT + bus host proof (desktop UI only), per user. Never returns the MEGA
 // password, the full MEGA email, the SSH private key, the root key or a folder capability; errors carry codes, never secrets.
-import { send, readJson } from '../../server/route-http.mjs';
+import { send, readJson, oauthCallbackHtml } from '../../server/route-http.mjs';
+import { config } from '../../core/config.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
-import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice } from '../../kb/sync-state.mjs';
+import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice, forgetSyncDevices } from '../../kb/sync-state.mjs';
 import { DEFAULT_SFTP_ROOT, DEFAULT_SFTP_USER, DEFAULT_WEB_HOST, generateSyncSshKey, parseHostFingerprint, validateSftpConfig } from '../../connectors/sync-store/sftp.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
-import { existingSigningFingerprint } from './keys.mjs';
+import { DEFAULT_BOX_FOLDER, validateBoxConfig } from '../../connectors/sync-store/box.mjs';
+import { existingSigningFingerprint, rotateKeys } from './keys.mjs';
 import { storeFor as defaultStoreFor, dropStore, publishNow, rotateNow, rotationPending, withUserLock } from './scheduler.mjs';
 import { randomBytes } from 'node:crypto';
 import { startEnrollment, pollEnrollment, confirmEnrollment, cancelEnrollment } from './enroll.mjs';
 import { revokeDevice } from './registry.mjs';
+import { startBoxConnect, pollBoxConnect, finishBoxConnect } from './box-connect.mjs';
 
 const sftpView = (c) => ({ host: c.host, port: c.port, username: c.username, hostFingerprint: c.hostFingerprint, webHost: c.webHost, publicKey: c.publicKey });
 /** Another storage kind is a place linked devices cannot follow (their pairing named the old one): drop a pending
@@ -39,16 +42,35 @@ function status(userId) {
   if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], rotationPending: false, lastPublishAt: null, lastError: null };
   return {
     configured: true, enabled: s.enabled, storeKind: s.storeKind,
-    store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : s.storeKind === 'sftp' ? sftpView(s.storeConfig) : null,
+    store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : s.storeKind === 'sftp' ? sftpView(s.storeConfig) : s.storeKind === 'box' ? { folder: s.storeConfig.folder ?? DEFAULT_BOX_FOLDER, account: s.storeConfig.account ?? '' } : null,
     syncId: s.syncId, epoch: s.epoch, signingFingerprint: existingSigningFingerprint(userId),
     devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: d.dir.slice(0, 6) })),
     rotationPending: rotationPending(userId), lastPublishAt: s.lastPublishAt, lastError: s.lastError,
   };
 }
 
+async function commitBox(userId, c, { storeFor }) {
+  const db = getDb();
+  const before = getSyncState(userId);
+  if (before && before.storeKind !== 'box') {
+    const old = storeFor(userId);
+    if (old) await withUserLock(userId, () => old.removeTree(before.syncId)).catch(() => {});
+  }
+  await cancelEnrollment(userId).catch(() => {});
+  await dropStore(userId);
+  setSecret(db, userId, 'sync.boxClientSecret', c.clientSecret);
+  setSecret(db, userId, 'sync.boxRefreshToken', c.refreshToken);
+  ensureSyncState(userId, { storeKind: 'box', storeConfig: { clientId: c.clientId, folder: c.folder, account: c.account } });
+  if (before && before.storeKind !== 'box') { resetSyncPublish(userId); if (forgetSyncDevices(userId) > 0) rotateKeys(userId); }
+}
+
 export async function handleSyncRoute(req, res, { deps = {}, env = process.env } = {}) {
   const storeFor = deps.storeFor ?? defaultStoreFor;
   const path = String(req.url || '').split('?')[0];
+  if (req.method === 'GET' && path === '/kb/sync/box/callback') {
+    const text = await finishBoxConnect(new URL(req.url, 'http://127.0.0.1').searchParams, { port: config.port, fetchImpl: deps.fetchImpl, commit: (uid, c) => commitBox(uid, c, { storeFor }) });
+    oauthCallbackHtml(res, text); return true;
+  }
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
   const userId = req.user?.id;
   if (!userId) return fail(res, 401, 'UNAUTHORIZED', 'Sign in first');
@@ -95,6 +117,14 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       });
       send(res, 200, status(userId)); return true;
     }
+    if (req.method === 'POST' && path === '/kb/sync/box/start') {
+      const b = await readJson(req, 4096);
+      const cfg = { clientId: String(b.clientId ?? '').trim(), clientSecret: typeof b.clientSecret === 'string' ? b.clientSecret.trim() : '', folder: String(b.folder ?? DEFAULT_BOX_FOLDER).trim() || DEFAULT_BOX_FOLDER };
+      const field = validateBoxConfig(cfg);
+      if (field) return fail(res, 400, 'VALIDATION_FAILED', `Invalid ${field}`, { field });
+      send(res, 200, startBoxConnect(userId, cfg, { port: config.port })); return true;
+    }
+    if (req.method === 'POST' && path === '/kb/sync/box/poll') { send(res, 200, pollBoxConnect(userId)); return true; }
     if (req.method === 'POST' && path === '/kb/sync/enabled') {
       const b = await readJson(req, 1024);
       if (typeof b.enabled !== 'boolean') return fail(res, 400, 'VALIDATION_FAILED', 'enabled must be a boolean', { field: 'enabled' });

@@ -349,6 +349,86 @@
           "$ref": "#/$defs/EncryptedSyncStatus"
         }
       }
+    },
+    "POST /kb/sync/box/start": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "clientId",
+            "clientSecret"
+          ],
+          "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "clientSecret": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "authorizeUrl": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/sync/box/poll": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "phase": {
+              "type": "string",
+              "enum": [
+                "none",
+                "waiting",
+                "done",
+                "failed"
+              ]
+            },
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/sync/box/callback": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string"
+        }
+      }
     }
   }
 }

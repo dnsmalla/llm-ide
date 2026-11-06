@@ -100,3 +100,9 @@ export function safeAudit(db, fields) {
     process.stderr.write(JSON.stringify({ level: 'warn', msg: 'audit_write_failed', action: fields.action, error: err.message }) + '\n');
   }
 }
+
+export function oauthCallbackHtml(res, msg, status = 200) {
+  const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  res.writeHead(status, { 'Content-Type': 'text/html' });
+  res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
+}
