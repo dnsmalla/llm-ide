@@ -89,7 +89,12 @@ final class SourceReadStore: ObservableObject {
         let task = Task { @MainActor [weak self] () -> String? in
             guard let self else { return nil }
             guard let c = self.configs[p], let r = self.tokens[p]?.refresh else { self.tokens[p] = nil; self.saveTokens(); return nil }
-            do { let t = try await SourceOAuth.refresh(p, c, refreshToken: r, nowMs: self.nowMs); self.tokens[p] = t; self.saveTokens(); return t.access }
+            do {
+                let t = try await SourceOAuth.refresh(p, c, refreshToken: r, nowMs: self.nowMs)
+                // Signed out (or in again) while the refresh was in flight: do not resurrect the old sign-in.
+                guard self.tokens[p]?.refresh == r else { await SourceOAuth.revoke(p, c, token: t.access); return nil }
+                self.tokens[p] = t; self.saveTokens(); return t.access
+            }
             catch { self.tokens[p] = nil; self.saveTokens(); return nil }
         }
         refreshTasks[p] = task
