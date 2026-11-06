@@ -29,8 +29,6 @@ const RULES = {
 
 // file -> rule -> { n: exact count, why }
 const ALLOWED = {
-  'providers/runtime.mjs': { bareFetch: { n: 2, why: 'api.anthropic.com, a fixed code-owned host (no user-supplied URL)' } },
-  'providers/web-client.mjs': { bareFetch: { n: 2, why: 'api.anthropic.com (fixed) and serpapi.com (fixed, optional search fallback). The direct page fetch uses the pinned fetch' } },
   'providers/jev.mjs': { bareFetch: { n: 1, why: 'the operator-configured Jev decision API (JEV_AI_BASE_URL), not a user connection' } },
   'server/pinned-fetch.mjs': { globalFetch: { n: 3, why: 'the NODE_ENV=test seam that honours a replaced globalThis.fetch; never consulted in production' } },
   'connectors/google-oauth.mjs': { bareFetch: { n: 2, why: 'Google OAuth token and userinfo endpoints (fixed hosts)' } },

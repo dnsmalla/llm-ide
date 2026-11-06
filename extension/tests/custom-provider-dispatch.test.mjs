@@ -11,6 +11,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// Load the pinned fetch before any test swaps globalThis.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

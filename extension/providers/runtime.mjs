@@ -11,6 +11,7 @@ import { markRouteFailed, routeFailure, ROUTE_BROKEN_TTL_MS, ROUTE_TRANSIENT_TTL
 import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs, extractCliUsage } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 
 // Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
 // into a live model call. Used across the Anthropic HTTP, CLI, and provider
@@ -65,6 +66,9 @@ const MIN_OVERFLOW_TOKENS = 256;
 // `anthropic-beta: prompt-caching-2024-07-31` header is no longer
 // needed and has been dropped.
 const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
+// Pinned, no redirects (the key rides in x-api-key), capped: a long buffered reply or a whole SSE stream fits.
+const ANTHROPIC_HOSTS = ['api.anthropic.com'];
+const ANTHROPIC_MAX_BYTES = 32 * 1024 * 1024;
 
 // Caller-supplied model ids reach us straight from the client's picker,
 // which can also offer non-Anthropic options (Cursor/Copilot/Gemini) that
@@ -426,7 +430,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     let overflowRetried = false;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const response = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'x-api-key': apiKey,
@@ -448,7 +452,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
           signal: signal
             ? AbortSignal.any([signal, AbortSignal.timeout(SOCKET_HANG_BREAKER_MS)])
             : AbortSignal.timeout(SOCKET_HANG_BREAKER_MS)
-        });
+        }, { hosts: ANTHROPIC_HOSTS, maxBytes: ANTHROPIC_MAX_BYTES });
 
         // Capture Anthropic's API rate-limit headers for the live headroom gauge
         // (API-key mode only — absent on the CLI/subscription path). Best-effort.
@@ -710,7 +714,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
   for (let attempt = 0; attempt < 2; attempt++) {
     let response;
     try {
-      response = await fetch('https://api.anthropic.com/v1/messages', {
+      response = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'x-api-key': apiKey,
@@ -726,7 +730,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
         // Was a 90 s total cap, which killed any stream that ran longer than a
         // minute and a half — a work deadline in all but name. Hang breaker only.
         signal: signal || AbortSignal.timeout(SOCKET_HANG_BREAKER_MS),
-      });
+      }, { hosts: ANTHROPIC_HOSTS, maxBytes: ANTHROPIC_MAX_BYTES });
     } catch (err) {
       // Network error or abort — fall back to buffered.
       if (userScopedKey) throw err;

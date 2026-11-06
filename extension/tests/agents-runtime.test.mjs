@@ -7,6 +7,9 @@
 
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
+// Load the pinned fetch before any test swaps globalThis.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -74,4 +77,22 @@ test('runClaude does NOT fall back to operator CLI when user-scoped key returns 
     globalThis.fetch = originalFetch;
     execSpy.mock.restore();
   }
+});
+
+test('a user-scoped key: a redirect from api.anthropic.com is refused on both paths and the CLI never runs', async () => {
+  resetDb();
+  const u = users.registerUser(db.getDb(), { email: `runtime-redirect-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' });
+  vault.setSecret(db.getDb(), u.id, 'claude.apiKey', 'sk-user-scoped-xyz');
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => { seen.push({ url: String(url), redirect: init.redirect }); return new Response(null, { status: 302, headers: { location: 'https://evil.example/steal' } }); };
+  const execSpy = mock.method(childProcess, 'execFile', () => { throw new Error('execFile MUST NOT be called when user-scoped key fails'); });
+  const { runClaude, runClaudeStream } = await import('../providers/runtime.mjs');
+  try {
+    await assert.rejects(() => runClaude('hello', { userId: u.id }), /redirect 302 not followed/);
+    await assert.rejects(() => runClaudeStream('hello', { userId: u.id, onChunk: () => {} }), /redirect 302 not followed/);
+    assert.ok(seen.length >= 2);
+    for (const s of seen) assert.deepEqual(s, { url: 'https://api.anthropic.com/v1/messages', redirect: 'manual' });
+    assert.equal(execSpy.mock.callCount(), 0);
+  } finally { globalThis.fetch = originalFetch; execSpy.mock.restore(); }
 });

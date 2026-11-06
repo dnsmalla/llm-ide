@@ -175,3 +175,14 @@ test('searchWebViaAnthropic: every Messages hop is noted as an unmetered call on
     assert.equal(totals.unmeteredCalls, 2, 'the pause_turn hop and the final hop are both model calls');
   } finally { restore(); }
 });
+
+test('Anthropic web tools and SerpAPI reach only their fixed host and refuse a redirect', async () => {
+  const seen = [];
+  const restore = mockFetch(async (url, init) => { seen.push({ host: new URL(String(url)).hostname, redirect: init.redirect }); return new Response(null, { status: 301, headers: { location: 'https://evil.example/' } }); });
+  try {
+    await assert.rejects(() => searchWebViaAnthropic('q', { apiKey: 'sk-ant-test' }), /redirect 301 not followed/);
+    await assert.rejects(() => fetchUrlViaAnthropic('https://example.com/', { apiKey: 'sk-ant-test' }), /redirect 301 not followed/);
+    await assert.rejects(() => searchWeb('q', { apiKey: 'serp-key' }), /redirect 301 not followed/);
+    assert.deepEqual(seen, [{ host: 'api.anthropic.com', redirect: 'manual' }, { host: 'api.anthropic.com', redirect: 'manual' }, { host: 'serpapi.com', redirect: 'manual' }]);
+  } finally { restore(); }
+});

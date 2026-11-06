@@ -14,6 +14,7 @@
 
 import { spawnCli, minimalCliEnv, anthropicWebCliArgs } from './providers.mjs';
 import { makePinnedFetch } from '../server/pinned-fetch.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { readFileSync } from 'node:fs';
@@ -30,6 +31,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const ANTHROPIC_TIMEOUT_MS = 45_000;
 const CLI_TIMEOUT_MS = 60_000;
 const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
+const WEB_TOOL_MAX_BYTES = 8 * 1024 * 1024;
+const SERPAPI_MAX_BYTES = 2 * 1024 * 1024;
 
 // Web-tool tool versions. `_20260209` adds server-side dynamic filtering and
 // is supported on Claude 4.6+ (the app's default model). Overridable for older
@@ -50,7 +53,7 @@ async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }
   let messages = [{ role: 'user', content: userText }];
   let last;
   for (let turn = 0; turn < 4; turn++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -59,7 +62,7 @@ async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }
       },
       body: JSON.stringify({ model: webModel(), max_tokens: 2048, tools: [tool], messages }),
       signal: signal || AbortSignal.timeout(timeoutMs),
-    });
+    }, { hosts: ['api.anthropic.com'], maxBytes: WEB_TOOL_MAX_BYTES });
     if (!res.ok) {
       let detail = '';
       try { detail = redactWithKey(await res.text(), apiKey).slice(0, 200); } catch { /* ignore */ }
@@ -193,7 +196,7 @@ export async function searchWeb(query, { apiKey, timeoutMs = DEFAULT_TIMEOUT_MS 
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url.toString(), { signal: controller.signal });
+    const res = await fixedHostFetch(url.toString(), { signal: controller.signal }, { hosts: ['serpapi.com'], maxBytes: SERPAPI_MAX_BYTES });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`SerpAPI ${res.status}: ${text.slice(0, 200)}`);

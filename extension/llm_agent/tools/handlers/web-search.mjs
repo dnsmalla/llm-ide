@@ -66,6 +66,7 @@ export async function handleWebSearch(args, { userId } = {}) {
 // ──── Tests (run via: node llm_agent/tools/handlers/web-search.mjs)
 
 export async function runTests() {
+  process.env.NODE_ENV = 'test'; // the pinned fetch honours the swapped fetch below only in test mode
   const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   const tests = [];
 
