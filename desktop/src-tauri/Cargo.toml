@@ -54,7 +54,8 @@ regex = "=1.13.1"
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"
-objc2-app-kit = { version = "=0.3.2", features = ["NSApplication"] }
+objc2-app-kit = { version = "=0.3.2", features = ["NSApplication", "NSRunningApplication"] }
+objc2-foundation = { version = "=0.3.2", features = ["NSString", "NSArray", "NSEnumerator"] }
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
 
 # OS secret stores (see docs/how-to/desktop-secret-store.md). One entry per OS so

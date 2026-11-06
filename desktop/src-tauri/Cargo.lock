@@ -2359,6 +2359,7 @@ dependencies = [
  "notify",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "p256",
  "portable-pty",
  "rand_core 0.6.4",
