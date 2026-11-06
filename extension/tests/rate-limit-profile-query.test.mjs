@@ -32,3 +32,10 @@ test('extension catalog steps that reach GitHub or the MCP registry ride the dis
   }
   for (const p of ['toggle', 'uninstall', 'rollback']) assert.notEqual(rateLimitProfile(`/auth/me/extensions/${p}`, 'POST'), 'dispatch', p);
 });
+
+test('hosted issue writes ride the dispatch bucket (each is one outbound GitHub or GitLab call)', () => {
+  for (const p of ['/kb/issues/create', '/kb/issues/comment', '/kb/issues/close']) {
+    assert.equal(rateLimitProfile(p, 'POST'), 'dispatch', p);
+    assert.equal(rateLimitProfile(`${p}?x=1`, 'POST'), 'dispatch', `${p}?x=1`);
+  }
+});

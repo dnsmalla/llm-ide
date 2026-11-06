@@ -317,6 +317,7 @@ const HOST = config.host;
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 //   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
+//   v116 — hosted issue writes (gantt_issues group), now advertised and guarded: POST /kb/issues/create { provider, repo, title, body?, idem } -> { ok, id, url, state, deduped }; POST /kb/issues/comment { provider, repo, number, body } and POST /kb/issues/close { provider, repo, number } -> { ok, id, url, state }. JWT + bus host proof (403 HOST_PROOF_REQUIRED first); only an issue or repo already on the caller's board whose stored URL is on github.com / gitlab.com (403 REPO_NOT_ALLOWED; a PR or MR is 400 NOT_AN_ISSUE); vault token only, fixed hosts api.github.com and gitlab.com; provider is required; title 1-255, body at most 20 000 characters (400 VALIDATION_FAILED details.field, never cut short); create dedupes on idem for 10 minutes (409 IDEM_CONFLICT for other content); provider 401 -> 403 TOKEN_UNAUTHORIZED, 403/404 -> 403 TOKEN_FORBIDDEN, 400/422 -> 400 PROVIDER_REJECTED, else 502 PROVIDER_ERROR / PROVIDER_UNREACHABLE (the old GITHUB_/GITLAB_WRITE_FAILED codes are gone). A close also marks the board row closed. 'dispatch' rate bucket; audit rows issues.<op> carry no title or body. Spec docs/spec/api-server.md section 7l.
 //   v115 — Box sync store (SP6), additive: POST /kb/sync/box/start { clientId, clientSecret, folder? } -> { authorizeUrl }; POST /kb/sync/box/poll -> { phase, code }; GET /kb/sync/box/callback (public HTML, Box's redirect). Status store for box = { folder, account (masked) }. Saving another storage kind than the configured one unlinks every device and clears the old kind's login. Start/poll: JWT + bus host proof; 'kbWrite' bucket.
 //   v114 — own-server sync (SP5), additive: POST /kb/sync/sftp { host, port?, username?, hostFingerprint, webHost? } -> status; for storeKind 'sftp' status.store = { host, port, username, hostFingerprint, webHost, publicKey } (the desktop's ed25519 public line; the private key never leaves the vault). New 502 code SYNC_HOST_KEY_CHANGED (sync turns off); 409 SYNC_BUSY from either setup route. Saving another storage kind than the configured one unlinks every device. JWT + bus host proof; 'kbWrite' bucket.
 //   v113 — sync device enrollment and registry, additive: POST /kb/sync/devices/enroll { tier } -> { qr, expiresAt, tier }; POST /kb/sync/devices/enroll/poll|confirm|cancel; DELETE /kb/sync/devices/:id; POST /kb/sync/rotate. Status gains rotationPending and devices[].folderHint. JWT + bus host proof; 'kbWrite' bucket.
@@ -327,7 +328,7 @@ const HOST = config.host;
 //   v111 — command bus desktop schedules, additive (spec docs/spec/command-bus.md section 9, migration 0063): GET /bus/schedules → { items: BusSchedule[] } (desktop-ui and ios-native; else 403 TIER_DENIED); POST /bus/schedules { kind: 'sources.update', args, intervalHours 1-168, standing?, standingDays? 1-90 } → 201 { schedule } (desktop-ui only; 400 INVALID_ARGS, 429 QUOTA_EXCEEDED at 10); DELETE /bus/schedules/:id → { deleted: true } | 404 (desktop-ui only; revokes its standing approval). POST /bus/commands/:id/approve takes an optional scheduleId: with the nonce it approves a desktop-enqueued run on that schedule's live standing approval (same kind and args, idem sched:<id>:, T1, at most one per half interval), else 403 STANDING_APPROVAL_INVALID { reason }. No server timer.
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
 
-const SERVER_API_VERSION = 115;
+const SERVER_API_VERSION = 116;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -359,6 +360,9 @@ const ALL_ENDPOINTS = [
   '/kb/ingest',
   '/kb/search',
   '/kb/issues',
+  '/kb/issues/create',
+  '/kb/issues/comment',
+  '/kb/issues/close',
   '/kb/meeting/:id',
   '/kb/entity/:id',
   '/kb/project/:id/export',
@@ -626,6 +630,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
+  if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close') return 'dispatch';   // one outbound GitHub/GitLab write
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
   if (url === '/kb/sync/test' || url === '/kb/sync/publish') return 'dispatch';
