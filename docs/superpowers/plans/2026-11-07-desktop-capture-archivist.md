@@ -1325,6 +1325,7 @@ Replace the sentence that starts `**Pending the desktop archivist:**` and ends `
 Append at the end of the file:
 
 ```markdown
+
 ## Desktop capture archivist (`desktop/src-tauri/src/capture_archivist.rs`)
 
 The host adopts finished extension captures from the core it spawned (`GET /kb/live/unacked`, `GET /kb/live/:id/capture`), writes each one as a meeting note and acks `POST /kb/live/:id/ack`.
@@ -1376,12 +1377,45 @@ git commit -m "docs: record the desktop capture archivist and the open extension
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
+
+### Task 8: The desktop core on `:3456` so the Chrome extension reaches it (decision D2) — about 30 min
+
+**Why:** the extension only talks to `http://127.0.0.1:3456` (`extension/src/lib/config.ts:16`, `extension/manifest.json`
+CSP `connect-src`). The 3457-3459 range existed only to stay clear of the retired Swift app's core on 3456.
+
+**Files:**
+- Modify: `desktop/src-tauri/src/core_host.rs` (`SPAWN_PORTS`, the live-port probe, the foreign-core status), its tests
+- Modify: `desktop/src-tauri/tauri.conf.json` (`csp` and `devCsp` `connect-src`)
+- Modify: `desktop/PACKAGING.md`, `extension/CLAUDE.md` (the capture checklist note), `docs/explanation/invariants.md` if it names the ports
+
+**Requirements (each with a test in `core_host.rs`):**
+1. `SPAWN_PORTS` becomes `[3456, 3457, 3458, 3459]`: the desktop spawns its own core on `:3456` first.
+2. Before spawning, the existing live-port probe still runs. A server this app did not start that already answers on
+   `:3456` is never adopted in a release build and never sent credentials (keep `note_foreign`); the spawn then tries
+   3457-3459, and `core_status` reports `foreign_core` plus a new additive `extensionReachable: false`. When the spawned
+   core is on `:3456`, `extensionReachable` is `true`.
+3. A restart after a crash prefers `:3456` again; a stale socket from the app's own previous core is waited out, not
+   reported as foreign (reuse the existing restart wait).
+4. CSP `connect-src` in both `csp` and `devCsp`: add `http://127.0.0.1:3456`, keep 3457-3459, and remove the dead
+   `ws://127.0.0.1:3006` (the Mac bridge is gone). `npm run check:security` and the CSP test
+   (`desktop/scripts/check-csp.test.mjs`) must pass; update its expected list.
+5. Check how the extension authenticates to a core (its login flow against `/auth/*` and the JWT it stores) and write in
+   `extension/CLAUDE.md` exactly what the user does once to sign the extension in to the desktop's core; if the desktop
+   core needs an extra env or CORS entry for the extension's pinned id (`ecojclccfoegmlffpiahbcenmkfhadlk`), add it in
+   `core_env.rs` with a test.
+6. The Settings screen's server card shows "Chrome extension can connect" / "Chrome extension cannot connect: another
+   program uses port 3456" from `extensionReachable` (additive decode in `ui/screens/shell` status model; no new command).
+
+**Gates:** `CARGO_INCREMENTAL=0 cargo test` (whole suite), `cd desktop && npm test && npm run check:security`, and a manual
+row in `extension/CLAUDE.md`: with only the desktop running, the extension side panel connects and a capture is archived
+as a note (the archivist from Tasks 1-6).
+
 ## D. Decisions for the user (secure default first)
 
 | # | Decision | Secure default (what this plan builds) | If the user picks the other option |
 |---|---|---|---|
 | D1 | Where the archivist runs | **Rust host thread.** It polls the core THIS app spawned and nonce-verified, uses the session the webview already bound (token in memory only), and writes through the existing `capture_store::finalize` writer and verifier | The core writes the notes folder itself. It would need the host-only notes root (chosen by a native dialog, re-validated per call) and a second writer and verifier in Node, and the core cannot prove the user's file read back |
-| D2 | How a real extension reaches the desktop core | **Not changed here.** The extension accepts only `:3456`, the desktop core runs on 3457 to 3459 and never adopts `:3456` in release, so no real capture arrives yet. A follow-up plan decides | (a) In a release build, the desktop spawns on a free `:3456` (core_host port list plus the webview CSP). (b) The extension accepts a user-set `127.0.0.1:3457-3459` (config allowlist plus manifest CSP), a wider local-port surface |
+| D2 | How a real extension reaches the desktop core | **Decided by the user 2026-11-07: the desktop core runs on `:3456`** when that port is free (Task 8); a foreign server on `:3456` is still never used or sent credentials, and the desktop then falls back to 3457-3459 and tells the user the extension cannot connect | (b) The extension accepts a user-set `127.0.0.1:3457-3459` — not chosen (wider local-port surface, manifest/CSP change, store review) |
 | D3 | `LLMIDE_LIVE_ACK` on the spawned core | **Always `1`, fixed in `core_host`, never from the host env.** A stuck archivist loses nothing: the extension keeps its draft until a verified `acked` | Keep it off until the C4 real-meeting run. The extension then keeps every draft in `no-ack`, and an archivist ack would release nothing |
 | D4 | Summary after archiving | **None.** Only Library's Re-summarise sends meeting text to a model | Summarise in the background like the Swift app (text leaves without a click) |
 | D5 | Where the note lands | **`notes_fs::current_root()` at pass time** (the open project's `llm-doc`, else the chosen notes folder), the same as a native Stop. With no root the capture waits, unacked | A fixed meetings folder, independent of the open project |
