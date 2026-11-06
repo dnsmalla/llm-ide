@@ -37,7 +37,6 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
         </a>
         <nav className="web-topnav" aria-label="LLM-IDE links">
           <a href="https://llm-ide.com/guide.html">Guide</a>
-          <a href="https://accounts.llm-ide.com/">Account</a>
         </nav>
       </header>
 
@@ -58,7 +57,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
         <section className="web-panel" aria-labelledby="web-pair-title">
           <div className="web-panel-top"><span className="web-live" aria-hidden="true" />CONNECT DESKTOP <span className="web-step">PAIRING</span></div>
           <h2 id="web-pair-title">Pair this browser</h2>
-          <p className="web-muted">Use a one-time PIN from the desktop app. The account at accounts.llm-ide.com is separate.</p>
+          <p className="web-muted">Use a one-time PIN from the desktop app. No account is needed.</p>
           <form className="web-form" onSubmit={submit}>
             {revokedNotice && <StatusBanner severity="info" message={revokedNotice} />}
             {shown && <StatusBanner severity="error" message={shown} />}
@@ -77,9 +76,6 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
             <p>If pairing fails, check that the desktop is running the workspace with this page listed in <code>LLMIDE_HOST_API_WEB_ORIGINS</code>.</p>
           </details>
           <div className="web-account-line">
-            <span>New to LLM-IDE?</span>
-            <a href="https://accounts.llm-ide.com/">Create an account</a>
-            <span aria-hidden="true">·</span>
             <a href="https://llm-ide.com/">What is LLM-IDE?</a>
           </div>
         </section>

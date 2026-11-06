@@ -19,7 +19,7 @@ const starting = new Map(); // userId -> the start in flight; starts run one at 
 const codeErr = (code) => Object.assign(new Error(code), { code });
 const envBytes = (env) => Buffer.from(JSON.stringify(env));
 const slotDir = (p) => `${p.pair.sid}/e/${p.pair.slot}`;
-const webOrigin = (env) => (ORIGIN_RE.test(env.LLMIDE_SYNC_WEB_ORIGIN ?? '') ? env.LLMIDE_SYNC_WEB_ORIGIN : 'https://llm-ide.com');
+const webOrigin = (env) => (ORIGIN_RE.test(env.LLMIDE_SYNC_WEB_ORIGIN ?? '') ? env.LLMIDE_SYNC_WEB_ORIGIN : 'https://llm-ide.com/app');
 
 function wipe(p) {
   p.es.fill(0); p.pair.es = ''; p.pair.bs = '';

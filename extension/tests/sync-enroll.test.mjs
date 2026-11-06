@@ -75,7 +75,7 @@ test('happy path: same SAS on both screens, desktop tier, wrap, first snapshot, 
 test('the web form carries the same fields; the default web origin is llm-ide.com', async () => {
   const { u, store } = setup();
   const { qr } = await startEnrollment(u, { store, tier: 'web', now: T, env: {} });
-  assert.ok(qr.startsWith('https://llm-ide.com/#pair=sv%3D1%26'));
+  assert.ok(qr.startsWith('https://llm-ide.com/app/#pair=sv%3D1%26'));
   const dev = createReferenceDevice({ tier: 'web', name: 'Laptop browser' });
   await dev.scanAndClaim(store, qr, { now: T });
   const p = await pollEnrollment(u, { now: T + 1000 });
@@ -83,7 +83,7 @@ test('the web form carries the same fields; the default web origin is llm-ide.co
   const { qr: dev2 } = await startEnrollment(u, { store, tier: 'web', now: T, env: { LLMIDE_SYNC_WEB_ORIGIN: 'http://localhost:5173' } });
   assert.ok(dev2.startsWith('http://localhost:5173/#pair='));
   const { qr: bad } = await startEnrollment(u, { store, tier: 'web', now: T, env: { LLMIDE_SYNC_WEB_ORIGIN: 'javascript:alert(1)' } });
-  assert.ok(bad.startsWith('https://llm-ide.com/#pair='), 'a bad origin falls back to the default');
+  assert.ok(bad.startsWith('https://llm-ide.com/app/#pair='), 'a bad origin falls back to the default');
 });
 
 test('no claim within 120 s: expired, key.bin and the slot are removed, nothing registered', async () => {
