@@ -101,3 +101,13 @@ struct SyncEnrollTests {
         #expect(throws: SyncCryptoError("bad_tier")) { _ = try SyncEnroll.sealClaim(pair: pair, tier: "mac", name: "x", keys: SoftwareSyncDeviceKeys(), issuedAt: 1) }
     }
 }
+
+
+    @Test func boxPairCarriesTheBoxApp() throws {
+        let base = "llmide://pair?sv=1&sid=\(String(repeating: "A", count: 22))&sfp=\(String(repeating: "B", count: 43))&dir=\(String(repeating: "C", count: 22))&slot=\(String(repeating: "D", count: 22))&es=\(String(repeating: "E", count: 22))&st=box%3Allmide-sync"
+        let p = try SyncEnroll.parsePair(base + "&bi=cid0123456789abcdef&bs=csec0123456789abcdef")
+        #expect(p.st == "box:llmide-sync" && p.bi == "cid0123456789abcdef" && p.bs == "csec0123456789abcdef")
+        #expect(throws: SyncCryptoError.self) { try SyncEnroll.parsePair(base) }
+        #expect(throws: SyncCryptoError.self) { try SyncEnroll.parsePair(base + "&bi=x&bs=y") }
+        #expect(try SyncEnroll.parsePair(base.replacingOccurrences(of: "st=box", with: "st=mega")).bs == nil)
+    }
