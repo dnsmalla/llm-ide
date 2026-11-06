@@ -31,6 +31,10 @@ final class SyncStore: ObservableObject {
     private var device: SyncDevice?
     private var mega: MegaClient?
     private var pendingPair: SyncPair?
+    /// The claim prepared for `pendingPair`, kept across retries so a retry rewrites the same claim (contract 4c).
+    private var prepared: (device: SyncDevice, stored: StoredKeys)?
+    /// The name in the prepared claim; a retry cannot change it.
+    var preparedName: String? { prepared?.device.state.name }
     private var enrollTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
     private var nowMs: Int { Int(Date().timeIntervalSince1970 * 1000) }
@@ -49,7 +53,7 @@ final class SyncStore: ObservableObject {
             phase = .ready
         } else { phase = .needsPassword }
         if let cache = Self.read([String: Data].self, "snapshot-cache.json"), !cache.isEmpty {
-            Task { snapshot = try? await d.readSnapshot(SyncDictionaryStore(files: cache), nowMs: nowMs) }
+            Task { snapshot = (try? await d.readSnapshot(SyncDictionaryStore(files: cache), nowMs: nowMs)) ?? nil }
         }
     }
 
@@ -73,7 +77,7 @@ final class SyncStore: ObservableObject {
 
     func startEnrollment(_ pair: SyncPair) {
         guard pair.st.hasPrefix("mega:") else { lastError = "This code is not for a MEGA sync folder."; return }
-        pendingPair = pair
+        pendingPair = pair; prepared = nil
         Task { try? await Task.sleep(nanoseconds: 600_000_000); enrollStep = .login }
     }
     func enroll(email: String, password: String, name: String) {
@@ -82,55 +86,76 @@ final class SyncStore: ObservableObject {
         enrollTask = Task { await runEnrollment(pair: pair, email: email, password: password, name: name) }
     }
     func cancelEnrollment() {
-        enrollTask?.cancel(); enrollTask = nil; enrollStep = nil; pendingPair = nil
+        enrollTask?.cancel(); enrollTask = nil; enrollStep = nil; pendingPair = nil; prepared = nil
     }
+    /// Back to the sign-in form for the same QR; the prepared claim is reused.
+    func retryEnrollment() { if pendingPair != nil { enrollStep = .login } }
 
     private func runEnrollment(pair: SyncPair, email: String, password: String, name: String) async {
         let folder = String(pair.st.dropFirst("mega:".count))
+        var client: MegaClient?
         do {
             enrollStep = .working("Signing in to MEGA…")
             let session = try await MegaClient.login(email: email, password: password)
-            let client = MegaClient(folder: folder, session: session)
+            let c = MegaClient(folder: folder, session: session)
+            client = c
             enrollStep = .working("Checking the desktop's key…")
-            let (keys, stored) = try Self.makeKeys()
-            let d = try await SyncDevice.begin(pair: pair, name: name, keys: keys, store: client, nowMs: nowMs)
+            let (d, stored): (SyncDevice, StoredKeys)
+            if let p = prepared { (d, stored) = p } else {
+                let (keys, s) = try Self.makeKeys()
+                let nd = try await SyncDevice.prepare(pair: pair, name: name, keys: keys, store: c, nowMs: nowMs)
+                (d, stored) = (nd, s)
+                prepared = (nd, s)
+            }
+            if d.state.userId == nil {  // not acked yet: (re)write the same claim; after the ack the slot may be gone
+                _ = try await poll(SyncDevice.ackWindowMs) { try await d.writeClaim(c); return true }
+            }
             enrollStep = .working("Waiting for the desktop…")
-            let sas = try await poll(SyncDevice.ackWindowMs) { try await d.readAck(client) }
-            enrollStep = .sas(sas)
-            UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.")
-            _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(client, nowMs: self.nowMs) ? true : nil }
+            // A retry after the ack: the slot is gone once the desktop confirmed, so go straight to the wrap.
+            let sas: String?
+            if d.state.userId != nil { sas = try await d.readAck(c) }
+            else { sas = try await poll(SyncDevice.ackWindowMs) { try await d.readAck(c) } }
+            if let sas {
+                enrollStep = .sas(sas)
+                UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.")
+            }
+            _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(c, nowMs: self.nowMs) ? true : nil }
+            prepared = nil; pendingPair = nil
             await mega?.logout()
             _ = Keychain.save(stored, .keys)
             _ = Keychain.save(d.state, .state)
             _ = Keychain.save(StoredMega(email: email, folder: folder, session: session), .mega)
-            attach(d); mega = client; megaEmail = email
+            attach(d); mega = c; megaEmail = email
             queued = []; Self.write(queued, "queue.json")
             phase = .ready; enrollStep = .done
             await refresh()
         } catch is CancellationError {
-        } catch { enrollStep = .failed(Self.message(for: error)) }
-    }
-
-    private func poll<T>(_ windowMs: Int, _ step: () async throws -> T?) async throws -> T {
-        let deadline = nowMs + windowMs
-        while true {
-            do { if let v = try await step() { return v } }
-            catch MegaClient.Failure.rateLimited { try await Task.sleep(nanoseconds: 8_000_000_000) }
-            guard nowMs < deadline else { throw SyncCryptoError("timeout") }
-            try await Task.sleep(nanoseconds: UInt64(SyncDevice.ackPollMs) * 1_000_000)
+            if let client { Task { await client.logout() } }  // a new task: this one is cancelled
+        } catch {
+            await client?.logout()
+            enrollStep = .failed(Self.message(for: error))
         }
     }
 
+    private func poll<T>(_ windowMs: Int, _ step: () async throws -> T?) async throws -> T {
+        try await SyncRetry.poll(windowMs: windowMs, intervalMs: SyncDevice.ackPollMs, now: { self.nowMs },
+                                 sleep: { try await Task.sleep(nanoseconds: $0) }, step)
+    }
+
     func refresh() async {
-        guard phase == .ready, let device, let mega, !refreshing else { return }
+        guard phase == .ready || phase == .removed, let device, let mega, !refreshing else { return }
         refreshing = true; defer { refreshing = false }
         do {
             let rec = SyncRecordingStore(remote: mega)
-            snapshot = try await device.readSnapshot(rec, nowMs: nowMs)
-            Self.write(rec.fetched, "snapshot-cache.json")
+            if let s = try await device.readSnapshot(rec, nowMs: nowMs) {  // nil: the first snapshot is not there yet
+                snapshot = s
+                Self.write(rec.fetched, "snapshot-cache.json")
+            }
+            phase = .ready
             var resend: [String] = []
-            for i in queued.indices where queued[i].isPending {
-                guard let r = try await device.readReply(mega, requestId: queued[i].id, nowMs: nowMs) else { continue }
+            let replies = try await device.readReplies(mega, requestIds: queued.filter(\.isPending).map(\.id), nowMs: nowMs)
+            for i in queued.indices {
+                guard let r = replies[queued[i].id] else { continue }
                 switch r {
                 case .answered(let text, _): queued[i].answer = text
                 case .failed(let code):

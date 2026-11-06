@@ -24,7 +24,13 @@ struct SyncEnrollSheet: View {
                 case .working(let text):
                     ProgressView(text).padding()
                 case .failed(let text):
-                    VStack { Image(systemName: "exclamationmark.triangle").font(.largeTitle); Text("Could not add this iPhone").font(.headline); Text(text).multilineTextAlignment(.center) }.padding()
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+                        Text("Could not add this iPhone").font(.headline)
+                        Text(text).multilineTextAlignment(.center)
+                        Button("Try again") { syncStore.retryEnrollment() }.buttonStyle(.borderedProminent)
+                        Text("Try again uses the same code while the desktop still shows it.").font(.footnote).foregroundColor(.secondary)
+                    }.padding()
                 case .done:
                     VStack { Image(systemName: "checkmark.circle").font(.largeTitle); Text("Sync is on").font(.headline); Text("The desktop's snapshot will appear in History.").multilineTextAlignment(.center) }.padding()
                 default:
@@ -33,9 +39,13 @@ struct SyncEnrollSheet: View {
                             TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).autocapitalization(.none)
                             SecureField("Password", text: $password).textContentType(.password)
                         }
-                        Section("This iPhone") { TextField("Name", text: $name) }
+                        if let fixed = syncStore.preparedName {
+                            Section("This iPhone") { Text(fixed) }
+                        } else {
+                            Section("This iPhone") { TextField("Name", text: $name) }
+                        }
                         Section {
-                            Button("Continue") { syncStore.enroll(email: email, password: password, name: name) }
+                            Button("Continue") { syncStore.enroll(email: email, password: password, name: syncStore.preparedName ?? name); password = "" }
                                 .disabled(email.isEmpty || password.isEmpty || name.isEmpty)
                         }
                     }

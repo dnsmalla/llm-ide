@@ -107,6 +107,15 @@ public final class SyncDevice {
     /// Contract 4b-4c: key.bin must hash to `sfp` from the QR and be a canonical P-256 SPKI; pin it; write the claim once.
     public static func begin(pair: SyncPair, tier: String = "ios", name: String, keys: SyncDeviceKeys,
                              store: SyncRemoteStore, nowMs: Int) async throws -> SyncDevice {
+        let d = try await prepare(pair: pair, tier: tier, name: name, keys: keys, store: store, nowMs: nowMs)
+        try await d.writeClaim(store)
+        return d
+    }
+
+    /// Contract 4b: pin key.bin and seal the claim, writing nothing. Keep the result across retries: `writeClaim` then
+    /// writes the same name and bytes again, never a second claim (a second claim kills the slot, contract 4c).
+    public static func prepare(pair: SyncPair, tier: String = "ios", name: String, keys: SyncDeviceKeys,
+                               store: SyncRemoteStore, nowMs: Int) async throws -> SyncDevice {
         guard let spki = try await store.get("\(pair.sid)/d/\(pair.dir)/key.bin"),
               SyncB64.encode(SyncCrypto.sha256(spki)) == pair.sfp else { throw SyncCryptoError("bad_desktop_key") }
         guard let es = SyncB64.decode(pair.es) else { throw SyncCryptoError("bad_secret") }
@@ -115,7 +124,6 @@ public final class SyncDevice {
         let d = try SyncDevice(state: state, keys: keys)
         d.enrollKeys = try SyncEnroll.enrollKeys(es: es, sid: pair.sid, slot: pair.slot)
         d.claimBytes = try SyncEnroll.sealClaim(pair: pair, tier: tier, name: name, keys: keys, issuedAt: nowMs).data()
-        try await d.writeClaim(store)
         return d
     }
 
@@ -156,13 +164,18 @@ public final class SyncDevice {
         return true
     }
 
-    public func readSnapshot(_ store: SyncRemoteStore, nowMs: Int) async throws -> SyncSnapshot {
+    /// nil = no snapshot yet: manifest.bin is missing but key.bin is there (the desktop publishes up to 60 s after
+    /// confirm). Only a missing key.bin means this device's folder was deleted ("removed").
+    public func readSnapshot(_ store: SyncRemoteStore, nowMs: Int) async throws -> SyncSnapshot? {
         try await readSnapshot(store, nowMs: nowMs, retry: true)
     }
 
-    private func readSnapshot(_ store: SyncRemoteStore, nowMs: Int, retry: Bool) async throws -> SyncSnapshot {
+    private func readSnapshot(_ store: SyncRemoteStore, nowMs: Int, retry: Bool) async throws -> SyncSnapshot? {
         guard let userId = state.userId, state.wrapKeys != nil else { throw SyncCryptoError("not_enrolled") }
-        guard let raw = try await store.get("\(base)/manifest.bin") else { throw SyncCryptoError("removed") }
+        guard let raw = try await store.get("\(base)/manifest.bin") else {
+            guard try await store.get("\(base)/key.bin") != nil else { throw SyncCryptoError("removed") }
+            return nil
+        }
         let env = try SyncEnvelope.parse(raw)
         if env.epoch > state.epoch {
             guard try await readWrap(store, nowMs: nowMs) else { throw SyncCryptoError("bad_epoch") }
@@ -240,6 +253,20 @@ public final class SyncDevice {
         return requestId
     }
 
+    /// Every reply that has arrived, by request id. One that fails to open (an old epoch past its 24 h, a corrupt or
+    /// forged file) is skipped so it cannot block the others; it stays pending and ages out. Store errors (network,
+    /// session) still throw: they say nothing about one reply.
+    public func readReplies(_ store: SyncRemoteStore, requestIds: [String], nowMs: Int) async throws -> [String: SyncReply] {
+        var out: [String: SyncReply] = [:]
+        for id in requestIds {
+            do { if let r = try await readReply(store, requestId: id, nowMs: nowMs) { out[id] = r } }
+            catch let e where SyncRetry.isTransient(e) || e as? MegaClient.Failure == .sessionExpired || e as? MegaClient.Failure == .authFailed {
+                throw e
+            } catch {}
+        }
+        return out
+    }
+
     public func readReply(_ store: SyncRemoteStore, requestId: String, nowMs: Int) async throws -> SyncReply? {
         guard let wk = state.wrapKeys, let userId = state.userId else { throw SyncCryptoError("not_enrolled") }
         guard let bytes = try await store.get("\(base)/out/\(requestId).bin") else { return nil }
@@ -253,5 +280,42 @@ public final class SyncDevice {
             ("purpose", "reply"), ("userId", .s(userId)), ("desktopId", .s(sid)), ("from", .s(sid)), ("to", .s(state.deviceId)),
         ])
         return try SyncReply.parse(pt, requestId: requestId)
+    }
+}
+
+/// Polling the store during enrollment: a transient error backs off and polls again instead of ending the enrollment.
+public enum SyncRetry {
+    public static let maxBackoffMs = 30_000
+
+    /// No network, a MEGA server error, busy (EAGAIN after the client's own retries) or over quota for now.
+    public static func isTransient(_ e: Error) -> Bool {
+        if let u = e as? URLError { return u.code != .cancelled }
+        switch e as? MegaClient.Failure {
+        case .rateLimited?, .quota?: return true
+        case .http(let code)?: return code == 429 || (500...599).contains(code)
+        default: return false
+        }
+    }
+
+    /// Calls `step` until it returns a value. nil waits `intervalMs`; a transient error waits 2x, 4x... (up to 30 s);
+    /// anything else is thrown at once. Past `windowMs` the last transient error, else `timeout`, is thrown.
+    @MainActor
+    public static func poll<T>(windowMs: Int, intervalMs: Int, now: () -> Int, sleep: (UInt64) async throws -> Void,
+                               _ step: () async throws -> T?) async throws -> T {
+        let deadline = now() + windowMs
+        var backoff = intervalMs
+        while true {
+            var wait = intervalMs
+            do {
+                if let v = try await step() { return v }
+                backoff = intervalMs
+                if now() >= deadline { throw SyncCryptoError("timeout") }
+            } catch let e where isTransient(e) {
+                if now() >= deadline { throw e }
+                backoff = min(backoff * 2, maxBackoffMs)
+                wait = backoff
+            }
+            try await sleep(UInt64(wait) * 1_000_000)
+        }
     }
 }
