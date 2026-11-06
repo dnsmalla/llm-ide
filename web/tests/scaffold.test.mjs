@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz"];
+const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz", "https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com"];
 
 test("the CSP allows no inline or remote script; remote connects go only to MEGA's API and transfer hosts", async () => {
   const { CSP, WEB_PORT } = await import("../vite.config.ts");

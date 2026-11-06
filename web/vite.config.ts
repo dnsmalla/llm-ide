@@ -12,7 +12,7 @@ export const WEB_PORT = 5180;
 // MEGA for offline sync (design 8.3): the API host and the transfer hosts it hands out per download/upload.
 export const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
+  "connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:* wss: https://g.api.mega.co.nz https://*.userstorage.mega.co.nz https://gitlab.com https://api.box.com https://dl.boxcloud.com https://public.boxcloud.com", "base-uri 'none'", "form-action 'none'", "object-src 'none'",
 ].join("; ");
 
 // Vite's dev server injects an inline React-refresh preamble, so the CSP meta goes into the built page only.
