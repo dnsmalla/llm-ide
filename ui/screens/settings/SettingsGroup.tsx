@@ -17,7 +17,7 @@ export function SettingsGroup({ id, title, icon, open, onToggle, children }: Set
   const headerId = `st-group-h-${id}`;
   const bodyId = `st-group-b-${id}`;
   return (
-    <section className="ui-settings-section st-group" id={`st-group-${id}`} data-group={id}>
+    <section className="ui-settings-section st-group" id={`st-group-${id}`} data-group={id} data-open={open}>
       <h2 className="st-group-h" id={headerId}>
         <button type="button" className="ui-settings-header st-group-btn" aria-expanded={open} aria-controls={bodyId} title={open ? `Collapse ${title}` : `Expand ${title}`} onClick={onToggle}>
           <span className="ui-settings-icon" aria-hidden="true">{icon ? <Icon name={icon} size={13} /> : null}</span>

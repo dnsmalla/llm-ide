@@ -22,7 +22,6 @@ export function AppearanceSection() {
           {t.label}
         </label>
       ))}
-      <p className="st-hint">The theme applies at once and is remembered on this computer.</p>
     </div>
   );
 }
@@ -47,7 +46,6 @@ export function WorkspaceSection() {
       <div className="st-stack">
         <span className="st-label">Notes folder</span>
         {host.notesFolderPath ? <p>{asked ? notes ?? "Not chosen yet." : "Loading..."}</p> : <NeedsHost what="The notes folder" />}
-        {host.pickFolder && host.notesFolderPath ? <p className="st-hint">Changing the notes folder is done from the Library, which owns the move of existing notes.</p> : null}
       </div>
       <label className="st-field">
         <span className="st-label">Home page</span>
@@ -66,7 +64,7 @@ export function WorkspaceSection() {
             <option key={s.id} value={s.id}>{s.label}</option>
           ))}
         </select>
-        <span className="st-hint">Where the app lands once a project is open. The Home button returns here; with no project it returns to Welcome. Applies at once.</span>
+        <span className="st-hint">Applies at once.</span>
       </label>
     </div>
   );
@@ -87,7 +85,6 @@ export function FeaturesSection() {
       <ErrorText text={error} />
       {loaded ? <p>{rows.note}</p> : <p className="st-hint" role="status">Loading...</p>}
       {rows.enabled.length > 0 ? <ul aria-label="Enabled features">{rows.enabled.map((f) => <li key={f}>{f}</li>)}</ul> : null}
-      <p className="st-hint">Features are chosen when the backend starts.</p>
       <Button label="Reload features" onClick={load}>Reload</Button>
       <TerminalToggle host={host} />
     </div>
@@ -104,5 +101,5 @@ function TerminalToggle({ host }: { host: SettingsHost }) {
   }, [getExtraPrefs]);
   if (!getExtraPrefs || !setExtraPrefs) return <NeedsHost what="The Terminal switch" />;
   if (on === null) return null;
-  return <Switch label="Terminal" checked={on} hint="Lets you open a shell inside the app, after a native confirmation. Applies the next time you open the app." onChange={(v) => { setOn(v); void setExtraPrefs({ terminal: v }); }} />;
+  return <Switch label="Terminal" checked={on} hint="Applies next launch." onChange={(v) => { setOn(v); void setExtraPrefs({ terminal: v }); }} />;
 }

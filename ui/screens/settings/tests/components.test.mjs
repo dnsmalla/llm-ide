@@ -89,10 +89,10 @@ function twoGroupRegistry() {
   return reg;
 }
 
-test("SettingsScreen: one 'App' h1, a list of collapsed groups, each header a button with aria-expanded=false and aria-controls", () => {
+test("SettingsScreen: one 'Settings' h1, a list of collapsed groups, each header a button with aria-expanded=false and aria-controls", () => {
   const out = html(h(m.screen.SettingsScreen, { env: env({}), registry: twoGroupRegistry(), expanded: new m.groups.ExpandedGroups(memStore()) }));
   assert.equal((out.match(/<h1/g) ?? []).length, 1);
-  assert.match(out, /<h1[^>]*>App<\/h1>/);
+  assert.match(out, /<h1[^>]*>Settings<\/h1>/);
   assert.equal((out.match(/<h2/g) ?? []).length, 2); // Alpha, Beta; Proj needs a project
   assert.equal((out.match(/aria-expanded="false"/g) ?? []).length, 2);
   assert.match(out, /<h2[^>]*><button[^>]*aria-controls="st-group-b-a"/);

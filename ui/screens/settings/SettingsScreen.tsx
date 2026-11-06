@@ -61,6 +61,9 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
     opened.current = true;
     store.current.set(target, true);
   }
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = (title: string) => q.length === 0 || title.toLowerCase().includes(q);
   const [, bump] = useState(0);
   const toggle = (id: string) => {
     store.current!.toggle(id);
@@ -73,10 +76,10 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   }, [target]);
 
   const hasProject = Boolean(env.host.activeProjectPath?.());
-  const app = registry.sectionsIn("app");
-  const project = hasProject ? registry.sectionsIn("project") : [];
+  const app = registry.sectionsIn("app").filter((s) => matches(s.title));
+  const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title)) : [];
   const row = (s: ReturnType<SettingsRegistry<SectionComponent>["sections"]>[number]) => {
-    const open = store.current!.isOpen(s.id);
+    const open = store.current!.isOpen(s.id) || q.length > 0;
     const Body = lazyOf(s.load);
     const cards = registry.cardsFor(s.id);
     return (
@@ -106,8 +109,9 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
     <SettingsEnvProvider env={env}>
       <div className="st-root">
         <main className="st-page" aria-labelledby="st-title">
-          <h1 id="st-title" className="st-h1">App</h1>
-          <ul className="st-groups" aria-label="Settings groups">{app.map(row)}</ul>
+          <h1 id="st-title" className="st-h1">Settings</h1>
+          <div className="st-search"><input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search settings…" aria-label="Search settings" autoComplete="off" spellCheck={false} /></div>
+          {app.length > 0 ? <ul className="st-groups" aria-label="Settings groups">{app.map(row)}</ul> : <p className="st-empty" role="status">No settings match “{query.trim()}”.</p>}
           {project.length > 0 ? (
             <div role="group" aria-labelledby="st-band-project" className="st-band-wrap">
               <p id="st-band-project" className="st-h1">Project</p>
