@@ -12,12 +12,14 @@
 // All operations are user_id-scoped in kb/issue-schedule.mjs (IDOR-safe).
 
 import * as kb from '../kb/db.mjs';
+import { handleIssueWriteRoutes } from './issue-writes.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
 const BASE = '/kb/issue-schedule';
 
 export async function handleIssueScheduleRoutes(req, res, ctx) {
   const { userId, url } = ctx;
+  if (await handleIssueWriteRoutes(req, res, ctx)) return true;
   if (!url.startsWith(BASE)) return false;
 
   // GET /kb/issue-schedule?provider=github&repo=owner/name

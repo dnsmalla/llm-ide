@@ -5,11 +5,18 @@
 // A write reaches only an issue or repo already on the caller's board: an imported ticket row whose stored URL is on
 // that provider's web host (kb.findTicket). Audit rows carry the action, repo/number and outcome, never the text.
 import { createHash } from 'node:crypto';
+import * as kb from '../kb/db.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { verifyBusHostProof } from '../core/host-approval.mjs';
+import { getSecret } from '../server/vault.mjs';
+import { makePinnedFetch } from '../server/pinned-fetch.mjs';
+import { safeAudit, clientIp } from '../server/route-http.mjs';
 
 export const ISSUE_LIMITS = Object.freeze({ title: 255, body: 20_000, repo: 200 });
 export const IDEM_TTL_MS = 10 * 60_000;
 const IDEM_MAX = 500;
 const API_BASE = Object.freeze({ github: 'https://api.github.com', gitlab: 'https://gitlab.com/api/v4' });
+const WEB_ORIGIN = Object.freeze({ github: 'https://github.com', gitlab: 'https://gitlab.com' });
 const NAME = Object.freeze({ github: 'GitHub', gitlab: 'GitLab' });
 const REPO_SHAPE = Object.freeze({
   github: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
@@ -95,3 +102,63 @@ export async function onceForIdem(userId, w, run, now = Date.now()) {
 
 /** Test seam. */
 export function _resetIssueWriteIdemForTests() { creates.clear(); }
+
+const fail = (res, status, code, message) => { sendJSON(res, status, { error: { code, message } }); return true; };
+
+async function callProvider(w, token) {
+  const call = providerCall(w);
+  const headers = w.provider === 'gitlab'
+    ? { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' }
+    : { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  try {
+    const r = await makePinnedFetch()(call.url, { method: call.method, headers, body: JSON.stringify(call.payload), signal: AbortSignal.timeout(15_000) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const f = mapProviderFailure(w.provider, r.status, data);
+      return { status: f.status, body: { error: { code: f.code, message: f.message } } };
+    }
+    const url = typeof data?.web_url === 'string' ? data.web_url : typeof data?.html_url === 'string' ? data.html_url : null;
+    return { status: 200, body: { ok: true, id: Number.isSafeInteger(data?.id) ? data.id : null, url, state: typeof data?.state === 'string' ? data.state : null } };
+  } catch {
+    return { status: 502, body: { error: { code: 'PROVIDER_UNREACHABLE', message: `${NAME[w.provider]} could not be reached. Check the connection and try again.` } } };
+  }
+}
+
+/** POST /kb/issues/{create,comment,close}. false for anything else (the caller keeps dispatching). */
+export async function handleIssueWriteRoutes(req, res, { userId, url }) {
+  const path = String(url || '').split('?')[0];
+  const op = req.method === 'POST' && path === '/kb/issues/create' ? 'create'
+    : req.method === 'POST' && path === '/kb/issues/comment' ? 'comment'
+      : req.method === 'POST' && path === '/kb/issues/close' ? 'close' : null;
+  if (!op) return false;
+  const audit = (outcome, resource, detail) => safeAudit(kb.getDb(), {
+    userId, ip: clientIp(req), userAgent: String(req.headers?.['user-agent'] ?? '').slice(0, 200) || null,
+    action: `issues.${op}`, resource, outcome, detail,
+  });
+  if (!verifyBusHostProof(req)) {
+    audit('denied', null, { code: 'HOST_PROOF_REQUIRED' });
+    return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  }
+  let raw;
+  try { raw = parseJSON(await readBody(req, 128 * 1024)); } catch { return fail(res, 400, 'VALIDATION_FAILED', 'Invalid JSON body'); }
+  const w = parseIssueWrite(op, raw);
+  if (w.error) { sendJSON(res, 400, w); return true; }
+  const resource = `${w.provider}:${w.repo}${w.number ? `#${w.number}` : ''}`;
+  const known = kb.findTicket(userId, { provider: w.provider, repo: w.repo, number: w.number ?? null, origin: WEB_ORIGIN[w.provider] });
+  if (!known) {
+    audit('denied', resource, { code: 'REPO_NOT_ALLOWED' });
+    return fail(res, 403, 'REPO_NOT_ALLOWED', w.number
+      ? 'This issue is not on your Issues board. Import its repository first.'
+      : 'Only repositories on your Issues board can get new issues. Import this repository first.');
+  }
+  if (w.number && known.isPR) return fail(res, 400, 'NOT_AN_ISSUE', 'Pull requests and merge requests are not written from the Issues board.');
+  const token = getSecret(kb.getDb(), userId, `${w.provider}.token`);
+  if (!token) return fail(res, 400, `${w.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${NAME[w.provider]} token in Settings → Built-in keys first.`);
+  const out = op === 'create' ? await onceForIdem(userId, w, () => callProvider(w, token)) : await callProvider(w, token);
+  if (op === 'close' && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'closed' });
+  audit(out.status === 200 ? 'success' : 'failure', resource, {
+    status: out.status, code: out.body?.error?.code ?? null, ...(op === 'create' && out.status === 200 ? { deduped: out.body.deduped } : {}),
+  });
+  sendJSON(res, out.status, out.body);
+  return true;
+}

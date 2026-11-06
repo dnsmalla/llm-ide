@@ -32,7 +32,7 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
   }),
   // Gantt schedule overlay (Features/Issues, incl. Issues/Gantt, only).
   gantt_issues: Object.freeze({
-    prefixes: Object.freeze(['/kb/issue-schedule']),
+    prefixes: Object.freeze(['/kb/issue-schedule', '/kb/issues']),
     load: async () => (await import('./issue-schedule.mjs')).handleIssueScheduleRoutes,
   }),
   // Doc Gen's /generate-doc (Features/Generation, Mac only). Prefix-matched
