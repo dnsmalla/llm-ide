@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 113
+  x-api-version: 114
 servers:
   - url: "https://{host}"
     variables:
@@ -14496,6 +14496,37 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/sftp:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "host"
+                - "hostFingerprint"
+              properties:
+                host:
+                  type: "string"
+                port:
+                  type: "integer"
+                username:
+                  type: "string"
+                hostFingerprint:
+                  type: "string"
+                webHost:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
   /kb/sync/status:
     get:
       tags:
@@ -17163,17 +17194,13 @@ components:
           type:
             - "string"
             - "null"
-          description: "mega | memory (sftp | box in later sub-projects)"
+          description: "mega | sftp | memory (box in a later sub-project)"
         store:
           type:
             - "object"
             - "null"
-          properties:
-            folder:
-              type: "string"
-            account:
-              type: "string"
-          description: "mega: { folder, account }, account = masked email"
+          additionalProperties: true
+          description: "mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }"
         syncId:
           type:
             - "string"

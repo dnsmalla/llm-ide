@@ -15,22 +15,15 @@
             "string",
             "null"
           ],
-          "description": "mega | memory (sftp | box in later sub-projects)"
+          "description": "mega | sftp | memory (box in a later sub-project)"
         },
         "store": {
           "type": [
             "object",
             "null"
           ],
-          "properties": {
-            "folder": {
-              "type": "string"
-            },
-            "account": {
-              "type": "string"
-            }
-          },
-          "description": "mega: { folder, account }, account = masked email"
+          "additionalProperties": true,
+          "description": "mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }"
         },
         "syncId": {
           "type": [
@@ -318,6 +311,39 @@
       }
     },
     "POST /kb/sync/rotate": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
+        }
+      }
+    },
+    "POST /kb/sync/sftp": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "host",
+            "hostFingerprint"
+          ],
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "username": {
+              "type": "string"
+            },
+            "hostFingerprint": {
+              "type": "string"
+            },
+            "webHost": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "responses": {
         "200": {
           "$ref": "#/$defs/EncryptedSyncStatus"

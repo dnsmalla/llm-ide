@@ -1,0 +1,41 @@
+{
+  "endpoint": "POST /kb/sync/sftp",
+  "request": {
+    "body": {
+      "host": "sync.example.com",
+      "port": 2222,
+      "username": "llmidesync",
+      "hostFingerprint": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "webHost": "llm-ide.com"
+    }
+  },
+  "status": 200,
+  "response": {
+    "configured": true,
+    "enabled": false,
+    "storeKind": "sftp",
+    "store": {
+      "host": "sync.example.com",
+      "port": 2222,
+      "username": "llmidesync",
+      "hostFingerprint": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "webHost": "llm-ide.com",
+      "publicKey": "ssh-ed25519 AAAA llmide-sync-x"
+    },
+    "syncId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "epoch": 1,
+    "signingFingerprint": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "devices": [
+      {
+        "deviceId": "dev1",
+        "name": "Phone",
+        "tier": "ios",
+        "addedAt": 1,
+        "folderHint": "d/abc"
+      }
+    ],
+    "rotationPending": false,
+    "lastPublishAt": null,
+    "lastError": null
+  }
+}

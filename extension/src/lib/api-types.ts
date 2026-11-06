@@ -2058,13 +2058,10 @@ export type ReviewOk = {
 export type EncryptedSyncStatus = {
   configured?: boolean;
   enabled?: boolean;
-  /** mega | memory (sftp | box in later sub-projects) */
+  /** mega | sftp | memory (box in a later sub-project) */
   storeKind?: string | null;
-  /** mega: { folder, account }, account = masked email */
-  store?: {
-    folder?: string;
-    account?: string;
-  } | null;
+  /** mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey } */
+  store?: Record<string, unknown> | null;
   syncId?: string | null;
   epoch?: number | null;
   /** base64url SHA-256 of the desktop signing SPKI */
@@ -8123,6 +8120,19 @@ export type PostKbSyncRotateRequest = Record<string, never>;
 
 export type PostKbSyncRotateResponse200 = EncryptedSyncStatus;
 
+/** Request parts for `POST /kb/sync/sftp` (schema/http/sync.schema.json). */
+export type PostKbSyncSftpRequest = {
+  body: {
+    host: string;
+    port?: number;
+    username?: string;
+    hostFingerprint: string;
+    webHost?: string;
+  };
+};
+
+export type PostKbSyncSftpResponse200 = EncryptedSyncStatus;
+
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
   "GET /kb/storage": {
@@ -10502,6 +10512,12 @@ export interface ApiEndpoints {
     request: PostKbSyncRotateRequest;
     responses: {
       200: PostKbSyncRotateResponse200;
+    };
+  };
+  "POST /kb/sync/sftp": {
+    request: PostKbSyncSftpRequest;
+    responses: {
+      200: PostKbSyncSftpResponse200;
     };
   };
 }
