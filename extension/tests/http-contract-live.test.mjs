@@ -109,6 +109,12 @@ const SKIP_RULES = [
       && !/get-kb-calendar-ical-sources-200-empty/.test(fx.file),
   },
   {
+    // Hosted issue writes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY, so only
+    // the HOST_PROOF_REQUIRED row replays. The rest are covered with a faked provider by tests/issue-writes.test.mjs.
+    why: 'hosted issue writes: needs the bus host proof and a vault token; covered by tests/issue-writes.test.mjs',
+    when: (fx) => /^POST \/kb\/issues\/(create|comment|close)$/.test(fx.endpoint) && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
+  },
+  {
     // Host API pairing routes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY and sends
     // no proof, so only the 403 rows replay live. The rest were transcribed from the handler (tests/host-api-routes.test.mjs).
     why: 'Host API pairing: needs the bus host proof and LLMIDE_HOST_API_DEV; covered by tests/host-api-routes.test.mjs and tests/host-api-e2e.test.mjs',
