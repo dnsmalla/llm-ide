@@ -1,5 +1,5 @@
 {
-  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO. 409 SYNC_OFF|ENROLL_NOT_READY|ENROLL_FAILED, 404 NOT_FOUND (revoke).",
+  "description": "Encrypted sync settings (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md): the desktop Settings card's routes. Served by extension/routes/sync/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. No route returns the MEGA password or full email, a private key, root key or device folder name. Errors: 400 VALIDATION_FAILED (details.field), 409 SYNC_NOT_SET_UP, 502 SYNC_AUTH_FAILED|SYNC_MFA_REQUIRED|SYNC_RATE_LIMITED|SYNC_QUOTA|SYNC_UNREACHABLE|SYNC_IO. 409 SYNC_OFF|ENROLL_NOT_READY|ENROLL_FAILED, 404 NOT_FOUND (revoke). GET /kb/sync/box/callback is public (Box's browser redirect) and answers HTML. No route returns the Box client secret or a token.",
   "$defs": {
     "EncryptedSyncStatus": {
       "type": "object",
@@ -15,7 +15,7 @@
             "string",
             "null"
           ],
-          "description": "mega | sftp | memory (box in a later sub-project)"
+          "description": "mega | sftp | box | memory"
         },
         "store": {
           "type": [
@@ -23,7 +23,7 @@
             "null"
           ],
           "additionalProperties": true,
-          "description": "mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }"
+          "description": "mega: { folder, account = masked email }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }; box: { folder, account = masked Box login }"
         },
         "syncId": {
           "type": [

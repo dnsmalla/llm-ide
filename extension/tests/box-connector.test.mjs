@@ -18,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_box-connector-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
-const { buildTokenForm, parseFolderItems, toSourceRows } = await import('../connectors/box.mjs');
+const { buildTokenForm, parseFolderItems, toSourceRows, buildAuthCodeForm, buildRefreshForm, boxRequest, postToken, readCappedBuffer } = await import('../connectors/box.mjs');
 
 test('buildTokenForm encodes a CCG request', () => {
   const form = buildTokenForm({ clientId: 'cid', clientSecret: 'sec', subjectType: 'enterprise', subjectId: '123' });
@@ -285,4 +285,45 @@ test('replaceBoxIndex ingests >MAX_INGEST_BATCH rows and rolls back on failure',
     dbmod.closeDb();
     for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
   }
+});
+
+const stubRes = (status, body = '', headers = {}) => new Response(status === 204 ? null : body, { status, headers });
+const staticSession = (t = 'tok') => ({ ensure: async () => t, refresh: async () => { throw new Error('no refresh'); } });
+
+test('auth code and refresh forms carry the client secret and the PKCE verifier', () => {
+  const a = new URLSearchParams(buildAuthCodeForm({ clientId: 'cid', clientSecret: 'sec', code: 'c1', redirectUri: 'http://127.0.0.1:3456/cb', codeVerifier: 'v1' }));
+  assert.deepEqual([a.get('grant_type'), a.get('code'), a.get('client_secret'), a.get('redirect_uri'), a.get('code_verifier')],
+    ['authorization_code', 'c1', 'sec', 'http://127.0.0.1:3456/cb', 'v1']);
+  const r = new URLSearchParams(buildRefreshForm({ clientId: 'cid', clientSecret: 'sec', refreshToken: 'rt' }));
+  assert.deepEqual([r.get('grant_type'), r.get('refresh_token'), r.get('client_id')], ['refresh_token', 'rt', 'cid']);
+});
+
+test('boxRequest sends method and body, and refuses a redirect on a write', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push([init.method, init.body?.toString()]); return stubRes(302, '', { location: 'https://api.box.com/elsewhere' }); };
+  await assert.rejects(boxRequest(staticSession(), 'https://upload.box.com/api/2.0/files/content', { method: 'POST', body: Buffer.from('x'), fetchImpl }),
+    (e) => e.code === 'BOX_FETCH_REFUSED');
+  assert.deepEqual(seen, [['POST', 'x']]);
+});
+
+test('boxRequest returns a 429 at once when retry-after is above maxWaitMs, and retries a short one', async () => {
+  let calls = 0;
+  const long = async () => { calls += 1; return stubRes(429, '{}', { 'retry-after': '120' }); };
+  assert.equal((await boxRequest(staticSession(), 'https://api.box.com/2.0/folders/0', { fetchImpl: long, maxWaitMs: 10_000 })).status, 429);
+  assert.equal(calls, 1);
+  let n = 0;
+  const short = async () => (++n === 1 ? stubRes(429, '{}', { 'retry-after': '0' }) : stubRes(200, '{}'));
+  assert.equal((await boxRequest(staticSession(), 'https://api.box.com/2.0/folders/0', { fetchImpl: short, maxWaitMs: 10_000 })).status, 200);
+});
+
+test('postToken reports the Box error code and never puts the secret in the message', async () => {
+  const fetchImpl = async () => stubRes(400, JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid refresh token' }));
+  await assert.rejects(postToken(buildRefreshForm({ clientId: 'cid', clientSecret: 'very-secret-value', refreshToken: 'rt' }), { fetchImpl }),
+    (e) => e.code === 'BOX_AUTH_FAILED' && e.boxError === 'invalid_grant' && e.status === 400 && !e.message.includes('very-secret-value'));
+});
+
+test('readCappedBuffer returns bytes, an empty buffer for no body, and refuses an oversize body', async () => {
+  assert.deepEqual([...(await readCappedBuffer(stubRes(200, new Uint8Array([1, 2, 3])), 10))], [1, 2, 3]);
+  assert.equal((await readCappedBuffer(stubRes(204), 10)).length, 0);
+  await assert.rejects(readCappedBuffer(stubRes(200, new Uint8Array(11)), 10), (e) => e.code === 'BOX_FETCH_REFUSED');
 });

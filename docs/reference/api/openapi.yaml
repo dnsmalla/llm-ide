@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 114
+  x-api-version: 115
 servers:
   - url: "https://{host}"
     variables:
@@ -17274,13 +17274,13 @@ components:
           type:
             - "string"
             - "null"
-          description: "mega | sftp | memory (box in a later sub-project)"
+          description: "mega | sftp | box | memory"
         store:
           type:
             - "object"
             - "null"
           additionalProperties: true
-          description: "mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }"
+          description: "mega: { folder, account = masked email }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }; box: { folder, account = masked Box login }"
         syncId:
           type:
             - "string"

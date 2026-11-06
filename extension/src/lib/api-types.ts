@@ -2058,9 +2058,9 @@ export type ReviewOk = {
 export type EncryptedSyncStatus = {
   configured?: boolean;
   enabled?: boolean;
-  /** mega | sftp | memory (box in a later sub-project) */
+  /** mega | sftp | box | memory */
   storeKind?: string | null;
-  /** mega: { folder, account }; sftp: { host, port, username, hostFingerprint, webHost, publicKey } */
+  /** mega: { folder, account = masked email }; sftp: { host, port, username, hostFingerprint, webHost, publicKey }; box: { folder, account = masked Box login } */
   store?: Record<string, unknown> | null;
   syncId?: string | null;
   epoch?: number | null;
