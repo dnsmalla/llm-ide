@@ -294,7 +294,8 @@ struct HostApiV1ClientTests {
         c.close()
         guard case .refused(let r) = await outcome else { Issue.record("expected refused"); return }
         #expect(r.code == "host_unreachable")
-        #expect(Date().timeIntervalSince(started) < 5)
+        // Well under the 30 s hello timeout: close() ended the wait (a loaded CI runner took 7 s, so not < 5).
+        #expect(Date().timeIntervalSince(started) < 20)
         #expect(socket.cancelled)
         #expect(c.state == .disconnected)
     }
