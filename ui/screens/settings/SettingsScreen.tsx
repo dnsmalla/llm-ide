@@ -61,12 +61,16 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
     opened.current = true;
     store.current.set(target, true);
   }
+  const [showHelp, setShowHelp] = useState(false);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const matches = (title: string) => q.length === 0 || title.toLowerCase().includes(q);
   const [, bump] = useState(0);
   const toggle = (id: string) => {
-    store.current!.toggle(id);
+    const opening = !store.current!.isOpen(id);
+    // One section at a time: opening a group closes the others, so the page never becomes a long stack.
+    if (opening) for (const s of [...registry.sectionsIn("app"), ...registry.sectionsIn("project")]) if (s.id !== id) store.current!.set(s.id, false);
+    store.current!.set(id, opening);
     bump((n) => n + 1);
   };
   useEffect(() => {
@@ -108,8 +112,11 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   return (
     <SettingsEnvProvider env={env}>
       <div className="st-root">
-        <main className="st-page" aria-labelledby="st-title">
-          <h1 id="st-title" className="st-h1">Settings</h1>
+        <main className={"st-page" + (showHelp ? "" : " st-hide-help")} aria-labelledby="st-title">
+          <div className="st-page-head">
+            <h1 id="st-title" className="st-h1">Settings</h1>
+            <button type="button" className="st-help-toggle" aria-pressed={showHelp} onClick={() => setShowHelp((v) => !v)}>{showHelp ? "Hide help" : "Show help"}</button>
+          </div>
           <div className="st-search"><input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search settings…" aria-label="Search settings" autoComplete="off" spellCheck={false} /></div>
           {app.length > 0 ? <ul className="st-groups" aria-label="Settings groups">{app.map(row)}</ul> : <p className="st-empty" role="status">No settings match “{query.trim()}”.</p>}
           {project.length > 0 ? (
