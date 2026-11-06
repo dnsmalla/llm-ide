@@ -147,6 +147,8 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 - [ ] **UN-052** Real-corpus checks: platform-less note count, hidden-note semantics, iCloud placeholders (ROADMAP Loose ends).
   - Why you: reads your real notes, which agents must not. How: run the count commands the ROADMAP Loose ends list gives and report numbers only. Effort: 15 minutes.
 
+Desktop Live capture plan 2026-11-05 assumes no Swift helper; approving it changes only that plan's Task 5.
+
 ## C. Delegated decisions (revisit if wrong)
 
 You said "do the best, secure, usable for big projects" and agents decided. Each is ticked; reopen any by saying so.
