@@ -16,6 +16,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLink, setShowLink] = useState(false);
   const active = useRef(false);
   active.current = start !== null && (poll === null || poll.phase === "waiting" || poll.phase === "confirm");
 
@@ -28,7 +29,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
     return pollEnrollSerially(client, setPoll, (e) => setError(describeError(e)));
   }, [client, start]);
   useEffect(() => () => { if (active.current) void cancelEnroll(client).catch(() => {}); }, [client]);
-  const stop = () => { setStart(null); setPoll(null); };
+  const stop = () => { setStart(null); setPoll(null); setShowLink(false); };
   const begin = (tier: "web" | "ios") => run(async () => { setPoll(null); setStart(await startEnroll(client, tier)); });
   const screen = enrollScreen(start, poll);
   useEffect(() => { // the backend restarted mid-enrollment: its QR is dead, so stop polling and say so
@@ -62,7 +63,9 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
         <div className="st-stack" role="status">
           <PairingQr payload={start.qr} />
           <p className="st-hint">{start.tier === "ios" ? "Scan with the LLM-IDE iPhone app." : "Open this link in the browser you want to add."} The code works for 2 minutes and once only. Keep this screen out of view of others.</p>
-          <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p>
+          {status.storeKind !== "box" || showLink
+            ? <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p> // for Box the link carries the client secret
+            : <div className="st-row"><Button onClick={() => setShowLink(true)}>Show link</Button></div>}
           <div className="st-row"><Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Cancel</Button></div>
         </div>
       )}

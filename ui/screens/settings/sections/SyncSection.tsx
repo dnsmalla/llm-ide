@@ -1,5 +1,4 @@
-// Settings → Phone and web sync (desktop off): choose the storage (a dedicated MEGA account, or your own server over
-// SFTP), connection test, on/off and "Publish now". Secrets are write-only: the MEGA password field is cleared after
+// Settings → Phone and web sync (desktop off): choose the storage (MEGA, own server or Box; a dedicated account for MEGA and Box), connection test, on/off and "Publish now". Secrets are write-only: the MEGA password field is cleared after
 // Save and never filled from the core, and the SSH private key never leaves the core. Saving the other storage kind
 // unlinks every device, so the card asks first.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -32,7 +31,7 @@ export default function SyncSection(): ReactNode {
     else if (s?.store && !isSftpStore(s.store)) { const folder = s.store.folder; setForm((f) => ({ ...f, folder })); }
   }, (e) => setError(describeError(e))); }, [client]);
   if (status === null) return null;
-  const configured = status?.storeKind === "mega" || status?.storeKind === "sftp" ? status.storeKind : null;
+  const configured = status?.storeKind === "mega" || status?.storeKind === "sftp" || status?.storeKind === "box" ? status.storeKind : null;
   /** Saving another kind than the configured one unlinks every device: ask first. */
   const guarded = (fn: () => Promise<void>) => { if (configured && configured !== kind) setPending(() => fn); else void fn(); };
   const saveMegaNow = () => run(async () => {
@@ -41,7 +40,7 @@ export default function SyncSection(): ReactNode {
     await testSync(client);
   }, "Saved. MEGA connection works.");
   const saveSftpNow = (cfg: SftpSetup) => run(() => saveSftp(client, cfg), "Saved. Install the key below on the server, then press Test connection.");
-  const working = kind === "sftp" ? "Your server answers." : "MEGA connection works.";
+  const working = kind === "sftp" ? "Your server answers." : kind === "box" ? "Box connection works." : "MEGA connection works.";
   return (
     <section className="st-stack" aria-labelledby="sync-title">
       <span className="st-label" id="sync-title">Phone and web sync</span>
@@ -50,7 +49,7 @@ export default function SyncSection(): ReactNode {
         <legend className="st-label">Storage</legend>
         {STORE_CHOICES.map((c) => (
           <label key={c.kind} className="st-row">
-            <input type="radio" name="sync-store" checked={kind === c.kind} disabled={!c.built} onChange={() => setKind(c.kind)} /> {c.label}{c.built ? "" : " (not available yet)"}
+            <input type="radio" name="sync-store" checked={kind === c.kind} onChange={() => setKind(c.kind)} /> {c.label}
           </label>
         ))}
       </fieldset>
@@ -73,7 +72,7 @@ export default function SyncSection(): ReactNode {
           <div className="st-row"><Button onClick={() => guarded(saveMegaNow)} disabled={!form.email.trim() || !form.password}>Save and test</Button></div>
         </>
       ) : (
-        kind === "box" ? <SyncBoxForm folder={status?.storeKind === "box" && status.store && "folder" in status.store ? status.store.folder : "llmide-sync"} switching={!!status?.storeKind && status.storeKind !== "box" && status.devices.length > 0} run={run} /> : <SyncOwnServer status={status} onSave={(cfg) => guarded(() => saveSftpNow(cfg))} />
+        kind === "box" ? <SyncBoxForm folder={status?.storeKind === "box" && status.store && "folder" in status.store ? status.store.folder : "llmide-sync"} switching={!!status?.storeKind && status.storeKind !== "box" && status.devices.length > 0} run={run} onConnect={guarded} /> : <SyncOwnServer status={status} onSave={(cfg) => guarded(() => saveSftpNow(cfg))} />
       )}
       {pending && (
         <div className="st-dialog" role="alertdialog" aria-label="Switch sync storage">

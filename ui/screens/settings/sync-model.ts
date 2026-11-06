@@ -71,6 +71,7 @@ export const saveSftp = async (client: CoreClient, cfg: SftpSetup) => decodeSync
 export const authorizedKeysCommand = (publicKey: string, user: string) => `printf 'restrict %s\\n' '${publicKey}' > /etc/ssh/authorized_keys/${user}`;
 export function storeSummary(s: SyncStatus): string {
   if (isSftpStore(s.store)) return `Server ${s.store.username}@${s.store.host}:${s.store.port}. Phones and browsers use https://${s.store.webHost}/sync/.`;
+  if (s.storeKind === "box" && s.store) return `Connected Box account ${s.store.account}, folder ${s.store.folder} in its Box files.`;
   return s.store ? `Connected account ${s.store.account}, folder ${s.store.folder} in its Cloud Drive.` : "";
 }
 export const testSync = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/test", {}); };
@@ -128,7 +129,7 @@ export const rotateSyncKeys = async (client: CoreClient) => decodeSyncStatus(awa
 export const STORE_CHOICES: ReadonlyArray<{ kind: StoreKind; label: string; built: boolean }> = [
   { kind: "mega", label: "MEGA", built: true },
   { kind: "box", label: "Box", built: true },
-  { kind: "sftp", label: "Own server", built: false },
+  { kind: "sftp", label: "Own server", built: true },
 ];
 export const BOX_DESKTOP_REDIRECT = "http://127.0.0.1/kb/sync/box/callback";
 export interface BoxSetup { clientId: string; clientSecret: string; folder: string }
@@ -161,11 +162,15 @@ const BOX_ERROR_TEXT: Record<string, string> = {
   SYNC_QUOTA: "The Box account is out of storage.",
   SYNC_UNREACHABLE: "Box could not be reached. Check the network; sync retries by itself.",
   SYNC_IO: "A Box operation failed. Sync retries by itself.",
+  SYNC_BUSY: "Sync is finishing a cycle. Try again in a moment.",
 };
 const BOX_CONNECT_TEXT: Record<string, string> = {
   cancelled: "Box sign-in was cancelled. Nothing changed.",
   SYNC_BAD_CLIENT: "Box refused the client ID or secret. Copy both again from your Box app's Configuration page.",
   SYNC_AUTH_FAILED: "Box refused the sign-in. Check that your Box app lists the redirect URI shown here, then try again.",
   SYNC_UNREACHABLE: "Box could not be reached. Check the network and try again.",
+  SYNC_BUSY: "Sync is finishing a cycle. Try again in a moment.",
+  SYNC_QUOTA: "The Box account is out of storage.",
+  SYNC_IO: "A Box operation failed. Try again.",
 };
 export const boxConnectFailureText = (code: string | null): string => BOX_CONNECT_TEXT[code ?? ""] ?? "Connecting Box stopped. Nothing changed.";

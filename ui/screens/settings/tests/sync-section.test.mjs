@@ -135,9 +135,12 @@ test("waitBoxConnect polls until done or failed, and times out", async () => {
   let t = 0;
   assert.equal((await m.waitBoxConnect(stuck, { intervalMs: 1, timeoutMs: 3, sleep: async () => {}, now: () => t++ })).phase, "timeout");
 });
-test("Box errors read as Box guidance; the chooser lists Own server as not built", () => {
+test("Box errors read as Box guidance; every chooser option is built", () => {
   assert.match(m.syncErrorText("SYNC_AUTH_FAILED", "box"), /Connect Box again/);
   assert.match(m.syncErrorText("SYNC_AUTH_FAILED", "mega"), /email or password/);
   assert.match(m.boxConnectFailureText("SYNC_BAD_CLIENT"), /client ID or secret/);
-  assert.deepEqual(m.STORE_CHOICES.map((s) => [s.kind, s.built]), [["mega", true], ["box", true], ["sftp", false]]);
+  assert.match(m.boxConnectFailureText("SYNC_BUSY"), /finishing a cycle/);
+  assert.match(m.boxConnectFailureText("SYNC_QUOTA"), /out of storage/);
+  assert.match(m.storeSummary({ storeKind: "box", store: { folder: "f", account: "a" } }), /Box/);
+  assert.deepEqual(m.STORE_CHOICES.map((s) => [s.kind, s.built]), [["mega", true], ["box", true], ["sftp", true]]);
 });
