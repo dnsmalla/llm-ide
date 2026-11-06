@@ -38,6 +38,8 @@
 
 ## Decisions for the user (secure default first, already applied in this plan)
 
+**Accepted by the user on 2026-11-06: all nine secure defaults, as written.** Do not implement any alternative.
+
 | # | Question | Secure default (applied) | Alternative |
 |---|---|---|---|
 | 1 | How is the new surface granted? | One new capability `compose`, served only with `LLMIDE_HOST_API_COMPOSE=1` (default off); a browser paired before must re-pair; never via the relay web tier. | Put it under `chat`, which would silently grant it to every paired device. |
