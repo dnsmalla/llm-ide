@@ -15,9 +15,6 @@ final class V2HostConnection: HostConnection {
     private var lastChatSend: String?
     private enum Reply { case snapshot, clear }
     private var waiters: [Reply: [(id: UUID, continuation: CheckedContinuation<Data, Error>)]] = [:]
-    /// Requests that timed out but whose reply the Mac still sends, in order. Each such reply is dropped so it
-    /// cannot resolve the next waiter. Relies on the Mac answering every request of a kind.
-    private var orphanedReplies: [Reply: Int] = [:]
     private static let replyTimeout: TimeInterval = 15
 
     init(service: ConnectionService) { self.service = service }
@@ -95,8 +92,6 @@ final class V2HostConnection: HostConnection {
     /// is kept on purpose: today a Stop after a silent reconnect still sends Cancel for the store's current id.
     func connectionEnded() {
         for kind in [Reply.snapshot, .clear] {
-            // A new socket never answers the old one's requests.
-            orphanedReplies[kind] = 0
             while waiters[kind]?.isEmpty == false { resolve(kind, token: nil, with: .failure(Self.unreachable(nil))) }
         }
     }
@@ -109,19 +104,16 @@ final class V2HostConnection: HostConnection {
                 try? await Task.sleep(nanoseconds: UInt64(Self.replyTimeout * 1_000_000_000))
                 guard let self, let index = self.waiters[kind]?.firstIndex(where: { $0.id == token }) else { return }
                 let waiter = self.waiters[kind]!.remove(at: index)
-                self.orphanedReplies[kind, default: 0] += 1
                 waiter.continuation.resume(throwing: Self.unreachable(requestId))
+                // v2 replies carry no id, so a late reply would answer the next request. A fresh socket never
+                // carries the old one's replies; the reconnect also fails every other waiter (`connectionEnded`).
+                self.service.reconnectAfterStall()
             }
         }
     }
 
-    /// v2 replies carry no id, and the Mac answers in order: a reply goes to the oldest live waiter, unless it
-    /// answers a request that already timed out.
+    /// v2 replies carry no id, and the Mac answers in order: a reply goes to the oldest live waiter.
     private func deliverReply(_ kind: Reply, with result: Result<Data, Error>) {
-        if orphanedReplies[kind, default: 0] > 0 {
-            orphanedReplies[kind, default: 0] -= 1
-            return
-        }
         resolve(kind, token: nil, with: result)
     }
 

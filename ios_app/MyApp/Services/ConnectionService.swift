@@ -505,6 +505,15 @@ final class ConnectionService: ObservableObject {
         disconnect(clearDirect: false)
     }
 
+    /// A request went unanswered on a live socket: drop it and reconnect with the saved pairing, as a missed
+    /// heartbeat does. Not a user close, so the auto-reconnect stays on.
+    func reconnectAfterStall() {
+        guard connectionStatus == .connected, !isDemo else { return }
+        invalidateSocket()
+        connectionStatus = .disconnected
+        scheduleReconnect()
+    }
+
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
