@@ -118,6 +118,10 @@ export function check({ libRs, buildRs, capabilities, cargoToml, updaterRs, prod
     }
   }
   for (const cmd of manifest) if (!all.includes(cmd)) problems.push(`build.rs COMMANDS lists ${cmd}, which is not a registered handler`);
+  // A grant for a command that no longer exists makes a clean `tauri build` panic ("Permission allow-… not found"),
+  // while a cached local build still passes: catch it here.
+  const known = new Set(manifest.map((c) => `allow-${toKebab(c)}`));
+  for (const perm of granted) if (perm.startsWith('allow-') && !known.has(perm)) problems.push(`a capability grants ${perm}, but no build.rs COMMANDS entry defines it`);
   return problems;
 }
 

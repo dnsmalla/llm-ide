@@ -24,6 +24,10 @@ test('ungranted or undeclared command fails', () => {
   const b = { ...ok(), buildRs: 'const COMMANDS: &[&str] = &["ping"];' };
   assert.ok(check(b).some((p) => p.includes('not in build.rs')));
 });
+test('a grant for a removed command fails (a clean tauri build would panic on it)', () => {
+  const c = ok(); c.capabilities['a.json'].permissions.push('allow-loop-boundary-warnings');
+  assert.ok(check(c).some((p) => p.includes('allow-loop-boundary-warnings')));
+});
 test('remote scope and other windows fail', () => {
   assert.ok(check({ ...ok(), capabilities: { 'a.json': cap(['allow-ping', 'allow-thing-two', 'allow-core-status'], { remote: { urls: ['https://x'] } }) } }).length);
   assert.ok(check({ ...ok(), capabilities: { 'a.json': { ...cap(['allow-ping', 'allow-thing-two', 'allow-core-status']), windows: ['*'] } } }).length);
