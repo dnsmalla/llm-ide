@@ -20,6 +20,11 @@
 # (see docs/how-to/desktop-signing-decisions.md).
 set -euo pipefail
 
+# The Rust toolchain ships rust-objcopy with its libLLVM; macOS needs that directory on DYLD_LIBRARY_PATH so the
+# release debug-strip step runs instead of warning and leaving symbols in the bundle.
+RUST_SYSROOT="$(rustc --print sysroot)"
+export DYLD_LIBRARY_PATH="${RUST_SYSROOT}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+
 DMG=0; CHECKS=1; SMOKE=1
 for a in "$@"; do
   case "$a" in
