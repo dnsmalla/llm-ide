@@ -2,82 +2,79 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>$(DEVELOPMENT_LANGUAGE)</string>
-  <key>CFBundleDisplayName</key>
-  <string>LLM-IDE</string>
-  <key>CFBundleExecutable</key>
-  <string>$(EXECUTABLE_NAME)</string>
-  <key>CFBundleIdentifier</key>
-  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>$(PRODUCT_NAME)</string>
-  <key>CFBundlePackageType</key>
-  <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>LSRequiresIPhoneOS</key>
-  <true/>
-  <key>UIApplicationSceneManifest</key>
-  <dict>
-    <key>UIApplicationSupportsMultipleScenes</key>
-    <false/>
-  </dict>
-  <key>UILaunchScreen</key>
-  <dict>
-    <key>UIColorName</key>
-    <string>LaunchBackground</string>
-  </dict>
-  <key>UISupportedInterfaceOrientations</key>
-  <array>
-    <string>UIInterfaceOrientationPortrait</string>
-    <string>UIInterfaceOrientationLandscapeLeft</string>
-    <string>UIInterfaceOrientationLandscapeRight</string>
-  </array>
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <!-- WHY this is still ArbitraryLoads rather than the narrower
-         NSAllowsLocalNetworking: the Mac PREFERS its Tailscale address in the
-         pairing QR (MobileConnectionInfo), and 100.64.0.0/10 is RFC 6598
-         shared address space — NOT one of the RFC 1918 / link-local / .local
-         ranges NSAllowsLocalNetworking exempts. Narrowing the key would very
-         likely block the primary documented pairing path over a tailnet.
-         Blast radius is bounded: URLSession appears in exactly one file
-         (ConnectionService) and reaches only the paired Mac.
-         The REAL fix is to stop needing an ATS exemption at all — TLS with
-         an SPKI hash carried in the QR and pinned here, or moving the socket
-         to NWConnection (which ATS does not police). Tracked as the follow-up
-         to this security pass; narrowing this key requires an on-device test
-         over Tailscale first. -->
-    <key>NSAllowsArbitraryLoads</key>
-    <true/>
-  </dict>
-  <key>NSLocalNetworkUsageDescription</key>
-  <string>LLM-IDE discovers your Mac on the local network to connect automatically.</string>
-  <key>NSCameraUsageDescription</key>
-  <string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>LLM-IDE uses the microphone so you can dictate chat messages to your Mac instead of typing them.</string>
-  <key>NSSpeechRecognitionUsageDescription</key>
-  <string>LLM-IDE converts your speech to text on-device so dictated chat messages stay on your phone until you send them.</string>
-  <key>NSBonjourServices</key>
-  <array>
-    <string>_llmide._tcp</string>
-  </array>
-  <!-- Export compliance. The app contains no cryptography of its own: no
-       CryptoKit, no CommonCrypto, no bundled algorithms — the only crypto
-       anywhere near it is the platform's own TLS/Keychain, which is exempt
-       under the "standard encryption built into the OS" carve-out. Declaring
-       this here answers the export-compliance question at build time instead
-       of prompting on every single App Store Connect upload.
-
-       If a future build ever adds its own crypto — e.g. the pinned-SPKI TLS
-       described in the ATS comment above — revisit this before shipping. -->
-  <key>ITSAppUsesNonExemptEncryption</key>
-  <false/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>LLM-IDE</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<!-- Export compliance. The app uses only the encryption built into iOS:
+	     CryptoKit (AES-GCM, ECDSA/ECDH P-256, HKDF, HMAC, SHA-256), CommonCrypto
+	     (AES, PBKDF2) and the Keychain / Secure Enclave, through Apple's own APIs,
+	     with standard algorithms. It bundles no crypto library. NO here matches the
+	     "only encryption within Apple's operating system" answer. Re-check with
+	     counsel before each submission that changes crypto. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<!-- WHY this is still ArbitraryLoads rather than the narrower
+	     NSAllowsLocalNetworking: the Mac PREFERS its Tailscale address in the
+	     pairing QR (MobileConnectionInfo), and 100.64.0.0/10 is RFC 6598
+	     shared address space — NOT one of the RFC 1918 / link-local / .local
+	     ranges NSAllowsLocalNetworking exempts. Narrowing the key would very
+	     likely block the primary documented pairing path over a tailnet.
+	     Blast radius is bounded: URLSession appears in exactly one file
+	     (ConnectionService) and reaches only the paired Mac.
+	     The REAL fix is to stop needing an ATS exemption at all — TLS with
+	     an SPKI hash carried in the QR and pinned here, or moving the socket
+	     to NWConnection (which ATS does not police). Tracked as the follow-up
+	     to this security pass; narrowing this key requires an on-device test
+	     over Tailscale first. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_llmide._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>LLM-IDE discovers your Mac on the local network to connect automatically.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LLM-IDE uses the microphone so you can dictate chat messages to your Mac instead of typing them.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>LLM-IDE converts your speech to text on-device so dictated chat messages stay on your phone until you send them.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>
