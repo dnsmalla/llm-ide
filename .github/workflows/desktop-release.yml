@@ -31,7 +31,8 @@ concurrency:
 env:
   SIGNED: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || inputs.signed == true }}
   # Windows signing is opt-in only: never set by a tag release, so no DESKTOP_WIN_* secret is required by default.
-  WIN_SIGNED: ${{ inputs.windows_signed == true }}
+  # windows_signed needs signed too: the signCommand rides the release overlay, which only signed runs build.
+  WIN_SIGNED: ${{ inputs.windows_signed == true && inputs.signed == true }}
 
 jobs:
   preflight:
@@ -333,7 +334,8 @@ jobs:
         run: |
           npm ci --prefix extension --omit dev --ignore-scripts
           npm sbom --prefix extension --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_core.cdx.json"
-          npm sbom --prefix desktop --omit dev --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_frontend.cdx.json"
+          # desktop/node_modules is never installed in this job: read the lockfile only.
+          npm sbom --prefix desktop --omit dev --package-lock-only --sbom-format cyclonedx > "dist/LLM-IDE_${VERSION}_frontend.cdx.json"
       # Signed runs: update-manifest.mjs is the ONLY SHA256SUMS writer (it covers latest.json and every SBOM above).
       - name: Update manifest (every signature verified) and SHA256SUMS
         if: env.SIGNED == 'true'

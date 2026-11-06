@@ -85,7 +85,7 @@ test('Windows: pinned Artifact Signing client, overlay passed to tauri build, si
 test('Windows signing is opt-in: unset windows_signed never checks or uses a DESKTOP_WIN_* secret', () => {
   const wf = rel();
   assert.match(wf, /windows_signed:[\s\S]*?default: false/);
-  assert.match(wf, /WIN_SIGNED: \$\{\{ inputs\.windows_signed == true \}\}/);
+  assert.match(wf, /WIN_SIGNED: \$\{\{ inputs\.windows_signed == true && inputs\.signed == true \}\}/);
   assert.doesNotMatch(wf, /WIN_SIGNED:.*refs\/tags/);
   // every step that mentions a DESKTOP_WIN_* secret is gated on WIN_SIGNED (the env: expression form is gated inline)
   const steps = wf.split(/\n      - /);
@@ -147,4 +147,10 @@ test('autobench: manual only, spike feature never in the release workflow', () =
   assert.match(ab, /--features spike/);
   assert.match(ab, /LLMIDE_POC_AUTOBENCH: all/);
   assert.doesNotMatch(rel(), /--features spike/);
+});
+
+test('final review: the frontend SBOM reads the lockfile only, and Windows signing needs a signed run', () => {
+  const y = readFileSync(new URL('../../.github/workflows/desktop-release.yml', import.meta.url), 'utf8');
+  assert.match(y, /npm sbom --prefix desktop --omit dev --package-lock-only/);
+  assert.match(y, /WIN_SIGNED: \$\{\{ inputs\.windows_signed == true && inputs\.signed == true \}\}/);
 });

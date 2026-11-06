@@ -28,7 +28,8 @@ whose signature does not match the public key committed at `desktop/release/upda
 updates safe on Windows and Linux without a paid certificate.
 
 Windows is unsigned by decision (2026-11-05, no paid certificate). Users see a SmartScreen warning; see
-"First launch on Windows" below. If you change your mind, use the `windows_signed` input (section 2).
+"First launch on Windows" below. The `windows_signed` input (section 2) only signs a dry run, which never
+publishes; shipping a signed Windows installer on a tag release needs a workflow change first.
 
 ## 2. One-time setup
 
@@ -107,7 +108,8 @@ Watch it with `gh run watch`. Files are in the run's artifacts.
    `Get-FileHash .\LLM-IDE_X.Y.Z_x64-setup.exe -Algorithm SHA256`.
    ```
 
-4. Commit, tag, push. The tag must be exactly `desktop-vX.Y.Z` and match the version in step 1:
+4. Commit, tag, push. Push `main` too, not only the tag, so the release commit is on remote `main`. The tag must
+   be exactly `desktop-vX.Y.Z` and match the version in step 1:
 
    ```bash
    git commit -am "chore(release): desktop-vX.Y.Z"
@@ -161,7 +163,7 @@ each (UN-114). Use the files from the draft release.
 - [ ] **Tray.** Icon present, Show and Quit work. On GNOME without the AppIndicator extension a missing tray is fine.
 - [ ] **Quit.** From the tray or the app menu. Expected: no `node` process left (`ps aux | grep core/node`;
   Windows Task Manager).
-- [ ] **Update N-1 to N.** Install the previous published version, promote N. Settings, Check Now shows N;
+- [ ] **Update N-1 to N** (from the second release on; the first release has no N-1). Install the previous published version, promote N. Settings, Check Now shows N;
   Install asks; the app restarts on N; chats and projects are still there. Once, switch off "Check for updates
   automatically", relaunch, and confirm no check happens until Check Now.
 - [ ] **Uninstall.** macOS: drag to Trash. Windows: Settings, Apps, Uninstall. Linux: `sudo apt remove llm-ide`
