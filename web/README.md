@@ -59,6 +59,22 @@ run, read-only, when the desktop is back (design: docs/superpowers/specs/2026-11
 - Code: `src/sync/`. Tests: `tests/sync-*.test.mjs` (vectors, malicious storage, fake MEGA) and
   `tests/e2e/sync-desktop-e2e.test.mjs` (real desktop sync code).
 
+## Documents and code at the source
+
+The web app reads Box documents and GitLab code directly from the user's own accounts, read-only, with or without
+the desktop (design §9). Nothing passes through sync, and nothing read is stored.
+
+- Sign-in is OAuth with PKCE in a pop-up: GitLab `read_api read_repository` (an application with Confidential
+  unticked), Box `root_readonly` (the user's own Box Custom App; Box needs its client secret, which stays in
+  IndexedDB `llmide-sources`). Tokens live in memory only, so each browser session signs in again.
+- Redirect URI: `<site>/oauth-callback.html` (for example `https://llm-ide.com/app/oauth-callback.html`; in
+  development `http://127.0.0.1:5180/oauth-callback.html`). Box also needs the site origin in its CORS Domains.
+- The CSP adds exactly `https://gitlab.com https://api.box.com https://dl.boxcloud.com https://public.boxcloud.com` to
+  `connect-src`. gitlab.com only; self-hosted GitLab is not supported yet.
+- Code and text show as plain text (1 MiB cap), Markdown without HTML or images, PDFs as "Save PDF" only, Office files
+  as Box's extracted text. Setup: docs/how-to/read-box-gitlab-on-phone-and-web.md.
+- Code: `src/sources/`. Tests: `tests/sources-*.test.mjs` (fake APIs); live: `npm run test:live` (opt-in).
+
 ## Installable shell
 
 The built client is a PWA: `manifest.webmanifest`, PNG/SVG icons and a service worker that caches only the app

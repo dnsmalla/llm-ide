@@ -27,7 +27,7 @@ Keep the Node server on loopback and let Caddy own DNS, certificates and HTTPS.
 The bundle is static, so any static host works; the CSP header below must be
 sent by the proxy or the server. The two MEGA hosts in `connect-src` are for offline sync; MEGA's
 transfer hosts (`*.userstorage.mega.co.nz`) are not yet confirmed to allow browser
-(CORS) access — see README "Offline sync" before relying on the browser tier.
+(CORS) access — see README "Offline sync" before relying on the browser tier. The four Box/GitLab hosts are for reading documents and code at the source.
 
 ```caddyfile
 web.example.com {

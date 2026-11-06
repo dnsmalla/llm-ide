@@ -86,3 +86,21 @@ Start the core yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`
 9. Keyboard only, then VoiceOver: pairing form, the code (read as single digits), unlock, the inbox, meetings and plans.
 10. iPhone, installed to the home screen: the installed app cannot receive an opened link (its storage is separate from
     Safari). - [ ] Copy the link from the desktop, paste it into the installed app's Pairing screen, and pairing works.
+
+## 5. Documents and code (direct reads)
+
+Needs a GitLab application and a Box Custom App set up as in docs/how-to/read-box-gitlab-on-phone-and-web.md, with
+`http://127.0.0.1:5180` in the Box app's CORS Domains and the `/oauth-callback.html` redirect URI registered.
+
+- [ ] Pairing screen → **Open documents and code**. Save the GitLab Application ID, **Sign in to GitLab**: a pop-up
+      opens, GitLab asks for `read_api` and `read_repository` only, the pop-up closes, the card says signed in.
+- [ ] Browse a project, open a folder, open a `.ts` file (plain text), a `.md` file (rendered, no images), a `.png`
+      ("not shown"). Search inside the project. **Open on GitLab** opens a new tab.
+- [ ] Box: save Client ID + secret, sign in (the consent screen shows read access only). Open a `.md`, a `.docx`
+      (extracted text), a `.pdf` (**Save PDF** downloads it). DevTools shows no CSP violation, and the `.md` download
+      redirect to `dl.boxcloud.com` succeeds (this is the browser CORS check the curl preflight could not make).
+- [ ] Reload the page: both providers say "Set up. Sign in to browse." (tokens were in memory only).
+- [ ] DevTools → Application: `localStorage` and `sessionStorage` hold no token; IndexedDB `llmide-sources` holds only
+      the IDs and the Box secret.
+- [ ] Turn the network off: the offline banner shows and Search is disabled.
+- [ ] A screen reader announces the breadcrumbs ("Location"), the status line, and the file heading when a file opens.
