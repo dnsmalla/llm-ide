@@ -346,10 +346,11 @@ fn version_of(program: &str, args: &[&str]) -> Option<String> {
 /// Changed paths in the run's worktree, from a fixed `git status --porcelain`. Used by the Loop run record.
 /// Reverts a bounded set of repo-relative paths in the resolved worktree. The page supplies paths only; the host
 /// rejects absolute/parent traversal and never accepts a command. Used by the protected-path and scope guard.
-/// Tracked paths are restored from the index (`git checkout --`). An untracked path (a user's file, an ignored file
-/// the agent overwrote, or a file the agent created) or an untracked directory refuses the whole call before anything
-/// changes; nothing is ever removed. Paths are literal pathspecs.
-pub fn revert_paths_in(work: &Path, paths: &[String]) -> Result<(), String> {
+/// Tracked paths are restored from the index (`git checkout --`). An untracked path is removed only when it is in
+/// `created` (the agent run's own `createdPaths`: absent before its Write), as the Mac's `revertUnlisted` does. Any
+/// other untracked path (a user's file, an ignored file the agent overwrote) or an untracked directory refuses the whole
+/// call before anything changes. Paths are literal pathspecs; a removal never follows a symlink out of `work`.
+pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Result<(), String> {
     if paths.len() > 100 { return Err("too many paths to revert".into()); }
     for p in paths {
         let rel = std::path::Path::new(p);
@@ -362,9 +363,16 @@ pub fn revert_paths_in(work: &Path, paths: &[String]) -> Result<(), String> {
     if !listed.status.success() { return Err("git ls-files failed; nothing was reverted".into()); }
     let tracked: HashSet<String> = String::from_utf8_lossy(&listed.stdout).split('\0').map(|s| s.to_string()).collect();
     let (tracked_paths, untracked): (Vec<&String>, Vec<&String>) = paths.iter().partition(|p| tracked.contains(p.as_str()));
-    if let Some(p) = untracked.first() {
-        if work.join(p.as_str()).is_dir() { return Err(format!("cannot revert untracked directory {p}; nothing was reverted")); }
-        return Err(format!("{p} is not tracked and the agent did not create it, so it may be your own file; nothing was reverted"));
+    let created: HashSet<&str> = created.iter().map(|s| s.as_str()).collect();
+    let canon_work = work.canonicalize().map_err(|e| format!("cannot resolve the worktree: {e}"))?;
+    for p in &untracked {
+        let full = work.join(p.as_str());
+        if full.is_dir() { return Err(format!("cannot revert untracked directory {p}; nothing was reverted")); }
+        if !created.contains(p.as_str()) {
+            return Err(format!("{p} is not tracked and the agent did not create it, so it may be your own file; nothing was reverted"));
+        }
+        let parent_ok = full.parent().and_then(|d| d.canonicalize().ok()).is_some_and(|d| d.starts_with(&canon_work));
+        if !parent_ok { return Err(format!("{p} is not inside the worktree; nothing was reverted")); }
     }
     if !tracked_paths.is_empty() {
         let mut cmd = Command::new("git");
@@ -376,17 +384,22 @@ pub fn revert_paths_in(work: &Path, paths: &[String]) -> Result<(), String> {
             return Err(format!("git checkout failed: {}", err.lines().next().unwrap_or("unknown error")));
         }
     }
+    for p in &untracked {
+        let full = work.join(p.as_str());
+        // symlink_metadata: a symlink the agent created is removed itself, never its target.
+        if std::fs::symlink_metadata(&full).is_ok_and(|m| m.is_file() || m.file_type().is_symlink()) {
+            std::fs::remove_file(&full).map_err(|e| format!("cannot remove {p}: {e}"))?;
+        }
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>) -> Result<(), String> {
-    // `created` is still accepted from the page for compatibility but ignored: untracked paths are never reverted.
-    let _ = created;
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        revert_paths_in(&work_root(&root), &paths)
+        revert_paths_in(&work_root(&root), &paths, &created.unwrap_or_default())
     }).await.map_err(|e| format!("revert task failed: {e}"))?
 }
 
@@ -575,14 +588,16 @@ mod tests {
     // port (shell stages cannot start there yet; MASTER-PLAN S2 'Windows cargo test').
     #[cfg(unix)]
     #[test]
-    fn revert_restores_tracked_files_and_refuses_untracked_ones_even_when_created() {
+    fn revert_restores_tracked_files_and_removes_only_files_the_agent_created() {
         let dir = repo("revert");
         std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
         std::fs::write(dir.join("new.txt"), "agent new\n").unwrap();
-        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "new.txt".to_string()]).is_err());
+        let both = ["a.txt".to_string(), "new.txt".to_string()];
+        assert!(revert_paths_in(&dir, &both, &[]).is_err());
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "agent edit\n", "a refused call changes nothing");
         assert!(dir.join("new.txt").exists());
-        revert_paths_in(&dir, &["a.txt".to_string()]).unwrap();
+        revert_paths_in(&dir, &both, &["new.txt".to_string()]).unwrap();
+        assert!(!dir.join("new.txt").exists(), "a file the agent created is removed");
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "committed\n");
         assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "committed\n");
         let _ = std::fs::remove_dir_all(&dir);
@@ -594,9 +609,9 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
         std::fs::create_dir_all(dir.join("newdir")).unwrap();
         std::fs::write(dir.join("newdir/x.txt"), "x\n").unwrap();
-        assert!(revert_paths_in(&dir, &["../etc/passwd".to_string()]).is_err());
-        assert!(revert_paths_in(&dir, &["/abs".to_string()]).is_err());
-        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "newdir".to_string()]).is_err());
+        assert!(revert_paths_in(&dir, &["../etc/passwd".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &["/abs".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "newdir".to_string()], &[]).is_err());
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "agent edit\n");
         assert!(dir.join("newdir/x.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -610,8 +625,8 @@ mod tests {
         std::fs::write(dir.join(".env"), "SECRET=1\n").unwrap();
         std::fs::write(dir.join("a.txt"), "agent edit\n").unwrap();
         // The agent overwrote these, but they existed before (not in createdPaths): refused, nothing changed.
-        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "user notes.txt".to_string()]).is_err());
-        assert!(revert_paths_in(&dir, &[".env".to_string()]).is_err());
+        assert!(revert_paths_in(&dir, &["a.txt".to_string(), "user notes.txt".to_string()], &[]).is_err());
+        assert!(revert_paths_in(&dir, &[".env".to_string()], &[]).is_err());
         assert_eq!(std::fs::read_to_string(dir.join("user notes.txt")).unwrap(), "mine\n");
         assert_eq!(std::fs::read_to_string(dir.join(".env")).unwrap(), "SECRET=1\n");
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "agent edit\n");
@@ -631,7 +646,7 @@ mod tests {
         git(&dir, &["commit", "-q", "-m", "more"]);
         std::fs::write(dir.join("my file.txt"), "agent\n").unwrap();
         std::fs::write(dir.join("x1.txt"), "user edit\n").unwrap();
-        revert_paths_in(&dir, &["my file.txt".to_string(), "x[1].txt".to_string()]).unwrap();
+        revert_paths_in(&dir, &["my file.txt".to_string(), "x[1].txt".to_string()], &[]).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("my file.txt")).unwrap(), "committed\n");
         // "x[1].txt" is a literal name, never a pattern that also matches x1.txt.
         assert_eq!(std::fs::read_to_string(dir.join("x1.txt")).unwrap(), "user edit\n");
@@ -647,7 +662,7 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("victim.txt"), "keep\n").unwrap();
         std::os::unix::fs::symlink(&outside, dir.join("link")).unwrap();
-        assert!(revert_paths_in(&dir, &["link/victim.txt".to_string()]).is_err());
+        assert!(revert_paths_in(&dir, &["link/victim.txt".to_string()], &["link/victim.txt".to_string()]).is_err(), "created or not, never through a symlinked folder");
         assert!(outside.join("victim.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
