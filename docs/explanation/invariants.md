@@ -650,3 +650,22 @@ The client side below was the retired Swift app's; the server-side purge rules s
 - Put a non-chat JSON file in `sessions/` (every `*.json` there is read as a chat).
 - Treat a failed or partial server chat list as complete (a chat with rows would look like an orphan).
 - Round-trip a chat file through the model just to add a tag (it drops what this build cannot read).
+
+## Desktop capture archivist (`desktop/src-tauri/src/capture_archivist.rs`)
+
+The host adopts finished extension captures from the core it spawned (`GET /kb/live/unacked`, `GET /kb/live/:id/capture`), writes each one as a meeting note and acks `POST /kb/live/:id/ack`.
+
+### ✅ MUST preserve
+
+- **Ack only a note that read back.** The ack is sent only after `capture_store::finalize` (create without overwrite, read back, frontmatter id and transcript line count verified) or `find_archived` returned a note, and only when the held rows equal the `lines` the ack echoes.
+- **Idempotent by content.** A crash between the write and the ack is repaired by the next pass finding the same note under the same name family, so no second note is written.
+- **Credentials only to the verified spawned core,** through the session `ChatService::bind` verified. Every bind and unbind moves the generation, and a pass stops before the next capture when it changes.
+- **Bounded:** 5 captures per 20 s pass, 3 attempts per capture per launch, 16 MB per capture response.
+- **No capture text in any log** (`desktop/scripts/check-capture-privacy.test.mjs` covers every `capture_*.rs`).
+- **The spawned core runs with `LLMIDE_LIVE_ACK=1`** (`core_host::SPAWNED_CORE_FLAGS`), and it is never taken from the host env.
+
+### ❌ DO NOT
+
+- Ack before a verified note exists, or ack with values other than the server's own `lines` and `hash`.
+- Let the core write the notes folder: the notes root is the host's (`notes_fs.rs`, chosen by a native dialog and re-validated per call).
+- Summarise an archived capture in the background: meeting text goes to a model only from Library's Re-summarise.

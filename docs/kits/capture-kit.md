@@ -17,8 +17,8 @@ The user rule that governs it is [data-lifecycle](data-lifecycle.md): capture on
 | Piece | Path | Lines (`wc -l`) | Notes |
 |---|---|---|---|
 | Live caption stream | `agents/live-sessions.mjs` | 680 | In-memory ring buffer per session, periodic flush to `meetings` for crash recovery, per-session caption cap, SSE for the Mac. |
-| Live routes | `routes/live.mjs` (`/kb/live`, `/kb/live/unacked`, `:id/append`, `:id/finalize`, `:id/stream`, `:id/ack`, `:id/status`) | 233 | Core, always on (Chat and the extension use it); no feature key. |
-| Live acknowledge | `kb/live-acks.mjs` | 162 | `live_crash_rows` kept until the Mac acks when `LLMIDE_LIVE_ACK=1` (API v84, v86). |
+| Live routes | `routes/live.mjs` (`/kb/live`, `/kb/live/unacked`, `:id/append`, `:id/finalize`, `:id/stream`, `:id/ack`, `:id/status`, `:id/capture`) | 233 | Core, always on (Chat and the extension use it); no feature key. |
+| Live acknowledge | `kb/live-acks.mjs` | 162 | `live_crash_rows` kept until the desktop archivist (`desktop/src-tauri/src/capture_archivist.rs`) acks when `LLMIDE_LIVE_ACK=1` (API v84, v86, v116). |
 | Meeting agent (co-pilot) | `agents/meeting-agent.mjs` (`dispatchAgent` `:177`, `stopAgent` `:311`) | 595 | Attaches to a live session, drafts one question every 1.5 s tick; routes `/kb/agent/dispatch`, `/stop`, `/runs`. Model-facing: agent-kit owns the engine, capture-kit owns the meeting trigger. |
 | Summarize | `agents/summarize.mjs` (`summarizeTranscript` `:48`) | 81 | `POST /kb/summarize` (`router.mjs:1123`); the Mac's meeting summary path. |
 | Notes, questions, entities | `server/ai-routes.mjs` (`/generate-notes` `:89`, `/generate-questions` `:259`, `/extract-entities` `:330`) | 393 | Extension clients; JSON-prompted model calls via `runClaude`. |

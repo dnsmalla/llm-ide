@@ -4347,7 +4347,7 @@ Run with a Finder-launched `.app`; for a dev run, grant Accessibility to the ter
 
 - **W. Windows (next):** a `SnapshotSource` over UI Automation (the `windows` crate, already a target dependency through `windows-sys`; `IUIAutomation` tree with `ControlType` Text and Group and the `Name` property mapped onto `AxNode`), readers keyed by process image name (`Zoom.exe`, `ms-teams.exe`) plus Windows fixtures, local time via `localtime_s`, and a UIPI integrity check (an elevated meeting app cannot be read). The UI copy changes to "Windows Accessibility"; no permission prompt exists.
 - **L. Linux (best-effort):** AT-SPI over D-Bus (`atspi` crate, a new dependency needing review), Zoom for Linux only (Teams has no native Linux client, so the extension covers it), with the session-wide AT-SPI caveat stated in the UI.
-- **Desktop as archivist for extension captures:** adopt `/kb/live/unacked` and ack (`POST /kb/live/:id/ack`) when the Swift app is not running. Needs a rule for who archives when both apps run.
+- **Desktop as archivist for extension captures:** planned and built in [2026-11-07-desktop-capture-archivist.md](2026-11-07-desktop-capture-archivist.md). The Swift app is gone, so there is no "both apps" rule to decide; the open item is how the extension reaches the desktop core (D2 there).
 - **Library meeting-detail take-over while live** (Mac `LiveCaptureGate`) and **auto-capture** (D5), after the manual flow is verified.
 
 ## G. Self-review
