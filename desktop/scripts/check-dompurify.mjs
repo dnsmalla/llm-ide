@@ -5,8 +5,9 @@
 //   2. package-lock.json resolves every dompurify to that version (no nested copy)
 //   3. if dist/ exists, it embeds the pinned version and not Monaco's vendored one
 // Usage: node scripts/check-dompurify.mjs   (exit 1 on any failure)
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** First DOMPurify release without the advisories reported against <= 3.4.16. */
 export const MIN_SAFE = '3.4.17';
@@ -51,7 +52,14 @@ function distTexts(dir) {
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare real paths, not URL strings: a path with spaces is percent-encoded in import.meta.url and a symlinked
+// prefix differs, so a string comparison silently skipped the whole check. If the paths cannot be resolved, run
+// anyway when the file name matches (fail closed, never skip the check).
+const isMain = () => {
+  try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1])); }
+  catch { return !!process.argv[1] && basename(process.argv[1]) === basename(fileURLToPath(import.meta.url)); }
+};
+if (process.argv[1] && isMain()) {
   const root = resolve(import.meta.dirname, '..');
   const vendored = join(root, 'node_modules/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js');
   const banner = existsSync(vendored) ? readFileSync(vendored, 'utf8').slice(0, 200).match(/DOMPurify (\d+\.\d+\.\d+)/) : null;

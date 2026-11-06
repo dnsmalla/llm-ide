@@ -5,8 +5,9 @@
 // Mac app, folder usage descriptions, product name), no leftover dev server URL, and the frontend assets.
 // Exit 1 on any problem. Pure parts are exported for tests.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { verifyStagedCore } from './stage-filter.mjs';
 import { verifyNoSdkBinary } from './sdk-binary.mjs';
 
@@ -59,7 +60,14 @@ function readInfo(app) {
   return JSON.parse(json);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare real paths, not URL strings: a path with spaces is percent-encoded in import.meta.url and a symlinked
+// prefix differs, so a string comparison silently skipped the whole check. If the paths cannot be resolved, run
+// anyway when the file name matches (fail closed, never skip the check).
+const isMain = () => {
+  try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1])); }
+  catch { return !!process.argv[1] && basename(process.argv[1]) === basename(fileURLToPath(import.meta.url)); }
+};
+if (process.argv[1] && isMain()) {
   const app = process.argv[2] ? resolve(process.argv[2]) : '';
   if (!app || !existsSync(app)) {
     console.error('usage: node scripts/verify-bundle.mjs <path/to/LLM-IDE.app>');

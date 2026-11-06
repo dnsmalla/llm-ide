@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 import { BUNDLE_ID, checkInfo, checkLayout } from './verify-bundle.mjs';
 
 const good = {
@@ -42,4 +46,14 @@ test('layout: a complete core passes; an SDK claude package or a database file f
   const empty = mkdtempSync(join(tmpdir(), 'bundle-')) + '/X.app';
   assert.match(checkLayout(empty).join('|'), /missing: bundled node/);
   rmSync(a, { recursive: true, force: true });
+});
+
+test('run as a script from a path with a space: the main guard still runs and prints usage', () => {
+  const d = mkdtempSync(join(tmpdir(), 'bundle main '));
+  mkdirSync(join(d, 'scripts'));
+  for (const f of ['verify-bundle.mjs', 'stage-filter.mjs', 'sdk-binary.mjs']) writeFileSync(join(d, 'scripts', f), readFileSync(join(HERE, f)));
+  const r = spawnSync(process.execPath, [join(d, 'scripts', 'verify-bundle.mjs'), join(d, 'missing.app')], { encoding: 'utf8' });
+  rmSync(d, { recursive: true, force: true });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /usage: node scripts\/verify-bundle\.mjs/);
 });
