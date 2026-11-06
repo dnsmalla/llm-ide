@@ -90,6 +90,12 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const [width, setWidth] = useState(280);
   const [showFiles, setShowFiles] = useState(() => { try { return localStorage.getItem("llmide.explorer.files") !== "0"; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem("llmide.explorer.files", showFiles ? "1" : "0"); } catch { /* session */ } }, [showFiles]);
+  useEffect(() => {
+    const toggle = () => setChatDock((d) => ({ ...d, open: !d.open }));
+    globalThis.addEventListener?.("llmide:toggle-code-assistant", toggle);
+    return () => globalThis.removeEventListener?.("llmide:toggle-code-assistant", toggle);
+  }, []);
+
   const [panel, setPanel] = useState<PanelId>(DEFAULT_PANEL);
   const [scmSeen, setScmSeen] = useState(false);
   useEffect(() => {

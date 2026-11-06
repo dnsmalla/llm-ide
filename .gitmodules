@@ -2,5 +2,5 @@
 	path = .skills
 	url = https://github.com/dnsmalla/agent-kit.git
 [submodule "mac/LocalPackages/graph-kit"]
-	path = mac/LocalPackages/graph-kit
+	path = graph-kit
 	url = https://github.com/dnsmalla/graph-kit.git
