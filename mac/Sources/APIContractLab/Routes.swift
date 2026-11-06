@@ -166,6 +166,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /host-api/devices/:id", "no Mac caller (Host API v1 desktop pairing, API 107: served to the Tauri UI behind the bus host proof; the Mac app is its own Host API host)"),
     ("GET /kb/sync/status", "no Mac caller (encrypted sync, API 112/113: served to the Tauri UI behind the bus host proof)"),
     ("POST /kb/sync/mega", "no Mac caller (encrypted sync, API 112: served to the Tauri UI behind the bus host proof)"),
+    ("POST /kb/sync/sftp", "no Mac caller (own-server sync, API 114: served to the Tauri UI behind the bus host proof)"),
     ("POST /kb/sync/test", "no Mac caller (encrypted sync, API 112: served to the Tauri UI behind the bus host proof)"),
     ("POST /kb/sync/enabled", "no Mac caller (encrypted sync, API 112: served to the Tauri UI behind the bus host proof)"),
     ("POST /kb/sync/publish", "no Mac caller (encrypted sync, API 112: served to the Tauri UI behind the bus host proof)"),
