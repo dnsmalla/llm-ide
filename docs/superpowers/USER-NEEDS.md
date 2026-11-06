@@ -2,7 +2,7 @@
 
 Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
-Open count: 61 open, 31 done, 92 total
+Open count: 62 open, 32 done, 94 total
 
 ## How to use this file
 
@@ -168,8 +168,16 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 
 - [ ] **UN-110** Mac auto-update keys: run Sparkle's `generate_keys` on your Mac (the private key stays in your Keychain, never in the repo or CI), then add GitHub secrets `MAC_SU_PUBLIC_KEY` (the public half) and `MAC_SU_FEED_URL` (the appcast address; GitHub Releases works, no domain needed), then one signed build-to-build update. Trigger: the first Mac release you give to anyone else; until then a CI release refuses to build without them (decided 2026-11-05, security first: no long-lived signing key before it is needed). How: [release-with-auto-update](../how-to/release-with-auto-update.md). Effort: 30 minutes.
 - [ ] **UN-070** Windows and Linux full passes (build, signing, packaging, manual check). Trigger: the macOS Tauri app reaches parity and daily use. Effort: a day per OS.
-- [ ] **UN-071** macOS signing and notarisation credentials: Apple Developer ID Application certificate (`.p12`), password, team id, notarisation credentials, a production bundle identifier and product name. Trigger: before the first public desktop release. How: [desktop-signing-decisions.md, What you must provide](../how-to/desktop-signing-decisions.md#what-you-must-provide); add as repository secrets.
-- [ ] **UN-072** Windows signing choice (Azure Trusted Signing or an EV certificate) and Linux formats (deb, AppImage). Trigger: when Windows or Linux builds are due. How: same doc, decisions 2 and 3.
+- [ ] **UN-071** macOS signing and notarisation credentials for the desktop release. Trigger: before the first public desktop release. How: [desktop-release.md, One-time setup](../how-to/desktop-release.md#2-one-time-setup). The seven existing `MAC_*` secrets (shared with `mac-release.yml`) are reused: nothing new if they are set.
+- [x] **UN-072** Windows signing: decided unsigned 2026-11-05 (no paid certificate); Linux formats decided (deb + AppImage). Windows signing stays built behind the `windows_signed` dispatch input and the six `DESKTOP_WIN_*` secrets, never needed by a tag release. To reverse: [desktop-signing-decisions.md, decision 2](../how-to/desktop-signing-decisions.md#2-windows-signing) (Azure Artifact Signing if eligible: organisations in US/CA/EU/UK with 3+ years of history, individuals in US/CA; otherwise OV in a cloud HSM). Status: closed by decision.
+- [ ] **UN-114** Real-run checklist per OS on the first draft desktop release.
+  - Why you: needs the machines and your eyes.
+  - How: [desktop-release.md §7](../how-to/desktop-release.md#7-real-run-checklist).
+  - Effort: 45 minutes per OS. Blocks: publishing the first desktop release. Status: not run.
+- [ ] **UN-115** Generate the desktop updater key pair, commit the public key as `desktop/release/updater.pubkey`, add the secrets `DESKTOP_UPDATER_PRIVATE_KEY` and `DESKTOP_UPDATER_KEY_PASSWORD`, back up the private key twice offline.
+  - Why you: the private key must be made and held by you.
+  - How: [desktop-release.md §2](../how-to/desktop-release.md#the-updater-key-un-115).
+  - Effort: 15 minutes. Blocks: any signed run and any tag release. Status: not done.
 - [ ] **UN-073** Updater key pair and where update manifests are hosted. Trigger: first signed release. How: same doc, decision 4.
 - [ ] **UN-074** Google verification path for one-click sign-in (cost unknown; Google may require an annual third-party security assessment for restricted Gmail and Drive scopes). Trigger: a stranger must connect Gmail with one click. Effort: a business decision plus weeks.
 - [ ] **UN-075** Relay hosting, accounts, domain and the independent external security review of the relay spec and R1, R3, R4 code (gate G-EXT, required before any public exposure). Trigger: R2 start (hosting), spec freeze (review). See UN-038 and UN-039.

@@ -216,6 +216,7 @@ optional detail (control chars and `<>&"` removed, 80 chars max) and is rate lim
 There is no auto-start.
 
 Per-OS caveats:
+
 - **Linux**: the tray needs `libayatana-appindicator3` (runtime) and its `-dev` package at
   build time; CI owner: add `libayatana-appindicator3-dev` to the apt step of
   `desktop-ci.yml` (not edited here). GNOME needs the AppIndicator extension, otherwise
@@ -419,3 +420,8 @@ release sets `LLMIDE_OMIT_SOURCE_ROOT=1` and the command refuses. Log: `~/Librar
 Honest scope: the frontend chunks and the core's route groups are reduced. The Rust host commands are shared
 infrastructure and are not cargo-excluded yet, and the staged core still contains the route modules (they are never
 loaded when disabled).
+
+## Release
+
+Tag-driven signed builds, the update channel and the real-run checklist: [docs/how-to/desktop-release.md](../docs/how-to/desktop-release.md).
+No size or smoke timings from a real runner dry run are recorded yet; add them after the first dry run.

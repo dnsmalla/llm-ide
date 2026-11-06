@@ -21,8 +21,8 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 10 | 26 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 3 | 5 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
-| Release and CI | 7 | 3 | 6 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 122 | 75 | 66 | 263 |  |
+| Release and CI | 7 | 4 | 5 | 16 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
+| Total | 122 | 76 | 65 | 263 |  |
 
 ## What to do next
 
@@ -124,8 +124,8 @@ Code and docs an agent (or I) can do now, from the linked plans.
   - Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log
 - **Release and CI**
   - ~ Mac Sparkle CFBundleVersion limitation
-  - ~ Tauri release workflow: unsigned manual draft desktop-release.yml
-  - Auto-update for Tauri, signed
+  - ~ Tauri release workflow: tag-driven
+  - ~ Auto-update for Tauri, signed
 
 ### Needs you (49)
 
@@ -187,7 +187,7 @@ Your decision, confirmation or real run (device, account, meeting, money). Comma
 - **Release and CI**
   - Install the nightly push job
   - CI result checked after every push
-  - Windows code signing and Linux packaging
+  - Windows code signing: decided unsigned 2026-11-05
   - Chrome Web Store publishing step in the extension release
   - ~ Mac auto-update feed in release builds
 
@@ -319,7 +319,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Tray / menu-bar presence and notifications: tray menu (Show, project name, Quit), left-click toggle, close-to-tray default off, `notify` limited to 2 fixed templates (capped plain text, rate limited, no notification permission granted to the webview), no auto-start; `tauri-plugin-notification` 2.4.0; cargo tests pass. Open: not run in a GUI, Windows/Linux untested, Linux needs `libayatana-appindicator3-dev` in CI (see `desktop/PACKAGING.md`) (me)
 - [x] Host security review fixes: terminal behind a native consent dialog + Terminal toggle read in Rust with a scrubbed shell env; spawned-core identity by per-launch nonce (`x-llmide-nonce` on `/health`, additive), no redirects, adopted `:3456` core flagged `adopted_unverified`; DB in the 0700 app data dir; redacted `core.log` instead of raw tails in `core_status`; graph read via fd (O_NOFOLLOW + F_GETPATH, 32 MB); hardened CSP + navigation guard; `check-capabilities` fail-open fixed (+`--product`, core allowlist); `stage-core` kb allowlist + staged-tree verification; broad-root lists extended (Rust + JS parity); server git/npm children scrubbed (`core/child-env.mjs`); single-instance lock. 58 cargo tests, 29+ node tests; no GUI run, see `desktop/PACKAGING.md` (me)
 - [~] Live caption capture per OS: macOS built in Rust per [desktop live capture plan](plans/2026-11-05-desktop-live-capture.md) (no Swift helper unless UN-035 says so), real-meeting check waits for you; Windows (UIA) and Linux (AT-SPI) are later phases (me)
-- [~] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel: an unsigned manual release draft (`.github/workflows/desktop-release.yml`) and the decisions doc (`docs/how-to/desktop-signing-decisions.md`) exist; no signing secrets and no update channel; waits on your signing decisions (you)
+- [~] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel: built and pushed (`53145c78` macOS sign + notarize, `b7a1ab69` optional Windows signing, `df7b2025` host updater + release config overlay, `34f1c8d7` tag-driven release, `latest.json` verification and `desktop-promote.yml`); Windows is unsigned by decision 2026-11-05, updates are verified by the updater key on every OS; nothing has run against real secrets: waits on UN-071, UN-115 (updater key) and the first signed dry run; runbook `docs/how-to/desktop-release.md` (you)
 - [~] Windows and Linux builds in CI (`desktop-ci.yml`): **Windows, Linux and macOS green** since 2026-11-04 (run 41840800550; Linux and macOS since 2026-11-02) (run 41418300554: node tests, security gates, tokens, frontend build, cargo check, cargo test). Fixes on the way: `@types/node` declared (`d57033be`, it came from a stray `~/node_modules`), test imports by file URL (`a40385fe`, `ebc52ff7`), graph-kit submodule checked out for the System page (`359deb6c`), CRLF fixtures, path separators, exec bit and e2e bus test (`db29d453`), unix-only hook test (`b6dde29d`). **Windows** `cargo test` is green too (next row). WebKitGTK graph render check not done (me)
 - [x] Windows `cargo test`: green on Windows CI (desktop-ci run 41840800550, `de21296e`, all three OS jobs pass) (run 41802314273 had 51 failures). Product: `\\?\` verbatim paths are stripped (`fsutil::plain_path`) for git HOME/ceiling, Loop cwd and `git -C`; a Windows drive root is refused as a new project parent; `fd_path` implemented on Windows (`GetFinalPathNameByHandleW`) and every opened-handle check now fails closed; Loop shell stages run in `cmd.exe /D /S /C` on Windows; `attach` reports a folder as `not_regular` on every OS; Stage All gets the 180 s bulk floor. Tests: git helpers set `GIT_CONFIG_NOSYSTEM` (no CRLF checkouts), worktree/submodule/clone args drop `\\?\`, Windows-illegal names unix-only, host-absolute paths in `pty`/`chat_store`/`os_open` expectations. Checked: macOS `cargo test` green, `cargo check --tests --target x86_64-pc-windows-msvc` clean (me)
 - [x] Parity checklist exists (`plans/2026-10-31-tauri-parity-checklist.md`; rows filled as screens land) (me)
@@ -591,9 +591,9 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Night-push job built (`746b94f9`) (me)
 - [ ] Install the nightly push job: commands in `scripts/nightly-push.sh --help` (you)
 - [ ] CI result checked after every push (`gh run list`) (you)
-- [~] Tauri release workflow: unsigned manual draft `desktop-release.yml` (macOS dmg, Windows NSIS, Linux deb/AppImage); never run on a runner, no signing (me)
-- [ ] Windows code signing and Linux packaging (deb/AppImage) decision; options and recommendation in `docs/how-to/desktop-signing-decisions.md` (you)
-- [ ] Auto-update for Tauri, signed (me)
+- [~] Tauri release workflow: tag-driven (`desktop-vX.Y.Z`), macOS signed and notarized with the Mac app's secrets, Windows unsigned, signed updater files, draft release, smoke on all four targets (`22b49cbc`, `53145c78`, `34f1c8d7`); first signed run pending (UN-114, UN-115) (me)
+- [ ] Windows code signing: decided unsigned 2026-11-05 (SmartScreen More info, Run anyway); Linux deb + AppImage decided; reverse it via `docs/how-to/desktop-signing-decisions.md` §2 (you)
+- [~] Auto-update for Tauri, signed: built (`df7b2025`, `94b5025a`, `8cfea2c1` updater.rs + Settings card, release overlay, `latest.json` verified at publish, `desktop-promote.yml` `34f1c8d7`); no real N-1 to N run yet (UN-114) (me)
 - [ ] Relay deployment pipeline and monitoring (blocked on S4 hosting) (wait)
 - [ ] Chrome Web Store publishing step in the extension release (you)
 - [x] Release notes / CHANGELOG discipline per surface (October summary by surface in `CHANGELOG.md`, `docs/how-to/maintain-the-changelog.md`) (me)

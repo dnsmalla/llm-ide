@@ -85,6 +85,12 @@ guaranteed to reproduce the same binary UUID. Set `LLMIDE_SKIP_STRIP=1` to
 keep the symbols in the executable instead. See
 [mac/README.md → Stripped executable and debug symbols](https://github.com/dnsmalla/llm-ide/blob/main/mac/README.md#stripped-executable-and-debug-symbols).
 
+## 4. Desktop app
+
+The Tauri desktop app has its own `desktop-vX.Y.Z` tag train: a tag builds all four targets, signs and notarizes
+macOS, and creates a draft release; you check it, publish it and promote it to the update channel. Full steps,
+secrets and the real-run checklist: [desktop-release.md](desktop-release.md).
+
 ## Version policy
 
 - **MAJOR** — breaking changes to the extension↔mac control plane, the KB
