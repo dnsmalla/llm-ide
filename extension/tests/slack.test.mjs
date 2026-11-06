@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// Load the pinned fetch before any test swaps globalThis.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
+process.env.NODE_ENV = 'test';
 import { renderPlanSummary, renderDispatchResult, renderReviewDecided, notifySlack } from '../agents/slack.mjs';
 
 test('renderPlanSummary produces title, goal, count, milestones', () => {
@@ -68,4 +72,15 @@ test('notifySlack releases the dedupe slot when the send fails', async () => {
   // reach postWebhook again (throw the same URL error) rather than be
   // silently swallowed as a duplicate.
   await assert.rejects(() => notifySlack(args), /Invalid Slack webhook URL/);
+});
+
+test('notifySlack posts only to hooks.slack.com and refuses a redirect from it', async () => {
+  const orig = globalThis.fetch; const seen = [];
+  globalThis.fetch = async (url, init) => { seen.push([String(url), init.redirect]); return seen.length === 1 ? new Response('ok', { status: 200 }) : new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }); };
+  try {
+    const base = { webhookUrl: 'https://hooks.slack.com/services/T0/B0/X0', kind: 'custom' };
+    assert.deepEqual(await notifySlack({ ...base, payload: { text: 'one' }, dedupeKey: 'pin:1' }), { ok: true, status: 200 });
+    await assert.rejects(() => notifySlack({ ...base, payload: { text: 'two' }, dedupeKey: 'pin:2' }), /redirect 302 not followed/);
+    assert.deepEqual(seen, [[base.webhookUrl, 'manual'], [base.webhookUrl, 'manual']]);
+  } finally { globalThis.fetch = orig; }
 });

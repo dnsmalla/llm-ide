@@ -15,6 +15,7 @@
 import { execFile } from 'child_process';
 import path from 'path';
 import { redactSecrets } from '../core/redact-secrets.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 // Sanitize free-form text before splicing into the commit message / PR
 // title/body.  Newlines are particularly dangerous: a multi-line value
 // could inject fake commit trailers ("Co-authored-by:", "Signed-off-by:")
@@ -152,6 +153,32 @@ export async function assertSafeBaseBranch(repoPath, base) {
   }
 }
 
+/**
+ * Opens a draft PR over the GitHub REST API: api.github.com only, no redirects (the token rides in
+ * Authorization), reply capped at 1 MiB. Always a draft so the user reviews before merging.
+ */
+export async function createDraftPr({ ghRepo, ghToken, title, head, base, body }) {
+  assertSafeGhRepo(ghRepo);
+  const r = await fixedHostFetch(`https://api.github.com/repos/${ghRepo}/pulls`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Authorization': `Bearer ${ghToken}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'llm-ide-extension',
+    },
+    body: JSON.stringify({ title, head, base, body, draft: true }),
+    signal: AbortSignal.timeout(15_000),
+  }, { hosts: ['api.github.com'], maxBytes: 1024 * 1024 });
+  if (!r.ok) {
+    // Redact before surfacing — GitHub 401/403 bodies can echo token fragments.
+    const text = redactSecrets((await r.text())).slice(0, 400);
+    throw new Error(`GitHub PR API ${r.status}: ${text}`);
+  }
+  return r.json();
+}
+
 export async function openPullRequest({
   repoPath, taskId, files = [], tests = [], summary, ghRepo, ghToken, baseBranch,
 }) {
@@ -246,30 +273,9 @@ export async function openPullRequest({
     `\nFiles changed: ${files.length} source · ${tests.length} test.`,
     `\nReview the changes under \`.llmide-auto/${safeTask}/\` and decide whether to integrate them into the main tree.`,
   ].join('');
-  const r = await fetch(`https://api.github.com/repos/${ghRepo}/pulls`, {
-    method: 'POST',
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'Authorization': `Bearer ${ghToken}`,
-      'Content-Type': 'application/json',
-      'User-Agent': 'llm-ide-extension',
-    },
-    body: JSON.stringify({
-      title: `auto: ${safeSummary80 || safeTask}`,
-      head: branch,
-      base,
-      body: prBody,
-      draft: true,                    // always open as draft so the user reviews before merging
-    }),
-    signal: AbortSignal.timeout(15_000),
+  const pr = await createDraftPr({
+    ghRepo, ghToken, title: `auto: ${safeSummary80 || safeTask}`, head: branch, base, body: prBody,
   });
-  if (!r.ok) {
-    // Redact before surfacing — GitHub 401/403 bodies can echo token fragments.
-    const text = redactSecrets((await r.text())).slice(0, 400);
-    throw new Error(`GitHub PR API ${r.status}: ${text}`);
-  }
-  const pr = await r.json();
   return {
     branch,
     base,

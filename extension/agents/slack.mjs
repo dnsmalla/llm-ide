@@ -5,6 +5,7 @@
 // chrome.storage.local just like our other tokens.
 
 import { scanForSecrets } from '../guardrails/scan.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 //
 // Three message templates: plan summary, dispatch result, review-decided.
 // Each renders Slack mrkdwn (the looser markdown variant Slack uses for
@@ -57,12 +58,13 @@ async function postWebhook(url, body) {
       throw new Error(`Slack webhook payload exceeds MAX_WEBHOOK_PAYLOAD_SIZE (${MAX_WEBHOOK_PAYLOAD_SIZE} bytes)`);
     }
   }
-  const r = await fetch(url, {
+  // isWebhookUrl above is the user-facing message; the fixed-host fetch enforces the same host at the socket.
+  const r = await fixedHostFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10_000),
-  });
+  }, { hosts: ['hooks.slack.com'], maxBytes: 64 * 1024 });
   if (!r.ok) {
     const text = (await r.text()).slice(0, 200);
     throw new Error(`Slack webhook returned ${r.status}: ${text}`);

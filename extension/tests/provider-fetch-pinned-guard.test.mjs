@@ -31,8 +31,6 @@ const RULES = {
 const ALLOWED = {
   'providers/jev.mjs': { bareFetch: { n: 1, why: 'the operator-configured Jev decision API (JEV_AI_BASE_URL), not a user connection' } },
   'server/pinned-fetch.mjs': { globalFetch: { n: 3, why: 'the NODE_ENV=test seam that honours a replaced globalThis.fetch; never consulted in production' } },
-  'agents/slack.mjs': { bareFetch: { n: 1, why: 'Slack incoming webhook the user configured; not a model-provider path' } },
-  'agents/github-pr.mjs': { bareFetch: { n: 1, why: 'api.github.com (fixed host)' } },
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
   'llm_agent/tools/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
   'llm_agent/tools/handlers/web-search.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
