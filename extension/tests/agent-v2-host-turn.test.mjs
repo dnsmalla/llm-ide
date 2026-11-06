@@ -119,3 +119,30 @@ test('a chat at its token cap rejects with SESSION_TOKEN_LIMIT and the same used
     assert.equal(ran, false);
   } finally { delete process.env.LLMIDE_ROUTER; delete process.env.LLMIDE_ROUTER_CAP; }
 });
+
+test('startHostTurn: an allowed mode runs as asked and a model is passed through', async () => {
+  const userId = await makeUser();
+  const seen = {};
+  await v2.startHostTurn({
+    userId, chatSessionId: 'c-host-mode', message: 'plan the change', mode: 'plan', model: 'claude-sonnet-5-5', onEvent: () => {},
+    deps: { classifyMode: async () => { throw new Error('an explicit mode must not classify'); }, runTurn: fakeRun([], seen) },
+  });
+  assert.equal(seen.mode, 'plan');
+  assert.equal(seen.model, 'claude-sonnet-5-5');
+  assert.equal(seen.permissionMode, null, 'never Bypass');
+});
+test('startHostTurn: execute, a permission mode or junk never runs as asked; auto stays auto_read_only', async () => {
+  const userId = await makeUser();
+  for (const mode of ['execute', 'bypass', 'accept-edits', 'auto_read_only', 'nonsense', 'auto', undefined]) {
+    const seen = {};
+    await v2.startHostTurn({
+      userId, chatSessionId: `c-host-${String(mode)}`, message: 'edit the file', mode, onEvent: () => {},
+      deps: { classifyMode: async () => ({ mode: 'execute' }), runTurn: fakeRun([], seen) },
+    });
+    assert.equal(seen.mode, 'ask', `${String(mode)} is clamped to read-only`);
+  }
+});
+test('HOST_TURN_MODES matches the shared compose vector', async () => {
+  const vector = JSON.parse(fs.readFileSync(path.join(__dirname, '../../schema/host-api/v1/fixtures/security/compose.json'), 'utf8'));
+  assert.deepEqual([...v2.HOST_TURN_MODES], vector.modes.allowed);
+});

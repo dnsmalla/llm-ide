@@ -1041,9 +1041,13 @@ export function clearChatSessionState(userId, chatSessionId) {
  * with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT, ROUTE_UNAVAILABLE)
  * rejects with an Error carrying that `code`.
  */
-export async function startHostTurn({ userId, chatSessionId, message, files = [], onEvent, deps = {} }) {
+export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document']);
+
+/** Runs one Agent v2 turn in process for the Host API: auto_read_only unless a bounded mode is chosen, then clamped again. */
+export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, onEvent, deps = {} }) {
   const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
-  const body = { message, mode: AUTO_READ_ONLY, agentContext, attachments: files };
+  const hostMode = mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
+  const body = { message, mode: hostMode, agentContext, attachments: files, ...(typeof model === 'string' && model ? { model } : {}) };
   // A non-Bypass turn ends the chat's Bypass grant, as gateBypassRequest does on HTTP.
   if (hostApprovalEnabled()) bypassGrants.revoke(userId, chatSessionId);
   await runV2Turn({ userId, chatSessionId, agentContext, message, body, deps: { ...DEFAULT_DEPS, ...deps }, turnStartedAt: Date.now() }, {
