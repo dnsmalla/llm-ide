@@ -21,6 +21,14 @@ export const DEFAULT_LOOP_DEFAULTS: LoopDefaults = Object.freeze({
   maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false,
 });
 
+/** Per-category notification switches (desktop prefs::NotifyPrefs). Apply at once. */
+export interface NotifyPrefs { approvals: boolean; tasks: boolean; sync: boolean; updates: boolean; core: boolean }
+export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = Object.freeze({ approvals: true, tasks: true, sync: true, updates: true, core: true });
+/** Defensive decode: anything but an explicit `false` reads as on (the host default). */
+export function decodeNotifyPrefs(raw: unknown): NotifyPrefs {
+  const r = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  return { approvals: r.approvals !== false, tasks: r.tasks !== false, sync: r.sync !== false, updates: r.updates !== false, core: r.core !== false };
+}
 export interface HostPrefs {
   ltaMode: LtaModeValue;
   router: boolean;
@@ -46,6 +54,8 @@ export interface HostPrefs {
   graphAutoUpdateMinutes: number;
   /** Daily signed-update check; applies at once. */
   updateChecks: boolean;
+  /** Per-category notification switches; apply at once. */
+  notifications: NotifyPrefs;
 }
 
 export interface HostPrefsView {
@@ -96,7 +106,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
     ? (raw.graphAutoUpdateMinutes === 0 ? 0 : Math.max(5, raw.graphAutoUpdateMinutes))
     : 0;
   const updateChecks = raw.updateChecks !== false;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks };
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {

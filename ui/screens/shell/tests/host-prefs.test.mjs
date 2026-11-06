@@ -22,7 +22,7 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -148,4 +148,10 @@ test("updateChecks decodes, defaults on for older files, and is written through 
   assert.equal(m.decodePrefs({ ...P, updateChecks: false }).updateChecks, false);
   const { updateChecks, ...old } = P;
   assert.equal(m.decodePrefs(old).updateChecks, true);
+});
+
+test("notification switches decode with every missing or bad value on", () => {
+  assert.deepEqual(m.decodeNotifyPrefs({ approvals: false, tasks: "no" }), { approvals: false, tasks: true, sync: true, updates: true, core: true });
+  assert.deepEqual(m.decodeNotifyPrefs("x"), m.DEFAULT_NOTIFY_PREFS);
+  assert.deepEqual(m.decodePrefs({ ...P, notifications: undefined }).notifications, m.DEFAULT_NOTIFY_PREFS, "an old host without the key");
 });
