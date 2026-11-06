@@ -15,6 +15,7 @@ struct ConnectView: View {
     @State private var showScanner: Bool = false
     @State private var errorMessage: String?
     @State private var connectAttempted: Bool = false
+    @AppStorage("llmide.demo") private var demo = false
 
     private var isConnecting: Bool { connection.connectionStatus == .connecting }
 
@@ -22,6 +23,20 @@ struct ConnectView: View {
         ScrollView {
             VStack(spacing: DesignSystem.Spacing.xl) {
                 header
+                Button {
+                    demo = true
+                } label: {
+                    Label("Explore demo", systemImage: "sparkles")
+                        .font(DesignSystem.Typography.headlineFont)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("explore-demo")
+                Text("Sample data only. No desktop, account or network connection is needed.")
+                    .font(DesignSystem.Typography.captionFont)
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
                 if let err = errorMessage {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -207,6 +222,137 @@ struct ConnectView: View {
             .cornerRadius(DesignSystem.Layout.cornerRadiusM)
             .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
                 .stroke(DesignSystem.Colors.primary.opacity(0.2), lineWidth: 1))
+        }
+    }
+}
+
+// MARK: — Reviewer demo
+
+/// Local, offline sample data so an App Review reviewer can evaluate the app without a desktop.
+/// Nothing here connects to the network, reads the Keychain or represents real user data.
+struct DemoRootView: View {
+    @AppStorage("llmide.demo") private var demo = true
+    @State private var tab = 0
+
+    var body: some View {
+        TabView(selection: $tab) {
+            DemoChatView()
+                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
+                .tag(0)
+            DemoHistoryView()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(1)
+            DemoSettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(2)
+        }
+        .tint(DesignSystem.Colors.primary)
+        .overlay(alignment: .top) {
+            Text("Demo data · no desktop or network connection")
+                .font(DesignSystem.Typography.captionFont.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(DesignSystem.Colors.background.opacity(0.95))
+                .clipShape(Capsule())
+                .padding(.top, 6)
+                .accessibilityIdentifier("demo-banner")
+        }
+    }
+}
+
+private struct DemoChatView: View {
+    @State private var draft = ""
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "desktopcomputer")
+                        Text("Alex's MacBook Pro · Demo")
+                    }
+                    .font(DesignSystem.Typography.captionFont.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+
+                    ChatBubble(message: ChatMessage(role: .user, text: "Summarise the release risks and suggest the next step."))
+                    ChatBubble(message: ChatMessage(role: .assistant, text: """
+                    The main risk is the migration running before the backup is verified.
+
+                    **Suggested next step:** verify the latest encrypted backup, then run the migration on staging.
+                    """))
+
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Label("Approval waiting", systemImage: "hand.raised.fill")
+                            .font(DesignSystem.Typography.headlineFont)
+                        Text("The agent wants to run the test suite in the project.")
+                            .font(DesignSystem.Typography.bodyFont)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                        HStack {
+                            Button("Allow once") {}.buttonStyle(.borderedProminent)
+                            Button("Deny") {}.buttonStyle(.bordered)
+                        }
+                        Text("Demo only — approvals are not sent anywhere.")
+                            .font(DesignSystem.Typography.captionFont)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                    }
+                    .padding(DesignSystem.Spacing.md)
+                    .background(DesignSystem.Colors.surface)
+                    .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+
+                    HStack {
+                        TextField("Message the agent", text: $draft).disabled(true)
+                            .padding(10)
+                            .background(DesignSystem.Colors.surface)
+                            .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                        Button {} label: { Image(systemName: "arrow.up.circle.fill") }.disabled(true)
+                    }
+                    .accessibilityHint("Sending is disabled in the demo")
+                }
+                .padding(DesignSystem.Layout.marginMobile)
+            }
+            .background(DesignSystem.Colors.background)
+            .navigationTitle("LLM-IDE")
+        }
+    }
+}
+
+private struct DemoHistoryView: View {
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Recent chats") {
+                    Label("Release risk review", systemImage: "bubble.left.and.text.bubble.right")
+                    Label("Fix the failing checkout test", systemImage: "checkmark.seal")
+                    Label("Plan the Box migration", systemImage: "shippingbox")
+                }
+                Section("Meeting notes") {
+                    Label("Weekly sync · 24 Oct", systemImage: "person.2.wave.2")
+                    Label("Incident review · 22 Oct", systemImage: "exclamationmark.triangle")
+                }
+                Section("Usage") {
+                    LabeledContent("Claude", value: "42% of weekly limit")
+                    LabeledContent("Requests today", value: "18")
+                }
+            }
+            .navigationTitle("History")
+        }
+    }
+}
+
+private struct DemoSettingsView: View {
+    @AppStorage("llmide.demo") private var demo = true
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Reviewer demo") {
+                    Text("This mode uses local sample data. It does not pair with a desktop, does not use the network and does not collect anything.")
+                    Button("Exit demo") { demo = false }
+                }
+                Section("About") {
+                    LabeledContent("App", value: "LLM-IDE")
+                    LabeledContent("Mode", value: "Demo")
+                }
+            }
+            .navigationTitle("Settings")
         }
     }
 }

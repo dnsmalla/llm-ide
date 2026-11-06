@@ -8,8 +8,7 @@ it short and keep it current when the app changes.
 
 ## What this app is
 
-LLM-IDE is a companion for the LLM-IDE desktop app. The iPhone app connects to *the user's own computer* over their local network (or
-their private Tailscale network) and lets them chat with the coding agent
+LLM-IDE is a companion for the LLM-IDE desktop app. The iPhone app connects to *the user's own computer* over their local network and lets them chat with the coding agent
 running there, answer its questions, approve or deny its tool requests, and
 read their chat history and usage.
 
@@ -28,9 +27,16 @@ through Apple's CryptoKit; the storage holds only ciphertext. Setup needs the us
 
 ## How to review
 
-The app needs the LLM-IDE desktop app to pair with: on the desktop, Settings →
-Mobile Control shows a pairing QR code, which the iPhone scans (**Scan QR
-Code** on the first screen). There is no built-in demo mode.
+**Use the demo first.** On the first screen, tap **Explore demo**. It opens a
+fully local sample workspace (chat, one approval, history and usage) with no
+desktop, account or network connection. A banner labels it as demo data. Exit it
+from Settings → Reviewer demo → Exit demo.
+
+To review the live product, the app needs the LLM-IDE desktop app to pair with:
+on the desktop, Settings → Mobile Control shows a pairing QR code, which the
+iPhone scans (**Scan QR Code** on the first screen). The desktop app is not
+distributed through the Mac App Store; the demo exists so the review does not
+depend on installing it.
 
 ## Permissions, and why each is requested
 

@@ -5,8 +5,17 @@ struct ContentView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var syncStore: SyncStore
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("llmide.demo") private var demo = false
 
     var body: some View {
+        if demo {
+            DemoRootView()
+        } else {
+            connectedShell
+        }
+    }
+
+    private var connectedShell: some View {
         // The enrollment sheet sits above both branches: a sync QR can be scanned from the pairing screen too.
         shell.sheet(isPresented: Binding(get: { syncStore.enrollStep != nil }, set: { if !$0 { syncStore.cancelEnrollment() } })) {
             SyncEnrollSheet().environmentObject(syncStore)
