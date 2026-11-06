@@ -4,7 +4,7 @@
 extension — with the shared Node core. Everything below is in priority order. The master plan stays the
 complete list; this page only says what comes first.
 
-## Track A — agents (code), about one working day
+## Track A — agents (code), about one working day — DONE 2026-11-07 (A1 `58d6aa00`..`bfc63d15`, A2 `5a1a6ced`..`ccefd459`, A3 `e385f7c0`, A4 `ee3e7371`; parallel plan `18819159`..`e5bccb34`). Next agent work: `plans/2026-11-07-desktop-notifications-tray.md`
 
 | # | Work | Plan | Size | Why now |
 |---|---|---|---|---|
