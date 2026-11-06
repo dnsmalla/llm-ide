@@ -12,6 +12,7 @@ import { core, coreStatusStore, devToolsEnabled, getTheme, host as shellHost, in
 import { createSettingsEnv } from "../shell/settings-adapter";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import type { ThemeChoice } from "./host.ts";
+import "../shell/notify/register-card.ts";
 
 declare const __APP_VERSION__: string | undefined;
 

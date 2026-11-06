@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { load, SHELL } from "./helpers.mjs";
+import { load, SHELL, React, renderToStaticMarkup } from "./helpers.mjs";
 
 const REPO = resolve(SHELL, "../../..");
 const n = await load("notify/notify.ts");
@@ -123,4 +123,13 @@ test("bridge: approvals, sync alerts and tray actions", async () => {
   session.set({ signedIn: false }); await tick();
   assert.equal(calls.filter(([c]) => c === "tray_report").at(-1)[1].sync, "unknown", "signed out: sync unavailable");
   off();
+});
+
+test("the Notifications card lists the five switches, the privacy line and the tray note", async () => {
+  const card = await load("notify/NotificationsCard.tsx");
+  const prefs = { approvals: true, tasks: false, sync: true, updates: true, core: true };
+  const html = renderToStaticMarkup(React.createElement(card.NotificationsBody, { prefs, note: n.trayNote({ available: false }), error: null, onChange() {} }));
+  for (const s of n.NOTIFY_SWITCHES) assert.ok(html.includes(s.label), s.label);
+  assert.match(html, /never chat text, file names, meeting captions or device names/);
+  assert.match(html, /libayatana-appindicator3-1/);
 });
