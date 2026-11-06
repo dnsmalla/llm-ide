@@ -28,7 +28,8 @@ test("Shell renders landmarks, skip link, top toolbar and a visible starting sta
   assert.doesNotMatch(out, /<footer class="sh-statusbar"/, "the Mac hides status-bar chrome before sign-in");
   assert.match(out, /role="status"[^>]*>[\s\S]*Starting core/);
   assert.match(out, /aria-label="Home"/, "Home button");
-  assert.match(out, /aria-label="Toggle Code Assistant"/, "Code Assistant is reachable from the top right");
+  assert.doesNotMatch(out, /aria-label="Toggle Code Assistant"/, "the Code Assistant button belongs to Explorer, not every section");
+  assert.match(html(h(Shell, { initialSection: "explorer", spike: () => null })), /aria-label="Toggle Code Assistant"/, "Code Assistant is reachable from Explorer's top right");
   for (const l of ["Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]) assert.match(out, new RegExp(`>${l}<`));
   for (const l of ["Chat", "Settings"]) assert.doesNotMatch(out, new RegExp(`class="sh-tool-label">${l}<`), `${l} is not a toolbar item (Mac: status bar / account menu)`);
   assert.doesNotMatch(out, />Spike</, "the developer-only item is hidden by default");

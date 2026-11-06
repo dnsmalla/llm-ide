@@ -266,19 +266,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
-        <button
-          type="button"
-          className="sh-icon-button sh-code-assistant"
-          aria-label="Toggle Code Assistant"
-          title="Show or hide the Code Assistant"
-          onClick={() => {
-            const fire = () => globalThis.dispatchEvent?.(new Event("llmide:toggle-code-assistant"));
-            if (nav.active === "explorer") fire();
-            else { dispatch({ type: "select", id: "explorer" }); setTimeout(fire, 150); }
-          }}
-        >
-          <Icon name="panel-right" size={16} />
-        </button>
+        {nav.active === "explorer" && (
+          <button
+            type="button"
+            className="sh-icon-button sh-code-assistant"
+            aria-label="Toggle Code Assistant"
+            title="Show or hide the Code Assistant"
+            onClick={() => globalThis.dispatchEvent?.(new Event("llmide:toggle-code-assistant"))}
+          >
+            <Icon name="panel-right" size={16} />
+          </button>
+        )}
         <ApprovalBadge onReveal={() => dispatch({ type: "select", id: "chat" })} />
         <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>

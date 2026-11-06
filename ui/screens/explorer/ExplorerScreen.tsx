@@ -499,17 +499,6 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
             </button>
           ) : null}
           <span className="ex-spacer" />
-          <button
-            type="button"
-            className="ex-link tm-toggle ex-chat-toggle"
-            aria-expanded={chatVisible}
-            aria-controls="ex-chat-dock"
-            disabled={!chatFits}
-            title={chatFits ? "Show or hide the Code Assistant" : "The window is too narrow for the Code Assistant"}
-            onClick={() => setChatDock((d) => ({ ...d, open: !d.open }))}
-          >
-            <Icon name="panel-right" size={13} /> Code Assistant
-          </button>
         </div>
       </div>
       {chatVisible && (

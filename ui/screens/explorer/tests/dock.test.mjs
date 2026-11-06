@@ -51,15 +51,13 @@ test("dock prefs: default open at 400; stored values are validated; hostile stor
 
 const screen = (kv, extra = {}) => html(h(ExplorerScreen, { active: true, projectRoot: "/Users/me/proj", deps: { fs: makeFs({ "a.txt": "x" }), kv, loadEditor: () => Promise.reject(new Error("x")), ...extra } }));
 
-test("Explorer layout: tree panel (switcher), editor tabs, and the docked Code Assistant with resize and toggle", () => {
+test("Explorer layout: tree panel (switcher), editor tabs, and the docked Code Assistant with resize", () => {
   const out = screen(null);
   assert.match(out, /<aside[^>]*aria-label="Side panel"/);
   assert.match(out, /role="tablist"[^>]*aria-label="Side panel"/);
   for (const l of ["Explorer", "Search", "Source Control"]) assert.match(out, new RegExp(`>${l}<`));
   assert.match(out, /<aside id="ex-chat-dock" class="ex-chat" style="width:400px" aria-label="Code Assistant"/);
   assert.match(out, /role="separator"[^>]*aria-orientation="vertical"[^>]*aria-label="Resize Code Assistant"[^>]*aria-valuenow="400"[^>]*aria-valuemin="300"[^>]*aria-valuemax="720"/);
-  assert.match(out, /aria-expanded="true"[^>]*aria-controls="ex-chat-dock"/);
-  assert.match(out, /Code Assistant<\/button>/);
   assert.ok(out.indexOf('aria-label="Code Assistant"') > out.indexOf('class="ex-main"'), "the dock is right of the editor column");
   assert.match(out, /not available in this build/, "no seam installed (node): a visible note, never an empty column");
 });
@@ -67,7 +65,6 @@ test("Explorer layout: tree panel (switcher), editor tabs, and the docked Code A
 test("Explorer dock: remembered closed state hides it; a remembered width is used; hostile storage falls back", () => {
   const closed = screen(mem({ [m.DOCK_KEY]: '{"open":false,"width":500}' }));
   assert.doesNotMatch(closed, /id="ex-chat-dock"/);
-  assert.match(closed, /aria-expanded="false"[^>]*aria-controls="ex-chat-dock"/);
   assert.match(screen(mem({ [m.DOCK_KEY]: '{"open":true,"width":560}' })), /style="width:560px" aria-label="Code Assistant"/);
   assert.match(screen(mem({ [m.DOCK_KEY]: '{"open":true,"width":"<script>"}' })), /style="width:400px" aria-label="Code Assistant"/);
   assert.match(screen(hostile), /id="ex-chat-dock"/);
