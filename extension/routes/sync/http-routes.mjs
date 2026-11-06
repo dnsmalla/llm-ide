@@ -5,7 +5,7 @@ import { config } from '../../core/config.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
-import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice, forgetSyncDevices } from '../../kb/sync-state.mjs';
+import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice } from '../../kb/sync-state.mjs';
 import { DEFAULT_SFTP_ROOT, DEFAULT_SFTP_USER, DEFAULT_WEB_HOST, generateSyncSshKey, parseHostFingerprint, validateSftpConfig } from '../../connectors/sync-store/sftp.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { DEFAULT_BOX_FOLDER, validateBoxConfig } from '../../connectors/sync-store/box.mjs';
@@ -26,7 +26,7 @@ async function leaveStoreKind(userId) {
   void cancelEnrollment(userId).catch(() => {});
   await dropStore(userId);
   for (const d of listSyncDevices(userId)) deleteSyncDevice(userId, d.deviceId);
-  for (const k of ['sync.megaEmail', 'sync.megaPassword', 'sync.sshKey']) setSecret(db, userId, k, '');
+  for (const k of ['sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.boxClientSecret', 'sync.boxRefreshToken']) setSecret(db, userId, k, '');
   resetSyncPublish(userId);
 }
 const DEVICE_RE = /^\/kb\/sync\/devices\/([A-Za-z0-9_-]{22})$/;
@@ -49,19 +49,31 @@ function status(userId) {
   };
 }
 
+/** The Box consent finished (SP6 D5/D6). Runs wholly under the user lock; a busy lock throws SYNC_BUSY, which
+ *  finishBoxConnect reports as a failed connect so Settings can retry. Same location: secrets and config only. Moved
+ *  within Box (another client, account or folder): also reset the publish records, devices stay. Another kind: delete the
+ *  old <syncId>/ tree best effort, leave the old kind (devices unlinked, its login forgotten) and rotate keys. */
 async function commitBox(userId, c, { storeFor }) {
   const db = getDb();
-  const before = getSyncState(userId);
-  if (before && before.storeKind !== 'box') {
-    const old = storeFor(userId);
-    if (old) await withUserLock(userId, () => old.removeTree(before.syncId)).catch(() => {});
-  }
-  await cancelEnrollment(userId).catch(() => {});
-  await dropStore(userId);
-  setSecret(db, userId, 'sync.boxClientSecret', c.clientSecret);
-  setSecret(db, userId, 'sync.boxRefreshToken', c.refreshToken);
-  ensureSyncState(userId, { storeKind: 'box', storeConfig: { clientId: c.clientId, folder: c.folder, account: c.account } });
-  if (before && before.storeKind !== 'box') { resetSyncPublish(userId); if (forgetSyncDevices(userId) > 0) rotateKeys(userId); }
+  await withUserLock(userId, async () => {
+    const before = getSyncState(userId);
+    const otherKind = !!before && before.storeKind !== 'box';
+    const sameAs = !!before && !otherKind && before.storeConfig.clientId === c.clientId && before.storeConfig.folder === c.folder && before.storeConfig.account === c.account;
+    const hadDevices = listSyncDevices(userId).length > 0;
+    if (otherKind) {
+      const old = storeFor(userId);
+      if (old) await old.removeTree(before.syncId).catch(() => {}); // best effort (D6)
+      await leaveStoreKind(userId);
+    } else if (before && !sameAs) {
+      await cancelEnrollment(userId).catch(() => {});
+    }
+    await dropStore(userId);
+    setSecret(db, userId, 'sync.boxClientSecret', c.clientSecret);
+    setSecret(db, userId, 'sync.boxRefreshToken', c.refreshToken);
+    ensureSyncState(userId, { storeKind: 'box', storeConfig: { clientId: c.clientId, folder: c.folder, account: c.account } });
+    if (before && !otherKind && !sameAs) resetSyncPublish(userId);
+    if (otherKind && hadDevices) rotateKeys(userId);
+  });
 }
 
 export async function handleSyncRoute(req, res, { deps = {}, env = process.env } = {}) {
