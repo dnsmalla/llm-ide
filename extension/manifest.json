@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4bgUuuWzaBI6iTCanJQmoTfk0dPdLJhRrR4nbBpEWlzrxKarlgVv6ATiXeBKMMs0JM0aVI5Mqj2I/dfN/v0gUy+2BGImPNv9N+a3ncV7y5Q0FishSF8NuUlxDZel4vE39WGRqz3qOQZ9zVRrqY4rTFqUnNb2/07DHcYx1bM2ni7pmLauPAVsMGbAHLXw54JE0BDSSiXzCZtJAx9EhQVgeALcNxepthmurbxCdClCcIbTeqMhOej1VnG2L0OELcL8+RWenmEqz/BZO7joe+dfM7ZDz7nKv24fss/pfAmdiGhioz9xRMVQxOhkgU9Jd/cQdu2D7aJyXWlRSp6xW+xFJwIDAQAB",
   "name": "LLM-IDE — AI Meeting Notes",
   "version": "2.3.0",
   "description": "AI-powered meeting notes for Google Meet, Teams, Zoom & more. Transcribes live captions and summarizes with Claude.",

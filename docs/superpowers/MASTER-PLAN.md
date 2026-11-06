@@ -100,7 +100,7 @@ Code and docs an agent (or I) can do now, from the linked plans.
   - ~ Public LLM-IDE site: marketing pages under marketing/ with a guide and product tour, and the web app mounted…
 - **Chrome extension**
   - llmide:// launch from Chrome
-  - Stable extension ID: add a manifest key so the unpacked and store builds share one ID
+  - Stable extension ID: manifest key pins one ID for unpacked and store builds
 - **Shared server and core**
   - ~ Phase 1 P12 Swift decode check
   - ~ K1 per kit, in order
@@ -466,7 +466,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] `llmide://` launch from Chrome (Q11) (me)
 - [x] Verify the Mac/server API the extension calls for reads is sufficient: every called path is served; capture hand-off is `/kb/live/*` append, finalize, status, ack ([audit](plans/2026-10-31-extension-storage-audit.md)) (me)
 - [ ] Phase 7 browser-control tools with grants and audit (Tauri plan) (wait)
-- [ ] Stable extension ID: add a manifest `key` so the unpacked and store builds share one ID; prerequisite for pinning the extension origin in CORS (`extension/manifest.json`, `server.mjs` CORS) (me)
+- [x] Stable extension ID: manifest `key` pins `ecojclccfoegmlffpiahbcenmkfhadlk` for unpacked and store builds; test `extension/tests/manifest-key.test.mjs` (me)
 - [x] Browser-level caption tests: the real scraper runs in happy-dom against Meet, Teams and Zoom caption DOM fixtures (`extension/tests/caption-scraper-dom.test.ts`, 32 tests, `fe416cff`, `9f98bf69`); mutation-checked (validation off, per-speaker state, suffix strip, session gap each fail tests). Fixtures are rebuilt from the scraper's selectors, not captured from live sites: add sanitized real snapshots when available (me)
 - [ ] Remove the legacy chat-buffer migration (`extension/src/lib/legacy-chat.ts`, ROADMAP Q18) once no installed client still holds the old buffer (wait)
 
