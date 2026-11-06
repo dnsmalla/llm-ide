@@ -23,6 +23,9 @@ tauri-build = { version = "=2.6.3", features = [] }
 [dependencies]
 tauri = { version = "=2.11.6", features = ["tray-icon"] }
 tauri-plugin-notification = "=2.4.0"
+# Signed auto-update (Ed25519/minisign, verified against the key in the release overlay); used from Rust only,
+# the webview gets update_status/update_check/update_install and no plugin permission. See updater.rs.
+tauri-plugin-updater = "=2.12.0"
 # Host-run native folder dialog (no webview-facing dialog/fs permission); see PACKAGING.md.
 rfd = "=0.17.2"
 serde = { version = "=1.0.228", features = ["derive"] }

@@ -54,6 +54,7 @@ mod source_pick;
 #[cfg(feature = "spike")]
 mod sse_replay;
 mod trash_guard;
+mod updater;
 mod tray;
 
 use std::sync::OnceLock;
@@ -425,6 +426,9 @@ macro_rules! product_handlers {
                 host_platform,
                 prefs::get_prefs,
                 prefs::set_prefs,
+                updater::update_status,
+                updater::update_check,
+                updater::update_install,
                 os_open::open_external_url,
                 os_open::reveal_in_os,
                 attach::attach_pick_files,
@@ -492,11 +496,18 @@ pub fn run() {
         previous_hook(info);
     }));
 
-    let app = tauri::Builder::default()
+    let context = tauri::generate_context!();
+    let update_problem = updater::config_problem(context.config().plugins.0.get("updater"));
+    updater::init(update_problem);
+
+    let builder = tauri::Builder::default()
         .manage(host)
         .manage(chat_cmds::ChatService::new())
         .plugin(navigation_guard())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+    // The updater exists only in a release build whose overlay carries a valid key and the fixed channel URL.
+    let builder = if update_problem.is_none() { builder.plugin(tauri_plugin_updater::Builder::new().build()) } else { builder };
+    let app = builder
         // A reload drops the webview's terminal state; its shells must not outlive it.
         .on_page_load(|_webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
@@ -565,10 +576,11 @@ pub fn run() {
                 // "Start backend on app launch" is off: the app opens with the core stopped; Start uses this dir.
                 setup_host.mark_stopped(data_dir);
             }
+            updater::start_background(app.handle().clone());
             Ok(())
         })
         .invoke_handler(app_handler!())
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building LLM-IDE Desktop PoC");
 
     app.run(|app_handle, event| match event {

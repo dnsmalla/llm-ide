@@ -131,6 +131,8 @@ pub struct Prefs {
     pub loop_defaults: LoopDefaults,
     /// Minutes between automatic Code Graph refreshes; 0 = off. Values 1-4 are raised to 5.
     pub graph_auto_update_minutes: u32,
+    /// Look for a signed update once a day (check only; installing always asks). Applies at once.
+    pub update_checks: bool,
 }
 
 impl Default for Prefs {
@@ -138,7 +140,7 @@ impl Default for Prefs {
         Self {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
-            loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0,
+            loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true,
         }
     }
 }
@@ -161,6 +163,7 @@ pub struct PrefsPatch {
     pub backend_auto_start: Option<bool>,
     pub loop_defaults: Option<LoopDefaults>,
     pub graph_auto_update_minutes: Option<u32>,
+    pub update_checks: Option<bool>,
 }
 
 /// An explicit feature list: only keys the server knows, in the canonical order, with `agent_chat` always on.
@@ -194,6 +197,9 @@ impl Prefs {
         }
         if let Some(v) = p.graph_auto_update_minutes {
             n.graph_auto_update_minutes = if v == 0 { 0 } else { v.clamp(5, 1440) };
+        }
+        if let Some(v) = p.update_checks {
+            n.update_checks = v;
         }
         if let Some(v) = &p.features {
             if v.is_empty() {
@@ -233,6 +239,7 @@ pub fn parse(text: &str) -> Prefs {
             features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
             backend_source: Some(p.backend_source), backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
             loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
+            update_checks: Some(p.update_checks),
         });
         out.backend_node = p.backend_node.trim().to_string();
         out.backend_dir = p.backend_dir.trim().to_string();
@@ -344,7 +351,7 @@ pub struct PrefsView {
 fn view(stored: Prefs, persisted: bool) -> PrefsView {
     let launch = launch();
     // The theme applies at once; only the others need a restart.
-    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, ..stored.clone() } != launch;
+    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, update_checks: launch.update_checks, ..stored.clone() } != launch;
     PrefsView { stored, launch, restart_needed, persisted }
 }
 
@@ -641,6 +648,16 @@ mod loop_default_tests {
         let q = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(high), ..Default::default() });
         assert_eq!(q.loop_defaults.max_iterations, 100);
         assert_eq!(q.loop_defaults.consecutive_failure_stop, 1);
+    }
+
+    #[test]
+    fn update_checks_default_on_patchable_and_never_need_a_restart() {
+        assert!(Prefs::default().update_checks);
+        let off = Prefs::default().patched(&PrefsPatch { update_checks: Some(false), ..Default::default() });
+        assert!(!off.update_checks);
+        assert!(!parse(&serde_json::to_string(&off).unwrap()).update_checks);
+        // An old file without the key keeps the default.
+        assert!(parse(r#"{"ltaMode":"off"}"#).update_checks);
     }
 
     #[test]
