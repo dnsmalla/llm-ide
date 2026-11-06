@@ -67,7 +67,7 @@ Verbatim prompts (the authoritative source; do not rely on paraphrases in docs):
 
 A typical code assistant turn:
 
-1. Mac client POSTs to `/code-assist`.
+1. Desktop client POSTs to `/code-assist`.
 2. Route handler assembles `agentContext` and calls `runAgentLoop` at depth 0 (global).
 3. Global agent decides: answer directly, or emit an `ask-internal` fence.
 4. If delegating: `ask-internal` handler calls `runAgentLoop` at depth 1 (internal) with full system context injected.

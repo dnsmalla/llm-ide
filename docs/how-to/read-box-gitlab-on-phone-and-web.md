@@ -54,7 +54,7 @@ Box refresh tokens are single use and last 60 days. After 60 days without use, s
 
 - [ ] Settings → Box and GitLab: save the GitLab ID, **Sign in to GitLab**. The system sign-in sheet shows
       gitlab.com and asks for `read_api` and `read_repository`. Closing the sheet shows no error.
-- [ ] With the Mac unreachable, History → At the source → GitLab code: projects, a folder, a `.swift` file
+- [ ] With the desktop unreachable, History → At the source → GitLab code: projects, a folder, a `.swift` file
       (monospaced, selectable, larger with a larger text size), a `.png` (not shown), search inside a project.
 - [ ] Box: a `.pdf` opens in the app and a link in it does nothing; a `.docx` shows extracted text.
 - [ ] Airplane mode: opening a folder says "You are offline…".

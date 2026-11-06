@@ -5,7 +5,7 @@ status: draft
 
 # Chrome extension
 
-> Orientation to the browser surface and how it connects to the Mac app and AI pipeline. For the rebuild-grade contracts (message protocol, caption-scraper constants/filters, storage shapes, service worker, build), see [`../spec/chrome-extension.md`](../spec/chrome-extension.md).
+> Orientation to the browser surface and how it connects to the desktop app and AI pipeline. For the rebuild-grade contracts (message protocol, caption-scraper constants/filters, storage shapes, service worker, build), see [`../spec/chrome-extension.md`](../spec/chrome-extension.md).
 
 !!! info "Rebuild-grade detail"
     Exact contracts (message protocol, caption-scraper constants/filters, storage shapes, service worker, build) are in [`../spec/chrome-extension.md`](../spec/chrome-extension.md).
@@ -27,7 +27,7 @@ The extension is a Manifest V3 extension built with React + Vite. At runtime it 
 3. The service worker injects the content scripts into the active meeting tab (if not already present) and forwards the message.
 4. The caption scraper content script begins polling the platform's CC DOM every ~800 ms and emits `CAPTION_FINAL` messages as speakers' captions change.
 5. The side panel receives each `CAPTION_FINAL` and updates the live transcript segment for that speaker in place (using the `sessionId` to route updates to the right line).
-6. When the user stops recording, the side panel sends the completed transcript to the local Mac app server (`POST /generate-notes`, `/chat`, etc.) for AI processing.
+6. When the user stops recording, the side panel sends the completed transcript to the local desktop core server (`POST /generate-notes`, `/chat`, etc.) for AI processing.
 
 For the detailed caption scraping mechanics — snapshot-diff design, per-speaker state, silence gaps, platform readers — see [`caption-capture.md`](caption-capture.md).
 
@@ -37,11 +37,11 @@ The extension strongly prefers the platform's built-in closed captions over micr
 
 This is a deliberate design stance: CC accuracy, speaker attribution, and language handling are all better left to the platform than reimplemented in the extension.
 
-## `OPEN_POPUP` — deep-linking to the Mac app, not a popup window
+## `OPEN_POPUP` — deep-linking to the desktop app, not a popup window
 
-When a content script sends `OPEN_POPUP`, the service worker opens Chrome's native **side panel** for that window and then deep-links into the native macOS app by calling the server's `/launch-app` endpoint, which issues an `llmide://` URI redirect.
+When a content script sends `OPEN_POPUP`, the service worker opens Chrome's native **side panel** for that window and then deep-links into the native desktop app by calling the server's `/launch-app` endpoint, which issues an `llmide://` URI redirect.
 
-There is **no `chrome.windows.create({ type: 'popup' })` call** in the extension. The floating-popup pattern was removed. The `OPEN_POPUP` message name is historical; its effect today is side-panel open + Mac app launch.
+There is **no `chrome.windows.create({ type: 'popup' })` call** in the extension. The floating-popup pattern was removed. The `OPEN_POPUP` message name is historical; its effect today is side-panel open + desktop app launch.
 
 ## What lives where
 

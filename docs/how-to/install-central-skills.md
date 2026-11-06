@@ -67,9 +67,9 @@ bash scripts/install-skills.sh
 cd extension && npm run sync:skills   # if agent-tools/globals changed
 ```
 
-## Auto-install into user projects (Mac app)
+## Auto-install into user projects (desktop app)
 
-When you **New Project** or **Settings → Paths → Rebuild missing folders**, the Mac
+When you **New Project** or **Settings → Paths → Rebuild missing folders**, the desktop
 app:
 
 1. Scaffolds folders **and** root agent entry files (`CLAUDE.md`, `AGENTS.md`,
@@ -99,5 +99,5 @@ hand-authored `CLAUDE.md` without the `llmide:auto` marker) are preserved.
 
 - `ls -la .cursor/skills/token-efficient-workflow` → symlink into `../../.skills/skills/...`
 - Cursor / Claude / Codex can invoke `/token-efficient-workflow`
-- Create a new project in the Mac app → `.cursor/skills/` appears under the project root
+- Create a new project in the desktop app → `.cursor/skills/` appears under the project root
 - `cd extension && npm test -- tests/install-project-skills.test.mjs` green

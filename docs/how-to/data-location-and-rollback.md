@@ -20,10 +20,10 @@ Individual variables still win: `LLMIDE_DB_PATH`, `LLMIDE_AGENT_DB_PATH`,
 `backups/` and `agent-sdk/` are then derived from its directory, not from
 `LLMIDE_DATA_DIR`. The location reports `custom`.
 
-## The Mac app
+## The desktop app
 
-A backend the app spawns gets `LLMIDE_DATA_DIR=~/Library/Application Support/llm-ide/system`
-(created `0700`). The inherited `LLMIDE_DATA_DIR`, `LLMIDE_DB_PATH` and
+A core the desktop app spawns gets `LLMIDE_DATA_DIR=<app data>/core` and
+`LLMIDE_DB_PATH=<app data>/core/data.db` (`desktop/src-tauri/src/core_host.rs`). The inherited `LLMIDE_DATA_DIR`, `LLMIDE_DB_PATH` and
 `LLMIDE_AGENT_DB_PATH` are dropped. A server the app *adopts* (one already
 listening on the port) keeps its own environment.
 
@@ -97,8 +97,8 @@ After a move, `<repo>/kb/MOVED-TO-APP-SUPPORT.txt` exists and `<repo>/kb/data.db
 does not. Starting the server on the repo kb then (`npm run server`, an older
 build, an adopted dev server) would create an empty DB and fresh secrets there.
 So the server **refuses to start** in the repo-kb layout, with a message on what to
-do: run with `LLMIDE_DATA_DIR=<dir>` (the Mac app does this), or restore
-`kb/data.db`. `LLMIDE_ALLOW_EMPTY_LEGACY=1` overrides it. The Mac app's
+do: run with `LLMIDE_DATA_DIR=<dir>` (the desktop app does this), or restore
+`kb/data.db`. `LLMIDE_ALLOW_EMPTY_LEGACY=1` overrides it. The desktop app's
 adopted-server path is unchanged.
 
 The refusal happens before any file is written: `core/config.mjs` also applies
@@ -188,6 +188,3 @@ healthy boot they are deleted. So:
   prune policy, the foreign-file refusal, minimum 1.
 - `extension/tests/dev-secrets.test.mjs`: fallback to the legacy file, and refusal
   to regenerate over an unreadable one.
-- `mac/Tests/LlmIdeMacTests/BackendChildEnvironmentTests.swift` and
-  `BackendReadinessBudgetTests.swift`: child environment, `0700` dir, and the 240 s
-  first-launch budget.

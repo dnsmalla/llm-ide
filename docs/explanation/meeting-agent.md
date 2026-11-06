@@ -7,7 +7,7 @@ status: stable
 
 **Status:** stable · co-pilot mode
 **Owner:** Dinesh
-**Surfaces affected:** `extension/` (server + Chrome ext), `mac/`
+**Surfaces affected:** `extension/` (server + Chrome ext), desktop UI (`ui/`; originally the retired `mac/` app)
 
 See also: [`spec/agent-runtime.md`](../spec/agent-runtime.md) — rebuild-grade contracts for `runClaude`, the loop algorithm, and the fence protocol used by every agent.
 
@@ -42,7 +42,7 @@ We already have:
 - Plan persistence and Q&A generation (`/kb/generate-questions`,
   `/kb/plans`, `/kb/plan/:id`).
 - Live caption streaming and cross-client mirroring (`/kb/live/*`).
-- Two surfaces (Chrome extension, Mac app) that already render those
+- Two surfaces (Chrome extension, desktop app) that already render those
   streams in real time.
 
 The agent is the part that contributes to the meeting: a focused
@@ -96,7 +96,7 @@ service, not a new product line.
                            │ GET /kb/live/:sessionId?since=N
                   ┌────────┴────────┐
                   ▼                 ▼
-           Chrome extension     Mac app
+           Chrome extension     Desktop app
            side panel           Transcript view
            (renders live)       (renders live)
 ```
@@ -190,9 +190,9 @@ Key design choices:
   user captions and agent-question rows (the latter styled via the
   `source="agent-question"` field).
 
-### `mac/`
+### Desktop (originally `mac/`)
 
-- TranscriptView polls the same `/kb/live/:sessionId?since=N` and
+- The transcript view polls the same `/kb/live/:sessionId?since=N` and
   renders agent-question rows with a distinct color/icon.
 
 ## 7. Risks & open questions
@@ -203,7 +203,7 @@ Key design choices:
 | **Caption scraper UI rot** when Meet rotates DOM class names. | Snapshot/diff strategy ([ADR 0006](../decisions/0006-snapshot-diff-caption-scraper.md)) tolerates churn; covered by tests. |
 | **Latency** between human pause and agent question feels stale. | 1.5s tick + 2.5s min-silence + CLI round-trip = ~3–5s. Acceptable for a non-spoken hint surface. |
 | **Speaker mis-attribution** from caption-panel guesses. | Fall back to "Speaker" generically; don't hallucinate names. |
-| **Mobile / native conferencing clients aren't covered.** | Out of scope. The Mac app's local AX capture (if enabled) is the only non-browser path. |
+| **Mobile / native conferencing clients aren't covered.** | Out of scope. The desktop app's local AX capture (if enabled) is the only non-browser path. |
 
 ## 8. Telemetry we need
 

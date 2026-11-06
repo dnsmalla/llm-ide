@@ -7,7 +7,7 @@ applies_to: server
 
 ## Goal
 
-A running `127.0.0.1:3456` API for the extension or macOS app to call.
+A running `127.0.0.1:3456` API for the extension or desktop app to call.
 
 ## Steps
 

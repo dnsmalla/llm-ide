@@ -9,9 +9,9 @@ status: stable
 
 ## The boundary
 
-The Mac↔server wire format (the `/agent/v2/stream` SSE vocabulary, decision bodies, `/code-assist` events) is **ours** and versioned by `SERVER_API_VERSION` — it does not change when the SDK does, with one documented exception (`approval_request.questions`, passed through verbatim).
+The desktop↔server wire format (the `/agent/v2/stream` SSE vocabulary, decision bodies, `/code-assist` events) is **ours** and versioned by `SERVER_API_VERSION` — it does not change when the SDK does, with one documented exception (`approval_request.questions`, passed through verbatim).
 
-The agent/v2 vocabulary is declared by `schema/agent-v2/agent-v2.schema.json` and gated by `scripts/conformance-agent-v2.mjs`, which diffs what the server emits against what the Mac actually decodes. It is **not** defined by `extension/llm_agent/sdk/events.mjs` alone: that file produces 8 of the 15 variants, and four more are emitted from outside the linker. See `schema/agent-v2/SCHEMA.md` for the emitter map. The linker is drawn so both endpoints of that vocabulary sit inside linker files:
+The agent/v2 vocabulary is declared by `schema/agent-v2/agent-v2.schema.json` and gated by `scripts/conformance-agent-v2.mjs`, which diffs what the server emits against what the desktop UI actually decodes. It is **not** defined by `extension/llm_agent/sdk/events.mjs` alone: that file produces 8 of the 15 variants, and four more are emitted from outside the linker. See `schema/agent-v2/SCHEMA.md` for the emitter map. The linker is drawn so both endpoints of that vocabulary sit inside linker files:
 
 ```text
 Claude Agent SDK / claude CLI
@@ -28,12 +28,11 @@ Claude Agent SDK / claude CLI
 └──────────────┬───────────────────────────────┘
                │  our wire format (frozen per SERVER_API_VERSION)
                ▼
-┌─ Mac linker ─────────────────────────────────┐
-│ mac/Sources/LlmIdeMac/ClaudeLink/            │
-│   AgentV2Event.swift        wire decode      │
-│   AgentV2Transport.swift    request/mapping  │
-│   ClaudeToolPresentation.swift  tool names   │
-│   ClaudeCLI.swift           CLI flags/models │
+┌─ Desktop linker ─────────────────────────────┐
+│ ui/screens/chat/                             │
+│   events.ts       wire decode                │
+│   controller.ts   request/mapping            │
+│   state.ts        tool names and approvals   │
 └──────────────────────────────────────────────┘
                ▲
    everything else (routes, engines, views)
@@ -44,7 +43,7 @@ Enforcement:
 
 - **Server**: ESLint (`extension/eslint.config.mjs`, `CLAUDE_SDK_IMPORT`) rejects any import of `@anthropic-ai/claude-agent-sdk` outside `llm_agent/sdk/` (tests exempt). Zero-violation ratchet, like the layer rules.
 - **Server boot**: the SDK and `engine.mjs` are loaded lazily (first chat turn, or the post-listen prewarm) — never statically from a module on the boot path. Pinned by `extension/tests/lazy-engine.test.mjs`; see `extension/CLAUDE.md` "Lazy engine".
-- **Mac**: convention — `LlmIdeAPIClient.progressLabel`/`normalizedToolName` and `ToolApprovalCard.title`/`icon`/`alwaysAllowLabel` are one-line shims delegating into `ClaudeLink/`; keep new Claude knowledge (tool names, flags, model ids, error codes) inside `ClaudeLink/` files.
+- **Desktop**: convention — keep new Claude knowledge (tool names, flags, model ids, error codes) inside `ui/screens/chat/` (`events.ts`, `controller.ts`, `state.ts`); other screens consume it.
 
 ## What lives where
 
@@ -60,12 +59,8 @@ Enforcement:
 | `claude plugin …` argv (marketplace update, list --available --json, update --json --accept-command) and its JSON parsing | `extension/providers/claude-plugin-cli.mjs` |
 | SDK pin | `extension/package.json` (`@anthropic-ai/claude-agent-sdk`) |
 | SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `scripts/sdk-surface.mjs`) |
-| Wire event decode (Mac) | `ClaudeLink/AgentV2Event.swift` |
-| v2 request body, event→result mapping, `SESSION_UNRESUMABLE` handling | `ClaudeLink/AgentV2Transport.swift` (the HTTP/SSE transport itself is generic: `LlmIdeAPIClient+CodeAssist.swift`) |
-| Transport contract `AgentV2Transport` implements (`ChatTransport` protocol, `ChatTransportInput`, `ChatTransportResult`) — engine-neutral, no Claude knowledge | `Core/Contracts/ChatTransport.swift` (in Core so ClaudeLink, a leaf, never names a feature type; the legacy engine's implementation is `Features/Chat/Transport/CodeAssistTransport.swift`) |
-| Retired Claude model-id migration map | `ClaudeCLI.retiredModelIds` (merged by `AppConfig`) |
-| Tool-name → verb/title/icon vocabulary (SDK built-ins + llm-ide tools) | `ClaudeLink/ClaudeToolPresentation.swift` |
-| CLI executable, `-p`, `--permission-mode acceptEdits`, fallback model ids, provider id, vault key (Mac) | `ClaudeLink/ClaudeCLI.swift` |
+| Wire event decode (desktop) | `ui/screens/chat/events.ts` |
+| v2 request body, event→result mapping, `SESSION_UNRESUMABLE` handling | `ui/screens/chat/controller.ts` |
 
 ## SDK update playbook
 
@@ -76,10 +71,10 @@ On the next `@anthropic-ai/claude-agent-sdk` (or `claude` CLI) bump, work in thi
    `llm_agent/sdk/engine.mjs` (query options, permission modes, resume), `events.mjs` (message shapes — keep the OUTPUT wire format identical; absorb changes here), `tools.mjs`/`hooks.mjs`/`decisions.mjs`, `transcripts.mjs` (disk layout), and for CLI-flag changes `providers/providers.mjs` + `runtime.mjs` + `web-client.mjs`.
 3. **Tests**: `cd extension && npm test` — the SDK-shaped suites are `agent-v2-events`, `agent-v2-tools`, `agent-v2-routes`, `agent-sdk-spike`, `providers`, `spawn-cli-stream`, `stream-model-reply`, `mcp-cli-args`, `mcp-runclaude-args`, `cli-concurrency-cap`, `dependency-pins`, `sdk-surface`, `sdk-surface-ledger`.
 4. **Adopt**: `tests/sdk-surface-ledger.test.mjs` fails until every new or removed top-level SDK item is classified in `llm_agent/sdk/sdk-surface.json`. By hand: `node scripts/sdk-surface.mjs diff --batch "$TMPDIR/b.md"` lists what is unclassified.
-   - **What the loop does**: the `sdk-adoption` default loop (LLM-IDE checkout only, scheduled) classifies each new item in a worktree, implements server-only additive items (inside `llm_agent/sdk/` or `providers/`, wire shape unchanged) with a test in a top-level `extension/tests/sdk-adopt-<name>.test.mjs` (the only test files the loop's agent may write; every other test stays protected, and a subdirectory would change how `/bin/sh` expands the `npm test` glob), and marks anything needing a wire, Mac app, permission or auth change `needs-human`. The result is a proposal in Settings › Self-Heal; nothing reaches main until you apply it. A version whose record is already proposed, needs-human, ignored or fixed is skipped on later ticks; a version-only bump with no new top-level item is recorded fixed.
+   - **What the loop does**: the `sdk-adoption` default loop (LLM-IDE checkout only, scheduled) classifies each new item in a worktree, implements server-only additive items (inside `llm_agent/sdk/` or `providers/`, wire shape unchanged) with a test in a top-level `extension/tests/sdk-adopt-<name>.test.mjs` (the only test files the loop's agent may write; every other test stays protected, and a subdirectory would change how `/bin/sh` expands the `npm test` glob), and marks anything needing a wire, desktop UI, permission or auth change `needs-human`. The result is a proposal in Settings › Self-Heal; nothing reaches main until you apply it. A version whose record is already proposed, needs-human, ignored or fixed is skipped on later ticks; a version-only bump with no new top-level item is recorded fixed.
    - **The seed backlog is human-only**: entries whose reason starts with `seed: not yet reviewed` were written by `init` when the ledger was created and are never re-offered to the loop. Count them (from `extension/`): `node -e 'const l=require("./llm_agent/sdk/sdk-surface.json");console.log(Object.values(l.items).filter(e=>e.reason?.startsWith("seed:")).length)'`.
    - **Coverage is top-level surface only**: `Options` keys, `SDKMessage` union members, `Query` methods and tool input types. Nested settings and control-protocol fields are not detected, so a green gate does not mean a release added nothing — read the SDK changelog for those.
-5. **Mac linker — only if the wire had to change** (new event type, new tool name, new approval arg): `ClaudeLink/AgentV2Event.swift`, `ClaudeToolPresentation.swift` (verb/title rows for new tools), `AgentV2Transport.swift`; a renamed CLI flag or model line lands in `ClaudeLink/ClaudeCLI.swift`. Bump `SERVER_API_VERSION` for **any** change to the wire format or the `ENDPOINTS` list (that list drives the client's stale-server banner) — see `invariants.md`. Raise `BackendManager.minimumServerApiVersion` only when an OLDER server would make a chat-path capability silently degrade or run with the wrong credentials; additive, off-chat changes leave the floor alone (v44, v45 and v46 all did, each with its reason recorded next to the constant). The two are therefore NOT in lockstep. v47 also declines to raise it, but for a different reason than v44-v46: the degradation is real (an older server resolves the unified quick chat's `ask` mode to `execute`, handing full act tools to a window whose approvals may have nothing to render), but it is confined to the three surfaces that actually send `ask` — so gate at the sending surface instead of the app-wide floor: `Chat/QuickChatContext.swift`'s `serverSupportsAsk` is what `MenuBarChatView`, `LlmChatSheet` and `MobileControlManager`'s `llmide_chat` handler each check before sending.
-6. **Verify**: `make test && make test-mac && make lint`, then one live chat turn per engine (v2 + legacy) against a running server.
+5. **Desktop linker — only if the wire had to change** (new event type, new tool name, new approval arg): `ui/screens/chat/events.ts`, `controller.ts`, `state.ts`. Bump `SERVER_API_VERSION` for **any** change to the wire format or the `ENDPOINTS` list (that list drives the client's stale-server banner), see `invariants.md`; additive, off-chat changes need no client floor change.
+6. **Verify**: `make test && make regression && make lint`, then one live chat turn per engine (v2 + legacy) against a running server.
 
 Anything the update forces you to edit **outside** these files is a boundary leak — move the knowledge into the linker as part of the same change, and extend this page's table.

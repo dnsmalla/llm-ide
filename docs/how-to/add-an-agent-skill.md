@@ -24,7 +24,7 @@ Teach the internal LLM-IDE agent a new capability — either a read (server-exec
 ### 1. Pick a name and a kind
 
 - Name: kebab-case, must match the filename. Example: `get-issue`.
-- Kind: `read` (server executes inside the internal loop) or `write` (internal halts; the Mac client renders a confirm sheet).
+- Kind: `read` (server executes inside the internal loop) or `write` (internal halts; the desktop client renders a confirm sheet).
 
 ### 2. Author the definition in the central skills repo
 
@@ -64,11 +64,11 @@ This pulls `agent-tools/` → `internal/skills/` and `agent-globals/` (the `.md`
 ### 4. Server side — the handler (stays local)
 
 - **Read tool:** create a handler module under `extension/llm_agent/tools/handlers/<name>.mjs` exporting a single function `(args, ctx) => Promise<result>`. Wire it into the handlers map at the top of `extension/llm_agent/tools/handlers/ask-internal.mjs` — that's where internal's handler set is built.
-- **Write tool:** no server code needed — internal's loop returns the validated arguments as `pendingTool` and the Mac client decides what to do.
+- **Write tool:** no server code needed — internal's loop returns the validated arguments as `pendingTool` and the desktop client decides what to do.
 
-### 5. Mac client side (write tools only)
+### 5. Desktop client side (write tools only)
 
-Add a confirm sheet under `mac/Sources/LlmIdeMac/Features/Chat/Views/Panel/` modelled on `CreateIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` (same folder) keyed on `pendingTool.name`.
+Add a confirm card under `ui/screens/chat/` keyed on `pendingTool.name` (see `events.ts` and `state.ts` for how approvals are decoded and shown).
 
 ### 6. Restart and test
 

@@ -203,8 +203,8 @@ thing.
 
 The companion app mirrors this surface. On the **Auto Tasks** screen, tap the
 slider icon on any task row to set its paths, skill, and template, and to
-create, edit, rename, or delete templates. The Mac remains the executor and the
-source of truth: every change is a request, and the Mac's reply is what the
+create, edit, rename, or delete templates. The desktop app remains the executor and the
+source of truth: every change is a request, and the desktop app's reply is what the
 phone displays.
 
 ## Understanding Lookback Modes

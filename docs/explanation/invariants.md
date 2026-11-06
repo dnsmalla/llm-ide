@@ -150,7 +150,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Health check every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS`** — user sees server state go offline/online without manual refresh.
 - **`HINT_DISMISSED_KEY` first-run hint** — dismissible, remembered in `chrome.storage.local`. Only shown when `!isRecording` and not previously dismissed.
 - **`handleStart()` clears notes/chat/questions before starting** — a fresh recording should not show stale AI output from the previous meeting.
-- **Pop-out sends `OPEN_POPUP`**, which the service worker handles by calling `openMacAppDeepLink()`: it opens a tab to `${serverUrl}/launch-app?to=transcript`, which 302s into the `llmide://` scheme so the native Mac app comes to the front. There is no Chrome `type: 'popup'` window.
+- **Pop-out sends `OPEN_POPUP`**, which the service worker handles by calling `openDesktopDeepLink()`: it opens a tab to `${serverUrl}/launch-app?to=transcript`, which 302s into the `llmide://` scheme so the native Mac app comes to the front. There is no Chrome `type: 'popup'` window.
 - **`language` threaded to every AI consumer** — `notes.generate(..., primaryLang)`, `ExportMenu language={primaryLang}`, `questions.generate(..., primaryLang)`, `chat.sendMessage(..., primaryLang)`.
 - **Copy-cmd button** on the offline banner copies `node server.mjs` to clipboard.
 
@@ -285,7 +285,7 @@ The floating `chrome.windows.create` popup was removed. The pop-out button now s
 
 ### ✅ MUST preserve
 
-- **`OPEN_POPUP` handler in service-worker.ts** calls `openMacAppDeepLink()` — do not remove or bypass it.
+- **`OPEN_POPUP` handler in service-worker.ts** calls `openDesktopDeepLink()` — do not remove or bypass it.
 - **`chrome.sidePanel.open()`** is still called alongside the deep-link so the side panel opens in the same window if it was closed.
 
 ### ❌ DO NOT do these

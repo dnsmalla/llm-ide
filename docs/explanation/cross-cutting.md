@@ -30,7 +30,7 @@ For the threat model, audit log schema, and known limitations (including the plu
 
 ## One config / one DB / one backend
 
-Both clients — the Chrome extension side panel and the macOS desktop app — talk to the same local Node.js server. There is no separate backend for the Mac app and no separate database. This means:
+Both clients — the Chrome extension side panel and the Tauri desktop app — talk to the same local Node.js server. There is no separate backend for the desktop app and no separate database. This means:
 
 - **One SQLite database** (`LLMIDE_DB_PATH`) holds all knowledge-base data, user accounts, vault ciphertext, and audit log rows. Both clients read and write through the same server API.
 - **One configuration surface** — environment variables and the runtime config object — controls both client paths. There is no per-client config file.
@@ -47,7 +47,7 @@ Development setup follows a straightforward path:
 1. `npm install && npm run build` inside `extension/` builds the Chrome extension and the Node.js server bundle.
 2. `node server.mjs` (or `npm start`) starts the local server, which auto-generates development secrets on first run if none are present.
 3. Load the unpacked extension from `extension/dist/` in Chrome.
-4. The macOS app is a separate Swift target built with `swift build` inside `mac/`.
+4. The desktop app is a separate Tauri target (`desktop/`, UI in `ui/`) built with `cargo tauri build` (see [desktop-release](../how-to/desktop-release.md)).
 
 The server requires Node.js 20 or later. `better-sqlite3` is a native module compiled against the running Node ABI — do not swap Node versions between install and run, and route dependency bumps for that package through CI where the native build is verified.
 

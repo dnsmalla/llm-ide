@@ -15,9 +15,9 @@ The commit type and scope decide the entry:
 | anything that closes a vulnerability or a data exposure | Security |
 | `docs`, `test`, `chore`, `style`, `build`, `ci` | usually omitted |
 
-Scopes map to a surface: `mac` is Mac, `server`, `kb`, `api`, `agent`, `extensions` are Server, `extension` is
+Scopes map to a surface: `server`, `kb`, `api`, `agent`, `extensions` are Server, `extension` is
 Extension, `desktop` is Desktop, `ios` is Mobile. The Unreleased section carries a "by surface" summary with one
-subsection per surface (Mac, Server, Extension, Desktop, Mobile) so a reader can find their own surface quickly.
+subsection per surface (Server, Extension, Desktop, Mobile) so a reader can find their own surface quickly.
 
 ## Routine
 

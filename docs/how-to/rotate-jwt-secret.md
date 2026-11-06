@@ -29,7 +29,7 @@ Two viable paths. Pick one before starting; don't mix.
 4. Start the server.
 
 **Effect:** all existing access tokens become invalid immediately
-(signature verification fails → 401). Every Mac/extension client
+(signature verification fails → 401). Every desktop/extension client
 re-runs the refresh flow — which ALSO fails because refresh tokens
 are signed with the same secret and verified on every refresh.
 Every user is forced to re-login.
@@ -134,7 +134,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 ### 7. Notify users
 
 Every signed-in user will see their next API call fail with 401 and
-the Mac app / extension will surface "session expired — please
+the desktop app / extension will surface "session expired — please
 re-login". This is the expected hard-cutover behavior.
 
 ## Postmortem hooks
@@ -150,7 +150,6 @@ re-login". This is the expected hard-cutover behavior.
 
 - **All in-flight uploads with bearer auth fail mid-stream.** Schedule
   rotation during a low-traffic window.
-- **Mac app's auto-restart loop may show several `--- Server started
-  ---` lines in quick succession** as it adopts the new server. Not a
-  bug; that's the [BackendManager auto-restart](https://github.com/dnsmalla/llm-ide/blob/main/mac/Sources/LlmIdeMac/Core/Networking/BackendManager.swift)
-  doing its job.
+- **The desktop app's core supervisor may show several `--- Server started
+  ---` lines in quick succession** as it restarts onto the new secret. Not a
+  bug; see [desktop-core-lifecycle.md](desktop-core-lifecycle.md).

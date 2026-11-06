@@ -20,7 +20,7 @@ The Code Assistant is two agents sharing one engine:
 - **Internal** — the system-aware specialist. Receives the full `agentContext` snapshot (active GitLab project, indexed code repos, recent open issues, recent meetings, app capabilities) plus the action skills (`search-kb`, `create-gitlab-issue`, `comment-gitlab-issue`, `trigger-review-code`). Returns prose or a `pendingTool` to global.
 
 ```text
-Mac client ── POST /code-assist ──▶ extension/server/ai-routes.mjs
+Desktop client ── POST /code-assist ──▶ extension/server/ai-routes.mjs
                                             │
                                             ▼
                                    llm_agent/runtime/route.mjs
@@ -49,7 +49,7 @@ Mac client ── POST /code-assist ──▶ extension/server/ai-routes.mjs
                        └─────── {answer, pendingTool} returned to global ◀───────────┘
                                             │
                                             ▼
-                                   Mac client receives {reply, pendingTool}
+                                   Desktop client receives {reply, pendingTool}
 ```
 
 ## Why two agents
@@ -64,7 +64,7 @@ The `claude -p` CLI is the always-available baseline ([ADR 0001](../decisions/00
 
 ## Why client-side confirm
 
-The Mac already has the user's GitLab token in Keychain. Keeping confirm + execute on the Mac means:
+The desktop app already holds the user's GitLab token in its vault. Keeping confirm + execute on the desktop means:
 
 - The server stays stateless. No per-session "pending tool" cache.
 - The confirm sheet can edit the agent's proposed args freely without a round-trip.

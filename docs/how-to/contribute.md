@@ -49,7 +49,7 @@ If you add an endpoint → update [`docs/reference/api/overview.md`](../referenc
 2. Bump `SERVER_API_VERSION` if endpoints changed.
 3. Update README badges if major.
 4. Tag `vX.Y.Z`.
-5. Build the macOS DMG (`mac/build_app.sh`) if shipping a paired release.
+5. Tag `desktop-vX.Y.Z` if shipping a paired desktop release ([desktop-release.md](desktop-release.md)).
 
 ## Verification
 

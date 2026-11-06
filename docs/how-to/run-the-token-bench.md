@@ -21,7 +21,7 @@ in `--fake` it is sent as `ask`, because the real classifier is a paid call),
 `scripts/bench-fixtures/fake-mcp-server.mjs`, registered for the bench user while the
 scenario runs; the registry goes to a temp directory, never your real plugins directory)
 and `ended-chat-continue` (the SDK session is deleted before turn 3 and that turn is
-sent fresh with the chat's history, as the Mac does after a restart). Whether the SDK
+sent fresh with the chat's history, as the desktop app does after a restart). Whether the SDK
 subprocess really loads the two stub servers was not verified offline: check
 `mcpServers` in a real run's `init` event before trusting that scenario.
 temp workspace before every sample. It runs each scenario `--repeat` times (default
@@ -119,7 +119,7 @@ baseline only from the machine and account that will run the gate.
 
 `--fake` starts the server with `LLMIDE_BENCH_FAKE=1` and the `--bench-fake` flag.
 Both are required, and the server refuses the switch under `NODE_ENV=production`.
-The server prints a loud banner to stderr while the switch is active. The Mac app
+The server prints a loud banner to stderr while the switch is active. The desktop app
 never passes the flag and strips `LLMIDE_BENCH_FAKE` from its child environment.
 With the switch on, each turn goes to `extension/llm_agent/sdk/bench-fake-engine.mjs`,
 which makes no model call and does not load the SDK. The numbers are synthetic and
