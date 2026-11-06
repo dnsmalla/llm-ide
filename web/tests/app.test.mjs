@@ -136,3 +136,10 @@ test("sync: while the first connection attempt is running, the sync tier does no
   assert.equal(m.getState().busy, true);
   assert.doesNotMatch(html(h(UI.App, { model: m, sync: fakeSync("locked") })), /offline sync/);
 });
+
+test("sources: Pairing and the sync tier both offer documents and code", () => {
+  const m = desk().model();
+  assert.match(html(h(UI.App, { model: m, sync: fakeSync("none") })), /Open documents and code/);
+  const down = desk({ up: false }).model();
+  assert.match(html(h(UI.App, { model: down, sync: fakeSync("locked") })), />Documents and code<\/button>/);
+});

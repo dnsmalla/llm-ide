@@ -6,24 +6,31 @@ import { fileURLToPath } from "node:url";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz", "https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com"];
+const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz"];
+// Direct reads (SP7): exactly the hosts the sources clients may call (web/src/sources/http.ts ALLOWED_HOSTS).
+const SOURCE_CONNECT = ["https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com"];
 
-test("the CSP allows no inline or remote script; remote connects go only to MEGA's API and transfer hosts", async () => {
+test("the CSP allows no inline or remote script; remote connects go only to MEGA and the Box/GitLab read hosts", async () => {
   const { CSP, WEB_PORT } = await import("../vite.config.ts");
   const { CSP: SERVED } = await import("../scripts/serve.mjs");
+  const { ALLOWED_HOSTS } = await import("../src/sources/http.ts");
   assert.equal(WEB_PORT, 5180);
   assert.equal(SERVED, CSP, "the static server sends the same policy as the built page");
   assert.match(CSP, /script-src 'self';/);
   assert.doesNotMatch(CSP, /unsafe-eval|wasm-unsafe-eval|script-src[^;]*unsafe-inline/);
   assert.match(CSP, /object-src 'none'/);
   const dirs = Object.fromEntries(CSP.split("; ").map((d) => { const [k, ...v] = d.split(" "); return [k, v]; }));
+  const remote = [...MEGA_CONNECT, ...SOURCE_CONNECT];
   for (const [k, v] of Object.entries(dirs)) {
-    for (const src of v) if (/^https?:/.test(src) || src.includes("*.")) assert.ok(k === "connect-src" && MEGA_CONNECT.includes(src), `${k} ${src}`);
+    for (const src of v) if (/^https?:/.test(src) || src.includes("*.")) assert.ok(k === "connect-src" && remote.includes(src), `${k} ${src}`);
   }
-  assert.deepEqual(dirs["connect-src"].filter((s) => s.startsWith("https:")), MEGA_CONNECT);
+  assert.deepEqual(dirs["connect-src"].filter((s) => s.startsWith("https:")), remote);
+  assert.deepEqual(SOURCE_CONNECT, ALLOWED_HOSTS.map((h) => `https://${h}`), "code allow-list and CSP agree");
   for (const ws of CSP.match(/ws:\/\/[^ ;]+/g)) assert.match(ws, /^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\*$/);
   const nginx = readFileSync(join(WEB, "../deploy/vps/llm-ide.com.nginx"), "utf8");
   assert.ok(nginx.includes(`connect-src ${dirs["connect-src"].join(" ")};`), "the VPS vhost sends the same connect-src");
+  const caddy = readFileSync(join(WEB, "DEPLOY.md"), "utf8");
+  assert.ok(caddy.includes(SOURCE_CONNECT.join(" ")), "the Caddy example lists the same read hosts");
 });
 test("the package pins exact versions only", () => {
   const pkg = JSON.parse(readFileSync(join(WEB, "package.json"), "utf8"));

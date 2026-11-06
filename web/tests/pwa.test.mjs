@@ -34,6 +34,7 @@ test("the worker caches only the shell, only GET, and never the Host API", () =>
   assert.match(sw, /req\.method !== "GET"/);
   assert.match(sw, /url\.origin !== self\.location\.origin/);
   assert.match(sw, /url\.pathname\.startsWith\("\/host-api\/"\)/);
+  assert.match(sw, /url\.pathname\.endsWith\("\/oauth-callback\.html"\)/, "the sign-in callback is never cached as the shell");
   assert.match(sw, /req\.mode === "navigate"/);
   assert.match(sw, /caches\.match\("\.\/"\)/);
   assert.match(sw, /CACHE = "llmide-shell-__SW_BUILD__"/);

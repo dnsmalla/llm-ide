@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateDeviceKeys, memoryKeyStore, indexedDbKeyStore } from '../src/sync/keystore.ts';
+import { fakeIdb } from './helpers/fake-idb.mjs';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -20,25 +21,6 @@ test('device key pairs are P-256, non-extractable, and only their SPKI leaves We
   const pub = await subtle.importKey('spki', k.signingSpki, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
   assert.ok(await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig, new Uint8Array([1])));
 });
-
-function fakeIdb() {
-  const data = new Map(); let created = false;
-  const request = (fn, after) => {
-    const r = { onsuccess: null, onerror: null, result: undefined, error: null };
-    queueMicrotask(() => { try { r.result = fn(); r.onsuccess?.(); after?.(); } catch (e) { r.error = e; r.onerror?.(); } });
-    return r;
-  };
-  const db = {
-    createObjectStore: () => { created = true; },
-    transaction: () => {
-      const t = { oncomplete: null, onerror: null, onabort: null, error: null };
-      const done = () => queueMicrotask(() => t.oncomplete?.());
-      t.objectStore = () => ({ get: (k) => request(() => data.get(k)), put: (v, k) => request(() => { data.set(k, v); }, done), delete: (k) => request(() => { data.delete(k); }, done) });
-      return t;
-    },
-  };
-  return { data, open: () => { const r = { onupgradeneeded: null, onsuccess: null, onerror: null, result: db }; queueMicrotask(() => { if (!created) r.onupgradeneeded?.(); r.onsuccess?.(); }); return r; } };
-}
 
 test('the IndexedDB store keeps one device record (CryptoKeys as objects) and clears it', async () => {
   assert.equal(indexedDbKeyStore(undefined), null, 'no IndexedDB: the caller falls back to memory');
