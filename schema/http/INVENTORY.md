@@ -332,13 +332,13 @@ Endpoints with no client caller (94):
 | `/host-api/pin` | ALL_ENDPOINTS | POST | token | core | `extension/routes/host-api/http-routes.mjs:67` | - | - | tests only |
 | `/host-api/devices` | ALL_ENDPOINTS | GET | token | core | `extension/routes/host-api/http-routes.mjs:77` | - | - | tests only |
 | `/host-api/devices/:id` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/host-api/http-routes.mjs:81` | - | - | tests only |
-| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:90` | `sync-model.ts` | - | - |
+| `/kb/sync/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/sync/http-routes.mjs:90` | `Shell.tsx`, `sync-model.ts` | - | - |
 | `/kb/sync/mega` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:91` | `sync-model.ts` | - | - |
 | `/kb/sync/sftp` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:110` | `sync-model.ts` | - | - |
 | `/kb/sync/box/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:139` | `sync-model.ts` | - | - |
 | `/kb/sync/box/start` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:132` | `sync-model.ts` | - | - |
 | `/kb/sync/test` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:148` | `sync-model.ts` | - | - |
-| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:140` | `sync-model.ts` | - | - |
+| `/kb/sync/enabled` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:140` | `Shell.tsx`, `sync-model.ts` | - | - |
 | `/kb/sync/publish` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:148` | `sync-model.ts` | - | - |
 | `/kb/sync/devices/enroll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:169` | `sync-model.ts` | - | - |
 | `/kb/sync/devices/enroll/poll` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:177` | `sync-model.ts` | - | - |
@@ -432,7 +432,7 @@ Endpoints with no client caller (94):
 
 ## Consistency
 
-Checked: 280 roster entries, 544 app source files, 52 extension source files.
+Checked: 280 roster entries, 548 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 
