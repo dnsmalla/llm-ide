@@ -117,17 +117,19 @@ function UnlockView({ state, sync }: { state: SyncState; sync: Actions }) {
     </section>
   );
   return (
-    <form className="web-form" onSubmit={submit}>
-      <h2>Unlock offline sync</h2>
-      <p>Enter the sync account's MEGA password for this session. It is never stored.</p>
+    <form className="web-form web-unlock-form" onSubmit={submit}>
+      <span className="sync-chip" data-tone="muted">Locked</span>
+      <h2>Locked after reload</h2>
+      <p>This offline sync session lives only in this page's memory, so reloading the page or opening a new tab locks it. Your pairing and queued prompts are safe.</p>
+      <p className="web-muted">Enter the MEGA password to unlock this browser again. It is never stored.</p>
       <label htmlFor={ids[0]}>MEGA email</label>
       <input id={ids[0]} type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
       <label htmlFor={ids[1]}>MEGA password</label>
-      <input id={ids[1]} type="password" autoComplete="current-password" value={password} required onChange={(e) => setPassword(e.target.value)} />
+      <input id={ids[1]} type="password" autoComplete="current-password" value={password} required autoFocus={!!state.email} onChange={(e) => setPassword(e.target.value)} />
       {state.error && <StatusBanner severity="error" message={state.error} />}
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       <div className="web-actions">
-        <button type="submit" disabled={state.busy}>{state.busy ? "Unlocking…" : "Unlock"}</button>
+        <button type="submit" disabled={state.busy}>{state.busy ? "Unlocking…" : "Unlock with MEGA"}</button>
         <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
       </div>
     </form>

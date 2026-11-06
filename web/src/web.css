@@ -346,3 +346,8 @@ body {
 .source-setup input:focus { outline: none; border-color: #5ea9de; box-shadow: 0 0 0 3px rgba(94,169,222,.13); }
 .sources-app > .web-read { width: min(100%, 900px); margin: 0 auto; background: linear-gradient(155deg, #101d28, #0b141d); border-color: #24394b; border-radius: 16px; padding: 20px; }
 @media (max-width: 860px) { .sources-grid { grid-template-columns: 1fr; } .sources-app { padding: 16px; } }
+
+.web-unlock-form .sync-chip { align-self: flex-start; }
+.web-unlock-form h2 { margin: 2px 0 6px; }
+.web-unlock-form p { margin: 0; color: #a8bccd; font-size: 13px; line-height: 1.55; }
+.web-unlock-form .web-muted { color: #8ba2b7; font-size: 12px; }
