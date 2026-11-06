@@ -4,8 +4,9 @@ import CryptoKit
 /// The pairing QR's sync fields (device contract item 1).
 public struct SyncPair: Codable, Equatable, Sendable {
     public var sid: String, sfp: String, dir: String, slot: String, es: String, st: String
-    public init(sid: String, sfp: String, dir: String, slot: String, es: String, st: String) {
-        self.sid = sid; self.sfp = sfp; self.dir = dir; self.slot = slot; self.es = es; self.st = st
+    public var bi: String? = nil, bs: String? = nil
+    public init(sid: String, sfp: String, dir: String, slot: String, es: String, st: String, bi: String? = nil, bs: String? = nil) {
+        self.sid = sid; self.sfp = sfp; self.dir = dir; self.slot = slot; self.es = es; self.st = st; self.bi = bi; self.bs = bs
     }
 }
 
@@ -34,9 +35,12 @@ public enum SyncEnroll {
     public static func isStore(_ st: String) -> Bool {
         if st == "memory:" { return true }
         if st.hasPrefix("sftp:") { return isOwnServerHost(String(st.dropFirst(5))) }
-        guard st.hasPrefix("mega:") else { return false }
-        let f = st.utf8.dropFirst(5)
+        guard st.hasPrefix("mega:") || st.hasPrefix("box:") else { return false }
+        let f = st.utf8.dropFirst(st.hasPrefix("box:") ? 4 : 5)
         return (1...64).contains(f.count) && f.allSatisfy { SyncB64.isB64uByte($0) || $0 == 0x2e }
+    }
+    static func isBoxApp(_ s: String?) -> Bool {
+        s?.range(of: #"^[A-Za-z0-9]{16,128}$"#, options: .regularExpression) != nil
     }
     public static func isOwnServerHost(_ h: String) -> Bool {
         h.range(of: #"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9]?)\.)+[a-z]{2,63}$"#, options: .regularExpression) != nil
@@ -61,9 +65,13 @@ public enum SyncEnroll {
             if items[k] == nil { items[k] = v }
         }
         guard items["sv"] == "1" else { throw bad }
-        let p = SyncPair(sid: items["sid"] ?? "", sfp: items["sfp"] ?? "", dir: items["dir"] ?? "", slot: items["slot"] ?? "",
+        var p = SyncPair(sid: items["sid"] ?? "", sfp: items["sfp"] ?? "", dir: items["dir"] ?? "", slot: items["slot"] ?? "",
                          es: items["es"] ?? "", st: items["st"] ?? "")
         guard [p.sid, p.dir, p.slot, p.es].allSatisfy({ isB64u($0, 22) }), isB64u(p.sfp, 43), isStore(p.st) else { throw bad }
+        if p.st.hasPrefix("box:") {
+            guard isBoxApp(items["bi"]), isBoxApp(items["bs"]) else { throw bad }
+            p.bi = items["bi"]; p.bs = items["bs"]
+        }
         return p
     }
 
