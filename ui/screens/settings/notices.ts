@@ -19,12 +19,6 @@ export interface GroupNotice {
 }
 
 export const NOTICES: Readonly<Record<string, GroupNotice>> = {
-  mobile: {
-    mac: "Hosts the iPhone companion: enable it, start on launch, port, pairing QR and PIN, paired devices, phone permissions and the connection log.",
-    status: "Managed in the Mac app",
-    meanwhile: "Pair and manage iPhones from the Mac app; the desktop app does not host the phone link yet.",
-    blockedBy: "Mobile Control hosting is Swift (WebSocket server, Bonjour, PIN cache). Needs a desktop host service and host commands before any control can be real.",
-  },
   "self-heal": {
     mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
     status: "Managed in the Mac app",

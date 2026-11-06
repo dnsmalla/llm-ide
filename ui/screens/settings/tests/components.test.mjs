@@ -130,12 +130,13 @@ test("SettingsScreen: a deep link (id, settings:<id>, or an old anchor) opens th
   assert.equal(m.screen.targetGroup(reg, "nope"), null);
 });
 
-test("SettingsScreen: the real registry renders the 17 live App groups in order, uppercase via the kit class, no project band without a project", () => {
+test("SettingsScreen: the real registry renders the 18 live App groups in order, uppercase via the kit class, no project band without a project", () => {
   const reg = m.registryDefault.createSettingsRegistry();
   const out = html(h(m.screen.SettingsScreen, { env: env({}), registry: reg, expanded: new m.groups.ExpandedGroups(memStore()) }));
   const titles = [...out.matchAll(/class="ui-settings-title">([^<]*)</g)].map((x) => x[1].replaceAll("&amp;", "&"));
   assert.deepEqual(titles, m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only").map((g) => g.title));
-  assert.equal(titles.length, 17);
+  assert.equal(titles.length, 18);
+  assert.ok(titles.includes("Phone and browser"), "phone and browser pairing is reachable");
   assert.ok(!out.includes("st-band-project"));
 });
 
