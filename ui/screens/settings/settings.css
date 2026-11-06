@@ -126,3 +126,4 @@
 .st-device-list { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 8px; }
 .st-device-card { padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: color-mix(in srgb, var(--tok-color-surface2) 58%, transparent); }
 .st-device-card .st-row { gap: 10px; flex-wrap: wrap; }
+.st-warning { margin: 6px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--tok-color-warning) 55%, var(--tok-color-border)); border-radius: 8px; color: var(--tok-color-warning); font-size: 11px; line-height: 1.45; }

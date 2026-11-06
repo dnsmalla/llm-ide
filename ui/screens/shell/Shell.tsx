@@ -67,6 +67,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [, bumpDev] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeDevTools(() => bumpDev()), []);
   useEffect(() => { if (shellHost.isAvailable()) void syncLiveRecordingFromHost(); }, []);
+  useEffect(() => {
+    const onState = (e: Event) => { const d = (e as CustomEvent<{ open?: unknown; fits?: unknown }>).detail; setAssistant({ open: d?.open === true, fits: d?.fits !== false }); };
+    globalThis.addEventListener?.("llmide:code-assistant-state", onState);
+    return () => globalThis.removeEventListener?.("llmide:code-assistant-state", onState);
+  }, []);
+  const [assistant, setAssistant] = useState({ open: false, fits: true });
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const [terminalOpen, setTerminalOpen] = useState(() => readTerminalPrefs().open);
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
@@ -271,7 +277,10 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             type="button"
             className="sh-icon-button sh-code-assistant"
             aria-label="Toggle Code Assistant"
-            title="Show or hide the Code Assistant"
+            aria-controls="ex-chat-dock"
+            aria-expanded={assistant.open}
+            disabled={!assistant.fits}
+            title={assistant.fits ? (assistant.open ? "Hide the Code Assistant" : "Show the Code Assistant") : "The window is too narrow for the Code Assistant"}
             onClick={() => globalThis.dispatchEvent?.(new Event("llmide:toggle-code-assistant"))}
           >
             <Icon name="panel-right" size={16} />

@@ -97,5 +97,5 @@ function TerminalToggle({ host }: { host: SettingsHost }) {
   }, [getExtraPrefs]);
   if (!getExtraPrefs || !setExtraPrefs) return <NeedsHost what="The Terminal switch" />;
   if (on === null) return null;
-  return <Switch label="Terminal" checked={on} hint="Applies next launch." onChange={(v) => { setOn(v); void setExtraPrefs({ terminal: v }); }} />;
+  return <Switch label="Terminal" checked={on} hint="Opens a shell inside the app after a native confirmation. Applies next launch." onChange={(v) => { setOn(v); void setExtraPrefs({ terminal: v }); }} />;
 }

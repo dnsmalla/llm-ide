@@ -299,21 +299,6 @@ pub(crate) fn url_dialog_text(c: &Checked) -> String {
     )
 }
 
-/// Open a URL this module has already validated at the call site (the account OAuth authorize URL).
-/// Deliberately skips the "Open link?" first-use dialog: the host constructed the URL and the caller
-/// has restricted it to the configured account origin. Still no shell: the fixed per-OS opener.
-#[allow(dead_code)]
-pub(crate) fn spawn_url(raw: &str) -> Result<(), FsError> {
-    let u = Url::parse(raw).map_err(|_| herr("url_refused", "the address is not a valid URL"))?;
-    if u.scheme() != "http" && u.scheme() != "https" {
-        return Err(herr("url_refused", "only http(s) links are opened"));
-    }
-    if !u.username().is_empty() || u.password().is_some() {
-        return Err(herr("url_refused", "addresses with a user name or password are not opened"));
-    }
-    spawn(&open_url_invocation(current_os(), u.as_str()))
-}
-
 /// Opens an http/https/mailto link with the OS. Returns `true` if it was opened, `false` if the
 /// user declined the first-use dialog. Never opens an internal address.
 #[tauri::command]

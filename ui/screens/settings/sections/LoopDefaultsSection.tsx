@@ -75,7 +75,7 @@ export default function LoopDefaultsSection() {
           {POLICY.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
       </Field>
-      {draft.protectedPathPolicy === "off" ? <p className="st-hint" role="note">With no check, a repair can delete the failing test and the run will report success.</p> : null}
+      {draft.protectedPathPolicy === "off" ? <p className="st-warning" role="alert">With no check, a repair can delete the failing test and the run will report success.</p> : null}
       <Switch label="Write a run summary note to the Library" checked={draft.writeSummaryNote} onChange={(v) => { setDraft({ ...draft, writeSummaryNote: v }); setSaved(false); }} />
       {error ? <ErrorText text={error} /> : null}
       <div className="st-actions">

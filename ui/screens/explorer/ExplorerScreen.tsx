@@ -369,6 +369,10 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   const name = baseName(projectRoot.replace(/[\\/]+$/, "")) || projectRoot;
   const chatFits = dockFits(viewportW, width);
   const chatVisible = chatDock.open && chatFits;
+  useEffect(() => {
+    globalThis.dispatchEvent?.(new CustomEvent("llmide:code-assistant-state", { detail: { open: chatVisible, fits: chatFits } }));
+  }, [chatVisible, chatFits]);
+
   const chatWidth = clampDockWidth(chatDock.width, viewportW, width);
 
   const loadFolders = useCallback(async () => {

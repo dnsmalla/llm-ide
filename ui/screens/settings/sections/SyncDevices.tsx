@@ -39,6 +39,11 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   const stop = () => { setStart(null); setPoll(null); setShowLink(false); };
   const begin = (tier: "web" | "ios") => run(async () => { setPoll(null); setStart(await startEnroll(client, tier)); });
   const screen = enrollScreen(start, poll);
+  useEffect(() => {
+    if (status.enabled || !keptStart) return;
+    keptStart = null; keptPoll = null; setStartState(null); setPollState(null);
+    void cancelEnroll(client).catch(() => {});
+  }, [client, status.enabled]);
   useEffect(() => { // the backend restarted mid-enrollment: its QR is dead, so stop polling and say so
     if (start && screen === "start") { setStart(null); setPoll(null); setError("Adding the device stopped because LLM-IDE restarted. Start again."); }
   }, [start, screen]);

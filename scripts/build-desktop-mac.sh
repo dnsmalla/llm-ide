@@ -23,7 +23,7 @@ set -euo pipefail
 # The Rust toolchain ships rust-objcopy with its libLLVM; macOS needs that directory on DYLD_LIBRARY_PATH so the
 # release debug-strip step runs instead of warning and leaving symbols in the bundle.
 RUST_SYSROOT="$(rustc --print sysroot)"
-export DYLD_LIBRARY_PATH="${RUST_SYSROOT}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+RUST_LIB="${RUST_SYSROOT}/lib"
 
 DMG=0; CHECKS=1; SMOKE=1
 for a in "$@"; do
@@ -84,7 +84,7 @@ step "Build the app (frontend + release Rust binary; the first cargo build takes
 # A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
 TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
 echo "features: ${LLMIDE_BUILD_FEATURES:-all}"
-(cd "$DESKTOP" && CARGO_TARGET_DIR="$TARGET_DIR" npx tauri build --bundles app)
+(cd "$DESKTOP" && DYLD_LIBRARY_PATH="${RUST_LIB}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" CARGO_TARGET_DIR="$TARGET_DIR" npx tauri build --bundles app)
 
 APP="$TARGET_DIR/release/bundle/macos/LLM-IDE.app"
 [ -d "$APP" ] || { echo "build finished but $APP is missing" >&2; exit 1; }
