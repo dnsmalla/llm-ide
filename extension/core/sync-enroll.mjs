@@ -9,7 +9,8 @@ export const PAIR_FIELDS = Object.freeze(['sid', 'sfp', 'dir', 'slot', 'es', 'st
 export const ID22 = /^[A-Za-z0-9_-]{22}$/;
 export const NAME_MAX = 64;
 const FP43 = /^[A-Za-z0-9_-]{43}$/;
-const ST_RE = /^(mega:[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/; // sftp: = own server's HTTPS host; memory: is the test adapter only
+const ST_RE = /^((mega|box):[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/; // box: = Box folder; sftp: = own server HTTPS host; memory: test adapter only
+export const BOX_APP_RE = /^[A-Za-z0-9]{16,128}$/;
 const USER_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const ENROLL_SALT = sha256(Buffer.from('llmide-sync-enroll-v1'));
 const fail = (code) => { throw new SyncCryptoError(code); };
@@ -17,7 +18,8 @@ const fail = (code) => { throw new SyncCryptoError(code); };
 export const newId22 = () => randomBytes(16).toString('base64url');
 
 export function pairQuery(p) {
-  return `sv=${PAIR_VERSION}&${PAIR_FIELDS.map((k) => `${k}=${encodeURIComponent(p[k])}`).join('&')}`;
+  const box = p.st.startsWith('box:') ? `&bi=${encodeURIComponent(p.bi)}&bs=${encodeURIComponent(p.bs)}` : '';
+  return `sv=${PAIR_VERSION}&${PAIR_FIELDS.map((k) => `${k}=${encodeURIComponent(p[k])}`).join('&')}${box}`;
 }
 
 export function pairUrl(p, tier, webOrigin = 'https://llm-ide.com') {
@@ -38,6 +40,10 @@ export function parsePair(url) {
   if (s.get('sv') !== PAIR_VERSION) fail('bad_pair');
   const p = Object.fromEntries(PAIR_FIELDS.map((k) => [k, s.get(k) ?? '']));
   if (![p.sid, p.dir, p.slot, p.es].every((v) => ID22.test(v)) || !FP43.test(p.sfp) || !ST_RE.test(p.st)) fail('bad_pair');
+  if (p.st.startsWith('box:')) {
+    p.bi = s.get('bi') ?? ''; p.bs = s.get('bs') ?? '';
+    if (!BOX_APP_RE.test(p.bi) || !BOX_APP_RE.test(p.bs)) fail('bad_pair');
+  }
   return p;
 }
 

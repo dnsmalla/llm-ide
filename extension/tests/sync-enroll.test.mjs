@@ -17,6 +17,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const st = await import('../kb/sync-state.mjs');
+const vault = await import('../server/vault.mjs');
 const E = await import('../core/sync-enroll.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
 const { publishOnce } = await import('../routes/sync/producer.mjs');
@@ -171,4 +172,27 @@ test('st accepts only lower-case DNS names for the own server', () => {
   for (const st of ['sftp:LLM-IDE.com', 'sftp:localhost', 'sftp:72.62.76.92', 'sftp:llm-ide.com:8443', 'sftp:']) {
     assert.throws(() => E.parsePair(E.pairUrl({ ...base, st }, 'ios', 'https://llm-ide.com')), (e) => e.code === 'bad_pair', st);
   }
+});
+
+test('a Box store puts the Box app id and secret in the QR; MEGA does not', async () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'box', storeConfig: { clientId: 'cid0123456789abcdef', folder: 'llmide-sync', account: 's***@example.com' } });
+  st.setSyncEnabled(u, true);
+  vault.setSecret(kb.getDb(), u, 'sync.boxClientSecret', 'csec0123456789abcdef');
+  const store = { ...createMemoryStore(), describe: () => ({ kind: 'box', root: 'llmide-sync', account: 's***@example.com' }) };
+  const { qr } = await startEnrollment(u, { store, tier: 'ios', now: T });
+  const p = E.parsePair(qr);
+  assert.equal(p.st, 'box:llmide-sync');
+  assert.equal(p.bi, 'cid0123456789abcdef');
+  assert.equal(p.bs, 'csec0123456789abcdef');
+  const { u: m, store: mem } = setup();
+  const { qr: q2 } = await startEnrollment(m, { store: mem, tier: 'web', now: T });
+  assert.ok(!q2.includes('bs%3D') && !q2.includes('&bs='));
+});
+test('parsePair: box needs valid bi and bs; mega ignores them', () => {
+  const base = { sid: 'A'.repeat(22), sfp: 'B'.repeat(43), dir: 'C'.repeat(22), slot: 'D'.repeat(22), es: 'E'.repeat(22) };
+  const url = (o) => E.pairUrl({ ...base, ...o }, 'ios');
+  assert.throws(() => E.parsePair(url({ st: 'box:llmide-sync', bi: 'short', bs: 'csec0123456789abcdef' })), (e) => e.code === 'bad_pair');
+  assert.throws(() => E.parsePair(url({ st: 'box:llmide-sync' })), (e) => e.code === 'bad_pair');
+  assert.equal(E.parsePair(url({ st: 'mega:llmide-sync' })).bs, undefined);
 });

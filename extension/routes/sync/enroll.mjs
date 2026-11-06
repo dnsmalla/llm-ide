@@ -4,6 +4,8 @@
 import { randomBytes } from 'node:crypto';
 import { enrollKeys, newId22, openClaim, sealAck, sasCode, pairUrl } from '../../core/sync-enroll.mjs';
 import { getSyncState, listSyncDevices, addSyncDevice, nextSeq } from '../../kb/sync-state.mjs';
+import { getDb } from '../../kb/db.mjs';
+import { getSecret } from '../../server/vault.mjs';
 import { ensureSyncKeys } from './keys.mjs';
 import { writeDeviceWrap } from './producer.mjs';
 import { withUserLock } from './scheduler.mjs';
@@ -20,7 +22,7 @@ const slotDir = (p) => `${p.pair.sid}/e/${p.pair.slot}`;
 const webOrigin = (env) => (ORIGIN_RE.test(env.LLMIDE_SYNC_WEB_ORIGIN ?? '') ? env.LLMIDE_SYNC_WEB_ORIGIN : 'https://llm-ide.com');
 
 function wipe(p) {
-  p.es.fill(0); p.pair.es = '';
+  p.es.fill(0); p.pair.es = ''; p.pair.bs = '';
   for (const k of Object.values(p.keys)) k.fill(0);
   clearTimeout(p.timer);
 }
@@ -57,6 +59,9 @@ async function startOne(userId, { store, tier, now = Date.now(), env = process.e
   const d = store.describe();
   const es = randomBytes(16);
   const pair = { sid: state.syncId, sfp: keys.fingerprint, dir: newId22(), slot: newId22(), es: es.toString('base64url'), st: `${d.kind}:${d.root}` };
+  // Box (SP6 D2): the device needs the user's own Box app id and secret before it can read anything, so they travel in
+  // the optical QR, never through storage.
+  if (d.kind === 'box') { pair.bi = state.storeConfig.clientId ?? ''; pair.bs = getSecret(getDb(), userId, 'sync.boxClientSecret') ?? ''; }
   const p = { pair, es, keys: enrollKeys(es, pair.sid, pair.slot), tier, store, openedAt: now, phase: 'waiting', code: null, claim: null, claimAt: 0, sas: null, timer: null };
   pending.set(userId, p);
   const qr = pairUrl(pair, tier, webOrigin(env));
