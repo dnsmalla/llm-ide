@@ -4,7 +4,7 @@
 // token is revoked on close (per app session, D4). PKCE is sent too (undocumented by Box: accepted or ignored). Writes
 // create only new, uniquely named files and never replace or delete anything (one writer per file, design 3). The OAuth
 // and the byte cap are SP7's guarded code (sources/oauth.ts, sources/http.ts) with Box's read-write scope.
-import { b64u } from "../relay/wire.ts";
+import { b64u } from "./wire.ts";
 import { readCapped } from "../sources/http.ts";
 import { authorizeUrl, challengeFor, CHANNEL, exchangeCode, OAuthError, randomString, refreshTokens, revokeToken, waitForCode,
   type ChannelLike, type Every, type ProviderConfig, type Tokens } from "../sources/oauth.ts";

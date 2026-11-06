@@ -7,7 +7,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import * as NE from '../../extension/core/sync-enroll.mjs';
 import * as W from '../src/sync/enroll.ts';
 import { importVerify, SyncCryptoError, hex } from '../src/sync/envelope.ts';
-import { unb64u } from '../src/relay/wire.ts';
+import { unb64u } from '../src/sync/wire.ts';
 
 const V = JSON.parse(readFileSync(new URL('../../schema/sync/v1/vectors/v1.json', import.meta.url), 'utf8'));
 const X = V.enroll;

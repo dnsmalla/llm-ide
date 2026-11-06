@@ -1,7 +1,7 @@
 // The browser's side of the sync v1 device contract (schema/sync/v1/README.md "Enrollment" items 1-6; design 4.3-4.4,
 // 5.3). Every byte read from storage is verified with the desktop key pinned by the QR's sfp before use, and persisted
 // state moves only after a file verified. The device writes only its sealed claim and sealed requests, each new unique.
-import { b64u, unb64u, utf8 } from "../relay/wire.ts";
+import { b64u, unb64u, utf8 } from "./wire.ts";
 import { fail, hex, importVerify, open, seal, sha256, unwrapSync, type SyncEnvelope } from "./envelope.ts";
 import { deviceIdOf, enrollKeys, newId22, openAck, p256Spki, sasCode, sealClaim, type EnrollKeys, type Pair } from "./enroll.ts";
 import { generateDeviceKeys, type DeviceKeyPairs, type LinkedDevice } from "./keystore.ts";

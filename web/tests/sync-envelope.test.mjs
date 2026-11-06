@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import * as N from '../../extension/core/sync-envelope.mjs';
 import { open, seal, unwrapSync, importAes, importVerify, SyncCryptoError } from '../src/sync/envelope.ts';
-import { unb64u, MAX_FRAME } from '../src/relay/wire.ts';
+import { unb64u, MAX_FRAME } from '../src/sync/wire.ts';
 
 const V = JSON.parse(readFileSync(new URL('../../schema/sync/v1/vectors/v1.json', import.meta.url), 'utf8'));
 const RV = JSON.parse(readFileSync(new URL('../../schema/relay/v1/vectors/v1.json', import.meta.url), 'utf8'));

@@ -1,7 +1,7 @@
 // Sync v1 enrollment, device side (schema/sync/v1/README.md "Enrollment"; SP2 extension/core/sync-enroll.mjs is the
 // desktop twin). The enrollment secret es is turned into non-extractable keys at once and its bytes are zeroed; the
 // SAS is computed only from values this device holds or that the desktop committed before it revealed nD.
-import { b64u, enc, unb64u, utf8 } from "../relay/wire.ts";
+import { b64u, enc, unb64u, utf8 } from "./wire.ts";
 import { decodeEnc, fail, importVerify, open, seal, sha256, type SyncEnvelope } from "./envelope.ts";
 
 const subtle: any = globalThis.crypto.subtle;

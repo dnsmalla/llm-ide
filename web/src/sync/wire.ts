@@ -1,19 +1,11 @@
-// schema/relay/v1 wire primitives: canonical encoding, padding, base64url. Pure, DOM-free.
-export type Purpose = "open" | "opened" | "request" | "reply" | "wrap" | "keyconfirm";
-export interface Header {
-  purpose: Purpose; userId: string; desktopId: string; from: string; to: string;
-  epoch: number; session: string; seq: number; issuedAt: number; tier: "" | "web" | "ios";
-}
-export interface Envelope extends Header { v: 1; nonce: string; ct: string; sig: string; eph?: string }
-
-export const BUCKETS = [1024, 4096, 16384, 65536, 262144, 1048576] as const;
+// Byte primitives of the relay v1 envelope format (schema/relay/v1) that sync v1 builds on (schema/sync/v1):
+// canonical encoding, padding buckets, base64url. Pure, DOM-free. Moved from the former relay directory when the relay
+// client was removed (ADR 0020); the bytes are unchanged and checked against the relay v1 vectors.
+const BUCKETS = [1024, 4096, 16384, 65536, 262144, 1048576] as const;
 export const MAX_FRAME = 1048576 - 4;
-export const KEY_MESSAGE_CAP = 2 ** 24;
-const HEADER_KEYS = ["purpose", "userId", "desktopId", "from", "to", "epoch", "session", "seq", "issuedAt", "tier"] as const;
 const te = new TextEncoder();
 
 export const utf8 = (s: string): Uint8Array => te.encode(s);
-export const context = (p: Purpose): Uint8Array => utf8(`llmide/${p}/v1\0`);
 
 export function concat(...parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
@@ -45,9 +37,6 @@ export function decodeEnc(b: Uint8Array, count: number): Uint8Array[] {
   if (out.length !== count) throw new Error("bad_encoding");
   return out;
 }
-
-export const headerFields = (h: Header) => [1, h.purpose, h.userId, h.desktopId, h.from, h.to, h.epoch, h.session, h.seq, h.issuedAt, h.tier];
-export const headerOf = (e: Envelope): Header => Object.fromEntries(HEADER_KEYS.map((k) => [k, e[k]])) as unknown as Header;
 
 export function pad(b: Uint8Array): Uint8Array {
   if (b.length > MAX_FRAME) throw new Error("frame_too_large");

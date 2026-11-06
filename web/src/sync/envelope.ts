@@ -1,7 +1,7 @@
 // Sync v1 envelope (schema/sync/v1) in WebCrypto for a device: relay v1 bytes plus the sync purposes. A port of
 // extension/core/sync-envelope.mjs with the same error codes, checked against schema/sync/v1/vectors/v1.json.
 // Verify before decrypt; unknown fields, purposes and versions fail closed. Every key is a non-extractable CryptoKey.
-import { b64u, concat, decodeEnc as rawDecodeEnc, enc, pad, unb64u, unpad, utf8 } from "../relay/wire.ts";
+import { b64u, concat, decodeEnc as rawDecodeEnc, enc, pad, unb64u, unpad, utf8 } from "./wire.ts";
 
 // TypeScript narrows BufferSource to ArrayBuffer-backed views; WebCrypto accepts any Uint8Array at runtime.
 const subtle: any = globalThis.crypto.subtle;

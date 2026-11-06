@@ -123,8 +123,8 @@ design keep the approved name.
 ## What is kept, parked
 
 **Update 2026-11-06:** the parked code below was removed from the repo (git history keeps it). What stays is
-the relay v1 byte format sync builds on: `schema/relay/v1` and `scripts/relay-reference.mjs` (plus the web
-copy under `web/src/relay/`). The VPS units are retired with the one-time note in `deploy/vps/README.md`.
+the relay v1 byte format sync builds on: `schema/relay/v1` and `scripts/relay-reference.mjs` (plus its byte
+helpers in `web/src/sync/wire.ts`; the web relay client was removed 2026-11-07). The VPS units are retired with the one-time note in `deploy/vps/README.md`.
 
 - `account-service/` with its relay unit, tests and migrations. `ACCOUNTS_RELAY` stays off. Add a hard
   refusal in production before any redeploy.
