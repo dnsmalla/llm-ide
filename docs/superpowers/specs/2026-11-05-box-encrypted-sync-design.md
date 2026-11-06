@@ -641,7 +641,7 @@ setup, but it is the account password.
 | SP4 | iPhone sync tier: SharedProtocol envelope in Swift, read views + queue; **MEGA client (own HTTPS client in SharedProtocol, Keychain session)** | SP2 | iPhone works with the desktop off |
 | SP5 | Own-server adapter: SFTP over `ssh2`, host-key pinning, desktop SSH key; sshd + nginx setup on the VPS, check script; URLSession / same-origin HTTPS clients for iPhone and PWA | SP1; clients after SP3/SP4 | users with their own server |
 | SP6 | Box adapter: desktop upload/delete/purge/events in `box.mjs`, server-side sync config, CCG-user check, consent fallback; device Box OAuth (verify PKCE first) | SP1; clients after SP3/SP4 | users of Box |
-| SP7 | Direct reads: Box documents and GitLab code in the PWA and the iPhone app (GitLab OAuth PKCE) | SP3/SP4 shells | docs and code with the desktop off — **plan written** (docs/superpowers/plans/2026-11-06-sync-sp7-direct-reads.md; owns the shared device OAuth module that SP6 reuses) |
+| SP7 | Direct reads: Box documents and GitLab code in the PWA and the iPhone app (GitLab OAuth PKCE) | SP3/SP4 shells | docs and code with the desktop off — **implemented (web + iPhone, 2026-11-06)** (docs/superpowers/plans/2026-11-06-sync-sp7-direct-reads.md; owns the shared device OAuth module that SP6 reuses) |
 | SP8 | Park and retire: ADR 0019 header "superseded by 0020", production refusal for `ACCOUNTS_RELAY` and the account service, nginx accounts vhost off, MASTER-PLAN Q-WEB-1/2, docs | — | one design in the docs |
 
 ## 15. Open questions for the user (secure, free defaults)
