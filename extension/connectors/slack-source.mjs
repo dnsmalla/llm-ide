@@ -7,10 +7,13 @@
 // fetchChannelHistory own the network. The token (bot or user) flows in as an
 // argument (resolved from the vault by the caller) and is NEVER logged.
 //
-// Host is fixed (https://slack.com/api/*), so unlike the IMAP connector there
-// is no DNS resolution / SSRF surface.
+// Host is fixed (https://slack.com/api/*) and every call goes through the pinned
+// fixed-host fetch: DNS pinned, slack.com only, no redirects (the token rides in
+// Authorization), replies capped at SLACK_MAX_BYTES.
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 
 const API = 'https://slack.com/api';
+const SLACK_MAX_BYTES = 8 * 1024 * 1024; // one conversations.history page of 200 messages with blocks
 
 const MAX_MESSAGES = 200;
 const MAX_TEXT_CHARS = 20000;
@@ -96,11 +99,11 @@ export function normalizeMessage(raw, channelId, userName) {
 async function slackCall(method, token, params, signal) {
   const qs = new URLSearchParams(params).toString();
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${API}/${method}?${qs}`, {
+    const res = await fixedHostFetch(`${API}/${method}?${qs}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       signal,
-    });
+    }, { hosts: ['slack.com'], maxBytes: SLACK_MAX_BYTES });
     // HTTP 429: rate limited. Honor Retry-After (header, seconds) with a bounded
     // backoff; the body is often not JSON, so don't parse it — just retry.
     if (res.status === 429) {

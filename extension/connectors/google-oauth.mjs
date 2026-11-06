@@ -1,6 +1,9 @@
 // Google OAuth2 (PKCE) for Gmail IMAP via XOAUTH2. Bring-your-own Desktop
-// client. Network is global fetch to fixed Google hosts (no SSRF surface).
+// client. Network goes through the pinned fixed-host fetch (one Google host per call, no redirects, capped).
 import crypto from 'node:crypto';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
+
+const OAUTH_MAX_BYTES = 64 * 1024;
 
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -31,11 +34,11 @@ export function buildAuthUrl({ clientId, redirectUri, state, challenge }) {
 }
 
 async function tokenPost(params) {
-  const res = await fetch(TOKEN_ENDPOINT, {
+  const res = await fixedHostFetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params).toString(),
-  });
+  }, { hosts: ['oauth2.googleapis.com'], maxBytes: OAUTH_MAX_BYTES });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.access_token) {
     throw new Error(`Google token exchange failed: ${data.error_description || data.error || res.status}`);
@@ -61,7 +64,8 @@ export async function refreshAccessToken({ clientId, clientSecret, refreshToken 
 }
 
 export async function fetchEmailAddress(accessToken) {
-  const res = await fetch(USERINFO, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const res = await fixedHostFetch(USERINFO, { headers: { Authorization: `Bearer ${accessToken}` } },
+    { hosts: ['openidconnect.googleapis.com'], maxBytes: OAUTH_MAX_BYTES });
   const d = await res.json().catch(() => ({}));
   return d.email || '';
 }

@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations } from '../connectors/slack-source.mjs';
+// Load the pinned fetch before any test swaps global.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
+process.env.NODE_ENV = 'test';
+import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations, testConnection } from '../connectors/slack-source.mjs';
 
 test('resolveOldestTs: high-water wins; else lookbackDays, clamped 1..60', () => {
   // Forward-only high-water always wins, verbatim.
@@ -131,4 +135,10 @@ test('listUserConversations stops at MAX_CONVERSATIONS_PAGES on an endless curso
     assert.equal(channels.length, 20);
     assert.equal(complete, false, 'hitting the cap is not a complete/natural end');
   } finally { global.fetch = orig; }
+});
+
+test('the Slack Web API call reaches only slack.com and refuses a redirect with the token', async () => {
+  const orig = global.fetch; const seen = [];
+  global.fetch = async (url, init) => { seen.push({ host: new URL(String(url)).hostname, redirect: init.redirect }); return new Response(null, { status: 307, headers: { location: 'https://evil.example/' } }); };
+  try { await assert.rejects(() => testConnection({ token: 'xoxp-1' }), /redirect 307 not followed/); assert.deepEqual(seen, [{ host: 'slack.com', redirect: 'manual' }]); } finally { global.fetch = orig; }
 });

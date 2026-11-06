@@ -5,6 +5,8 @@
 // user gets installed — the resulting authed_user.access_token (xoxp-...)
 // reads channels/groups the individual user already belongs to.
 
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
+
 const AUTHORIZE_ENDPOINT = 'https://slack.com/oauth/v2/authorize';
 const TOKEN_ENDPOINT = 'https://slack.com/api/oauth.v2.access';
 const USER_SCOPE = 'channels:history,groups:history,channels:read,groups:read,users:read';
@@ -22,7 +24,7 @@ export function buildAuthUrl({ clientId, redirectUri, state }) {
 }
 
 export async function exchangeCode({ clientId, clientSecret, code, redirectUri }) {
-  const res = await fetch(TOKEN_ENDPOINT, {
+  const res = await fixedHostFetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -30,7 +32,7 @@ export async function exchangeCode({ clientId, clientSecret, code, redirectUri }
       client_id: clientId, client_secret: clientSecret,
       code, redirect_uri: redirectUri,
     }).toString(),
-  });
+  }, { hosts: ['slack.com'], maxBytes: 64 * 1024 });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
     throw new Error(`Slack token exchange failed: ${data.error || res.status}`);

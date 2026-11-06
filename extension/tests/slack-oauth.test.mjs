@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// Load the pinned fetch before any test swaps global.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
+process.env.NODE_ENV = 'test';
 import { buildAuthUrl, exchangeCode, putState, getState, completeState, takeStatus } from '../connectors/slack-oauth.mjs';
 
 test('buildAuthUrl includes client_id, redirect_uri, user_scope (no bot scope), state', () => {
@@ -75,4 +79,10 @@ test('state store: put/get/complete/take with single-use status, carrying teamNa
 
 test('getState returns undefined for an unknown state', () => {
   assert.equal(getState('does-not-exist'), undefined);
+});
+
+test('exchangeCode reaches only slack.com and refuses a redirect', async () => {
+  const orig = global.fetch; const seen = [];
+  global.fetch = async (url, init) => { seen.push({ url: String(url), redirect: init.redirect }); return new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }); };
+  try { await assert.rejects(() => exchangeCode({ clientId: 'c', clientSecret: 's', code: 'x', redirectUri: 'r' }), /redirect 302 not followed/); assert.deepEqual(seen, [{ url: 'https://slack.com/api/oauth.v2.access', redirect: 'manual' }]); } finally { global.fetch = orig; }
 });

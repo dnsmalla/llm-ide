@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// Load the pinned fetch before any test swaps global.fetch: its NODE_ENV=test seam honours a swap
+// only when the module saw the original fetch first.
+import '../server/pinned-fetch.mjs';
+process.env.NODE_ENV = 'test';
 import crypto from 'node:crypto';
-import { pkcePair, buildAuthUrl, exchangeCode, refreshAccessToken, putState, getState, completeState, takeStatus } from '../connectors/google-oauth.mjs';
+import { pkcePair, buildAuthUrl, exchangeCode, refreshAccessToken, putState, getState, completeState, takeStatus, fetchEmailAddress } from '../connectors/google-oauth.mjs';
 
 test('pkcePair: challenge is base64url(SHA256(verifier))', () => {
   const { verifier, challenge } = pkcePair();
@@ -66,4 +70,14 @@ test('state store: put/get/complete/take with single-use status', () => {
   assert.deepEqual(takeStatus('S1'), { status: 'complete', email: 'a@b.com' });
   // status is single-read: after take it's gone (or pending→unknown)
   assert.equal(getState('S1'), undefined);
+});
+
+test('Google token and userinfo calls reach only their fixed hosts and refuse a redirect', async () => {
+  const orig = global.fetch; const seen = [];
+  global.fetch = async (url, init) => { seen.push({ url: String(url), redirect: init.redirect }); return new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }); };
+  try {
+    await assert.rejects(() => exchangeCode({ clientId: 'c', clientSecret: 's', code: 'x', verifier: 'v', redirectUri: 'r' }), /redirect 302 not followed/);
+    await assert.rejects(() => fetchEmailAddress('AT'), /redirect 302 not followed/);
+    assert.deepEqual(seen, [{ url: 'https://oauth2.googleapis.com/token', redirect: 'manual' }, { url: 'https://openidconnect.googleapis.com/v1/userinfo', redirect: 'manual' }]);
+  } finally { global.fetch = orig; }
 });
