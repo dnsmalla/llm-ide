@@ -64,19 +64,21 @@ Retired 2026-11-06: the account service, device linking and relay were removed (
 
 ## E. Desktop notifications and tray (about 10 minutes per OS)
 
+Build and open the app (`desktop/RUN-ON-MAC.md`; on Windows the NSIS-installed build, on Linux the .deb). Sign in and open a project.
+
 | # | OS | Do | Expect |
 |---|---|---|---|
 | E1 | all | Click Graph > Generate, then switch to another app before it ends | One notification "The code graph is ready." (title LLM-IDE); no project or file name |
 | E2 | all | Same, but stay on the Graph section | No notification |
 | E3 | all | Click the E1 notification (or focus the window within 2 minutes) | The Graph section opens |
 | E4 | all | Settings > General > Notifications: turn "Long tasks finished" off, repeat E1 | No notification; turn it back on |
-| E5 | all | From the iPhone or web app, queue a job that needs approval while the window is in the background | "A job is waiting for your approval."; the tray says "1 approval waiting"; its menu line opens the inbox |
+| E5 | all | From the iPhone or web app, queue a job that needs approval while the window is in the background | "A job is waiting for your approval."; the tray says "1 approval waiting" (macOS/Linux: "1" beside the icon; Windows: tooltip); its menu line opens the inbox |
 | E6 | all | Ask Chat for an edit in Ask mode, switch to Explorer before the tool prompt | "A tool is waiting for your approval in Chat."; tray line opens Chat |
-| E7 | all | Kill the core child process with the window in the background | "The LLM-IDE backend stopped. Open the app to restart it."; tray status restarts |
-| E8 | all | Tray: Pause sync, then Resume sync | Settings shows sync off, then on; the item text flips |
-| E9 | macOS | Tray: Start live capture, then Stop | Window opens on Live and records; tray shows "· Recording" |
-| E10 | macOS | First notification after a fresh install | The system permission prompt appears once |
+| E7 | all | Kill the core child process (`kill <pid>` from Settings > Server diagnostics) with the window in the background | "The LLM-IDE backend stopped. Open the app to restart it."; tray status "Backend restarting", then "Backend ready" |
+| E8 | all | Tray: Pause sync (sync set up), then Resume sync | Settings shows sync off, then on; the item text flips |
+| E9 | macOS | Tray: Start live capture with a Zoom meeting open; then Stop live capture | Window opens on Live and records; tray status shows "· Recording"; Stop saves the note |
+| E10 | macOS | First notification after a fresh install | The system permission prompt appears once; the lock screen shows no content preview by default |
 | E11 | macOS | Turn on close-to-tray, close the window, click a notification, then the Dock icon | The Dock click shows the window |
-| E12 | Windows | Installed NSIS build: E1 | The notification is attributed to LLM-IDE |
-| E13 | Linux (GNOME without AppIndicator) | Launch | No tray, no crash; the Settings note appears; E1 still notifies |
-| E14 | all | Turn on OS Focus / Do Not Disturb, repeat E1 | The OS holds the notification |
+| E12 | Windows | Installed (NSIS) build: E1 | The notification is attributed to LLM-IDE (not the exe name) |
+| E13 | Linux (GNOME without AppIndicator) | Launch | No tray, no crash; Settings > General > Notifications shows the AppIndicator note; E1 still notifies (D-Bus) |
+| E14 | all | Turn on OS Focus / Do Not Disturb, repeat E1 | The OS holds the notification (no quiet-hours setting in the app by design) |

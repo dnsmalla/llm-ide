@@ -204,13 +204,32 @@ reachable for the current launch, so the host must store a security-scoped bookm
 `startAccessingSecurityScopedResource` when reopening it. Not implemented; recent
 entries rely on normal filesystem access.
 
-**Tray and notifications** (`src-tauri/src/tray.rs`, `src-tauri/src/notify.rs`). Tauri `tray-icon` plus `tauri-plugin-notification` 2.4.0, used from Rust only: no `notification:*` permission is granted and `check-capabilities` forbids it. Tray menu: backend status (+ "Recording"), approvals waiting (opens Chat or the inbox), Show window, the active project (label), Start/Stop live capture (macOS), Pause/Resume sync, Quit; left-click toggles the window. The count also shows beside the menu-bar icon (macOS, Linux) and in the tooltip (Windows). Close-to-tray is off by default and refused without a tray icon. Notifications: the webview calls `notify_user(kind, key?, count?)` with a kind from a fixed table; the host raises `update_ready` and `core_down` itself. The host writes every word, skips a kind whose Settings switch is off or whose place the focused window shows, shows each key once and at most one per kind per 10 s. A 2 s in-memory watcher keeps the tray in step. There is no auto-start.
+**Tray and notifications** (`src-tauri/src/tray.rs`, `src-tauri/src/notify.rs`). Tauri `tray-icon` feature plus
+`tauri-plugin-notification` 2.4.0 (newest release that resolves against the pinned `tauri` 2.11.6; 2.5+ require
+tauri 2.12), used from Rust only: no `notification:*` permission is granted and `check-capabilities` forbids it.
+Tray menu: backend status (+ "Recording"), approvals waiting (opens Chat or the inbox), Show window, the active
+project (label), Start/Stop live capture (macOS), Pause/Resume sync, Quit; left-click toggles the window. The count
+also shows beside the menu-bar icon (macOS, Linux) and in the tooltip (Windows). Close-to-tray is off by default
+(`tray-settings.json`) and refused without a tray icon. Notifications: the webview calls `notify_user(kind, key?,
+count?)` with a kind from a fixed table (approvals, Loop / Auto Task / graph / Doc Gen done or failed, sync
+attention); the host raises `update_ready` and `core_down` itself. The host writes every word (generic, ≤ 80
+chars, no content, paths or names), skips a kind whose Settings switch is off (`prefs.json` `notifications`) or
+whose place the focused window already shows, shows each de-dup key once and at most one per kind per 10 s. The
+plugin reports no click on desktop, so the last notification's route is handed to the window when it next gains
+focus or opens from the tray (2 min). A 2 s in-memory watcher keeps the tray in step and notices the backend going
+down. There is no auto-start.
 
 Per-OS caveats:
 
-- **Linux**: the tray needs `libayatana-appindicator3-1` (a deb dependency; the `-dev` package is in every CI apt step). GNOME needs the AppIndicator extension, otherwise the tray is absent, the app runs without it (close-to-tray stays off), and Settings > General > Notifications says so. Tray menus do not receive left-click events on most Linux hosts. Notifications use D-Bus; without a notification daemon they are dropped silently.
+- **Linux**: the tray needs `libayatana-appindicator3-1` (a deb dependency; the `-dev` package is in every CI apt
+  step). GNOME needs the AppIndicator extension, otherwise the tray is absent, the app runs without it (close-to-tray
+  stays off), and Settings > General > Notifications says so. Tray menus do not receive left-click events on most
+  Linux hosts. Notifications use D-Bus; without a notification daemon they are dropped silently.
 - **Windows**: notifications from an unpackaged exe show under the exe's name; an installed (NSIS) build with an AppUserModelID is needed for correct attribution.
-- **macOS**: the first notification triggers the system permission prompt; the lock screen shows the app name only unless the user allows previews. Clicking a notification activates the app; the Dock reopen handler shows a window hidden to the tray. The menu-bar icon is a color icon unless a template image is supplied (icon polish open).
+- **macOS**: the first notification triggers the system permission prompt; the lock screen shows the app name only
+  unless the user allows previews. Clicking a notification activates the app; the Dock reopen handler shows a window
+  hidden to the tray. The menu-bar icon is a color icon unless a template image is supplied (icon polish open).
+
 ## Host prefs, neutral folder pick and trust confirmation
 
 **`prefs.json`** (`src-tauri/src/prefs.rs`, `get_prefs` / `set_prefs`). Bounded (16 KB), atomic, 0600, in the
