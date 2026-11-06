@@ -38,7 +38,7 @@ const LIVE_PORT: u16 = 3456;
 /// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
 /// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note.
 const SPAWNED_CORE_FLAGS: [(&str, &str); 3] = [("LLMIDE_ENGINE_PREWARM", "0"), ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"), ("LLMIDE_LIVE_ACK", "1")];
-const SPAWN_PORTS: [u16; 3] = [3457, 3458, 3459];
+const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Per-probe timeout on the spawned port (kept short so readiness isn't quantized).
@@ -211,6 +211,9 @@ pub struct CoreStatus {
     pub error_code: Option<&'static str>,
     /// Additive: the spawn ports this app tried (set with `ports_busy`).
     pub ports_tried: Vec<u16>,
+    /// Additive: the spawned core holds :3456, the only port the Chrome extension talks to.
+    #[serde(rename = "extensionReachable")]
+    pub extension_reachable: bool,
 }
 
 /// What one spawn needs; produced by a [`Launcher`].
@@ -367,6 +370,7 @@ impl CoreHost {
             foreign_core: s.foreign.clone(),
             error_code: s.error_code,
             ports_tried: s.ports_tried.clone(),
+            extension_reachable: s.state == Phase::Ready && !s.adopted && s.url.contains(":3456"),
         }
     }
 
@@ -1784,6 +1788,7 @@ process.on('SIGTERM', () => process.exit(0));
         let host = CoreHost::with(tuning_fast(vec![1]), never_launcher(), no_claude());
         let v = serde_json::to_value(host.status()).unwrap();
         assert!(v["foreign_core"].is_null() && v["error_code"].is_null() && v["ports_tried"].as_array().unwrap().is_empty());
+        assert_eq!(v["extensionReachable"], false);
         host.note_foreign(3456);
         let v = serde_json::to_value(host.status()).unwrap();
         assert_eq!(v["foreign_core"]["port"], 3456);

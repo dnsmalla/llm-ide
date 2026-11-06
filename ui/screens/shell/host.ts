@@ -36,6 +36,8 @@ export interface CoreStatus {
   error_code: string | null;
   /** Additive: the spawn ports the host tried (with `ports_busy`). */
   ports_tried: number[];
+  /** Additive: the spawned core holds :3456, so the Chrome extension can reach it. */
+  extensionReachable: boolean;
 }
 
 export interface ForeignCore {
@@ -173,6 +175,7 @@ export function normalizeCoreStatus(raw: unknown): CoreStatus {
     foreign_core: normalizeForeign(r.foreign_core),
     error_code: asStr(r.error_code),
     ports_tried: Array.isArray(r.ports_tried) ? r.ports_tried.map(asPort).filter((p): p is number => p !== null).slice(0, 8) : [],
+    extensionReachable: r.extensionReachable === true,
   };
 }
 
