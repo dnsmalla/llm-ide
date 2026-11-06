@@ -8,7 +8,7 @@ const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const MEGA_CONNECT = ["https://g.api.mega.co.nz", "https://*.userstorage.mega.co.nz"];
 // Direct reads (SP7): exactly the hosts the sources clients may call (web/src/sources/http.ts ALLOWED_HOSTS).
-const SOURCE_CONNECT = ["https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com"];
+const SOURCE_CONNECT = ["https://gitlab.com", "https://api.box.com", "https://dl.boxcloud.com", "https://public.boxcloud.com", "https://llm-ide.com"];
 
 test("the CSP allows no inline or remote script; remote connects go only to MEGA and the Box/GitLab read hosts", async () => {
   const { CSP, WEB_PORT } = await import("../vite.config.ts");
@@ -25,7 +25,7 @@ test("the CSP allows no inline or remote script; remote connects go only to MEGA
     for (const src of v) if (/^https?:/.test(src) || src.includes("*.")) assert.ok(k === "connect-src" && remote.includes(src), `${k} ${src}`);
   }
   assert.deepEqual(dirs["connect-src"].filter((s) => s.startsWith("https:")), remote);
-  assert.deepEqual(SOURCE_CONNECT, ALLOWED_HOSTS.map((h) => `https://${h}`), "code allow-list and CSP agree");
+  assert.deepEqual(ALLOWED_HOSTS.map((h) => `https://${h}`), SOURCE_CONNECT.slice(0, 4), "code allow-list and CSP agree");
   for (const ws of CSP.match(/ws:\/\/[^ ;]+/g)) assert.match(ws, /^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\*$/);
   const nginx = readFileSync(join(WEB, "../deploy/vps/llm-ide.com.nginx"), "utf8");
   assert.ok(nginx.includes(`connect-src ${dirs["connect-src"].join(" ")};`), "the VPS vhost sends the same connect-src");

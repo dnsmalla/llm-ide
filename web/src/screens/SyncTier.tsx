@@ -66,15 +66,15 @@ function PairView({ state, sync }: { state: SyncState; sync: Actions }) {
   return (
     <form className="web-form" onSubmit={submit} aria-describedby={ids[3]}>
       <h2>Add this browser to offline sync</h2>
-      <p id={ids[3]}>Use the dedicated MEGA account the desktop syncs to. The password is used for this session only and is never stored.</p>
+      <p id={ids[3]}>{state.login !== false ? "Use the dedicated MEGA account the desktop syncs to. The password is used for this session only and is never stored." : "This browser reaches its own folder on your server. Nothing to sign in to."}</p>
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       <label htmlFor={ids[0]}>Name for this browser</label>
       <input id={ids[0]} value={name} maxLength={64} required onChange={(e) => setName(e.target.value)} />
-      <label htmlFor={ids[1]}>MEGA email</label>
+      {state.login !== false && (<><label htmlFor={ids[1]}>MEGA email</label>
       <input id={ids[1]} type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
       <label htmlFor={ids[2]}>MEGA password</label>
-      <input id={ids[2]} type="password" autoComplete="current-password" value={password} required onChange={(e) => setPassword(e.target.value)} />
-      <p className="web-status" role="status" aria-live="polite">{state.busy ? STEP[state.pairStep ?? "login"] ?? "" : ""}</p>
+      <input id={ids[2]} type="password" autoComplete="current-password" value={password} required onChange={(e) => setPassword(e.target.value)} /></>)}
+      <p className="web-status" role="status" aria-live="polite">{state.busy ? (state.pairStep === "claiming" ? STEP.claiming : state.login !== false ? STEP.login : "Connecting to your server…") : ""}</p>
       {state.error && <StatusBanner severity="error" message={state.error} />}
       <div className="web-actions">
         <button type="submit" disabled={state.busy}>Continue</button>
@@ -89,6 +89,16 @@ function UnlockView({ state, sync }: { state: SyncState; sync: Actions }) {
   const [email, setEmail] = useState(state.email);
   const [password, setPassword] = useState("");
   const submit = (e: FormEvent) => { e.preventDefault(); const pw = password; setPassword(""); void sync.unlock({ email: email.trim(), password: pw }); };
+  if (state.login === false) return (
+    <section className="web-form">
+      <h2>Offline sync</h2>
+      {state.error && <StatusBanner severity="error" message={state.error} />}
+      <div className="web-actions">
+        <button type="button" disabled={state.busy} onClick={() => void sync.unlock({ email: "", password: "" })}>{state.busy ? "Connecting…" : "Connect"}</button>
+        <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
+      </div>
+    </section>
+  );
   return (
     <form className="web-form" onSubmit={submit}>
       <h2>Unlock offline sync</h2>
@@ -171,7 +181,7 @@ export function SyncTier({ state, sync, hostPaired, onSources }: SyncTierProps) 
         : state.phase === "removed" ? (
           <section>
             <h2>This browser was removed from sync</h2>
-            <p>The desktop removed it, or its folder was deleted in MEGA. Pair again from the desktop to keep using offline sync.</p>
+            <p>The desktop removed it, or its folder was deleted from the sync storage. Pair again from the desktop to keep using offline sync.</p>
             <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
           </section>
         )

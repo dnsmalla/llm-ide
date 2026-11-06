@@ -1,5 +1,5 @@
 // Sync tier controller (design 6, 4.3-4.4, 12; no React): pair this browser, unlock MEGA for this session, read the
-// latest verified snapshot, queue chat prompts and collect replies. The MEGA password reaches only the login call;
+// latest verified snapshot, queue chat prompts and collect replies. MEGA needs a password per session; the own server does not. The MEGA password reaches only the login call;
 // nothing decrypted is persisted. Polls every 30 s while unlocked, online and not paused (desktop live over Host API).
 import { parsePair, type Pair } from "./enroll.ts";
 import { SyncCryptoError } from "./envelope.ts";
@@ -7,6 +7,7 @@ import { prepareClaim, putClaim, readAck, readFirstWrap, readReply, readSnapshot
 import { indexedDbKeyStore, memoryKeyStore, type KeyStore, type LinkedDevice } from "./keystore.ts";
 import type { Snapshot } from "./kinds.ts";
 import { openMegaStore, type OpenedStore } from "./mega-store.ts";
+import { openHttpsStore, WEB_HOST_RE } from "./https-store.ts";
 import { takePairLink } from "./pair-fragment.ts";
 
 export const POLL_MS = 30_000;
@@ -24,12 +25,12 @@ export interface QueuedPrompt { requestId: string; issuedAt: number; text: strin
 export interface Answered extends QueuedPrompt { ok: boolean; reply: string | null; code: string | null }
 export interface SyncState {
   phase: SyncPhase; pairStep: PairStep; sas: string | null; busy: boolean; error: string | null; notice: string | null;
-  online: boolean; email: string; snapshot: Snapshot | null; stale: boolean; checkedAt: number | null;
+  online: boolean; email: string; login: boolean; snapshot: Snapshot | null; stale: boolean; checkedAt: number | null;
   pending: QueuedPrompt[]; answered: Answered[];
 }
 export interface SyncDeps {
   keystore: KeyStore;
-  openStore: (c: { email: string; password: string; folder: string }) => Promise<OpenedStore>;
+  openStore: (c: { st: string; email: string; password: string }) => Promise<OpenedStore>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   setTimer: (fn: () => void, ms: number) => unknown;
@@ -45,13 +46,13 @@ export const NOT_REMEMBERED = "This browser cannot keep the sync link (private w
 export const TEXT: Record<string, string> = {
   SYNC_AUTH_FAILED: "MEGA refused the email or password.",
   SYNC_MFA_REQUIRED: "This MEGA account has two-factor login on. Use the dedicated LLM-IDE sync account, which has it off.",
-  SYNC_RATE_LIMITED: "MEGA asked us to slow down. Trying again later.",
+  SYNC_RATE_LIMITED: "The sync storage asked us to slow down. Trying again later.",
   SYNC_QUOTA: "The MEGA account is over its storage or transfer quota.",
-  SYNC_UNREACHABLE: "MEGA is not reachable. Check the network.",
+  SYNC_UNREACHABLE: "The sync storage is not reachable. Check the network.",
   SYNC_SESSION_EXPIRED: "The MEGA session ended. Enter the password again.",
   SYNC_BAD_EMAIL: "Enter the sync account's email address.",
   SYNC_BAD_PASSWORD: "Enter the sync account's password.",
-  SYNC_MISSING: "The sync folder for this browser was not found in MEGA.",
+  SYNC_MISSING: "The sync folder for this browser was not found.",
   bad_pair: "This is not a valid LLM-IDE pairing link.",
   unsupported_store: "This link is for a storage this browser cannot open yet.",
   bad_desktop_key: "This pairing link does not match the desktop key in storage. Show a new code on the desktop.",
@@ -65,7 +66,7 @@ export function textOf(e: unknown): string {
   const code = codeOf(e);
   if (TEXT[code]) return TEXT[code];
   if (e instanceof SyncCryptoError) return `Storage returned data that failed verification (${code}). Nothing from it was used.`;
-  if (code.startsWith("SYNC_")) return `MEGA operation failed (${code}).`;
+  if (code.startsWith("SYNC_")) return `Sync storage operation failed (${code}).`;
   return "Something went wrong.";
 }
 export function folderOf(st: string): string {
@@ -74,11 +75,19 @@ export function folderOf(st: string): string {
   return m[1];
 }
 
+export const needsLogin = (st: string) => !st.startsWith("sftp:");
+export function hostOf(st: string): string {
+  const host = st.startsWith("sftp:") ? st.slice(5) : "";
+  if (!WEB_HOST_RE.test(host)) throw new SyncCryptoError("unsupported_store");
+  return host;
+}
+const checkStore = (st: string) => (needsLogin(st) ? folderOf(st) : hostOf(st));
+
 function defaultDeps(): SyncDeps {
   const g = globalThis as unknown as { addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void };
   return {
     keystore: indexedDbKeyStore() ?? memoryKeyStore(),
-    openStore: (c) => openMegaStore(c),
+    openStore: async (c) => (needsLogin(c.st) ? openMegaStore({ email: c.email, password: c.password, folder: folderOf(c.st) }) : openHttpsStore(hostOf(c.st))),
     now: () => Date.now(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     setTimer: (fn, ms) => setTimeout(fn, ms),
@@ -96,7 +105,7 @@ function defaultDeps(): SyncDeps {
 
 export function createSyncController(deps: Partial<SyncDeps> = {}) {
   const d: SyncDeps = { ...defaultDeps(), ...deps };
-  let state: SyncState = { phase: "none", pairStep: null, sas: null, busy: false, error: null, notice: null, online: d.online(), email: "",
+  let state: SyncState = { phase: "none", pairStep: null, sas: null, busy: false, error: null, notice: null, online: d.online(), email: "", login: true,
     snapshot: null, stale: false, checkedAt: null, pending: [], answered: [] };
   const subs = new Set<() => void>();
   const set = (p: Partial<SyncState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
@@ -137,10 +146,10 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
   function acceptLink(url: string): boolean {
     try {
       const p = parsePair(url.trim());
-      folderOf(p.st);
+      checkStore(p.st);
       void closeStore();
       pairRun += 1; pair = p; claim = null;
-      set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null,
+      set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null, login: needsLogin(p.st),
         notice: device ? "Pairing again replaces this browser's current sync link." : null });
       return true;
     } catch (e) { set({ error: textOf(e) }); return false; }
@@ -153,7 +162,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     set({ busy: true, error: null, pairStep: "login", sas: null });
     let s: OpenedStore | null = null;
     try {
-      s = await d.openStore({ email: i.email, password: i.password, folder: folderOf(p.st) });
+      s = await d.openStore({ st: p.st, email: i.email, password: i.password });
       set({ pairStep: "claiming" });
       claim ??= await prepareClaim(s, p, { name: i.name, now: d.now() });
       const e = claim;
@@ -162,7 +171,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       const open = s;
       const sas = await waitFor(run, () => readAck(open, e), ACK_WAIT_MS);
       set({ pairStep: "sas", sas });
-      const linked = await waitFor(run, () => readFirstWrap(open, e, { megaEmail: i.email }), WRAP_WAIT_MS);
+      const linked = await waitFor(run, () => readFirstWrap(open, e, { megaEmail: needsLogin(p.st) ? i.email : "" }), WRAP_WAIT_MS);
       await closeStore();
       device = linked; store = s; s = null; texts.clear();
       await save();
@@ -180,12 +189,12 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     if (!device || state.busy) return;
     set({ busy: true, error: null });
     try {
-      const s = await d.openStore({ email: i.email, password: i.password, folder: folderOf(device.st) });
+      const s = await d.openStore({ st: device.st, email: i.email, password: i.password });
       await closeStore();
       store = s;
-      if (device.megaEmail !== i.email) { device.megaEmail = i.email; await save(); }
+      if (needsLogin(device.st) && device.megaEmail !== i.email) { device.megaEmail = i.email; await save(); }
       backoff = POLL_MS;
-      set({ phase: "ready", busy: false, email: i.email });
+      set({ phase: "ready", busy: false, email: i.email, login: needsLogin(device.st) });
       await refresh();
     } catch (e) { set({ busy: false, error: textOf(e) }); }
   }
@@ -249,24 +258,25 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       offNet = d.onNetwork((on) => { set({ online: on }); if (on) void refresh(); else clearTimer(); });
       const link = d.takePairLink();
       try { device = await d.keystore.load(); } catch { device = null; d.keystore = memoryKeyStore(); set({ notice: NOT_REMEMBERED }); }
-      set({ phase: device ? "locked" : "none", email: device?.megaEmail ?? "", pending: pendingView() });
+      set({ phase: device ? "locked" : "none", email: device?.megaEmail ?? "", pending: pendingView(), login: device ? needsLogin(device.st) : true });
       if (link) acceptLink(link);
+      else if (device && !needsLogin(device.st)) await unlock({ email: "", password: "" });
     },
     acceptLink,
     pair: pairNow,
-    cancelPairing() { pairRun += 1; pair = null; claim = null; set({ phase: device ? "locked" : "none", pairStep: null, sas: null, busy: false, error: null }); },
+    cancelPairing() { pairRun += 1; pair = null; claim = null; set({ phase: device ? "locked" : "none", pairStep: null, sas: null, busy: false, error: null, login: device ? needsLogin(device.st) : true }); },
     unlock,
     refresh,
     send,
     async lock() {
       pairRun += 1; await closeStore(); texts.clear();
-      set({ phase: device ? "locked" : "none", snapshot: null, answered: [], pending: pendingView(), error: null, notice: null, stale: false, busy: false });
+      set({ phase: device ? "locked" : "none", snapshot: null, answered: [], pending: pendingView(), error: null, notice: null, stale: false, busy: false, login: device ? needsLogin(device.st) : true });
     },
     async forget() {
       if (!d.confirm(FORGET_SYNC_CONFIRM)) return;
       pairRun += 1; await closeStore(); device = null; pair = null; claim = null; texts.clear();
       try { await d.keystore.clear(); } catch { /* nothing kept */ }
-      set({ phase: "none", snapshot: null, answered: [], pending: [], error: null, notice: null, stale: false, email: "", busy: false });
+      set({ phase: "none", snapshot: null, answered: [], pending: [], error: null, notice: null, stale: false, email: "", busy: false, login: true });
     },
     pause() { paused = true; clearTimer(); },
     resume() { if (!paused) return; paused = false; void refresh(); },

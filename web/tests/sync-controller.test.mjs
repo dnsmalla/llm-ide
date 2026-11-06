@@ -14,10 +14,10 @@ const EMAIL = 'sync@example.com';
 const flush = () => new Promise((r) => setImmediate(r));
 const kinds = (tag = 'a') => ({ chats: { items: [{ id: 'c1', title: `Chat ${tag}`, updatedAt: T, messages: [] }] }, usage: { items: [{ providers: [] }] } });
 
-function rig() {
+function rig(st = 'mega:llmide-sync') {
   const store = createTamperStore();
-  const desk = createFakeDesktop({ store, st: 'mega:llmide-sync' });
-  const r = { store, desk, clock: T, timers: [], net: [], keystore: memoryKeyStore(), link: null, gets: 0, closed: 0, failOpen: null, dev: null, sasSeen: null };
+  const desk = createFakeDesktop({ store, st });
+  const r = { store, desk, st, clock: T, timers: [], net: [], keystore: memoryKeyStore(), link: null, gets: 0, closed: 0, failOpen: null, dev: null, sasSeen: null };
   r.c = createSyncController({
     keystore: r.keystore, now: () => r.clock,
     sleep: async (ms) => { r.clock += ms; if (!r.desk.lastSas) await r.desk.take(r.clock); else if (!r.dev) r.dev = await r.desk.confirm(r.clock); },
@@ -27,10 +27,10 @@ function rig() {
     online: () => true,
     onNetwork: (fn) => { r.net.push(fn); return () => {}; },
     takePairLink: () => r.link,
-    openStore: async ({ email, password, folder }) => {
-      assert.equal(folder, 'llmide-sync');
+    openStore: async ({ st, email, password }) => {
+      assert.equal(st, r.st);
       if (r.failOpen) throw r.failOpen;
-      if (email !== EMAIL || password !== PW) throw new SyncStoreError('SYNC_AUTH_FAILED');
+      if (st.startsWith('mega:') && (email !== EMAIL || password !== PW)) throw new SyncStoreError('SYNC_AUTH_FAILED');
       return { get: (p) => { r.gets++; return store.get(p); }, put: (p, b, m) => store.put(p, b, m), close: async () => { r.closed++; } };
     },
   });
@@ -201,4 +201,20 @@ test('a retry after a transient failure once the claim landed reuses the same cl
   assert.equal(claims.length, 2);
   assert.deepEqual(claims[1], claims[0], 'same claim name and bytes');
   assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+});
+
+test('own server: pairs with no login and reopens without unlock', async () => {
+  const r = rig('sftp:llm-ide.com');
+  r.link = await r.desk.open(T);
+  await r.c.start();
+  assert.equal(r.c.getState().phase, 'pairing');
+  assert.equal(r.c.getState().login, false);
+  await r.c.pair({ email: '', password: '', name: 'Laptop browser' });
+  assert.equal(r.c.getState().phase, 'ready', r.c.getState().error ?? '');
+  r.c.dispose();
+  const again = createSyncController({ keystore: r.keystore, takePairLink: () => null, onNetwork: () => () => {}, online: () => true,
+    setTimer: () => null, clearTimer: () => {}, now: () => r.clock,
+    openStore: async ({ st }) => { assert.equal(st, 'sftp:llm-ide.com'); return { get: (p) => r.store.get(p), put: (p, b) => r.store.put(p, b), close: async () => {} }; } });
+  await again.start();
+  assert.equal(again.getState().phase, 'ready', 'no unlock step for the own server');
 });
