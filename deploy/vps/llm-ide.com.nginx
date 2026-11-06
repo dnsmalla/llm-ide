@@ -95,7 +95,8 @@ server {
         try_files $uri =404;
     }
     # The OAuth callback carries ?code=&state= in its query: never write it to the access log.
-    location = /app/oauth-callback.html {
+    # The app may be built with VITE_BASE=/ or /app/, so cover both paths.
+    location ~ ^/(app/)?oauth-callback\.html$ {
         access_log off;
         try_files $uri =404;
     }
