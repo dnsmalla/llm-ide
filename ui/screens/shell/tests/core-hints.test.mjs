@@ -27,7 +27,7 @@ test("a foreign core while our own is ready: info text with the pid, a copyable 
   const v = view({ foreign_core: FOREIGN });
   assert.equal(v.level, "ok");
   assert.equal(v.down, false);
-  assert.equal(v.hints.length, 1);
+  assert.deepEqual(v.hints.map((x) => x.id), ["foreign_core", "extension"]);
   const hint = v.hints[0];
   assert.equal(hint.id, "foreign_core");
   assert.match(hint.text, /Another LLM-IDE server is running on port 3456 \(pid 4242, node\)\. It is not used by this app\. You can leave it or stop it with: kill 4242/);
@@ -46,6 +46,33 @@ test("hostile command names are not printed", () => {
   assert.match(hint.text, /\(pid 5\)/);
 });
 
+test("extensionReachable is decoded strictly: only a literal true", () => {
+  assert.equal(st().extensionReachable, false, "absent");
+  assert.equal(st({ extensionReachable: "true" }).extensionReachable, false);
+  assert.equal(st({ extensionReachable: 1 }).extensionReachable, false);
+  assert.equal(st({ extensionReachable: true }).extensionReachable, true);
+});
+
+test("our ready core says whether the Chrome extension can connect; an adopted or down core says nothing", () => {
+  const ok = view({ url: "http://127.0.0.1:3456", extensionReachable: true }).hints.find((x) => x.id === "extension");
+  assert.deepEqual([ok.level, ok.text, ok.command], ["info", "Chrome extension can connect", null]);
+  const no = view({ foreign_core: FOREIGN }).hints.find((x) => x.id === "extension");
+  assert.deepEqual([no.level, no.text, no.command], ["warn", "Chrome extension cannot connect: another program uses port 3456", null]);
+  assert.equal(view({ state: "starting" }).hints.length, 0);
+  assert.equal(view({ adopted: true, trust: "adopted_unverified", extensionReachable: true }).hints.length, 0);
+});
+
+test("server render: the extension line, with no command to copy", () => {
+  const can = view({ extensionReachable: true }).hints.find((x) => x.id === "extension");
+  const out = renderToStaticMarkup(h(HintNote, { hint: can }));
+  assert.match(out, /role="note"/);
+  assert.match(out, /data-hint="extension"/);
+  assert.match(out, />Chrome extension can connect</);
+  assert.doesNotMatch(out, /<code>|Copy/);
+  const cannot = view({ foreign_core: FOREIGN }).hints.find((x) => x.id === "extension");
+  assert.match(renderToStaticMarkup(h(HintNote, { hint: cannot })), /Chrome extension cannot connect: another program uses port 3456/);
+});
+
 test("ports_busy failure: explains, lists the range, offers an lsof command", () => {
   const v = view({ state: "failed", error: "could not start the core", error_code: "ports_busy", ports_tried: [3457, 3458, 3459] });
   assert.equal(v.level, "error");
@@ -53,7 +80,7 @@ test("ports_busy failure: explains, lists the range, offers an lsof command", ()
   const hint = v.hints.find((x) => x.id === "ports_busy");
   assert.match(hint.text, /Ports 3457-3459 are busy: free one of them or restart/);
   assert.equal(hint.command, "lsof -nP -iTCP:3457-3459 -sTCP:LISTEN");
-  assert.equal(view({ state: "ready", error_code: "ports_busy" }).hints.length, 0, "only while failed");
+  assert.equal(view({ state: "ready", error_code: "ports_busy" }).hints.some((x) => x.id === "ports_busy"), false, "only while failed");
 });
 
 test("existing states keep their wording and carry no hints", () => {

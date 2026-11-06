@@ -18,13 +18,13 @@ export interface StatusView {
   trustNotice: string | null;
   /** Shown when the user's `claude` CLI is missing; null otherwise. */
   claudeNotice: string | null;
-  /** Extra plain-language explanations (foreign :3456 server, busy ports). */
+  /** Extra plain-language explanations (foreign :3456 server, busy ports, Chrome extension reach). */
   hints: StatusHint[];
 }
 
 /** A plain-language explanation with an optional command to COPY. The app never runs or offers to run it. */
 export interface StatusHint {
-  id: "foreign_core" | "ports_busy";
+  id: "foreign_core" | "ports_busy" | "extension";
   level: "info" | "warn";
   text: string;
   /** Text to copy into a terminal; `null` when there is nothing to run. */
@@ -48,8 +48,16 @@ export function deriveHints(s: CoreStatus | null): StatusHint[] {
       command: f.pid !== null ? `kill ${f.pid}` : `lsof -nP -iTCP:${f.port} -sTCP:LISTEN`,
     });
   }
+  // Our own running core: the Chrome extension only talks to :3456 (`extensionReachable` from the host).
+  if (s.state === "ready" && !s.adopted) {
+    out.push(
+      s.extensionReachable
+        ? { id: "extension", level: "info", text: "Chrome extension can connect", command: null }
+        : { id: "extension", level: "warn", text: "Chrome extension cannot connect: another program uses port 3456", command: null },
+    );
+  }
   if (s.state === "failed" && s.error_code === "ports_busy") {
-    const ports = s.ports_tried.length > 0 ? [...s.ports_tried].sort((a, b) => a - b) : [3457, 3458, 3459];
+    const ports = s.ports_tried.length > 0 ? [...s.ports_tried].sort((a, b) => a - b) : [3456, 3457, 3458, 3459];
     const range = ports.length > 1 ? `${ports[0]}-${ports[ports.length - 1]}` : String(ports[0]);
     out.push({
       id: "ports_busy",
