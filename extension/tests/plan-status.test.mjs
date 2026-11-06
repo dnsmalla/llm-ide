@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  DEFAULT_FILE, checkDashboard, fixDashboard, formatTable, parseArgs, parseSections, totals,
+  DEFAULT_FILE, checkDashboard, fixDashboard, fixOwnerLists, formatTable, itemTitle, ownerGroup, parseArgs, parseSections, renderOwnerLists, totals,
 } from '../../scripts/plan-status.mjs';
 
 const SAMPLE = `# Plan
@@ -72,4 +72,25 @@ test('formatTable and parseArgs', () => {
 test('the committed MASTER-PLAN dashboard matches its checkboxes', () => {
   const md = fs.readFileSync(DEFAULT_FILE, 'utf8');
   assert.deepEqual(checkDashboard(md), []);
+});
+
+test('owner groups: you, partial work waiting on you, wait, and everything else to execute', () => {
+  assert.equal(ownerGroup(' ', 'Decide X (you)'), 'you');
+  assert.equal(ownerGroup('~', 'Built; open: your device check (me, you)'), 'you', 'built work that waits for your check');
+  assert.equal(ownerGroup(' ', 'Build Y, then you check it (me, you)'), 'execute', 'not built yet: execution comes first');
+  assert.equal(ownerGroup(' ', 'Two weeks of use (wait)'), 'wait');
+  assert.equal(ownerGroup(' ', 'Untagged item'), 'execute');
+  assert.equal(ownerGroup(' ', 'Earlier (you) then the owner (me)'), 'execute', 'the last tag decides');
+  assert.equal(itemTitle('Sync SP5, own-server adapter: built (`abc`) (me)'), 'Sync SP5, own-server adapter');
+  assert.equal(itemTitle('Phase 0 open: one Windows run (graph) (you)'), 'Phase 0 open: one Windows run');
+});
+
+test('owner lists are generated between markers, never as checkboxes, and --check sees drift', () => {
+  const md = '# P\n\n## Status dashboard\n\n<!-- owner-lists:start -->\n<!-- owner-lists:end -->\n\n## S1. A\n\n- [ ] Build it (me)\n- [~] Built: check it (me, you)\n- [x] Done (me)\n';
+  const fixed = fixOwnerLists(md);
+  assert.match(fixed, /### To execute \(1\)[\s\S]*- \*\*A\*\*\n {2}- Build it/);
+  assert.match(fixed, /### Needs you \(1\)[\s\S]*- ~ Built/);
+  assert.equal(parseSections(fixed).find((x) => x.title === 'A').total, 3, 'the generated list adds no counted boxes');
+  assert.equal(fixOwnerLists(fixed), fixed, 'stable');
+  assert.ok(renderOwnerLists(fixed).startsWith('<!-- owner-lists:start -->'));
 });
