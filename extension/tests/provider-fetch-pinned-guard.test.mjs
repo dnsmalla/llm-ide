@@ -29,7 +29,6 @@ const RULES = {
 
 // file -> rule -> { n: exact count, why }
 const ALLOWED = {
-  'providers/jev.mjs': { bareFetch: { n: 1, why: 'the operator-configured Jev decision API (JEV_AI_BASE_URL), not a user connection' } },
   'server/pinned-fetch.mjs': { globalFetch: { n: 3, why: 'the NODE_ENV=test seam that honours a replaced globalThis.fetch; never consulted in production' } },
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
   'llm_agent/tools/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
@@ -98,4 +97,10 @@ test('the deleted classic runtime files stay deleted', () => {
   for (const f of ['fence', 'loop', 'route', 'openai-tools']) {
     assert.equal(fs.existsSync(path.join(root, 'llm_agent/runtime', `${f}.mjs`)), false, f);
   }
+});
+
+test('every fixed-host caller goes through fixedHostFetch, and no bare fetch is allowlisted any more', () => {
+  const want = { 'providers/runtime.mjs': 2, 'providers/web-client.mjs': 2, 'providers/jev.mjs': 1, 'connectors/google-oauth.mjs': 2, 'connectors/slack-oauth.mjs': 1, 'connectors/slack-source.mjs': 1, 'agents/slack.mjs': 1, 'agents/github-pr.mjs': 1 };
+  for (const [f, n] of Object.entries(want)) { const src = strip(fs.readFileSync(path.join(root, f), 'utf8')); assert.equal((src.match(/\bfixedHostFetch\(/g) || []).length, n, f); assert.equal(ALLOWED[f], undefined, `${f} must not be allowlisted`); }
+  assert.deepEqual(Object.entries(ALLOWED).filter(([, rules]) => rules.bareFetch).map(([f]) => f), []);
 });

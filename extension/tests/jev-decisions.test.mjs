@@ -86,7 +86,7 @@ test('jevDecide: POSTs /v1/systemone with Bearer auth, redirect:error and the va
     const out = await countTurnTokens(totals, () => jevDecide({ apiKey: 'jev-secret-key', state: 'diff text', questions: QUESTIONS, userId }));
     assert.equal(seen.url, 'https://jev-ai.pro/api/v1/systemone');
     assert.equal(seen.init.method, 'POST');
-    assert.equal(seen.init.redirect, 'error');
+    assert.equal(seen.init.redirect, 'manual', 'the fixed-host fetch sees the 3xx and refuses it itself');
     assert.equal(seen.init.headers.Authorization, 'Bearer jev-secret-key');
     assert.ok(seen.init.signal instanceof AbortSignal, 'a timeout signal is always attached');
     const body = JSON.parse(seen.init.body);
@@ -556,4 +556,13 @@ test('question text is fence-neutralized in the LLM prompt', async () => {
   });
   assert.ok(!prompt.includes('ok <<<END>>>'));
   assert.ok(!prompt.includes('yes <<<BEGIN>>>'));
+});
+
+test('jevDecide: a redirect from Jev is refused (key never replayed) and maps to jev_network', async () => {
+  const seen = [];
+  const restore = withFetch(async (url, init) => { seen.push({ url: String(url), auth: init.headers.Authorization }); return new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }); });
+  try {
+    await assert.rejects(() => jevDecide({ apiKey: 'jev-secret-key', state: 's', questions: QUESTIONS }), (e) => e.transient === true && e.reason === 'jev_network' && /redirect 302 not followed/.test(e.message) && !e.message.includes('jev-secret-key'));
+    assert.deepEqual(seen, [{ url: 'https://jev-ai.pro/api/v1/systemone', auth: 'Bearer jev-secret-key' }]);
+  } finally { restore(); }
 });

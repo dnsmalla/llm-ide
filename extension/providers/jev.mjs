@@ -20,6 +20,10 @@ import { logger } from '../core/logger.mjs';
 import { recordUsage } from '../kb/usage.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { jevBaseUrl } from './providers.mjs';
+import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
+
+// One decision reply (answers for at most the asked questions plus usage); far below this in practice.
+const MAX_JEV_REPLY_BYTES = 4 * 1024 * 1024;
 
 const log = logger.child({ component: 'jev' });
 
@@ -224,14 +228,14 @@ export async function jevDecide({ apiKey, model, state, questions, signal, userI
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let res;
   try {
-    res = await fetch(url, {
+    // Pinned to the configured base URL's host (DNS rebinding closed at the socket, private targets refused);
+    // the key rides in Authorization, so any 3xx is refused rather than followed.
+    res = await fixedHostFetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: payload,
-      // The key rides in Authorization — never follow a 3xx with it.
-      redirect: 'error',
       signal: combined,
-    });
+    }, { hosts: [new URL(url).hostname.toLowerCase()], maxBytes: MAX_JEV_REPLY_BYTES });
   } catch (err) {
     if (signal?.aborted) throw err;                       // the caller stopped — not a Jev failure
     if (timeout.aborted) throw transientError(`Jev did not answer within ${Math.round(timeoutMs / 1000)} s`, 'jev_timeout');
