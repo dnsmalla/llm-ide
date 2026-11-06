@@ -8,11 +8,12 @@ const subtle: any = globalThis.crypto.subtle;
 export const ID22 = /^[A-Za-z0-9_-]{22}$/;
 export const NAME_MAX = 64;
 const FP43 = /^[A-Za-z0-9_-]{43}$/;
-const ST_RE = /^(mega:[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/; // memory: is the test adapter only; the controller refuses it
+const ST_RE = /^((mega|box):[A-Za-z0-9_.-]{1,64}|sftp:(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}|memory:)$/;
+const BOX_APP_RE = /^[A-Za-z0-9]{16,128}$/; // memory: is the test adapter only; the controller refuses it
 const USER_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const PAIR_FIELDS = ["sid", "sfp", "dir", "slot", "es", "st"] as const;
 export type Tier = "web" | "ios";
-export interface Pair { sid: string; sfp: string; dir: string; slot: string; es: string; st: string }
+export interface Pair { sid: string; sfp: string; dir: string; slot: string; es: string; st: string; bi?: string; bs?: string }
 export interface Claim { deviceId: string; ecdhSpki: Uint8Array; signingSpki: Uint8Array; name: string }
 export interface EnrollKeys { enroll: CryptoKey; enrollack: CryptoKey; bind: CryptoKey; sas: CryptoKey }
 type Bound = Pick<Pair, "sid" | "slot" | "dir" | "sfp"> & Claim & { tier: Tier };
@@ -33,6 +34,10 @@ export function parsePair(url: unknown): Pair {
   if (s.get("sv") !== "1") fail("bad_pair");
   const p = Object.fromEntries(PAIR_FIELDS.map((k) => [k, s.get(k) ?? ""])) as unknown as Pair;
   if (![p.sid, p.dir, p.slot, p.es].every((v) => ID22.test(v)) || !FP43.test(p.sfp) || !ST_RE.test(p.st)) fail("bad_pair");
+  if (p.st.startsWith("box:")) {
+    p.bi = s.get("bi") ?? ""; p.bs = s.get("bs") ?? "";
+    if (!BOX_APP_RE.test(p.bi) || !BOX_APP_RE.test(p.bs)) fail("bad_pair");
+  }
   return p;
 }
 

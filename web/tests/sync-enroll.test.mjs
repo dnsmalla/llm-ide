@@ -92,3 +92,11 @@ test('names, tiers and key types are validated', async () => {
   assert.equal((await W.p256Spki(unb64u(V.keys.desktopSigningSpki))).extractable, false);
   assert.match(W.newId22(), W.ID22);
 });
+
+test('parsePair: box links carry the Box app; a bad or missing one is refused', () => {
+  const q = (extra) => `llmide://pair?sv=1&sid=${'A'.repeat(22)}&sfp=${'B'.repeat(43)}&dir=${'C'.repeat(22)}&slot=${'D'.repeat(22)}&es=${'E'.repeat(22)}&st=box%3Allmide-sync${extra}`;
+  const p = W.parsePair(q('&bi=cid0123456789abcdef&bs=csec0123456789abcdef'));
+  assert.equal(p.st, 'box:llmide-sync'); assert.equal(p.bi, 'cid0123456789abcdef'); assert.equal(p.bs, 'csec0123456789abcdef');
+  assert.throws(() => W.parsePair(q('')), (e) => e.code === 'bad_pair');
+  assert.throws(() => W.parsePair(q('&bi=x&bs=y')), (e) => e.code === 'bad_pair');
+});

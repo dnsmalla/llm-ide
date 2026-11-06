@@ -8,6 +8,7 @@ import { indexedDbKeyStore, memoryKeyStore, type KeyStore, type LinkedDevice } f
 import type { Snapshot } from "./kinds.ts";
 import { openMegaStore, type OpenedStore } from "./mega-store.ts";
 import { openHttpsStore, WEB_HOST_RE } from "./https-store.ts";
+import { openBoxStore } from "./box-store.ts";
 import { takePairLink } from "./pair-fragment.ts";
 
 export const POLL_MS = 30_000;
@@ -25,12 +26,13 @@ export interface QueuedPrompt { requestId: string; issuedAt: number; text: strin
 export interface Answered extends QueuedPrompt { ok: boolean; reply: string | null; code: string | null }
 export interface SyncState {
   phase: SyncPhase; pairStep: PairStep; sas: string | null; busy: boolean; error: string | null; notice: string | null;
-  online: boolean; email: string; login: boolean; snapshot: Snapshot | null; stale: boolean; checkedAt: number | null;
+  online: boolean; email: string; login: boolean; store: "mega" | "box" | null; snapshot: Snapshot | null; stale: boolean; checkedAt: number | null;
   pending: QueuedPrompt[]; answered: Answered[];
 }
 export interface SyncDeps {
   keystore: KeyStore;
   openStore: (c: { st: string; email: string; password: string }) => Promise<OpenedStore>;
+  openBox: (c: { clientId: string; clientSecret: string; folder: string }) => Promise<OpenedStore>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   setTimer: (fn: () => void, ms: number) => unknown;
@@ -70,10 +72,11 @@ export function textOf(e: unknown): string {
   return "Something went wrong.";
 }
 export function folderOf(st: string): string {
-  const m = /^mega:([A-Za-z0-9_.-]{1,64})$/.exec(st);
+  const m = /^(?:mega|box):([A-Za-z0-9_.-]{1,64})$/.exec(st);
   if (!m || m[1] === "." || m[1] === "..") throw new SyncCryptoError("unsupported_store");
   return m[1];
 }
+export const storeKindOf = (st: string): "mega" | "box" => (st.startsWith("box:") ? "box" : "mega");
 
 export const needsLogin = (st: string) => !st.startsWith("sftp:");
 export function hostOf(st: string): string {
@@ -88,6 +91,7 @@ function defaultDeps(): SyncDeps {
   return {
     keystore: indexedDbKeyStore() ?? memoryKeyStore(),
     openStore: async (c) => (needsLogin(c.st) ? openMegaStore({ email: c.email, password: c.password, folder: folderOf(c.st) }) : openHttpsStore(hostOf(c.st))),
+    openBox: (c) => openBoxStore(c),
     now: () => Date.now(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     setTimer: (fn, ms) => setTimeout(fn, ms),
@@ -105,7 +109,7 @@ function defaultDeps(): SyncDeps {
 
 export function createSyncController(deps: Partial<SyncDeps> = {}) {
   const d: SyncDeps = { ...defaultDeps(), ...deps };
-  let state: SyncState = { phase: "none", pairStep: null, sas: null, busy: false, error: null, notice: null, online: d.online(), email: "", login: true,
+  let state: SyncState = { phase: "none", pairStep: null, sas: null, busy: false, error: null, notice: null, online: d.online(), email: "", login: true, store: null,
     snapshot: null, stale: false, checkedAt: null, pending: [], answered: [] };
   const subs = new Set<() => void>();
   const set = (p: Partial<SyncState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
@@ -149,7 +153,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       checkStore(p.st);
       void closeStore();
       pairRun += 1; pair = p; claim = null;
-      set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null, login: needsLogin(p.st),
+      set({ phase: "pairing", pairStep: null, sas: null, busy: false, error: null, snapshot: null, store: storeKindOf(p.st), login: needsLogin(p.st),
         notice: device ? "Pairing again replaces this browser's current sync link." : null });
       return true;
     } catch (e) { set({ error: textOf(e) }); return false; }
@@ -162,7 +166,9 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     set({ busy: true, error: null, pairStep: "login", sas: null });
     let s: OpenedStore | null = null;
     try {
-      s = await d.openStore({ st: p.st, email: i.email, password: i.password });
+      s = storeKindOf(p.st) === "box"
+        ? await d.openBox({ clientId: p.bi ?? "", clientSecret: p.bs ?? "", folder: folderOf(p.st) })
+        : await d.openStore({ st: p.st, email: i.email, password: i.password });
       set({ pairStep: "claiming" });
       claim ??= await prepareClaim(s, p, { name: i.name, now: d.now() });
       const e = claim;
@@ -189,10 +195,12 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     if (!device || state.busy) return;
     set({ busy: true, error: null });
     try {
-      const s = await d.openStore({ st: device.st, email: i.email, password: i.password });
+      const s = storeKindOf(device.st) === "box" && device.box
+        ? await d.openBox({ ...device.box, folder: folderOf(device.st) })
+        : await d.openStore({ st: device.st, email: i.email, password: i.password });
       await closeStore();
       store = s;
-      if (needsLogin(device.st) && device.megaEmail !== i.email) { device.megaEmail = i.email; await save(); }
+      if (storeKindOf(device.st) === "mega" && device.megaEmail !== i.email) { device.megaEmail = i.email; await save(); }
       backoff = POLL_MS;
       set({ phase: "ready", busy: false, email: i.email, login: needsLogin(device.st) });
       await refresh();
@@ -258,7 +266,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       offNet = d.onNetwork((on) => { set({ online: on }); if (on) void refresh(); else clearTimer(); });
       const link = d.takePairLink();
       try { device = await d.keystore.load(); } catch { device = null; d.keystore = memoryKeyStore(); set({ notice: NOT_REMEMBERED }); }
-      set({ phase: device ? "locked" : "none", email: device?.megaEmail ?? "", pending: pendingView(), login: device ? needsLogin(device.st) : true });
+      set({ phase: device ? "locked" : "none", email: device?.megaEmail ?? "", pending: pendingView(), login: device ? needsLogin(device.st) : true, store: device ? storeKindOf(device.st) : null });
       if (link) acceptLink(link);
       else if (device && !needsLogin(device.st)) await unlock({ email: "", password: "" });
     },

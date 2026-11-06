@@ -218,3 +218,17 @@ test('own server: pairs with no login and reopens without unlock', async () => {
   await again.start();
   assert.equal(again.getState().phase, 'ready', 'no unlock step for the own server');
 });
+
+test('a Box pairing link opens Box (not MEGA), stores the Box app on the device', async () => {
+  const opened = [];
+  const fakeStore = { async get() { return null; }, async put() {}, async close() {} };
+  const link = `https://pwa.example/#pair=${encodeURIComponent(`sv=1&sid=${'A'.repeat(22)}&sfp=${'B'.repeat(43)}&dir=${'C'.repeat(22)}&slot=${'D'.repeat(22)}&es=${'E'.repeat(22)}&st=box%3Allmide-sync&bi=cid0123456789abcdef&bs=csec0123456789abcdef`)}`;
+  const c = createSyncController({ keystore: memoryKeyStore(), takePairLink: () => null, onNetwork: () => () => {}, online: () => true,
+    openStore: async () => { throw new Error('MEGA must not be used'); },
+    openBox: async (cfg) => { opened.push(cfg); return fakeStore; } });
+  await c.start();
+  assert.equal(c.acceptLink(link), true);
+  assert.equal(c.getState().store, 'box');
+  await c.pair({ email: '', password: '', name: 'Browser' });
+  assert.deepEqual(opened[0], { clientId: 'cid0123456789abcdef', clientSecret: 'csec0123456789abcdef', folder: 'llmide-sync' });
+});

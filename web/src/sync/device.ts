@@ -85,7 +85,8 @@ export async function readFirstWrap(store: DeviceStore, e: Enrolling, { megaEmai
   const keys = await unwrapSync({ env, ecdhPrivate: e.dev.ecdhPrivate, deviceEcdhSpki: e.dev.ecdhSpki, desktopSigningSpki: e.desktopSpki,
     verifyKey: e.desktopVerify, currentEpoch: 0, deviceId: e.deviceId });
   return { v: 1, sid: e.pair.sid, dir: e.pair.dir, st: e.pair.st, tier: "web", name: e.name, deviceId: e.deviceId, userId: e.userId,
-    ...e.dev, desktopSpki: e.desktopSpki, epoch: env.epoch, keys, prevReply: null, manifestSeq: 0, reqSeq: 0, pending: [], megaEmail };
+    ...e.dev, desktopSpki: e.desktopSpki, epoch: env.epoch, keys, prevReply: null, manifestSeq: 0, reqSeq: 0, pending: [], megaEmail,
+    box: e.pair.bi && e.pair.bs ? { clientId: e.pair.bi, clientSecret: e.pair.bs } : undefined };
 }
 
 /** Contract 5: take wrap.bin when it is for a newer epoch. false = nothing newer. The old reply key stays 24 h. */

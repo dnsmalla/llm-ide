@@ -9,6 +9,7 @@ export interface LinkedDevice extends DeviceKeyPairs {
   v: 1; sid: string; dir: string; st: string; tier: "web"; name: string; deviceId: string; userId: string;
   desktopSpki: Uint8Array; epoch: number; keys: WrapKeys; prevReply: { epoch: number; key: CryptoKey; until: number } | null;
   manifestSeq: number; reqSeq: number; pending: Array<{ requestId: string; issuedAt: number }>; megaEmail: string;
+  box?: { clientId: string; clientSecret: string };
 }
 export interface KeyStore { load(): Promise<LinkedDevice | null>; save(d: LinkedDevice): Promise<void>; clear(): Promise<void> }
 
