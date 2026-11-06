@@ -14,7 +14,7 @@
 
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
-  ackLiveSession, liveSessionStatus, listUnackedLiveSessions, validateCaptureMeta,
+  ackLiveSession, liveSessionStatus, listUnackedLiveSessions, validateCaptureMeta, liveCaptureOf,
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
@@ -66,6 +66,19 @@ export async function handleLiveRoutes(req, res, ctx) {
   if (req.method === 'GET' && /^\/kb\/live\/[^/]+\/status$/.test(path)) {
     const sessionId = decodeParam(path.slice('/kb/live/'.length, -'/status'.length));
     sendJSON(res, 200, { sessionId, ...liveSessionStatus(userId, sessionId) });
+    return true;
+  }
+
+  // GET /kb/live/:sessionId/capture — the held copy of a finalized, unacked capture, for the desktop archivist
+  // (desktop/src-tauri/src/capture_archivist.rs). It writes the note, verifies it, then acks.
+  if (req.method === 'GET' && /^\/kb\/live\/[^/]+\/capture$/.test(path)) {
+    const sessionId = decodeParam(path.slice('/kb/live/'.length, -'/capture'.length));
+    const cap = liveCaptureOf(userId, sessionId);
+    if (!cap) {
+      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'capture is not finalized, already acked or not known' } });
+      return true;
+    }
+    sendJSON(res, 200, cap);
     return true;
   }
 

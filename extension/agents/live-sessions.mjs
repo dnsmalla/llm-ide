@@ -665,6 +665,49 @@ export function listUnackedLiveSessions(userId) {
   return out;
 }
 
+const HELD_LINE = /^\[(\d{2}:\d{2}:\d{2})\] (.+?): (.*)$/;
+
+/**
+ * Rows of a held transcript ("[HH:MM:SS] Speaker: text", UTC times, as captureOf builds it). A line that does not
+ * parse is dropped, so a caller compares rows.length with the capture's line count and refuses a mismatch.
+ * shortcut: a speaker name that itself contains ": " splits early (the text keeps the rest, nothing is lost);
+ * store structured rows in live_crash_rows if that ever shows up.
+ */
+export function rowsOfTranscript(transcript) {
+  const out = [];
+  for (const line of String(transcript || '').split('\n')) {
+    const m = HELD_LINE.exec(line);
+    if (m) out.push({ time: m[1], speaker: m[2], text: m[3] });
+  }
+  return out;
+}
+
+/**
+ * The held (redacted) copy of a finalized capture nobody has acked yet, for the desktop archivist
+ * (GET /kb/live/:id/capture). Null while it is live, once acked or expired, or when unknown to this user.
+ * `lines` and `hash` are exactly what the ack must echo.
+ */
+export function liveCaptureOf(userId, sessionId) {
+  if (!userId || !sessionId) throw new Error('userId and sessionId required');
+  const s = sessions.get(key(userId, sessionId));
+  if (s && !s.finalized) return null;
+  if (getLiveAck(userId, sessionId)) return null;
+  if (s) {
+    const cap = captureOf(s);
+    return {
+      sessionId, title: titleOf(s), startedAt: s.startedAt, durationSec: durationOf(s), language: s.language || '',
+      lines: cap.lines, hash: cap.hash, rows: rowsOfTranscript(cap.transcript),
+    };
+  }
+  const row = getCrashRow(userId, sessionId);
+  if (!row) return null;
+  const startedAt = Date.parse(row.started_at);
+  return {
+    sessionId, title: row.title, startedAt: Number.isFinite(startedAt) ? startedAt : null, durationSec: row.duration_sec,
+    language: row.language || '', lines: row.lines, hash: row.content_hash, rows: rowsOfTranscript(row.transcript),
+  };
+}
+
 // For the test runner — never called from production code.
 export function _resetForTests() { sessions.clear(); }
 
