@@ -16,6 +16,7 @@ public final class SyncHttpsClient: SyncRemoteStore {
     private static let urlSession: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        c.timeoutIntervalForRequest = 30; c.timeoutIntervalForResource = 60
         c.httpShouldSetCookies = false
         c.httpCookieAcceptPolicy = .never
         return URLSession(configuration: c, delegate: NoRedirect(), delegateQueue: nil)

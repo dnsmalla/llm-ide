@@ -4,7 +4,7 @@ import Security
 import UIKit
 import SharedProtocol
 
-/// The iPhone's sync tier: with the desktop off, read the last encrypted snapshot and queue chat prompts.
+/// The iPhone's sync tier: with the desktop off, read the last encrypted snapshot and queue chat prompts, from MEGA or from the user's own server.
 @MainActor
 final class SyncStore: ObservableObject {
     enum Phase: Equatable { case off, needsPassword, ready, removed }
@@ -50,8 +50,10 @@ final class SyncStore: ObservableObject {
               let d = try? SyncDevice(state: st, keys: keys) else { return }
         attach(d)
         queued = Self.read([Queued].self, "queue.json") ?? []
-        if d.state.pair.st.hasPrefix("sftp:"), let h = d.state.pair.st.split(separator: ":").last, let server = try? SyncHttpsClient(host: String(h)) {
-            self.server = server; mega = nil; megaEmail = ""; phase = .ready
+        if d.state.pair.st.hasPrefix("sftp:") {
+            if let server = try? SyncHttpsClient(host: String(d.state.pair.st.dropFirst(5))) {
+                self.server = server; mega = nil; megaEmail = ""; phase = .ready
+            } else { phase = .off }
         } else if let m = Keychain.load(StoredMega.self, .mega) {
             megaEmail = m.email
             mega = MegaClient(folder: m.folder, session: m.session)
@@ -150,6 +152,7 @@ final class SyncStore: ObservableObject {
 
     private func runServerEnrollment(pair: SyncPair, name: String) async {
         do {
+            enrollStep = .working("Connecting to your server…")
             let store = try SyncHttpsClient(host: String(pair.st.dropFirst("sftp:".count)))
             enrollStep = .working("Checking the desktop's key…")
             let (d, stored): (SyncDevice, StoredKeys)
@@ -165,6 +168,7 @@ final class SyncStore: ObservableObject {
             _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(store, nowMs: self.nowMs) ? true : nil }
             guard Keychain.save(stored, .keys) && Keychain.save(d.state, .state) else { enrollStep = .failed("This phone couldn't save the sign-in to its Keychain. Try again."); return }
             prepared = nil; pendingPair = nil; await mega?.logout(); mega = nil
+            Keychain.delete(.mega)  // re-pairing a MEGA phone to the own server drops the old MEGA session secret
             attach(d); server = store; megaEmail = ""
             queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
             await refresh()
@@ -209,8 +213,7 @@ final class SyncStore: ObservableObject {
 
     func send(_ text: String) async {
         guard phase == .ready, let device else { return }
-        let remote: SyncRemoteStore?
-        if let server { remote = server } else { remote = try? await mega?.pinned() }
+        let remote: SyncRemoteStore? = server ?? mega
         guard let remote else { return }
         do {
             let id = try await device.sendRequest(remote, text: text, nowMs: nowMs)
@@ -276,7 +279,14 @@ final class SyncStore: ObservableObject {
             case .tooLarge, .badResponse, .http, .api: return "Couldn't read from MEGA (\(f))."
             }
         }
-        if error is URLError { return "No connection to MEGA." }
+        if let f = error as? SyncHttpsClient.Failure {
+            switch f {
+            case .rateLimited: return "Your server is busy. Try again in a minute."
+            case .missing: return "This iPhone's sync folder is gone from your server. Set it up again from the desktop."
+            case .tooLarge, .badHost, .http: return "Couldn't reach your sync server (\(f))."
+            }
+        }
+        if error is URLError { return "No connection to the sync storage." }
         switch (error as? SyncCryptoError)?.code {
         case "removed": return "This iPhone was removed from sync. Set it up again from the desktop."
         case "updating": return "The desktop is updating the snapshot. Pull to refresh in a moment."
