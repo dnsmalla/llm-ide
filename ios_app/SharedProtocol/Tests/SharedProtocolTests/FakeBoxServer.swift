@@ -10,6 +10,9 @@ final class FakeBoxServer {
     var nodes: [String: Node] = ["0": Node(id: "0", type: "folder", name: "All Files", parent: nil)]
     var access: Set<String> = []; var refresh: Set<String> = []; var codes: Set<String> = []
     var uploads = 0; var revoked: [String] = []; var failNext: [String: Int] = [:]; var bearerAtDownload = false
+    var refreshCalls = 0
+    /// Awaited inside a token call before it answers (lets a test act while a refresh is in flight).
+    var tokenGate: (() async -> Void)?
     private var n = 100
     private func next() -> String { n += 1; return String(n) }
 
@@ -46,13 +49,16 @@ final class FakeBoxServer {
     private func entry(_ x: Node) -> [String: Any] { ["type": x.type, "id": x.id, "name": x.name, "size": x.data.count] }
 
     func handle(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        await Task.yield()  // a real request suspends; let concurrent callers interleave
         let url = req.url!, path = url.path, method = req.httpMethod ?? "GET"
         if let s = failNext.removeValue(forKey: "\(method) \(path)") { return reply(["code": "injected"], s, ["retry-after": "30"]) }
         if path == "/oauth2/token" {
             let f = form(req)
             guard f["client_id"] == app.clientId, f["client_secret"] == app.clientSecret else { return reply(["error": "invalid_client"], 400) }
+            if f["grant_type"] == "refresh_token" { refreshCalls += 1 }
             let ok = f["grant_type"] == "authorization_code" ? codes.remove(f["code"] ?? "") != nil : refresh.remove(f["refresh_token"] ?? "") != nil
             guard ok else { return reply(["error": "invalid_grant"], 400) }
+            if let g = tokenGate { await g() }  // the grant is spent; the answer is still on its way
             let t = grant(); return reply(["access_token": t.access, "refresh_token": t.refresh])
         }
         if path == "/oauth2/revoke" { let t = form(req)["token"] ?? ""; revoked.append(t); refresh.remove(t); return reply([:]) }
@@ -87,10 +93,8 @@ final class FakeBoxServer {
         }
         if method == "GET", parts.count == 4, parts[1] == "files", parts[3] == "content" {
             guard nodes[parts[2]] != nil else { return reply(["code": "not_found"], 404) }
-            // URLSession follows redirects itself; the fake answers as the download host would, after BoxClient.redirected.
-            var hop = URLRequest(url: URL(string: "https://dl.boxcloud.com/d/1/\(parts[2])")!)
-            hop.setValue(req.value(forHTTPHeaderField: "Authorization"), forHTTPHeaderField: "Authorization")
-            return try await handle(BoxClient.redirected(hop, from: req)!)
+            // URLSession follows redirects itself, and SourceRedirectGuard drops the bearer on the hop to another host.
+            return try await handle(URLRequest(url: URL(string: "https://dl.boxcloud.com/d/1/\(parts[2])")!))
         }
         return reply(["code": "not_found"], 404)
     }

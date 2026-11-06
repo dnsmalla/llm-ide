@@ -1,8 +1,9 @@
 import Foundation
 
 /// A minimal Box API client for the sync folder (design §8.2, SP6; no SDK). The user's OWN Box app (client id + secret
-/// from the pairing QR, SP6 D2). Box refresh tokens are single use, so every rotation is reported through `onTokens`
-/// before the new access token is used (the app saves it in the Keychain). HTTPS only; creates only new files; never
+/// from the pairing QR, SP6 D2). Box refresh tokens are single use, so one refresh is in flight at a time and every
+/// rotation is reported through `onTokens` before the new access token is used (the app saves it in the Keychain).
+/// HTTP goes through SP7's guarded transport (SourceHTTP: allowed hosts, redirect guard, timeouts, byte cap). HTTPS only; creates only new files; never
 /// deletes. PKCE is sent on authorize and exchange (undocumented by Box: accepted or ignored).
 @MainActor
 public final class BoxClient: SyncRemoteStore {
@@ -24,24 +25,18 @@ public final class BoxClient: SyncRemoteStore {
     static let revokeURL = URL(string: "https://api.box.com/oauth2/revoke")!
     static let authorizeBase = URL(string: "https://account.box.com/api/oauth2/authorize")!
 
-    /// URLSession follows Box's download redirect itself; this keeps it on https and drops the bearer off the API host.
-    nonisolated static func redirected(_ req: URLRequest, from original: URLRequest?) -> URLRequest? {
-        guard req.url?.scheme == "https" else { return nil }
-        var next = req
-        if req.url?.host != original?.url?.host { next.setValue(nil, forHTTPHeaderField: "Authorization") }
-        return next
+    /// Where a Box response may land: SP7's Box hosts (API, the two pre-signed download hosts) plus the upload host.
+    public static let allowedHosts: Set<String> = SourceHTTP.allowedHosts.subtracting(["gitlab.com"]).union(["upload.box.com"])
+    nonisolated public static func isAllowed(_ u: URL) -> Bool {
+        u.scheme == "https" && u.user == nil && u.password == nil && (u.port == nil || u.port == 443) && allowedHosts.contains(u.host ?? "")
     }
-    final class RedirectGuard: NSObject, URLSessionTaskDelegate {
-        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                        newRequest request: URLRequest) async -> URLRequest? {
-            BoxClient.redirected(request, from: task.originalRequest)
-        }
-    }
-    private static let urlSession = URLSession(configuration: .ephemeral)
-    private static let redirectGuard = RedirectGuard()
+    /// Largest body read: a sync file is at most SyncPath.maxFileBytes; a 1000-entry folder listing is far smaller.
+    public static let readCap = 4 * 1_048_576
+    /// SP7's guarded session: ephemeral, 20 s / 60 s timeouts, redirects only to its allowed hosts and never with the bearer
+    /// off the host it was sent to, and the body read capped while it streams.
     public static let urlSessionTransport: Transport = { request in
-        let (data, response) = try await urlSession.data(for: request, delegate: redirectGuard)
-        guard let http = response as? HTTPURLResponse else { throw Failure.badResponse }
+        let (data, http, truncated) = try await SourceHTTP.urlSessionTransport(request, readCap)
+        if truncated { throw Failure.tooLarge }
         return (data, http)
     }
 
@@ -50,6 +45,9 @@ public final class BoxClient: SyncRemoteStore {
     public private(set) var tokens: Tokens
     public var onTokens: ((Tokens) -> Void)?
     private let transport: Transport
+    /// The one refresh in flight: Box refresh tokens are single use, so concurrent 401s share it.
+    private var renewing: Task<Void, Error>?
+    private var revoked = false
     private var ids: [String: String] = [:]  // folder path below the sync folder ("" = the sync folder) -> Box id
 
     public init(folder: String, app: App, tokens: Tokens, transport: @escaping Transport = BoxClient.urlSessionTransport) {
@@ -57,13 +55,14 @@ public final class BoxClient: SyncRemoteStore {
     }
 
     public static func pkce() -> (verifier: String, challenge: String) {
-        let v = SyncB64.encode(SyncCrypto.randomBytes(32))
-        return (v, SyncB64.encode(SyncCrypto.sha256(Data(v.utf8))))
+        let v = SourceOAuth.randomString()
+        return (v, SourceOAuth.challenge(for: v))
     }
+    public static let scope = "root_readwrite"
     public static func authorizeURL(app: App, state: String, challenge: String, redirectURI: String = BoxClient.redirectURI) -> URL {
         var c = URLComponents(url: authorizeBase, resolvingAgainstBaseURL: false)!
         c.percentEncodedQuery = String(decoding: form([("response_type", "code"), ("client_id", app.clientId), ("redirect_uri", redirectURI),
-                                                        ("state", state), ("code_challenge", challenge), ("code_challenge_method", "S256")]), as: UTF8.self)
+                                                        ("state", state), ("scope", scope), ("code_challenge", challenge), ("code_challenge_method", "S256")]), as: UTF8.self)
         return c.url!
     }
     static func form(_ items: [(String, String)]) -> Data {
@@ -90,19 +89,38 @@ public final class BoxClient: SyncRemoteStore {
     private func send(_ build: () -> URLRequest) async throws -> (Data, HTTPURLResponse) {
         var refreshed = false
         while true {
+            if let r = renewing { try await r.value }
+            if revoked { throw Failure.authFailed }
+            let sent = tokens.access
             var req = build()
-            req.setValue("Bearer \(tokens.access)", forHTTPHeaderField: "Authorization")
+            req.setValue("Bearer \(sent)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await transport(req)
+            if let landed = resp.url, !Self.isAllowed(landed) { throw Failure.badResponse }
             if resp.statusCode == 401, !refreshed {
                 refreshed = true
-                tokens = try await Self.token([("grant_type", "refresh_token"), ("refresh_token", tokens.refresh)], app: app, transport: transport)
-                onTokens?(tokens)  // single use: saved before the new access token is used
+                try await renew(sent: sent)
                 continue
             }
             if resp.statusCode == 401 { throw Failure.authFailed }
             if resp.statusCode == 429 { throw Failure.rateLimited }
             return (data, resp)
         }
+    }
+    /// One refresh for every request that saw a 401 with `sent`; the rest wait for it and retry with its token. A refresh
+    /// that lands after revoke() is revoked too and never reported, so a sign-out is never undone.
+    private func renew(sent: String) async throws {
+        if tokens.access != sent { return }  // rotated since this request was sent
+        if let r = renewing { try await r.value; return }
+        let old = tokens.refresh
+        let t = Task { @MainActor in
+            defer { self.renewing = nil }
+            let next = try await Self.token([("grant_type", "refresh_token"), ("refresh_token", old)], app: self.app, transport: self.transport)
+            if self.revoked { await self.revokeToken(next.refresh); throw Failure.authFailed }
+            self.tokens = next
+            self.onTokens?(next)  // single use: saved before the new access token is used
+        }
+        renewing = t
+        try await t.value
     }
     private func items(_ id: String) async throws -> [[String: Any]]? {
         let (data, resp) = try await send { URLRequest(url: URL(string: "\(Self.api)/folders/\(id)/items?fields=id,name,type,size&limit=1000")!) }
@@ -176,11 +194,15 @@ public final class BoxClient: SyncRemoteStore {
         throw code == "storage_limit_exceeded" ? Failure.quota : Failure.http(resp.statusCode)
     }
 
-    /// Ends this device's Box session (Remove from this iPhone).
+    /// Ends this device's Box session (Remove from this iPhone, or a switch to another storage). Final: later calls fail.
     public func revoke() async {
+        revoked = true
+        await revokeToken(tokens.refresh)
+    }
+    private func revokeToken(_ token: String) async {
         var req = URLRequest(url: Self.revokeURL); req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = Self.form([("client_id", app.clientId), ("client_secret", app.clientSecret), ("token", tokens.refresh)])
+        req.httpBody = Self.form([("client_id", app.clientId), ("client_secret", app.clientSecret), ("token", token)])
         _ = try? await transport(req)
     }
 }

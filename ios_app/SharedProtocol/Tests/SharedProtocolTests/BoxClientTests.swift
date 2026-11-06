@@ -63,14 +63,49 @@ struct BoxClientTests {
         let url = BoxClient.authorizeURL(app: s.app, state: "i.abc", challenge: challenge)
         #expect(url.absoluteString.hasPrefix("https://account.box.com/api/oauth2/authorize?"))
         #expect(url.absoluteString.contains("redirect_uri=llmide-box"))
+        #expect(url.absoluteString.contains("scope=root_readwrite"))
     }
 
-    @Test func redirectsDropTheBearerOffHostAndRefuseHttp() {
-        var api = URLRequest(url: URL(string: "https://api.box.com/2.0/files/1/content")!)
-        api.setValue("Bearer x", forHTTPHeaderField: "Authorization")
-        var hop = URLRequest(url: URL(string: "https://dl.boxcloud.com/d/1/abc")!)
-        hop.setValue("Bearer x", forHTTPHeaderField: "Authorization")
-        #expect(BoxClient.redirected(hop, from: api)?.value(forHTTPHeaderField: "Authorization") == nil)
-        #expect(BoxClient.redirected(URLRequest(url: URL(string: "http://dl.boxcloud.com/x")!), from: api) == nil)
+    @Test func onlyBoxHostsOverHttpsAreAllowedAndAnOffHostLandingIsRefused() async throws {
+        for ok in ["https://api.box.com/2.0/x", "https://upload.box.com/api/2.0/files/content", "https://dl.boxcloud.com/d/1/a", "https://public.boxcloud.com/a"] {
+            #expect(BoxClient.isAllowed(URL(string: ok)!), "\(ok)")
+        }
+        for bad in ["http://dl.boxcloud.com/x", "https://evil.example/x", "https://gitlab.com/x", "https://dl.boxcloud.com:8443/x", "https://u@api.box.com/x"] {
+            #expect(!BoxClient.isAllowed(URL(string: bad)!), "\(bad)")
+        }
+        let s = FakeBoxServer()
+        s.mkdirs("llmide-sync")
+        let evil: BoxClient.Transport = { _ in (Data("{}".utf8), HTTPURLResponse(url: URL(string: "https://evil.example/x")!, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
+        let c = BoxClient(folder: "llmide-sync", app: s.app, tokens: s.grant(), transport: evil)
+        await #expect(throws: BoxClient.Failure.badResponse) { _ = try await c.get("S/x.bin") }
+    }
+
+    @Test func concurrent401sShareOneRefresh() async throws {
+        let s = FakeBoxServer()
+        s.seed("llmide-sync/S/a.bin", Data("a".utf8)); s.seed("llmide-sync/S/b.bin", Data("b".utf8))
+        let c = client(s)
+        var seen = 0
+        c.onTokens = { _ in seen += 1 }
+        s.access.removeAll()
+        async let a = c.get("S/a.bin")
+        async let b = c.get("S/b.bin")
+        let (x, y) = try await (a, b)
+        #expect(x == Data("a".utf8) && y == Data("b".utf8))
+        #expect(s.refreshCalls == 1 && seen == 1, "Box refresh tokens are single use: one refresh for both")
+    }
+
+    @Test func aRefreshThatLandsAfterRevokeIsRevokedAndNeverReported() async throws {
+        let s = FakeBoxServer()
+        s.seed("llmide-sync/S/x.bin", Data("1".utf8))
+        let c = client(s)
+        var seen = 0
+        c.onTokens = { _ in seen += 1 }
+        s.access.removeAll()
+        var revokedDuring = false
+        s.tokenGate = { [unowned s] in s.tokenGate = nil; await c.revoke(); revokedDuring = true }
+        await #expect(throws: BoxClient.Failure.authFailed) { _ = try await c.get("S/x.bin") }
+        #expect(revokedDuring && seen == 0, "a sign-out is never undone by a late rotation")
+        #expect(s.revoked.count == 2, "the old refresh token, then the one the late refresh returned")
+        await #expect(throws: BoxClient.Failure.authFailed) { _ = try await c.get("S/x.bin") }
     }
 }
