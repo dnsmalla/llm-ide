@@ -28,4 +28,21 @@ struct PairingInfoTests {
         #expect(PairingInfo(from: "llmide://pair?ip=8.8.8.8&port=3006&pin=123456") == nil)
         #expect(PairingInfo(from: "llmide://pair?ip=example.com&port=3006&pin=123456") == nil)
     }
+
+    @Test("only real fc00::/7 and fe80::/10 addresses count as private IPv6")
+    func ipv6Ranges() {
+        #expect(PairingInfo(from: "llmide://pair?ip=fd12::1&port=3006&pin=123456") != nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=fe80::1&port=3006&pin=123456") != nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=fc::1&port=3006&pin=123456") == nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=fe8::1&port=3006&pin=123456") == nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=2001:db8::1&port=3006&pin=123456") == nil)
+    }
+
+    @Test("a wrong scheme, a bad PIN, a privileged port or an oversized host is refused")
+    func malformed() {
+        #expect(PairingInfo(from: "https://pair?ip=192.168.1.20&port=3006&pin=123456") == nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=192.168.1.20&port=3006&pin=12a456") == nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=192.168.1.20&port=80&pin=123456") == nil)
+        #expect(PairingInfo(from: "llmide://pair?ip=\(String(repeating: "a", count: 300)).local&port=3006&pin=123456") == nil)
+    }
 }

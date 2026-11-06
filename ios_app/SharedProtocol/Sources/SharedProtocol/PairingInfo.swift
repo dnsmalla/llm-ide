@@ -114,9 +114,12 @@ public struct PairingInfo {
         let lower = addr.lowercased()
         guard lower.allSatisfy({ $0.isHexDigit || $0 == ":" }) else { return false }
         if lower == "::1" { return true }                       // loopback
-        if lower.hasPrefix("fe8") || lower.hasPrefix("fe9")
-            || lower.hasPrefix("fea") || lower.hasPrefix("feb") { return true }  // fe80::/10
-        if lower.hasPrefix("fc") || lower.hasPrefix("fd") { return true }        // fc00::/7 ULA
+        // The prefix only means something on a full 4-digit first group: "fc::1" is fc::/16-ish, not fc00::/7.
+        let first = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+        guard first.count == 4 else { return false }
+        if first.hasPrefix("fe8") || first.hasPrefix("fe9")
+            || first.hasPrefix("fea") || first.hasPrefix("feb") { return true }  // fe80::/10
+        if first.hasPrefix("fc") || first.hasPrefix("fd") { return true }        // fc00::/7 ULA
         return false
     }
 
