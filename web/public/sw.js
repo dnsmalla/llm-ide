@@ -41,6 +41,8 @@ self.addEventListener("fetch", (event) => {
   // The socket is not an HTTP request; this guard is for any future HTTP core route.
   if (url.pathname.startsWith("/host-api/")) return;
   if (url.pathname.endsWith("/sw.js")) return;
+  // The sign-in callback must never be cached: the navigate branch would store it as the shell ("./").
+  if (url.pathname.endsWith("/oauth-callback.html") || url.pathname.endsWith("/oauth-callback.js")) return;
 
   if (req.mode === "navigate") {
     event.respondWith(
