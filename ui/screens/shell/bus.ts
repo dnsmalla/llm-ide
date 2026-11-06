@@ -13,7 +13,9 @@ export type ShellEvent =
   /** Switch section; `anchor` is a section-specific sub-page id (Settings: "about", "providers", ...). */
   | { type: "goto-section"; section: SectionId; anchor?: string }
   /** The project's files or cached repository issues changed (clone, import); owners reload. */
-  | { type: "project-changed" };
+  | { type: "project-changed" }
+  /** Start or stop live capture (the tray's quick action); the Live screen toggles its own Start/Stop. */
+  | { type: "live-capture" };
 
 export type ShellEventType = ShellEvent["type"];
 type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) => void;
@@ -21,7 +23,7 @@ type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) 
 /** A pending request older than this is stale (the user moved on). */
 export const PENDING_TTL_MS = 10_000;
 
-const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section"]);
+const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section", "live-capture"]);
 
 /** Project-relative path check: no absolute form, no `..`, no NUL, bounded. Returns the normalised path or null. */
 export function safeRelativePath(raw: string): string | null {
