@@ -12,12 +12,12 @@
 
 /* sidebar */
 .lib-list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--tok-color-border); }
-.lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 45%; flex: 0 0 auto; overflow-y: auto; border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-md); gap: 2px; }
+.lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 45%; flex: 0 0 auto; overflow-y: auto; border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-md); gap: 7px; }
 .lib-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--tok-space-xs); }
 .lib-nav-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
-.lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-xs); margin: var(--tok-space-lg) 0 4px; padding: 0 var(--tok-space-xs); font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
-.lib-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.lib-nav-item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: var(--tok-space-sm); font: inherit; font-size: var(--tok-type-body-size); color: inherit; background: none; border: 0; border-radius: var(--tok-radius-sm); padding: 7px 10px; cursor: pointer; text-align: left; }
+.lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-sm); margin: var(--tok-space-xl) 0 6px; padding: 0 var(--tok-space-xs); min-height: 26px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
+.lib-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lib-nav-item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: var(--tok-space-sm); font: inherit; font-size: 13px; color: inherit; background: none; border: 0; border-radius: var(--tok-radius-sm); padding: 7px 10px; cursor: pointer; text-align: left; }
 .lib-nav-item:hover { background: var(--tok-color-row-alt); }
 .lib-nav-item[data-selected="true"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
 .lib-nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -109,14 +109,14 @@
 @media (prefers-reduced-motion: reduce) { .lib-screen * { transition: none !important; animation: none !important; } }
 /* Library > Project files (Mac Code/Data categories). */
 .lib-project { border-top: 1px solid var(--tok-color-border); margin-top: var(--tok-space-sm); padding-top: var(--tok-space-sm); }
-.lib-project-root + .lib-project-root { margin-top: var(--tok-space-xs); }
+.lib-project-root + .lib-project-root { margin-top: var(--tok-space-md); }
 .lib-project-head { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 .lib-project-list { list-style: none; margin: 0; padding: 0; }
-.lib-project-row { line-height: 24px; }
+.lib-project-row { line-height: 28px; }
 .lib-project-caret { display: inline-block; width: 14px; color: var(--tok-color-text-muted); }
-.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); text-align: left; cursor: pointer; padding: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.lib-project-dir, .lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: 13px; text-align: left; cursor: pointer; padding: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
 .lib-project-dir { color: var(--tok-color-text-muted); }
-.lib-project-icon { width: 15px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
+.lib-project-icon { width: 13px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
 .lib-project-icon[data-kind="folder"] { color: #e8b64c; }
 .lib-project-icon[data-kind="code"] { color: #4c9aff; }
 .lib-project-icon[data-kind="config"] { color: #e09a3d; }
@@ -129,7 +129,7 @@
 .lib-project-view-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .lib-project-spacer { flex: 1; }
 .lib-project-text { margin: 0; padding: var(--tok-space-sm); overflow: auto; flex: 1; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); white-space: pre; tab-size: 2; }
-.lib-nav-group-btn { display: flex; align-items: center; gap: var(--tok-space-xs); width: 100%; font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; text-transform: inherit; letter-spacing: inherit; }
+.lib-nav-group-btn { display: flex; align-items: center; gap: var(--tok-space-sm); width: 100%; font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; text-transform: inherit; letter-spacing: inherit; }
 .lib-nav-group-btn .lib-count { margin-left: auto; }
 .lib-context { position: fixed; z-index: 60; min-width: 180px; display: flex; flex-direction: column; padding: 4px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); box-shadow: 0 6px 20px color-mix(in srgb, #000 35%, transparent); }
 .lib-context button { font: inherit; color: inherit; text-align: left; background: none; border: 0; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
@@ -146,6 +146,7 @@
 .lib-nav-group .lib-nav-label { font-weight: inherit; }
 .lib-plus { flex: none; border: 0; background: none; color: var(--tok-color-text-muted); font: inherit; cursor: pointer; padding: 0 2px; line-height: 1; }
 .lib-plus:hover { color: var(--tok-color-text); }
+.lib-nav-group-btn svg { width: 9px; height: 9px; flex: none; opacity: 0.9; }
 .lib-nav-group[data-accent="sources"] .lib-nav-group-btn svg { color: var(--tok-color-accent); }
 .lib-nav-group[data-accent="docs"] .lib-nav-group-btn svg { color: #59a6ff; }
 .lib-nav-group[data-accent="plugins"] .lib-nav-group-btn svg { color: #35c6b0; }
