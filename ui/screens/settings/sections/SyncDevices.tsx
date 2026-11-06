@@ -59,9 +59,9 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
           <div className="st-row">
             <Button tone="primary" disabled={busy} onClick={() => void run(async () => { onStatus(await confirmEnroll(client)); stop(); })}>Codes match</Button>
             <Button tone="danger" disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Codes differ</Button>
-            <Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); setPoll(null); setStart(await startEnroll(client, "ios")); })}>Start over with a new QR</Button>
+            <Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); const tier = start?.tier ?? "ios"; setPoll(null); setStart(await startEnroll(client, tier)); })}>Start over</Button>
           </div>
-          <p className="st-hint">The QR is shown only before the iPhone claims it. Starting over makes the old code in the iPhone useless.</p>
+          <p className="st-hint">Starting over makes a new pairing code; the old one stops working on the device.</p>
         </div>
       ) : screen === "failed" && poll ? (
         <div className="st-stack" role="alert">
@@ -78,18 +78,19 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
           ) : (
             <>
               <p className="st-hint">Open the pairing link in the browser you want to add. There is nothing to scan with a camera.</p>
-              <div className="st-row">
+              {(status.storeKind !== "box" || showLink) && <div className="st-row">
                 <Button tone="primary" disabled={busy} onClick={() => void run(async () => {
                   if (isHostAvailable()) await invokeHost("open_external_url", { url: start.qr });
                   else globalThis.open?.(start.qr, "_blank", "noopener,noreferrer");
                 })}>Open in browser</Button>
                 <Button disabled={busy} onClick={() => void host.copyText(start.qr).then(() => setCopied(true), () => setCopied(false))}>{copied ? "Copied" : "Copy link"}</Button>
-              </div>
-              <p className="st-hint">The link opens the web app and starts the same MEGA sign-in. It is replaced by the comparison code as soon as the browser claims it.</p>
+              </div>}
+              <p className="st-hint">The link opens the web app and starts pairing. It is replaced by the comparison code as soon as the browser claims it.</p>
             </>
           )}
-          {status.storeKind !== "box" || showLink || start.tier === "web"
-            ? <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p> // for Box the link carries the client secret
+          {status.storeKind !== "box" || showLink
+            // For Box the link carries the Box app's client secret: shown, copied or opened only after "Show link".
+            ? <p className="st-pre" aria-label="Sync pairing link">{start.qr}</p>
             : <div className="st-row"><Button onClick={() => setShowLink(true)}>Show link</Button></div>}
           <div className="st-row"><Button disabled={busy} onClick={() => void run(async () => { await cancelEnroll(client); stop(); })}>Cancel</Button></div>
         </div>
