@@ -8,8 +8,8 @@ complete list; this page only says what comes first.
 
 | # | Work | Plan | Size | Why now |
 |---|---|---|---|---|
-| A1 | Desktop archivist for extension captures | `plans/2026-11-07-desktop-capture-archivist.md` (being written) | 2-4 h | Since the Mac app's removal, meetings captured in Chrome are never saved as notes |
-| A2 | Hosted issue write actions (create, comment, close) | `plans/2026-11-07-hosted-issue-writes.md` (being written) | 2-4 h | The desktop Issues screen's write buttons call routes the core does not serve |
+| A1 | Hosted issue write actions (create, comment, close) — **first** | `plans/2026-11-07-hosted-issue-writes.md` | ~2 h 50 | The three routes already exist inline in `routes/router.mjs` with no host proof, rate limit, repo allowlist, dedupe, audit or tests: harden them now. Takes API **116** |
+| A2 | Desktop archivist for extension captures | `plans/2026-11-07-desktop-capture-archivist.md` | ~3 h 10 | Meetings captured in Chrome are never saved as notes. Takes API **117** (the next free number after A1). Archives nothing from a real extension until decision D2 below |
 | A3 | Review leftovers batch | this page, below | 1 h | Small items the reviews recorded but did not fix |
 | A4 | Master-plan re-baseline | this page, below | 30 min | Many rows still measure against the retired Mac app |
 
@@ -40,6 +40,15 @@ the Mac app", "Mac-parity round", "Phone sees archived chats and notes only thro
 "Mechanical parity inventory", "ui-kit parity bar against the Mac render", "Two Macs on one account". Replace
 each kept one with what the Tauri desktop itself must do, and mark built screens that you have checked in a real
 window as `[x]`. Then `node scripts/plan-status.mjs --fix` and `node scripts/user-needs.mjs --fix`.
+
+### Decision needed before A2 is useful: how the Chrome extension reaches the desktop (archivist plan D2)
+
+The extension only talks to `127.0.0.1:3456` (its config and manifest CSP); the Mac app's core ran there. The Tauri
+desktop starts its own core on 3457-3459 and, in a release build, never adopts a server on 3456. So the extension
+has no core to talk to on a machine running only the new desktop: no capture upload, no live chat.
+Options: (a) the release desktop starts its core on 3456 when that port is free (port list and the desktop's webview
+CSP change) — recommended, keeps the extension's single fixed origin; (b) the extension accepts a user-set
+127.0.0.1:3457-3459 — a wider local-port surface. A follow-up plan implements the choice.
 
 ## Track B — you (real devices and accounts), this weekend
 
