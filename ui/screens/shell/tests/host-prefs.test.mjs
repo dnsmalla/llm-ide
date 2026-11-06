@@ -22,7 +22,7 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0 };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -142,4 +142,10 @@ test("graph auto-update decodes off and floors small intervals", () => {
   assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: 1 }).graphAutoUpdateMinutes, 5);
   assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: 1440 }).graphAutoUpdateMinutes, 1440);
   assert.equal(m.decodePrefs({ ...P, graphAutoUpdateMinutes: -1 }).graphAutoUpdateMinutes, 0);
+});
+
+test("updateChecks decodes, defaults on for older files, and is written through set_prefs", async () => {
+  assert.equal(m.decodePrefs({ ...P, updateChecks: false }).updateChecks, false);
+  const { updateChecks, ...old } = P;
+  assert.equal(m.decodePrefs(old).updateChecks, true);
 });

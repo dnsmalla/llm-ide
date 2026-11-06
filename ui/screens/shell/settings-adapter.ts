@@ -12,6 +12,7 @@ import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settin
 import { decodeMemory, decodePaths } from "../settings/project-model";
 import { decodeTrayStatus } from "../settings/misc-model";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
+import { decodeUpdateStatus, type UpdateStatusView } from "../settings/updates-model";
 import { CoreError, type CoreClient } from "./core";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
 import type { CoreStatus } from "./host";
@@ -46,6 +47,8 @@ export function settingsClientFrom(core: Pick<CoreClient, "requestRaw">): Settin
   };
 }
 
+const mustDecode = (v: UpdateStatusView | null): UpdateStatusView => { if (!v) throw new Error("bad update status from host"); return v; };
+
 export function trustOf(status: CoreStatus | null): CoreTrust {
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
 }
@@ -77,6 +80,11 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         setLoopDefaults: async (loopDefaults) => { const p = (await writePrefs({ loopDefaults })).stored; return p.loopDefaults; },
         getGraphAutoUpdate: async () => (await readPrefs()).stored.graphAutoUpdateMinutes,
         setGraphAutoUpdate: async (graphAutoUpdateMinutes) => (await writePrefs({ graphAutoUpdateMinutes })).stored.graphAutoUpdateMinutes,
+        getUpdateChecks: async () => (await readPrefs()).stored.updateChecks,
+        setUpdateChecks: async (updateChecks) => (await writePrefs({ updateChecks })).stored.updateChecks,
+        updateStatus: async () => mustDecode(decodeUpdateStatus(await d.invoke<unknown>("update_status"))),
+        checkForUpdate: async () => mustDecode(decodeUpdateStatus(await d.invoke<unknown>("update_check"))),
+        installUpdate: async () => (await d.invoke<unknown>("update_install")) === true,
         async pickFolder(title) {
           const choice = decodePickedChoice(await d.invoke<unknown>("pick_folder", { title }));
           if (!choice) return null;

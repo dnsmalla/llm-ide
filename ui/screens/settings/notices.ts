@@ -52,7 +52,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   server:
     "On the Mac this group also edits the server URL and the Node and project paths. Here the app starts and supervises the core: status, log, Start, Stop and Kill & Restart are real. A source checkout edits its Node binary, project folder and loopback port here; editing the server URL of an external core is not offered.",
   updates:
-    "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
+    "Updates come from signed LLM-IDE releases only: the host checks once a day when the switch is on and never installs without asking. A local or test build has no update channel. A .deb install is updated by the package manager, not here.",
   general:
     "The Mac hides its bilingual switch; the desktop does not show one either. The menu-bar icon switch is real here (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
 };

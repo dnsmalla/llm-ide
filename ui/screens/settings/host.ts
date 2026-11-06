@@ -6,6 +6,7 @@
 
 import type { CoreClient } from "./core-api.ts";
 import type { LoopDefaults } from "../shell/host-prefs.ts";
+import type { UpdateStatusView } from "./updates-model.ts";
 
 export type ThemeChoice = "dark" | "light" | "midnight";
 
@@ -135,6 +136,14 @@ export interface SettingsHost {
   /** Minutes between automatic Code Graph refreshes (0 = off; 5-1440 otherwise). */
   getGraphAutoUpdate?(): Promise<number>;
   setGraphAutoUpdate?(minutes: number): Promise<number>;
+  /** Daily signed-update check (host pref, applies at once). */
+  getUpdateChecks?(): Promise<boolean>;
+  setUpdateChecks?(on: boolean): Promise<boolean>;
+  /** The host updater: cached status, a network check, and install (native confirm, then restart). */
+  updateStatus?(): Promise<UpdateStatusView>;
+  checkForUpdate?(): Promise<UpdateStatusView>;
+  /** false = the user cancelled the native dialog. */
+  installUpdate?(): Promise<boolean>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
   /** The optional-component store (Mermaid): status, and install/remove behind the host's native dialogs. */

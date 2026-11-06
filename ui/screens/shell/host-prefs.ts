@@ -44,6 +44,8 @@ export interface HostPrefs {
   loopDefaults: LoopDefaults;
   /** Minutes between automatic Code Graph refreshes; 0 = off. Host raises 1-4 to 5. */
   graphAutoUpdateMinutes: number;
+  /** Daily signed-update check; applies at once. */
+  updateChecks: boolean;
 }
 
 export interface HostPrefsView {
@@ -93,7 +95,8 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const graphAutoUpdateMinutes = typeof raw.graphAutoUpdateMinutes === "number" && Number.isInteger(raw.graphAutoUpdateMinutes) && raw.graphAutoUpdateMinutes >= 0 && raw.graphAutoUpdateMinutes <= 1440
     ? (raw.graphAutoUpdateMinutes === 0 ? 0 : Math.max(5, raw.graphAutoUpdateMinutes))
     : 0;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes };
+  const updateChecks = raw.updateChecks !== false;
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
