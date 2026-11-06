@@ -121,7 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check out graph-kit submodule (System page web source)
-        run: git submodule update --init mac/LocalPackages/graph-kit
+        run: git submodule update --init graph-kit
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -145,7 +145,7 @@ jobs:
           npm ci --prefix extension
           npm ci --prefix ui/kit
           npm ci --prefix web
-          npm ci --prefix mac/LocalPackages/graph-kit/web
+          npm ci --prefix graph-kit/web
       # Pinned official Node for this runner's target, SHA-256 checked against the repo pin and nodejs.org,
       # production deps only, the SDK's claude binary removed and re-verified (MASTER-PLAN S2 condition 2).
       - name: Stage the Node core

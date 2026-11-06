@@ -1,35 +1,30 @@
 #!/usr/bin/env node
-// graph-kit pin check. Three pins select the graph-kit revision the Mac app
-// and the graph gates use, and they must agree:
-//   1. the submodule gitlink    (index entry of mac/LocalPackages/graph-kit)
-//   2. the `revision:` pin      (mac/Package.swift, the URL+revision dependency)
-//   3. the graph-kit entry      (mac/Package.resolved, what SwiftPM builds)
+// graph-kit pin check. One pin selects the graph-kit revision llm-ide uses: the
+// submodule gitlink (index entry of graph-kit/). The desktop and the graph gates
+// read the checkout; the Swift Mac app and its Package.swift/Package.resolved pins
+// are gone.
 //
 // Usage:
-//   node scripts/graphkit-pin-check.mjs              offline: the three pins agree (make regression)
+//   node scripts/graphkit-pin-check.mjs              offline: the gitlink exists (make regression)
 //   node scripts/graphkit-pin-check.mjs --online     also: the pinned sha exists on the graph-kit
 //                                                    remote. Asks the remote, not the local clone:
 //                                                    a branch/tag tip from `git ls-remote`, else
 //                                                    `git fetch origin <sha>` in the submodule, else
 //                                                    the GitHub API. Fetches the submodule first.
 //                                                    Unreachable remote = warning, never a failure.
-//   node scripts/graphkit-pin-check.mjs --set-pin <sha> [--tag X.Y.Z]
-//                                                    rewrite the revision pin in mac/Package.swift
-//                                                    (used by `make graphkit-bump`; touches nothing else)
 //
 // Warnings (never failures): the submodule worktree HEAD differs from the
 // gitlink, the submodule is not checked out, or the remote could not be asked.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const GRAPHKIT_URL = 'https://github.com/dnsmalla/graph-kit.git';
 export const GRAPHKIT_REPO = 'dnsmalla/graph-kit';
-export const SUBMODULE_PATH = 'mac/LocalPackages/graph-kit';
-const SHA = /^[0-9a-f]{40}$/;
+export const SUBMODULE_PATH = 'graph-kit';
 const REMOTE_TIMEOUT_MS = 30_000;
 const FETCH_TIMEOUT_MS = 60_000;
 
@@ -42,49 +37,11 @@ export function parseGitlink(lsFilesOutput) {
   return null;
 }
 
-// Every revision pinned in mac/Package.swift for the graph-kit URL. The check
-// requires exactly one, so a second pin cannot hide behind the first.
-export function parseSwiftPins(packageSwiftText) {
-  const re = /graph-kit\.git",\s*revision:\s*"([0-9a-f]{40})"/g;
-  return [...String(packageSwiftText).matchAll(re)].map((m) => m[1]);
-}
-
-// The graph-kit entry of mac/Package.resolved (identity "graph-kit").
-export function parseResolvedPin(packageResolvedText) {
-  const json = JSON.parse(packageResolvedText);
-  const pin = (json.pins || []).find((p) => p.identity === 'graph-kit');
-  if (!pin) return { revision: null, location: null };
-  return { revision: pin.state?.revision ?? null, location: pin.location ?? null };
-}
-
 // Returns { problems: string[], warnings: string[] }. Problems fail the gate.
-export function comparePins({ gitlink, swiftShas, resolved }) {
+export function comparePins({ gitlink }) {
   const problems = [];
-  const warnings = [];
   if (!gitlink) problems.push(`no submodule gitlink for ${SUBMODULE_PATH} in the index`);
-  if (swiftShas.length !== 1) {
-    problems.push(
-      `mac/Package.swift must carry exactly one graph-kit revision pin, found ${swiftShas.length}`,
-    );
-  }
-  if (!resolved || !resolved.revision) {
-    problems.push('mac/Package.resolved has no graph-kit entry (run `swift package resolve graph-kit` in mac/)');
-  } else if (resolved.location && resolved.location !== GRAPHKIT_URL) {
-    problems.push(`mac/Package.resolved graph-kit location is ${resolved.location}, expected ${GRAPHKIT_URL}`);
-  }
-  const values = [
-    ['submodule gitlink', gitlink],
-    ['mac/Package.swift revision', swiftShas[0]],
-    ['mac/Package.resolved revision', resolved?.revision],
-  ];
-  const distinct = new Set(values.map(([, v]) => v).filter(Boolean));
-  if (values.every(([, v]) => v) && distinct.size > 1) {
-    problems.push(
-      'graph-kit pins disagree: ' + values.map(([name, v]) => `${name} ${v}`).join(', ') +
-      ' (bump them together with `make graphkit-bump`)',
-    );
-  }
-  return { problems, warnings };
+  return { problems, warnings: [] };
 }
 
 // `git ls-remote <url>` output: "<sha>\t<ref>" per line.
@@ -160,37 +117,6 @@ export function decideOnline({ sha, remoteRefs, remoteError = '', shaProbe = 'sk
   };
 }
 
-// Rewrites the single graph-kit `.package(url:…, revision: "<sha>")` line.
-// The trailing `// graph-kit X.Y.Z` annotation is replaced (or removed when
-// no tag is given); the rest of the line is kept verbatim.
-export function rewriteSwiftPin(packageSwiftText, sha, tag) {
-  if (!SHA.test(sha)) throw new Error(`not a full sha: ${sha}`);
-  if (tag !== undefined && !/^\d+\.\d+\.\d+$/.test(tag)) throw new Error(`not a semver tag: ${tag}`);
-  const re = /(\.package\(url: "https:\/\/github\.com\/dnsmalla\/graph-kit\.git", revision: ")([0-9a-f]{40})("\)[^\n]*)/g;
-  const matches = [...String(packageSwiftText).matchAll(re)];
-  if (matches.length !== 1) {
-    throw new Error(`expected exactly one graph-kit revision pin in Package.swift, found ${matches.length}`);
-  }
-  return String(packageSwiftText).replace(re, (_all, head, _old, rest) => {
-    const cleaned = rest.replace(/\s*\/\/ graph-kit [^\n]*$/, '');
-    const note = tag ? ` // graph-kit ${tag}` : '';
-    return `${head}${sha}${cleaned}${note}`;
-  });
-}
-
-// `--set-pin <sha> [--tag X.Y.Z]` argument parsing. A bare `--tag` (no value,
-// or followed by another flag) is an error, never silently an untagged pin.
-export function parseSetPinArgs(argv) {
-  const sha = argv[1];
-  if (!sha || !SHA.test(sha)) throw new Error(`--set-pin needs a full 40-character sha, got '${sha ?? ''}'`);
-  const tagIdx = argv.indexOf('--tag');
-  if (tagIdx < 0) return { sha, tag: undefined };
-  const tag = argv[tagIdx + 1];
-  if (tag === undefined || tag.startsWith('--')) throw new Error('--tag needs a value, e.g. --tag 1.7.0');
-  if (!/^\d+\.\d+\.\d+$/.test(tag)) throw new Error(`--tag must be plain X.Y.Z, got '${tag}'`);
-  return { sha, tag };
-}
-
 function git(args, cwd = ROOT, timeout = REMOTE_TIMEOUT_MS) {
   return execFileSync('git', args, {
     cwd,
@@ -205,22 +131,16 @@ function firstLine(text) {
   return String(text ?? '').trim().split('\n')[0] ?? '';
 }
 
-function readRepoFile(rel) {
-  return readFileSync(join(ROOT, rel), 'utf8');
-}
-
 function offlineReport() {
   const problems = [];
   const warnings = [];
   const gitlink = parseGitlink(git(['ls-files', '-s', SUBMODULE_PATH]));
-  const swiftShas = parseSwiftPins(readRepoFile('mac/Package.swift'));
-  const resolved = parseResolvedPin(readRepoFile('mac/Package.resolved'));
-  const cmp = comparePins({ gitlink, swiftShas, resolved });
+  const cmp = comparePins({ gitlink });
   problems.push(...cmp.problems);
   warnings.push(...cmp.warnings);
 
   const subDir = join(ROOT, SUBMODULE_PATH);
-  if (!existsSync(join(subDir, 'Package.swift'))) {
+  if (!existsSync(join(subDir, '.git'))) {
     warnings.push(`submodule ${SUBMODULE_PATH} is not checked out (git submodule update --init ${SUBMODULE_PATH})`);
   } else if (gitlink) {
     const head = git(['rev-parse', 'HEAD'], subDir).trim();
@@ -228,7 +148,7 @@ function offlineReport() {
       warnings.push(`submodule worktree HEAD ${head.slice(0, 12)} differs from the gitlink ${gitlink.slice(0, 12)} (the gitlink is what gets committed)`);
     }
   }
-  return { gitlink, swiftShas, resolved, problems, warnings };
+  return { gitlink, problems, warnings };
 }
 
 // Gathers the remote facts and hands them to decideOnline. Fetches the submodule
@@ -236,7 +156,7 @@ function offlineReport() {
 // stale and never decides the outcome by itself.
 function onlineProblems(sha) {
   const subDir = join(ROOT, SUBMODULE_PATH);
-  const hasSub = existsSync(join(subDir, 'Package.swift'));
+  const hasSub = existsSync(join(subDir, '.git'));
 
   let fetchOk = false;
   if (hasSub) {
@@ -289,19 +209,12 @@ function probeGitHubApi(sha) {
 }
 
 function main(argv) {
-  if (argv[0] === '--set-pin') {
-    const { sha, tag } = parseSetPinArgs(argv);
-    const path = join(ROOT, 'mac/Package.swift');
-    writeFileSync(path, rewriteSwiftPin(readFileSync(path, 'utf8'), sha, tag));
-    console.log(`graphkit-pin-check: Package.swift revision -> ${sha}${tag ? ` (// graph-kit ${tag})` : ''}`);
-    return 0;
-  }
   const online = argv.includes('--online');
   const rep = offlineReport();
   const problems = [...rep.problems];
   const warnings = [...rep.warnings];
-  if (online && rep.swiftShas.length === 1) {
-    const o = onlineProblems(rep.swiftShas[0]);
+  if (online && rep.gitlink) {
+    const o = onlineProblems(rep.gitlink);
     problems.push(...o.problems);
     warnings.push(...o.warnings);
   }
@@ -310,10 +223,7 @@ function main(argv) {
     for (const p of problems) console.error(`graphkit-pin-check: FAIL: ${p}`);
     return 1;
   }
-  console.log(
-    `graphkit-pin-check: ok (${online ? 'online' : 'offline'}) gitlink=${rep.gitlink.slice(0, 12)} ` +
-      `Package.swift=${rep.swiftShas[0].slice(0, 12)} Package.resolved=${rep.resolved.revision.slice(0, 12)}`,
-  );
+  console.log(`graphkit-pin-check: ok (${online ? 'online' : 'offline'}) gitlink=${rep.gitlink.slice(0, 12)}`);
   return 0;
 }
 

@@ -1,6 +1,6 @@
 // The desktop OsHost for graph-kit's System page. The page has no transport of its own; this adapter answers its
 // calls through the shell's authenticated core client and the host's project files, the same contract the Mac app
-// implements natively (see mac/LocalPackages/graph-kit/web/src/host.ts).
+// implements natively (see graph-kit/web/src/host.ts).
 import type {
   OsCancel,
   OsFileContent,

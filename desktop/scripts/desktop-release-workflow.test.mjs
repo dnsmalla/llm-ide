@@ -23,8 +23,8 @@ test('the bundle matrix covers four targets and stages each on a native runner',
 
 test('the frontend build has what desktop-ci gives it', () => {
   const wf = rel();
-  assert.match(wf, /git submodule update --init mac\/LocalPackages\/graph-kit/);
-  for (const d of ['ui/kit', 'web', 'mac/LocalPackages/graph-kit/web']) assert.match(wf, new RegExp(`npm ci --prefix ${d.replaceAll('/', '\\/')}`));
+  assert.match(wf, /git submodule update --init graph-kit/);
+  for (const d of ['ui/kit', 'web', 'graph-kit/web']) assert.match(wf, new RegExp(`npm ci --prefix ${d.replaceAll('/', '\\/')}`));
 });
 
 test('every bundle is collected, re-checked for the SDK claude binary and smoked as a packaged app', () => {

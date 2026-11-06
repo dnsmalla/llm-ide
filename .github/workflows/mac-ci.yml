@@ -235,7 +235,7 @@ jobs:
       # resolves graph-kit by URL). Only that submodule — `.skills` is private
       # and not needed here (see the build-test job's checkout note).
       - name: Check out graph-kit submodule
-        run: git submodule update --init mac/LocalPackages/graph-kit
+        run: git submodule update --init graph-kit
 
       - name: Select latest stable Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
@@ -279,7 +279,7 @@ jobs:
       # would gate a different engine than the one that ships.
       - name: graph-kit pin matches the submodule
         run: |
-          gitlink=$(git ls-files -s mac/LocalPackages/graph-kit | awk '{print $2}')
+          gitlink=$(git ls-files -s graph-kit | awk '{print $2}')
           pin=$(grep -E 'graph-kit\.git", *revision:' mac/Package.swift | grep -oE '[0-9a-f]{40}')
           echo "submodule=$gitlink  Package.swift pin=$pin"
           if [ -z "$pin" ] || [ "$gitlink" != "$pin" ]; then
@@ -288,7 +288,7 @@ jobs:
           fi
 
       - name: Build graph-kit labs (release)
-        working-directory: mac/LocalPackages/graph-kit
+        working-directory: graph-kit
         run: swift build -c release
 
       - name: Generation contract gate

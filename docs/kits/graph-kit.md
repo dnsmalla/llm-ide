@@ -2,7 +2,7 @@
 
 Status: **K0 Map**, written 2026-10-28. No code changed. The layout inventory is §6, the port design §7, the parity and rollout plan §8, and the decisions for the user §9. Corrections to the plan's premises are in §10.
 
-Conventions. `gk/` means `mac/LocalPackages/graph-kit/`. Every other path is relative to the llm-ide root. `path:line` citations were checked on llm-ide `a0dd8473` and graph-kit `b9235dd`. That revision is the submodule gitlink and the `revision:` pin in `mac/Package.swift` (`graphKitDependency`, `:326`), and `.github/workflows/mac-ci.yml:280-287` fails when the two differ. `make graphkit-pin-check` checks all three pins, including `mac/Package.resolved`.
+Conventions. `gk/` means `graph-kit/`. Every other path is relative to the llm-ide root. `path:line` citations were checked on llm-ide `a0dd8473` and graph-kit `b9235dd`. That revision is the submodule gitlink and the `revision:` pin in `mac/Package.swift` (`graphKitDependency`, `:326`), and `.github/workflows/mac-ci.yml:280-287` fails when the two differ. `make graphkit-pin-check` checks all three pins, including `mac/Package.resolved`.
 
 Counts. Line counts are `wc -l` over the listed files. Swift test counts are `grep -c 'func test\|@Test'`. TypeScript and JavaScript test counts are `grep -cE '^\s*(test|it)\('`, which is a source-level count; the runner's own count is given in brackets when it differs. Rust counts are `#[test]` attributes. Run results are from this Mac on 2026-10-28 (arm64, macOS 26.6, Xcode with XCTest, rustc 1.99.1, Node 22.23.1). §11 lists the commands.
 

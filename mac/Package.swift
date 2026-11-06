@@ -345,7 +345,7 @@ if graphIncluded {
 // pass --manifest-cache none when toggling it (the Makefile targets do).
 let graphKitDependency: Package.Dependency =
     ProcessInfo.processInfo.environment["GRAPHKIT_LOCAL"] == "1"
-    ? .package(path: "LocalPackages/graph-kit")
+    ? .package(path: "../graph-kit")
     : .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "6de363ff6789c223da4b0d3cad164c0abad1ff32")
 
 // The SharedProtocol PACKAGE is gated with its product: a local path

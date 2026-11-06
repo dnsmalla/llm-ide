@@ -35,7 +35,7 @@ fn toolchain(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
         return Ok((bundled_node, bundled_cli));
     }
     let root = crate::core_host::repo_root()?;
-    let cli = root.join("mac").join("LocalPackages").join("graph-kit").join("bin").join("graph-kit.js");
+    let cli = root.join("graph-kit").join("bin").join("graph-kit.js");
     let node = crate::core_host::node_binary();
     if cli.is_file() {
         return Ok((node, cli));

@@ -113,8 +113,8 @@ const GRAPHKIT_PENDING_LIGHT_TEXT_MUTED = "rgb(42% 46% 55%)";
 
 // U5: graph-kit keeps its own theme (separate repo); its role names must map onto tokens.json.
 test("graph-kit web theme conforms to tokens.json (skipped when the submodule is absent)", (t) => {
-  const themeCss = join(REPO, "mac/LocalPackages/graph-kit/web/src/theme.css");
-  const themeTs = join(REPO, "mac/LocalPackages/graph-kit/web/src/theme.ts");
+  const themeCss = join(REPO, "graph-kit/web/src/theme.css");
+  const themeTs = join(REPO, "graph-kit/web/src/theme.ts");
   if (!existsSync(themeCss)) return t.skip("graph-kit checkout absent");
   const theirs = parseBlocks(readFileSync(themeCss, "utf8"));
   const ours = parseBlocks(gen.generateCss(src));

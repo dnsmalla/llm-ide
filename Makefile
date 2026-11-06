@@ -177,28 +177,26 @@ feature-gates:
 # the failure was a bare Node MODULE_NOT_FOUND stack trace naming no cause.
 .PHONY: graph-kit-checkout
 graph-kit-checkout:
-	@test -f mac/LocalPackages/graph-kit/Package.swift || { \
-	  echo "graph-gates: mac/LocalPackages/graph-kit is not checked out. The Mac build no longer" >&2; \
+	@test -f graph-kit/Package.swift || { \
+	  echo "graph-gates: graph-kit is not checked out. The Mac build no longer" >&2; \
 	  echo "  needs the submodule, but the graph gates run from it. Fix with:" >&2; \
-	  echo "    git submodule update --init mac/LocalPackages/graph-kit" >&2; \
+	  echo "    git submodule update --init graph-kit" >&2; \
 	  exit 1; }
 
-# The three graph-kit pins (submodule gitlink, mac/Package.swift revision,
-# mac/Package.resolved) must agree. Offline by default (it runs in `regression`);
-# ONLINE=1 also checks the pinned sha exists on the graph-kit remote, which is
-# what the pre-push hook runs when the pins change. Workflow: docs/how-to/graph-kit-workflow.md.
+# The graph-kit pin is the submodule gitlink. Offline by default (it runs in
+# `regression`); ONLINE=1 also checks the pinned sha exists on the graph-kit
+# remote, which is what the pre-push hook runs when the gitlink changes. Workflow: docs/how-to/graph-kit-workflow.md.
 .PHONY: graphkit-pin-check
 graphkit-pin-check:
 	node scripts/graphkit-pin-check.mjs $(if $(ONLINE),--online,)
 
-# Push graph-kit, bump all three pins, rebuild the System page bundle and
-# verify. Dry run prints every step and changes nothing:
+# Push graph-kit, move the gitlink to its HEAD and verify. Dry run prints every step and changes nothing:
 #   make graphkit-bump DRY_RUN=1
 #   make graphkit-bump TAG=1.7.0 YES=1 COMMIT=1   (cut a release tag too)
 .PHONY: graphkit-bump
 graphkit-bump:
 	$(if $(filter-out undefined,$(origin TAG)),$(if $(strip $(TAG)),,$(error graphkit-bump: TAG is set but empty; pass TAG=X.Y.Z or leave TAG unset)),)
-	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" COAUTHOR="$(COAUTHOR)" SKIP_BUILD="$(SKIP_BUILD)" bash scripts/graphkit-bump.sh
+	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" COAUTHOR="$(COAUTHOR)" bash scripts/graphkit-bump.sh
 
 # Iterate on graph-kit without pushing it: the app builds against the submodule
 # checkout (GRAPHKIT_LOCAL=1 in mac/Package.swift) in its own scratch path, so
@@ -212,9 +210,9 @@ build-mac-graphkit-local: graph-kit-checkout ## app built against LocalPackages/
 
 .PHONY: graph-gates
 graph-gates: graph-kit-checkout
-	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
-	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
-	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
+	cd graph-kit && swift run -c release graph-layout-lab
+	cd graph-kit && swift run -c release graph-engine-lab
+	cd graph-kit && node scripts/conformance-memory.mjs
 
 .PHONY: api-gates
 # Decodes every 2xx HTTP contract fixture with the Mac's Codable models and

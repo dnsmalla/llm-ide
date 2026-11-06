@@ -1,5 +1,5 @@
 // Driver for graph-kit's Rust `graph-layout` kernel (vendored as wasm/graph-layout.wasm): the C ABI of
-// mac/LocalPackages/graph-kit/rust/graph-layout/README.md, typed arrays in and out, no imports needed.
+// graph-kit/rust/graph-layout/README.md, typed arrays in and out, no imports needed.
 //   input  (little endian): u32 n | u32 m | u8 kindCount | kindCount x (u8 len, utf8 name) | m x (u32 from, u32 to, u8 kind, u8 conf)
 //   output: u32 n | u32 linkCount | u32 communityCount | n x (f64 x, f64 y, f64 radius, u32 community, u32 degree, u32 inDegree) | linkCount x f64
 import type { GraphModel, LayoutResult } from "./model.ts";

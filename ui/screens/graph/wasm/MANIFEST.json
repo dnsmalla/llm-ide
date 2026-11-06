@@ -2,7 +2,7 @@
   "file": "graph-layout.wasm",
   "graphKitCommit": "6de363ff6789c223da4b0d3cad164c0abad1ff32",
   "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-  "buildCommand": "cd mac/LocalPackages/graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>  (cargo build --release -p graph-layout --lib --target wasm32-unknown-unknown)",
+  "buildCommand": "cd graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>  (cargo build --release -p graph-layout --lib --target wasm32-unknown-unknown)",
   "sha256": "b0d7eae260c09eb06daf8b39694bfd6163c958487931c720f464a5d31f9a981e",
   "bytes": 106575,
   "gzipBytes": 40114,

@@ -11,7 +11,7 @@ import { createServer } from 'vite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.resolve(ROOT, '../../schema/http/fixtures/os');
-const GRAPH_KIT_INDEX = path.resolve(ROOT, '../../mac/LocalPackages/graph-kit/web/src/index.ts');
+const GRAPH_KIT_INDEX = path.resolve(ROOT, '../../graph-kit/web/src/index.ts');
 const BUNDLE = path.resolve(ROOT, '../../mac/Sources/LlmIdeMac/Resources/os-view');
 const BASE = 'http://127.0.0.1:3456';
 const TOKEN = 'test-token-123';

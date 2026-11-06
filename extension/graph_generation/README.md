@@ -14,12 +14,12 @@ How LLM-IDE gets its graphs, and how to supply a different engine.
 
 | レイヤ | 場所 | 着脱 |
 |---|---|---|
-| 正規モデル + JSON 契約 + 成果物レンダリング | `mac/LocalPackages/graph-kit/Sources/GraphCore/Model/` | 常在 |
-| レイアウトエンジン | `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/` | 常在 |
+| 正規モデル + JSON 契約 + 成果物レンダリング | `graph-kit/Sources/GraphCore/Model/` | 常在 |
+| レイアウトエンジン | `graph-kit/Sources/GraphCore/Layout/` | 常在 |
 | 描画（Canvas / 3D / パレット） | `mac/Sources/LlmIdeMac/Features/CodeGraph/Views/` | 常在 |
 | エンジン境界 | `mac/Sources/LlmIdeMac/Features/CodeGraph/Engine/` | 常在 |
-| merge / InfiniteBrain 生成 | `mac/LocalPackages/graph-kit/Sources/GraphKit/` | **着脱可** |
-| **生成器（スキャナ・抽出器）** | `mac/LocalPackages/graph-kit/` | **着脱可** |
+| merge / InfiniteBrain 生成 | `graph-kit/Sources/GraphKit/` | **着脱可** |
+| **生成器（スキャナ・抽出器）** | `graph-kit/` | **着脱可** |
 
 レイアウトを常在の `GraphCore` プロダクトに置いているのが要点です。エンジン側に置くと、外した瞬間に
 Graph ビューが真っ白になり「不要なら外す」が成立しません。
@@ -74,7 +74,7 @@ func docSetFingerprint(roots: [URL]) -> String
 契約が**サブプロセス + 正規 JSON** である理由は、エンジンの実装言語をエンジン自身の
 問題に留めるためです。Node CLI でも Python スクリプトでもコンパイル済みバイナリでも
 アプリ側は区別しません。ワイヤ形式は既存の
-[`graph-kit/schema/graph.schema.json`](../../mac/LocalPackages/graph-kit/schema/graph.schema.json)
+[`graph-kit/schema/graph.schema.json`](../../graph-kit/schema/graph.schema.json)
 です。
 
 ### 出力形式
@@ -125,7 +125,7 @@ skills やドキュメントを届ける用途には使えますが、生成は�
 `.package(path: "LocalPackages/graph-kit")` の行は**残します** — 常在の
 `GraphCore` プロダクト（モデル + レイアウト）がこのパッケージから来るためです。
 
-なお `mac/LocalPackages/graph-kit` は git サブモジュール
+なお `graph-kit` は git サブモジュール
 （`github.com/dnsmalla/graph-kit`）です。SwiftPM から見ればどちらもディレクトリ
 なので `.package(path:)` の記述は変わりませんが、バージョンの固定は
 `Package.swift` ではなく gitlink 側にあります。エンジン本体の変更はあちらの

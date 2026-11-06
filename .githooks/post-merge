@@ -21,8 +21,8 @@ if echo "$changed" | grep -q "^\.skills$\|^\.gitmodules$"; then
   echo "✅  Skills up to date."
 fi
 
-if echo "$changed" | grep -q "^mac/LocalPackages/graph-kit$\|^\.gitmodules$"; then
+if echo "$changed" | grep -q "^graph-kit$\|^\.gitmodules$"; then
   echo "🔄  graph-kit pointer changed — updating submodule..."
-  git submodule update --init --recursive mac/LocalPackages/graph-kit
+  git submodule update --init --recursive graph-kit
   echo "✅  graph-kit up to date."
 fi

@@ -49,14 +49,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         # otherwise be safe and run the gate.
         if git rev-parse --verify --quiet origin/main >/dev/null; then
             files=$(git diff --name-only "origin/main...$local_sha" 2>/dev/null || echo mac/)
-            pkg_diff=$(git diff "origin/main...$local_sha" -- mac/Package.swift 2>/dev/null || true)
         else
             files="mac/"
-            pkg_diff="+graph-kit (no origin/main to diff against: assume the pin moved)"
+            pin_changed=1   # no origin/main to diff against: assume the pin moved
         fi
     else
         files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo mac/)
-        pkg_diff=$(git diff "$remote_sha" "$local_sha" -- mac/Package.swift 2>/dev/null || true)
     fi
     # `schema/` and `scripts/` carry the Mac↔server wire contract and the gate
     # that checks it (make chat-gates → conformance-agent-v2.mjs). The contract
@@ -76,13 +74,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if printf '%s\n' "$files" | grep -qE '^docs/.*\.md$' && printf '%s\n' "$files" | grep -E '^docs/.*\.md$' | grep -qv '^docs/superpowers/'; then
         docs_changed=1
     fi
-    # Pin trigger, narrowed: the gitlink moved (its path appears in the diff),
-    # Package.resolved changed, or a pushed Package.swift line names graph-kit.
-    # Other Package.swift edits (dependencies, flags) skip the online check.
-    if printf '%s\n' "$files" | grep -qxE 'mac/LocalPackages/graph-kit|mac/Package\.resolved'; then
-        pin_changed=1
-    fi
-    if printf '%s\n' "$pkg_diff" | grep -qE '^[+-].*graph-kit'; then
+    # Pin trigger: the graph-kit gitlink moved (its path appears in the diff).
+    if printf '%s\n' "$files" | grep -qx 'graph-kit'; then
         pin_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
@@ -93,16 +86,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
 done
 
-# The graph-kit pins: the submodule gitlink, the revision in mac/Package.swift and
-# the entry in mac/Package.resolved must agree, and the pinned commit must exist
-# on the graph-kit remote, or every other machine fails to resolve it. Online
-# here (the offline form already runs inside `make regression`).
+# The graph-kit pin (the submodule gitlink) must exist on the graph-kit remote,
+# or every other machine fails to check it out. Online here (the offline form
+# already runs inside `make regression`).
 if [ "$pin_changed" -eq 1 ]; then
-    echo "pre-push: graph-kit pins changed — checking they agree and exist on the remote…"
+    echo "pre-push: graph-kit pin changed — checking it exists on the remote…"
     if ! node "$(git rev-parse --show-toplevel)/scripts/graphkit-pin-check.mjs" --online; then
         echo "pre-push: graph-kit pin check FAILED — push aborted." >&2
-        echo "          Push graph-kit's commit first (git -C mac/LocalPackages/graph-kit push origin main)," >&2
-        echo "          or fix the pins with make graphkit-bump. Bypass with: git push --no-verify" >&2
+        echo "          Push graph-kit's commit first (git -C graph-kit push origin main)," >&2
+        echo "          or fix the pin with make graphkit-bump. Bypass with: git push --no-verify" >&2
         exit 1
     fi
 fi

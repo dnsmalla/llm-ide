@@ -10,10 +10,10 @@ const outDir =
   process.env.OS_VIEW_OUT ??
   fileURLToPath(new URL('../../mac/Sources/LlmIdeMac/Resources/os-view', import.meta.url));
 
-// The page itself is graph-kit's (mac/LocalPackages/graph-kit/web). This package is the
+// The page itself is graph-kit's (graph-kit/web). This package is the
 // host: it supplies graph-kit's OsHost over the native bridge and over HTTP.
-const graphKitRoot = fileURLToPath(new URL('../../mac/LocalPackages/graph-kit', import.meta.url));
-const graphKitWeb = fileURLToPath(new URL('../../mac/LocalPackages/graph-kit/web/src/index.ts', import.meta.url));
+const graphKitRoot = fileURLToPath(new URL('../../graph-kit', import.meta.url));
+const graphKitWeb = fileURLToPath(new URL('../../graph-kit/web/src/index.ts', import.meta.url));
 
 // The page is opened from file:// inside a WKWebView. A module script or a
 // crossorigin attribute is refused for file:// origins, so the build emits

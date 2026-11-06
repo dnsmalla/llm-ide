@@ -145,7 +145,7 @@ cd extension && npm run server
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
 
 > Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
-> submodules (`.skills` and `mac/LocalPackages/graph-kit`). The Mac build no longer needs
+> submodules (`.skills` and `graph-kit`). The Mac build no longer needs
 > the graph-kit submodule — SwiftPM fetches that (public) package from GitHub itself, so a
 > cold resolve needs only network access — but `make regression`'s graph gates run from
 > it and it is where you edit the engine, so keep it initialized.

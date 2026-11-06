@@ -89,10 +89,10 @@ fi
 # fetches the package itself. The submodule is still checked out here because
 # it is where you edit the engine and run its labs (graph-layout-lab /
 # graph-engine-lab) against a real working tree.
-if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = mac/LocalPackages/graph-kit' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
+if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = graph-kit' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
     echo ""
     echo "⚙️  Fetching graph-kit (graph engine submodule)..."
-    git -C "$REPO_ROOT" submodule update --init --recursive mac/LocalPackages/graph-kit
+    git -C "$REPO_ROOT" submodule update --init --recursive graph-kit
     echo "✅ graph-kit ready"
 fi
 

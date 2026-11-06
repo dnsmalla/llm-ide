@@ -251,7 +251,7 @@ The original analysis is kept below for the record.
 
 - the **relay + phone PWA** in the sync-kit row and ADR 0018 (phase 4 of the Tauri plan): an always-on service holding E2E-encrypted snapshots, a phone PWA served by it, extension read/queue while the desktop is off. **No code exists**; hosting is undecided (small VPS or Cloudflare Workers + R2);
 - the **"the web is a connector" rule** ([data-lifecycle](../kits/data-lifecycle.md) rule 3): the web and external services are ingest sources only;
-- the **React web bundles** that already run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, the System/OS view, commits `b31133e0`, `641fa2fd`): not a hosted web app;
+- the **React web bundles** that already run inside the Mac app (`graph-kit/web/`, the System/OS view, commits `b31133e0`, `641fa2fd`): not a hosted web app;
 - the Chrome extension, which is the only browser-resident surface.
 
 Q-WEB-1. **What is "the web app"?** Options:
@@ -412,7 +412,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 
 - [x] Rule recorded: the web and external services are connectors / ingest only (`docs/kits/data-lifecycle.md` rule 3) (me)
 - [x] Connector adapters for Box, git, issues, QA, SCIP, email, Slack with OAuth (`extension/connectors/`, CLAUDE.md) (me)
-- [x] Reusable React web bundles run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, OS view `b31133e0`); the standalone Host API web client is `web/` (pairing, chat, approvals; local static server, no relay yet) (me)
+- [x] Reusable React web bundles run inside the Mac app (`graph-kit/web/`, OS view `b31133e0`); the standalone Host API web client is `web/` (pairing, chat, approvals; local static server, no relay yet) (me)
 - [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
 - [x] Decide relay hosting (Q-WEB-2 = D6): localhost now, then your own domain on a VPS (user decision 2026-11-04); the domain and VPS are not set up yet (you)
 - [ ] Independent external security review of the relay spec and R1, R3, R4 code: release gate G-EXT, required before any public exposure (D9) (you)

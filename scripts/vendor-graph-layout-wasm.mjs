@@ -5,7 +5,7 @@
 //   node scripts/vendor-graph-layout-wasm.mjs --from <f>  vendor a prebuilt .wasm (the graph-kit commit is still recorded)
 //   node scripts/vendor-graph-layout-wasm.mjs --verify    check the committed .wasm against the committed manifest
 //
-// graph-kit is a separate repository (mac/LocalPackages/graph-kit, a submodule): this script only READS it and
+// graph-kit is a separate repository (graph-kit, a submodule): this script only READS it and
 // builds into a temporary target directory; it never commits there and never touches the pin. The manifest
 // records the graph-kit commit, the compiler, the build command, the sha256 and the size, so a reviewer can
 // rebuild and compare. wasm bytes are only reproducible with the same compiler, so a rebuild with a different
@@ -22,8 +22,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const WASM_DIR = join(ROOT, "ui/screens/graph/wasm");
 export const WASM_FILE = join(WASM_DIR, "graph-layout.wasm");
 export const MANIFEST_FILE = join(WASM_DIR, "MANIFEST.json");
-const KIT = join(ROOT, "mac/LocalPackages/graph-kit");
-export const BUILD_COMMAND = "cd mac/LocalPackages/graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>  (cargo build --release -p graph-layout --lib --target wasm32-unknown-unknown)";
+const KIT = join(ROOT, "graph-kit");
+export const BUILD_COMMAND = "cd graph-kit && CARGO_TARGET_DIR=<tmp> scripts/build-layout-wasm.sh <tmp-out>  (cargo build --release -p graph-layout --lib --target wasm32-unknown-unknown)";
 
 export const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 

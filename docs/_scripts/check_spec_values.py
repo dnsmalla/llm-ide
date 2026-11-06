@@ -70,7 +70,7 @@ def build_checks() -> list[tuple[str, object, object, str]]:
     # graph-kit consumption mechanism. It is a REMOTE dependency pinned by
     # commit (`.package(url:, revision:)`), NOT the vendored `.package(path:)`
     # it once was. Two consequences this check encodes: the submodule at
-    # mac/LocalPackages/graph-kit is now only the editing/lab working tree, so
+    # graph-kit is now only the editing/lab working tree, so
     # its CHANGELOG is not what the build resolves and must never be read as
     # the shipped version; and the version itself is a commit sha the spec page
     # deliberately elides (duplicating a sha in prose guarantees drift), so

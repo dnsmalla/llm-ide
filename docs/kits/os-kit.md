@@ -27,8 +27,8 @@ The key finding of this map: **os-kit is split across three owners today** (the 
 
 | Piece | Path | Size | Notes |
 |---|---|---|---|
-| The page (source) | `mac/LocalPackages/graph-kit/web/src/` | 9 017 lines of TS, TSX, CSS (graph-kit map, `docs/kits/graph-kit.md` 2a) | `controller.ts` (1 056), `systemGraph.ts` (288), `host.ts` (113, the `OsHost` interface), `components/` (`Brain`, `CodeStructure`, `HubOverview`, `NodeSearch`, `Recent`, `Selection`), `orbit/` (three.js), `wasm/` (the Rust core as embedded bytes). Own `theme.css`, `os-tokens.css`, `theme.ts`. |
-| OS graph core | `mac/LocalPackages/graph-kit/rust/os-graph/` | 6 037 lines Rust | Community detection, orbit layout, viz graph; WASM. See the graph-kit map. |
+| The page (source) | `graph-kit/web/src/` | 9 017 lines of TS, TSX, CSS (graph-kit map, `docs/kits/graph-kit.md` 2a) | `controller.ts` (1 056), `systemGraph.ts` (288), `host.ts` (113, the `OsHost` interface), `components/` (`Brain`, `CodeStructure`, `HubOverview`, `NodeSearch`, `Recent`, `Selection`), `orbit/` (three.js), `wasm/` (the Rust core as embedded bytes). Own `theme.css`, `os-tokens.css`, `theme.ts`. |
+| OS graph core | `graph-kit/rust/os-graph/` | 6 037 lines Rust | Community detection, orbit layout, viz graph; WASM. See the graph-kit map. |
 | Host package | `ui/os-view/` | `src/` 984 lines over 11 files (`api.ts` 123, `bridge.ts` 187, `hosts.ts` 285, `stream.ts` 118, `sse.ts` 58, `boot.ts` 73, `main.tsx` 32, `components/DevConnect.tsx` 88) | Supplies graph-kit's `OsHost` over the native bridge (Mac) and over HTTP (dev). Aliases `@dnsmalla/graph-kit-web` to the graph-kit source (`ui/os-view/vite.config.ts`). |
 | Host tests | `ui/os-view/tests/os-view.test.mjs` | 919 lines, 64 `test(`/`it(` | |
 | Built bundle | `mac/Sources/LlmIdeMac/Resources/os-view/` | | Committed; `make os-view` writes it, `make os-view-check` fails when stale (`Makefile:245-262`). Runs from `file://` in a WKWebView, so one classic IIFE script (`vite.config.ts`). |

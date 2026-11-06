@@ -123,7 +123,7 @@ if (TARGET.startsWith('darwin-') && process.platform === 'darwin') {
 
 // 1b. The GraphKit TypeScript CLI (dist/bin, esbuild-bundled). The Mac's graph scanners are Swift; the
 // desktop uses the schema-compatible TS engine to generate the same canonical graph.json.
-const gk = join(REPO, 'mac', 'LocalPackages', 'graph-kit', 'bin', 'graph-kit.js');
+const gk = join(REPO, 'graph-kit', 'bin', 'graph-kit.js');
 if (existsSync(gk)) {
   const gkOut = join(OUT, 'root', 'graph-kit', 'bin');
   mkdirSync(gkOut, { recursive: true });

@@ -6,7 +6,7 @@ import { WasmKernel, encodeKernelInput } from "../kernel.ts";
 import { decodeGraph } from "../decode.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
 
-const KIT = new URL("../../../../mac/LocalPackages/graph-kit/", import.meta.url);
+const KIT = new URL("../../../../graph-kit/", import.meta.url);
 
 test("every edge kind in the graph-kit schema has a weight, and no extra kinds", () => {
   const file = new URL("schema/graph.schema.json", KIT);

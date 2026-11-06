@@ -69,7 +69,7 @@ ui-kit depends on nothing (plan: depends on none). Everything depends on it.
 | UI3 | extension to ui-kit | generated CSS | ok | `extension/src/styles/tokens.generated.css` |
 | UI4 | os-kit page to ui-kit | generated CSS in the host, own CSS in the page | partial: two token sheets in one bundle | section 2d |
 | UI5 | desktop to ui-kit | second generator over Swift | **drift risk** | section 2c |
-| UI6 | graph-kit renderer to ui-kit | none: graph-kit's `web/` carries its own theme | by design (separate repo) | `mac/LocalPackages/graph-kit/web/src/theme.ts` |
+| UI6 | graph-kit renderer to ui-kit | none: graph-kit's `web/` carries its own theme | by design (separate repo) | `graph-kit/web/src/theme.ts` |
 
 No cycles.
 
