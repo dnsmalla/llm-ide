@@ -1,7 +1,7 @@
 // Settings → Phone and web sync → "Add a phone or browser": QR (sync fields; the one-time secret lives only in this
 // component's state and the QR), the 6-digit code to compare, the device list with revoke, and key rotation.
-// Polls every 2 s while adding; leaving the card cancels the enrollment.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+// Polls every 2 s while adding; leaving the card keeps it alive so the code survives navigation.
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
@@ -9,16 +9,21 @@ import { PairingQr } from "./HostApiPairing.tsx";
 import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
 
+// Kept outside React on purpose: navigating within Settings unmounts this card. The desktop must keep the pending
+// enrollment so the 6-digit code is still here when the user returns; the core expires it on its own timer.
+let keptStart: EnrollStart | null = null;
+let keptPoll: EnrollPoll | null = null;
+
 export default function SyncDevices({ status, onStatus }: { status: SyncStatus; onStatus: (s: SyncStatus) => void }): ReactNode {
   const { client } = useEnv();
-  const [start, setStart] = useState<EnrollStart | null>(null);
-  const [poll, setPoll] = useState<EnrollPoll | null>(null);
+  const [start, setStartState] = useState<EnrollStart | null>(keptStart);
+  const [poll, setPollState] = useState<EnrollPoll | null>(keptPoll);
+  const setStart = (v: EnrollStart | null) => { keptStart = v; setStartState(v); };
+  const setPoll = (v: EnrollPoll | null) => { keptPoll = v; setPollState(v); };
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLink, setShowLink] = useState(false);
-  const active = useRef(false);
-  active.current = start !== null && (poll === null || poll.phase === "waiting" || poll.phase === "confirm");
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true); setError(null);
@@ -28,7 +33,6 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
     if (!start) return;
     return pollEnrollSerially(client, setPoll, (e) => setError(describeError(e)));
   }, [client, start]);
-  useEffect(() => () => { if (active.current) void cancelEnroll(client).catch(() => {}); }, [client]);
   const stop = () => { setStart(null); setPoll(null); setShowLink(false); };
   const begin = (tier: "web" | "ios") => run(async () => { setPoll(null); setStart(await startEnroll(client, tier)); });
   const screen = enrollScreen(start, poll);
