@@ -30,6 +30,7 @@ final class SyncStore: ObservableObject {
 
     private var device: SyncDevice?
     private var mega: MegaClient?
+    private var server: SyncHttpsClient?
     private var pendingPair: SyncPair?
     /// The claim prepared for `pendingPair`, kept across retries so a retry rewrites the same claim (contract 4c).
     private var prepared: (device: SyncDevice, stored: StoredKeys)?
@@ -38,6 +39,8 @@ final class SyncStore: ObservableObject {
     private var enrollTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
     private var nowMs: Int { Int(Date().timeIntervalSince1970 * 1000) }
+    /// MEGA pairings need the account password each session; an own-server (`sftp:`) pairing does not.
+    var needsLogin: Bool { !((pendingPair?.st ?? device?.state.pair.st)?.hasPrefix("sftp:") ?? false) }
 
     init() { restore() }
 
@@ -47,7 +50,9 @@ final class SyncStore: ObservableObject {
               let d = try? SyncDevice(state: st, keys: keys) else { return }
         attach(d)
         queued = Self.read([Queued].self, "queue.json") ?? []
-        if let m = Keychain.load(StoredMega.self, .mega) {
+        if d.state.pair.st.hasPrefix("sftp:"), let h = d.state.pair.st.split(separator: ":").last, let server = try? SyncHttpsClient(host: String(h)) {
+            self.server = server; mega = nil; megaEmail = ""; phase = .ready
+        } else if let m = Keychain.load(StoredMega.self, .mega) {
             megaEmail = m.email
             mega = MegaClient(folder: m.folder, session: m.session)
             phase = .ready
@@ -76,7 +81,7 @@ final class SyncStore: ObservableObject {
     }
 
     func startEnrollment(_ pair: SyncPair) {
-        guard pair.st.hasPrefix("mega:") else { lastError = "This code is not for a MEGA sync folder."; return }
+        guard pair.st.hasPrefix("mega:") || pair.st.hasPrefix("sftp:") else { lastError = "This code is not for a sync storage this app can open."; return }
         pendingPair = pair; prepared = nil
         Task { try? await Task.sleep(nanoseconds: 600_000_000); enrollStep = .login }
     }
@@ -92,6 +97,7 @@ final class SyncStore: ObservableObject {
     func retryEnrollment() { if pendingPair != nil { enrollStep = .login } }
 
     private func runEnrollment(pair: SyncPair, email: String, password: String, name: String) async {
+        if pair.st.hasPrefix("sftp:") { await runServerEnrollment(pair: pair, name: name); return }
         let folder = String(pair.st.dropFirst("mega:".count))
         var client: MegaClient?
         do {
@@ -142,16 +148,40 @@ final class SyncStore: ObservableObject {
         }
     }
 
+    private func runServerEnrollment(pair: SyncPair, name: String) async {
+        do {
+            let store = try SyncHttpsClient(host: String(pair.st.dropFirst("sftp:".count)))
+            enrollStep = .working("Checking the desktop's key…")
+            let (d, stored): (SyncDevice, StoredKeys)
+            if let p = prepared { (d, stored) = p } else {
+                let (keys, s) = try Self.makeKeys()
+                let nd = try await SyncDevice.prepare(pair: pair, name: name, keys: keys, store: store, nowMs: nowMs)
+                (d, stored) = (nd, s); prepared = (nd, s)
+            }
+            if d.state.userId == nil { _ = try await poll(SyncDevice.ackWindowMs) { try await d.writeClaim(store); return true } }
+            enrollStep = .working("Waiting for the desktop…")
+            let sas = d.state.userId != nil ? try await d.readAck(store) : try await poll(SyncDevice.ackWindowMs) { try await d.readAck(store) }
+            if let sas { enrollStep = .sas(sas); UIAccessibility.post(notification: .announcement, argument: "Code ready. Compare it with the desktop.") }
+            _ = try await poll(SyncDevice.wrapWindowMs) { try await d.readWrap(store, nowMs: self.nowMs) ? true : nil }
+            guard Keychain.save(stored, .keys) && Keychain.save(d.state, .state) else { enrollStep = .failed("This phone couldn't save the sign-in to its Keychain. Try again."); return }
+            prepared = nil; pendingPair = nil; await mega?.logout(); mega = nil
+            attach(d); server = store; megaEmail = ""
+            queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
+            await refresh()
+        } catch is CancellationError { } catch { enrollStep = .failed(Self.message(for: error)) }
+    }
+
     private func poll<T>(_ windowMs: Int, _ step: () async throws -> T?) async throws -> T {
         try await SyncRetry.poll(windowMs: windowMs, intervalMs: SyncDevice.ackPollMs, now: { self.nowMs },
                                  sleep: { try await Task.sleep(nanoseconds: $0) }, step)
     }
 
     func refresh() async {
-        guard phase == .ready || phase == .removed, let device, let mega, !refreshing else { return }
+        guard phase == .ready || phase == .removed, let device, !refreshing else { return }
+        let store: SyncRemoteStore
+        do { if let mega { store = try await mega.pinned() } else if let server { store = server } else { return } } catch { fail(error); return }
         refreshing = true; defer { refreshing = false }
         do {
-            let store = try await mega.pinned()  // one tree listing for the whole refresh
             let rec = SyncRecordingStore(remote: store)
             if let s = try await device.readSnapshot(rec, nowMs: nowMs) {  // nil: the first snapshot is not there yet
                 snapshot = s
@@ -178,9 +208,12 @@ final class SyncStore: ObservableObject {
     }
 
     func send(_ text: String) async {
-        guard phase == .ready, let device, let mega else { return }
+        guard phase == .ready, let device else { return }
+        let remote: SyncRemoteStore?
+        if let server { remote = server } else { remote = try? await mega?.pinned() }
+        guard let remote else { return }
         do {
-            let id = try await device.sendRequest(mega, text: text, nowMs: nowMs)
+            let id = try await device.sendRequest(remote, text: text, nowMs: nowMs)
             queued.append(Queued(id: id, text: text, issuedAtMs: nowMs))
             Self.write(queued, "queue.json"); lastError = nil
         } catch { fail(error) }
@@ -202,9 +235,10 @@ final class SyncStore: ObservableObject {
 
     func removeFromPhone() async {
         await mega?.logout()
+        server = nil
         for item in [Keychain.Item.state, .keys, .mega] { Keychain.delete(item) }
         try? FileManager.default.removeItem(at: Self.dir)
-        device = nil; mega = nil; snapshot = nil; queued = []; lastError = nil; megaEmail = ""
+        device = nil; mega = nil; server = nil; snapshot = nil; queued = []; lastError = nil; megaEmail = ""
         phase = .off
     }
 
@@ -222,6 +256,7 @@ final class SyncStore: ObservableObject {
     }
 
     private func fail(_ error: Error) {
+        if (error as? SyncHttpsClient.Failure) == .missing { phase = .removed }
         if let f = error as? MegaClient.Failure, f == .sessionExpired || f == .authFailed {
             Keychain.delete(.mega); mega = nil; phase = .needsPassword
         }

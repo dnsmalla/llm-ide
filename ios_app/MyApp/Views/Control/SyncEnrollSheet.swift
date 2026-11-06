@@ -35,9 +35,11 @@ struct SyncEnrollSheet: View {
                     VStack { Image(systemName: "checkmark.circle").font(.largeTitle); Text("Sync is on").font(.headline); Text("The desktop's snapshot will appear in History.").multilineTextAlignment(.center) }.padding()
                 default:
                     Form {
-                        Section("MEGA account") {
-                            TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).autocapitalization(.none)
-                            SecureField("Password", text: $password).textContentType(.password)
+                        if syncStore.needsLogin {
+                            Section("MEGA account") {
+                                TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).autocapitalization(.none)
+                                SecureField("Password", text: $password).textContentType(.password)
+                            }
                         }
                         if let fixed = syncStore.preparedName {
                             Section("This iPhone") { Text(fixed) }
@@ -46,7 +48,7 @@ struct SyncEnrollSheet: View {
                         }
                         Section {
                             Button("Continue") { syncStore.enroll(email: email, password: password, name: syncStore.preparedName ?? name); password = "" }
-                                .disabled(email.isEmpty || password.isEmpty || name.isEmpty)
+                                .disabled((syncStore.needsLogin && (email.isEmpty || password.isEmpty)) || name.isEmpty)
                         }
                     }
                 }

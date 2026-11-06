@@ -30,12 +30,16 @@ public enum SyncEnroll {
 
     static func isB64u(_ s: String, _ n: Int) -> Bool { s.utf8.count == n && s.utf8.allSatisfy(SyncB64.isB64uByte) }
 
-    /// `mega:<folder>` (folder `[A-Za-z0-9_.-]{1,64}`), or `memory:` (the test adapter).
+    /// `mega:<folder>`, `sftp:<lower-case DNS host>`, or `memory:` (the test adapter).
     public static func isStore(_ st: String) -> Bool {
         if st == "memory:" { return true }
+        if st.hasPrefix("sftp:") { return isOwnServerHost(String(st.dropFirst(5))) }
         guard st.hasPrefix("mega:") else { return false }
         let f = st.utf8.dropFirst(5)
         return (1...64).contains(f.count) && f.allSatisfy { SyncB64.isB64uByte($0) || $0 == 0x2e }
+    }
+    public static func isOwnServerHost(_ h: String) -> Bool {
+        h.range(of: #"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9]?)\.)+[a-z]{2,63}$"#, options: .regularExpression) != nil
     }
 
     /// `llmide://pair?…` or `<origin>/#pair=<encoded query>`. Unknown parameters (Host API fields) are ignored.
