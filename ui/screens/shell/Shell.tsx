@@ -10,6 +10,8 @@ import { host as shellHost, invokeHost } from "./host";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { CrashReportBanner } from "./CrashReportBanner";
+import { LiveBanner } from "./LiveBanner";
+import { syncLiveRecordingFromHost } from "./live-status";
 import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-report";
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
@@ -64,6 +66,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // Developer tools (the Spike item) can be switched on while the app runs: re-render the nav when they change.
   const [, bumpDev] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeDevTools(() => bumpDev()), []);
+  useEffect(() => { if (shellHost.isAvailable()) void syncLiveRecordingFromHost(); }, []);
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const [terminalOpen, setTerminalOpen] = useState(() => readTerminalPrefs().open);
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
@@ -280,6 +283,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       <div className="sh-body">
         <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
+          <LiveBanner activeSection={nav.active} onOpen={() => dispatch({ type: "select", id: "live" })} />
           {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
           {keepSectionNotice(sectionNotice, nav.active) && (

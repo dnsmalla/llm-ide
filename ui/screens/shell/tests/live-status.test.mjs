@@ -1,0 +1,13 @@
+import { test, before } from "node:test";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
+const HERE=dirname(fileURLToPath(import.meta.url)),SHELL=resolve(HERE,".."),req=createRequire(join(resolve(SHELL,"../../../desktop"),"package.json"));const {createElement:h}=req("react");const {renderToStaticMarkup:html}=req("react-dom/server");let M;
+before(async()=>{const {build}=req("esbuild");const outfile=join(bundleDir("shell-live"),"banner.mjs");await build({stdin:{contents:`export * from "./LiveBanner.tsx"; export * from "./live-status.ts";`,resolveDir:SHELL,loader:"ts"},outfile,bundle:true,format:"esm",platform:"node",packages:"external",jsx:"automatic",logLevel:"silent"});M=await import(pathToFileURL(outfile).href)});
+test("store",()=>{let n=0;const off=M.subscribeLiveRecording(()=>n++);M.setLiveRecording({sessionId:"m-a-b",startedAtMs:1,platform:"zoom"});M.setLiveRecording(null);off();assert.equal(n,2);assert.equal(M.getLiveRecording(),null)});
+test("sync",async()=>{await M.syncLiveRecordingFromHost(async()=>({recording:true,sessionId:"m-a-b",startedAtMs:42}));assert.deepEqual(M.getLiveRecording(),{sessionId:"m-a-b",startedAtMs:42,platform:null});await M.syncLiveRecordingFromHost(async()=>{throw new Error("no host")});assert.notEqual(M.getLiveRecording(),null);M.setLiveRecording(null)});
+test("banner",()=>{M.setLiveRecording({sessionId:"m-a-b",startedAtMs:Date.now(),platform:"teams"});const out=html(h(M.LiveBanner,{activeSection:"library",onOpen:()=>{}}));assert.match(out,/role="status"/);assert.match(out,/Recording meeting captions/);assert.match(out,/never audio/);assert.match(out,/Open Live/);assert.equal(html(h(M.LiveBanner,{activeSection:"live",onOpen:()=>{}})),"");M.setLiveRecording(null);assert.equal(html(h(M.LiveBanner,{activeSection:"library",onOpen:()=>{}})),"")});
+test("shell",()=>{const src=readFileSync(join(SHELL,"Shell.tsx"),"utf8");assert.match(src,/<LiveBanner activeSection=\{nav\.active\}/);assert.match(src,/syncLiveRecordingFromHost\(\)/)});
