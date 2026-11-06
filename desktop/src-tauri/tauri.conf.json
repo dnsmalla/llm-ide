@@ -34,6 +34,11 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Local-first AI meeting intelligence and code assistant",
+    "linux": {
+      "deb": {
+        "depends": ["libayatana-appindicator3-1"]
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "12.0"
     },

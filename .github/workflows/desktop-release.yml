@@ -277,6 +277,9 @@ jobs:
           node desktop/scripts/smoke-app.mjs $exe.FullName
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Start-Process -Wait -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S'
+      - name: Verify the Linux bundles
+        if: runner.os == 'Linux'
+        run: node desktop/scripts/verify-linux-bundle.mjs "$(ls "$BUNDLE"/deb/*.deb | head -n1)" "$(ls "$BUNDLE"/appimage/*.AppImage | head -n1)"
       - name: Smoke-test the packaged app (Linux AppImage)
         if: runner.os == 'Linux'
         env:
