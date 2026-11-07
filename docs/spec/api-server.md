@@ -413,8 +413,18 @@ registration, switches a no-invite registration's defaults to `read_only` / 20 U
 
 A turn above the member's `maxMode` is refused `403 { error: { code: 'ROLE_DENIED', message: 'Your team role cannot run turns' } }`
 (`max_mode` `none`, audited `team.deny` with `{ reason }` and no message text) or clamped to a read-only mode. Host API
-pairing grants a viewer / `max_mode` none member only `host`, `read`, `push`. `usdCapForModel` applies
-`min(member cap, model cap)` and `PUT /kb/usage/limits` may not write a usd row above the member's cap.
+pairing grants a viewer / `max_mode` none member only `host`, `read`, `push`.
+
+`usd_cap_month` is a MONTHLY cap, enforced in two places, never per turn. `usage_ledger.cost_usd` (migration 0069)
+carries each turn's USD cost (null when the engine or a CLI turn reports none), and `usedUsdMonth` sums it for the
+user's current month: a turn is refused `429 { error: { code: 'USD_CAP', message: 'Monthly USD cap reached' } }` once
+that sum reaches the cap (audited `team.deny` `{ reason: 'usd_cap' }`), and `usdCapForModel` hands the engine the
+REMAINING budget (`min(model cap, cap - used)`) so one turn cannot cross the month line. `PUT /kb/usage/limits` stays
+self-service but may not write a usd row above the member's cap.
+
+The owner rules hold on both delete routes, not only on `PATCH /admin/members/:id`: `DELETE /admin/users/:id` answers
+`403 ROLE_DENIED` when the target is an owner the actor may not touch and `409 LAST_OWNER` for the last owner;
+`POST /auth/me/delete` answers `409 LAST_OWNER` for the sole owner (a second owner makes either deletable).
 
 ## 8. See also
 

@@ -187,7 +187,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0068` (`0068_team_members.sql`: `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0069` (`0069_usage_cost_usd.sql`: `usage_ledger.cost_usd`, the monthly USD sum behind the member cap; `0068_team_members.sql` added `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 
