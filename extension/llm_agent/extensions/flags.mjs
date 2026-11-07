@@ -26,7 +26,7 @@ const ON = new Set(['1', 'on', 'true', 'yes']);
 const OFF = new Set(['0', 'off', 'false', 'no']);
 const read = (name) => String(process.env[name] ?? '').trim().toLowerCase();
 
-export function activeSetEnabled() { return !OFF.has(read('LLMIDE_EXT_ACTIVE_SET')); }
+export function activeSetEnabled() { return ON.has(read('LLMIDE_EXT_ACTIVE_SET')); }
 export function adapterEnabled() { return !OFF.has(read('LLMIDE_EXT_ADAPTER')); }
 // Under NODE_ENV=test the shadow stays off unless a test turns it on, so the
 // engine's unit tests never compute an active set as a side effect.

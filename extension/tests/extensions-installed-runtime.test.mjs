@@ -62,7 +62,7 @@ const delivery = (u) => registry.buildUserPluginDelivery(u, { nativeEnabled: tru
 const libraryIds = (u) => { skills._resetSkillLibraryCache(); return skills.listSkillLibrary(u).skills.map((s) => s.id).sort(); };
 
 afterEach(() => {
-  process.env.LLMIDE_EXT_ACTIVE_SET = '0';
+  delete process.env.LLMIDE_EXT_ACTIVE_SET;
   delete process.env.LLMIDE_EXT_CATALOG;
   for (const u of [u1, u2, u3]) { try { inst.forgetUserExtensions(u); } catch { /* none */ } }
   _resetInstalledRuntimeForTests();

@@ -86,7 +86,7 @@ async function waitGone(pid) {
 
 afterEach(() => {
   delete process.env.LLMIDE_EXT_ADAPTER;
-  process.env.LLMIDE_EXT_ACTIVE_SET = '0';
+  delete process.env.LLMIDE_EXT_ACTIVE_SET;
   fs.rmSync(LOG, { force: true });
   fs.rmSync(store.storeFilePath(), { force: true });
 });
