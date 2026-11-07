@@ -846,10 +846,10 @@ impl CoreHost {
         let mut child = ManagedChild::spawn(&mut cmd).map_err(|e| format!("cannot spawn the core: {e}"))?;
 
         if let Some(out) = child.child_mut().stdout.take() {
-            drain(out, Arc::clone(&self.inner.log));
+            drain(out, Arc::clone(&self.inner.log), false);
         }
         if let Some(err) = child.child_mut().stderr.take() {
-            drain(err, Arc::clone(&self.inner.log));
+            drain(err, Arc::clone(&self.inner.log), true);
         }
         let pid = child.id();
 
@@ -1007,8 +1007,8 @@ fn redact_token(tok: &str) -> String {
 }
 
 /// Keep the pipe drained so the child never blocks on a full buffer.
-/// Only the last `LOG_TAIL_LINES` lines are retained.
-fn drain<R: Read + Send + 'static>(pipe: R, log: Arc<Mutex<VecDeque<String>>>) {
+/// Only the last `LOG_TAIL_LINES` lines are retained. Stderr lines also feed Self-Heal (a no-op in release builds).
+fn drain<R: Read + Send + 'static>(pipe: R, log: Arc<Mutex<VecDeque<String>>>, stderr: bool) {
     thread::spawn(move || {
         let mut reader = BufReader::new(pipe);
         loop {
@@ -1019,11 +1019,17 @@ fn drain<R: Read + Send + 'static>(pipe: R, log: Arc<Mutex<VecDeque<String>>>) {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             };
+            if stderr {
+                crate::self_heal::on_core_stderr_line(&line);
+            }
             let mut buf = lock(&log);
             if buf.len() == LOG_TAIL_LINES {
                 buf.pop_front();
             }
             buf.push_back(line);
+        }
+        if stderr {
+            crate::self_heal::on_core_stderr_end();
         }
     });
 }
@@ -1226,6 +1232,11 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     // Host API v1 loopback dev listener: debug builds only, explicit `.env` (never a widened core_env ALLOWED).
     if host_api_dev_env(cfg!(debug_assertions), std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref()) {
         cmd.env("LLMIDE_HOST_API_DEV", "1");
+    }
+    // Self-Heal incident capture: debug builds only (self_heal::enabled), an explicit `.env` like the dev flag, never
+    // a widened core_env ALLOWED.
+    if crate::self_heal::enabled() {
+        cmd.env("LLMIDE_SELF_HEAL", "1");
     }
     for key in ["LLMIDE_HOST_API_TLS", "LLMIDE_HOST_API_WEB_ORIGINS"] {
         if let Some(v) = host_api_env(key, std::env::var(key).ok().as_deref()) {
@@ -1550,7 +1561,7 @@ mod tests {
         bytes.extend(std::iter::repeat(b'a').take(1 << 20));
         bytes.extend_from_slice(b"\nlast\n");
         let log = Arc::new(Mutex::new(VecDeque::new()));
-        drain(std::io::Cursor::new(bytes), log.clone());
+        drain(std::io::Cursor::new(bytes), log.clone(), false);
         let end = Instant::now() + Duration::from_secs(5);
         while Instant::now() < end && !lock(&log).iter().any(|l| l == "last") {
             thread::sleep(Duration::from_millis(10));

@@ -91,6 +91,7 @@
     "allow-git-tags",
     "allow-crash-report-latest",
     "allow-crash-report-dismiss",
+    "allow-self-heal-take",
     "allow-export-note",
     "allow-docgen-destination-status",
     "allow-docgen-destination-pick",

@@ -362,6 +362,7 @@ macro_rules! product_handlers {
                 git_scm::git_tags,
                 crash_report::crash_report_latest,
                 crash_report::crash_report_dismiss,
+                self_heal::self_heal_take,
                 export_note::export_note,
                 docgen_dest::docgen_destination_status,
                 docgen_dest::docgen_destination_pick,
