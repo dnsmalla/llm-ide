@@ -65,7 +65,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [projectFile, setProjectFile] = useState<string | null>(null);
   const [projectFileDirty, setProjectFileDirty] = useState(false);
-  const selectProjectFile = (path: string | null) => { if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return; setProjectFileDirty(false); setProjectFile(path); };
+  const selectProjectFile = (path: string | null) => { if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return; setProjectFileDirty(false); setProjectFile(path); if (path !== null) setExtensionId(null); };
   const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
   useEffect(() => {
     if (!noteMenu) return undefined;
@@ -227,8 +227,9 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                   store.setSection(state.sectionId === id ? null : id);
                 }}
                 onExtension={(id) => {
-                  if (dirtyRef.current) setPendingNav({ proceed: () => setExtensionId(id) });
-                  else setExtensionId(id);
+                  const open = () => { setProjectFile(null); setProjectFileDirty(false); setExtensionId(id); };
+                  if (dirtyRef.current) setPendingNav({ proceed: open });
+                  else open();
                 }}
                 onRefresh={refresh}
                 onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
@@ -243,6 +244,10 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
       </div>
       {ext ? (
         <div className="lib-ext" role="region" aria-label={ext.label}>
+          <div className="lib-ext-head">
+            <span className="lib-ext-title">{ext.label}</span>
+            <button type="button" className="lib-btn" aria-label={`Close ${ext.label}`} onClick={() => setExtensionId(null)}>Close</button>
+          </div>
           {ext.render ? ext.render() : (
             <>
               <h2>{ext.label}</h2>

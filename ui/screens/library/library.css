@@ -185,3 +185,7 @@
 .lib-context-close:hover { color: var(--tok-color-text); }
 .lib-nav-close { border: 0; background: none; color: var(--tok-color-text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
 .lib-nav-close:hover { color: var(--tok-color-text); }
+.lib-ext { display: flex; flex-direction: column; min-height: 0; }
+.lib-ext-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--tok-color-border); }
+.lib-ext-title { font-size: 12px; font-weight: 600; color: var(--tok-color-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.lib-ext > :not(.lib-ext-head) { min-height: 0; }
