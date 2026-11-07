@@ -198,3 +198,5 @@
 .chat-dock-mode .chat-composer-bar .chat-pick select { width: 100%; max-width: 100%; }
 .chat-dock-mode .chat-composer-bar .chat-btn[type="submit"] { grid-column: 1 / -1; width: 100%; }
 .chat-dock-mode .chat-composer-bar .chat-error { grid-column: 1 / -1; }
+.chat-options-toggle[hidden] { display: none; }
+.chat-dock-mode .chat-options-toggle { justify-self: start; }

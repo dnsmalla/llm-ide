@@ -29,6 +29,8 @@ export interface ComposerProps {
   memory?: ReactNode;
   /** Token/cap meter shown at the right of the bottom bar. */
   meter?: ReactNode;
+  /** Dock: keep the advanced controls collapsed until the user opens Options. */
+  collapsible?: boolean;
 }
 
 /** The Mac's empty-field prompt (ChatComposer.inputBar). */
@@ -118,6 +120,7 @@ export function isGlobalDictationShortcut(e: { key: string; metaKey: boolean; ct
 export function Composer(p: ComposerProps) {
   const speech = useRef<SpeechRecognitionLike | null>(null);
   const [listening, setListening] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const voice = speechCtor();
   const toggleVoice = () => {
     if (!voice) return;
@@ -212,19 +215,22 @@ export function Composer(p: ComposerProps) {
       />
       {ghost ? <p className="chat-muted chat-ghost" role="status">Tab: {ghost}</p> : null}
       {/* The Mac's toolbar order (ChatComposer.toolbarSingleRow): context buttons, pickers, memory | meter, key hint, voice, send. */}
-      <div className="chat-composer-bar">
-        {p.extras?.toolbar}
-        {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
-        {p.controls}
-        {p.memory}
+      <div className="chat-composer-bar" data-options={p.collapsible ? optionsOpen : true}>
+        <button type="button" className="chat-icon-btn chat-options-toggle" aria-label={optionsOpen ? "Hide composer options" : "Show composer options"} aria-expanded={optionsOpen} title={optionsOpen ? "Hide options" : "Options"} onClick={() => setOptionsOpen((v) => !v)} hidden={!p.collapsible}>
+          <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h5M10 12h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="10.5" cy="4" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/><circle cx="5.5" cy="8" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/><circle cx="8.5" cy="12" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/></svg>
+        </button>
+        {(!p.collapsible || optionsOpen) && p.extras?.toolbar}
+        {(!p.collapsible || optionsOpen) && !p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
+        {(!p.collapsible || optionsOpen) && p.controls}
+        {(!p.collapsible || optionsOpen) && p.memory}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
         {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
         {p.meter}
         <KeyHint />
-        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button>
-          : <button type="button" className="chat-btn" disabled aria-label="Dictate a message" title="Speech recognition is not available in this build">Dictate</button>}
+        {(!p.collapsible || optionsOpen) && (voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button>
+          : <button type="button" className="chat-btn" disabled aria-label="Dictate a message" title="Speech recognition is not available in this build">Dictate</button>)}
         {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>
       </div>

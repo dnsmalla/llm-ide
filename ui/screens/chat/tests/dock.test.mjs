@@ -69,7 +69,7 @@ test("history options: bounded, the open chat always listed, titles are text wit
   assert.equal(c.historyOptions([], null, new Set()).length, 0);
 });
 
-test("ChatScreen docked: one column, Code Assistant landmark, no session list, same controls as the Chat section", () => {
+test("ChatScreen docked: one column, Code Assistant landmark, advanced options collapsed by default", () => {
   const store = new c.MemoryChatStore();
   const controller = new c.ChatController({ core: fakeCore(), store, workspaceRoot: () => "/p" });
   const common = { controller, store, core: fakeCore(), host: { openLink: noop, copy: noop }, initialSessionId: "x" };
@@ -80,7 +80,8 @@ test("ChatScreen docked: one column, Code Assistant landmark, no session list, s
   assert.doesNotMatch(dock, /aria-label="Chats"/, "no session column in the dock");
   assert.match(dock, /aria-label="Message composer"/);
   assert.match(dock, /aria-label="Hide Code Assistant"/);
-  for (const re of [/Permission/i, /Model/i]) assert.match(dock, re);
+  assert.match(dock, /aria-label="Show composer options"[^>]*aria-expanded="false"/);
+  assert.doesNotMatch(dock, /Permission/i, "advanced controls wait behind Options");
   const full = html(h(c.ChatScreen, common));
   assert.match(full, /<section[^>]*aria-label="Chat"/);
   assert.match(full, /CODE ASSISTANT/);
