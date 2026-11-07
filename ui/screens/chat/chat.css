@@ -127,3 +127,5 @@
 .chat-memory-popover { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(340px, 90vw); z-index: 20; }
 /* Transcript replies grow naturally; the transcript itself is the only vertical scroller. */
 .chat-scroll .chat-msg, .chat-scroll .chat-md { max-height: none; overflow: visible; }
+/* Bottom-bar dialogs open upward: there is no space below the composer. */
+.chat-library-picker.chat-popover { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; z-index: 30; }
