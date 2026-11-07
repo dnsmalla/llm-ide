@@ -97,9 +97,20 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - `config.selfHeal` = `LLMIDE_SELF_HEAL=1` and not production. The Tauri host passes it only in a debug build (`desktop/src-tauri/src/self_heal.rs` `enabled()`; opt out with `LLMIDE_SELF_HEAL=0` in the host's env).
   - Off: `/kb/self-heal/*` answers `404 {"error":"feature_disabled","feature":"self_heal"}`, `routes/self-heal.mjs` is never imported, and `/health` does not list the paths.
   - It is not a `FEATURE_ROUTE_GROUPS` entry, because an unset `LLMIDE_FEATURES` means all on.
-- **Flow**:
-  - The host turns the spawned core's stderr (JSON `error` lines, plain error lines with their frames, 5xx summaries) and panic records into reports.
-  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures and posts them to `POST /kb/self-heal/incidents` (JWT + bus host proof).
+- **Capture (plan A)**:
+  - The host turns the spawned core's stderr and panic records into reports.
+  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures and posts them to `POST /kb/self-heal/incidents`.
   - `kb/incidents.mjs` stores them in `self_heal_incidents` (migration 0067) after `core/incident.mjs` redacted and signed them.
-- **Never** log incident text, send it anywhere or give it to a model. Plan B (the fix loop) drives `fixing`, `proposed`, `needsHuman`, `fixed`, `attempts` and the proposal columns.
-- Tests: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen).
+- **Fix loop (plan B, manual only)**: Settings → Self-Heal → Try to fix (`ui/screens/settings/self-heal-run.ts`).
+  1. `POST /kb/self-heal/runs` (one run per user, 4 h in-memory lease) triages up to 5 `new` incidents and returns `.self-heal/BATCH.md` (`core/self-heal-batch.mjs`).
+  2. The host adds a worktree of the source checkout under `<data dir>/self-heal/loop-worktrees/<run id>` (`self_heal_fix.rs`).
+  3. One `POST /kb/loop/agent-run` edits the worktree.
+  4. The host reverts `Makefile`, `scripts/**`, `**/*.sh` and `**/package.json`, then runs the checkout's `scripts/self-heal-verify.sh` (`make regression`, 90 min).
+  5. `POST /kb/self-heal/runs/:id/outcome` maps the verdicts.
+  - Review / Apply (`git apply` of the reviewed patch, never a commit) / Discard end with `POST /kb/self-heal/runs/:id/resolve`.
+  - The source checkout must be on the user's repo allow-list, and the Auto Tasks feature (which owns the Loop agent) must be on.
+  - While a run is open, the core skips `log` and `server` reports.
+- **Never** log incident text or send it anywhere. It reaches a model only fenced inside `BATCH.md`, in a run the user started.
+- Tests:
+  - node: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen), `tests/self-heal-batch.test.mjs`, `tests/self-heal-fix-store.test.mjs`, `tests/self-heal-runs.test.mjs` (local listen)
+  - cargo: `self_heal_fix` (real git in temp folders)
