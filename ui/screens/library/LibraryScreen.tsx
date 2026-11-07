@@ -227,6 +227,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                   store.setSection(state.sectionId === id ? null : id);
                 }}
                 onExtension={(id) => {
+                  if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return;
                   const open = () => { setProjectFile(null); setProjectFileDirty(false); setExtensionId(id); };
                   if (dirtyRef.current) setPendingNav({ proceed: open });
                   else open();
