@@ -621,6 +621,7 @@ async function streamTurn({
   let sdkSessionId = null;
   let declined = 0;
   let reply = '';
+  let continued = false;
   let buf = '';
   const decoder = new TextDecoder();
   try {
@@ -637,6 +638,7 @@ async function streamTurn({
         if (ev.type === 'delta' && typeof ev.text === 'string') reply += ev.text;
         if (ev.type === 'error') error = `${ev.code}: ${ev.message}`;
         if (ev.type === 'init' && ev.sessionId) sdkSessionId = ev.sessionId;
+        if (ev.type === 'notice' && ev.kind === 'chat_continued') continued = true;
         // Nobody answers a question or an approval in a bench run: decline it
         // at once (as a user dismissing it would) so the turn carries on
         // instead of parking until the decision times out.
@@ -652,7 +654,7 @@ async function streamTurn({
     }
     throw err;
   }
-  return { ttftMs, totalMs: performance.now() - started, error, declined, reply };
+  return { ttftMs, totalMs: performance.now() - started, error, declined, reply, continued };
 }
 
 async function declineDecision({ base, token, requestId, sdkSessionId }) {
@@ -789,6 +791,7 @@ async function runSample({ scenario, ctx }) {
     turns.push({
       hops: Number(comp.apiCalls) || 0,
       raw,
+      continued: t.continued === true,
       billable: billableTokens(raw),
       ttftMs: t.ttftMs,
       totalMs: t.totalMs,
@@ -864,7 +867,7 @@ function aggregate(scenario, samples) {
     ...(scenario.route ? { route: true } : {}),
     perTurn: medianSample.turns.map((t) => ({
       hops: t.hops, billable: t.billable, input: t.raw.input, output: t.raw.output,
-      cacheRead: t.raw.cacheRead, cacheWrite: t.raw.cacheWrite,
+      cacheRead: t.raw.cacheRead, cacheWrite: t.raw.cacheWrite, continued: t.continued === true,
     })),
     contextSplit: medianSample.contextSplit,
   };

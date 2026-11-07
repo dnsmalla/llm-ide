@@ -58,14 +58,15 @@ test('defaultBenchModel is the cheapest (fast) picker model from anthropic-model
 const V2_IDS = ['greeting', 'explain-file', 'small-edit', 'plan-step', 'two-turn-reuse', 'long-tool-results', 'cache-slope'];
 const V3_IDS = ['repo-search', 'auto-mode', 'mode-switch', 'cache-slope-12', 'mcp-two-servers', 'ended-chat-continue'];
 const V4_IDS = ['switch-handoff', 'capped-session', 'compress-long-tools'];
+const V5_IDS = ['ended-chat-continue-long'];
 // The router scenarios need server switches (--env); the default fake runs below use the other thirteen.
 const withoutRouter = (list) => list.filter((s) => !s.requiresEnv);
 
-test('loadScenarios reads the committed set (version 4 = the v3 thirteen unchanged + three router scenarios) with tool scenarios marked', () => {
+test('loadScenarios reads the committed set (version 5 = the v4 sixteen unchanged + the long ended-chat scenario) with tool scenarios marked', () => {
   const { version, scenarios, compatibleWith } = loadScenarios(SCENARIOS);
-  assert.equal(version, 4);
-  assert.deepEqual(compatibleWith, [2, 3]);
-  assert.deepEqual(scenarios.map((s) => s.id), [...V2_IDS, ...V3_IDS, ...V4_IDS]);
+  assert.equal(version, 5);
+  assert.deepEqual(compatibleWith, [2, 3, 4]);
+  assert.deepEqual(scenarios.map((s) => s.id), [...V2_IDS, ...V3_IDS, ...V4_IDS, ...V5_IDS]);
   assert.equal(scenarios.find((s) => s.id === 'two-turn-reuse').turns.length, 2);
   assert.equal(scenarios.find((s) => s.id === 'cache-slope').turns.length, 5);
   assert.deepEqual(
@@ -511,9 +512,9 @@ test('runBench --fake end to end: every turn metered, cache reused on the second
     fake: true, model: FAKE_MODEL, scenarios: withoutRouter(scenarios), scenariosVersion: version, compatibleWith, repeat: 1,
   });
   assert.equal(results.fake, true);
-  assert.equal(results.scenariosVersion, 4);
-  assert.deepEqual(results.scenariosCompatibleWith, [2, 3]);
-  assert.equal(results.scenarios.length, 13);
+  assert.equal(results.scenariosVersion, 5);
+  assert.deepEqual(results.scenariosCompatibleWith, [2, 3, 4]);
+  assert.equal(results.scenarios.length, 14);
   for (const s of results.scenarios) {
     assert.ok(s.billableTokens > 0, `${s.id} billable`);
     assert.ok(s.raw.output > 0, `${s.id} output`);
@@ -581,4 +582,20 @@ test('CLI: --fake compares medians with a baseline; 0 when unchanged, 1 on a >15
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('runBench --fake: with LLMIDE_V2_CONTINUE_SUMMARY=on the long ended chat continues from a metered summary', async () => {
+  const { scenarios } = loadScenarios(SCENARIOS);
+  const pick = scenarios.filter((s) => s.id === 'ended-chat-continue-long');
+  assert.equal(pick[0].turns.length, 11);
+  assert.deepEqual(pick[0].dropSessionBefore, [10]);
+  const off = await runBench({ fake: true, model: FAKE_MODEL, scenarios: pick, scenariosVersion: 5, repeat: 1 });
+  const on = await runBench({ fake: true, model: FAKE_MODEL, scenarios: pick, scenariosVersion: 5, repeat: 1, extraEnv: { LLMIDE_V2_CONTINUE_SUMMARY: 'on' } });
+  const a = off.scenarios[0].perTurn.at(-1);
+  const b = on.scenarios[0].perTurn.at(-1);
+  assert.equal(a.continued, false);
+  assert.equal(b.continued, true);
+  assert.ok(b.input > a.input, 'the summary call is counted inside the continued turn');
+  assert.ok(b.cacheWrite < a.cacheWrite, 'summary + recent turns write less than the replayed history');
+  assert.equal(on.scenarios[0].helperCalls, 0, 'the summary is not a helper call');
 });

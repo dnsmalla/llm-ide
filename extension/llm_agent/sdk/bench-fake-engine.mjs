@@ -13,6 +13,8 @@
 // the real engine.
 
 import { randomUUID } from 'node:crypto';
+import { recordUsage } from '../../kb/usage.mjs';
+import { getDb } from '../../kb/db.mjs';
 
 // Synthetic prompt prefix, in tokens (system prompt + tool schemas).
 const PREFIX_TOKENS = 9000;
@@ -27,7 +29,7 @@ const approxTokens = (text) => Math.ceil(String(text).length / 4);
  * @returns {Promise<{ result: object, usageTotals: object, composition: object }>}
  */
 export async function runBenchFakeTurn({
-  message = '', model, mode, resumeSdkSessionId, onEvent,
+  message = '', model, mode, resumeSdkSessionId, onEvent, history = [],
 } = {}) {
   const resumed = Boolean(resumeSdkSessionId) && transcripts.has(resumeSdkSessionId);
   const sessionId = resumed ? resumeSdkSessionId : `bench-fake-${randomUUID()}`;
@@ -43,7 +45,9 @@ export async function runBenchFakeTurn({
   const reply = 'ok '.repeat(replyTokens);
   onEvent?.({ type: 'delta', text: reply });
 
-  const newPromptTokens = approxTokens(message);
+  // A fresh session also writes the history it was seeded with (a replay, or an ended-chat summary + recent turns).
+  const seedTokens = resumed || !Array.isArray(history) ? 0 : approxTokens(history.map((t) => t?.content ?? '').join('\n'));
+  const newPromptTokens = approxTokens(message) + seedTokens;
   // Fresh session: the whole prefix is written to the cache. Resumed: the
   // prefix and prior transcript are read back from cache; only the new
   // message is written.
@@ -87,6 +91,16 @@ export async function runBenchFakeTurn({
     usageTotals,
     composition,
   };
+}
+
+/**
+ * Stand-in for the ended-chat summary call (providers/continuation.mjs `summarize` seam): no model call, one
+ * deterministic ledger row under the caller's endpoint and request id, exactly where runClaude would write it.
+ */
+export async function benchFakeSummary(prompt, { userId, provider = 'anthropic', model, endpoint, requestId } = {}) {
+  const text = `Bench summary of ${approxTokens(prompt)} prompt tokens.`;
+  recordUsage(getDb(), { userId, provider, model: model || 'bench-fake', source: 'api', endpoint, requestId, inputTokens: approxTokens(prompt), outputTokens: approxTokens(text) });
+  return text;
 }
 
 /** Tests only: forget the synthetic transcripts. */

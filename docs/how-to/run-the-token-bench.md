@@ -158,3 +158,18 @@ node scripts/token-bench.mjs --only capped-session --env LLMIDE_ROUTER=on --env 
 ```
 
 They are not in the committed baseline; the version 2 and 3 baselines stay comparable. Fake-mode tests pin only their structure.
+
+## Ended-chat continuation (scenario set version 5)
+
+`ended-chat-continue-long` seeds ten facts, drops the chat's SDK session, then asks for three of them back (what
+a restart after a quit purge looks like). Run the A/B for the X3 switch on the same model and `--repeat`:
+
+    node scripts/token-bench.mjs --only ended-chat-continue-long,ended-chat-continue --repeat 5 --out a.json
+    node scripts/token-bench.mjs --only ended-chat-continue-long,ended-chat-continue --repeat 5 --env LLMIDE_V2_CONTINUE_SUMMARY=on --out b.json
+    node scripts/token-bench.mjs --compare a.json b.json
+
+The summary call is metered inside the continued turn (`/agent/v2/stream:continuation`, same request id), so the
+billable numbers compare like for like. `perTurn[].continued` marks the continued turn. Gate (agent-kit plan 3.4):
+on the long scenario the continued turn's billable tokens with the switch are at most 30% of the replay's, and
+the 3-turn `ended-chat-continue` is unchanged (nothing is old enough to summarise). Check the recall answer by hand.
+A `--fake` run shows the plumbing only.

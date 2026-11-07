@@ -289,7 +289,16 @@ export function freshTurnHistory(body) {
 }
 
 // The production seams; tests pass their own (see the header).
-const DEFAULT_DEPS = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand, summarize: (prompt, opts) => runClaude(prompt, opts) };
+// The ended-chat summary call: runClaude, or under the token bench's fake engine a metered stand-in (no model call).
+async function defaultSummarize(prompt, opts) {
+  if (benchFakeEngineEnabled()) {
+    const { benchFakeSummary } = await import('../llm_agent/sdk/bench-fake-engine.mjs');
+    return benchFakeSummary(prompt, opts);
+  }
+  return runClaude(prompt, opts);
+}
+
+const DEFAULT_DEPS = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand, summarize: defaultSummarize };
 
 export async function handleAgentV2Routes(req, res, deps = DEFAULT_DEPS) {
   const url = req.url || '';

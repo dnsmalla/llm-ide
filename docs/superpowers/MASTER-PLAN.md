@@ -18,11 +18,11 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Web app and relay | 7 | 16 | 3 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; offline sync tier (SP3); the account service, device linking and relay were retired by ADR 0020 and removed (`3891a2d5`, web client 2026-11-07) |
 | Chrome extension | 8 | 4 | 5 | 17 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 21 | 3 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
-| Data and storage | 6 | 1 | 6 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
+| Data and storage | 6 | 2 | 5 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 11 | 27 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 11 | 2 | 3 | 16 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 2 | 5 | 14 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 126 | 74 | 48 | 248 |  |
+| Total | 126 | 75 | 47 | 248 |  |
 
 ## What to do next
 
@@ -95,7 +95,7 @@ Code and docs an agent (or I) can do now, from the linked plans.
   - ~ Core job runner: library done
   - automation-kit
 - **Data and storage**
-  - Ended-chat continuation: per-chat summary on a cheap model plus last turns
+  - ~ Ended-chat continuation: per-chat summary on a cheap model plus last turns
 - **Agents, providers, extensions**
   - Extensions catalog P7 skills diet
   - Extensions catalog P9 per-tool MCP deny list, after the ended-chat engine work
@@ -494,7 +494,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] `extension/scripts/backup.mjs` online backup (me)
 - [~] Live-then-archive `lta.mode`: built and in shadow; on-by-default waits for Y2 (you)
 - [ ] Ledger step B: budget readers to `usage_calls` after 7 days of zero mismatches, fail closed (X5) (you)
-- [ ] Ended-chat continuation: per-chat summary on a cheap model plus last turns (X3, bench-gated; planned 2026-11-07 `plans/2026-11-07-ended-chat-continuation.md`, ships off until Y1) (me)
+- [~] Ended-chat continuation: per-chat summary on a cheap model plus last turns (X3), built OFF behind `LLMIDE_V2_CONTINUE_SUMMARY` / desktop pref `continueSummary` (API 119, migration 0065, `plans/2026-11-07-ended-chat-continuation.md`); bench A/B `ended-chat-continue-long` pending Y1 (me, then you)
 - [ ] 7-day shadow soak on real meeting notes, topK overlap, countDelta 0 (M2) (wait)
 - [ ] Delete legacy duplicate rows, destructive: export-before-delete, backup, rollback drill (L1) (wait)
 - [ ] Knowledge-kit K1: files stay the truth, server keeps a rebuildable index (L2; needs Q1-Q14) (you)

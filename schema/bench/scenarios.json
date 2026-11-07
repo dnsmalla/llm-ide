@@ -1,7 +1,8 @@
 {
   "_comment": [
-    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 4.",
+    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 5.",
     "Version 4 = the thirteen version-3 scenarios, UNCHANGED, plus three added ones for the session router (agent-kit K1 Phase 6b T6b.9).",
+    "Version 5 = the sixteen version-4 scenarios, UNCHANGED, plus ended-chat-continue-long (X3): ten facts, the SDK session dropped, then a recall turn. A/B it with --env LLMIDE_V2_CONTINUE_SUMMARY=on; perTurn[].continued says whether a turn was continued from a summary.",
     "`compatibleWith: [2, 3]`: a version-2 or version-3 baseline still covers its own scenarios; the new",
     "ones show as \"new\" until a version-3 baseline is committed.",
     "Every sample opens a NEW v2 chat (one chat per scenario sample; every turn of",
@@ -25,7 +26,7 @@
     "`requiresEnv`: server switches the scenario needs (--env LLMIDE_ROUTER=on ...); a run without them fails up front. These three scenarios are for the user's paid run after the build; the committed baseline does not include them.",
     "`switch-handoff` pins one chat to a second model between turns (cold switch cost); `capped-session` sets a small token limit and expects the chat to be refused at it; `compress-long-tools` re-reads a large file with compression on (adapter turns only: on the Claude path it measures nothing, so run it on a catalog provider)."
   ],
-  "version": 4,
+  "version": 5,
   "scenarios": [
     {
       "id": "greeting",
@@ -205,10 +206,29 @@
         "Read notes.txt in the workspace and reply with its first line only.",
         "Read notes.txt again and reply with its last line only."
       ]
+    },
+    {
+      "id": "ended-chat-continue-long",
+      "mode": "ask",
+      "dropSessionBefore": [10],
+      "turns": [
+        "Remember the code word is 'maple'. Reply with OK only.",
+        "Remember the colour is 'teal'. Reply with OK only.",
+        "Remember the city is 'Lisbon'. Reply with OK only.",
+        "Remember the number is 42. Reply with OK only.",
+        "Remember the animal is 'otter'. Reply with OK only.",
+        "Remember the fruit is 'quince'. Reply with OK only.",
+        "Remember the tool is 'chisel'. Reply with OK only.",
+        "Remember the planet is 'Neptune'. Reply with OK only.",
+        "Remember the metal is 'cobalt'. Reply with OK only.",
+        "Remember the river is 'Danube'. Reply with OK only.",
+        "List the code word, the colour and the city I asked you to remember, comma-separated, nothing else."
+      ]
     }
   ],
   "compatibleWith": [
     2,
-    3
+    3,
+    4
   ]
 }
