@@ -427,7 +427,12 @@ export function createGateway(overrides) {
         return fail(s, r.id, 'denied', `This device was not granted ${capability} — pair again to grant it.`);
       }
       const cls = COMMAND_CLASS[r.command];
-      if (cls) {
+      if (cls === undefined) {
+        const { userId: u, deviceId: d } = entry.state;
+        audit('role_denied', { peer: entry.peer, userId: u, deviceId: d, detail: 'unclassified', dedupeKey: `${d}:unclassified` });
+        return fail(s, r.id, 'denied', 'This command is not available.');
+      }
+      if (cls !== null) {
         const { userId: u, deviceId: d } = entry.state;
         const refusal = classRefusal(deps.member(u), cls);
         if (refusal) {

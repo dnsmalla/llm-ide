@@ -536,9 +536,12 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // phone). See AUTO_READ_ONLY. Its fallbacks are `ask`, not execute: a client
   // that asked for read-only must not get the full agentic mode because the
   // classifier had a bad day.
+  const member = getMember(getDb(), userId);
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
-  if ((requestedMode === 'auto' || readOnly) && isAutoContinueTurn(message, userId, chatSessionId)) {
+  if (member?.teamRole === 'viewer') {
+    mode = 'ask';
+  } else if ((requestedMode === 'auto' || readOnly) && isAutoContinueTurn(message, userId, chatSessionId)) {
     // An auto-continue round of a task run: execute, without a classifier call.
     mode = readOnly ? clampToReadOnly('execute') : 'execute';
   } else if (requestedMode === 'auto' || readOnly) {
@@ -570,7 +573,6 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // ADR 0021: the member's highest run mode caps whatever the client or classifier chose. One place,
   // after `mode` is final and before the lock, for the HTTP stream and startHostTurn alike (a phone
   // turn runs through this same function). No members row = an unregistered caller: execute, as today.
-  const member = getMember(getDb(), userId);
   // No members row fails closed: read-only, like the Host API gateway (a registration always writes one).
   const maxMode = member?.maxMode ?? 'read_only';
   if (maxMode === 'none') {

@@ -98,6 +98,7 @@ async function register(email) {
 
 const DANGEROUS = [
   ['POST', '/kb/loop/agent-run', { message: 'x', repoRoot: '/tmp' }],
+  ['POST', '/kb/issues/create', {}],
   ['POST', '/kb/ingest-scip', { scipPath: '/tmp/x.scip' }],
   ['POST', '/auth/me/plugins/hook-trust', {}],
   ['POST', '/auth/me/mcp-plugins/toggle', {}],
