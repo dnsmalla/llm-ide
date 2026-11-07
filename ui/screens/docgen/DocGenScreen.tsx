@@ -22,6 +22,7 @@ import { CommandManager } from "./CommandManager";
 import type { FsApi } from "../explorer/fs";
 import { chatOutputStore } from "../shell/chat-output";
 import { ChatDockSlot } from "../shell/chat-dock";
+import { ChatDockToggle } from "../shell/ChatDockToggle";
 
 export interface DocGenScreenProps {
   store: DocGenStore;
@@ -212,7 +213,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             chatSaveError={s.chatSaveError}
             onSaveChat={() => { if (chatOutput) void store.saveChatReply(chatOutput.text); }}
           />
-          {showChat ? <div className="dg-chat-dock"><ChatDockSlot surface="docgen" active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} /></div> : null}
+          {showChat ? <div className="dg-chat-dock" id="dg-chat-dock"><ChatDockSlot surface="docgen" active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} onCollapse={() => setShowChat(false)} /></div> : null}
         </aside>
       </div>
     );
@@ -225,7 +226,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
       <header className="dg-top">
         <h1 className="dg-title">{title}</h1>
         {s.setup === "ready" && <button type="button" className="dg-btn" aria-pressed={showSources} onClick={() => setShowSources((v) => !v)}>{showSources ? "Hide sources" : "Show sources"}</button>}
-        {s.setup === "ready" && <button type="button" className="dg-btn" aria-pressed={showChat} onClick={() => setShowChat((v) => !v)}>{showChat ? "Hide chat" : "Show chat"}</button>}
+        {s.setup === "ready" && <ChatDockToggle open={showChat} controls="dg-chat-dock" onToggle={() => setShowChat((v) => !v)} />}
         {s.setup === "ready" && <p className="dg-muted">{store.surface === "visual" ? "Describe or diagram your sources." : "Turn sources into a document."}</p>}
       </header>
       {body}

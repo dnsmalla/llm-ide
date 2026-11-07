@@ -5,6 +5,7 @@ import { FileTreeRow, FolderIcon, Icon, StatusBanner } from "@llmide/ui-kit";
 import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import type { SectionProps } from "../shell/sections";
 import { ChatDockSlot } from "../shell/chat-dock";
+import { ChatDockToggle } from "../shell/ChatDockToggle";
 import { shellBus } from "../shell/bus";
 import { Markdown } from "../chat/MarkdownView";
 import { readRepoConfig } from "../settings/repo-config.ts";
@@ -126,7 +127,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
         <span className="rv-spacer" />
         <button type="button" className="rv-btn" onClick={() => void loadRoots()} disabled={busy}>Refresh</button>
         <button type="button" className="rv-btn" disabled={!selected} onClick={() => selected && shellBus.publish({ type: "open-file", path: selected.path })}>Open in Explorer</button>
-        <button type="button" className="rv-btn" aria-pressed={showChat} onClick={() => setShowChat((v) => !v)}>Code Assistant</button>
+        <ChatDockToggle open={showChat} controls="rv-chat-dock" onToggle={() => setShowChat((v) => !v)} />
       </header>
 
       {linked ? (
@@ -203,7 +204,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
               }}
             />
             <aside className="rv-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
-              <ChatDockSlot surface="review" active={active} projectRoot={projectRoot} initialPath={selected?.path ?? null} onCollapse={() => setShowChat(false)} />
+              <div id="rv-chat-dock"><ChatDockSlot surface="review" active={active} projectRoot={projectRoot} initialPath={selected?.path ?? null} onCollapse={() => setShowChat(false)} /></div>
             </aside>
           </>
         ) : null}
