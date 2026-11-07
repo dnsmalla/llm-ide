@@ -225,10 +225,29 @@ Keep this terminal running.
 
 ```bash
 cd desktop && npm ci && npm run tauri dev
-# release bundle: npm run tauri build (see desktop/PACKAGING.md)
+```
+
+Build and open the release app (recommended for normal use):
+
+```bash
+cd ~/llm-ide
+PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" \
+  bash scripts/build-desktop-mac.sh
+open ~/llm-ide/desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app
+```
+
+Install it into Applications:
+
+```bash
+ditto ~/llm-ide/desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app \
+  /Applications/LLM-IDE.app
 ```
 
 The desktop app starts its own core; Settings → Features switches features off (applied on the next core start).
+The release app and the `tauri dev` debug binary are different macOS programs: a desktop folder allowed by TCC
+for the release app is not automatically allowed for the debug binary. Grant the debug binary Desktop/Full Disk
+Access, or move the project outside `~/Desktop`, `~/Documents` and `~/Downloads`. See
+[desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md) for the full build, permissions and troubleshooting checklist.
 
 ---
 
