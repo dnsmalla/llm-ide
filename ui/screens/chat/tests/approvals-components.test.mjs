@@ -105,12 +105,13 @@ test("QuestionCard: fieldsets, single vs multi inputs, secret note, escaped opti
   const out = html(h(A.QuestionCard, { approval: q, ui: undefined, position: 1, total: 1, turnClosed: false, onAnswer: noop, onDecline: noop }));
   assert.match(out, /aria-label="The assistant has a question"/);
   assert.equal(count(out, /<fieldset/g), 2);
-  assert.match(out, /type="radio"/);
-  assert.match(out, /type="checkbox"/);
+  assert.ok(count(out, /class="appr-option"/g) >= 2, "options are one-tap rows");
+  assert.equal(count(out, /type="radio"/g), 0);
+  assert.equal(count(out, /type="checkbox"/g), 0);
   assert.match(out, /sent to the model/);
   assert.ok(!out.includes("<script>") && !out.includes("<b>many"));
   assert.match(out, /Decline to answer/);
-  assert.match(out, /Send answer/);
+  assert.match(out, /Submit/);
 });
 
 test("ApprovalsPanel: 500 queued approvals render one card, a bounded next list and a counter", () => {

@@ -33,3 +33,8 @@
 .appr-dialog { max-width: 520px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-md); }
 .appr-trust-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tok-space-xs); }
 .appr-trust-head p { margin: 0; }
+.appr-option { display: flex; align-items: flex-start; gap: 8px; width: 100%; box-sizing: border-box; text-align: left; border: 1px solid var(--tok-color-border); border-radius: 8px; background: var(--tok-color-surface2); color: var(--tok-color-text); padding: 8px 10px; margin: 0 0 6px; font: inherit; cursor: pointer; }
+.appr-option:hover:not(:disabled) { border-color: var(--tok-color-accent); }
+.appr-option[data-selected="true"] { border-color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, var(--tok-color-surface2)); }
+.appr-option:disabled { opacity: .65; cursor: default; }
+.appr-check { width: 16px; flex: none; color: var(--tok-color-accent); font-weight: 700; }

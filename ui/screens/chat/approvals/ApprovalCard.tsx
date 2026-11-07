@@ -50,6 +50,7 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
   const [reviewed, setReviewed] = useState<PendingApproval[] | null>(reviewedInitial);
   // The panel keys this card by request id, so every new head starts un-armed: see DWELL_MS.
   const [armed, setArmed] = useState(dwellMs <= 0);
+  const [clicked, setClicked] = useState(false);
   useEffect(() => {
     if (armed) return;
     const t = setTimeout(() => setArmed(true), dwellMs);
@@ -60,7 +61,9 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
   const preview = useMemo(() => buildPreview(approval), [approval]);
   const rule = useMemo(() => describeRule(approval.suggestion, risk, projectRoot, commandOf(approval)), [approval, risk, projectRoot]);
   const phase = ui?.phase ?? "idle";
-  const locked = !armed || turnClosed || phase === "submitting" || phase === "expired" || batchProgress !== null;
+  const locked = clicked || !armed || turnClosed || phase === "submitting" || phase === "expired" || batchProgress !== null;
+  useEffect(() => { if (phase === "failed") setClicked(false); }, [phase]);
+  const decide = (action: ToolAction, feedback?: string) => { if (locked) return; setClicked(true); onDecide(action, feedback); };
   const title = toolTitle(approval.toolName);
   const sessionRule = rule.ok && rule.view.scope === "session" ? rule.view : null;
   const projectRule = rule.ok && rule.view.scope === "project" ? rule.view : null;
@@ -73,8 +76,8 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
       return;
     }
     routeCardKey(e as unknown as KeyEventLike, { armed, locked }, {
-      allow: () => onDecide("allow"),
-      deny: () => onDecide("deny", note),
+      allow: () => decide("allow"),
+      deny: () => decide("deny", note),
       rule: () => { if (projectRule) onConfirmRule(true); },
       session: () => { if (sessionRule) onConfirmRule(true); },
       // Esc is the keyboard exit from the Tab cycle below; it must not decide (an accidental Esc is not a denial).
@@ -105,7 +108,7 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
           <p className="appr-exact">{rule.view.exact}</p>
           <p className="chat-muted">{rule.view.scopeText} {rule.view.revoke}</p>
           <div className="appr-actions">
-            <button type="button" className="chat-btn chat-primary" disabled={locked} onClick={() => onDecide("always-allow")}>Save rule and allow</button>
+            <button type="button" className="chat-btn chat-primary" disabled={locked} onClick={() => decide("always-allow")}>Save rule and allow</button>
             <button type="button" className="chat-btn" disabled={locked} onClick={() => onConfirmRule(false)}>Back</button>
           </div>
         </div>
@@ -114,14 +117,14 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
       {!ui?.confirmingRule && (
         <>
           <div className="appr-actions">
-            <button type="button" className="chat-btn chat-primary" disabled={locked} aria-keyshortcuts="Alt+Y" title="Alt+Y" onClick={() => onDecide("allow")}>Allow once</button>
+            <button type="button" className="chat-btn chat-primary" disabled={locked} aria-keyshortcuts="Alt+Y" title="Alt+Y" onClick={() => decide("allow")}>Allow once</button>
             {sessionRule && <button type="button" className="chat-btn" disabled={locked} aria-keyshortcuts="Alt+S" title="Alt+S" onClick={() => onConfirmRule(true)}>{sessionRule.button}</button>}
             {projectRule && <button type="button" className="chat-btn" disabled={locked} aria-keyshortcuts="Alt+A" title="Alt+A" onClick={() => onConfirmRule(true)}>{projectRule.button}</button>}
-            <button type="button" className="chat-btn chat-danger" disabled={locked} aria-keyshortcuts="Alt+N" title="Alt+N" onClick={() => onDecide("deny", note)}>Deny</button>
+            <button type="button" className="chat-btn chat-danger" disabled={locked} aria-keyshortcuts="Alt+N" title="Alt+N" onClick={() => decide("deny", note)}>Deny</button>
           </div>
           <input className="chat-input appr-note-input" aria-label="Optional note to the assistant, sent with Deny" placeholder="Or tell it what to do instead, then Deny (optional)"
             value={note} maxLength={2000} disabled={locked} onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.repeat && note.trim() && !locked) { e.preventDefault(); onDecide("deny", note); } }} />
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.repeat && note.trim() && !locked) { e.preventDefault(); decide("deny", note); } }} />
           {!rule.ok && approval.suggestion && <p className="chat-muted">{rule.reason}</p>}
         </>
       )}

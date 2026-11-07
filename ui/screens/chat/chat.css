@@ -125,3 +125,5 @@
 .chat-icon-btn:hover { color: var(--tok-color-text); border-color: var(--tok-color-accent); }
 .chat-composer-bar { position: relative; }
 .chat-memory-popover { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(340px, 90vw); z-index: 20; }
+/* Transcript replies grow naturally; the transcript itself is the only vertical scroller. */
+.chat-scroll .chat-msg, .chat-scroll .chat-md { max-height: none; overflow: visible; }
