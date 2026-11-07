@@ -22,7 +22,7 @@ const { getDb, closeDb } = await import('../kb/db.mjs');
 const v2 = await import('../routes/agent-v2.mjs');
 const { createChatSession, appendChatMessage } = await import('../kb/chat-sessions.mjs');
 const { markAgentSessionUsed, deleteAgentSession } = await import('../kb/agent-sessions.mjs');
-const { getContinuation } = await import('../kb/chat-continuations.mjs');
+const { getContinuation, putContinuation } = await import('../kb/chat-continuations.mjs');
 const { SUMMARY_ENDPOINT } = await import('../providers/continuation.mjs');
 const { fastModelFor } = await import('../kb/usage.mjs');
 const db = getDb();
@@ -204,4 +204,13 @@ test('the message the desktop stored before sending is not history', async () =>
   await turn(u, chat, { runTurn: okTurn(seen), summarize: fakeSummarize([]) });
   assert.match(seen[0].history.at(-1).content, /^answer 6/);
   assert.ok(!seen[0].history.some((t) => t.content === 'next question'));
+});
+
+test('DELETE /agent/v2/session drops a client-made continuation', async () => {
+  const u = mkUser();
+  await putContinuation(u.id, 'client-chat', { summary: 's', contentHash: 'a'.repeat(64), coveredTurns: 2, source: 'client' });
+  const req = makeReq({ method: 'DELETE', url: '/agent/v2/session', body: { chatSessionId: 'client-chat' }, user: u });
+  const res = makeRes();
+  await v2.handleAgentV2Routes(req, res, {});
+  assert.equal(getContinuation(u.id, 'client-chat'), null);
 });

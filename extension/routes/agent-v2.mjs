@@ -24,6 +24,7 @@ import { classifyCodeAssistMode, quickMode, MODES, AUTO_READ_ONLY, clampToReadOn
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
+import { deleteContinuation } from '../kb/chat-continuations.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
 import { clearChatMessages } from '../kb/chat-sessions.mjs';
 import {
@@ -1057,6 +1058,8 @@ function dropAgentSessionState(userId, chatSessionId) {
   try { deleteSessionMemory(userId, chatSessionId); } catch { /* best-effort, like the transcript cleanup */ }
   // The chat's route row (pick, cap, counters) goes with the chat.
   try { deleteRoute(getDb(), userId, chatSessionId); } catch { /* best-effort */ }
+  // A continuation summary made from a client's history is that chat's working state.
+  try { deleteContinuation(userId, chatSessionId, { clientOnly: true }); } catch { /* best-effort */ }
   return sdkSessionId;
 }
 

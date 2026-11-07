@@ -148,8 +148,9 @@ export async function planContinuation({ userId, chatSessionId, agentContext, bo
     if (!turns.some((t) => t.role === 'assistant')) return null;
     const priorChars = turns.reduce((sum, t) => sum + t.content.length, 0);
     const reason = endedReason({ fresh: body?.fresh, sdkSessionId, lastUsedMs: agentSessionLastUsedMs(userId, chatSessionId), now, priorChars });
+    // Replay is the user's explicit request, including on the now-warm session after a summary turn.
+    if (body?.continueMode === 'replay') return { kind: 'replay', reason: reason ?? 'requested', turns };
     if (!reason) return null;
-    if (body?.continueMode === 'replay') return reason === 'idle' ? null : { kind: 'replay', reason, turns };
     const built = await buildContinuation({ userId, chatSessionId, turns, source, provider, model, requestId, summarize, signal });
     if (!built) return null;
     log.info('chat_continued', { reason, source, coveredTurns: built.coveredTurns, keptTurns: built.keptTurns, cached: built.cached, summaryChars: built.summaryChars });

@@ -142,3 +142,13 @@ test('planContinuation: off, host-api, no prior answer and a throwing summariser
 });
 
 test.after(() => { closeDb(); for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } } });
+
+test('replay on a warm session still sends the full history', async () => {
+  const u = mk();
+  const chat = createChatSession(u.id, { title: 'warm' });
+  for (let i = 0; i < 7; i += 1) { appendChatMessage(u.id, chat.id, { role: 'user', content: `q${i}` }); appendChatMessage(u.id, chat.id, { role: 'assistant', content: `a${i}` }); }
+  const plan = await c.planContinuation({ userId: u.id, chatSessionId: chat.id, agentContext: {}, body: { continueMode: 'replay' }, sdkSessionId: 'warm', provider: 'anthropic', model: null, requestId: 't', summarize: async () => 'S', env: { LLMIDE_V2_CONTINUE_SUMMARY: 'on' } });
+  assert.equal(plan.kind, 'replay');
+  assert.equal(plan.reason, 'requested');
+  assert.ok(plan.turns.length >= 14);
+});
