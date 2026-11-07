@@ -56,6 +56,8 @@ export interface AssistantMessage {
   status: MessageStatus;
   /** This reply's token counts once the core reports them (live turns; the Mac labels each reply with them). */
   usage?: UsageCounts;
+  /** The mode the server ran this reply in (`mode_set`), shown as the Mac's ModeBadge. Live turns only. */
+  mode?: string;
 }
 export type Message = UserMessage | AssistantMessage;
 
@@ -370,6 +372,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
         break;
       case "mode_set":
         next.resolvedMode = ev.mode;
+        if (target) target.mode = ev.mode;
         break;
       case "delta":
         if (target) {

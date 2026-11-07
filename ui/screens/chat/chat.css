@@ -138,3 +138,5 @@
 .chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-notes { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); padding: 0 var(--tok-space-md); }
 .chat-notes:empty { display: none; }
+.chat-assistant > .chat-badge { display: inline-block; margin-bottom: var(--tok-space-xs); padding: 0 var(--tok-space-sm); border-radius: 999px; font-size: var(--tok-type-caption-size); font-weight: 600; text-transform: uppercase; color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }
+.chat-assistant > .chat-badge:is([data-mode="auto"], [data-mode="execute"]) { color: var(--tok-color-text-muted); background: color-mix(in srgb, var(--tok-color-text-muted) 10%, transparent); }
