@@ -249,7 +249,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
       ) : (
         <main className="lib-detail" aria-label={projectFile ? "Project file" : "Note"}>
           {projectFile ? (
-            <ProjectFileView path={projectFile} deps={files!} onDirtyChange={setProjectFileDirty} onClose={() => selectProjectFile(null)} />
+            <ProjectFileView path={projectFile} deps={files!} onDirtyChange={setProjectFileDirty} onClose={() => { setProjectFileDirty(false); setProjectFile(null); }} />
           ) : selected && write ? (
             <NoteWorkspace
               key={selected}
