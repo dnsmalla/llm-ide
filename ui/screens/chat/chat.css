@@ -146,3 +146,20 @@
 .chat-suggestion { font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 999px; padding: var(--tok-space-xs) var(--tok-space-md); cursor: pointer; }
 .chat-suggestion:hover { color: var(--tok-color-text); border-color: var(--tok-color-accent); }
 .chat-ghost { margin: 0; padding: 0 var(--tok-space-sm); font-size: var(--tok-type-caption-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One compact composer bar: the mode, model, effort and permission pickers stay on one line. */
+.chat-composer { position: relative; z-index: 25; overflow: visible; }
+.chat-composer-bar { flex-wrap: nowrap; gap: 6px; overflow: visible; }
+.chat-composer-bar .chat-pick { flex: 0 1 auto; min-width: 0; }
+.chat-composer-bar .chat-pick select { max-width: 190px; text-overflow: ellipsis; }
+.chat-composer-bar .chat-pick:first-of-type select { max-width: 105px; }
+.chat-composer-bar .chat-muted { white-space: nowrap; }
+.chat-memory-popover { top: auto !important; z-index: 60; }
+@media (max-width: 1080px) {
+  .chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .chat-composer-bar { flex-wrap: wrap; }
+}
+@media (max-width: 760px) {
+  .chat-composer-bar .chat-pick select { max-width: 150px; }
+}
+.chat-more-providers { display: none; }
+.chat-composer-bar .chat-btn[aria-label="Add model…"] { padding-inline: 7px; font-weight: 700; }

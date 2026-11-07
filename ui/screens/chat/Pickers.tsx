@@ -64,7 +64,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
       </label>
       {unlisted && <span className="chat-note" role="note">This chat is pinned to “{unlistedModel}”, which is not in the provider’s current model list. It is sent as-is; choose a listed model to use the provider’s current one.</span>}
       {groups.filter((g) => g.note).map((g) => <span key={g.id} className="chat-muted">{g.label}: {g.note}</span>)}
-      {groups.length > 0 && groups.every((g) => g.id === "anthropic") && <span className="chat-muted">{MORE_PROVIDERS_HINT}</span>}
+      {groups.length > 0 && groups.every((g) => g.id === "anthropic") && <span className="chat-muted chat-more-providers">{MORE_PROVIDERS_HINT}</span>}
       {plainChat && <span className="chat-note" role="note" title={plainChatDetail(plainChat)}>{PLAIN_CHAT_TITLE}</span>}
       {addGroup && onAdd && <AddModelControl groupLabel={addGroup.label} onAdd={(id) => onAdd(addGroup.id, id)} />}
       {removable && onRemove && model && <button type="button" className="chat-link-btn" onClick={() => onRemove(removable.id, model)}>Remove {model}</button>}
@@ -77,7 +77,7 @@ export function AddModelControl({ groupLabel, onAdd }: { groupLabel: string; onA
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className="chat-link-btn" aria-expanded={open} onClick={() => setOpen(!open)}>Add model…</button>
+      <button type="button" className="chat-link-btn" aria-expanded={open} onClick={() => setOpen(!open)}aria-label="Add model…" title="Add model…">＋</button>
       {open && <AddModelDialog groupLabel={groupLabel} onCancel={() => setOpen(false)} onAdd={(id) => { setOpen(false); onAdd(id); }} />}
     </>
   );
