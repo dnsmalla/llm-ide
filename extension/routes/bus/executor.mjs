@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createJobRunner } from '../../kb/job-runner.mjs';
 import { getDb } from '../../kb/db.mjs';
+import { classRefusal, getMember } from '../../kb/members.mjs';
+import { usedUsdMonth } from '../../kb/usage.mjs';
 import {
   createCommand, getCommand, getCommandArgs, approveCommand, denyCommand, cancelPending, expireStale, expireStaleAllSystem,
   ensureTerminal, appendEvent, terminalFor, backfillTerminalsSystem, purgeOldCommandsSystem, isKindEnabled, ERROR_CODES,
@@ -23,6 +25,10 @@ import { truncateUtf8, chunkUtf8 } from './bytes.mjs';
 import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 
 export const busEnabled = () => String(process.env.LLMIDE_BUS || '').toLowerCase() !== 'off';
+
+// Plan H1.2: the action class of each kind, re-checked when the job RUNS (a member demoted after
+// enqueueing is refused). Reuses the existing tier_denied code: no new wire value.
+const KIND_CLASS = Object.freeze({ review: 'model.read', 'sources.update': 'external.read' });
 
 export class BusError extends Error {
   constructor(status, code, message, details) { super(message); this.status = status; this.code = code; if (details !== undefined) this.details = details; }
@@ -122,6 +128,9 @@ export function createBus({
       }
       if (info.tier === 'T0' && cmd.originClient !== 'desktop-ui' && !approved && !isKindEnabled(userId, kind)) fail('switch_off');
       if (!getDb().prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) fail('not_found');
+      const kindClass = KIND_CLASS[kind];
+      if (!kindClass) fail('kind_not_available');
+      if (classRefusal(getMember(getDb(), userId), kindClass, () => usedUsdMonth(getDb(), userId))) fail('tier_denied');
       const args = getCommandArgs(userId, job.id) ?? {};
       let root = null;
       if (args.projectId) {

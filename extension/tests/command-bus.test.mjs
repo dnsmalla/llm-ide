@@ -1071,3 +1071,19 @@ test('L6: the review checks AND runs in the realpath (a symlink swapped in after
     assert.deepEqual(seenCwd, [REPO], 'the run used that same resolved path, not the symlink');
   } finally { await b.stop(); busRef = bus; bus.start(); fs.rmSync(link, { force: true }); }
 });
+
+test('a member demoted to viewer before the job runs is refused at execution: tier_denied, nothing runs', async () => {
+  const { grant } = await import('./helpers/grant.mjs');
+  await reset();
+  grant(main.getDb(), A, { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 0 });
+  try {
+    const r = await call('POST', '/bus/commands', cmd());
+    assert.equal(r.status, 202, r.text);
+    const id = r.body.command.id;
+    await until(async () => store.getCommand(A, id)?.state === 'failed');
+    assert.equal(store.getCommand(A, id).error, 'tier_denied');
+    assert.equal(control.calls.length, 0, 'the review never started');
+  } finally {
+    grant(main.getDb(), A, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  }
+});

@@ -229,3 +229,16 @@ test('getRunBySessionId returns the run for a known sessionId', async () => {
   assert.equal(meetingAgent.getRunBySessionId('sess-R'), null,
     'after stop, the run should be gone');
 });
+
+test('a tick refuses to draft a question once the member may no longer run the model', async () => {
+  reset();
+  meetingAgent._setAuthorityForTests(() => 'role_denied');
+  liveSessions.appendCaptions('user-1', 'sess-auth', [
+    { speaker: 'Alice', text: 'agent, what do you think?', ts: Date.now(), source: 'extension-cc' },
+  ]);
+  await meetingAgent.dispatchAgent({ userId: 'user-1', sessionId: 'sess-auth' });
+  await new Promise((r) => setTimeout(r, 1700)); // one TICK_MS (1500) + slack
+  assert.equal(meetingAgent.getRunBySessionId('sess-auth').lastDecision.reason, 'authority: role_denied');
+  await meetingAgent.stopAgent({ userId: 'user-1', sessionId: 'sess-auth' });
+  reset();
+});

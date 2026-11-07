@@ -15,13 +15,21 @@
 
 import { appendCaptions, getCaptionsSince, listActiveSessions } from './live-sessions.mjs';
 import { draftQuestion } from './agent-prompt.mjs';
-import { getPlan, getAgentPersona } from '../kb/db.mjs';
+import { getPlan, getAgentPersona, getDb } from '../kb/db.mjs';
+import { classRefusal, getMember } from '../kb/members.mjs';
+import { usedUsdMonth } from '../kb/usage.mjs';
 import { logger as _agentLog } from '../core/logger.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
 import { randomUUID } from 'node:crypto';
 import { beginAgentRun } from '../kb/agent-runs.mjs';
 
 const log = _agentLog.child ? _agentLog.child({ component: 'meeting-agent' }) : _agentLog;
+
+// Plan H1.2: the member's grant can change mid-meeting; every tick re-checks before any model work.
+const dbAuthority = (userId) => classRefusal(getMember(getDb(), userId), 'model.read', () => usedUsdMonth(getDb(), userId));
+let authority = dbAuthority;
+/** Test seam: these tests run without a DB. */
+export function _setAuthorityForTests(fn) { authority = fn; }
 
 // ── Question-loop tunables ────────────────────────────────────────────
 // Held in module scope so tests can override.  Numbers come from §6 of
@@ -385,6 +393,11 @@ function stopQuestionLoop(run) {
 }
 
 async function tickRun(run) {
+  const refusal = authority(run.userId);
+  if (refusal) {
+    recordDecision(run, `authority: ${refusal}`);
+    return;
+  }
   const now = Date.now();
 
   // Incremental fetch: only pull captions with seq > run.lastSeenSeq.
@@ -587,6 +600,7 @@ export function stopAllAgents() {
 
 // For tests.
 export function _resetForTests() {
+  authority = () => null;
   for (const r of runs.values()) stopQuestionLoop(r);
   runs.clear();
   // Diagnostic map is also module-state — clearing runs without

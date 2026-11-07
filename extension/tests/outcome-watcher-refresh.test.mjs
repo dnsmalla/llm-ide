@@ -132,3 +132,14 @@ test('refreshAllOutcomes: circuit breaker opens after repeated failures and skip
   const task = db.getTaskById(U, taskId);
   assert.notEqual(task.status, 'done');
 });
+
+test('the background poller skips a member who may no longer read external services', async () => {
+  const { usersAllowedToPoll } = await import('../agents/outcome-watcher.mjs');
+  const { grant } = await import('./helpers/grant.mjs');
+  const mk = (e) => users.registerUser(db.getDb(), { email: e, password: 'CorrectHorseBattery', displayName: e }).id;
+  const reader = mk('poll-reader@example.test');
+  const viewer = mk('poll-viewer@example.test');
+  grant(db.getDb(), reader, { teamRole: 'member', maxMode: 'read_only' });
+  grant(db.getDb(), viewer, { teamRole: 'viewer', maxMode: 'read_only' });
+  assert.deepEqual(usersAllowedToPoll(db.getDb(), [reader, viewer, 'no-such-user']), [reader]);
+});

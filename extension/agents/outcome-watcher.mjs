@@ -10,6 +10,7 @@ import { pollOne } from './outcome-providers.mjs';
 import { pMap } from '../core/p-map.mjs';
 import { getDb } from '../kb/db.mjs';
 import { getSecrets } from '../server/vault.mjs';
+import { classRefusal, getMember } from '../kb/members.mjs';
 import { logger as _bgLogger } from '../core/logger.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
 
@@ -18,6 +19,11 @@ import { redactSecrets } from '../core/redact-secrets.mjs';
 // authenticated, Linear ~1500/hour, Backlog ~10/sec — 4 concurrent
 // requests stays well under all three.
 const CONCURRENCY = 4;
+
+/** Plan H1.2: only members who may still read external services are polled with their credentials. */
+export function usersAllowedToPoll(db, userIds) {
+  return userIds.filter((userId) => classRefusal(getMember(db, userId), 'external.read') === null);
+}
 
 // ---------------------------------------------------------------------------
 // Per-provider circuit breaker
@@ -219,7 +225,7 @@ async function runBackgroundPoll() {
   log.info('outcome_bg_poll_start', { users: userIds.length });
   let totalChanged = 0;
 
-  for (const userId of userIds) {
+  for (const userId of usersAllowedToPoll(db, userIds)) {
     try {
       // Read vault credentials for this user — all three providers in one
       // DB round-trip using getSecrets() batch helper.
