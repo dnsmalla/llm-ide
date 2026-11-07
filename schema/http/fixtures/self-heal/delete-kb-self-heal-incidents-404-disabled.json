@@ -1,0 +1,8 @@
+{
+  "endpoint": "DELETE /kb/self-heal/incidents",
+  "status": 404,
+  "response": {
+    "error": "feature_disabled",
+    "feature": "self_heal"
+  }
+}

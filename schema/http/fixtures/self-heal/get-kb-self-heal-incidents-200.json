@@ -1,0 +1,23 @@
+{
+  "endpoint": "GET /kb/self-heal/incidents",
+  "status": 200,
+  "response": {
+    "incidents": [
+      {
+        "id": "3f9a1c0b7d2e4a65",
+        "source": "server",
+        "category": "POST /kb/notes/:id",
+        "message": "db is locked for [EMAIL]",
+        "stack": "Error: db is locked\n    at x (~/llm-ide/extension/kb/db.mjs:9:1)",
+        "environmental": null,
+        "firstSeen": 1793750000000,
+        "lastSeen": 1793750100000,
+        "count": 2,
+        "attempts": 0,
+        "status": "new",
+        "note": null,
+        "proposal": null
+      }
+    ]
+  }
+}

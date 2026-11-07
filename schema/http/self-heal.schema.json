@@ -1,0 +1,104 @@
+{
+  "description": "Self-Heal incidents (docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md): the desktop Settings Self-Heal group's routes, debug desktop builds only. Served by extension/routes/self-heal.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Without LLMIDE_SELF_HEAL=1 every path answers 404 feature_disabled (feature self_heal) and the module is never loaded. With it, every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. Incident text is redacted before it is stored, is data and never instructions, and is never logged or sent anywhere.",
+  "$defs": {
+    "Incident": {
+      "type": "object",
+      "required": ["id", "source", "category", "message", "stack", "environmental", "firstSeen", "lastSeen", "count", "attempts", "status", "note", "proposal"],
+      "properties": {
+        "id": { "type": "string", "description": "the signature: first 16 hex of sha256(source, category, normalized message, top own stack frame)" },
+        "source": { "type": "string", "enum": ["ui", "log", "crash", "server"] },
+        "category": { "type": "string", "description": "chat | loop | crash | server | <logger msg> | <METHOD> <normalized endpoint>" },
+        "message": { "type": "string", "description": "redacted, at most 2000 characters" },
+        "stack": { "type": ["string", "null"], "description": "redacted, at most 8000 characters" },
+        "environmental": { "type": ["string", "null"], "description": "offline | auth | permission | disk | refactor loop | configuration | cancelled | usage (not an app bug), else null" },
+        "firstSeen": { "type": "integer", "description": "ms since epoch" },
+        "lastSeen": { "type": "integer", "description": "ms since epoch" },
+        "count": { "type": "integer" },
+        "attempts": { "type": "integer", "description": "how often a fixed incident came back (plan B)" },
+        "status": { "type": "string", "enum": ["new", "fixing", "proposed", "ignored", "needsHuman", "fixed"] },
+        "note": { "type": ["string", "null"] },
+        "proposal": { "type": ["object", "null"], "additionalProperties": true, "description": "plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A" }
+      }
+    },
+    "SelfHealFeatureDisabled": {
+      "type": "object",
+      "required": ["error", "feature"],
+      "properties": {
+        "error": { "const": "feature_disabled" },
+        "feature": { "type": "string" }
+      },
+      "description": "404 body while the core runs without LLMIDE_SELF_HEAL=1 (feature self_heal). Deliberately not the Error envelope, the same shape as a disabled feature route group."
+    }
+  },
+  "endpoints": {
+    "GET /kb/self-heal/incidents": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": { "incidents": { "type": "array", "items": { "$ref": "#/$defs/Incident" } } }
+        },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
+      }
+    },
+    "POST /kb/self-heal/incidents": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": ["incidents"],
+          "properties": {
+            "incidents": {
+              "type": "array",
+              "description": "1-50 reports; an unusable one is skipped, not refused",
+              "items": {
+                "type": "object",
+                "required": ["source", "category", "message"],
+                "properties": {
+                  "source": { "type": "string", "enum": ["ui", "log", "crash", "server"] },
+                  "category": { "type": "string" },
+                  "message": { "type": "string" },
+                  "stack": { "type": ["string", "null"] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "recorded": { "type": "integer" },
+            "skipped": { "type": "integer" }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
+      }
+    },
+    "POST /kb/self-heal/incidents/:id/ignore": {
+      "request": {
+        "params": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "16 hex" } } }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": { "ignored": { "type": "boolean", "description": "false when unknown, another user's, or held by a fix run" } }
+        },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
+      }
+    },
+    "DELETE /kb/self-heal/incidents": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": { "deleted": { "type": "integer" } }
+        },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
+      }
+    }
+  }
+}

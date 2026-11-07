@@ -1,0 +1,9 @@
+{
+  "endpoint": "GET /kb/self-heal/incidents",
+  "status": 404,
+  "description": "The core runs without LLMIDE_SELF_HEAL=1 (every release build).",
+  "response": {
+    "error": "feature_disabled",
+    "feature": "self_heal"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/self-heal/incidents",
+  "status": 400,
+  "request": {
+    "body": {
+      "incidents": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "incidents must be an array of 1 to 50 reports"
+    }
+  }
+}

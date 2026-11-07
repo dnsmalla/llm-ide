@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/self-heal/incidents",
+  "status": 404,
+  "request": {
+    "body": {
+      "incidents": [
+        {
+          "source": "ui",
+          "category": "chat",
+          "message": "x"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "self_heal"
+  }
+}

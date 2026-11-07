@@ -2074,6 +2074,37 @@ export type ReviewOk = {
   ok: true;
 };
 
+export type Incident = {
+  /** the signature: first 16 hex of sha256(source, category, normalized message, top own stack frame) */
+  id: string;
+  source: "ui" | "log" | "crash" | "server";
+  /** chat | loop | crash | server | <logger msg> | <METHOD> <normalized endpoint> */
+  category: string;
+  /** redacted, at most 2000 characters */
+  message: string;
+  /** redacted, at most 8000 characters */
+  stack: string | null;
+  /** offline | auth | permission | disk | refactor loop | configuration | cancelled | usage (not an app bug), else null */
+  environmental: string | null;
+  /** ms since epoch */
+  firstSeen: number;
+  /** ms since epoch */
+  lastSeen: number;
+  count: number;
+  /** how often a fixed incident came back (plan B) */
+  attempts: number;
+  status: "new" | "fixing" | "proposed" | "ignored" | "needsHuman" | "fixed";
+  note: string | null;
+  /** plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A */
+  proposal: Record<string, unknown> | null;
+};
+
+/** 404 body while the core runs without LLMIDE_SELF_HEAL=1 (feature self_heal). Deliberately not the Error envelope, the same shape as a disabled feature route group. */
+export type SelfHealFeatureDisabled = {
+  error: "feature_disabled";
+  feature: string;
+};
+
 export type EncryptedSyncStatus = {
   configured?: boolean;
   enabled?: boolean;
@@ -8223,6 +8254,69 @@ export type PostKbReviewDeleteResponse401 = CommonError;
 
 export type PostKbReviewDeleteResponse429 = CommonError;
 
+/** Request parts for `GET /kb/self-heal/incidents` (schema/http/self-heal.schema.json). */
+export type GetKbSelfHealIncidentsRequest = Record<string, never>;
+
+export type GetKbSelfHealIncidentsResponse200 = {
+  incidents?: Incident[];
+};
+
+export type GetKbSelfHealIncidentsResponse403 = CommonError;
+
+export type GetKbSelfHealIncidentsResponse404 = SelfHealFeatureDisabled;
+
+/** Request parts for `POST /kb/self-heal/incidents` (schema/http/self-heal.schema.json). */
+export type PostKbSelfHealIncidentsRequest = {
+  body: {
+    /** 1-50 reports; an unusable one is skipped, not refused */
+    incidents: ({
+      source: "ui" | "log" | "crash" | "server";
+      category: string;
+      message: string;
+      stack?: string | null;
+    })[];
+  };
+};
+
+export type PostKbSelfHealIncidentsResponse200 = {
+  recorded?: number;
+  skipped?: number;
+};
+
+export type PostKbSelfHealIncidentsResponse400 = CommonError;
+
+export type PostKbSelfHealIncidentsResponse403 = CommonError;
+
+export type PostKbSelfHealIncidentsResponse404 = SelfHealFeatureDisabled;
+
+/** Request parts for `POST /kb/self-heal/incidents/:id/ignore` (schema/http/self-heal.schema.json). */
+export type PostKbSelfHealIncidentsIdIgnoreRequest = {
+  params: {
+    /** 16 hex */
+    id: string;
+  };
+};
+
+export type PostKbSelfHealIncidentsIdIgnoreResponse200 = {
+  /** false when unknown, another user's, or held by a fix run */
+  ignored?: boolean;
+};
+
+export type PostKbSelfHealIncidentsIdIgnoreResponse403 = CommonError;
+
+export type PostKbSelfHealIncidentsIdIgnoreResponse404 = SelfHealFeatureDisabled;
+
+/** Request parts for `DELETE /kb/self-heal/incidents` (schema/http/self-heal.schema.json). */
+export type DeleteKbSelfHealIncidentsRequest = Record<string, never>;
+
+export type DeleteKbSelfHealIncidentsResponse200 = {
+  deleted?: number;
+};
+
+export type DeleteKbSelfHealIncidentsResponse403 = CommonError;
+
+export type DeleteKbSelfHealIncidentsResponse404 = SelfHealFeatureDisabled;
+
 /** Request parts for `GET /kb/sync/status` (schema/http/sync.schema.json). */
 export type GetKbSyncStatusRequest = Record<string, never>;
 
@@ -10751,6 +10845,39 @@ export interface ApiEndpoints {
       200: PostKbReviewDeleteResponse200;
       401: PostKbReviewDeleteResponse401;
       429: PostKbReviewDeleteResponse429;
+    };
+  };
+  "GET /kb/self-heal/incidents": {
+    request: GetKbSelfHealIncidentsRequest;
+    responses: {
+      200: GetKbSelfHealIncidentsResponse200;
+      403: GetKbSelfHealIncidentsResponse403;
+      404: GetKbSelfHealIncidentsResponse404;
+    };
+  };
+  "POST /kb/self-heal/incidents": {
+    request: PostKbSelfHealIncidentsRequest;
+    responses: {
+      200: PostKbSelfHealIncidentsResponse200;
+      400: PostKbSelfHealIncidentsResponse400;
+      403: PostKbSelfHealIncidentsResponse403;
+      404: PostKbSelfHealIncidentsResponse404;
+    };
+  };
+  "POST /kb/self-heal/incidents/:id/ignore": {
+    request: PostKbSelfHealIncidentsIdIgnoreRequest;
+    responses: {
+      200: PostKbSelfHealIncidentsIdIgnoreResponse200;
+      403: PostKbSelfHealIncidentsIdIgnoreResponse403;
+      404: PostKbSelfHealIncidentsIdIgnoreResponse404;
+    };
+  };
+  "DELETE /kb/self-heal/incidents": {
+    request: DeleteKbSelfHealIncidentsRequest;
+    responses: {
+      200: DeleteKbSelfHealIncidentsResponse200;
+      403: DeleteKbSelfHealIncidentsResponse403;
+      404: DeleteKbSelfHealIncidentsResponse404;
     };
   };
   "GET /kb/sync/status": {

@@ -1,0 +1,26 @@
+{
+  "endpoint": "POST /kb/self-heal/incidents",
+  "status": 200,
+  "request": {
+    "body": {
+      "incidents": [
+        {
+          "source": "server",
+          "category": "POST /kb/notes/:id",
+          "message": "db is locked for me@example.com",
+          "stack": "Error: db is locked\n    at x (/r/extension/kb/db.mjs:9:1)"
+        },
+        {
+          "source": "ui",
+          "category": "chat",
+          "message": "   ",
+          "stack": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "recorded": 1,
+    "skipped": 1
+  }
+}

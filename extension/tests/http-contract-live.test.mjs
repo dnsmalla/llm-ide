@@ -128,6 +128,13 @@ const SKIP_RULES = [
     when: (fx) => /^(GET|POST) \/kb\/sync\//.test(fx.endpoint) && fx.status !== 403,
   },
   {
+    // Self-Heal routes exist only with LLMIDE_SELF_HEAL=1 (debug desktop builds) and then need the bus host proof; the
+    // replay server has neither and answers 404 feature_disabled. The rows were recorded from the handler
+    // (tests/self-heal-routes.test.mjs) and the real server (tests/self-heal-server.test.mjs).
+    why: 'Self-Heal: needs LLMIDE_SELF_HEAL=1 and the bus host proof; covered by tests/self-heal-routes.test.mjs and tests/self-heal-server.test.mjs',
+    when: (fx) => /\/kb\/self-heal\//.test(fx.endpoint),
+  },
+  {
     why: 'token check: needs a vault token seeded for the fixture user; covered by tests/kb-repo-token.test.mjs',
     when: (fx) => fx.endpoint === 'POST /kb/repos/check-token' && (fx.status === 200 || fx.status === 403),
   },

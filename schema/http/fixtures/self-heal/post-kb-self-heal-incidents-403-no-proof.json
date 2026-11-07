@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/self-heal/incidents",
+  "status": 403,
+  "request": {
+    "body": {
+      "incidents": [
+        {
+          "source": "ui",
+          "category": "chat",
+          "message": "x"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

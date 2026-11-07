@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /kb/self-heal/incidents/:id/ignore",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "3f9a1c0b7d2e4a65"
+    }
+  },
+  "response": {
+    "ignored": true
+  }
+}

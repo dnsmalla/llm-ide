@@ -1,0 +1,7 @@
+{
+  "endpoint": "DELETE /kb/self-heal/incidents",
+  "status": 200,
+  "response": {
+    "deleted": 1
+  }
+}

@@ -11,11 +11,11 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 
 ## Summary
 
-- Endpoints in `ALL_ENDPOINTS`: **200**
+- Endpoints in `ALL_ENDPOINTS`: **202**
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
-- Auth: 270 token, 13 public
-- Handler found: 280; no handler found: 3
-- No app and no extension caller: 97 (tests only: 81, comments/docs only: 16, no reference: 0)
+- Auth: 272 token, 13 public
+- Handler found: 281; no handler found: 4
+- No app and no extension caller: 99 (tests only: 83, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
@@ -35,20 +35,20 @@ By first path segment:
 | `/generate-questions` | 1 |
 | `/health` | 1 |
 | `/host-api` | 6 |
-| `/kb` | 166 |
+| `/kb` | 168 |
 | `/launch-app` | 1 |
 
 By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 269 |
+| core | 271 |
 | code_graph_3d | 1 |
 | gantt_issues | 4 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (97):
+Endpoints with no client caller (99):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -116,6 +116,8 @@ Endpoints with no client caller (97):
 - `/host-api/push/send` — tests only
 - `/host-api/push/status` — tests only
 - `/host-api/push/apns` — tests only
+- `/kb/self-heal/incidents` — tests only
+- `/kb/self-heal/incidents/:id/ignore` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -352,8 +354,10 @@ Endpoints with no client caller (97):
 | `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:183` | `sync-model.ts` | - | - |
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | `sync-model.ts` | - | - |
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
+| `/kb/self-heal/incidents` | ALL_ENDPOINTS | DELETE, GET, POST | token | core | `extension/routes/self-heal.mjs:26` | - | - | tests only |
+| `/kb/self-heal/incidents/:id/ignore` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:878` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:894` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:107` | `core.ts` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:132` | `core.ts` | `config.ts` | - |
@@ -364,7 +368,7 @@ Endpoints with no client caller (97):
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:331` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:376` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:909` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:925` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:423` | `core.ts` | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:605` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:620` | - | - | tests only |
@@ -438,7 +442,7 @@ Endpoints with no client caller (97):
 
 ## Consistency
 
-Checked: 283 roster entries, 551 app source files, 52 extension source files.
+Checked: 285 roster entries, 551 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

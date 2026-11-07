@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 120
+  x-api-version: 121
 servers:
   - url: "https://{host}"
     variables:
@@ -38,6 +38,7 @@ tags:
   - name: "provider-catalog"
   - name: "providers-usage"
   - name: "review"
+  - name: "self-heal"
   - name: "sync"
 paths:
   /:
@@ -14412,6 +14413,160 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/self-heal/incidents:
+    get:
+      tags:
+        - "self-heal"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  incidents:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Incident"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+    post:
+      tags:
+        - "self-heal"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "incidents"
+              properties:
+                incidents:
+                  type: "array"
+                  description: "1-50 reports; an unusable one is skipped, not refused"
+                  items:
+                    type: "object"
+                    required:
+                      - "source"
+                      - "category"
+                      - "message"
+                    properties:
+                      source:
+                        type: "string"
+                        enum:
+                          - "ui"
+                          - "log"
+                          - "crash"
+                          - "server"
+                      category:
+                        type: "string"
+                      message:
+                        type: "string"
+                      stack:
+                        type:
+                          - "string"
+                          - "null"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  recorded:
+                    type: "integer"
+                  skipped:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+    delete:
+      tags:
+        - "self-heal"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  deleted:
+                    type: "integer"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+  /kb/self-heal/incidents/{id}/ignore:
+    post:
+      tags:
+        - "self-heal"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "16 hex"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ignored:
+                    type: "boolean"
+                    description: "false when unknown, another user's, or held by a fix run"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
   /kb/session-purges:
     post:
       tags:
@@ -18539,6 +18694,79 @@ components:
       properties:
         ok:
           const: true
+    Incident:
+      type: "object"
+      required:
+        - "id"
+        - "source"
+        - "category"
+        - "message"
+        - "stack"
+        - "environmental"
+        - "firstSeen"
+        - "lastSeen"
+        - "count"
+        - "attempts"
+        - "status"
+        - "note"
+        - "proposal"
+      properties:
+        id:
+          type: "string"
+          description: "the signature: first 16 hex of sha256(source, category, normalized message, top own stack frame)"
+        source:
+          type: "string"
+          enum:
+            - "ui"
+            - "log"
+            - "crash"
+            - "server"
+        category:
+          type: "string"
+          description: "chat | loop | crash | server | <logger msg> | <METHOD> <normalized endpoint>"
+        message:
+          type: "string"
+          description: "redacted, at most 2000 characters"
+        stack:
+          type:
+            - "string"
+            - "null"
+          description: "redacted, at most 8000 characters"
+        environmental:
+          type:
+            - "string"
+            - "null"
+          description: "offline | auth | permission | disk | refactor loop | configuration | cancelled | usage (not an app bug), else null"
+        firstSeen:
+          type: "integer"
+          description: "ms since epoch"
+        lastSeen:
+          type: "integer"
+          description: "ms since epoch"
+        count:
+          type: "integer"
+        attempts:
+          type: "integer"
+          description: "how often a fixed incident came back (plan B)"
+        status:
+          type: "string"
+          enum:
+            - "new"
+            - "fixing"
+            - "proposed"
+            - "ignored"
+            - "needsHuman"
+            - "fixed"
+        note:
+          type:
+            - "string"
+            - "null"
+        proposal:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A"
     IngestResult:
       type: "object"
       required:
@@ -20745,6 +20973,17 @@ components:
           description: "Relative paths created by this call (templates/README.md, templates/<folder>/template.md, ...). Files that already exist are not listed."
         count:
           type: "integer"
+    SelfHealFeatureDisabled:
+      type: "object"
+      required:
+        - "error"
+        - "feature"
+      properties:
+        error:
+          const: "feature_disabled"
+        feature:
+          type: "string"
+      description: "404 body while the core runs without LLMIDE_SELF_HEAL=1 (feature self_heal). Deliberately not the Error envelope, the same shape as a disabled feature route group."
     Session:
       type: "object"
       required:
