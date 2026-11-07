@@ -11,6 +11,8 @@ import { WebChat } from "./screens/WebChat.tsx";
 import { ComposeBar } from "./screens/ComposeBar.tsx";
 import { ReadPanel } from "./screens/ReadPanel.tsx";
 import { SyncLinkEntry, SyncTier } from "./screens/SyncTier.tsx";
+import { createPushController } from "./push/controller.ts";
+import { PushToggle } from "./screens/PushToggle.tsx";
 
 /** The session's connection state, re-rendered on every change. */
 function useConnection(session: Session | null): ConnectionState | null {
@@ -24,6 +26,9 @@ function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionS
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
   const cs = useSyncExternalStore(compose.subscribe, compose.getState, compose.getState);
+  const [push] = useState(() => createPushController(c));
+  const ps = useSyncExternalStore(push.subscribe, push.getState, push.getState);
+  useEffect(() => { void push.refresh(); return c.onResync(() => void push.refresh()); }, [push, c]);
   const capabilities = state.capabilities ?? c.capabilities;
   const canCompose = capabilities.has("compose");
   const send = (t: string) => {
@@ -33,6 +38,7 @@ function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionS
   const newChat = () => void controller.newChat().then((ok) => { if (ok) void read.refresh(); });
   return (
     <div className="web-shell">
+      <PushToggle state={ps} onEnable={() => void push.enable()} onDisable={() => void push.disable()} />
       <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}
         onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
       {!readState.open && (

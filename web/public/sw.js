@@ -1,6 +1,7 @@
 // App-shell service worker. It caches the built page and its hashed assets so the installed client opens
 // offline; it never caches the Host API WebSocket, pairing data, tokens or any cross-origin response.
 importScripts("sw-prune.js");
+importScripts("sw-push.js");
 
 const CACHE = "llmide-shell-__SW_BUILD__";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png", "./icons/apple-touch-icon.png"];
@@ -31,6 +32,23 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
+});
+
+// A push names a fixed kind and a count; the words come from sw-push.js (the desktop notifier's table). Never fetch here.
+self.addEventListener("push", (event) => {
+  let data = null;
+  try { data = event.data ? event.data.json() : null; } catch { data = null; }
+  const n = self.LLMIDEPush.render(data);
+  if (!n) return;
+  event.waitUntil(self.registration.showNotification(n.title, { body: n.body, tag: n.tag, icon: "./icons/icon-192.png" }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    const open = list.find((c) => new URL(c.url).origin === self.location.origin);
+    return open ? open.focus() : self.clients.openWindow("./");
+  }));
 });
 
 self.addEventListener("fetch", (event) => {

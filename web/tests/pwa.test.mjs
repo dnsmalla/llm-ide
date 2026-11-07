@@ -101,3 +101,16 @@ test("the stamp CLI works from a path containing a space", () => {
   assert.doesNotMatch(readFileSync(target, "utf8"), /__SW_BUILD__/);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("the worker shows a push only from its local text table, and a click only focuses or opens the app", () => {
+  const sw = read("public/sw.js");
+  assert.match(sw, /importScripts\("sw-push\.js"\)/);
+  assert.match(sw, /self\.addEventListener\("push"/);
+  assert.match(sw, /self\.LLMIDEPush\.render\(data\)/);
+  assert.match(sw, /self\.addEventListener\("notificationclick"/);
+  assert.match(sw, /self\.clients\.openWindow\("\.\/"\)/);
+  const push = sw.slice(sw.indexOf('addEventListener("push"'), sw.indexOf('addEventListener("fetch"'));
+  assert.doesNotMatch(push, /fetch\(|caches\.|importScripts|eval\(/, "no network, cache or code in the push path");
+  const csp = read("vite.config.ts");
+  assert.doesNotMatch(csp, /fcm\.googleapis|push\.services\.mozilla|notify\.windows|web\.push\.apple/, "the browser talks to its push service, not the page");
+});

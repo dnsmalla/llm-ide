@@ -381,3 +381,5 @@ body {
 .web-foot a { color: #9fc4e2; text-decoration: none; }
 .web-foot a:hover { text-decoration: underline; }
 @media (max-width: 620px) { .web-legal { padding: 16px; } .web-legal-card { padding: 20px; } }
+
+.web-push { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 16px; }

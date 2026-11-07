@@ -78,7 +78,7 @@ access logs and rate limiting.
 
 The build ships `manifest.webmanifest`, icons and `sw.js`; `npm start` serves the manifest as
 `application/manifest+json` and the worker with `no-cache`. Installation and service workers require HTTPS or
-`localhost`; a plain-HTTP domain will load the page but not offer install/offline.
+`localhost`; a plain-HTTP domain will load the page but not offer install/offline. Push notifications use the same worker plus `sw-push.js` (its text table). They need HTTPS or `localhost`, a desktop serving the Host API `push` capability, and on iPhone Safari a home-screen web app (iOS 16.4+). The CSP needs no push host, because the browser, not the page, talks to its push service.
 
 ## Release checklist
 
