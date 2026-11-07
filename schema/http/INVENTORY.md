@@ -250,7 +250,7 @@ Endpoints with no client caller (98):
 | `/kb/providers/catalog/disconnect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:123` | `providers-model.ts` | - | - |
 | `/kb/providers/catalog/test` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:128` | `providers-model.ts` | - | - |
 | `/kb/providers/catalog/models` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:128` | `providers-model.ts`, `route.ts` | - | - |
-| `/kb/providers/custom` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:93` | `providers-model.ts` | - | - |
+| `/kb/providers/custom` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:93` | `providers-model.ts`, `route.ts` | - | - |
 | `/kb/providers/settings` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:97` | `model-notices.tsx`, `providers-model.ts` | - | - |
 | `/kb/providers/turn` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:143` | - | - | tests only |
 | `/kb/agent-sdk` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:204` | `app-model.ts` | - | - |
@@ -444,7 +444,7 @@ Endpoints with no client caller (98):
 
 ## Consistency
 
-Checked: 288 roster entries, 556 app source files, 52 extension source files.
+Checked: 288 roster entries, 559 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 
