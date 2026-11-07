@@ -212,7 +212,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
             chatSaveError={s.chatSaveError}
             onSaveChat={() => { if (chatOutput) void store.saveChatReply(chatOutput.text); }}
           />
-          {showChat ? <div className="dg-chat-dock"><ChatDockSlot active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} /></div> : null}
+          {showChat ? <div className="dg-chat-dock"><ChatDockSlot surface="docgen" active={p.active && showChat} projectRoot={p.projectRoot} initialPath={store.surface === "visual" ? s.selection.items().find((i) => i.kind === "file" && /\.(png|jpe?g|gif|webp|bmp|heic|avif|tiff?|svg)$/i.test(i.rel))?.rel ?? null : null} /></div> : null}
         </aside>
       </div>
     );

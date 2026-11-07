@@ -51,11 +51,12 @@ export interface ChatRuntime {
   noteProject(root: string | null): void;
 }
 
-let runtime: ChatRuntime | null = null;
+const runtimes = new Map<string, ChatRuntime>();
 
-/** The app's one chat runtime, created on first use. */
-export function chatRuntime(): ChatRuntime {
-  if (runtime) return runtime;
+/** One chat runtime per surface: the Chat section, Explorer, Review and Doc Gen keep separate open chats. */
+export function chatRuntime(surface = "chat"): ChatRuntime {
+  const existing = runtimes.get(surface);
+  if (existing) return existing;
   const transport = coreTransportFrom(shellCore);
   // Capability choice: inside the desktop app the chat file store (Mac format, live-then-archive) is the one copy;
   // in a plain browser (vite dev, the extension) the core's own chat routes are.
@@ -78,7 +79,7 @@ export function chatRuntime(): ChatRuntime {
       was = now;
     });
   }
-  runtime = {
+  const runtime: ChatRuntime = {
     transport, store, bypass, controller, ui, root,
     noteProject(next) {
       if (noted !== undefined && noted !== next) {
@@ -88,6 +89,7 @@ export function chatRuntime(): ChatRuntime {
       noted = next;
     },
   };
+  runtimes.set(surface, runtime);
   return runtime;
 }
 
@@ -102,8 +104,8 @@ export interface ChatSurface {
  * Wires one chat surface to the shared runtime. `active` = this surface is on screen: only then does it re-check
  * what is running on the core and re-attach to running turns (a hidden surface stays quiet).
  */
-export function useChatSurface(projectRoot: string | null, active: boolean, initialPath: string | null = null): ChatSurface {
-  const rt = chatRuntime();
+export function useChatSurface(projectRoot: string | null, active: boolean, initialPath: string | null = null, surface = "chat"): ChatSurface {
+  const rt = chatRuntime(surface);
   rt.root.current = projectRoot;
   const { controller, transport, bypass } = rt;
   useEffect(() => rt.noteProject(projectRoot), [rt, projectRoot]);

@@ -11,6 +11,8 @@ export interface ChatDockProps {
   projectRoot: string | null;
   /** The active Explorer file, auto-attached when the dock opens (Mac `initialURL`). */
   initialPath?: string | null;
+  /** Which section owns this dock: each keeps its own open chat and draft. */
+  surface?: string;
   /** Hides the dock; the dock's header shows a button when given. */
   onCollapse?: () => void;
 }

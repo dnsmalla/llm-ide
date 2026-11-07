@@ -203,7 +203,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
               }}
             />
             <aside className="rv-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
-              <ChatDockSlot active={active} projectRoot={projectRoot} initialPath={selected?.path ?? null} onCollapse={() => setShowChat(false)} />
+              <ChatDockSlot surface="review" active={active} projectRoot={projectRoot} initialPath={selected?.path ?? null} onCollapse={() => setShowChat(false)} />
             </aside>
           </>
         ) : null}

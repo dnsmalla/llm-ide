@@ -516,7 +516,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
             onWidthChange={(w) => setChatDock((d) => ({ ...d, width: clampDockWidth(w, viewportW, width) }))}
           />
           <aside id="ex-chat-dock" className="ex-chat" style={{ width: chatWidth }} aria-label="Code Assistant">
-            <ChatDockSlot active={active} projectRoot={projectRoot} initialPath={snap.tabs.activeId && findEntry(snap, snap.tabs.activeId)?.kind === "file" ? snap.tabs.activeId : null} onCollapse={() => setChatDock((d) => ({ ...d, open: false }))} />
+            <ChatDockSlot surface="explorer" active={active} projectRoot={projectRoot} initialPath={snap.tabs.activeId && findEntry(snap, snap.tabs.activeId)?.kind === "file" ? snap.tabs.activeId : null} onCollapse={() => setChatDock((d) => ({ ...d, open: false }))} />
           </aside>
         </>
       )}

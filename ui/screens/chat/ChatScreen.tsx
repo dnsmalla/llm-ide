@@ -37,6 +37,7 @@ import type { ChatStore, SessionSummary } from "./store";
 import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
 import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE } from "./tauri-store";
+import { claimSession, sessionVisible } from "./surface-sessions";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -81,11 +82,13 @@ export interface ChatScreenProps {
   dock?: boolean;
   /** Dock only: hides the dock (the header shows the button when this is given). */
   onCollapse?: () => void;
+  /** Which surface owns this chat list; each dock sees only the chats it created. */
+  surface?: string;
 }
 
 const SESSION_PAGE = 100;
 
-export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, active = false, dock = false, onCollapse }: ChatScreenProps) {
+export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, active = false, dock = false, onCollapse, surface = "chat" }: ChatScreenProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -129,7 +132,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     if (skipRev.current === sessionsRev) return undefined; // our own change: the list is already up to date here
     const ac = new AbortController();
     store.listSessions({ limit: SESSION_PAGE, offset: 0 }, ac.signal)
-      .then(setSessions)
+      .then((list) => setSessions(list.filter((x) => sessionVisible(surface, x.id))))
       .catch((e) => { if (!ac.signal.aborted) setListError(describeError(e).message); });
     return () => ac.abort();
   }, [store, sessionsRev]);
@@ -218,7 +221,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 
   const newChat = useCallback(async () => {
     try {
-      const s = await store.createSession({});
+      const s = await store.createSession({}); claimSession(surface, s.id);
       setSessions((cur) => [s, ...cur]);
       setActiveId(s.id);
       bumpSessions();
