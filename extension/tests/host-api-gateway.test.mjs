@@ -8,8 +8,8 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0 };
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, member = () => ({ teamRole: 'owner', maxMode: 'execute' }) } = {}) {
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   let quick = null;
@@ -26,6 +26,8 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     hostName: () => 'Test Computer',
     certificateFingerprint: () => fingerprint,
     capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : []), ...(t.compose ? ['compose'] : [])],
+    // ADR 0021 authority; the default is the install owner, so the full served list is paired.
+    member: (userId) => t.member(userId),
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
@@ -333,6 +335,7 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
   let code = 'TURN_IN_PROGRESS';
   const g = createGateway({
     send: (_s, text) => t.sent.push([_s, JSON.parse(text)]), close: () => {}, hostName: () => 'X', capabilities: () => ['host', 'chat', 'approvals'], log: () => {},
+    member: () => ({ teamRole: 'owner', maxMode: 'execute' }),
     pins: { consumePin: () => 'u1' }, devices: t.devices,
     quickChat: { get: () => 'chat-1', set: () => {}, create: () => 'chat-1' },
     turn: () => Promise.reject(Object.assign(new Error('Busy.'), { code })),
@@ -356,6 +359,7 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
   let thrown = null;
   const g2 = createGateway({
     send: (_s, text) => { if (JSON.parse(text).type === 'event') throw new Error('socket gone'); }, close: () => {}, hostName: () => 'X', capabilities: () => ['host', 'chat', 'approvals'], log: () => {},
+    member: () => ({ teamRole: 'owner', maxMode: 'execute' }),
     pins: { consumePin: () => 'u1' }, devices: t.devices,
     quickChat: { get: () => 'chat-1', set: () => {}, create: () => 'chat-1' },
     turn: ({ onEvent }) => { try { onEvent({ type: 'delta', text: 'x' }); onEvent({ type: 'result' }); } catch (e) { thrown = e; } return Promise.resolve(); },
@@ -618,4 +622,57 @@ test('chat.new: refused busy while a turn of this user runs', async () => {
 test('chat.new: not served without compose', async () => {
   const t = harness(); const s = {}; await t.paired(s);
   await t.g.receive(s, req('c-1', 'chat.new', {})); assert.equal(t.lastError(), 'capability_unavailable');
+});
+
+// --- team authority at pairing (ADR 0021, plan Task 3) ---------------------
+// A viewer or a `max_mode` none member is served host + read + push only: chat, approvals,
+// tool_approvals and compose never enter the pairing token, and a re-auth recomputes from the stored
+// scopes ∩ the same filter, so a demotion applies on the next connect.
+
+const VIEWER = () => ({ userId: 'u1', teamRole: 'viewer', maxMode: 'execute', usdCapMonth: 20 });
+const NO_TURNS = () => ({ userId: 'u1', teamRole: 'member', maxMode: 'none', usdCapMonth: 20 });
+const READER = () => ({ userId: 'u1', teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20 });
+
+test('pairing as a viewer grants host + read + push only', async () => {
+  const t = harness({ read: true, member: VIEWER });
+  const s = {};
+  await t.paired(s);
+  assert.deepEqual(t.last().result.capabilities, ['host', 'read']);
+  const token = t.last().result.token;
+  assert.deepEqual(t.tokens.get(token).scopes, ['host', 'read']);
+});
+
+test('pairing as a max_mode none member grants the same minimum', async () => {
+  const t = harness({ read: true, compose: true, toolApprovals: true, member: NO_TURNS });
+  await t.paired({});
+  assert.deepEqual(t.last().result.capabilities, ['host', 'read']);
+});
+
+test('pairing as a read_only or execute member keeps everything served', async () => {
+  for (const member of [READER, () => ({ teamRole: 'member', maxMode: 'execute' })]) {
+    const t = harness({ read: true, member });
+    await t.paired({});
+    assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'read']);
+  }
+});
+
+test('a demoted member loses chat on the next token auth (stored scopes ∩ the filter)', async () => {
+  let current = READER;
+  const t = harness({ read: true, member: () => current() });
+  const s1 = {};
+  await t.paired(s1);
+  const token = t.last().result.token;
+  assert.deepEqual(t.tokens.get(token).scopes, ['host', 'chat', 'approvals', 'read']);
+
+  current = VIEWER;
+  const s2 = { n: 2 };
+  t.g.opened(s2, '127.0.0.1');
+  await t.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  assert.deepEqual(t.last().result.capabilities, ['host', 'read']);
+  // The stored token still carries the old scopes; the connection's grants are the filtered set, so
+  // chat.send is refused on this connection.
+  await t.g.receive(s2, req('c-send', 'chat.send', { text: 'hi' }));
+  assert.equal(t.lastError(), 'denied');
+  assert.equal(t.turns.length, 0);
 });

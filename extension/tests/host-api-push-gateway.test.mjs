@@ -19,6 +19,8 @@ function harness() {
   t.g = createGateway({
     send: (_s, text) => t.sent.push(JSON.parse(text)), close: () => {}, hostName: () => 'Test Computer', log: () => {},
     capabilities: () => ['host', 'chat', 'approvals', ...(t.served ? ['push'] : [])],
+    // ADR 0021: the paired account is this install's owner (the pre-team fixture world had no roles).
+    member: () => ({ teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }),
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
     devices: {
       issueDeviceToken(userId, _name, _now, scopes) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId, scopes }); return { deviceId, token }; },

@@ -36,6 +36,8 @@ function harness({ caps = ['host', 'chat', 'approvals'] } = {}) {
     close: (s) => t.closed.push(s),
     hostName: () => 'Test Computer',
     capabilities: () => t.caps,
+    // ADR 0021: the paired account is this install's owner (the pre-team fixture world had no roles).
+    member: () => ({ teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }),
     log: () => {},
     now: () => t.clock,
     audit: (event, fields) => t.audit.push({ event, ...fields }),

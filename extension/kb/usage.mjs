@@ -19,6 +19,7 @@ import { ANTHROPIC_MODELS, canonicalModel, modelAliases } from './model-ids.mjs'
 import { emitOsEvent } from '../core/os-events.mjs';
 import { mirrorUsageCall } from './agent-usage.mjs';
 import { learnFromSnapshot } from './learned-limits.mjs';
+import { getMember } from './members.mjs';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -462,6 +463,10 @@ function maybePruneLedger(db) {
 export function setLimits(db, userId, chains) {
   if (!userId || !chains || typeof chains !== 'object') return { ok: false };
   const del = db.prepare('DELETE FROM model_limits WHERE user_id=? AND provider=?');
+  // ADR 0021: the limits UI stays self-service, but it may not lift the member's own USD ceiling — a
+  // usd-unit row above the member cap is clamped to it. 0 = the member has no cap (no clamp).
+  const memberCap = Number(getMember(db, userId)?.usdCapMonth);
+  const usdCeiling = Number.isFinite(memberCap) && memberCap > 0 ? memberCap : null;
   const ins = db.prepare(
     `INSERT INTO model_limits
        (user_id, provider, model, priority, enabled, limit_value, unit, window_kind, threshold_pct, updated_at)
@@ -476,12 +481,17 @@ export function setLimits(db, userId, chains) {
         const model = typeof m?.model === 'string' ? canonicalModel(provider, m.model.slice(0, 128)) : '';
         if (!model || seen.has(model)) return;
         seen.add(model);
+        // `usd` is not in VALID_UNITS (no client writes it yet), but a supplied usd row is stored as
+        // one — usdCapForModel reads that unit — and clamped to the member's monthly cap.
+        const unit = m.unit === 'usd' ? 'usd' : (VALID_UNITS.has(m.unit) ? m.unit : 'runs');
+        let value = clampInt(m.limit_value, 0, 1_000_000_000, 0);
+        if (unit === 'usd' && usdCeiling != null && value > usdCeiling) value = usdCeiling;
         ins.run(
           userId, provider, model,
           clampInt(m.priority, 0, 999, i),
           m.enabled === false ? 0 : 1,
-          clampInt(m.limit_value, 0, 1_000_000_000, 0),
-          VALID_UNITS.has(m.unit) ? m.unit : 'runs',
+          value,
+          unit,
           VALID_WINDOWS.has(m.window_kind) ? m.window_kind : 'daily',
           clampInt(m.threshold_pct, 1, 100, 90),
         );
@@ -531,7 +541,13 @@ export function usdCapForModel(db, userId, provider, model) {
         ORDER BY model = ? DESC LIMIT 1`
     ).get(userId, provider, ...ids, live);
     const cap = Number(row?.limit_value);
-    return Number.isFinite(cap) && cap > 0 ? cap : null;
+    const modelCap = Number.isFinite(cap) && cap > 0 ? cap : null;
+    // ADR 0021: the member's monthly USD cap also bounds the turn. Both non-zero → the smaller; one
+    // non-zero → that one; 0 (or no members row) means "no cap", exactly as before.
+    const memberCap = Number(getMember(db, userId)?.usdCapMonth);
+    const memberUsd = Number.isFinite(memberCap) && memberCap > 0 ? memberCap : null;
+    if (modelCap != null && memberUsd != null) return Math.min(modelCap, memberUsd);
+    return modelCap ?? memberUsd;
   } catch {
     return null; // best-effort — a limits read must never fail the turn
   }

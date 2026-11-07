@@ -29,6 +29,8 @@ function gatewayFor(userId) {
     close: () => {},
     hostName: () => 'Test Computer',
     capabilities: () => ['host', 'chat', 'approvals', 'read'],
+    // ADR 0021: the paired account is this install's owner (the pre-team fixture world had no roles).
+    member: () => ({ teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }),
     pins: { consumePin: (pin) => (pin === '123456' ? userId : null) },
     devices: {
       issueDeviceToken: (_u, _n, _now, scopes) => ({ deviceId: `h1-${userId}`, token: `tok-${userId}-0123456789`, scopes }),

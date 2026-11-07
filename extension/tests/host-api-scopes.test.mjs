@@ -32,6 +32,8 @@ function harness({ toolApprovals = false } = {}) {
     close: () => {},
     hostName: () => 'Test Computer',
     capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : [])],
+    // ADR 0021: the paired account is this install's owner (the pre-team fixture world had no roles).
+    member: () => ({ teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }),
     log: () => {},
     chatClearEnabled: () => false,
     pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },

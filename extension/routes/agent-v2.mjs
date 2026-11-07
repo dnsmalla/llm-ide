@@ -21,9 +21,11 @@ import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/tasks/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { classifyCodeAssistMode, quickMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/modes/mode-classify.mjs';
+import { restrictsTools } from '../llm_agent/modes/mode-personas.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
+import { getMember } from '../kb/members.mjs';
 import { deleteContinuation } from '../kb/chat-continuations.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
 import { clearChatMessages } from '../kb/chat-sessions.mjs';
@@ -560,6 +562,22 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     }
   } else {
     mode = requestedMode && MODES.has(requestedMode) ? requestedMode : DEFAULT_MODE;
+  }
+
+  // ADR 0021: the member's highest run mode caps whatever the client or classifier chose. One place,
+  // after `mode` is final and before the lock, for the HTTP stream and startHostTurn alike (a phone
+  // turn runs through this same function). No members row = an unregistered caller: execute, as today.
+  const member = getMember(getDb(), userId);
+  const maxMode = member?.maxMode ?? 'execute';
+  if (maxMode === 'none') {
+    // The reason only — never the message, the chat id or any prompt text.
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'max_mode_none' } });
+    return io.refuse({ code: 'ROLE_DENIED', status: 403, message: 'Your team role cannot run turns' });
+  }
+  if (maxMode === 'read_only' && !restrictsTools(mode)) {
+    mode = clampToReadOnly(mode);
+    body.permissionMode = null;
+    bypassGrants.revoke(userId, chatSessionId);
   }
 
   // Slash-command expansion — parity with the legacy loop: a message that

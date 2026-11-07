@@ -12,14 +12,29 @@ import { attachmentsToFiles, isBinaryAttachment, optionsOf, offersModel } from '
 import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
+import { getDb } from '../../kb/db.mjs';
+import { getMember } from '../../kb/members.mjs';
 
 export const MAX_SESSIONS = 4;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
 const TOP_LEVEL_ID = /^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})"/;
 export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every MAX_SESSIONS slot before auth
-// Refusals that clear by themselves; SESSION_TOKEN_LIMIT and SLASH_COMMAND_FAILED do not.
+// Refusals that clear by themselves; SESSION_TOKEN_LIMIT, SLASH_COMMAND_FAILED and ROLE_DENIED do not.
+// ROLE_DENIED is the team clamp's refusal (ADR 0021): its message is the gateway's own text, so it is
+// relayed like the other known codes instead of the generic "turn failed" line.
 const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
-const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED']);
+const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED', 'ROLE_DENIED']);
+// A viewer / max_mode none member is served the minimum: host + read + push only (ADR 0021). Chat,
+// approvals, tool_approvals and compose are all refused, and the pairing token never carries them.
+const MINIMAL_SCOPES = ['host', 'read', 'push'];
+// The served/reserved capability list for this member (ADR 0021): the minimum for a viewer, a
+// `max_mode` none member, or a caller with no authority row at all (fail closed — registration always
+// writes one, so this only reaches a legacy/unknown user), everything otherwise.
+function minimalFor(member, caps) {
+  return (!member || member.maxMode === 'none' || member.teamRole === 'viewer')
+    ? caps.filter((c) => MINIMAL_SCOPES.includes(c))
+    : caps;
+}
 
 export function hostApiCapabilities(env = process.env) {
   return ['host', 'chat', 'approvals',
@@ -36,6 +51,8 @@ const pushModule = () => import('./push.mjs'); // Task 6; lazy, off the boot pat
 function defaultDeps() {
   return {
     capabilities: () => hostApiCapabilities(),
+    // The paired user's authority row (ADR 0021), read fresh at pairing and at every token re-auth.
+    member: (userId) => getMember(getDb(), userId),
     chatClearEnabled: () => process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
     turn: async (args) => (await agentV2()).startHostTurn(args),
     cancel: async (userId, chatSessionId) => (await agentV2()).cancelChatTurn(userId, chatSessionId),
@@ -414,8 +431,11 @@ export function createGateway(overrides) {
           return fail(s, id, 'auth_failed', 'Wrong PIN.');
         }
         pairThrottle.success(entry.peer);
+        // ADR 0021: a viewer / `max_mode` none member is served the minimum only. The filter is applied
+        // here, at pairing, so the token's scopes never carry chat / approvals / tool_approvals / compose.
+        const served2 = minimalFor(deps.member(pinUser), served);
         // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
-        const scopes = [...new Set(['host', ...served])];
+        const scopes = [...new Set(['host', ...served2])];
         const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
         entry.state.authenticated(pinUser, deviceId);
         clearTimeout(entry.timer);
@@ -433,7 +453,11 @@ export function createGateway(overrides) {
         tokenThrottle.success(entry.peer);
         entry.state.authenticated(auth.userId, auth.deviceId);
         clearTimeout(entry.timer);
-        return respond(s, id, command, { capabilities: grant(entry, auth.scopes ?? LEGACY_SCOPES) });
+        // Re-auth recomputes from the stored scopes ∩ the member filter, so a demoted member loses chat
+        // on the next connect (ADR 0021).
+        return respond(s, id, command, {
+          capabilities: grant(entry, minimalFor(deps.member(auth.userId), auth.scopes ?? LEGACY_SCOPES)),
+        });
       }
       case 'host.auth.revoke': {
         const auth = deps.devices.authenticateDeviceToken(p.token, deps.now());
