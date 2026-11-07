@@ -49,6 +49,7 @@ mod project_search;
 mod pty;
 mod rtk;
 mod secrets;
+mod self_heal;
 mod source_pick;
 #[cfg(feature = "spike")]
 mod sse_replay;

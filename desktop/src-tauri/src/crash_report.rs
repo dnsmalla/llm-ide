@@ -199,7 +199,7 @@ fn home_dir() -> Option<String> {
     std::env::var("HOME").ok().or_else(|| std::env::var("USERPROFILE").ok()).filter(|h| !h.trim().is_empty())
 }
 
-fn records_dir() -> Result<PathBuf, String> {
+pub(crate) fn records_dir() -> Result<PathBuf, String> {
     Ok(fsutil::desktop_data_dir()?.join(DIR_NAME))
 }
 
@@ -272,6 +272,22 @@ pub fn latest_in(dir: &Path) -> Option<CrashNotice> {
         os: redact(&rec.os, None, 80),
         count,
     })
+}
+
+/// Every readable pending record with its file name (the crash id Self-Heal imports once), re-redacted on read like
+/// `latest_in`.
+pub fn pending_records_in(dir: &Path) -> Vec<(String, CrashRecord)> {
+    let home = home_dir();
+    pending_files(dir)
+        .into_iter()
+        .filter_map(|(_, p)| {
+            let id = p.file_name()?.to_str()?.to_string();
+            let mut rec = read_record(&p)?;
+            rec.message = redact(&rec.message, home.as_deref(), MESSAGE_CAP);
+            rec.location = redact(&rec.location, home.as_deref(), LOCATION_CAP);
+            Some((id, rec))
+        })
+        .collect()
 }
 
 /// Deletes every pending record in `dir` (and nothing else). Returns how many files were removed.
