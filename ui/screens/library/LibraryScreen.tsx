@@ -64,6 +64,8 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [reloadKey, setReloadKey] = useState(0);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [projectFile, setProjectFile] = useState<string | null>(null);
+  const [projectFileDirty, setProjectFileDirty] = useState(false);
+  const selectProjectFile = (path: string | null) => { if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return; setProjectFileDirty(false); setProjectFile(path); };
   const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
   // ---- write side
   const queue = useMemo(() => new WriteQueue(), []);
@@ -210,7 +212,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 extensionId={extensionId}
                 extensions={extensions}
                 connections={connections}
-                projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={setProjectFile} active={active} /> : undefined}
+                projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={(path) => selectProjectFile(path)} active={active} /> : undefined}
                 onSection={(id) => {
                   setProjectFile(null);
                   setExtensionId(null);
@@ -247,7 +249,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
       ) : (
         <main className="lib-detail" aria-label={projectFile ? "Project file" : "Note"}>
           {projectFile ? (
-            <ProjectFileView path={projectFile} deps={files!} onClose={() => setProjectFile(null)} />
+            <ProjectFileView path={projectFile} deps={files!} onDirtyChange={setProjectFileDirty} onClose={() => selectProjectFile(null)} />
           ) : selected && write ? (
             <NoteWorkspace
               key={selected}

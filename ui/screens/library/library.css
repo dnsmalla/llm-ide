@@ -177,3 +177,6 @@
 .lib-view-toggle .lib-btn[aria-pressed="true"] { background: var(--tok-color-surface2); border-color: var(--tok-color-accent); }
 .lib-project-markdown { flex: 1; min-height: 0; overflow: auto; padding: var(--tok-space-sm) var(--tok-space-md); }
 .lib-project-edit { flex: 1; min-height: 240px; margin: 0; padding: var(--tok-space-sm); resize: none; overflow: auto; border: 0; outline: none; background: var(--tok-color-editor-background, var(--tok-color-surface)); color: var(--tok-color-text); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); tab-size: 2; }
+.lib-link-btn { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; text-decoration: underline; padding: 0 4px; }
+.lib-discard { display: flex; align-items: center; gap: 8px; padding: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
+.lib-discard span { flex: 1; }

@@ -41,9 +41,28 @@ export function decodeProjectEntries(body: unknown): ProjectEntry[] {
 }
 
 /** A text read for the read-only viewer; null for binary/too-large. */
-export function decodeProjectFile(body: unknown): { text: string; bytes: number } | null {
+export interface ProjectFileBody {
+  text: string;
+  bytes: number;
+  /** The hash the host read; saving must send it back so a disk change is not overwritten. */
+  hash: string | null;
+  encoding: string;
+  bom: boolean;
+  eol: "lf" | "crlf";
+  read_only: boolean;
+}
+export function decodeProjectFile(body: unknown): ProjectFileBody | null {
   if (!isRecord(body) || body.status !== "ok" || typeof body.text !== "string") return null;
-  return { text: body.text, bytes: typeof body.size === "number" ? body.size : body.text.length };
+  const enc = typeof body.encoding === "string" ? body.encoding : "utf-8";
+  return {
+    text: body.text,
+    bytes: typeof body.size === "number" ? body.size : body.text.length,
+    hash: typeof body.hash === "string" ? body.hash : null,
+    encoding: enc,
+    bom: body.bom === true,
+    eol: body.eol === "crlf" ? "crlf" : "lf",
+    read_only: body.read_only === true || enc === "unknown",
+  };
 }
 
 /**
@@ -64,4 +83,10 @@ export async function revealFirst(paths: readonly string[], reveal: (projectRela
     }
   }
   return false;
+}
+
+/** The exact save request for an edited project file: read hash/encoding/BOM/EOL, never a blind overwrite. */
+export function projectSaveRequest(body: ProjectFileBody, text: string): { text: string; expected_hash: string | null; encoding: string; bom: boolean; force: false } {
+  const eol = body.eol === "crlf" ? "\r\n" : "\n";
+  return { text: text.replace(/\r?\n/g, eol), expected_hash: body.hash, encoding: body.encoding, bom: body.bom, force: false };
 }

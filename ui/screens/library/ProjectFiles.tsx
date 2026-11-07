@@ -8,7 +8,7 @@ import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { shellBus } from "../shell/bus";
 import { Dialog } from "./write/Dialog";
 import { MarkdownView } from "./MarkdownView";
-import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, type ProjectEntry } from "./project-files.ts";
+import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, projectSaveRequest, type ProjectEntry } from "./project-files.ts";
 import { addFilesToFolder, addSummary, createFolder, pickReason, planRemove, runRemove, validateEntryName, type Mutations, type RemovePlan } from "./project-ops.ts";
 
 export interface ProjectFilesDeps {
@@ -17,7 +17,7 @@ export interface ProjectFilesDeps {
   /** Add and remove (trash only). Absent: the tree is read-only and "+" opens Explorer. */
   mutate?: Mutations;
   /** Save an edited Markdown project file in place. */
-  write?: (path: string, text: string) => Promise<void>;
+  write?: (path: string, text: string, opts: { expected_hash: string | null; encoding: string; bom: boolean }) => Promise<string>;
 }
 
 interface MenuState {
@@ -312,30 +312,42 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
   );
 }
 
-export function ProjectFileView({ path, deps, onClose }: { path: string; deps: ProjectFilesDeps; onClose: () => void }): ReactNode {
+export function ProjectFileView({ path, deps, onClose, onDirtyChange }: { path: string; deps: ProjectFilesDeps; onClose: () => void; onDirtyChange?: (dirty: boolean) => void }): ReactNode {
   const [body, setBody] = useState<ReturnType<typeof decodeProjectFile> | "error" | undefined>(undefined);
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"preview" | "edit">("preview");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [readNonce, setReadNonce] = useState(0);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => {
     let live = true;
     setBody(undefined); setDirty(false); setSaveError(null);
     deps.read(path).then(
-      (r) => { if (!live) return; const d = decodeProjectFile(r); setBody(d); setText(d?.text ?? ""); },
+      (r) => { if (!live) return; const d = decodeProjectFile(r); setBody(d); setText(d?.text ?? ""); setConfirmDiscard(false); },
       () => live && setBody("error"),
     );
     return () => { live = false; };
-  }, [deps, path]);
+  }, [deps, path, readNonce]);
   const name = path.split("/").pop() ?? path;
   const markdown = /\.(md|markdown)$/i.test(path);
-  const canEdit = markdown && body !== undefined && body !== "error" && body !== null && typeof deps.write === "function";
+  const canEdit = markdown && body !== undefined && body !== "error" && body !== null && !body.read_only && typeof deps.write === "function";
   const save = async () => {
     if (!deps.write || saving) return;
     setSaving(true); setSaveError(null);
-    try { await deps.write(path, text); setDirty(false); setMode("preview"); }
-    catch { setSaveError("The file could not be saved."); }
+    try {
+      if (!body || body === "error") return;
+      const req = projectSaveRequest(body, text);
+      const out = req.text;
+      const hash = await deps.write(path, out, { expected_hash: req.expected_hash, encoding: req.encoding, bom: req.bom });
+      setBody((b) => b && b !== "error" ? { ...b, text: out, hash } : b);
+      setDirty(false); setMode("preview");
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? "";
+      setSaveError(code === "conflict" ? "The file changed on disk. Reload to see the current version." : "The file could not be saved.");
+    }
     finally { setSaving(false); }
   };
   return (
@@ -351,7 +363,7 @@ export function ProjectFileView({ path, deps, onClose }: { path: string; deps: P
           </div>
         ) : null}
         {dirty ? <button type="button" className="lib-btn lib-btn-primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}
-        <button type="button" className="lib-btn" aria-label="Close file" title="Close" onClick={onClose}>Close</button>
+        <button type="button" className="lib-btn" aria-label="Close file" title="Close" onClick={() => dirty ? setConfirmDiscard(true) : onClose()}>Close</button>
       </div>
       {body === undefined ? <p className="lib-muted" role="status">Reading…</p>
         : body === "error" ? <p className="lib-muted">The file could not be read.</p>
@@ -364,7 +376,8 @@ export function ProjectFileView({ path, deps, onClose }: { path: string; deps: P
         ) : (
           <pre className="lib-project-text">{body.text}</pre>
         )}
-      {saveError ? <p className="lib-error" role="alert">{saveError}</p> : null}
+      {saveError ? <p className="lib-error" role="alert">{saveError} {body && body !== "error" && body !== null ? <button type="button" className="lib-link-btn" onClick={() => { setSaveError(null); setDirty(false); setReadNonce((n) => n + 1); }}>Reload</button> : null}</p> : null}
+      {confirmDiscard ? <div className="lib-discard" role="alertdialog" aria-label="Discard unsaved changes?"><span>Discard unsaved changes?</span><button type="button" className="lib-btn" onClick={() => setConfirmDiscard(false)}>Keep editing</button><button type="button" className="lib-btn lib-btn-danger" onClick={onClose}>Discard</button></div> : null}
     </div>
   );
 }
