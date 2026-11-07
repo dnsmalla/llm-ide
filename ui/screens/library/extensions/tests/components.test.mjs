@@ -321,3 +321,9 @@ test("llm sources pane: counts as text, empty state when none", async () => {
   const none = await legacy("llm-sources", { "GET /auth/me/llm-sources": () => ({ sources: [] }) });
   assert.match(html(h(X.LegacyView, { model: none })), /No LLM sources are registered/);
 });
+
+test("active: the scope note says which chats ignore the switches, as a note", async () => {
+  const model = await mk(items());
+  const out = html(h(X.ExtensionsView, { model }));
+  assert.match(out, /role="note"[^>]*>Claude chats do not use these switches yet/);
+});

@@ -99,4 +99,7 @@ test("activeScopeNote says which chats ignore the switches, and nothing when all
   assert.equal(activeScopeNote({ ...base, turns: null }), null);
   assert.match(activeScopeNote({ ...base, turns: { claude: false, providers: true } })!, /^Claude chats do not use these switches yet/);
   assert.match(activeScopeNote({ ...base, turns: { claude: true, providers: false } })!, /^Provider-model chats do not load/);
+  const both = activeScopeNote({ ...base, turns: { claude: false, providers: false } })!;
+  assert.match(both, /Claude chats/);
+  assert.match(both, /Provider-model chats/);
 });

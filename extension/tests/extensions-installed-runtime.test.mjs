@@ -209,7 +209,7 @@ test('an MCP registry item mounts its https remote only; a package-only item mou
   await install(u1, 'remote');
   await install(u1, 'pkgonly');
   inst.setInstalledEnabled(u1, 'mcp:acme/remote', true, { consents: ['mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'mcp:acme/remote').pinnedCommit });
-  inst.setInstalledEnabled(u1, 'mcp:acme/pkgonly', true, { consents: ['mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'mcp:acme/remote').pinnedCommit });
+  inst.setInstalledEnabled(u1, 'mcp:acme/pkgonly', true, { consents: ['mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'mcp:acme/pkgonly').pinnedCommit });
   const m = mcpNow(u1);
   assert.deepEqual(m.servers.remote, { type: 'http', url: 'https://mcp.acme.example.com/mcp' });
   assert.equal('pkgonly' in m.servers, false);

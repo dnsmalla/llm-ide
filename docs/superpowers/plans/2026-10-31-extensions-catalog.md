@@ -1,6 +1,6 @@
 # Extensions catalog: skills, MCP servers and plugins from GitHub, one switch per item, only active items loaded
 
-Status: **P0 to P3 implemented, P4 implemented for GitHub sources, installed items load into turns** on `main` (local, not pushed; see section 16); P5 onward not started. Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
+Status: **P0 to P6 implemented; P8 not done (user kept today's behaviour); P7 and P9 deferred**. Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
 Research basis: read-only pass at `b1cb2817` (`SERVER_API_VERSION = 92`, `extension/server.mjs:298`). Inputs: [agent-kit](../../kits/agent-kit.md) (K0 map), [agent-kit K1](2026-10-30-agent-kit-k1.md) (Track Q, lean config, bench gates), [provider catalog spec](../../spec/provider-catalog.md) (the catalog pattern), [LLM-source items design](../specs/2026-09-25-llm-source-items-and-update-design.md). Every `path:line` was read in this pass. Nothing was run (no bench, no test, no Mac build). External facts carry a URL; anything I could not confirm is marked **(unverified)** and collected in section 15.
 
 User request (2026-10-30): "upgrade plugin, skill, MCP to a more professional way; reduce OUR generated skills; use popular skills from GitHub; select/deselect each to use or not; do the same for MCP, plugin and skills; when updating, update the system so only ACTIVE ones are used."

@@ -516,12 +516,14 @@ test("M8: COMMIT_CHANGED from the core re-reads the list and switches nothing on
   const reads = () => core.calls.filter((c) => c.method === "GET" && c.path === `${P}/installed`).length;
   const r0 = reads();
   await model.requestEnable(model.item("skill:acme/tidy")!);
-  assert.ok(reads() > r0);
+  assert.ok(reads() > r0, "re-read the installed list");
   assert.equal(model.getSnapshot().notice!.error, true);
   assert.match(model.getSnapshot().notice!.text, /changed while you were deciding/);
 });
+
 test("disabling sends no commit", async () => {
   const { core, model } = setup({ [`POST ${P}/toggle`]: () => reply("post-auth-me-extensions-toggle-200") });
-  await model.init(); await model.disable(model.item("skill:acme/tidy")!);
+  await model.init();
+  await model.disable(model.item("skill:acme/tidy")!);
   assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "skill:acme/tidy", enabled: false });
 });

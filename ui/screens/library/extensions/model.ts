@@ -297,10 +297,10 @@ export class ExtensionsModel {
     await this.toggle(item, false, null);
   }
 
-  private async toggle(item: InstalledItem, enabled: boolean, consents: string[] | null): Promise<void> {
+  private async toggle(item: InstalledItem, enabled: boolean, consents: string[] | null, commit?: string): Promise<void> {
     await this.withBusy(item.id, async () => {
       try {
-        const r = await this.api.toggle({ id: item.id, enabled, consents: consents ?? undefined, commit: enabled ? item.pinnedCommit : undefined }, this.signal);
+        const r = await this.api.toggle({ id: item.id, enabled, consents: consents ?? undefined, commit: enabled ? (commit ?? item.pinnedCommit) : undefined }, this.signal);
         this.replace(r.item);
         this.succeed(enabled ? `${item.name} is on.` : `${item.name} is off.`);
       } catch (e) {
@@ -363,8 +363,8 @@ export class ExtensionsModel {
         this.info(`${item.name} changed while you were deciding. Switch it on again to review it.`);
         return;
       }
-      // The core binds consents per commit but the toggle request carries no commit field, so re-read the installed
-      // list right before enabling: the local copy may be stale, and consent given for commit A must not enable B.
+      // The core binds consents per commit, so consent given for commit A must not enable B: re-read the installed
+      // list right before enabling (the local copy may be stale) and send the consented commit explicitly.
       let latest: InstalledItem | undefined;
       try {
         latest = (await this.api.installed(this.signal)).items.find((i) => i.id === request.itemId);
@@ -382,7 +382,7 @@ export class ExtensionsModel {
         this.info(`${item.name} changed while you were deciding. Switch it on again to review it.`);
         return;
       }
-      await this.toggle(latest, true, consents);
+      await this.toggle(latest, true, consents, request.commit);
       return;
     }
     if (item.pinnedCommit !== request.from) {

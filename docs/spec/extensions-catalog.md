@@ -198,7 +198,7 @@ The GitHub adapters resolve `HEAD`, skip the download when the commit equals the
 |---|---|---|
 | `GET /auth/me/extensions/catalog` | `q, kind, limit, offset` | `{ query, total, offset, results[], sources[] }`; 400 `VALIDATION_FAILED` |
 | `POST /auth/me/extensions/catalog/refresh` | `{ source?, force? }` | `{ results: [{ id, status, count?, error? }] }`; 400, 404 `NOT_FOUND` (unknown source) / `CATALOG_DISABLED` |
-| `GET /auth/me/extensions/active` (result: the view above, plus `turns { claude, providers }` — which chats follow the switches) | | the view above |
+| `GET /auth/me/extensions/active` | | the view above, plus `turns { claude, providers }` (API 118): which chats follow the switches (`LLMIDE_EXT_ACTIVE_SET`, `LLMIDE_EXT_ADAPTER`) |
 | `GET /auth/me/extensions/updates` | | `{ corrupt, items[] }` |
 | `POST /auth/me/extensions/updates/check` | `{ id? }` | `{ checkedAt, results: [{ id, current, latest?, updateAvailable, error? }] }`; 404 for an unknown id |
 | `POST /auth/me/extensions/update/preview` | `{ id, commit? }` | the diff above; 400 `INVALID_COMMIT`, 404, 409 `ALREADY_CURRENT/BYTES_MISSING`, 422 `IDENTITY_CHANGED/COMMIT_NOT_IN_REPO/…`, 503 `VERIFY_UNAVAILABLE` |

@@ -4,7 +4,7 @@
 //
 //   GET  /auth/me/extensions/installed
 //   POST /auth/me/extensions/install    { url, ref?, commit?, path? }
-//   POST /auth/me/extensions/toggle     { id, enabled, consents?: string[], members?: string[] }
+//   POST /auth/me/extensions/toggle     { id, enabled, consents?: string[], members?: string[], commit? }
 //   POST /auth/me/extensions/uninstall  { id }
 //
 // P5 (API 94): updates, rollback, repair, indexes and search. Reads are cache-only;
