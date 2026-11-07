@@ -8,13 +8,13 @@ import {
   MORE_PROVIDERS_HINT, meterText, modelDefaultLabel, modelOptionText, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
-export function ModePicker({ value, resolved, onChange, disabled }: { value: string; resolved?: string | null; onChange: (m: string) => void; disabled?: boolean }) {
-  const shown = MODES.find((m) => m.id === value);
+export function ModePicker({ value, resolved, onChange, disabled, modes = MODES }: { value: string; resolved?: string | null; onChange: (m: string) => void; disabled?: boolean; modes?: readonly (typeof MODES)[number][] }) {
+  const shown = modes.find((m) => m.id === value) ?? MODES.find((m) => m.id === value);
   return (
     <label className="chat-pick">
       <span className="chat-pick-label">Mode</span>
       <select aria-label="Mode" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} title={shown?.hint}>
-        {MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+        {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select>
       {value === "auto" && resolved && resolved !== "auto" && <span className="chat-muted" aria-live="polite">running as {resolved}</span>}
     </label>

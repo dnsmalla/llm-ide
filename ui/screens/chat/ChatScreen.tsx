@@ -24,7 +24,7 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
+  AUTO_MODE, MODES, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -39,6 +39,7 @@ import { describeError, type CoreTransport } from "./transport";
 import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE } from "./tauri-store";
 import { claimSession, sessionVisible } from "./surface-sessions";
 import { coreStatusStore } from "../shell/runtime";
+import { allowedModes, chatBlockReason, permissionsFromMe } from "../shell/permissions";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -123,6 +124,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // The effort pick is one app-wide choice (the Mac's chat.effort), remembered across launches.
   const effortPick = useSyncExternalStore(effortStore.subscribe, effortStore.get, effortStore.get);
   const [route, setRoute] = useState<RouteView | null>(null);
+  // Plan H1.2: the action classes the core says this member may use; null = unknown (an older core), hide nothing.
+  const [perms, setPerms] = useState<ReadonlySet<string> | null>(null);
   // A supervised core restart invalidates running-turn state and provider/model caches: follow its restart counter.
   const coreRestarts = useSyncExternalStore(coreStatusStore.subscribe, () => coreStatusStore.getSnapshot().status?.restarts ?? 0, () => 0);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
@@ -149,6 +152,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useEffect(() => {
     const ac = new AbortController();
     loadModelGroups(core, ac.signal).then((r) => { setListedGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
+    return () => ac.abort();
+  }, [core, coreRestarts]);
+
+  // The caller's permitted action classes, once per screen and after every core restart (plan H1.2).
+  useEffect(() => {
+    const ac = new AbortController();
+    core.json<unknown>("GET", "/auth/me", undefined, ac.signal)
+      .then((body) => setPerms(permissionsFromMe(body)))
+      .catch(() => setPerms(null));
     return () => ac.abort();
   }, [core, coreRestarts]);
 
@@ -183,6 +195,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [state.messages]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
+  // A viewer has exactly one permitted mode (Ask): the picker never shows Auto and the chat runs as Ask.
+  const modeOptions = useMemo(() => allowedModes(perms, MODES), [perms]);
+  useEffect(() => {
+    if (activeId && modeOptions.length === 1 && current.mode !== modeOptions[0]!.id) setCurrent({ mode: "ask" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, modeOptions]);
 
   // Auto follows the server's resolved mode; a hand-picked mode never moves.
   useEffect(() => {
@@ -387,7 +405,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
               meter={<ContextMeter usage={state.context} />}
               controls={<>
-                <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
+                <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
                 <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
                   onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
                   userModels={userModels} onRemove={removeModel} />
@@ -401,7 +419,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
               </>}
               onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
-              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null}
+              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={chatBlockReason(perms) ?? (isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null)}
             />
           </>
         )}
