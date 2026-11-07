@@ -40,14 +40,14 @@ export function jumpPillVisible(messages: readonly Message[], scrollTop: number,
   return tail?.role === "assistant" && tail.status === "streaming" && showJumpToLatest(scrollTop, viewport, total);
 }
 
-export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScrollTop, onScrollState, onOpenLink, onCopy, files, empty }: Props) {
+export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScrollTop, onScrollState, onOpenLink, onCopy, files, onFullHistoryNext, empty }: Props) {
   const keyOf = useCallback((i: number) => messages[i]?.id ?? String(i), [messages]);
   const { scrollRef, range, measure, offsets, scrollTop, viewport } = useVirtualList(messages.length, keyOf, MESSAGE_ESTIMATE_PX);
   const stick = useRef(initialScrollTop === null);
   const loading = useRef(false);
   const firstId = useRef<string | null>(null);
   const lastCount = useRef(0);
-  const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy, files }), [onOpenLink, onCopy, files]);
+  const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy, files, onFullHistoryNext }), [onOpenLink, onCopy, files, onFullHistoryNext]);
   // The Mac folds every assistant reply except the latest into a preview; the reader expands the ones they want.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const lastAssistantId = useMemo(() => { for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === "assistant") return messages[i]!.id; return null; }, [messages]);

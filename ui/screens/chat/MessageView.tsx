@@ -20,6 +20,8 @@ export interface MessageHost {
   files?: FileRefs;
   /** Retry the failed turn from the message itself. */
   onRetry?: () => void;
+  /** On a "continued from a summary" notice: send the full history with the next message (one message). */
+  onFullHistoryNext?: () => void;
 }
 
 const PATH_KEYS = ["file_path", "path", "filePath", "notebook_path"] as const;
@@ -128,9 +130,12 @@ export function ToolCard({ tool, files }: { tool: ToolPart; files?: FileRefs }) 
   );
 }
 
-function NoticeLine({ n }: { n: Notice }) {
+function NoticeLine({ n, host }: { n: Notice; host: MessageHost }) {
   const text = n.count > 1 ? `${n.text} (x${n.count})` : n.text;
-  return <StatusBanner severity={n.level === "error" ? "error" : n.level === "warning" ? "warning" : "info"} message={text} />;
+  const message = n.kind === "chat_continued" && host.onFullHistoryNext
+    ? <>{text} <button type="button" className="chat-link-btn" onClick={host.onFullHistoryNext}>Send the full history with my next message</button></>
+    : text;
+  return <StatusBanner severity={n.level === "error" ? "error" : n.level === "warning" ? "warning" : "info"} message={message} />;
 }
 
 /** The Mac's collapsed-reply preview (MarkdownRenderer.plainTextPreview): links to text, structural marks dropped,
@@ -168,7 +173,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
             ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
             : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
         {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
-        {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} />)}
+        {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} host={host} />)}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
         {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
         {m.usage && !live && <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens</p>}

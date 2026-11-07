@@ -318,3 +318,23 @@ test("StrictMode double effect (mount, unmount, mount) leaves the controller ali
   await tick(5);
   assert.deepEqual(await ctl.reattachRunning(), [], "disposed: no re-attach");
 });
+
+test("fullHistoryNext: a marker, then exactly the next message carries continueMode replay (kept on its retry)", async () => {
+  const core = fakeCore({ streams: [turn(), turn(), turn()] });
+  const { ctl } = make(core);
+  ctl.send("a", "one", { mode: "ask" });
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done");
+  ctl.fullHistoryNext("a");
+  ctl.fullHistoryNext("a");
+  const marks = ctl.getState("a").messages.at(-1).notices.filter((x) => x.kind === "full_history_next");
+  assert.equal(marks.length, 1, "asking twice adds one marker");
+  assert.equal(marks[0].text, c.FULL_HISTORY_NEXT_NOTICE);
+  ctl.send("a", "two", { mode: "ask" });
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done" && ctl.getState("a").turnSeq === 2);
+  ctl.send("a", "three", { mode: "ask" });
+  await until(() => ctl.getState("a").turnSeq === 3 && ctl.getState("a").messages.at(-1)?.status === "done");
+  const bodies = core.calls.filter((x) => x.method === "STREAM").map((x) => x.body);
+  assert.equal(bodies[0].continueMode, undefined);
+  assert.equal(bodies[1].continueMode, "replay");
+  assert.equal(bodies[2].continueMode, undefined);
+});

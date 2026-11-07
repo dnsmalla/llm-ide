@@ -258,6 +258,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [core]);
 
   const onLoadOlder = useCallback(() => (activeId ? controller.loadOlder(activeId) : Promise.resolve(0)), [activeId, controller]);
+  const onFullHistoryNext = useCallback(() => { if (activeId) controller.fullHistoryNext(activeId); }, [activeId, controller]);
   const onScrollState = useCallback((scrollTop: number, stick: boolean) => { if (activeId) controller.setView(activeId, { scrollTop, stickToBottom: stick }); }, [activeId, controller]);
 
   // Bypass: a native host dialog per chat (a live grant is not asked again). A decline leaves the mode as it was,
@@ -336,6 +337,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               key={activeId} messages={state.messages} hasMoreOlder={state.hasMoreOlder} onLoadOlder={onLoadOlder}
               initialScrollTop={controller.getView(activeId).stickToBottom ? null : controller.getView(activeId).scrollTop}
               onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files} onRetry={() => controller.retry(activeId)}
+              onFullHistoryNext={onFullHistoryNext}
               empty={<p className="chat-muted chat-pad">Ask anything. Mode and model are below.</p>}
             />
             {showsPlanProgress(planRunChat, activeId, state.tasks) && <PlanProgress tasks={state.tasks} />}

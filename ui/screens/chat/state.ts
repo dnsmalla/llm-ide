@@ -40,7 +40,7 @@ export interface Notice {
   text: string;
   /** Count of consecutive identical notices (retry loops). */
   count: number;
-  /** Shown to the user: warning/error, plus `workspace_trust`. `info` is bookkeeping. */
+  /** Shown to the user: warning/error, plus the info kinds in SHOWN_INFO_KINDS. Other `info` is bookkeeping. */
   visible: boolean;
 }
 
@@ -217,8 +217,11 @@ const lastAssistantIndex = (messages: Message[]) => {
   return -1;
 };
 
+/** Info notices the user must see: the folder-trust prompt, and a chat continued from a summary (API 119). */
+const SHOWN_INFO_KINDS: ReadonlySet<string> = new Set(["workspace_trust", "chat_continued"]);
+
 function noticeOf(ev: Extract<AgentEvent, { type: "notice" }>): Notice {
-  return { kind: ev.kind, level: ev.level, text: ev.text, count: 1, visible: ev.level !== "info" || ev.kind === "workspace_trust" };
+  return { kind: ev.kind, level: ev.level, text: ev.text, count: 1, visible: ev.level !== "info" || SHOWN_INFO_KINDS.has(ev.kind) };
 }
 
 function capText(text: string, cap: number): { text: string; clipped: boolean } {

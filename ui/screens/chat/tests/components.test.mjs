@@ -215,3 +215,11 @@ test("SessionList: the unreadable footer row renders when the host reports unrea
   assert.match(out, /3 chats could not be read \(not touched\)/);
   assert.doesNotMatch(html(h(c.SessionList, listProps(1))), /could not be read/);
 });
+
+test("MessageView: a chat_continued notice offers the full history only when the host can send it", () => {
+  const m = asst({ notices: [{ kind: "chat_continued", level: "info", text: "Continued from a summary of 8 earlier messages", count: 1, visible: true }] });
+  assert.match(html(h(c.MessageView, { host: { onFullHistoryNext: () => {} }, m })), /Send the full history with my next message/);
+  const plain = html(h(c.MessageView, { host: {}, m }));
+  assert.match(plain, /Continued from a summary/);
+  assert.ok(!plain.includes("Send the full history"));
+});

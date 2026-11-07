@@ -184,3 +184,9 @@ test("appendText: 200k paragraphs stay linear (sealed blocks are merged), text i
   c.appendText(c.emptyText(), "```" + " ".repeat(500_000) + "x\n");
   assert.ok(performance.now() - t1 < 500);
 });
+
+test("chat_continued is info but shown (the user must see the chat was continued from a summary)", () => {
+  let s = start();
+  s = c.reduce(s, { type: "events", events: [ev("notice", { kind: "chat_continued", level: "info", text: "Continued from a summary of 8 earlier messages", data: { reason: "no_session" } })] });
+  assert.deepEqual(last(s).notices.map((x) => [x.kind, x.visible]), [["chat_continued", true]]);
+});

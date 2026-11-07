@@ -31,6 +31,8 @@ export interface SendOptions {
   fresh?: boolean;
   /** A reasoning-effort level the model offers (effort.ts turnEffort); absent = the core chooses. */
   effort?: string;
+  /** "replay": the core sends this turn the chat's full history instead of an ended-chat summary (API 119). */
+  continueMode?: "replay";
 }
 
 export interface ControllerDeps {
@@ -64,6 +66,7 @@ export interface ChatView {
 interface QueuedSend { text: string; opts: SendOptions; workspaceRoot: string }
 
 export const PROJECT_CHANGED_NOTICE = "Project changed: message kept as a draft";
+export const FULL_HISTORY_NEXT_NOTICE = "Your next message will carry the full history.";
 
 interface Runtime {
   state: ChatState;
@@ -82,6 +85,8 @@ interface Runtime {
   reattached: boolean;
   /** `startedAt` of the core turn last followed: the same turn resumes at `seq`, a different one starts at 0. */
   attachedTurn: string | null;
+  /** The user asked for the full history on the next message (one message, then cleared). */
+  fullHistoryNext: boolean;
 }
 
 /** Micro-batching of stream events. */
@@ -115,7 +120,7 @@ export class ChatController {
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
     if (!r) {
-      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null };
+      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false };
       this.runtimes.set(id, r);
     }
     return r;
@@ -272,6 +277,14 @@ export class ChatController {
 
   clearError(id: string): void { this.dispatch(id, { type: "clear_error" }); }
 
+  /** The next message of this chat asks the core for its full history instead of a summary (the chat_continued action). */
+  fullHistoryNext(id: string): void {
+    const r = this.rt(id);
+    if (r.fullHistoryNext) return;
+    r.fullHistoryNext = true;
+    this.dispatch(id, { type: "marker", kind: "full_history_next", level: "info", text: FULL_HISTORY_NEXT_NOTICE });
+  }
+
   /** S-G: records that the folder was trusted (clears the banner if the notice still names `path`). */
   trustGranted(id: string, path: string): void { this.dispatch(id, { type: "trust_granted", path }); }
 
@@ -381,6 +394,8 @@ export class ChatController {
 
   private async runTurn(id: string, text: string, opts: SendOptions, workspaceRoot: string, persistUser = true, fromQueue = false): Promise<void> {
     const r = this.rt(id);
+    // Taken into the options (so a retry of this message keeps it) and cleared: one message only.
+    if (r.fullHistoryNext) { opts = { ...opts, continueMode: "replay" }; r.fullHistoryNext = false; }
     const ac = new AbortController();
     r.ac = ac; r.userAborted = false; r.lastSend = { text, opts, workspaceRoot }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
     if (persistUser) this.persist(id, { role: "user", content: text, meta: { mode: opts.mode } });
@@ -398,6 +413,7 @@ export class ChatController {
           ...(opts.effort ? { effort: opts.effort } : {}),
           ...(p.permissionMode ? { permissionMode: p.permissionMode } : {}),
           ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
+          ...(opts.continueMode ? { continueMode: opts.continueMode } : {}),
           agentContext: { chatSessionId: id, workspaceRoot, surface: "desktop" },
         },
       };
