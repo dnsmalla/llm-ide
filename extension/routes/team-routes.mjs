@@ -46,14 +46,12 @@ function closedObject(body, allowed) {
   return out;
 }
 
-/** A bounded JSON body, or null (the caller answers 400). */
+/** A bounded JSON object body: { ok, body }. ok:false = malformed JSON or a non-object body (400). */
 async function readBody(req) {
-  try {
-    const body = await readJson(req, BODY_MAX);
-    return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
-  } catch {
-    return null;
-  }
+  let body;
+  try { body = await readJson(req, BODY_MAX); } catch { return { ok: false, body: null }; }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return { ok: false, body: null };
+  return { ok: true, body };
 }
 
 export async function handleTeamRoute(req, res, { db = getDb(), logger, requestId } = {}) {
@@ -93,8 +91,8 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
 
   const memberMatch = MEMBER_PATH.exec(url);
   if (method === 'PATCH' && memberMatch) {
-    const body = await readBody(req);
-    const patch = body && closedObject(body, PATCH_KEYS);
+    const parsed = await readBody(req);
+    const patch = parsed.ok ? closedObject(parsed.body, PATCH_KEYS) : null;
     if (!patch) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid member patch');
     if (patch.usdCapMonth !== undefined) {
       const n = Number(patch.usdCapMonth);
@@ -109,8 +107,9 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
   }
 
   if (method === 'POST' && url === '/admin/invites') {
-    const body = (await readBody(req)) ?? {};
-    const input = closedObject(body, INVITE_KEYS);
+    const parsed = await readBody(req);
+    if (!parsed.ok) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid invite');
+    const input = closedObject(parsed.body, INVITE_KEYS);
     if (!input) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid invite');
     if (input.email !== undefined && input.email !== null
         && (typeof input.email !== 'string' || input.email.length > 254)) {

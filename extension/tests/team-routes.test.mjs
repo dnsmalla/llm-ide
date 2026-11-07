@@ -22,8 +22,8 @@ const { handleTeamRoute, isTeamRoute } = await import('../routes/team-routes.mjs
 const noopLogger = { info() {}, warn() {}, error() {}, child() { return this; } };
 
 let ipCounter = 0;
-function makeReq({ method, url, body, user }) {
-  const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
+function makeReq({ method, url, body, rawBody, user }) {
+  const chunks = rawBody != null ? [Buffer.from(rawBody)] : body == null ? [] : [Buffer.from(JSON.stringify(body))];
   const req = {
     method,
     url,
@@ -320,6 +320,19 @@ test('DELETE /admin/invites/:id revokes it and audits team.invite.revoke', async
 
   const malformed = await call({ method: 'DELETE', url: '/admin/invites/not-an-id', user: as(owner) });
   assert.equal(malformed.statusCode, 404);
+});
+
+test('a malformed JSON body or a non-object body is 400, never an accidental default invite', async () => {
+  const owner = addUser('owner');
+  const before = getDb().prepare('SELECT COUNT(*) AS n FROM invites').get().n;
+  for (const rawBody of ['{not json', '[1,2,3]', '"text"']) {
+    const invites = await call({ method: 'POST', url: '/admin/invites', user: as(owner), rawBody });
+    assert.equal(invites.statusCode, 400, rawBody);
+    assert.equal(invites.json().error.code, 'VALIDATION_FAILED');
+    const patch = await call({ method: 'PATCH', url: `/admin/members/${owner}`, user: as(owner), rawBody });
+    assert.equal(patch.statusCode, 400, rawBody);
+  }
+  assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM invites').get().n, before, 'nothing was minted');
 });
 
 test('an unknown method on a team path answers 404 instead of falling through', async () => {
