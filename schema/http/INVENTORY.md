@@ -15,7 +15,7 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
 - Auth: 275 token, 13 public
 - Handler found: 282; no handler found: 6
-- No app and no extension caller: 101 (tests only: 83, comments/docs only: 18, no reference: 0)
+- No app and no extension caller: 98 (tests only: 82, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
@@ -48,7 +48,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (101):
+Endpoints with no client caller (98):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -117,9 +117,6 @@ Endpoints with no client caller (101):
 - `/host-api/push/status` — tests only
 - `/host-api/push/apns` — tests only
 - `/kb/self-heal/incidents/:id/ignore` — tests only
-- `/kb/self-heal/runs` — tests only
-- `/kb/self-heal/runs/:id/outcome` — comments/docs only
-- `/kb/self-heal/runs/:id/resolve` — comments/docs only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -177,7 +174,7 @@ Endpoints with no client caller (101):
 | `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:334` | `controller.ts` | - | - |
 | `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:337` | `route.ts` | - | - |
 | `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:343` | `Badges.tsx` | - | - |
-| `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:111` | `NativeAutoTasksScreen.tsx`, `NativeLoopScreen.tsx`, `run-custom.ts` | - | - |
+| `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:111` | `NativeAutoTasksScreen.tsx`, `NativeLoopScreen.tsx`, `run-custom.ts`, `settings-adapter.ts` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `NativeLoopScreen.tsx` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:259` | - | `App.tsx`, `useQuestions.ts` | - |
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:330` | - | `App.tsx` | - |
@@ -358,9 +355,9 @@ Endpoints with no client caller (101):
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
 | `/kb/self-heal/incidents` | ALL_ENDPOINTS | DELETE, GET, POST | token | core | `extension/routes/self-heal.mjs:89` | `SelfHealSection.tsx`, `Shell.tsx` | - | - |
 | `/kb/self-heal/incidents/:id/ignore` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
-| `/kb/self-heal/runs` | ALL_ENDPOINTS | POST | token | core | `extension/routes/self-heal.mjs:116` | - | - | tests only |
-| `/kb/self-heal/runs/:id/outcome` | ALL_ENDPOINTS | ANY | token | core | - | - | - | comments/docs only |
-| `/kb/self-heal/runs/:id/resolve` | ALL_ENDPOINTS | ANY | token | core | - | - | - | comments/docs only |
+| `/kb/self-heal/runs` | ALL_ENDPOINTS | POST | token | core | `extension/routes/self-heal.mjs:116` | `self-heal-run.ts` | - | - |
+| `/kb/self-heal/runs/:id/outcome` | ALL_ENDPOINTS | ANY | token | core | - | `self-heal-run.ts` | - | - |
+| `/kb/self-heal/runs/:id/resolve` | ALL_ENDPOINTS | ANY | token | core | - | `SelfHealSection.tsx` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:898` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
@@ -447,7 +444,7 @@ Endpoints with no client caller (101):
 
 ## Consistency
 
-Checked: 288 roster entries, 555 app source files, 52 extension source files.
+Checked: 288 roster entries, 556 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

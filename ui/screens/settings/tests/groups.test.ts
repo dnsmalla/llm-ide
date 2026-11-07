@@ -7,7 +7,7 @@ test("group ids are unique and storage-safe; every non-working group has a notic
   assert.equal(new Set(ids).size, ids.length);
   for (const id of ids) assert.match(id, /^[a-z][a-z0-9-]*$/);
   for (const g of ALL_GROUPS) {
-    if (g.status === "host" || g.status === "mac-only" || g.status === "dev-only") assert.ok(NOTICES[g.id], `notice for ${g.id}`);
+    if (g.status === "host" || g.status === "mac-only") assert.ok(NOTICES[g.id], `notice for ${g.id}`);
     if (g.status === "partial") assert.ok(PARTIAL_NOTES[g.id], `partial note for ${g.id}`);
   }
   for (const id of Object.keys(NOTICES)) assert.ok(ids.includes(id), `notice for unknown group ${id}`);

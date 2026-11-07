@@ -1,7 +1,6 @@
 // Groups the desktop cannot do yet: the real header and, when open, an honest card (see ../notices.ts).
 // No control lives here by design.
-import type { ComponentType } from "react";
-import { NOTICES, PARTIAL_NOTES, type GroupNotice } from "../notices.ts";
+import { PARTIAL_NOTES, type GroupNotice } from "../notices.ts";
 
 export function ManagedNotice({ notice }: { notice: GroupNotice }) {
   return (
@@ -18,13 +17,3 @@ export function PartialNote({ id }: { id: string }) {
   const text = PARTIAL_NOTES[id];
   return text ? <p className="st-hint" data-partial-note={id}>{text}</p> : null;
 }
-
-const make = (id: string): ComponentType => {
-  const n = NOTICES[id];
-  if (!n) throw new Error(`no notice for settings group "${id}"`);
-  return function NoticeGroup() {
-    return <ManagedNotice notice={n} />;
-  };
-};
-
-export const SelfHealGroup = make("self-heal");

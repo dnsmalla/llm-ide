@@ -53,6 +53,7 @@ before(async () => {
       historyModel: join(SETTINGS, "agent-history-model.ts"),
       secret: join(SETTINGS, "secret-field.ts"),
       routing: join(SETTINGS, "sections/RoutingSection.tsx"),
+      selfheal: join(SETTINGS, "sections/SelfHealSection.tsx"),
     },
     outdir,
     bundle: true,
@@ -70,7 +71,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing", "selfheal"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -140,14 +141,23 @@ test("SettingsScreen: the real registry renders the 18 live App groups in order,
   assert.ok(!out.includes("st-band-project"));
 });
 
-test("Mac-only and planned groups render an honest status card with no control (buttons, inputs, switches)", () => {
-  for (const [name, status] of [["SelfHealGroup", "Status: planned"]]) {
-    const out = html(h(m.notices[name], {}, null));
-    assert.ok(out.includes(status), name);
-    assert.match(out, /role="group" aria-label="Status on the desktop"/);
-    assert.match(out, /Meanwhile:/);
-    assert.ok(!/<(button|input|select|textarea)\b/.test(out), `${name} must not contain a control`);
-  }
+test("Self-Heal: Try to fix with its token cost, Refresh and Clear; no planned notice; no host = no fix button", () => {
+  const client = { request: async () => ({ status: 200, body: { incidents: [] } }) };
+  const selfHeal = {
+    source: async () => "/src", prepare: async () => ({}), agentRun: async () => ({ status: 200, body: {} }), verify: async () => ({}),
+    diff: async () => ({}), apply: async () => {}, remove: async () => {}, flushIncidents: async () => {},
+  };
+  const e = { client, host: { diagnostics: async () => ({}), copyText: async () => {}, selfHeal } };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.selfheal.default)));
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Try to fix<\/button>/, "disabled until incidents load and one is new");
+  assert.match(out, /costs tokens like one Loop agent step/);
+  assert.match(out, /Apply never commits/);
+  assert.match(out, />Refresh<\/button>/);
+  assert.match(out, /Loading incidents\.\.\./);
+  assert.ok(!out.includes("Status: planned"));
+  const bare = html(h(m.context.SettingsEnvProvider, { env: { client, host: { diagnostics: async () => ({}), copyText: async () => {} } } }, h(m.selfheal.default)));
+  assert.ok(!bare.includes(">Try to fix</button>"));
+  assert.match(bare, /Try to fix needs the desktop app\./);
 });
 
 test("Optional components: a real card over the host commands, with no status pretending before data arrives", () => {

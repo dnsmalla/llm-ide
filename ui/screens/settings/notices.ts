@@ -18,14 +18,7 @@ export interface GroupNotice {
   blockedBy: string;
 }
 
-export const NOTICES: Readonly<Record<string, GroupNotice>> = {
-  "self-heal": {
-    mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
-    status: "Planned",
-    meanwhile: "Debug builds record the app's errors and list them below (Ignore and Clear work). Release builds record nothing and hide this group.",
-    blockedBy: "Proposing and applying fixes (git worktree, agent, make regression, review) is plan B and not built yet.",
-  },
-};
+export const NOTICES: Readonly<Record<string, GroupNotice>> = {};
 
 /** Groups that are only partly implemented keep a short note for the part that is not. */
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
