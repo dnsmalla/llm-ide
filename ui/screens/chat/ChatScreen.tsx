@@ -87,7 +87,6 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectMemoryOpen, setProjectMemoryOpen] = useState(false);
   const memoryCore = useMemo(() => memoryClient(core), [core]);
@@ -359,34 +358,6 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             {approvals?.(state)}
             {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
             <div className="chat-controls">
-              {state.context && (
-                <div className="chat-context">
-                  <button type="button" className="chat-chip-btn" aria-label={`Context ${state.context.percentage} percent used`} aria-haspopup="dialog" aria-expanded={contextOpen} onClick={() => setContextOpen((v) => !v)}>
-                    Context {state.context.percentage}%
-                  </button>
-                  {contextOpen ? (
-                    <div role="dialog" aria-label="Context usage" className="chat-popover">
-                      <p className="chat-muted">{state.context.totalTokens.toLocaleString()} of {state.context.maxTokens.toLocaleString()} tokens</p>
-                      <ul className="chat-context-list">
-                        {state.context.categories.map((c) => (
-                          <li key={`${c.kind}:${c.name}`}><span>{c.name}</span><span>{c.tokens.toLocaleString()}</span></li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              <div className="chat-context">
-                <button ref={memoryChip} type="button" className="chat-chip-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} onClick={() => setMemoryOpen((v) => !v)}>
-                  {state.memory ? `Memory ${state.memory.sessionFacts}` : "Memory"}
-                </button>
-                {memoryOpen ? (
-                  <div role="dialog" aria-label="Session memory" className="chat-popover">
-                    {state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}
-                    <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button>
-                  </div>
-                ) : null}
-              </div>
               <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
               <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
                 onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
@@ -402,6 +373,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
+              memory={<>
+                <button ref={memoryChip} type="button" className="chat-icon-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} title="Session memory" onClick={() => setMemoryOpen((v) => !v)}>
+                  <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+                </button>
+                {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover">{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
+              </>}
               onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null}
             />

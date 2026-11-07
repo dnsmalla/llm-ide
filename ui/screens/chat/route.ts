@@ -177,8 +177,8 @@ export function modelPickerValue(route: ModelPickerRoute | null | undefined, pro
 export type ModelPickerRoute = Pick<RouteView, "enabled" | "pinned"> & Partial<Pick<RouteView, "provider" | "model" | "pending">>;
 
 /** The select's empty option: "Default" with the router off, the Mac's "Not pinned (the composer's model)" with it on. */
-export function modelDefaultLabel(route: Pick<RouteView, "enabled"> | null | undefined, composerModelLabel: string | null): string {
-  if (route?.enabled !== true) return "Default";
+export function modelDefaultLabel(route: Pick<RouteView, "enabled"> | null | undefined, composerModelLabel: string | null, detected?: string | null): string {
+  if (route?.enabled !== true) return detected ? `Auto · ${detected}` : "Default";
   return composerModelLabel ? `Not pinned (the composer's model: ${composerModelLabel})` : "Not pinned (the composer's model)";
 }
 

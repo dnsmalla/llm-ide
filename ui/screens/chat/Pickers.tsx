@@ -40,12 +40,16 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
   const unlistedModel = unlisted?.split("|").slice(1).join("|") ?? "";
   const unlistedProvider = unlisted?.split("|")[0] ?? "";
   const unlistedLabel = unlisted ? `${groups.find((g) => g.provider === unlistedProvider || g.models.some((m) => m.provider === unlistedProvider))?.label ?? unlistedProvider} · ${unlistedModel}` : null;
+  // What the core will run when nothing is pinned: the SDK's first model is its default.
+  const autoGroup = groups.find((g) => g.id === "anthropic") ?? groups[0];
+  const autoModel = autoGroup?.models[0];
+  const detected = autoModel ? `${autoGroup.label} · ${autoModel.label}` : null;
   return (
     <div className="chat-pick">
       <label>
         <span className="chat-pick-label">Model</span>
         <select aria-label="Model" value={value} disabled={loading} onChange={(e) => { const [p, ...m] = e.target.value.split("|"); if (p) onChange(p, m.join("|")); else onChange("", ""); }}>
-          <option value="">{modelDefaultLabel(route, composerLabel)}</option>
+          <option value="">{modelDefaultLabel(route, composerLabel, detected)}</option>
           {unlisted && <optgroup label="Current (not in the provider list)"><option value={unlisted}>{unlistedLabel}</option></optgroup>}
           {groups.map((g) => (
             <optgroup key={g.id} label={g.label}>

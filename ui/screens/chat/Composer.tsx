@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
+import type { ReactNode } from "react";
 
 export interface ComposerProps {
   draft: string;
@@ -22,6 +23,8 @@ export interface ComposerProps {
   disabledReason?: string | null;
   /** Slash menu, @ mentions, skill chips and attachments (slash/extras.tsx); absent = the plain composer. */
   extras?: ComposerExtras;
+  /** Bottom-bar leading control (session memory). */
+  memory?: ReactNode;
 }
 
 /** Longest message the composer accepts (the server caps a turn near 500k characters). */
@@ -166,6 +169,7 @@ export function Composer(p: ComposerProps) {
         }}
       />
       <div className="chat-composer-bar">
+        {p.memory}
         {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button> : null}
         {p.extras?.toolbar}
         {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}

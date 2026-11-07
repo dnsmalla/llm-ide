@@ -175,7 +175,7 @@ test("a pinned chat shows its pinned model, a pending switch shows what runs nex
   assert.deepEqual(selected(picker({ route: { enabled: true, pinned: true, provider: "anthropic", model: "claude-b" } })), ["anthropic|claude-b", "Claude B"]);
   assert.deepEqual(selected(picker({ route: { enabled: true, pinned: true, provider: "anthropic", model: "claude-b", pending: { provider: "", model: "" } } }))?.[0], "", "a pending unpin shows Not pinned");
   assert.deepEqual(selected(picker({ route: { enabled: false, pinned: false } })), ["anthropic|claude-a", "Claude A"]);
-  assert.match(picker({ route: null, provider: null, model: null }), /<option value="" selected="">Default<\/option>/);
+  assert.match(picker({ route: null, provider: null, model: null }), /<option value="" selected="">Auto · Claude · Claude A<\/option>/);
 });
 
 test("a pinned model missing from the lists still shows as chosen, under Current", () => {
