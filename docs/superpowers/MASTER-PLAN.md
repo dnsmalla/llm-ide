@@ -20,9 +20,9 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Shared server and core | 21 | 3 | 2 | 26 | API 121, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 2 | 5 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 11 | 27 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 13 | 3 | 4 | 20 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
+| Security | 14 | 3 | 4 | 21 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 2 | 5 | 14 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 128 | 78 | 47 | 253 |  |
+| Total | 129 | 78 | 47 | 254 |  |
 
 ## What to do next
 
@@ -562,6 +562,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5; confirmed by ADR 0021 D2) (you)
 - [x] Team Hub H1: enforced team roles (`members`), per-member `max_mode` and USD cap, single-use invites, Host API capabilities by grant, API 123, migration 0068 (ADR 0021; `plans/2026-11-07-team-hub-h1-authority.md`) (me)
 - [x] Team Hub H1.1: auditable YAML user assignments (`<LLMIDE_DATA_DIR>/team.yaml`), generated on first boot from the current members (solo owner preserved), strict dependency-free parser/serializer, undefined = viewer/read_only/20, unknown emails ignored, every change audited as actor `team.yaml`, invalid file refuses the boot, one application per boot (ADR 0021; `extension/kb/team-yaml.mjs`) (me)
+- [x] Team Hub H1.2: every HTTP route, Host API command and background job runs within its role, `max_mode` and USD cap (`ROUTE_POLICY` deny-by-default, 404 for undeclared; viewers Ask only, engineers install, admin keeps team management; `/auth/me.member.permissions`; API 124, no migration) (ADR 0021; `plans/2026-11-08-team-hub-h1-2-route-policy.md`) (me)
 - [ ] Team Hub H2–H6: hub mode on the VPS behind TLS (invite only), desktop "Connect to hub", iPhone + web parity (Auto Tasks, sessions, images, discovery), project sharing and audit screens, external review before public invites (`plans/2026-11-07-team-hub-plan.md` §3) (me)
 - [~] Team Hub H2, local/UI part: Settings → Team for owners/admins over API 123 — member list with role/max mode/USD cap edits under the server's self-grant, owner and last-owner rules; invite flow whose single-use token is shown once with Copy and never persisted; invites listed without tokens and revoked behind a confirmation; role gate from `/auth/me.member.teamRole`; docs `docs/how-to/manage-team-members.md`. **H2 is not done:** hub reachability remains the user's VPS/TLS work (`LLMIDE_HUB=1` ⇒ remote bind + TLS + registration closed, WSS `:3016`, nginx reopening `/host-api/` and `/api/` only to the hub unit, `llmide-core.service` enabled, company key or `claude login` on the VPS) (`plans/2026-11-07-team-hub-plan.md` §3) (me)
 - [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)

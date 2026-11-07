@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 123` (`server.mjs:351`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–392`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 124` (`server.mjs:359`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–392`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -394,7 +394,7 @@ at a route. A solo install does not change: migration 0068 makes the earliest ac
 `execute`, every other existing user `member` with `execute`, and a registration with no invite keeps
 `member`/`execute` unless `LLMIDE_HUB=1` (then `member`/`read_only`/20 USD).
 
-`GET /auth/me` gains `member: { teamRole, maxMode, usdCapMonth }` (null for the `legacy` data-owner row).
+`GET /auth/me` gains `member: { teamRole, maxMode, usdCapMonth, permissions }` (null for the `legacy` data-owner row; `permissions` was added by API 124).
 
 The admin routes (`extension/routes/team-routes.mjs`, contract `schema/http/team.schema.json`, always on, no feature
 group) need the JWT and the admin team role (`403 ROLE_DENIED`); writes ride `kbWrite`:
@@ -413,7 +413,8 @@ registration, switches a no-invite registration's defaults to `read_only` / 20 U
 
 A turn above the member's `maxMode` is refused `403 { error: { code: 'ROLE_DENIED', message: 'Your team role cannot run turns' } }`
 (`max_mode` `none`, audited `team.deny` with `{ reason }` and no message text) or clamped to a read-only mode. Host API
-pairing grants a viewer / `max_mode` none member only `host`, `read`, `push`.
+pairing grants a viewer `host`, `read`, `push`, `chat` and `approvals` (Ask only, API 124), and a `max_mode` none member
+only `host`, `read`, `push`.
 
 `usd_cap_month` is a MONTHLY cap, enforced in two places, never per turn. `usage_ledger.cost_usd` (migration 0069)
 carries each turn's USD cost (null when the engine or a CLI turn reports none), and `usedUsdMonth` sums it for the
@@ -425,6 +426,29 @@ self-service but may not write a usd row above the member's cap.
 The owner rules hold on both delete routes, not only on `PATCH /admin/members/:id`: `DELETE /admin/users/:id` answers
 `403 ROLE_DENIED` when the target is an owner the actor may not touch and `409 LAST_OWNER` for the last owner;
 `POST /auth/me/delete` answers `409 LAST_OWNER` for the sole owner (a second owner makes either deletable).
+
+## 7o. Team Hub H1.2: every route within its role (API 124)
+
+Every method + path the core serves has exactly ONE action class (`extension/kb/members.mjs` `CLASS_GRANTS`,
+table in ADR 0021): `public`, `self.read`, `self.write`, `model.ask`, `model.read`, `model.exec`, `fs.read`,
+`fs.write`, `external.read`, `external.write`, `install`, `admin`, `host`. `extension/server/route-authority.mjs`
+`ROUTE_POLICY` assigns each route one class and `server.mjs` applies it after authentication and rate limiting.
+
+- **Deny by default:** an authenticated request that matches no rule answers `404 { error: { code: 'NOT_FOUND',
+  message: 'Not found' } }` and logs `route_policy_unlisted` with the method and path only.
+- **Refusals:** `403 { error: { code: 'ROLE_DENIED', message } }` (role or `max_mode`) and `429 { error: { code:
+  'USD_CAP', message } }`; exactly one `team.deny` audit row with `{ reason }` only. A disabled feature keeps its
+  own `404 feature_disabled`.
+- **Roles (user decision 2026-11-08):** owners, admins and engineers (role `member`) do all work; `install` is
+  member + execute; `admin` is team management only. A viewer may only Ask: `model.ask` on `/agent/v2/stream`,
+  `/agent/v2/decision` and `/kb/agent/ask`, and `runV2Turn` forces the turn to the read-only `ask` mode with no
+  permission mode (HTTP and Host API alike).
+- **`GET /auth/me`** adds `member.permissions: string[]` — the classes the caller may use, in table order, cap not
+  applied. Additive; older clients ignore it.
+- **Host API `COMMAND_CLASS`** re-checks the class on every frame (`chat.send` / `approvals.answer` = `model.ask`,
+  `toolApprovals.answer` = `model.exec`), so a demotion applies on the next frame.
+- **Background jobs** re-check when they act: the bus executor (`KIND_CLASS`), the meeting agent (`tickRun`) and the
+  outcome poller (`usersAllowedToPoll`).
 
 ## 8. See also
 

@@ -136,7 +136,10 @@ test('closed registration + a valid invite registers a member with the invite\'s
   const res = await register(base, { email: addr, password: PASSWORD, invite: invites.plain.token });
   assert.equal(res.status, 201, await res.text());
   const me = await login(base, addr);
-  assert.deepEqual(me.member, { teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20 });
+  assert.deepEqual(me.member, {
+    teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20,
+    permissions: ['self.read', 'self.write', 'model.ask', 'model.read', 'fs.read', 'external.read', 'host'],
+  });
 });
 
 test('the same invite used twice is refused as closed (403 REGISTRATION_CLOSED)', async () => {
@@ -165,7 +168,10 @@ test('an email-bound invite refuses another address and accepts the bound one (c
   const ok = await register(base, { email: 'bound@example.com', password: PASSWORD, invite: invites.bound.token });
   assert.equal(ok.status, 201, await ok.text());
   const me = await login(base, 'bound@example.com');
-  assert.deepEqual(me.member, { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 });
+  assert.deepEqual(me.member, {
+    teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
+    permissions: ['self.read', 'self.write', 'host'],
+  });
 });
 
 test('a garbage invite on a closed server is refused before the password hash (R-008#1)', async () => {

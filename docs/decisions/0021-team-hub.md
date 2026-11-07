@@ -69,3 +69,55 @@ The user decided that authority must be auditable and editable outside the DB, s
 - A solo install changes nothing: its single user becomes `owner` with `execute`.
 - The hub is private infrastructure of one team; public invite links wait for the external review (UN-075).
 - Phases H1–H6 in the plan; H1 (authority in the core) is `plans/2026-11-07-team-hub-h1-authority.md`.
+
+## Amendment: H1.2 — every route within its role (2026-11-08)
+
+**User decision:** "Admin and engineers need all, but others only ask." Mapped onto the ADR 0021 roles:
+
+- **owner, admin, member (= engineer):** every work class — model with tools, files, connectors, pushes,
+  installing plugins / MCP servers / extensions / the skills kit. The `member` role id stays; UI copy may
+  call it "Engineer".
+- **viewer (everyone else):** only Ask — a chat turn forced to the read-only `ask` mode (no edit or command
+  tools), within the USD cap, plus their own data. No one-shot model routes, files, connectors or installs.
+- **admin and owner only:** team and install management — members, invites, deleting users, backups,
+  `metrics`.
+- `max_mode` still narrows a member: `read_only` keeps tools off, `none` refuses every model action.
+
+### Classes
+
+One table, `CLASS_GRANTS` in `extension/kb/members.mjs`; one route table, `ROUTE_POLICY` in
+`extension/server/route-authority.mjs`. A route, a Host API command or a background job names its class;
+nothing else decides who may do what. `cap` = the member's monthly USD cap is checked (`0` = no cap).
+
+| class | min role | min `max_mode` | USD cap checked | used for |
+|---|---|---|---|---|
+| `public` | — | — | — | pre-auth paths (health, login, register, OAuth callbacks) |
+| `self.read` | viewer | none | no | reading the caller's own data |
+| `self.write` | viewer | none | no | writing the caller's own data (notes, chats, settings, sessions) |
+| `model.ask` | viewer | read_only | yes | Ask: a chat turn forced to the read-only `ask` mode; `/kb/agent/ask`; answering the agent's questions |
+| `model.read` | member | read_only | yes | any other model call with no file-editing or command tools (one-shot notes, summaries, plans, classify) |
+| `model.exec` | member | execute | yes | an agent that edits files or runs commands |
+| `fs.read` | member | read_only | no | reading host files outside the DB (repos, project dirs, plugin dirs) |
+| `fs.write` | member | execute | no | writing host files, or adding a path an agent may edit |
+| `external.read` | member | read_only | no | fetching from a third-party service with the user's credentials |
+| `external.write` | member | execute | no | pushing to a third-party service (GitHub/Linear/Backlog/Slack) |
+| `install` | member | execute | no | enabling code that runs on the host (engineers — user decision) |
+| `admin` | admin | none | no | team and install management: members, invites, deleting users, backups, metrics |
+| `host` | viewer | none | no | desktop-only routes; the host proof is the real gate |
+
+### Decisions D1–D5 (accepted as recommended)
+
+- **D1** — a viewer may spend model tokens on Ask only (chat forced to `ask`, `/kb/agent/ask`, answering
+  the agent's own questions), within the USD cap.
+- **D2** — an authenticated request that matches no `ROUTE_POLICY` rule answers `404 NOT_FOUND` and logs
+  `route_policy_unlisted` at error level with `{ method, path }` (no query string).
+- **D3** — engineers enable code that runs on the host (`install` = member + execute); only team
+  management (`/admin/*`, `/metrics`) stays admin.
+- **D4** — host-proof routes (`/kb/sync/*`, `/kb/self-heal/*`, `/host-api/*`, `/bus` approvals,
+  `/kb/issues/*`) are class `host` = any member row; the host proof stays the gate.
+- **D5** — background work that moves only the user's own data or is system maintenance (sync scheduler,
+  auth GC, backups, agent-store jobs) is not additionally gated.
+
+**Rule:** a new route without a class is refused 404 and fails `extension/tests/route-policy-coverage.test.mjs`.
+The Host API (`COMMAND_CLASS`) and the background jobs (bus executor, meeting agent, outcome poller)
+re-check the class at the moment they act, so a demotion applies on the next frame or tick.
