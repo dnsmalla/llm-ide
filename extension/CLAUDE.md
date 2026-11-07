@@ -90,3 +90,16 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 - **Ceiling**: queued requests are `chat.send` only and run only through `startHostTurn` (`auto_read_only`, phone chat); an approval request cancels the turn and replies `needs_approval`; record-before-execute in `sync_requests`.
 - **Off switch**: `LLMIDE_SYNC=off` starts no scheduler; per user, Settings "Sync on" (`sync_state.enabled`).
 - **Never** log keys, folder names, the SSH private key, the MEGA email or password, or decrypted content.
+
+## Self-Heal (debug desktop builds)
+
+- **Switch**:
+  - `config.selfHeal` = `LLMIDE_SELF_HEAL=1` and not production. The Tauri host passes it only in a debug build (`desktop/src-tauri/src/self_heal.rs` `enabled()`; opt out with `LLMIDE_SELF_HEAL=0` in the host's env).
+  - Off: `/kb/self-heal/*` answers `404 {"error":"feature_disabled","feature":"self_heal"}`, `routes/self-heal.mjs` is never imported, and `/health` does not list the paths.
+  - It is not a `FEATURE_ROUTE_GROUPS` entry, because an unset `LLMIDE_FEATURES` means all on.
+- **Flow**:
+  - The host turns the spawned core's stderr (JSON `error` lines, plain error lines with their frames, 5xx summaries) and panic records into reports.
+  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures and posts them to `POST /kb/self-heal/incidents` (JWT + bus host proof).
+  - `kb/incidents.mjs` stores them in `self_heal_incidents` (migration 0067) after `core/incident.mjs` redacted and signed them.
+- **Never** log incident text, send it anywhere or give it to a model. Plan B (the fix loop) drives `fixing`, `proposed`, `needsHuman`, `fixed`, `attempts` and the proposal columns.
+- Tests: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen).
