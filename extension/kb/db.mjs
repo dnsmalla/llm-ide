@@ -1049,6 +1049,9 @@ export function deleteUserCascade(userId) {
       'google_accounts', 'connector_sync_state',
       // migration 0060 — iCal feed sources (the feed URLs live in the vault, deleted with user_secrets)
       'ical_sources',
+      // migration 0066 — push targets (FOREIGN KEY to host_api_devices): deleted first, so the row is
+      // gone even when the FK cascade is not enforcing
+      'host_api_push',
       // migration 0061 — Host API paired devices (hashed tokens) and the phone chat id
       'host_api_devices', 'host_api_quick_chat',
       // migration 0062 — host_api_identity is install-level (one row, no user_id), so it is NOT in this per-user list
