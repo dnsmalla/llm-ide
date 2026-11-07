@@ -256,7 +256,7 @@ function ranOn({ model, provider: explicitProvider }) {
   return { provider, model: (provider === 'anthropic' ? resolveModel(model) : model) ?? null };
 }
 
-async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
+async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, requestId, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -305,7 +305,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
   }
 
   // Metering context threaded into the provider HTTP path.
-  const meter = userId ? { userId, endpoint } : undefined;
+  const meter = userId ? { userId, endpoint, requestId } : undefined;
 
   // Multi-provider routing. An explicit provider (from the client picker)
   // wins — required for `custom`, whose model ids aren't prefix-routable;
@@ -379,7 +379,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     // NOTE: 'cli-default' rows therefore never count against a same-provider
     // quota chain (chains are keyed by real model ids) — by design: the
     // model that ran is unknown.
-    meterUsage({ userId, provider, model: cliModelId(provider, model) || 'cli-default', source: 'cli', endpoint });
+    meterUsage({ userId, provider, model: cliModelId(provider, model) || 'cli-default', source: 'cli', endpoint, requestId });
     return cliText;
   }
 
@@ -474,7 +474,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
               });
             }
             meterUsage({
-              userId, provider: 'anthropic', model: resolvedModel, source: 'api', endpoint,
+              userId, provider: 'anthropic', model: resolvedModel, source: 'api', endpoint, requestId,
               inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens,
               cacheReadTokens: data.usage?.cache_read_input_tokens,
               cacheCreationTokens: data.usage?.cache_creation_input_tokens,
@@ -626,7 +626,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
       });
       const parsed = parseCliJsonResult(stdout);
       meterUsage({
-        userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint,
+        userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint, requestId,
         ...(parsed?.usage?.length ? {
           inputTokens: parsed.usage.reduce((n, u) => n + u.inputTokens, 0),
           outputTokens: parsed.usage.reduce((n, u) => n + u.outputTokens, 0),

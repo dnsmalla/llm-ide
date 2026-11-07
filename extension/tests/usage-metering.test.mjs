@@ -70,6 +70,21 @@ test('runClaude records token usage + rate-limit headers (Anthropic path)', asyn
   assert.equal(rl.tokens.remaining, 99985);
 });
 
+test('runClaude writes the caller\'s requestId on its ledger row (the continuation summary joins its turn)', async () => {
+  const userId = freshUser();
+  vault.setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-anthropic-test');
+  const restore = mockFetch(async () => ({
+    ok: true, status: 200, headers: new Map(),
+    json: async () => ({ content: [{ text: 'ok' }], usage: { input_tokens: 10, output_tokens: 5 } }),
+    text: async () => '{}',
+  }));
+  try {
+    await runClaude('hi', { userId, model: 'claude-sonnet-4-6', endpoint: '/agent/v2/stream:continuation', requestId: 'turn-xyz' });
+  } finally { restore(); }
+  const row = db.getDb().prepare('SELECT request_id, endpoint FROM usage_ledger WHERE user_id = ?').get(userId);
+  assert.deepEqual(row, { request_id: 'turn-xyz', endpoint: '/agent/v2/stream:continuation' });
+});
+
 test('completeViaApi reactively falls back to the next model on a 429 quota error', async () => {
   const userId = freshUser();
   vault.setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-openai-test');
