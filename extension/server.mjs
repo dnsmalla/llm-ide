@@ -18,6 +18,7 @@ import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireRole } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
+import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
 import { handleHostApiRoute, isHostApiRoute } from './routes/host-api/http-routes.mjs';
 import { createBus, busEnabled } from './routes/bus/executor.mjs';
@@ -655,6 +656,8 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/sync/test' || url === '/kb/sync/publish') return 'dispatch';
   if (url.startsWith('/kb/sync/'))       return 'kbWrite';
   if (url.startsWith('/kb/self-heal/'))  return 'kbWrite';
+  // Team Hub admin writes (ADR 0021): a member grant or an invite mint is a small authenticated write.
+  if (url.startsWith('/admin/members') || url.startsWith('/admin/invites')) return 'kbWrite';
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).
   if (['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair'].some((p) => url === `/auth/me/extensions/${p}`)) return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
@@ -848,6 +851,12 @@ const server = http.createServer(async (req, res) => {
   // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
   if (isBusRoute(req.url || '')) {
     await handleBusRoute(req, res, { bus });
+    return;
+  }
+
+  // Team Hub admin (/admin/members, /admin/invites): always on, JWT + admin team role inside (ADR 0021).
+  if (isTeamRoute(req.url || '')) {
+    try { await handleTeamRoute(req, res, { logger: reqLog, requestId }); } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 
