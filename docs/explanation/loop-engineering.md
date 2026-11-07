@@ -238,7 +238,11 @@ A stage is one step of the run (`LoopStage`). Seven kinds are described here; th
   whose verify command still needs approval ends the run `needs approval`
   instead of retrying.
 - **`shellCommand`** — an arbitrary project command (`swift test`, `npm test`).
-  Requires an explicit approval in `VerifyApprovalStore` before it will ever run.
+  The desktop host requires a native Cancel-first dialog approval pinned to the
+  command's exact SHA-256, the loop/stage id and the working folder before it will
+  ever spawn `/bin/sh`; the Mac app's equivalent is `VerifyApprovalStore`. A
+  page-side `window.confirm` or localStorage list is not an approval: the host
+  re-reads `system/loop.json` and refuses when the command changed.
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,
   and the verify stages decide whether that helped. When the agent call fails
   (retried once first only when the request provably never reached a running
@@ -306,6 +310,14 @@ parent folder exists there, else the project root). A non-doc stage writing
 `~` is expanded and containment is case-insensitive.
 
 ### How a shell stage runs
+
+On the desktop the gate is `desktop/src-tauri/src/loop_approval.rs`, not the Mac's
+`VerifyApprovalStore`: `system/loop.json` and the fault reports are working-tree
+files the webview can write, so the host derives the stage list and every
+`verify:` command itself, shows the exact commands and folder in a native dialog,
+and mints a token bound to their hashes. Editing a command after approval
+invalidates the token and nothing runs. A scheduled run never opens a dialog: it
+reuses a still-valid token for the exact same command set or skips the loop.
 
 A shell stage (and every verify command) runs through `GroupedSubprocess`: `/bin/sh -c`
 in its own **process group**, stdin from `/dev/null`. Stop, a timeout, and the
@@ -491,8 +503,10 @@ tagged `test:<id>`, whose `verify` command runs that single test through
 `VerifyCommandBuilder`: `swift test --filter` for XCTest, `--test-name-pattern
 '^leaf$'` for `node --test`, a node id for pytest, `-t` for jest and `-run` for
 `go test`. A `package.json` test script counts as `node --test` only when it is plain `node --test [path]`; any flags or globs make the root `npm`. Cargo, npm and make have no portable single-test form and fall back
-to the suite command. The Loop pre-approves only these natively built commands
-in `VerifyApprovalStore`, never a command from a file the agent can edit. A
+to the suite command. The Mac Loop pre-approves only these natively built commands
+in `VerifyApprovalStore`; the desktop host instead binds its native approval to
+every fault `verify:` command it read from `system/faults`, so a changed command
+is refused before it can run. A
 test that passes again marks its fault `fixed`. Two faults created in the same
 second get a hash suffix so neither overwrites the other. The run journal
 records them as `LoopStageAttempt.newFaults`, and the change in each map counter

@@ -448,6 +448,23 @@ Run through this against a real meeting before merging:
 - **Do NOT offer or honour a tool-wide `SandboxNetworkAccess` rule** — it would open every host to every sandboxed command.
 - **Do NOT honour the pre-0034 `tool_approvals` rows** — they are global and listed only so they can be removed.
 
+## Desktop Loop shell execution (`desktop/src-tauri/src/{loop_runner,loop_approval}.rs`)
+
+### ✅ MUST preserve
+
+- **A Loop shell command runs only after a NATIVE host approval pinned to its exact SHA-256 (R-014#2).** `system/loop.json` is a working-tree file the webview can write; a `window.confirm()` or a localStorage "approved" list is not a boundary. The host derives the stage list and every fault `verify:` command itself, shows the exact commands and the canonical working folder in a Cancel-first native dialog (`confirm::ask`), and mints an in-memory token bound to the command hashes, loop/stage (or fault path) and folder. `loop_run_stage`, `loop_run_loop` and `loop_run_fault_verify` refuse before spawning when the token is missing, expired, scoped elsewhere, or the command changed.
+- **Editing a command AFTER approval invalidates the approval.** Approval is checked against the CURRENT bytes the host re-reads; a changed hash returns `the command changed since it was approved; nothing ran`. There is no fallback that runs the unapproved command.
+- **`system/loop.json` is untrusted input, not a command source the page can bypass.** The webview supplies only a loop/stage id or a project-relative fault path. `run_loop_gated` authorises every shell stage BEFORE the first process starts, so a changed later stage refuses the whole pass instead of running the earlier ones.
+- **A scheduled run never prompts and never self-approves.** It reuses a still-valid grant for the exact same command set (`loop_approval_status`) or skips the loop. The grant expires (`GRANT_TTL_MS`, 4 h) and `loop_revoke_approvals` clears every grant.
+- **Non-shell stages stay functional.** `regressionSweep` (the deterministic no-op/refusal slice), `skill`, `testMap`, `artifactCheck`, `codeGraph` and `testPrune` do not require a shell approval; only commands the host will execute do.
+
+### ❌ DO NOT do these
+
+- **Do NOT reintroduce a page-side confirmation as the gate** (`window.confirm`, a localStorage approval, a query param). The native dialog is the human click; the token it mints is the proof.
+- **Do NOT accept a command string from the webview** or expose `run_command_at`/`run_command_cancellable` as a Loop entry point. `run_command_cancellable` is Self-Heal's fixed-script helper only.
+- **Do NOT approve a command the host did not read and display**, and do not truncate the approved command set in the dialog. If it is too large to show, refuse rather than approve unseen commands.
+- **Do NOT blanket-approve every shell command in every project.** A grant is scoped to the shown hashes, loop/stage, canonical folder and expiry; a changed command or another loop/folder is refused.
+
 ## Agent-engine prompt cache + metering (`extension/llm_agent/sdk/{engine,turn-context}.mjs`, `routes/agent-v2.mjs`)
 
 ### ✅ MUST preserve

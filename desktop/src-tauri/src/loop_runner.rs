@@ -1,18 +1,23 @@
-//! Native Loop stage execution, first slice. Only a `shellCommand` stage that is already present in the project's
-//! committed `system/loop.json` can run: the webview names a stage id, never a command string, so it cannot ask the
-//! host to execute arbitrary shell. The user starts the stage from the Loop page.
+//! Native Loop stage execution, first slice. Only a `shellCommand` stage read by the host from the project's
+//! working-tree `system/loop.json` can run, and only after a NATIVE host approval pinned to that exact command's
+//! SHA-256 (`loop_approval.rs`). The webview names a stage id, never a command string; it cannot ask the host to
+//! execute arbitrary shell, and editing `system/loop.json` after approval invalidates the approval. The user starts
+//! the stage from the Loop page (one native dialog per loop or stage).
 //!
 //! Output is captured with bounded buffers; the process is killed on timeout or when the caller cancels by dropping
 //! the task (the async command is blocking, so cancellation is bounded by the timeout).
 use std::collections::HashSet;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
+use crate::loop_approval::ApprovalStore;
 use crate::proc_tree::ManagedChild;
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
@@ -92,38 +97,203 @@ pub fn work_root(root: &Path) -> std::path::PathBuf {
     dirs.into_iter().next().unwrap_or_else(|| root.to_path_buf())
 }
 
-/// Finds the command of a shell stage in `system/loop.json`. No command is accepted from the caller.
-pub fn stage_command(root: &Path, stage_id: &str) -> Result<String, String> {
+/// One stage read by the host from `system/loop.json`. `command` is the exact string that was approved and will be
+/// run; the webview never supplies it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StageSpec {
+    pub loop_id: String,
+    pub stage_id: String,
+    pub name: String,
+    pub kind: String,
+    pub command: String,
+}
+
+/// One saved fault `verify:` command read by the host. `rel` is the project-relative, `/`-separated path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FaultSpec {
+    pub rel: String,
+    pub command: String,
+}
+
+fn read_loop_json(root: &Path) -> Result<serde_json::Value, String> {
     let path = root.join("system").join("loop.json");
     let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read system/loop.json: {e}"))?;
-    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))
+}
+
+pub(crate) fn loop_name(root: &Path, loop_id: &str) -> Result<String, String> {
+    let v = read_loop_json(root)?;
+    let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
+    let l = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
+    Ok(l.get("name").and_then(|x| x.as_str()).unwrap_or("Loop").to_string())
+}
+
+pub(crate) fn loop_has_enabled_kind(root: &Path, loop_id: &str, kind: &str) -> Result<bool, String> {
+    let v = read_loop_json(root)?;
+    let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
+    let l = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
+    let stages = l.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).ok_or("loop has no stages")?;
+    Ok(stages.iter().any(|s| s.get("enabled").and_then(|x| x.as_bool()) == Some(true) && s.get("kind").and_then(|x| x.as_str()) == Some(kind)))
+}
+
+/// Resolves a stage by id, host-side. When `loop_id` is given the stage must belong to that loop; otherwise the
+/// first matching stage across the file wins (older callers). No command is accepted from the caller.
+pub(crate) fn resolve_stage(root: &Path, stage_id: &str, loop_id: Option<&str>) -> Result<StageSpec, String> {
+    let v = read_loop_json(root)?;
     let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
     for l in loops {
+        let lid = l.get("id").and_then(|x| x.as_str()).unwrap_or("");
+        if loop_id.is_some_and(|want| want != lid) { continue; }
         let Some(stages) = l.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()) else { continue };
         for s in stages {
             if s.get("id").and_then(|x| x.as_str()) != Some(stage_id) { continue; }
-            if s.get("kind").and_then(|x| x.as_str()) != Some("shellCommand") {
-                return Err("only shellCommand stages can run in this slice".into());
-            }
-            let cmd = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim();
-            if cmd.is_empty() { return Err("this stage has no command".into()); }
-            return Ok(cmd.to_string());
+            return Ok(StageSpec {
+                loop_id: lid.to_string(),
+                stage_id: stage_id.to_string(),
+                name: s.get("name").and_then(|x| x.as_str()).unwrap_or("Stage").to_string(),
+                kind: s.get("kind").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                command: s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string(),
+            });
         }
     }
     Err("that stage is not in system/loop.json".into())
 }
 
-fn stage_kind(root: &Path, stage_id: &str) -> Result<String, String> {
-    let text = std::fs::read_to_string(root.join("system").join("loop.json")).map_err(|e| format!("cannot read system/loop.json: {e}"))?;
-    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))?;
-    for l in v.get("loops").and_then(|x| x.as_array()).into_iter().flatten() {
-        for s in l.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).into_iter().flatten() {
-            if s.get("id").and_then(|x| x.as_str()) == Some(stage_id) {
-                return Ok(s.get("kind").and_then(|x| x.as_str()).unwrap_or("").to_string());
-            }
+/// The command of a shell stage, retained for the stage-only path and tests. No command is accepted from the caller.
+pub(crate) fn stage_command(root: &Path, stage_id: &str) -> Result<String, String> {
+    let s = resolve_stage(root, stage_id, None)?;
+    if s.kind != "shellCommand" { return Err("only shellCommand stages can run in this slice".into()); }
+    if s.command.is_empty() { return Err("this stage has no command".into()); }
+    Ok(s.command)
+}
+
+/// Every ENABLED `shellCommand` stage of one loop, in file order. This is the host's own derivation of what an
+/// approval for this loop must cover; it never comes from the webview.
+pub(crate) fn loop_shell_stages(root: &Path, loop_id: &str) -> Result<Vec<StageSpec>, String> {
+    let v = read_loop_json(root)?;
+    let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
+    let l = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
+    let stages = l.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).ok_or("loop has no stages")?;
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for s in stages {
+        if s.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue; }
+        if s.get("kind").and_then(|x| x.as_str()) != Some("shellCommand") { continue; }
+        let name = s.get("name").and_then(|x| x.as_str()).unwrap_or("Stage").to_string();
+        let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if id.is_empty() { return Err(format!("“{name}” has no stage id")); }
+        if !seen.insert(id.clone()) { return Err(format!("“{name}” reuses a stage id in this loop; an approval could not tell the stages apart")); }
+        let command = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        if command.is_empty() { return Err(format!("“{name}” has no command")); }
+        out.push(StageSpec {
+            loop_id: loop_id.to_string(),
+            stage_id: id,
+            name,
+            kind: "shellCommand".to_string(),
+            command,
+        });
+    }
+    Ok(out)
+}
+
+fn stage_frontmatter_verify(text: &str) -> Option<String> {
+    let mut verify = None;
+    for line in text.lines() {
+        let t = line.trim();
+        if let Some(v) = t.strip_prefix("verify:") {
+            let v = v.trim();
+            if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+                if let Ok(s) = serde_json::from_str::<String>(v) { verify = Some(s); }
+            } else if !v.is_empty() { verify = Some(v.to_string()); }
+            break;
         }
     }
-    Err("that stage is not in system/loop.json".into())
+    verify.filter(|c| !c.trim().is_empty())
+}
+
+/// Reads one fault report's `verify:` command. The caller names the project-relative path; never a command.
+pub(crate) fn fault_verify_command_in(root: &Path, rel: &str) -> Result<String, String> {
+    let p = crate::fs_ops::resolve_existing(root, rel).map_err(|e| e.message)?;
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("cannot read the fault report: {e}"))?;
+    stage_frontmatter_verify(&text).ok_or_else(|| "this fault has no verify command".into())
+}
+
+fn walk_faults(dir: &Path, rel_prefix: &str, depth: usize, out: &mut Vec<FaultSpec>, budget: &mut usize) -> Result<(), String> {
+    if depth > 8 { return Err("the fault reports are nested too deeply to approve".into()); }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()),
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    for p in paths {
+        let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
+        if meta.file_type().is_symlink() { continue; }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
+        if name.starts_with('.') { continue; }
+        let rel = format!("{rel_prefix}/{name}");
+        if meta.is_dir() {
+            walk_faults(&p, &rel, depth + 1, out, budget)?;
+            continue;
+        }
+        if p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("md")) != Some(true) { continue; }
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        if meta.len() > 2_000_000 { continue; }
+        if meta.len() as usize > FAULT_SCAN_BYTES.saturating_sub(*budget) {
+            return Err("there is too much fault text to show in one approval dialog; run the faults individually".into());
+        }
+        *budget += meta.len() as usize;
+        let text = std::fs::read_to_string(&p).unwrap_or_default();
+        if let Some(command) = stage_frontmatter_verify(&text) {
+            out.push(FaultSpec { rel, command });
+            if out.len() > 500 { return Err("there are more than 500 fault verify commands to approve; run the faults individually".into()); }
+        }
+    }
+    Ok(())
+}
+
+/// Most fault text one approval scans, so a huge faults folder cannot make the dialog allocate without bound.
+const FAULT_SCAN_BYTES: usize = 8_000_000;
+
+/// Every fault `verify:` command under the project's `system/faults` AND, when the Loop runs in a `code/<repo>`
+/// working tree, that tree's `system/faults` (the UI lists the latter). Paths are project-relative, so they match
+/// what `loop_run_fault_verify` resolves. The host's own list, never the webview's.
+pub(crate) fn fault_commands(root: &Path) -> Result<Vec<FaultSpec>, String> {
+    let project = crate::fs_ops::checked_root(root).map_err(|e| e.message)?;
+    let work = work_root(&project);
+    let mut out = Vec::new();
+    let mut budget = 0usize;
+    walk_faults(&project.join("system").join("faults"), "system/faults", 0, &mut out, &mut budget)?;
+    if let Ok(rel) = work.strip_prefix(&project) {
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if !rel.is_empty() {
+            walk_faults(&work.join("system").join("faults"), &format!("{rel}/system/faults"), 0, &mut out, &mut budget)?;
+        }
+    }
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out.dedup_by(|a, b| a.rel == b.rel);
+    Ok(out)
+}
+
+/// Normalises a project-relative path (`a/b/c`) for use as an approval key.
+pub(crate) fn normalized_rel(rel: &str) -> Result<String, String> {
+    let parts = crate::fs_ops::split_rel(rel).map_err(|e| e.message)?;
+    Ok(parts.join("/"))
+}
+
+/// SHA-256 of the EXACT command bytes. An approval is valid only for this hash; editing the command changes it.
+pub(crate) fn command_hash(command: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(command.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The canonical project root and the Loop working folder an approval is bound to.
+pub(crate) fn canonical_roots(root: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let project = crate::fs_ops::checked_root(root).map_err(|e| e.message)?;
+    let work = work_root(&project);
+    let work = std::fs::canonicalize(&work).map_err(|e| format!("cannot resolve the Loop working folder: {e}"))?;
+    Ok((project, work))
 }
 
 /// True when any `system/faults/**/*.md` is still marked `status: fixed`. The desktop's deterministic slice cannot
@@ -151,34 +321,37 @@ fn run_regression(root: &Path) -> Result<StageRun, String> {
     })
 }
 
-/// Runs one already-saved shell stage. The caller is the Loop page's explicit Run action.
-/// Reads a fault report's `verify` command (frontmatter) and runs it in the git root. The webview supplies only the
-/// project-relative fault path, never a command.
-pub fn run_fault_verify(root: &Path, rel: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    let p = crate::fs_ops::resolve_existing(root, rel).map_err(|e| e.message)?;
-    let text = std::fs::read_to_string(&p).map_err(|e| format!("cannot read the fault report: {e}"))?;
-    let mut verify = None;
-    for line in text.lines() {
-        let t = line.trim();
-        if let Some(v) = t.strip_prefix("verify:") {
-            let v = v.trim();
-            if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
-                if let Ok(s) = serde_json::from_str::<String>(v) { verify = Some(s); }
-            } else if !v.is_empty() { verify = Some(v.to_string()); }
-            break;
+/// Reads a fault report's `verify` command (frontmatter) and runs it in the git root, but ONLY when the host holds
+/// a native approval for this exact project-relative path and command hash. The webview supplies only the path.
+pub(crate) fn run_fault_verify_gated(root: &Path, rel: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<StageRun, String> {
+    let command = fault_verify_command_in(root, rel)?;
+    let (project, work) = canonical_roots(root)?;
+    let key = normalized_rel(rel)?;
+    let token = token.ok_or_else(|| "this fault verify command needs a native host approval before it can run".to_string())?;
+    store.authorize_fault_at(token, &project, &work, &key, &command, crate::confirm::now_ms())?;
+    run_command_at(&work, &command, timeout_secs)
+}
+
+/// Runs one already-saved stage. A shell stage requires a native host approval pinned to its exact command; a
+/// Regression stage runs its deterministic slice without shell. Nothing is spawned until the approval checks pass.
+pub(crate) fn run_stage_gated(root: &Path, stage_id: &str, loop_id: Option<&str>, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<StageRun, String> {
+    let spec = resolve_stage(root, stage_id, loop_id)?;
+    match spec.kind.as_str() {
+        "regressionSweep" => run_regression(root),
+        "shellCommand" => {
+            if spec.command.is_empty() { return Err("this stage has no command".into()); }
+            let (project, work) = canonical_roots(root)?;
+            let token = token.ok_or_else(|| "this shell stage needs a native host approval before it can run".to_string())?;
+            store.authorize_stage_at(token, &project, &work, &spec.loop_id, &spec.stage_id, &spec.command, crate::confirm::now_ms())?;
+            run_command_at(&work, &spec.command, timeout_secs)
         }
+        _ => Err("only shellCommand and regressionSweep stages can run in this slice".into()),
     }
-    let command = verify.filter(|c| !c.trim().is_empty()).ok_or("this fault has no verify command")?;
-    run_command(root, &command, timeout_secs)
 }
 
-pub fn run_stage(root: &Path, stage_id: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    let command = stage_command(root, stage_id)?;
-    run_command(root, &command, timeout_secs)
-}
-
-pub fn run_command(root: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    run_command_with(root, command, timeout_secs, None)
+/// The shell command actually runs in `work` (the approved working folder), never in a folder re-derived later.
+fn run_command_at(work: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    run_command_at_cancellable(work, command, timeout_secs, None, &CANCEL)
 }
 
 /// The shell a saved stage command runs in: `/bin/sh -lc`, like the Mac app's Loop. Windows has no `/bin/sh`, so
@@ -221,13 +394,13 @@ pub fn git_command() -> Command {
     c
 }
 
-pub fn run_command_with(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>) -> Result<StageRun, String> {
-    run_command_cancellable(root, command, timeout_secs, sink, &CANCEL)
+/// The host-controlled shell helper for Self-Heal's fixed `scripts/self-heal-verify.sh` run. It is NOT a Loop entry
+/// point: every Loop shell command goes through `run_stage_gated` / `run_loop_gated` / `run_fault_verify_gated`.
+pub(crate) fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
+    run_command_at_cancellable(&work_root(root), command, timeout_secs, sink, cancel)
 }
 
-/// Like `run_command_with`, with the caller's own cancel flag: Self-Heal's verify must not stop because the Loop's
-/// Stop left `CANCEL` set.
-pub fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
+fn run_command_at_cancellable(work: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
     if cancel.load(Ordering::SeqCst) {
@@ -237,7 +410,7 @@ pub fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<
     strip_git_env(&mut cmd);
     cmd
         // cmd.exe cannot start in a `\\?\` folder (it falls back to the Windows folder).
-        .current_dir(crate::fsutil::plain_path(&work_root(root)))
+        .current_dir(crate::fsutil::plain_path(work))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -276,18 +449,21 @@ pub fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<
     })
 }
 
-/// Runs every enabled stage of one loop in order. This slice supports only `shellCommand` stages: a loop with any
-/// other enabled stage is refused before anything runs, instead of silently reporting a green run that skipped the
-/// verification the user asked for. Blocking failures stop the pass; advisory failures are recorded and continue.
-pub fn run_loop(root: &Path, loop_id: &str, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
-    let text = std::fs::read_to_string(root.join("system").join("loop.json"))
-        .map_err(|e| format!("cannot read system/loop.json: {e}"))?;
-    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))?;
+struct LoopPlanStage {
+    spec: StageSpec,
+    severity: String,
+}
+
+/// Host-side plan for one loop: every enabled stage, with the exact command read here. A loop with any enabled stage
+/// this native slice cannot run is refused before anything runs, instead of silently reporting a green run that
+/// skipped the verification the user asked for.
+fn build_loop_plan(root: &Path, loop_id: &str) -> Result<(String, Vec<LoopPlanStage>), String> {
+    let v = read_loop_json(root)?;
     let loops = v.get("loops").and_then(|x| x.as_array()).ok_or("system/loop.json has no loops")?;
     let loop_v = loops.iter().find(|l| l.get("id").and_then(|x| x.as_str()) == Some(loop_id)).ok_or("that loop is not in system/loop.json")?;
     let loop_name = loop_v.get("name").and_then(|x| x.as_str()).unwrap_or("Loop").to_string();
     let stages = loop_v.get("config").and_then(|c| c.get("stages")).and_then(|s| s.as_array()).ok_or("loop has no stages")?;
-    let mut plan: Vec<(String, String, String, String, String)> = Vec::new();
+    let mut plan = Vec::new();
     for s in stages {
         if s.get("enabled").and_then(|x| x.as_bool()) != Some(true) { continue; }
         let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
@@ -300,33 +476,54 @@ pub fn run_loop(root: &Path, loop_id: &str, timeout_secs: Option<u64>) -> Result
         if kind == "regressionSweep" && has_fixed_faults(&root.join("system").join("faults")) {
             return Err(format!("“{name}” has fixed faults to re-ask; the native regression/agent slice is not ported yet"));
         }
-        let cmd = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
-        if kind == "shellCommand" && cmd.is_empty() { return Err(format!("“{name}” has no command")); }
-        plan.push((id, name, severity, kind.to_string(), cmd));
+        let command = s.get("command").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        if kind == "shellCommand" && command.is_empty() { return Err(format!("“{name}” has no command")); }
+        plan.push(LoopPlanStage {
+            spec: StageSpec { loop_id: loop_id.to_string(), stage_id: id, name, kind: kind.to_string(), command },
+            severity,
+        });
     }
     if plan.is_empty() { return Err("this loop has no enabled stages".into()); }
+    Ok((loop_name, plan))
+}
+
+/// Runs every enabled stage of one loop in order. Every shell command is authorised against the host's native
+/// approval BEFORE the first process starts, so a changed command anywhere in the loop refuses the whole pass rather
+/// than running the earlier stages and then stopping. Blocking failures stop the pass; advisory failures continue.
+pub(crate) fn run_loop_gated(root: &Path, loop_id: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<LoopRunResult, String> {
+    let (project, work) = canonical_roots(root)?;
+    let (loop_name, plan) = build_loop_plan(root, loop_id)?;
+    let shell: Vec<&LoopPlanStage> = plan.iter().filter(|p| p.spec.kind == "shellCommand").collect();
+    if !shell.is_empty() {
+        let token = token.ok_or_else(|| "this loop has shell commands that need a native host approval before they can run".to_string())?;
+        let now = crate::confirm::now_ms();
+        for p in &shell {
+            store.authorize_stage_at(token, &project, &work, &p.spec.loop_id, &p.spec.stage_id, &p.spec.command, now)?;
+        }
+    }
     let mut results = Vec::new();
     let mut passed = true;
-    for (id, name, severity, kind, _cmd) in plan {
-        let run = if kind == "regressionSweep" { run_regression(root)? } else { run_stage(root, &id, timeout_secs)? };
+    for p in plan {
+        let run = if p.spec.kind == "regressionSweep" { run_regression(root)? } else { run_command_at(&work, &p.spec.command, timeout_secs)? };
         let ok = !run.timed_out && run.exit_code == Some(0);
-        results.push(LoopStageResult { stage_id: id, stage_name: name, severity: severity.clone(), run });
+        results.push(LoopStageResult { stage_id: p.spec.stage_id, stage_name: p.spec.name, severity: p.severity.clone(), run });
         if !ok {
             passed = false;
-            if severity == "blocking" { break; }
+            if p.severity == "blocking" { break; }
         }
     }
     Ok(LoopRunResult { loop_id: loop_id.to_string(), loop_name, passed, stages: results })
 }
 
-/// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC.
+/// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC. A shell
+/// stage must carry the host-minted approval token for its exact command.
 #[tauri::command]
-pub async fn loop_run_stage(stage_id: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+pub async fn loop_run_stage(stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     CANCEL.store(false, Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        if stage_kind(&root, &stage_id)? == "regressionSweep" { run_regression(&root) } else { run_stage(&root, &stage_id, timeout_secs) }
+        run_stage_gated(&root, &stage_id, loop_id.as_deref(), timeout_secs, crate::loop_approval::store(), approval_token.as_deref())
     }).await.map_err(|e| format!("Loop stage task failed: {e}"))?
 }
 
@@ -343,11 +540,11 @@ pub fn loop_work_root() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn loop_run_loop(loop_id: String, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
+pub async fn loop_run_loop(loop_id: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        run_loop(&root, &loop_id, timeout_secs)
+        run_loop_gated(&root, &loop_id, timeout_secs, crate::loop_approval::store(), approval_token.as_deref())
     }).await.map_err(|e| format!("Loop task failed: {e}"))?
 }
 
@@ -481,11 +678,11 @@ pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
 }
 
 #[tauri::command]
-pub async fn loop_run_fault_verify(rel: String, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        run_fault_verify(&root, &rel, timeout_secs)
+        run_fault_verify_gated(&root, &rel, timeout_secs, crate::loop_approval::store(), approval_token.as_deref())
     }).await.map_err(|e| format!("fault verify task failed: {e}"))?
 }
 
@@ -499,12 +696,30 @@ mod tests {
         if cfg!(windows) { s.replace("printf ", "echo ") } else { s.to_string() }
     }
 
+    use crate::loop_approval::{approve_loop_with, approve_stage_with, ApprovalStore};
+
     fn project(name: &str, command: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("llmide-loop-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("system")).unwrap();
-        std::fs::write(root.join("system/loop.json"), format!(r#"{{"schemaVersion":2,"loops":[{{"name":"L","config":{{"stages":[{{"id":"s1","name":"T","kind":"shellCommand","command":{command:?},"order":0}}]}}}}]}}"#)).unwrap();
+        std::fs::write(root.join("system/loop.json"), format!(r#"{{"schemaVersion":2,"loops":[{{"id":"l1","name":"L","config":{{"stages":[{{"id":"s1","name":"T","kind":"shellCommand","command":{command:?},"enabled":true,"order":0}}]}}}}]}}"#)).unwrap();
         root
+    }
+
+    fn approve_loop(store: &ApprovalStore, root: &Path) -> String {
+        approve_loop_with(store, root, "l1", crate::confirm::now_ms(), |_, _| true)
+            .expect("the approval step itself failed").expect("the fake dialog accepted").token
+    }
+
+    fn approve_stage(store: &ApprovalStore, root: &Path, stage_id: &str) -> String {
+        approve_stage_with(store, root, stage_id, Some("l1"), crate::confirm::now_ms(), |_, _| true)
+            .expect("the approval step itself failed").expect("the fake dialog accepted").token
+    }
+
+    fn run_approved(root: &Path, stage_id: &str, timeout_secs: u64) -> StageRun {
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, root, stage_id);
+        run_stage_gated(root, stage_id, Some("l1"), Some(timeout_secs), &store, Some(&token)).unwrap()
     }
 
     #[test]
@@ -512,7 +727,9 @@ mod tests {
         let line = if cfg!(windows) { "echo hello& echo err>&2& exit 3" } else { "printf hello; printf err >&2; exit 3" };
         let root = project("ok", line);
         assert_eq!(stage_command(&root, "s1").unwrap(), line);
-        let r = run_stage(&root, "s1", Some(10)).unwrap();
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "s1");
+        let r = run_stage_gated(&root, "s1", Some("l1"), Some(10), &store, Some(&token)).unwrap();
         assert_eq!(r.stdout.trim_end(), "hello");
         assert_eq!(r.stderr.trim_end(), "err");
         assert_eq!(r.exit_code, Some(3));
@@ -525,15 +742,65 @@ mod tests {
     fn loop_runs_shell_stages_in_order_and_stops_at_blocking_failure() {
         let root = project("loop", "printf one");
         std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"maxIterations":2,"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"printf one","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
-        let r = run_loop(&root, "l1", Some(10)).unwrap();
+        let store = ApprovalStore::new();
+        let token = approve_loop(&store, &root);
+        let r = run_loop_gated(&root, "l1", Some(10), &store, Some(&token)).unwrap();
         assert!(r.passed);
         assert_eq!(r.stages.len(), 2);
         assert_eq!(r.stages[0].run.stdout.trim_end(), "one");
         assert_eq!(r.stages[1].run.stdout.trim_end(), "two");
         std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"s1","name":"One","kind":"shellCommand","command":"exit 1","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Two","kind":"shellCommand","command":"printf two","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
-        let r = run_loop(&root, "l1", Some(10)).unwrap();
+        let token = approve_loop(&store, &root);
+        let r = run_loop_gated(&root, "l1", Some(10), &store, Some(&token)).unwrap();
         assert!(!r.passed);
         assert_eq!(r.stages.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_changed_command_refuses_before_any_process_starts() {
+        let root = project("changed", "printf approved > marker.txt");
+        let marker = root.join("marker.txt");
+        let store = ApprovalStore::new();
+        let token = approve_loop(&store, &root);
+        run_loop_gated(&root, "l1", Some(10), &store, Some(&token)).unwrap();
+        assert!(marker.exists(), "the approved command ran");
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::write(root.join("system/loop.json"), format!(r#"{{"schemaVersion":2,"loops":[{{"id":"l1","name":"L","config":{{"stages":[{{"id":"s1","name":"T","kind":"shellCommand","command":{command:?},"enabled":true,"order":0}}]}}}}]}}"#, command = cmd("printf changed > marker.txt"))).unwrap();
+        let err = run_loop_gated(&root, "l1", Some(10), &store, Some(&token)).unwrap_err();
+        assert!(err.contains("changed since it was approved") || err.contains("not approved"), "{err}");
+        assert!(!marker.exists(), "nothing may run when the exact command hash no longer matches");
+        std::fs::write(root.join("system/loop.json"), format!(r#"{{"schemaVersion":2,"loops":[{{"id":"l1","name":"L","config":{{"stages":[{{"id":"s1","name":"T","kind":"shellCommand","command":{command:?},"enabled":true,"order":0}}]}}}}]}}"#, command = cmd("printf changed > marker.txt"))).unwrap();
+        let err = run_stage_gated(&root, "s1", Some("l1"), Some(10), &store, Some(&token)).unwrap_err();
+        assert!(err.contains("changed since it was approved") || err.contains("not approved"), "{err}");
+        assert!(!marker.exists(), "the single-stage path refuses too");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_denied_or_missing_native_approval_refuses_without_running() {
+        let root = project("denied", "printf ran > marker.txt");
+        let marker = root.join("marker.txt");
+        let store = ApprovalStore::new();
+        let denial = approve_loop_with(&store, &root, "l1", crate::confirm::now_ms(), |_, _| false).unwrap();
+        assert!(denial.is_none(), "Cancel mints no approval");
+        let err = run_loop_gated(&root, "l1", Some(10), &store, None).unwrap_err();
+        assert!(err.contains("native host approval"), "{err}");
+        assert!(!marker.exists(), "a declined approval runs nothing");
+        let err = run_stage_gated(&root, "s1", Some("l1"), Some(10), &store, None).unwrap_err();
+        assert!(err.contains("native host approval"), "{err}");
+        assert!(!marker.exists(), "a direct caller without a token runs nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_approval_for_another_loop_or_stage_does_not_run_this_command() {
+        let root = project("wrong-scope", "printf ran > marker.txt");
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "s1");
+        let err = run_stage_gated(&root, "s1", Some("another-loop"), Some(10), &store, Some(&token)).unwrap_err();
+        assert!(err.contains("not approved") || err.contains("not in system/loop.json"), "{err}");
+        assert!(!root.join("marker.txt").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -552,14 +819,16 @@ mod tests {
     fn regression_stage_with_no_fixed_faults_is_a_honest_noop() {
         let root = project("regression-empty", "printf test");
         std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l","name":"R","config":{"stages":[{"id":"s1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0},{"id":"s2","name":"Test","kind":"shellCommand","command":"printf ok","enabled":true,"severity":"blocking","order":1}]}}]}"#)).unwrap();
-        let r = run_loop(&root, "l", Some(10)).unwrap();
+        let store = ApprovalStore::new();
+        let token = approve_loop_with(&store, &root, "l", crate::confirm::now_ms(), |_, _| true).unwrap().unwrap().token;
+        let r = run_loop_gated(&root, "l", Some(10), &store, Some(&token)).unwrap();
         assert!(r.passed);
         assert_eq!(r.stages.len(), 2);
         assert_eq!(r.stages[0].run.exit_code, Some(0));
         assert_eq!(r.stages[1].run.stdout.trim_end(), "ok");
         std::fs::create_dir_all(root.join("system/faults")).unwrap();
         std::fs::write(root.join("system/faults/f.md"), "---\nstatus: fixed\n---\n").unwrap();
-        assert!(run_loop(&root, "l", Some(10)).is_err());
+        assert!(run_loop_gated(&root, "l", Some(10), &store, Some(&token)).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -567,8 +836,53 @@ mod tests {
     fn fault_verify_reads_the_saved_command_only() {
         let root = std::fs::canonicalize(project("fault", "printf ok")).unwrap();
         std::fs::create_dir_all(root.join("system/faults")).unwrap();
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"r1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0}]}}]}"#)).unwrap();
         std::fs::write(root.join("system/faults/f.md"), cmd("---\nverify: \"printf verified\"\nstatus: fixed\n---\nnotes\n")).unwrap();
-        let r = run_fault_verify(&root, "system/faults/f.md", Some(5)).unwrap();
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "r1");
+        let r = run_fault_verify_gated(&root, "system/faults/f.md", Some(5), &store, Some(&token)).unwrap();
+        assert_eq!(r.stdout.trim_end(), "verified");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_changed_fault_verify_command_refuses_and_runs_nothing() {
+        let root = std::fs::canonicalize(project("fault-changed", "printf ok")).unwrap();
+        std::fs::create_dir_all(root.join("system/faults")).unwrap();
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"r1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0}]}}]}"#)).unwrap();
+        std::fs::write(root.join("system/faults/f.md"), cmd("---\nverify: \"printf approved > fault-marker.txt\"\nstatus: fixed\n---\nnotes\n")).unwrap();
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "r1");
+        let marker = root.join("fault-marker.txt");
+        run_fault_verify_gated(&root, "system/faults/f.md", Some(5), &store, Some(&token)).unwrap();
+        assert!(marker.exists());
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::write(root.join("system/faults/f.md"), cmd("---\nverify: \"printf changed > fault-marker.txt\"\nstatus: fixed\n---\nnotes\n")).unwrap();
+        let err = run_fault_verify_gated(&root, "system/faults/f.md", Some(5), &store, Some(&token)).unwrap_err();
+        assert!(err.contains("changed since it was approved") || err.contains("not approved"), "{err}");
+        assert!(!marker.exists(), "nothing may run when the fault verify command changed");
+        let err = run_fault_verify_gated(&root, "system/faults/f.md", Some(5), &store, None).unwrap_err();
+        assert!(err.contains("native host approval"), "{err}");
+        assert!(!marker.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_work_tree_faults_are_included_in_the_approval() {
+        let root = std::env::temp_dir().join(format!("llmide-loop-worktree-faults-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("system")).unwrap();
+        std::fs::create_dir_all(root.join("code/repo/.git")).unwrap();
+        std::fs::create_dir_all(root.join("code/repo/system/faults")).unwrap();
+        std::fs::write(root.join("system/loop.json"), cmd(r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"r1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0}]}}]}"#)).unwrap();
+        std::fs::write(root.join("code/repo/system/faults/f.md"), cmd("---\nverify: \"printf verified\"\nstatus: fixed\n---\n")).unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        let rel = "code/repo/system/faults/f.md";
+        let got = fault_commands(&root).unwrap();
+        assert!(got.iter().any(|f| f.rel == rel), "the approval scan must see the working tree's faults: {got:?}");
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "r1");
+        let r = run_fault_verify_gated(&root, rel, Some(5), &store, Some(&token)).unwrap();
         assert_eq!(r.stdout.trim_end(), "verified");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -713,7 +1027,7 @@ mod tests {
     fn a_program_in_the_working_folder_does_not_shadow_path() {
         let root = project("shadow", "hostname");
         std::fs::write(root.join("hostname.bat"), "@echo planted\r\n").unwrap();
-        let r = run_stage(&root, "s1", Some(10)).unwrap();
+        let r = run_approved(&root, "s1", 10);
         assert!(!r.stdout.contains("planted"), "{r:?}");
         assert_eq!(r.exit_code, Some(0), "{r:?}");
         let _ = std::fs::remove_dir_all(&root);
@@ -722,7 +1036,7 @@ mod tests {
     #[test]
     fn timeout_kills_the_stage() {
         let root = project("timeout", if cfg!(windows) { "ping -n 6 127.0.0.1 >nul" } else { "sleep 5" });
-        let r = run_stage(&root, "s1", Some(1)).unwrap();
+        let r = run_approved(&root, "s1", 1);
         assert!(r.timed_out);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -733,7 +1047,7 @@ mod tests {
         let pidfile = std::env::temp_dir().join(format!("llmide-loop-grandchild-{}.pid", std::process::id()));
         let _ = std::fs::remove_file(&pidfile);
         let root = project("grandchild", &format!("sleep 30 & echo $! > {}; wait", pidfile.display()));
-        let r = run_stage(&root, "s1", Some(1)).unwrap();
+        let r = run_approved(&root, "s1", 1);
         assert!(r.timed_out);
         let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
         let alive = || Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();

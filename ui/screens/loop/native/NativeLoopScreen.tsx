@@ -17,7 +17,7 @@ import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
 import { evaluateArtifact } from "./artifact.ts";
-import { approve, isApproved, revokeAll } from "./approvals.ts";
+import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
@@ -104,6 +104,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
+  /** Host-side approval state for the selected loop; null when the host cannot answer (browser fallback). */
+  const [approvalState, setApprovalState] = useState<LoopApprovalStatus | null>(null);
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
   const haltRef = useRef<string | null>(null);
@@ -281,6 +283,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const loop = store?.loops.find((l) => l.id === selectedLoopId) ?? store?.loops[0] ?? null;
   const stage = loop?.config.stages.find((s) => s.id === selectedStageId) ?? loop?.config.stages[0] ?? null;
 
+  /** Re-read the host's approval state (commands may have changed since the last dialog). */
+  const refreshApproval = async (loopId: string) => {
+    try { setApprovalState(await approvalStatus(loopId)); } catch { setApprovalState(null); }
+  };
+
+  useEffect(() => {
+    if (!loop) { setApprovalState(null); return undefined; }
+    let live = true;
+    void approvalStatus(loop.id).then((s) => { if (live) setApprovalState(s); }).catch(() => { if (live) setApprovalState(null); });
+    return () => { live = false; };
+  }, [loop?.id]);
+
   const mutateStore = (fn: (store: LoopProjectStore) => void) => {
     if (!store) return;
     const next = cloneStore(store);
@@ -432,9 +446,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return g.violation;
   };
 
-  const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = []): Promise<{ ok: boolean; output: string }> => {
+  const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = [], approvalToken: string | null = null): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand") {
-      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, timeoutSecs: s.timeoutSeconds });
+      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, loopId: target.id, approvalToken, timeoutSecs: s.timeoutSeconds });
       if (r.cancelled) cancelledRef.current = true;
       return { ok: !r.timedOut && !r.cancelled && r.exitCode === 0, output: r.cancelled ? "Stage cancelled." : [r.stdout, r.stderr].filter(Boolean).join("\n") };
     }
@@ -444,7 +458,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const faultsRoot = repoPrefix ? `${repoPrefix}/system/faults` : "system/faults";
       const r = await runRegression(fs, faultsRoot, {
         async verify(f) {
-          const v = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_fault_verify", { rel: f.rel, timeoutSecs: s.timeoutSeconds });
+          const v = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_fault_verify", { rel: f.rel, approvalToken, timeoutSecs: s.timeoutSeconds });
           return { ok: !v.timedOut && v.exitCode === 0, output: [v.stdout, v.stderr].filter(Boolean).join("\n") };
         },
         async ask(prompt) {
@@ -541,23 +555,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
-  const approvalRoot = workRoot ?? projectRoot ?? "";
-  /** Shell commands in a loop that this machine has not approved yet. Read-only: approving stays an explicit confirm. */
-  const unapprovedCommands = (target: LoopDefinition): string[] =>
-    target.config.stages.flatMap((s) => (s.enabled && s.kind === "shellCommand" && s.command && !isApproved(approvalRoot, s.command) ? [s.command] : []));
-
-  const ensureApprovals = (target: LoopDefinition, prompt = true): string | null => {
-    const root = workRoot ?? projectRoot ?? "";
-    for (const s of target.config.stages) {
-      if (!s.enabled || s.kind !== "shellCommand" || !s.command) continue;
-      if (isApproved(root, s.command)) continue;
-      if (!prompt) return `“${s.name}” needs command approval before a scheduled run: ${s.command}`;
-      if (!window.confirm(`Approve this command for ${target.name}?\n\n${s.command}`)) return `“${s.name}” needs command approval before it can run.`;
-      approve(root, s.command);
-    }
-    return null;
-  };
-
   const stopRun = () => {
     cancelledRef.current = true;
     pausedRef.current = false;
@@ -598,8 +595,28 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = macBatchReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
-    const approval = ensureApprovals(target, !scheduled);
-    if (approval) { setNotice(approval); return; }
+    // The native Rust dialog (or a still-valid grant for exactly the same command hashes) is the approval. A
+    // scheduled run never opens a dialog: it reuses an existing grant or skips, so the app cannot self-approve.
+    let approvalToken: string | null = null;
+    try {
+      if (scheduled) {
+        const status = await approvalStatus(target.id);
+        if (!status.approved) {
+          setNotice(`“${target.name}” needs a native host approval for its exact shell commands before a scheduled run; run it once from here.`);
+          return;
+        }
+        // `token` is null when there is nothing to approve (no shell or fault verify commands).
+        approvalToken = status.token;
+      } else {
+        const approval = await approveLoop(target.id);
+        if (!approval) { setNotice("The Loop commands were not approved; the run did not start."); return; }
+        approvalToken = approval.token;
+      }
+      await refreshApproval(target.id);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "The Loop commands could not be approved.");
+      return;
+    }
     runningRef.current = true;
     cancelledRef.current = false;
     haltRef.current = null;
@@ -617,7 +634,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const outcome = await runNativeLoop(target.config, {
         isCancelled() { return cancelledRef.current; },
         async runStage(s, prior) {
-          const r = await runOneStage(s, target, prior);
+          const r = await runOneStage(s, target, prior, approvalToken);
           setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
           return r;
         },
@@ -678,6 +695,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setPaused(false);
       setLoopRunning(false);
       setRunningStage(false);
+      void refreshApproval(target.id);
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
       persistQueue();
@@ -687,10 +705,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
-    if (!runningRef.current && !scheduled) {
-      const pending = unapprovedCommands(target).length;
-      if (pending > 0) setNotice(`${pending} shell command${pending === 1 ? "" : "s"} in “${target.name}” ${pending === 1 ? "needs" : "need"} approval on this machine; you will be asked before ${pending === 1 ? "it runs" : "each one runs"}.`);
-    }
     if (runningRef.current) {
       if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
       setQueued(queueRef.current.length);
@@ -773,20 +787,32 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
     if (stage.kind === "skill" && isBatchSkill(stage.skillId)) { setNotice("This refactor batch stage needs the Mac app's rollback; run it from the Mac."); return; }
-    if (stage.kind === "shellCommand" && stage.command && !isApproved(workRoot ?? projectRoot ?? "", stage.command)) {
-      if (!window.confirm(`Approve this command?\n\n${stage.command}`)) return;
-      approve(workRoot ?? projectRoot ?? "", stage.command);
+    // Shell stages and a Regression stage's fault verifies need the host's native approval for this exact stage.
+    let approvalToken: string | null = null;
+    if (stage.kind === "shellCommand" || stage.kind === "regressionSweep") {
+      try {
+        const approval = await approveStage(stage.id, loop.id);
+        if (!approval) { setNotice("The stage command was not approved; nothing ran."); return; }
+        approvalToken = approval.token;
+        await refreshApproval(loop.id);
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : "The stage command could not be approved.");
+        return;
+      }
     }
     setRunningStage(true);
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
-      const r = await runOneStage(stage, loop);
+      const r = await runOneStage(stage, loop, [], approvalToken);
       setRunLog((l) => [...l, r.output, r.ok ? "Stage passed." : "Stage failed."]);
       setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The stage could not run.");
-    } finally { setRunningStage(false); }
+    } finally {
+      setRunningStage(false);
+      void refreshApproval(loop.id);
+    }
   };
 
   const save = async () => {
@@ -876,7 +902,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <li key={s.id}>
               <button type="button" className="loop-stage-row" data-on={s.id === stage?.id || undefined} onClick={() => setSelectedStageId(s.id)}>
                 <span className="loop-stage-name">{s.name}</span>
-                {s.enabled && s.kind === "shellCommand" && s.command && !isApproved(approvalRoot, s.command) ? <span className="loop-unapproved" title="Command not yet approved on this machine">needs approval</span> : null}
+                {s.enabled && s.kind === "shellCommand" && s.command && approvalState && !approvalState.approved ? <span className="loop-unapproved" title="The host has no valid approval for this loop's exact commands">needs host approval</span> : null}
                 {s.isDefault ? <span className="loop-lock" title="Default stage">🔒</span> : null}
                 <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
@@ -921,7 +947,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             {loop.config.protectedPathPolicy === "off" && loop.scopeGlobs.length > 0 ? <p className="loop-warn">Not enforced: the policy above is Off, which disables the scope check too.</p> : null}
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
-            <button type="button" className="loop-btn" onClick={() => { revokeAll(); setNotice("Revoked every approved Loop shell command on this machine."); }}>Revoke command approvals</button>
+            <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.alwaysUseWorktree} onChange={() => undefined} /> Always run in an isolated worktree (not ported)</label>

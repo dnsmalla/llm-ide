@@ -1,31 +1,39 @@
-// Per-machine shell-command approvals for Loop stages. The Mac's VerifyApprovalStore is per machine; this is the
-// desktop equivalent for shell stages: a command must be approved once for a project before a run can execute it.
-// Approvals are UI state only; the host still resolves the command from the committed loop.json, never from the page.
-const KEY = "llmide.loopApprovals.v1";
+// Host-minted approvals for Loop shell commands (R-014#2). This module carries ONLY the opaque token the Rust host
+// returns after its native Cancel-first dialog; the token is bound to the exact command hash, loop/stage, working
+// folder and an expiry. A page-side string is never accepted by the host, and there is no localStorage "approved"
+// list: editing system/loop.json invalidates the host approval and the run is refused.
+import { invokeHost } from "../../shell/host.ts";
 
-function read(storage: Storage | undefined = globalThis.localStorage): string[] {
-  try {
-    const raw = storage?.getItem(KEY);
-    const v = raw ? JSON.parse(raw) as unknown : [];
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-500) : [];
-  } catch { return []; }
+export interface LoopApproval {
+  token: string;
+  expiresAtMs: number;
+  stageIds: string[];
+  faultCount: number;
 }
 
-function key(root: string, command: string): string {
-  return `${root.replace(/\/+$/, "")}\u0000${command.trim()}`;
+export interface LoopApprovalStatus {
+  approved: boolean;
+  pending: number;
+  expiresAtMs: number | null;
+  token: string | null;
 }
 
-export function isApproved(root: string, command: string, storage: Storage | undefined = globalThis.localStorage): boolean {
-  return read(storage).includes(key(root, command));
+/** Native dialog for a whole loop, or an existing valid grant for the exact same commands. `null` = declined. */
+export async function approveLoop(loopId: string): Promise<LoopApproval | null> {
+  return invokeHost<LoopApproval | null>("loop_approve_loop", { loopId });
 }
 
-export function approve(root: string, command: string, storage: Storage | undefined = globalThis.localStorage): void {
-  const list = read(storage);
-  const k = key(root, command);
-  if (!list.includes(k)) list.push(k);
-  try { storage?.setItem(KEY, JSON.stringify(list.slice(-500))); } catch { /* session only */ }
+/** Native dialog for one stage (its shell command, or a Regression stage's fault verify commands). */
+export async function approveStage(stageId: string, loopId: string | null): Promise<LoopApproval | null> {
+  return invokeHost<LoopApproval | null>("loop_approve_stage", loopId === null ? { stageId } : { stageId, loopId });
 }
 
-export function revokeAll(storage: Storage | undefined = globalThis.localStorage): void {
-  try { storage?.removeItem(KEY); } catch { /* session only */ }
+/** Whether a valid approval already covers the loop's exact current commands. Never shows a dialog. */
+export async function approvalStatus(loopId: string): Promise<LoopApprovalStatus> {
+  return invokeHost<LoopApprovalStatus>("loop_approval_status", { loopId });
+}
+
+/** Drops every Loop approval this app has minted. */
+export async function revokeApprovals(): Promise<void> {
+  await invokeHost<unknown>("loop_revoke_approvals");
 }
