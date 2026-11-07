@@ -45,6 +45,30 @@ export function getMember(db, userId) {
   };
 }
 
+/**
+ * The full row state, for undoing a grant when the team.yaml write-through fails (R-013#2). Unlike
+ * `getMember` it keeps `granted_by`/`updated_at`, so the rollback restores the row exactly.
+ */
+export function getMemberSnapshot(db, userId) {
+  if (!userId) return null;
+  return db.prepare(
+    'SELECT user_id, team_role, max_mode, usd_cap_month, granted_by, updated_at FROM members WHERE user_id = ?',
+  ).get(String(userId)) ?? null;
+}
+
+/** Restore a row captured by `getMemberSnapshot`. A null snapshot is a no-op (nothing to undo). */
+export function restoreMemberSnapshot(db, snapshot) {
+  if (!snapshot) return;
+  db.prepare(`
+    UPDATE members
+       SET team_role = ?, max_mode = ?, usd_cap_month = ?, granted_by = ?, updated_at = ?
+     WHERE user_id = ?
+  `).run(
+    snapshot.team_role, snapshot.max_mode, snapshot.usd_cap_month,
+    snapshot.granted_by, snapshot.updated_at, snapshot.user_id,
+  );
+}
+
 /** Every member joined with the users row, ordered by role then email. */
 export function listMembers(db) {
   return db.prepare(`

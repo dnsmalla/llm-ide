@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import { parseTeamYaml } from '../kb/team-yaml.mjs';
 
 const EXT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -117,6 +118,35 @@ async function register(base, email) {
   return JSON.parse(text).user;
 }
 
+/** POST /auth/login, returning the bearer token. */
+async function login(base, email) {
+  const res = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: 'CorrectHorseBattery' }),
+  });
+  const text = await res.text();
+  assert.equal(res.status, 200, `login ${email} answered ${res.status}: ${text}`);
+  return JSON.parse(text).accessToken;
+}
+
+/** One authenticated JSON request; returns `{ status, body }`. */
+async function api(base, token, method, url, body) {
+  const res = await fetch(`${base}${url}`, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : null };
+}
+
+/** The assignment for one email in the data dir's team.yaml (fails the test when absent). */
+function fileGrant(dir, email) {
+  const rows = parseTeamYaml(fs.readFileSync(path.join(dir, 'team.yaml'), 'utf8'));
+  return rows.find((row) => row.email === email) ?? null;
+}
+
 const grantOf = (dir, userId) => {
   const db = new Database(path.join(dir, 'data.db'), { readonly: true });
   try {
@@ -203,6 +233,87 @@ test('boot defers, generates, applies and audits team.yaml, then refuses an inva
     assert.match(bad.output, /team_yaml_invalid/);
     assert.deepEqual(grantOf(dir, member.id), { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 9 },
       'the last valid grants stay in place; no partial application');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// R-013#2: team.yaml is authoritative at every boot, so the API must write it through. These two tests
+// exercise the exact reload path a desktop core restart takes.
+
+test('PATCH /admin/members writes team.yaml through, so the grant survives a restart', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-team-patch-'));
+  try {
+    const first = await startCore(dir);
+    const owner = await register(first.base, 'owner@example.com');
+    const member = await register(first.base, 'member@example.com');
+    await first.stop();
+    assert.equal(fs.existsSync(path.join(dir, 'team.yaml')), false, 'registrations alone do not write the file');
+
+    // The next boot generates the file from the current rows.
+    let core = await startCore(dir);
+    const token = await login(core.base, 'owner@example.com');
+    const patched = await api(core.base, token, 'PATCH', `/admin/members/${member.id}`, {
+      teamRole: 'admin', maxMode: 'execute', usdCapMonth: 7,
+    });
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    assert.deepEqual(fileGrant(dir, 'member@example.com'), {
+      email: 'member@example.com', teamRole: 'admin', maxMode: 'execute', usdCapMonth: 7,
+    }, 'the PATCH rewrote the authoritative file in the same request');
+    assert.equal(fs.statSync(path.join(dir, 'team.yaml')).mode & 0o777, 0o600);
+    await core.stop();
+
+    // Restart: the boot applies the file, and the API grant is still there.
+    core = await startCore(dir);
+    await core.stop();
+    assert.deepEqual(grantOf(dir, member.id), { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 7 },
+      'the grant survived the restart');
+    assert.deepEqual(grantOf(dir, owner.id), { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+    assert.deepEqual(fileGrant(dir, 'member@example.com'), {
+      email: 'member@example.com', teamRole: 'admin', maxMode: 'execute', usdCapMonth: 7,
+    }, 'the restart did not rewrite the file');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an invited registration writes team.yaml through, so the invite grant survives a restart', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-team-invite-'));
+  try {
+    const first = await startCore(dir);
+    await register(first.base, 'owner@example.com');
+    await first.stop();
+
+    let core = await startCore(dir); // generates team.yaml from the owner
+    const token = await login(core.base, 'owner@example.com');
+    const minted = await api(core.base, token, 'POST', '/admin/invites', {
+      email: 'invitee@example.com', teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
+    });
+    assert.equal(minted.status, 200, JSON.stringify(minted.body));
+
+    const registered = await fetch(`${core.base}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'invitee@example.com', password: 'CorrectHorseBattery',
+        displayName: 'Invited', invite: minted.body.token,
+      }),
+    });
+    const registeredText = await registered.text();
+    assert.equal(registered.status, 201, `invited registration answered ${registered.status}: ${registeredText}`);
+    const invitee = JSON.parse(registeredText).user;
+    assert.deepEqual(fileGrant(dir, 'invitee@example.com'), {
+      email: 'invitee@example.com', teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
+    }, 'the invite grant is in the file before any restart');
+    await core.stop();
+
+    core = await startCore(dir);
+    await core.stop();
+    assert.deepEqual(grantOf(dir, invitee.id), { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 },
+      'the invite grant survived the restart instead of being reset to the viewer default');
+    assert.deepEqual(fileGrant(dir, 'invitee@example.com'), {
+      email: 'invitee@example.com', teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

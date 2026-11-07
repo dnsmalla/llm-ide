@@ -46,9 +46,17 @@ The user decided that authority must be auditable and editable outside the DB, s
 - **The first boot with a real account generates the file** from the current `members` rows, so an existing
   solo owner stays owner and every other existing account is listed with its current grants. A fresh install
   (only the synthetic `legacy` user) **defers** generation: an empty file would become authoritative at the
-  next boot and demote the first registered owner. The core never rewrites an existing file.
-- **One application per boot**, after migrations and before serving; never on a request path. Every actual
-  change is an `audit_log` row with actor `team.yaml` (from/to only, never message text).
+  next boot and demote the first registered owner. A boot never rewrites an existing file.
+- **One application per boot**, after migrations and before serving. Every actual change is an `audit_log`
+  row with actor `team.yaml` (from/to only, never message text).
+- **Write-through (R-013#2)**: because the file is authoritative, an admin grant or an invited member's
+  grant would otherwise be reset by the next restart. `PATCH /admin/members` and an invited registration
+  therefore rewrite the file atomically (0600, same generation path) after their DB transaction, from the
+  current `members` rows. A failed write answers 500 and rolls the grant / registration back, so a completed
+  request never leaves the DB and file disagreeing. Entries for emails with no account and the file's
+  full-line comments are preserved; the DB wins for an account it lists. An edit made to the file while the
+  core runs is replaced by the next API grant change (it applies at the next boot). Write events are
+  audited as `team.yaml.write` with actor `team.yaml`; the file itself is never read on a request path.
 - **Invalid YAML, an unknown role or an invalid grant fails closed**: the boot is refused with
   `team_yaml_invalid`, so the core never serves with stale or widened grants. Unknown emails are ignored and
   audited; they never create accounts.

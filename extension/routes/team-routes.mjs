@@ -12,12 +12,21 @@
 //
 // Validation is a closed object per route (an unknown key is a 400, not silently ignored), enums as in
 // migration 0068, usdCapMonth 0-100000, ttlHours 1-168, email <= 254 chars.
+//
+// Write-through (R-013#2): PATCH /admin/members rewrites <data dir>/team.yaml atomically after the DB
+// transaction, so the grant survives the next core restart (the file is authoritative at boot). A failed
+// write answers 500 and restores the previous grant. Invited registration does the same in
+// server/auth-routes.mjs. See kb/team-yaml.mjs `persistTeamYaml`.
 import { getDb } from '../kb/db.mjs';
+import { config } from '../core/config.mjs';
+import path from 'node:path';
 import { requireRole } from '../server/auth.mjs';
 import { send, readJson, clientIp, safeAudit } from '../server/route-http.mjs';
 import {
-  MAX_USD_CAP_MONTH, createInvite, listInvites, listMembers, revokeInvite, setMember,
+  MAX_USD_CAP_MONTH, createInvite, getMemberSnapshot, listInvites, listMembers, restoreMemberSnapshot,
+  revokeInvite, setMember,
 } from '../kb/members.mjs';
+import { persistTeamYaml } from '../kb/team-yaml.mjs';
 
 const BODY_MAX = 64 * 1024;
 const MEMBER_PATH = /^\/admin\/members\/([A-Za-z0-9_-]{1,64})$/;
@@ -54,11 +63,13 @@ async function readBody(req) {
   return { ok: true, body };
 }
 
-export async function handleTeamRoute(req, res, { db = getDb(), logger, requestId } = {}) {
+export async function handleTeamRoute(req, res, { db = getDb(), logger, requestId, dir } = {}) {
   const url = String(req.url || '').split('?')[0];
   const method = req.method;
   const ip = clientIp(req);
   const ua = req.headers?.['user-agent'] || '';
+  // Same directory the boot applies: <LLMIDE_DATA_DIR>/team.yaml, or beside the DB in the repo layout.
+  const dataDir = typeof dir === 'string' && dir ? dir : (config.dataDir ?? path.dirname(config.dbPath));
 
   if (!req.user) {
     if (logger) logger.warn?.('team_route_unauthenticated', { url });
@@ -66,6 +77,12 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
   }
   const audit = (action, detail, resource) => safeAudit(db, {
     userId: req.user.id, requestId, ip, userAgent: ua, action, resource, outcome: 'success', detail,
+  });
+  // The file actor, same shape as server/team-boot.mjs: the write is the file's, triggered by this route.
+  const fileAudit = (entry) => safeAudit(db, {
+    userId: req.user.id, requestId, ip, userAgent: ua,
+    action: entry.action, resource: entry.resource ?? null, outcome: entry.outcome ?? 'success',
+    detail: { actor: 'team.yaml', ...(entry.detail ?? {}) },
   });
 
   try {
@@ -98,7 +115,22 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
       const n = Number(patch.usdCapMonth);
       if (!Number.isFinite(n) || n < 0 || n > MAX_USD_CAP_MONTH) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid USD cap');
     }
+    // Write-through ordering: DB transaction first, then the authoritative file. A file failure restores
+    // the exact previous row, so a completed request never leaves the DB and team.yaml disagreeing.
+    const before = getMemberSnapshot(db, memberMatch[1]);
     const updated = setMember(db, req.user.id, memberMatch[1], patch);
+    try {
+      persistTeamYaml(db, dataDir, { logger, audit: fileAudit, trigger: 'admin.patch' });
+    } catch (err) {
+      restoreMemberSnapshot(db, before);
+      if (logger) {
+        logger.error?.('team_yaml_write_failed', {
+          trigger: 'admin.patch', target: memberMatch[1], reason: err?.reason ?? 'invalid',
+          message: String(err?.message ?? err).slice(0, 200),
+        });
+      }
+      return fail(res, 500, 'INTERNAL_ERROR', 'Could not write team.yaml; the grant change was rolled back');
+    }
     audit('team.grant', patch, memberMatch[1]);
     // The same row shape GET /admin/members returns (the store helper answers the four grant fields).
     const member = listMembers(db).find((m) => m.userId === updated.userId) ?? updated;

@@ -21,9 +21,17 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 const kb = await import('../kb/db.mjs');
 const {
   DEFAULT_VIEWER_ASSIGNMENT, TeamYamlError, applyTeamYaml, listTeamAssignments,
-  parseTeamYaml, serializeTeamYaml,
+  mergeTeamYamlAssignments, parseTeamYaml, persistTeamYaml, serializeTeamYaml,
 } = await import('../kb/team-yaml.mjs');
 const { applyTeamYamlAtBoot } = await import('../server/team-boot.mjs');
+const { safeAudit } = await import('../server/route-http.mjs');
+
+/** The boot adapter's audit shape, for the write-through tests (actor team.yaml, no request). */
+const teamAudit = (entry) => safeAudit(kb.getDb(), {
+  userId: entry.userId ?? null, requestId: 'team.yaml', ip: 'test', userAgent: 'team.yaml',
+  action: entry.action, resource: entry.resource ?? null, outcome: entry.outcome ?? 'success',
+  detail: { actor: 'team.yaml', ...(entry.detail ?? {}) },
+});
 
 const noopLogger = { info() {}, warn() {}, error() {} };
 let seq = 0;
@@ -207,6 +215,89 @@ test('a second boot applies the same file without rewriting it or changing a row
   assert.equal(fs.readFileSync(file, 'utf8'), text, 'an existing file is never rewritten');
   assert.equal(auditRows('team.yaml.apply').length, applyRows, 'no audit row without a change');
   assert.equal(auditRows('team.yaml.generate').length, 1);
+});
+
+// ── write-through (R-013#2) ───────────────────────────────────────────────
+
+test('persistTeamYaml writes the DB authority through, preserving manual entries and full-line comments', () => {
+  reset();
+  const d = dir();
+  addUser('owner@example.com', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  const member = addUser('member@example.com', { teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20 });
+  // A file the user has edited: a future account's grant plus a comment. The API write must not lose either.
+  writeYaml(d, [
+    '# prepared for the new hire',
+    'members:',
+    '  owner@example.com:',
+    '    role: owner',
+    '    max_mode: execute',
+    '    usd_cap_month: 0',
+    '  future@example.com:',
+    '    role: admin',
+    '    max_mode: execute',
+    '    usd_cap_month: 0',
+    '  member@example.com:',
+    '    role: viewer',           // the stale pre-PATCH grant
+    '    max_mode: read_only',
+    '    usd_cap_month: 9',
+  ].join('\n'));
+  // What PATCH wrote to the DB before the file write-through.
+  kb.getDb().prepare("UPDATE members SET team_role = 'admin', max_mode = 'execute', usd_cap_month = 7 WHERE user_id = ?").run(member);
+
+  const result = persistTeamYaml(kb.getDb(), d, { trigger: 'admin.patch', audit: teamAudit });
+  assert.equal(result.users, 2);
+  assert.equal(result.preserved, 1, 'the future (unknown-email) entry is kept');
+  const text = fs.readFileSync(path.join(d, 'team.yaml'), 'utf8');
+  assert.match(text, /^# prepared for the new hire$/m, 'the user comment survives');
+  assert.deepEqual(parseTeamYaml(text), [
+    entry('owner@example.com', 'owner', 'execute', 0),
+    entry('future@example.com', 'admin', 'execute', 0),
+    entry('member@example.com', 'admin', 'execute', 7),
+  ], 'the DB wins for a listed account, the manual entry is preserved');
+  assert.equal(fs.statSync(path.join(d, 'team.yaml')).mode & 0o777, 0o600);
+  const writeRows = auditRows('team.yaml.write');
+  assert.equal(writeRows.length, 1);
+  assert.equal(writeRows[0].user_agent, 'team.yaml');
+  assert.equal(writeRows[0].detail.actor, 'team.yaml');
+  assert.equal(writeRows[0].detail.trigger, 'admin.patch');
+  assert.equal(writeRows[0].detail.users, 2);
+  assert.equal(writeRows[0].detail.preserved, 1);
+});
+
+test('persistTeamYaml refuses to overwrite an invalid file and leaves every grant to the boot', () => {
+  reset();
+  const d = dir();
+  addUser('owner@example.com', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  const invalid = 'members:\n  owner@example.com:\n    role: root\n    max_mode: execute\n    usd_cap_month: 0\n';
+  writeYaml(d, invalid);
+  assert.throws(
+    () => persistTeamYaml(kb.getDb(), d, { trigger: 'admin.patch', audit: teamAudit }),
+    (err) => err instanceof TeamYamlError && err.code === 'TEAM_YAML_INVALID',
+  );
+  assert.equal(fs.readFileSync(path.join(d, 'team.yaml'), 'utf8'), invalid, 'the audited file is not clobbered');
+  const rows = auditRows('team.yaml.invalid');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].outcome, 'failure');
+});
+
+test('mergeTeamYamlAssignments keeps an unknown email but never a stale grant for a known account', () => {
+  const merged = mergeTeamYamlAssignments([
+    'members:',
+    '  owner@example.com:',
+    '    role: owner',
+    '    max_mode: execute',
+    '    usd_cap_month: 0',
+    '  ghost@example.com:',
+    '    role: viewer',
+    '    max_mode: read_only',
+    '    usd_cap_month: 3',
+  ].join('\n'), [entry('owner@example.com', 'admin', 'none', 0)]);
+  assert.deepEqual(merged.assignments, [
+    entry('owner@example.com', 'admin', 'none', 0),
+    entry('ghost@example.com', 'viewer', 'read_only', 3),
+  ]);
+  assert.deepEqual(merged.preserved.map((a) => a.email), ['ghost@example.com']);
+  assert.deepEqual(mergeTeamYamlAssignments(null, []).assignments, []);
 });
 
 // ── undefined accounts ────────────────────────────────────────────────────

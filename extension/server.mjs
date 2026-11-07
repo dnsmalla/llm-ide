@@ -876,7 +876,14 @@ const server = http.createServer(async (req, res) => {
 
   // Team Hub admin (/admin/members, /admin/invites): always on, JWT + admin team role inside (ADR 0021).
   if (isTeamRoute(req.url || '')) {
-    try { await handleTeamRoute(req, res, { logger: reqLog, requestId }); } catch (err) { sendError(res, err, { logger: reqLog }); }
+    try {
+      await handleTeamRoute(req, res, {
+        logger: reqLog,
+        requestId,
+        // Same directory the boot applies team.yaml from: a PATCH writes it through (R-013#2).
+        dir: config.dataDir ?? path.dirname(config.dbPath),
+      });
+    } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 

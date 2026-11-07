@@ -4,8 +4,9 @@
 // through the kb facade.
 
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { config } from '../core/config.mjs';
-import { errAuth, errNotFound, errValidation } from '../core/errors.mjs';
+import { errAuth, errInternal, errNotFound, errValidation } from '../core/errors.mjs';
 import { tryConsume } from './rate-limit.mjs';
 import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
@@ -28,6 +29,7 @@ import {
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { assertDeletable, consumeInvite, ensureMember, getMember, ownerCount, peekInvite } from '../kb/members.mjs';
+import { persistTeamYaml } from '../kb/team-yaml.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
 // RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
@@ -153,6 +155,32 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         });
         return { user, invite: null };
       })();
+      // R-013#2: team.yaml is authoritative at every boot, so an invited member's grant must be in it or
+      // the next restart demotes them. Rewrite it after the DB transaction; a write failure rolls the
+      // registration (and the invite burn) back, so a 201 always means both sides agree.
+      if (out.invite) {
+        try {
+          persistTeamYaml(db, config.dataDir ?? path.dirname(config.dbPath), {
+            logger,
+            trigger: 'auth.register.invite',
+            audit: (entry) => safeAudit(db, {
+              userId: out.user.id, requestId, ip, userAgent: ua,
+              action: entry.action, resource: entry.resource ?? null, outcome: entry.outcome ?? 'success',
+              detail: { actor: 'team.yaml', ...(entry.detail ?? {}) },
+            }),
+          });
+        } catch (err) {
+          db.transaction(() => {
+            db.prepare('DELETE FROM users WHERE id = ?').run(out.user.id);
+            db.prepare('UPDATE invites SET used_at = NULL, used_by = NULL WHERE id = ?').run(out.invite);
+          })();
+          logger?.error?.('team_yaml_write_failed', {
+            trigger: 'auth.register.invite', reason: err?.reason ?? 'invalid',
+            message: String(err?.message ?? err).slice(0, 200),
+          });
+          throw errInternal('Could not write team.yaml; the registration was rolled back');
+        }
+      }
       safeAudit(db, {
         userId: out.user.id, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'success',
         ...(out.invite ? { detail: { invite: out.invite } } : {}),

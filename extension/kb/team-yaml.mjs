@@ -27,6 +27,17 @@
 // duplicate emails/fields, tabs and malformed values are errors. No
 // dependency is added for this schema.
 //
+// WRITE-THROUGH (R-013#2): because the file is authoritative at every boot,
+// an admin-UI grant or an invited member's grant that the file did not repeat
+// was reset by the next restart. So `PATCH /admin/members` and an invited
+// registration call `persistTeamYaml` after their DB transaction: it rewrites
+// the file atomically (0600, same generation path) from the current `members`
+// rows, preserving entries for emails that have no account yet and the
+// existing full-line comments. The request fails (and the grant / registration
+// is rolled back) when the write fails, so DB and file never diverge on a
+// completed request. The file stays the authority; an edit made while the core
+// runs is replaced by the next API grant change, and applies at the next boot.
+//
 // Layer note: every db-writing helper takes the db handle first (kb
 // convention). The module may not import `server/audit.mjs` (kb → core/kb
 // only), so `applyTeamYaml` accepts an `audit` callback; the boot adapter
@@ -244,13 +255,22 @@ const HEADER = [
   '#                 max_mode (none|read_only|execute),',
   '#                 usd_cap_month (0 = no cap, maximum 100000).',
   '# Emails are matched case-insensitively.',
+  '#',
+  '# PATCH /admin/members and an invited registration rewrite this file after their DB transaction,',
+  '# so a grant made in the app survives the next core restart. An account listed here wins over the',
+  '# row at the next boot. Entries for emails with no account are preserved.',
 ];
+const HEADER_SET = new Set(HEADER);
 
 /**
  * Serialize assignments to the strict subset. Validates every entry first, so
  * a bad row can never be written into the file the user audits.
+ *
+ * `comments` are full-line `#` comments from the file being replaced (an API
+ * write-through). They are kept above `members:`; comments trailing an entry
+ * are not preserved (the serializer writes canonical entries).
  */
-export function serializeTeamYaml(assignments) {
+export function serializeTeamYaml(assignments, { comments = [] } = {}) {
   if (!Array.isArray(assignments)) throw invalid('assignments must be an array');
   const clean = assignments.map(validateAssignment);
   clean.sort((a, b) => {
@@ -258,7 +278,15 @@ export function serializeTeamYaml(assignments) {
     if (role !== 0) return role;
     return a.email < b.email ? -1 : a.email > b.email ? 1 : 0;
   });
-  const lines = [...HEADER, `${TOP_KEY}:`];
+  const lines = [...HEADER];
+  const seen = new Set();
+  for (const comment of comments) {
+    const line = typeof comment === 'string' ? comment.trim() : '';
+    if (!line.startsWith('#') || HEADER_SET.has(line) || seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+  lines.push(`${TOP_KEY}:`);
   for (const assignment of clean) {
     lines.push(`  ${assignment.email}:`);
     lines.push(`    role: ${assignment.teamRole}`);
@@ -492,6 +520,126 @@ function sameGrant(current, desired) {
   return current.teamRole === desired.teamRole
     && current.maxMode === desired.maxMode
     && Number(current.usdCapMonth) === Number(desired.usdCapMonth);
+}
+
+// ── write-through (R-013#2) ────────────────────────────────────────────────
+
+/** Every full-line `#` comment in `text`, trimmed (the serializer keeps them above `members:`). */
+function fullLineComments(text) {
+  if (typeof text !== 'string') return [];
+  return text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('#'));
+}
+
+/**
+ * Merge the DB's current authority over an existing file: the DB wins for an
+ * account it lists (it is newer — the boot applies the file, the API writes
+ * it), while an entry whose email has no account is preserved (a grant the
+ * user prepared for someone who has not registered yet). Pure; throws
+ * `TeamYamlError` when the existing text is outside the strict subset.
+ */
+export function mergeTeamYamlAssignments(existingText, current) {
+  const existing = existingText == null ? [] : parseTeamYaml(existingText);
+  const known = new Set(current.map((assignment) => assignment.email));
+  const preserved = existing.filter((assignment) => !known.has(assignment.email));
+  return { assignments: [...current, ...preserved], preserved };
+}
+
+/**
+ * Rewrite `<dir>/team.yaml` from the current `members` rows — the write-through
+ * after an admin grant (`PATCH /admin/members`) or an invited registration.
+ * Atomic (temp file, 0600, rename), same generation path as the boot file.
+ *
+ * `current` entries are the DB's authority. An existing file contributes its
+ * unknown-email entries and its full-line comments; it is never replaced when
+ * it cannot be parsed (fail closed: the user's audited file is left for repair).
+ * Throws `TeamYamlError` (`code: 'TEAM_YAML_INVALID'`); the caller answers 500
+ * and rolls the DB change back, so a completed request never leaves the file
+ * and the DB disagreeing.
+ */
+export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger = 'api' } = {}) {
+  if (!db || typeof db.prepare !== 'function') throw new TypeError('persistTeamYaml requires a db handle');
+  if (typeof dir !== 'string' || dir === '') throw new TypeError('persistTeamYaml requires a directory');
+
+  const file = path.join(dir, TEAM_YAML_FILENAME);
+  const current = listTeamAssignments(db).map(({ userId: _userId, ...assignment }) => assignment);
+  let existingText = null;
+  if (fs.existsSync(file)) {
+    try {
+      existingText = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      throw invalid(`cannot read ${file}: ${err.message}`, null, 'unreadable');
+    }
+  }
+
+  // Nothing to write on a fresh install with no real accounts yet: an empty
+  // file would be authoritative at the next boot (the boot defers it too).
+  if (current.length === 0 && existingText == null) {
+    if (logger) logger.info('team_yaml_deferred', { path: file, reason: 'no_real_users' });
+    return { path: file, deferred: true, users: 0, preserved: 0, assignments: 0 };
+  }
+
+  let merged;
+  try {
+    merged = mergeTeamYamlAssignments(existingText, current);
+  } catch (err) {
+    if (err instanceof TeamYamlError) {
+      report(audit, {
+        action: 'team.yaml.invalid',
+        outcome: 'failure',
+        detail: { reason: err.reason, line: err.line },
+      });
+    }
+    throw err;
+  }
+  // The file is authoritative at every boot, so never write one that would
+  // leave the install with no owner (the boot's no_owner guard would then
+  // refuse to start). The DB produced `current`, so this is a corruption guard.
+  if (merged.assignments.length > 0
+      && !merged.assignments.some((assignment) => assignment.teamRole === 'owner')) {
+    const err = invalid(
+      `refusing to write ${file}: no account would keep the owner role`,
+      null,
+      'no_owner',
+    );
+    report(audit, {
+      action: 'team.yaml.invalid',
+      outcome: 'failure',
+      detail: { reason: err.reason, line: null },
+    });
+    throw err;
+  }
+
+  const text = serializeTeamYaml(merged.assignments, {
+    comments: existingText == null ? [] : fullLineComments(existingText),
+  });
+  try {
+    writeFileAtomic(file, text);
+  } catch (err) {
+    report(audit, {
+      action: 'team.yaml.write',
+      outcome: 'failure',
+      detail: { trigger, reason: 'write_failed' },
+    });
+    throw invalid(`cannot write ${file}: ${err.message}`, null, 'write_failed');
+  }
+  report(audit, {
+    action: 'team.yaml.write',
+    detail: { trigger, users: current.length, preserved: merged.preserved.length },
+  });
+  if (logger) {
+    logger.info('team_yaml_written', {
+      path: file, trigger, users: current.length, preserved: merged.preserved.length,
+    });
+  }
+  return {
+    path: file,
+    deferred: false,
+    users: current.length,
+    preserved: merged.preserved.length,
+    assignments: merged.assignments.length,
+  };
 }
 
 /** True when `to` grants strictly less than `from` in any dimension — the boot-time downgrade warning. */

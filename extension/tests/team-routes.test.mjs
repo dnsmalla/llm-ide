@@ -5,6 +5,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -15,9 +16,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_team-routes-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+// Each test file gets its own team.yaml directory: a PATCH now writes the file through (R-013#2).
+const TEAM_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-team-routes-'));
 
 const { getDb } = await import('../kb/db.mjs');
 const { handleTeamRoute, isTeamRoute } = await import('../routes/team-routes.mjs');
+const { parseTeamYaml } = await import('../kb/team-yaml.mjs');
 
 const noopLogger = { info() {}, warn() {}, error() {}, child() { return this; } };
 
@@ -53,9 +57,9 @@ function makeRes() {
   };
 }
 
-async function call(reqOpts) {
+async function call(reqOpts, dir = TEAM_DIR) {
   const res = makeRes();
-  await handleTeamRoute(makeReq(reqOpts), res, { db: getDb(), logger: noopLogger, requestId: 'test-req' });
+  await handleTeamRoute(makeReq(reqOpts), res, { db: getDb(), logger: noopLogger, requestId: 'test-req', dir });
   return res;
 }
 
@@ -170,6 +174,43 @@ test('PATCH /admin/members/:id changes grants (owner) and audits team.grant', as
   const rows = auditRows('team.grant').filter((r) => r.resource === target);
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].detail, { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 });
+
+  // R-013#2: the authoritative file was rewritten in the same request (0600, atomic generation).
+  const file = path.join(TEAM_DIR, 'team.yaml');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.deepEqual(
+    parseTeamYaml(fs.readFileSync(file, 'utf8')).find((a) => a.email === `${target}@example.com`),
+    { email: `${target}@example.com`, teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 },
+  );
+  const writeRows = auditRows('team.yaml.write');
+  assert.ok(writeRows.some((r) => r.detail.trigger === 'admin.patch'), 'the file write is audited');
+});
+
+test('a team.yaml write failure answers 500 and restores the previous grant exactly', async () => {
+  const owner = addUser('owner');
+  const target = addUser('member');
+  const before = getDb().prepare(
+    'SELECT team_role, max_mode, usd_cap_month, granted_by, updated_at FROM members WHERE user_id = ?',
+  ).get(target);
+  // A file cannot be created under a path whose ancestor is a regular file: the atomic write throws.
+  const blocker = path.join(TEAM_DIR, 'write-blocker');
+  fs.writeFileSync(blocker, 'not a directory');
+  const res = await call({
+    method: 'PATCH', url: `/admin/members/${target}`, user: as(owner),
+    body: { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0 },
+  }, path.join(blocker, 'sub'));
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.json().error.code, 'INTERNAL_ERROR');
+  assert.deepEqual(
+    getDb().prepare('SELECT team_role, max_mode, usd_cap_month, granted_by, updated_at FROM members WHERE user_id = ?').get(target),
+    before,
+    'the grant change was rolled back',
+  );
+  assert.equal(auditRows('team.grant').filter((r) => r.resource === target).length, 0,
+    'no grant audit row for a change that did not persist');
+  assert.ok(auditRows('team.yaml.write').some((r) => r.detail.trigger === 'admin.patch' && r.detail.reason === 'write_failed'),
+    'the failed write is audited');
 });
 
 test('an admin may change a member but not the owner; the owner cannot demote the last owner', async () => {
@@ -347,4 +388,5 @@ after(() => {
   for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) {
     try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
   }
+  try { fs.rmSync(TEAM_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
 });
