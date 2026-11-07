@@ -1,0 +1,28 @@
+{
+  "kinds": ["approval_chat", "approval_job", "loop_done", "loop_failed", "autotask_done", "autotask_failed", "graph_done", "graph_failed", "docgen_done", "docgen_failed", "sync_attention"],
+  "refusedKinds": ["update_ready", "core_down", "", "Approval_chat", "approval_chat "],
+  "endpoints": {
+    "allowed": [
+      "https://fcm.googleapis.com/fcm/send/abc123",
+      "https://updates.push.services.mozilla.com/wpush/v2/gAAAAABk",
+      "https://web.push.apple.com/QGuQyavXutnMH",
+      "https://wns2-par02p.notify.windows.com/w/?token=BQYAAAB",
+      "https://fcm.googleapis.com:443/fcm/send/abc"
+    ],
+    "refused": [
+      "http://fcm.googleapis.com/fcm/send/abc",
+      "https://fcm.googleapis.com:8443/fcm/send/abc",
+      "https://user:pw@fcm.googleapis.com/x",
+      "https://evil.example/fcm.googleapis.com",
+      "https://fcm.googleapis.com.evil.example/x",
+      "https://a.b.notify.windows.com/x",
+      "https://notify.windows.com/x",
+      "https://127.0.0.1/x",
+      "https://[::1]/x",
+      "https://localhost/x",
+      "not a url",
+      ""
+    ]
+  },
+  "payload": { "fields": ["k", "n"], "maxCount": 999 }
+}
