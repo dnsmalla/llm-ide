@@ -4,7 +4,7 @@ import { useState } from "react";
 import { EFFORT_AUTO, effortLabel } from "./effort";
 import { validateModelId, type UserModels } from "./custom-models";
 import {
-  CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
+  CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, capChipText, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
   MORE_PROVIDERS_HINT, meterText, modelDefaultLabel, modelOptionText, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
@@ -151,8 +151,8 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
   return (
     <div className="chat-cap" data-level={level}>
       <button type="button" className="chat-chip-btn" aria-haspopup="dialog" aria-expanded={open} aria-label={`Token limit ${meterText(used, route.tokenLimit)}`}
-        disabled={disabled} onClick={() => { setText(route.tokenLimit ? String(route.tokenLimit) : ""); setOpen(!open); }}>
-        {meterText(used, route.tokenLimit, route.used.cacheRead)}
+        title="This chat's model and token limit" disabled={disabled} onClick={() => { setText(route.tokenLimit ? String(route.tokenLimit) : ""); setOpen(!open); }}>
+        {capChipText(route)}
       </button>
       {open && (
         <div role="dialog" aria-label="Session token limit" className="chat-popover">

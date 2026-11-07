@@ -110,6 +110,16 @@ export function meterText(used: number, limit: number | null, cacheRead = 0): st
   return s;
 }
 
+/**
+ * The header route chip's text (the Mac's ChatRouteControl label): the pinned model, else "Route", then the meter once
+ * a limit is set or tokens were used. Pure.
+ */
+export function capChipText(route: Pick<RouteView, "pinned" | "model" | "tokenLimit" | "used">): string {
+  const name = route.pinned && route.model ? route.model : "Route";
+  const used = route.used.billable;
+  return route.tokenLimit !== null || used > 0 ? `${name} · ${meterText(used, route.tokenLimit, route.used.cacheRead)}` : name;
+}
+
 /** One-click raise at the cap: 50 percent more, at least 50k above usage, whole thousands, within the bound. */
 export function raisedLimit(current: number, used: number): number {
   const grown = Math.ceil(Math.max(current, 1) * 1.5);
