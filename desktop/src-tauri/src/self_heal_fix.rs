@@ -65,6 +65,8 @@ pub struct ProposalDiff {
     pub truncated: bool,
     /// sha256 of the `--binary` patch this text was derived from: Apply applies only that patch.
     pub patch_id: String,
+    /// Paths in the staged patch, for the reviewer's file list.
+    pub files: Vec<String>,
 }
 
 /// A run id is the core's lowercase uuid: it becomes a folder and a branch name, so nothing else is accepted.
@@ -291,7 +293,9 @@ pub fn diff_in(main: &Path, dir: &Path, run_id: &str) -> Result<ProposalDiff, St
     } else {
         full
     };
-    Ok(ProposalDiff { text, truncated, patch_id: sha256_hex(&patch) })
+    let names = git(&wt, &["diff", "--cached", "--name-only", "--no-ext-diff", "HEAD"], None)?;
+    let files = String::from_utf8_lossy(&names).lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).take(100).collect();
+    Ok(ProposalDiff { text, truncated, patch_id: sha256_hex(&patch), files })
 }
 
 /// Applies exactly the reviewed patch to the source checkout, never a commit, then removes the worktree.
@@ -300,6 +304,9 @@ pub fn apply_in(main: &Path, dir: &Path, run_id: &str, patch_id: &str) -> Result
     let patch = staged_patch(&wt, true)?;
     if patch.is_empty() {
         return Err("The proposal has no changes.".into());
+    }
+    if patch.len() > DIFF_TEXT_MAX {
+        return Err("This proposal is too large to review here, so it cannot be applied. Discard it.".into());
     }
     if sha256_hex(&patch) != patch_id {
         return Err("The proposal changed since you opened it. Close it and review it again.".into());
@@ -507,6 +514,20 @@ mod tests {
         assert_eq!(sh_git(&main, &["rev-parse", "HEAD"]).trim(), p.base_commit);
         assert!(!wt.exists(), "the worktree is removed after apply");
         assert_eq!(self_heal_branches(&main), "");
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_refuses_a_patch_larger_than_the_review_cap() {
+        let (main, dir) = checkout("big", 0);
+        let p = prepare_in(&main, &dir, RUN, "batch").unwrap();
+        let wt = PathBuf::from(&p.worktree_path);
+        std::fs::write(wt.join("extension/big.txt"), "x".repeat(2 * 1024 * 1024 + 1024)).unwrap();
+        let d = diff_in(&main, &dir, RUN).unwrap();
+        assert!(d.truncated, "the review text is cut");
+        assert!(apply_in(&main, &dir, RUN, &d.patch_id).unwrap_err().contains("too large to review"));
+        assert!(!main.join("extension/big.txt").exists(), "the checkout is unchanged");
         let _ = std::fs::remove_dir_all(main.parent().unwrap());
     }
 }

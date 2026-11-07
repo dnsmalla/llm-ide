@@ -142,5 +142,12 @@ const HIDDEN = /[​-‏‪-‮⁦-⁩﻿]/g;
 
 export function decodeDiff(raw: unknown): SelfHealDiff | null {
   if (!isRec(raw) || typeof raw.text !== "string" || typeof raw.truncated !== "boolean" || typeof raw.patchId !== "string" || !/^[0-9a-f]{64}$/.test(raw.patchId)) return null;
-  return { text: raw.text.replace(HIDDEN, "�"), truncated: raw.truncated, patchId: raw.patchId };
+  const files = Array.isArray(raw.files) ? raw.files.filter((f): f is string => typeof f === "string" && f.length > 0 && f.length <= 400).slice(0, 100) : [];
+  return { text: raw.text.replace(HIDDEN, "�"), truncated: raw.truncated, patchId: raw.patchId, files };
+}
+
+/** Test files are allowed to change (a fix often needs it) but must be called out in the review. */
+export function isTestFile(path: string): boolean {
+  const p = path.replaceAll("\\", "/");
+  return /(^|\/)tests?\//.test(p) || /\.test\.[^/]+$/.test(p) || /(^|\/)__tests__\//.test(p);
 }

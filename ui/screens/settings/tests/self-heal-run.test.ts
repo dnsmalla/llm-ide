@@ -25,7 +25,7 @@ function fakes(o: { start?: unknown; agent?: CoreResponse | Error; verify?: Self
     prepare: async (runId, batch) => { log.push(`prepare ${runId} ${batch.length}`); if (o.prepare) throw o.prepare; return prepared; },
     agentRun: async (body) => { log.push("agent"); bodies.agent = body; if (o.agent instanceof Error) throw o.agent; return o.agent ?? { status: 200, body: { ran: true, reply: "done" } }; },
     verify: async (runId) => { log.push(`verify ${runId}`); return o.verify ?? passed; },
-    diff: async () => ({ text: "", truncated: false, patchId: "0".repeat(64) }),
+    diff: async () => ({ text: "", truncated: false, patchId: "0".repeat(64), files: [] }),
     apply: async () => undefined,
     remove: async (runId) => { log.push(`remove ${runId}`); },
     flushIncidents: async () => { log.push("flush"); },

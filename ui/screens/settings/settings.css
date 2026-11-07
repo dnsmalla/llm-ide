@@ -127,3 +127,7 @@
 .st-device-card { padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: color-mix(in srgb, var(--tok-color-surface2) 58%, transparent); }
 .st-device-card .st-row { gap: 10px; flex-wrap: wrap; }
 .st-warning { margin: 6px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--tok-color-warning) 55%, var(--tok-color-border)); border-radius: 8px; color: var(--tok-color-warning); font-size: 11px; line-height: 1.45; }
+.sh-files { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 3px; font-size: 11px; }
+.sh-files li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.sh-files code { overflow-wrap: anywhere; }
+.sh-test-flag { color: var(--tok-color-warning); border: 1px solid color-mix(in srgb, var(--tok-color-warning) 45%, var(--tok-color-border)); border-radius: 6px; padding: 1px 5px; font-size: 10px; }

@@ -112,6 +112,7 @@ export interface SelfHealDiff {
   text: string;
   truncated: boolean;
   patchId: string;
+  files: string[];
 }
 
 /** Plan B's fix run (debug desktop builds). Host commands take a run id only; `agentRun` is the core's Loop agent

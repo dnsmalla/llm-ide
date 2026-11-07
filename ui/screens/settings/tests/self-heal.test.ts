@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeDiff, decodeIncidents, decodePrepared, decodeVerified, incidentSummary, proposalsOf, STATUS_TEXT } from "../self-heal-model.ts";
+import { decodeDiff, isTestFile, decodeIncidents, decodePrepared, decodeVerified, incidentSummary, proposalsOf, STATUS_TEXT } from "../self-heal-model.ts";
 
 const row = (o: Record<string, unknown> = {}) => ({
   id: "3f9a1c0b7d2e4a65", source: "server", category: "POST /kb/notes/:id", message: "db is locked",
@@ -50,6 +50,15 @@ test("host answers are decoded strictly; hidden marks in a diff are made visible
   assert.equal(decodePrepared({ ...proposal, baseCommit: "HEAD" }), null);
   assert.deepEqual(decodeVerified({ batch: "b", passed: true, timedOut: false, hasChanges: false, reverted: ["Makefile", 3], output: "ok" }), { batch: "b", passed: true, timedOut: false, hasChanges: false, reverted: ["Makefile"], output: "ok" });
   assert.equal(decodeVerified({ batch: "b", passed: "yes" }), null);
-  assert.deepEqual(decodeDiff({ text: "+a‮b\n", truncated: false, patchId: "f".repeat(64) }), { text: "+a�b\n", truncated: false, patchId: "f".repeat(64) });
+  assert.deepEqual(decodeDiff({ text: "+a‮b\n", truncated: false, patchId: "f".repeat(64) }), { text: "+a�b\n", truncated: false, patchId: "f".repeat(64), files: [] });
   assert.equal(decodeDiff({ text: "x", truncated: false, patchId: "short" }), null);
+});
+
+test("decodeDiff carries changed files and flags test paths", () => {
+  const d = decodeDiff({ text: "diff", truncated: false, patchId: "a".repeat(64), files: ["extension/server.mjs", "extension/tests/a.test.mjs", "src/tests/b.ts"] });
+  assert.deepEqual(d?.files, ["extension/server.mjs", "extension/tests/a.test.mjs", "src/tests/b.ts"]);
+  assert.equal(isTestFile("extension/tests/a.test.mjs"), true);
+  assert.equal(isTestFile("src/tests/b.ts"), true);
+  assert.equal(isTestFile("extension/server.mjs"), false);
+  assert.deepEqual(decodeDiff({ text: "", truncated: false, patchId: "a".repeat(64) })?.files, [], "older host: no list");
 });

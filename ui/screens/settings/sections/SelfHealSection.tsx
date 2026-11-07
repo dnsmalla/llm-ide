@@ -7,7 +7,7 @@ import { useEnv } from "../context.tsx";
 import { ApiError, call } from "../core-api.ts";
 import type { SelfHealDiff } from "../host.ts";
 import { Button, ErrorText } from "../ui.tsx";
-import { SOURCE_TEXT, STATUS_TEXT, decodeIncidents, incidentSummary, proposalsOf, type IncidentView } from "../self-heal-model.ts";
+import { SOURCE_TEXT, STATUS_TEXT, decodeIncidents, incidentSummary, isTestFile, proposalsOf, type IncidentView } from "../self-heal-model.ts";
 import { COST_TEXT, STEP_TEXT, resetSelfHealRun, runSelfHealFix, type RunStep } from "../self-heal-run.ts";
 
 const BASE = "/kb/self-heal/incidents";
@@ -145,6 +145,7 @@ export default function SelfHealSection() {
               </div>
               {review?.runId === p.runId ? (
                 <>
+                  {review.files.length > 0 && <ul className="sh-files" aria-label="Files in this proposal">{review.files.map((f) => <li key={f}><code>{f}</code>{isTestFile(f) ? <span className="sh-test-flag" role="note">test changed — check it was not weakened</span> : null}</li>)}</ul>}
                   <pre aria-label="Proposed diff">{review.text || "(no changes)"}</pre>
                   {review.truncated ? <p className="st-hint">The diff is too long to show here. Review it in {p.worktreePath} and apply it by hand.</p> : null}
                   {confirm(`apply:${p.runId}`, "Apply to my checkout", () => void resolve("apply", p.runId), "primary", review.text === "" || review.truncated)}
