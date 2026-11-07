@@ -163,3 +163,15 @@
 }
 .chat-more-providers { display: none; }
 .chat-composer-bar .chat-btn[aria-label="Add model…"] { padding-inline: 7px; font-weight: 700; }
+/* Docked Code Assistant: the dock is narrower than the window, so viewport media queries do not apply. */
+.chat-dock-mode .chat-composer-bar { flex-wrap: wrap; }
+.chat-dock-mode .chat-composer-bar .chat-pick { flex: 1 1 auto; }
+.chat-dock-mode .chat-composer-bar .chat-pick select { max-width: 100%; width: 100%; }
+.chat-dock-mode .chat-composer-bar .chat-btn { flex: 0 0 auto; }
+.chat-dock-mode .chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.chat-dock-mode .chat-composer-bar .chat-more-providers { display: none; }
+/* Route/cap popover: fixed to the viewport so the dock column cannot clip it. */
+.chat-dock-mode .chat-cap .chat-popover {
+  position: fixed; top: 92px; right: 12px; left: auto;
+  width: min(340px, calc(100vw - 24px)); max-height: 65vh; overflow: auto;
+}
