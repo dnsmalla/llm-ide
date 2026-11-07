@@ -1,0 +1,9 @@
+{
+  "endpoint": "DELETE /host-api/push/apns",
+  "status": 200,
+  "response": {
+    "configured": false,
+    "keyId": null,
+    "teamId": null
+  }
+}

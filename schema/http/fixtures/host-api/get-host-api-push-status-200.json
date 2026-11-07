@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /host-api/push/status",
+  "status": 200,
+  "response": {
+    "served": true,
+    "apns": {
+      "configured": true,
+      "keyId": "ABCDE12345",
+      "teamId": "9A3YFRQ7SM"
+    },
+    "devices": [
+      {
+        "deviceId": "h1-0b0c2e7a-1f3d-4c5e-9a8b-7d6c5b4a3f21",
+        "name": "iPhone",
+        "kind": "apns",
+        "lastResult": "ok",
+        "lastAt": 1793750100000
+      }
+    ]
+  }
+}

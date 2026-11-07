@@ -1174,6 +1174,12 @@ export type Device = {
   lastSeenAt?: number;
 };
 
+export type ApnsStatus = {
+  configured?: boolean;
+  keyId?: string | null;
+  teamId?: string | null;
+};
+
 export type Note = {
   /** Relative path under the project root, forward slashes. No leading slash, no .. segments. */
   noteKey: string;
@@ -4948,6 +4954,80 @@ export type DeleteHostApiDevicesIdResponse400 = CommonError;
 export type DeleteHostApiDevicesIdResponse403 = CommonError;
 
 export type DeleteHostApiDevicesIdResponse404 = CommonError;
+
+/** Request parts for `POST /host-api/push/send` (schema/http/host-api.schema.json). */
+export type PostHostApiPushSendRequest = {
+  body: {
+    /** one of the desktop notifier's webview kinds (server/push/kinds.mjs PUSH_KINDS) */
+    kind: string;
+    /** opaque de-dup key, [A-Za-z0-9_.:-]{1,64}, never shown */
+    key?: string;
+    /** 1-999, how many are waiting (approvals) */
+    count?: number;
+  };
+};
+
+export type PostHostApiPushSendResponse200 = {
+  /** devices the push service or APNs accepted it for */
+  sent?: number;
+};
+
+export type PostHostApiPushSendResponse400 = CommonError;
+
+export type PostHostApiPushSendResponse403 = CommonError;
+
+export type PostHostApiPushSendResponse404 = CommonError;
+
+/** Request parts for `GET /host-api/push/status` (schema/http/host-api.schema.json). */
+export type GetHostApiPushStatusRequest = Record<string, never>;
+
+export type GetHostApiPushStatusResponse200 = {
+  /** LLMIDE_HOST_API_PUSH=1 on this core */
+  served?: boolean;
+  apns?: ApnsStatus;
+  devices?: ({
+    deviceId?: string;
+    name?: string;
+    kind?: "webpush" | "apns";
+    /** ok, rate_limited, APNS_NOT_CONFIGURED or an error code; null before the first push */
+    lastResult?: string | null;
+    /** ms since epoch */
+    lastAt?: number | null;
+  })[];
+};
+
+export type GetHostApiPushStatusResponse403 = CommonError;
+
+export type GetHostApiPushStatusResponse404 = CommonError;
+
+/** Request parts for `PUT /host-api/push/apns` (schema/http/host-api.schema.json). */
+export type PutHostApiPushApnsRequest = {
+  body: {
+    /** the .p8 file's PEM text (EC P-256 PKCS#8); stored in the vault, never returned */
+    key: string;
+    /** 10 × [A-Z0-9] */
+    keyId: string;
+    /** 10 × [A-Z0-9] */
+    teamId: string;
+  };
+};
+
+export type PutHostApiPushApnsResponse200 = ApnsStatus;
+
+export type PutHostApiPushApnsResponse400 = CommonError;
+
+export type PutHostApiPushApnsResponse403 = CommonError;
+
+export type PutHostApiPushApnsResponse404 = CommonError;
+
+/** Request parts for `DELETE /host-api/push/apns` (schema/http/host-api.schema.json). */
+export type DeleteHostApiPushApnsRequest = Record<string, never>;
+
+export type DeleteHostApiPushApnsResponse200 = ApnsStatus;
+
+export type DeleteHostApiPushApnsResponse403 = CommonError;
+
+export type DeleteHostApiPushApnsResponse404 = CommonError;
 
 /** Request parts for `POST /kb/index/notes` (schema/http/index.schema.json). */
 export type PostKbIndexNotesRequest = {
@@ -9569,6 +9649,40 @@ export interface ApiEndpoints {
       400: DeleteHostApiDevicesIdResponse400;
       403: DeleteHostApiDevicesIdResponse403;
       404: DeleteHostApiDevicesIdResponse404;
+    };
+  };
+  "POST /host-api/push/send": {
+    request: PostHostApiPushSendRequest;
+    responses: {
+      200: PostHostApiPushSendResponse200;
+      400: PostHostApiPushSendResponse400;
+      403: PostHostApiPushSendResponse403;
+      404: PostHostApiPushSendResponse404;
+    };
+  };
+  "GET /host-api/push/status": {
+    request: GetHostApiPushStatusRequest;
+    responses: {
+      200: GetHostApiPushStatusResponse200;
+      403: GetHostApiPushStatusResponse403;
+      404: GetHostApiPushStatusResponse404;
+    };
+  };
+  "PUT /host-api/push/apns": {
+    request: PutHostApiPushApnsRequest;
+    responses: {
+      200: PutHostApiPushApnsResponse200;
+      400: PutHostApiPushApnsResponse400;
+      403: PutHostApiPushApnsResponse403;
+      404: PutHostApiPushApnsResponse404;
+    };
+  };
+  "DELETE /host-api/push/apns": {
+    request: DeleteHostApiPushApnsRequest;
+    responses: {
+      200: DeleteHostApiPushApnsResponse200;
+      403: DeleteHostApiPushApnsResponse403;
+      404: DeleteHostApiPushApnsResponse404;
     };
   };
   "POST /kb/index/notes": {

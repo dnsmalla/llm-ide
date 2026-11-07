@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /host-api/push/apns",
+  "status": 200,
+  "request": {
+    "body": {
+      "key": "-----BEGIN PRIVATE KEY-----\nEXAMPLE\n-----END PRIVATE KEY-----\n",
+      "keyId": "ABCDE12345",
+      "teamId": "9A3YFRQ7SM"
+    }
+  },
+  "response": {
+    "configured": true,
+    "keyId": "ABCDE12345",
+    "teamId": "9A3YFRQ7SM"
+  }
+}

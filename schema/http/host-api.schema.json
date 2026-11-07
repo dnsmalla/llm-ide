@@ -1,5 +1,5 @@
 {
-  "description": "Host API v1 desktop pairing (schema/host-api/v1/README.md): the host-only HTTP routes the desktop Settings card uses to mint a pairing PIN and manage paired devices. Rows: POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id. Served by extension/routes/host-api/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce (core/host-approval.mjs verifyBusHostProof), checked first: without it 403 HOST_PROOF_REQUIRED. Then, unless the core runs a v1 listener (LLMIDE_HOST_API_TLS=1, or LLMIDE_HOST_API_DEV=1 never in production), 404 HOST_API_DISABLED. The PIN is six digits, one use, valid 10 minutes, one live PIN per user (a new one replaces the old); it is returned once and never logged. port is the bound port of the v1 listener (3016 or the next free one); fingerprint is the TLS listener's certificate pin, null for the plaintext dev listener; addresses are this computer's IPv4s for the pairing QR in TLS mode, [] otherwise; 503 HOST_API_UNAVAILABLE while it is not up. A device token is never returned. User-scoped: another user's device id answers revoked:false. Fixtures are transcribed from the handler (tests/host-api-routes.test.mjs); ids and timestamps are example values.",
+  "description": "Host API v1 desktop pairing (schema/host-api/v1/README.md): the host-only HTTP routes the desktop Settings card uses to mint a pairing PIN and manage paired devices. Rows: POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id, and the push routes POST /host-api/push/send, GET /host-api/push/status, PUT and DELETE /host-api/push/apns (API v120; never an endpoint, device token or key in any answer). Served by extension/routes/host-api/http-routes.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Every route needs the JWT AND the bus host proof header x-llmide-host-nonce (core/host-approval.mjs verifyBusHostProof), checked first: without it 403 HOST_PROOF_REQUIRED. Then, unless the core runs a v1 listener (LLMIDE_HOST_API_TLS=1, or LLMIDE_HOST_API_DEV=1 never in production), 404 HOST_API_DISABLED. The PIN is six digits, one use, valid 10 minutes, one live PIN per user (a new one replaces the old); it is returned once and never logged. port is the bound port of the v1 listener (3016 or the next free one); fingerprint is the TLS listener's certificate pin, null for the plaintext dev listener; addresses are this computer's IPv4s for the pairing QR in TLS mode, [] otherwise; 503 HOST_API_UNAVAILABLE while it is not up. A device token is never returned. User-scoped: another user's device id answers revoked:false. Fixtures are transcribed from the handler (tests/host-api-routes.test.mjs); ids and timestamps are example values.",
   "$defs": {
     "Device": {
       "type": "object",
@@ -19,6 +19,26 @@
         "lastSeenAt": {
           "type": "integer",
           "description": "ms since epoch, updated on each token sign-in"
+        }
+      }
+    },
+    "ApnsStatus": {
+      "type": "object",
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "keyId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }
@@ -116,6 +136,160 @@
         },
         "400": {
           "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /host-api/push/send": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "one of the desktop notifier's webview kinds (server/push/kinds.mjs PUSH_KINDS)"
+            },
+            "key": {
+              "type": "string",
+              "description": "opaque de-dup key, [A-Za-z0-9_.:-]{1,64}, never shown"
+            },
+            "count": {
+              "type": "integer",
+              "description": "1-999, how many are waiting (approvals)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "sent": {
+              "type": "integer",
+              "description": "devices the push service or APNs accepted it for"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /host-api/push/status": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "served": {
+              "type": "boolean",
+              "description": "LLMIDE_HOST_API_PUSH=1 on this core"
+            },
+            "apns": {
+              "$ref": "#/$defs/ApnsStatus"
+            },
+            "devices": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "webpush",
+                      "apns"
+                    ]
+                  },
+                  "lastResult": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ok, rate_limited, APNS_NOT_CONFIGURED or an error code; null before the first push"
+                  },
+                  "lastAt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "ms since epoch"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /host-api/push/apns": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "key",
+            "keyId",
+            "teamId"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "the .p8 file's PEM text (EC P-256 PKCS#8); stored in the vault, never returned"
+            },
+            "keyId": {
+              "type": "string",
+              "description": "10 × [A-Z0-9]"
+            },
+            "teamId": {
+              "type": "string",
+              "description": "10 × [A-Z0-9]"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ApnsStatus"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /host-api/push/apns": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ApnsStatus"
         },
         "403": {
           "$ref": "_common#/$defs/Error"

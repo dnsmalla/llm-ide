@@ -1,0 +1,17 @@
+{
+  "endpoint": "PUT /host-api/push/apns",
+  "status": 404,
+  "request": {
+    "body": {
+      "key": "-----BEGIN PRIVATE KEY-----\nEXAMPLE\n-----END PRIVATE KEY-----\n",
+      "keyId": "ABCDE12345",
+      "teamId": "9A3YFRQ7SM"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_API_DISABLED",
+      "message": "Host API is not enabled on this core"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /host-api/push/send",
+  "status": 404,
+  "request": {
+    "body": {
+      "kind": "loop_done"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_API_DISABLED",
+      "message": "Host API is not enabled on this core"
+    }
+  }
+}

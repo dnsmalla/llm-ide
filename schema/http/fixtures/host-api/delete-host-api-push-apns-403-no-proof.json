@@ -1,0 +1,10 @@
+{
+  "endpoint": "DELETE /host-api/push/apns",
+  "status": 403,
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

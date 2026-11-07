@@ -116,9 +116,10 @@ const SKIP_RULES = [
   },
   {
     // Host API pairing routes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY and sends
-    // no proof, so only the 403 rows replay live. The rest were transcribed from the handler (tests/host-api-routes.test.mjs).
+    // no proof, so only the 403 rows replay live. The rest were transcribed from the handler (tests/host-api-routes.test.mjs,
+    // and for the push routes tests/host-api-push-routes.test.mjs).
     why: 'Host API pairing: needs the bus host proof and LLMIDE_HOST_API_DEV; covered by tests/host-api-routes.test.mjs and tests/host-api-e2e.test.mjs',
-    when: (fx) => /^(GET|POST|DELETE) \/host-api\//.test(fx.endpoint) && fx.status !== 403,
+    when: (fx) => /^(GET|POST|PUT|DELETE) \/host-api\//.test(fx.endpoint) && fx.status !== 403,
   },
   {
     // Encrypted sync routes check the bus host proof first and then log in to MEGA; the replay server has neither.

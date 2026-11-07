@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 119
+  x-api-version: 120
 servers:
   - url: "https://{host}"
     variables:
@@ -5373,6 +5373,181 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "503":
           description: "Service Unavailable"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /host-api/push/apns:
+    put:
+      tags:
+        - "host-api"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "key"
+                - "keyId"
+                - "teamId"
+              properties:
+                key:
+                  type: "string"
+                  description: "the .p8 file's PEM text (EC P-256 PKCS#8); stored in the vault, never returned"
+                keyId:
+                  type: "string"
+                  description: "10 × [A-Z0-9]"
+                teamId:
+                  type: "string"
+                  description: "10 × [A-Z0-9]"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ApnsStatus"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      tags:
+        - "host-api"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ApnsStatus"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /host-api/push/send:
+    post:
+      tags:
+        - "host-api"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "kind"
+              properties:
+                kind:
+                  type: "string"
+                  description: "one of the desktop notifier's webview kinds (server/push/kinds.mjs PUSH_KINDS)"
+                key:
+                  type: "string"
+                  description: "opaque de-dup key, [A-Za-z0-9_.:-]{1,64}, never shown"
+                count:
+                  type: "integer"
+                  description: "1-999, how many are waiting (approvals)"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  sent:
+                    type: "integer"
+                    description: "devices the push service or APNs accepted it for"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /host-api/push/status:
+    get:
+      tags:
+        - "host-api"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  served:
+                    type: "boolean"
+                    description: "LLMIDE_HOST_API_PUSH=1 on this core"
+                  apns:
+                    "$ref": "#/components/schemas/ApnsStatus"
+                  devices:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        deviceId:
+                          type: "string"
+                        name:
+                          type: "string"
+                        kind:
+                          type: "string"
+                          enum:
+                            - "webpush"
+                            - "apns"
+                        lastResult:
+                          type:
+                            - "string"
+                            - "null"
+                          description: "ok, rate_limited, APNS_NOT_CONFIGURED or an error code; null before the first push"
+                        lastAt:
+                          type:
+                            - "integer"
+                            - "null"
+                          description: "ms since epoch"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
           content:
             application/json:
               schema:
@@ -16572,6 +16747,19 @@ components:
         - "user"
         - "ignored"
         - "effective"
+    ApnsStatus:
+      type: "object"
+      properties:
+        configured:
+          type: "boolean"
+        keyId:
+          type:
+            - "string"
+            - "null"
+        teamId:
+          type:
+            - "string"
+            - "null"
     ApprovalGrant:
       type: "object"
       required:

@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /host-api/push/send",
+  "status": 200,
+  "request": {
+    "body": {
+      "kind": "approval_chat",
+      "key": "activity:12",
+      "count": 2
+    }
+  },
+  "response": {
+    "sent": 1
+  }
+}

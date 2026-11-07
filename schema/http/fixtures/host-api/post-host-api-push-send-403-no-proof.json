@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /host-api/push/send",
+  "status": 403,
+  "request": {
+    "body": {
+      "kind": "loop_done"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

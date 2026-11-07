@@ -1,0 +1,10 @@
+{
+  "endpoint": "DELETE /host-api/push/apns",
+  "status": 404,
+  "response": {
+    "error": {
+      "code": "HOST_API_DISABLED",
+      "message": "Host API is not enabled on this core"
+    }
+  }
+}

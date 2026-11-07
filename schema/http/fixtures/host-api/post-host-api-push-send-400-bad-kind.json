@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /host-api/push/send",
+  "status": 400,
+  "request": {
+    "body": {
+      "kind": "core_down"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Unknown push kind"
+    }
+  }
+}

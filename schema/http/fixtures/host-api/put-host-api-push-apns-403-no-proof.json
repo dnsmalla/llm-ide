@@ -1,0 +1,17 @@
+{
+  "endpoint": "PUT /host-api/push/apns",
+  "status": 403,
+  "request": {
+    "body": {
+      "key": "x",
+      "keyId": "ABCDE12345",
+      "teamId": "9A3YFRQ7SM"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "PUT /host-api/push/apns",
+  "status": 400,
+  "request": {
+    "body": {
+      "key": "not a key",
+      "keyId": "ABCDE12345",
+      "teamId": "9A3YFRQ7SM"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid key"
+    }
+  }
+}
