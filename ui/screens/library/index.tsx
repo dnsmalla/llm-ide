@@ -89,6 +89,7 @@ export default function Library({ active, projectRoot }: SectionProps) {
       ? {
           list: (path: string) => invokeHost<unknown>("fs_list_dir", { req: { path, offset: 0, limit: 300, show_hidden: false, gitignore: true, hide_ignored: true } }),
           read: (path: string) => invokeHost<unknown>("fs_read_file", { req: { path, max_bytes: 1_000_000 } }),
+          write: async (path: string, text: string) => { await invokeHost("fs_write_file", { req: { path, text, encoding: "utf-8", bom: false, expected_hash: null, force: true } }); },
           mutate: projectMutations((cmd, args) => invokeHost<unknown>(cmd, args)),
         }
       : undefined),

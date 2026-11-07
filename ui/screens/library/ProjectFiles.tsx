@@ -7,6 +7,7 @@ import { CodeIcon, FileTreeRow, FolderIcon, Icon, TableIcon } from "@llmide/ui-k
 import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { shellBus } from "../shell/bus";
 import { Dialog } from "./write/Dialog";
+import { MarkdownView } from "./MarkdownView";
 import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, type ProjectEntry } from "./project-files.ts";
 import { addFilesToFolder, addSummary, createFolder, pickReason, planRemove, runRemove, validateEntryName, type Mutations, type RemovePlan } from "./project-ops.ts";
 
@@ -15,6 +16,8 @@ export interface ProjectFilesDeps {
   read: (path: string) => Promise<unknown>;
   /** Add and remove (trash only). Absent: the tree is read-only and "+" opens Explorer. */
   mutate?: Mutations;
+  /** Save an edited Markdown project file in place. */
+  write?: (path: string, text: string) => Promise<void>;
 }
 
 interface MenuState {
@@ -311,28 +314,57 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
 
 export function ProjectFileView({ path, deps, onClose }: { path: string; deps: ProjectFilesDeps; onClose: () => void }): ReactNode {
   const [body, setBody] = useState<ReturnType<typeof decodeProjectFile> | "error" | undefined>(undefined);
+  const [text, setText] = useState("");
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    setBody(undefined);
+    setBody(undefined); setDirty(false); setSaveError(null);
     deps.read(path).then(
-      (r) => live && setBody(decodeProjectFile(r)),
+      (r) => { if (!live) return; const d = decodeProjectFile(r); setBody(d); setText(d?.text ?? ""); },
       () => live && setBody("error"),
     );
     return () => { live = false; };
   }, [deps, path]);
   const name = path.split("/").pop() ?? path;
+  const markdown = /\.(md|markdown)$/i.test(path);
+  const canEdit = markdown && body !== undefined && body !== "error" && body !== null && typeof deps.write === "function";
+  const save = async () => {
+    if (!deps.write || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await deps.write(path, text); setDirty(false); setMode("preview"); }
+    catch { setSaveError("The file could not be saved."); }
+    finally { setSaving(false); }
+  };
   return (
     <div className="lib-project-view" aria-label={`${name} preview`}>
       <div className="lib-project-view-head">
         <strong>{name}</strong>
         <span className="lib-muted">{path}</span>
         <span className="lib-project-spacer" />
+        {markdown ? (
+          <div className="lib-view-toggle" role="group" aria-label="View mode">
+            <button type="button" className="lib-btn" aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
+            <button type="button" className="lib-btn" aria-pressed={mode === "edit"} disabled={!canEdit} onClick={() => setMode("edit")}>Edit</button>
+          </div>
+        ) : null}
+        {dirty ? <button type="button" className="lib-btn lib-btn-primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}
         <button type="button" className="lib-btn" aria-label="Close file" title="Close" onClick={onClose}>Close</button>
       </div>
       {body === undefined ? <p className="lib-muted" role="status">Reading…</p>
         : body === "error" ? <p className="lib-muted">The file could not be read.</p>
         : body === null ? <p className="lib-muted">This file is binary or too large to preview here.</p>
-        : <pre className="lib-project-text">{body.text}</pre>}
+        : mode === "edit" && markdown ? (
+          <textarea className="lib-project-edit" aria-label={`Edit ${name}`} value={text} spellCheck={false}
+            onChange={(e) => { setText(e.target.value); setDirty(true); }} />
+        ) : markdown ? (
+          <div className="lib-project-markdown"><MarkdownView text={text} baseRel={path} /></div>
+        ) : (
+          <pre className="lib-project-text">{body.text}</pre>
+        )}
+      {saveError ? <p className="lib-error" role="alert">{saveError}</p> : null}
     </div>
   );
 }

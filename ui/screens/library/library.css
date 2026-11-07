@@ -173,3 +173,7 @@
 .lib-modal-close { border: 0; background: transparent; color: var(--tok-color-text-muted); font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; }
 .lib-modal-close:hover:not(:disabled) { color: var(--tok-color-text); }
 .lib-project-view-head { position: sticky; top: 0; z-index: 2; background: var(--tok-color-surface); }
+.lib-view-toggle { display: inline-flex; gap: 2px; }
+.lib-view-toggle .lib-btn[aria-pressed="true"] { background: var(--tok-color-surface2); border-color: var(--tok-color-accent); }
+.lib-project-markdown { flex: 1; min-height: 0; overflow: auto; padding: var(--tok-space-sm) var(--tok-space-md); }
+.lib-project-edit { flex: 1; min-height: 240px; margin: 0; padding: var(--tok-space-sm); resize: none; overflow: auto; border: 0; outline: none; background: var(--tok-color-editor-background, var(--tok-color-surface)); color: var(--tok-color-text); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); tab-size: 2; }
