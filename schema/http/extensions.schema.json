@@ -941,6 +941,14 @@
               "items": {
                 "type": "string"
               }
+            },
+            "turns": {
+              "type": "object",
+              "properties": {
+                "claude": { "type": "boolean" },
+                "providers": { "type": "boolean" }
+              },
+              "required": ["claude", "providers"]
             }
           },
           "required": [
@@ -950,7 +958,8 @@
             "skills",
             "sdkPlugins",
             "mcpServers",
-            "warnings"
+            "warnings",
+            "turns"
           ]
         },
         "401": {

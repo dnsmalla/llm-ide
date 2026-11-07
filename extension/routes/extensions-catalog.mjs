@@ -32,6 +32,7 @@
 import { config } from '../core/config.mjs';
 import { send, readJson, clientIp, safeAudit } from '../server/route-http.mjs';
 import { parseItemId } from '../llm_agent/extensions/model.mjs';
+import { activeSetEnabled, adapterEnabled } from '../llm_agent/extensions/flags.mjs';
 import {
   installFromGithub, listInstalled, setInstalledEnabled, setInstalledMembers, uninstall, InstallError,
 } from '../llm_agent/extensions/install.mjs';
@@ -103,6 +104,8 @@ async function activeView(userId) {
     mcpServers: cap(Object.keys(a.mcpServers).sort(), 200),
     excluded: cap(a.excluded, 200),
     warnings: cap(a.warnings.map((w) => String(typeof w === 'string' ? w : w?.message ?? '').slice(0, 200)), 50),
+    // Which chats follow these switches right now (operator flags), so a screen never claims more than is true.
+    turns: { claude: activeSetEnabled(), providers: adapterEnabled() },
   };
 }
 

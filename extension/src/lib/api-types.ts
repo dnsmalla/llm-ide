@@ -3576,6 +3576,10 @@ export type GetAuthMeExtensionsActiveResponse200 = {
     reason: string;
   }[];
   warnings: string[];
+  turns: {
+    claude: boolean;
+    providers: boolean;
+  };
 };
 
 export type GetAuthMeExtensionsActiveResponse401 = CommonError;

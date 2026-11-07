@@ -239,3 +239,13 @@ test('M8: an item with no executable part still enables without a commit (older 
   const moved = await call('POST', '/auth/me/extensions/toggle', { id: 'skill:acme/tidy', enabled: true, commit: 'f'.repeat(40) }, u);
   assert.equal(moved.status, 409); assert.equal(moved.body.error.code, 'COMMIT_CHANGED');
 });
+
+test('active: turns says which chats follow the switches, read at request time', async () => {
+  const u = { id: 'turns' };
+  try {
+    process.env.LLMIDE_EXT_ACTIVE_SET = '1'; delete process.env.LLMIDE_EXT_ADAPTER;
+    assert.deepEqual((await call('GET', '/auth/me/extensions/active', undefined, u)).body.turns, { claude: true, providers: true });
+    process.env.LLMIDE_EXT_ACTIVE_SET = '0'; process.env.LLMIDE_EXT_ADAPTER = 'off';
+    assert.deepEqual((await call('GET', '/auth/me/extensions/active', undefined, u)).body.turns, { claude: false, providers: false });
+  } finally { delete process.env.LLMIDE_EXT_ACTIVE_SET; delete process.env.LLMIDE_EXT_ADAPTER; }
+});

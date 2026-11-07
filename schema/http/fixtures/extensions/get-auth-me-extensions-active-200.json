@@ -36,6 +36,7 @@
     "sdkPlugins": 0,
     "mcpServers": [],
     "excluded": [],
-    "warnings": []
+    "warnings": [],
+    "turns": { "claude": false, "providers": true }
   }
 }
