@@ -4,7 +4,7 @@
 // Every method that is not available yet is optional: the card then shows a "needs the
 // desktop host" placeholder instead of pretending.
 
-import type { CoreClient } from "./core-api.ts";
+import type { CoreClient, CoreResponse } from "./core-api.ts";
 import type { LoopDefaults } from "../shell/host-prefs.ts";
 import type { UpdateStatusView } from "./updates-model.ts";
 
@@ -89,6 +89,44 @@ export interface RtkStatus {
   canInstall: boolean;
 }
 
+/** A Self-Heal run's worktree (plan B; `self_heal_prepare`). */
+export interface SelfHealPrepared {
+  mainRepo: string;
+  worktreePath: string;
+  branch: string;
+  baseCommit: string;
+}
+
+/** `self_heal_verify`: the answered batch, whether make regression passed and whether a diff is left. */
+export interface SelfHealVerified {
+  batch: string;
+  passed: boolean;
+  timedOut: boolean;
+  hasChanges: boolean;
+  reverted: string[];
+  output: string;
+}
+
+/** `self_heal_diff`: the text shown, and the id of the exact patch Apply will apply. */
+export interface SelfHealDiff {
+  text: string;
+  truncated: boolean;
+  patchId: string;
+}
+
+/** Plan B's fix run (debug desktop builds). Host commands take a run id only; `agentRun` is the core's Loop agent
+ *  with a long client timeout; `flushIncidents` posts the reports the run produced before its outcome. */
+export interface SelfHealHost {
+  source(): Promise<string>;
+  prepare(runId: string, batch: string): Promise<SelfHealPrepared>;
+  agentRun(body: Record<string, unknown>): Promise<CoreResponse>;
+  verify(runId: string): Promise<SelfHealVerified>;
+  diff(runId: string): Promise<SelfHealDiff>;
+  apply(runId: string, patchId: string): Promise<void>;
+  remove(runId: string): Promise<void>;
+  flushIncidents(): Promise<void>;
+}
+
 export interface SettingsHost {
   /** Versions and core trust state (nonce verified = "spawned"). */
   diagnostics(): Promise<DiagnosticsInfo>;
@@ -150,6 +188,8 @@ export interface SettingsHost {
   mermaidStatus?(): Promise<ComponentStatus>;
   installMermaid?(): Promise<ComponentStatus>;
   removeMermaid?(): Promise<ComponentStatus>;
+  /** Self-Heal's fix run (plan B): present only with a desktop host; its commands refuse in a release build. */
+  selfHeal?: SelfHealHost;
   /** The core's log tail for the Server & Backend group (fixed paths under the app data dir, bounded). */
   coreLog?(): Promise<CoreLogText>;
   clearCoreLog?(): Promise<void>;

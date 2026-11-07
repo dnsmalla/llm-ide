@@ -11,6 +11,9 @@ import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
 import { decodeTrayStatus } from "../settings/misc-model";
+import { decodeDiff, decodePrepared, decodeVerified } from "../settings/self-heal-model";
+import { AGENT_TIMEOUT_MS } from "../settings/self-heal-run";
+import { flushSelfHealNow } from "./self-heal";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { decodeUpdateStatus, type UpdateStatusView } from "../settings/updates-model";
 import { CoreError, type CoreClient } from "./core";
@@ -167,6 +170,39 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const s = decodeComponentStatus(await d.invoke<unknown>("mermaid_runtime_remove"));
           if (!s) throw new Error("the desktop host returned a component status this app cannot read");
           return s;
+        },
+        selfHeal: {
+          async source() {
+            const r = await d.invoke<unknown>("self_heal_source");
+            if (typeof r !== "string" || r === "") throw new Error("the desktop host returned no source checkout");
+            return r;
+          },
+          async prepare(runId, batch) {
+            const p = decodePrepared(await d.invoke<unknown>("self_heal_prepare", { runId, batch }));
+            if (!p) throw new Error("the desktop host returned a worktree this app cannot read");
+            return p;
+          },
+          async agentRun(body) {
+            const r = await d.core.requestRaw("/kb/loop/agent-run", { method: "POST", body, timeoutMs: AGENT_TIMEOUT_MS + 60_000 });
+            return { status: r.status, body: r.body ?? null };
+          },
+          async verify(runId) {
+            const v = decodeVerified(await d.invoke<unknown>("self_heal_verify", { runId }));
+            if (!v) throw new Error("the desktop host returned a verify result this app cannot read");
+            return v;
+          },
+          async diff(runId) {
+            const v = decodeDiff(await d.invoke<unknown>("self_heal_diff", { runId }));
+            if (!v) throw new Error("the desktop host returned a diff this app cannot read");
+            return v;
+          },
+          async apply(runId, patchId) {
+            await d.invoke<unknown>("self_heal_apply", { runId, patchId });
+          },
+          async remove(runId) {
+            await d.invoke<unknown>("self_heal_remove", { runId });
+          },
+          flushIncidents: () => flushSelfHealNow(),
         },
         async coreLog() {
           const l = decodeCoreLog(await d.invoke<unknown>("core_log_read"));

@@ -28,6 +28,7 @@ const SOURCES: ReadonlySet<string> = new Set(["ui", "log", "crash", "server"]);
 let enabled = false;
 let pending: IncidentReport[] = [];
 const listeners = new Set<() => void>();
+let lastDeps: PumpDeps | null = null;
 
 /** True once the host said this is a debug build that records (Settings shows the Self-Heal group then). */
 export const selfHealEnabled = (): boolean => enabled;
@@ -104,6 +105,7 @@ export async function pumpOnce(deps: PumpDeps): Promise<void> {
 export function startSelfHealPump(deps: PumpDeps, intervalMs = PUMP_MS): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  lastDeps = deps;
   const tick = async (): Promise<void> => {
     await pumpOnce(deps);
     if (!stopped && enabled) timer = setTimeout(() => void tick(), intervalMs);
@@ -111,12 +113,26 @@ export function startSelfHealPump(deps: PumpDeps, intervalMs = PUMP_MS): () => v
   void tick();
   return () => {
     stopped = true;
+    if (lastDeps === deps) lastDeps = null;
     if (timer !== null) clearTimeout(timer);
   };
 }
 
 export function resetSelfHealForTests(): void {
+  lastDeps = null;
   enabled = false;
   pending = [];
   listeners.clear();
+}
+
+/**
+ * A Self-Heal fix run's last step (plan B): after `waitMs` (the host settles a stack trace after 2 s of quiet), drain
+ * the host and post once more through the running pump, while the core still holds the run open and drops the run's
+ * own reports. A no-op without a running pump.
+ */
+export async function flushSelfHealNow(waitMs = 2_500): Promise<void> {
+  const deps = lastDeps;
+  if (!deps) return;
+  await new Promise((r) => setTimeout(r, waitMs));
+  await pumpOnce(deps);
 }

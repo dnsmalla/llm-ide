@@ -60,3 +60,18 @@ test("subscribers hear the switch once", async () => {
   off();
   assert.equal(n, 1);
 });
+
+test("flushSelfHealNow drains the host once more through the running pump, and does nothing without one", async () => {
+  let takes = 0;
+  const posted = [];
+  await sh.flushSelfHealNow(0);
+  assert.equal(takes, 0);
+  const stop = sh.startSelfHealPump({ take: async () => { takes += 1; return { enabled: true, incidents: [{ ...ok, message: `Error: ${takes}` }] }; }, post: async (b) => { posted.push(...b); } }, 1e9);
+  await sh.flushSelfHealNow(0);
+  stop();
+  assert.ok(takes >= 2, "the first tick and the flush");
+  assert.ok(posted.some((p) => p.message === "Error: 2"));
+  const before = takes;
+  await sh.flushSelfHealNow(0);
+  assert.equal(takes, before, "a stopped pump is not flushed");
+});
