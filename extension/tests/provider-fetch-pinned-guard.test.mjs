@@ -7,7 +7,8 @@
 //   - `globalThis.fetch` / `global.fetch` (a replaced fetch is how a guard is bypassed or faked),
 //   - `http.request` / `https.request` / `http.get` / `https.get`,
 //   - an `undici` import,
-//   - a child process that runs `curl` or `wget`.
+//   - a child process that runs `curl` or `wget`,
+//   - a node:http2 import or http2.connect (only APNs, reviewed below).
 // What this does NOT prove: that the allowlisted calls are safe; each entry states why it is allowed.
 // What it DOES protect: no new network path can be added to the server without a reviewed entry here.
 import { test } from 'node:test';
@@ -29,6 +30,8 @@ const RULES = {
   httpRequest: /\bhttps?\.(request|get)\s*\(/g,
   undici: /['"`]undici['"`]/g,
   curlSpawn: /\b(spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(\s*['"`](curl|wget)\b/g,
+  http2Import: /['"`](node:)?http2['"`]/g,
+  http2Connect: /\bhttp2\.connect\s*\(/g,
 };
 
 // file -> rule -> { n: exact count, why }
@@ -37,6 +40,10 @@ const ALLOWED = {
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
   'llm_agent/tools/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
   'llm_agent/tools/handlers/web-search.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
+  'server/push/apns.mjs': {
+    http2Import: { n: 1, why: 'APNs needs HTTP/2: two fixed Apple hosts (APNS_HOSTS), checked lookup, no redirects in the protocol' },
+    http2Connect: { n: 1, why: 'the one http2.connect (defaultConnect), only to https://api.push.apple.com or api.sandbox.push.apple.com' },
+  },
 };
 
 function walk(dir, out = []) {
@@ -107,4 +114,13 @@ test('every fixed-host caller goes through fixedHostFetch, and no bare fetch is 
   const want = { 'providers/runtime.mjs': 2, 'providers/web-client.mjs': 2, 'providers/jev.mjs': 1, 'connectors/google-oauth.mjs': 2, 'connectors/slack-oauth.mjs': 1, 'connectors/slack-source.mjs': 1, 'agents/slack.mjs': 1, 'agents/github-pr.mjs': 1 };
   for (const [f, n] of Object.entries(want)) { const src = strip(fs.readFileSync(path.join(root, f), 'utf8')); assert.equal((src.match(/\bfixedHostFetch\(/g) || []).length, n, f); assert.equal(ALLOWED[f], undefined, `${f} must not be allowlisted`); }
   assert.deepEqual(Object.entries(ALLOWED).filter(([, rules]) => rules.bareFetch).map(([f]) => f), []);
+});
+
+test('APNs dials only the two fixed Apple hosts, and Web Push only through fixedHostFetch', () => {
+  const apns = strip(fs.readFileSync(path.join(root, 'server/push/apns.mjs'), 'utf8'));
+  assert.match(apns, /APNS_HOSTS = Object\.freeze\(\{ production: 'api\.push\.apple\.com', sandbox: 'api\.sandbox\.push\.apple\.com' \}\)/);
+  assert.match(apns, /connect\(`https:\/\/\$\{APNS_HOSTS\[environment\]\}`\)/);
+  const wp = strip(fs.readFileSync(path.join(root, 'server/push/webpush.mjs'), 'utf8'));
+  assert.match(wp, /fetchImpl = fixedHostFetch/);
+  assert.match(wp, /\{ hosts: \[u\.hostname\], maxBytes: 16 \* 1024 \}/);
 });
