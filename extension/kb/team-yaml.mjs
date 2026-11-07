@@ -30,7 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { ROLE_ORDER, MAX_MODES, MAX_USD_CAP_MONTH, getMember } from './members.mjs';
+import { ROLE_ORDER, MAX_MODES, MAX_USD_CAP_MONTH, getMember, ownerCount } from './members.mjs';
 
 export const TEAM_YAML_FILENAME = 'team.yaml';
 
@@ -43,6 +43,8 @@ export const DEFAULT_VIEWER_ASSIGNMENT = Object.freeze({
 
 const ROLES = new Set(Object.keys(ROLE_ORDER));
 const MODES = new Set(MAX_MODES);
+// Rank of each max_mode, for the downgrade warning (none < read_only < execute).
+const MODE_ORDER = Object.freeze(Object.fromEntries(MAX_MODES.map((mode, i) => [mode, i])));
 const ENTRY_KEYS = new Set(['role', 'max_mode', 'usd_cap_month']);
 const TOP_KEY = 'members';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -409,8 +411,52 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
         detail: { email, from, to: change.to },
       });
     }
+
+    // Fail closed (R-012#2): the file path bypasses the API's LAST_OWNER guard, and the API is the only
+    // place that refuses demoting the last owner. A typo in an owner's email, an owner listed with another
+    // role, or an empty `members:` would otherwise demote every owner to the default viewer and boot a
+    // core nobody can administer. Throwing INSIDE the transaction rolls back every grant change; the
+    // boot adapter turns it into `team_yaml_invalid` and exits 1.
+    // An install with no real accounts yet (fresh DB, only the synthetic `legacy` user) is exempt: there
+    // is nothing to demote, and the first registration is what creates the owner (`auth-routes.mjs`).
+    if (userRows.length > 0 && ownerCount(db) === 0) {
+      throw invalid(
+        `refusing to apply ${file}: no account would keep the owner role — list this install's owner in the file `
+        + '(an owner email typo, an owner listed with another role, or an empty members list)',
+        null,
+        'no_owner',
+      );
+    }
   });
-  apply();
+  try {
+    apply();
+  } catch (err) {
+    // The parser's own audit row is written above, before the transaction. This one covers the
+    // transaction's fail-closed guard, and must be outside it: a row written inside would be rolled back.
+    if (err instanceof TeamYamlError) {
+      report(audit, {
+        action: 'team.yaml.invalid',
+        outcome: 'failure',
+        detail: { reason: err.reason, line: err.line },
+      });
+    }
+    throw err;
+  }
+
+  // team.yaml is authoritative at every boot: an admin-UI grant or an invited member's grant that the
+  // file does not repeat is reset on restart. That is the design (ADR 0021 H1.1), but it must be visible,
+  // so every narrower grant gets one warning naming the account and the before/after values (R-012#6).
+  for (const change of changes) {
+    if (!isDowngrade(change.from, change.to)) continue;
+    if (logger) {
+      logger.warn('team_yaml_downgrade', {
+        email: change.email,
+        from: change.from,
+        to: change.to,
+        message: 'team.yaml is authoritative at every boot: this account was reset to the narrower grant in the file.',
+      });
+    }
+  }
 
   return {
     path: file,
@@ -427,6 +473,24 @@ function sameGrant(current, desired) {
   return current.teamRole === desired.teamRole
     && current.maxMode === desired.maxMode
     && Number(current.usdCapMonth) === Number(desired.usdCapMonth);
+}
+
+/** True when `to` grants strictly less than `from` in any dimension — the boot-time downgrade warning. */
+function isDowngrade(from, to) {
+  if (!from || !to) return false; // a row created now is not a downgrade
+  if (ROLE_ORDER[to.teamRole] < ROLE_ORDER[from.teamRole]) return true;
+  if (MODE_ORDER[to.maxMode] < MODE_ORDER[from.maxMode]) return true;
+  return capIsTighter(from.usdCapMonth, to.usdCapMonth);
+}
+
+/** `usd_cap_month: 0` means no cap, so any non-zero cap below it is tighter; else a smaller cap is. */
+function capIsTighter(fromCap, toCap) {
+  const from = Number(fromCap);
+  const to = Number(toCap);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+  if (to === 0) return false; // no cap is the loosest grant possible
+  if (from === 0) return to > 0;
+  return to < from;
 }
 
 /** Audit must never change the boot decision: a throwing sink is a no-op. */

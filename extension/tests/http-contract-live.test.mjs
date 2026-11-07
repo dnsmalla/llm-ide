@@ -349,15 +349,20 @@ async function seedUsers(toReplay, secrets) {
     const insert = db.prepare('INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, ?, ?, ?)');
     // ADR 0021: the admin-gated routes read the `members` row, so the replay account is this install's
     // operator (admin, execute, no cap) — the fixtures that exercise those routes still replay live.
-    const insertMember = db.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'admin', 'execute', 0)");
-    const seed = (email) => {
+    // The FIRST account is the owner: team.yaml is generated from these rows on the server's first boot
+    // and a file that leaves zero owners with accounts present now refuses the boot (R-012#2). Owner is
+    // at least admin, so every admin-gated fixture still replays.
+    const insertMember = db.prepare('INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, ?, \'execute\', 0)');
+    const seed = (email, teamRole = 'admin') => {
       const id = randomBytes(8).toString('hex');
       insert.run(id, email, 'Contract', hash, 'user');
-      insertMember.run(id);
+      insertMember.run(id, teamRole);
       return signAccessToken({ userId: id, role: 'user' });
     };
     db.transaction(() => {
-      toReplay.forEach((fx, i) => { if (fx.status !== 401) tokenFor.set(fx, seed(`contract-${i}@example.com`)); });
+      toReplay.forEach((fx, i) => {
+        if (fx.status !== 401) tokenFor.set(fx, seed(`contract-${i}@example.com`, i === 0 ? 'owner' : 'admin'));
+      });
     })();
   } finally {
     closeDb();

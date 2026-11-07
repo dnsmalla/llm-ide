@@ -341,6 +341,98 @@ test('every actual change is audited with actor team.yaml and from/to only', () 
   assert.ok(!JSON.stringify(rows[0].detail).includes('prompt'), 'never message text');
 });
 
+// ── fail closed: zero owners (R-012#2) ───────────────────────────────────
+
+test('a fresh install with no real accounts still applies (the first registration creates the owner)', () => {
+  reset();
+  const d = dir();
+  // Only the synthetic `legacy` user exists: nothing to demote, so the boot must not fail.
+  const result = applyTeamYaml(kb.getDb(), d, { logger: noopLogger });
+  assert.equal(result.created, true);
+  assert.equal(kb.getDb().prepare("SELECT COUNT(*) AS n FROM members WHERE team_role = 'owner'").get().n, 0);
+});
+
+test('a file that would leave no owner refuses the boot and rolls back every change', () => {
+  const cases = {
+    'owner email typo': [
+      'members:',
+      '  ownerr@example.com:',
+      '    role: owner',
+      '    max_mode: execute',
+      '    usd_cap_month: 0',
+      '  member@example.com:',
+      '    role: admin',
+      '    max_mode: execute',
+      '    usd_cap_month: 0',
+    ].join('\n'),
+    'owner listed with another role': [
+      'members:',
+      '  owner@example.com:',
+      '    role: admin',
+      '    max_mode: execute',
+      '    usd_cap_month: 0',
+    ].join('\n'),
+    'empty members': 'members:\n',
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    reset();
+    const d = dir();
+    const owner = addUser('owner@example.com', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+    const member = addUser('member@example.com', { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 });
+    writeYaml(d, text);
+
+    assert.throws(
+      () => applyTeamYamlAtBoot({ db: kb.getDb(), dir: d, logger: noopLogger }),
+      (err) => err instanceof TeamYamlError && err.code === 'TEAM_YAML_INVALID' && err.reason === 'no_owner',
+      name,
+    );
+    // The guard throws INSIDE the transaction: no partial grant change survives, not even a promotion.
+    assert.deepEqual(grantOf(owner), { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }, `${name}: owner unchanged`);
+    assert.deepEqual(grantOf(member), { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 }, `${name}: member unchanged`);
+    const rows = auditRows('team.yaml.invalid');
+    assert.equal(rows.length, 1, name);
+    assert.equal(rows[0].outcome, 'failure', name);
+    assert.equal(rows[0].detail.reason, 'no_owner', name);
+    assert.equal(rows[0].user_agent, 'team.yaml', name);
+  }
+});
+
+// ── downgrade warning (R-012#6) ──────────────────────────────────────────
+
+test('every boot-time downgrade logs one warning; an upgrade logs none', () => {
+  reset();
+  const d = dir();
+  addUser('owner@example.com', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  addUser('admin@example.com', { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0 });
+  addUser('viewer@example.com', { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 20 });
+  writeYaml(d, [
+    'members:',
+    '  owner@example.com:',
+    '    role: owner',
+    '    max_mode: execute',
+    '    usd_cap_month: 0',
+    '  admin@example.com:',
+    '    role: viewer',
+    '    max_mode: read_only',
+    '    usd_cap_month: 5',
+    '  viewer@example.com:',
+    '    role: admin',
+    '    max_mode: execute',
+    '    usd_cap_month: 0',
+  ].join('\n'));
+
+  const warnings = [];
+  const logger = { info() {}, warn: (event, detail) => warnings.push({ event, detail }) };
+  applyTeamYamlAtBoot({ db: kb.getDb(), dir: d, logger });
+
+  const downgrades = warnings.filter((w) => w.event === 'team_yaml_downgrade');
+  assert.equal(downgrades.length, 1, 'one per narrowed account, none for the promoted one');
+  assert.equal(downgrades[0].detail.email, 'admin@example.com');
+  assert.deepEqual(downgrades[0].detail.from, { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0 });
+  assert.deepEqual(downgrades[0].detail.to, { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 5 });
+  assert.match(downgrades[0].detail.message, /authoritative at every boot/);
+});
+
 after(() => {
   kb.closeDb();
   fs.rmSync(root, { recursive: true, force: true });
