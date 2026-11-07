@@ -162,14 +162,14 @@ Endpoints with no client caller (94):
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:210` | - | - | tests only |
-| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:315` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
-| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:318` | `controller.ts` | `agent-v2-client.ts` | - |
-| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:321` | - | `agent-v2-client.ts` | - |
-| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:324` | `route.ts` | - | - |
-| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:329` | `controller.ts` | - | - |
-| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:333` | `controller.ts` | - | - |
-| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:336` | `route.ts` | - | - |
-| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:342` | `Badges.tsx` | - | - |
+| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:316` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
+| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:319` | `controller.ts` | `agent-v2-client.ts` | - |
+| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:322` | - | `agent-v2-client.ts` | - |
+| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:325` | `route.ts` | - | - |
+| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:330` | `controller.ts` | - | - |
+| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:334` | `controller.ts` | - | - |
+| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:337` | `route.ts` | - | - |
+| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:343` | `Badges.tsx` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:111` | `NativeAutoTasksScreen.tsx`, `NativeLoopScreen.tsx`, `run-custom.ts` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `NativeLoopScreen.tsx` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:259` | - | `App.tsx`, `useQuestions.ts` | - |
