@@ -38,7 +38,7 @@ export function LibraryNotePicker({ host, onPick, onClose }: { host: NotesHost; 
   };
 
   return (
-    <div className="chat-popover chat-library-picker" role="dialog" aria-label="Add from Library">
+    <div className="chat-popover chat-library-picker" role="dialog" aria-label="Add from Library" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}>
       <div className="chat-library-head"><strong>Add from Library</strong><button type="button" className="chat-link-btn" onClick={onClose}>Close</button></div>
       <input autoFocus aria-label="Filter notes" placeholder="Filter notes" value={q} onChange={(ev) => setQ(ev.target.value)} />
       {loading ? <p className="chat-muted" role="status">Reading the notes folder…</p> : null}
