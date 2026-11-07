@@ -87,6 +87,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
         <span className="lib-nav-chevron" aria-hidden="true">{open(id) ? "▾" : "▸"}</span>{icon} <span className="lib-nav-label">{label}</span>{count !== null && count !== undefined ? <span className="lib-count">{count.toLocaleString()}</span> : null}
       </button>
       {onAdd ? <button type="button" className="lib-plus" aria-label={addLabel ?? `Add ${label}`} title={addLabel ?? `Add ${label}`} onClick={onAdd}>＋</button> : null}
+      {open(id) ? <button type="button" className="lib-nav-close" aria-label={`Close ${label}`} title={`Close ${label}`} onClick={() => toggle(id)}>×</button> : null}
     </h3>
   );
   const root: NotesRoot | null = state.root;
@@ -135,6 +136,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
               <span className="lib-nav-chevron" aria-hidden="true">{open(x.id) ? "▾" : "▸"}</span><PuzzleIcon /> <span className="lib-nav-label">{x.label}</span>
             </button>
             <button type="button" className="lib-plus" aria-label={`Open ${x.label}`} title={`Open ${x.label}`} onClick={() => p.onExtension(x.id)}>＋</button>
+            {open(x.id) ? <button type="button" className="lib-nav-close" aria-label={`Close ${x.label}`} title={`Close ${x.label}`} onClick={() => toggle(x.id)}>×</button> : null}
           </h3>
         </Fragment>
       ))}

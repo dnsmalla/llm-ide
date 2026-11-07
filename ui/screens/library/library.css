@@ -180,3 +180,8 @@
 .lib-link-btn { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; text-decoration: underline; padding: 0 4px; }
 .lib-discard { display: flex; align-items: center; gap: 8px; padding: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
 .lib-discard span { flex: 1; }
+.lib-context { max-height: min(70vh, 420px); overflow: auto; }
+.lib-context-close { position: sticky; top: 0; align-self: flex-end; margin: -2px -2px 0 0; padding: 0 6px !important; font-size: 17px; line-height: 1.1; color: var(--tok-color-text-muted); background: var(--tok-color-surface) !important; }
+.lib-context-close:hover { color: var(--tok-color-text); }
+.lib-nav-close { border: 0; background: none; color: var(--tok-color-text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
+.lib-nav-close:hover { color: var(--tok-color-text); }

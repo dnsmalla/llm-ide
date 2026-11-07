@@ -39,6 +39,14 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [removal, setRemoval] = useState<Extract<RemovePlan, { ok: true }> | null>(null);
   const [newFolderIn, setNewFolderIn] = useState<string | null>(null);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const close = (e: PointerEvent) => { if (!(e.target as Element | null)?.closest?.("[data-lib-menu]")) setMenu(null); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close, true); document.removeEventListener("keydown", key); };
+  }, [menu]);
   const [notice, setNotice] = useState<string | null>(null);
   const childrenRef = useRef(children);
   childrenRef.current = children;
@@ -193,7 +201,8 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
       })}
       {notice ? <p className="lib-muted lib-project-note" role="status">{notice}</p> : null}
       {menu ? (
-        <div className="lib-context" role="menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)} onKeyDown={(e) => { if (e.key === "Escape") setMenu(null); }}>
+        <div className="lib-context" role="menu" data-lib-menu style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)} onKeyDown={(e) => { if (e.key === "Escape") setMenu(null); }}>
+          <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={() => setMenu(null)}>×</button>
           {menu.entry === null ? (
             <>
               <div className="lib-muted lib-context-note" role="none">Adds to {menu.target}</div>

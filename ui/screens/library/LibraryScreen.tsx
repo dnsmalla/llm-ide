@@ -67,6 +67,14 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [projectFileDirty, setProjectFileDirty] = useState(false);
   const selectProjectFile = (path: string | null) => { if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return; setProjectFileDirty(false); setProjectFile(path); };
   const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!noteMenu) return undefined;
+    const close = (e: PointerEvent) => { if (!(e.target as Element | null)?.closest?.("[data-lib-menu]")) setNoteMenu(null); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setNoteMenu(null); };
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close, true); document.removeEventListener("keydown", key); };
+  }, [noteMenu]);
   // ---- write side
   const queue = useMemo(() => new WriteQueue(), []);
   const [dirty, setDirty] = useState(false);
@@ -283,7 +291,8 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
         </main>
       )}
       {noteMenu ? (
-        <div className="lib-context" role="menu" style={{ left: noteMenu.x, top: noteMenu.y }} onMouseLeave={() => setNoteMenu(null)}>
+        <div className="lib-context" role="menu" data-lib-menu style={{ left: noteMenu.x, top: noteMenu.y }} onMouseLeave={() => setNoteMenu(null)}>
+          <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={() => setNoteMenu(null)}>×</button>
           <button type="button" role="menuitem" onClick={() => { store.select(noteMenu.rel); setNoteMenu(null); }}>Open</button>
           <button type="button" role="menuitem" onClick={() => { void onCopyPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Copy relative path</button>
           <button type="button" role="menuitem" onClick={() => { void onRevealPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Reveal in Finder</button>
