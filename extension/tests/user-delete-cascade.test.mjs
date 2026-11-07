@@ -168,6 +168,8 @@ test('cascade is transactional — counts add up across every table', () => {
     'email_seen', 'email_state', 'slack_seen', 'slack_state',
     'activity', 'activity_seen',
     'note_index', 'note_index_pass', 'pending_session_purges', 'live_acks', 'live_crash_rows',
+    // migration 0068 — team authority (ADR 0021); `invites` is keyed by created_by
+    'members', 'invites',
     'audit_anonymised', 'user',
   ];
   for (const k of expectedKeys) {
@@ -305,6 +307,30 @@ test('deleteUserCascade removes activity + activity_seen rows (KB-3)', async () 
     0,
     'activity_seen rows should be gone after cascade',
   );
+});
+
+// ADR 0021: the authority row and every invite the deleted user minted go with the account. `members`
+// is enumerated by the user_id-table sweep; `invites` is keyed by created_by, so it needs this test.
+test('team members row and minted invites are wiped on user deletion (ADR 0021)', () => {
+  reset();
+  const alice = provision('alice-team@example.com').id;
+  const bob = provision('bob-team@example.com').id;
+  const handle = db.getDb();
+  handle.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(alice);
+  handle.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(bob);
+  handle.prepare("INSERT INTO invites (id, token_hash, created_by, expires_at) VALUES ('inv-a', 'hash-a', ?, datetime('now', '+1 day'))").run(alice);
+  handle.prepare("INSERT INTO invites (id, token_hash, created_by, expires_at) VALUES ('inv-b', 'hash-b', ?, datetime('now', '+1 day'))").run(bob);
+
+  assert.ok(handle.prepare('SELECT COUNT(*) AS n FROM members WHERE user_id = ?').get(alice).n > 0);
+  const counts = db.deleteUserCascade(alice);
+
+  assert.equal(counts.members, 1);
+  assert.equal(counts.invites, 1);
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM members WHERE user_id = ?').get(alice).n, 0);
+  assert.equal(handle.prepare("SELECT COUNT(*) AS n FROM invites WHERE created_by = ?").get(alice).n, 0);
+  // Bob's invite and authority row survive.
+  assert.equal(handle.prepare("SELECT COUNT(*) AS n FROM invites WHERE created_by = ?").get(bob).n, 1);
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM members WHERE user_id = ?').get(bob).n, 1);
 });
 
 test('refuses to run with no userId', () => {

@@ -1059,9 +1059,13 @@ export function deleteUserCascade(userId) {
       'bus_schedules',
       // migration 0067 — Self-Heal incidents (debug desktop builds)
       'self_heal_incidents',
+      // migration 0068 — team authority (ADR 0021)
+      'members',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
+    // migration 0068 — invites have no user_id column: the creator's row goes with the creator.
+    counts.invites = del('DELETE FROM invites WHERE created_by = ?');
     // migration 0009 — rate_limit_buckets has no user_id column; the key
     // column stores "<profile>::<scope>" where scope == userId for
     // authenticated KB routes.  We match by suffix so all per-user
