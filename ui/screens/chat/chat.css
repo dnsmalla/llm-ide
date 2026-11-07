@@ -183,3 +183,18 @@
 .chat-dock-mode .chat-pick .chat-muted { display: none; }
 .chat-dock-mode .chat-composer-bar .chat-error { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
 .chat-dock-mode .chat-composer-bar .chat-pick { min-width: 0; }
+/* Dock composer: a two-column grid, so Send and Dictate can never be pushed off-screen. */
+.chat-dock-mode .chat-composer-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 6px;
+}
+.chat-dock-mode .chat-composer-bar > * { min-width: 0; }
+.chat-dock-mode .chat-composer-bar .chat-spacer,
+.chat-dock-mode .chat-composer-bar .chat-keyhint,
+.chat-dock-mode .chat-composer-bar [role="img"] { display: none; }
+.chat-dock-mode .chat-composer-bar .chat-pick { width: 100%; }
+.chat-dock-mode .chat-composer-bar .chat-pick select { width: 100%; max-width: 100%; }
+.chat-dock-mode .chat-composer-bar .chat-btn[type="submit"] { grid-column: 1 / -1; width: 100%; }
+.chat-dock-mode .chat-composer-bar .chat-error { grid-column: 1 / -1; }
