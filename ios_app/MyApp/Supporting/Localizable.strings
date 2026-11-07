@@ -1,0 +1,15 @@
+/* Push notification text (Host API v1 capability push). The desktop sends only a kind and a count; these are the
+   words of desktop/src-tauri/src/notify.rs Kind::body. extension/tests/push-kinds.test.mjs keeps them in step. */
+"PUSH_APPROVAL_CHAT" = "A tool is waiting for your approval in Chat.";
+"PUSH_APPROVAL_JOB" = "A job is waiting for your approval.";
+"PUSH_LOOP_DONE" = "A Loop run passed.";
+"PUSH_LOOP_FAILED" = "A Loop run did not pass.";
+"PUSH_AUTOTASK_DONE" = "An Auto Task finished.";
+"PUSH_AUTOTASK_FAILED" = "An Auto Task did not complete.";
+"PUSH_GRAPH_DONE" = "The code graph is ready.";
+"PUSH_GRAPH_FAILED" = "Code graph generation failed.";
+"PUSH_DOCGEN_DONE" = "A generated document is ready.";
+"PUSH_DOCGEN_FAILED" = "Document generation failed.";
+"PUSH_SYNC_ATTENTION" = "Sync needs your attention in Settings.";
+"PUSH_APPROVAL_CHAT_MANY" = "%@ tools are waiting for your approval in Chat.";
+"PUSH_APPROVAL_JOB_MANY" = "%@ jobs are waiting for your approval.";
