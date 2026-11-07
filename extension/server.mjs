@@ -331,7 +331,7 @@ const HOST = config.host;
 //   v111 — command bus desktop schedules, additive (spec docs/spec/command-bus.md section 9, migration 0063): GET /bus/schedules → { items: BusSchedule[] } (desktop-ui and ios-native; else 403 TIER_DENIED); POST /bus/schedules { kind: 'sources.update', args, intervalHours 1-168, standing?, standingDays? 1-90 } → 201 { schedule } (desktop-ui only; 400 INVALID_ARGS, 429 QUOTA_EXCEEDED at 10); DELETE /bus/schedules/:id → { deleted: true } | 404 (desktop-ui only; revokes its standing approval). POST /bus/commands/:id/approve takes an optional scheduleId: with the nonce it approves a desktop-enqueued run on that schedule's live standing approval (same kind and args, idem sched:<id>:, T1, at most one per half interval), else 403 STANDING_APPROVAL_INVALID { reason }. No server timer.
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
 
-const SERVER_API_VERSION = 119;
+const SERVER_API_VERSION = 120;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -518,6 +518,9 @@ const ALL_ENDPOINTS = [
   '/host-api/pin',
   '/host-api/devices',
   '/host-api/devices/:id',
+  '/host-api/push/send',
+  '/host-api/push/status',
+  '/host-api/push/apns',
   '/kb/sync/status',
   '/kb/sync/mega',
   '/kb/sync/sftp',

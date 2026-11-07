@@ -11,7 +11,7 @@
 // Order: proof first (403 HOST_PROOF_REQUIRED), then the flag (404 HOST_API_DISABLED), so an unproven caller learns
 // nothing about the flag. The PIN is returned once and never logged.
 import { networkInterfaces } from 'node:os';
-import { send } from '../../server/route-http.mjs';
+import { send, readJson } from '../../server/route-http.mjs';
 import { sendError } from '../../core/errors.mjs';
 import { config } from '../../core/config.mjs';
 import { logger } from '../../core/logger.mjs';
@@ -19,6 +19,9 @@ import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { mintPin } from './pin.mjs';
 import { listDevices, revokeDevice } from '../../kb/host-api-devices.mjs';
 import { sharedAuditSink } from './audit.mjs';
+import { hostApiCapabilities } from './gateway.mjs';
+import { isPushKind } from '../../server/push/kinds.mjs';
+import { dispatchPush, pushGate, pushStatus, apnsStatus, setApnsCredentials, clearApnsCredentials } from './push.mjs';
 
 const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const fail = (res, status, code, message) => { send(res, status, { error: { code, message } }); return true; };
@@ -57,7 +60,7 @@ export async function handleHostApiRoute(req, res, opts = {}) {
   }
 }
 
-async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces }) {
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces, pushDeps = {} }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
   if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
@@ -88,6 +91,32 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
     try { hostApi()?.gateway?.disconnectDevice(userId, id); } catch { /* best effort */ }
     send(res, 200, { revoked });
     return true;
+  }
+  if (path.startsWith('/host-api/push/')) return pushRoute(req, res, path, userId, { env, audit, pushDeps });
+  return fail(res, 404, 'NOT_FOUND', 'No such Host API route');
+}
+
+const PUSH_KEY_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const bodyOf = async (req) => { try { return await readJson(req, 16 * 1024); } catch { return null; } };
+async function pushRoute(req, res, path, userId, { env, audit, pushDeps }) {
+  const served = hostApiCapabilities(env).includes('push');
+  if (req.method === 'POST' && path === '/host-api/push/send') {
+    const b = await bodyOf(req);
+    if (!b || !isPushKind(b.kind)) return fail(res, 400, 'VALIDATION_FAILED', 'Unknown push kind');
+    if (b.key != null && !(typeof b.key === 'string' && PUSH_KEY_RE.test(b.key))) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid push key');
+    if (b.count != null && !(Number.isInteger(b.count) && b.count >= 1 && b.count <= 999)) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid push count');
+    const out = await dispatchPush(userId, { kind: b.kind, key: b.key ?? null, count: b.count ?? 1 }, { gate: pushGate, served, log: (m) => logger.info('host_api_push', { message: m }), ...pushDeps });
+    send(res, 200, { sent: out.sent }); return true;
+  }
+  if (req.method === 'GET' && path === '/host-api/push/status') { send(res, 200, pushStatus(userId, served)); return true; }
+  if (req.method === 'PUT' && path === '/host-api/push/apns') {
+    const r = setApnsCredentials(userId, (await bodyOf(req)) ?? {});
+    if (!r.ok) return fail(res, 400, 'VALIDATION_FAILED', `Invalid ${r.field}`);
+    audit().record('push_apns_set', { peer: req.socket?.remoteAddress, userId, detail: `key ${r.keyId}` });
+    send(res, 200, apnsStatus(userId)); return true;
+  }
+  if (req.method === 'DELETE' && path === '/host-api/push/apns') {
+    clearApnsCredentials(userId); audit().record('push_apns_removed', { peer: req.socket?.remoteAddress, userId }); send(res, 200, apnsStatus(userId)); return true;
   }
   return fail(res, 404, 'NOT_FOUND', 'No such Host API route');
 }
