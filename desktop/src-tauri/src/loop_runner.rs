@@ -201,13 +201,40 @@ fn stage_shell(command: &str) -> Command {
     c
 }
 
+/// Repo overrides an inherited environment can carry (a host started from a git hook or a terminal with GIT_DIR set):
+/// with one of them, every git call below would act on some other repository or index.
+pub const GIT_OVERRIDES: &[&str] = &[
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE", "GIT_PREFIX", "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS",
+];
+
+pub fn strip_git_env(c: &mut Command) {
+    for k in GIT_OVERRIDES {
+        c.env_remove(k);
+    }
+}
+
+/// `git` with the inherited repo overrides removed.
+pub fn git_command() -> Command {
+    let mut c = Command::new("git");
+    strip_git_env(&mut c);
+    c
+}
+
 pub fn run_command_with(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>) -> Result<StageRun, String> {
+    run_command_cancellable(root, command, timeout_secs, sink, &CANCEL)
+}
+
+/// Like `run_command_with`, with the caller's own cancel flag: Self-Heal's verify must not stop because the Loop's
+/// Stop left `CANCEL` set.
+pub fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
-    if CANCEL.load(Ordering::SeqCst) {
+    if cancel.load(Ordering::SeqCst) {
         return Ok(StageRun { exit_code: None, stdout: String::new(), stderr: String::new(), timed_out: false, cancelled: true, duration_ms: 0 });
     }
     let mut cmd = stage_shell(command);
+    strip_git_env(&mut cmd);
     cmd
         // cmd.exe cannot start in a `\\?\` folder (it falls back to the Windows folder).
         .current_dir(crate::fsutil::plain_path(&work_root(root)))
@@ -224,7 +251,7 @@ pub fn run_command_with(root: &Path, command: &str, timeout_secs: Option<u64>, s
     let status = loop {
         match child.try_wait().map_err(|e| format!("cannot wait for the stage: {e}"))? {
             Some(s) => break Some(s),
-            None if CANCEL.load(Ordering::SeqCst) => {
+            None if cancel.load(Ordering::SeqCst) => {
                 cancelled = true;
                 child.terminate(grace);
                 break None;
@@ -357,7 +384,7 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
             return Err(format!("unsafe path: {p}"));
         }
     }
-    let listed = Command::new("git").arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).args(["ls-files", "-z", "--"]).args(paths).output()
+    let listed = git_command().arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).args(["ls-files", "-z", "--"]).args(paths).output()
         .map_err(|e| format!("cannot run git ls-files: {e}"))?;
     if !listed.status.success() { return Err("git ls-files failed; nothing was reverted".into()); }
     let tracked: HashSet<String> = String::from_utf8_lossy(&listed.stdout).split('\0').map(|s| s.to_string()).collect();
@@ -374,7 +401,7 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
         if !parent_ok { return Err(format!("{p} is not inside the worktree; nothing was reverted")); }
     }
     if !tracked_paths.is_empty() {
-        let mut cmd = Command::new("git");
+        let mut cmd = git_command();
         cmd.arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).arg("checkout").arg("--");
         for p in &tracked_paths { cmd.arg(p.as_str()); }
         let out = cmd.output().map_err(|e| format!("cannot run git checkout: {e}"))?;
@@ -410,7 +437,7 @@ const MAX_CHANGED_PATHS: usize = 20_000;
 /// back exactly as the agent run reports them). Both sides of a rename/copy are listed. Errors when git cannot answer
 /// or the list is too long, so a caller never reads "unknown" as "clean" (the revert snapshot depends on that).
 pub fn changed_paths_in(work: &Path) -> Result<Vec<String>, String> {
-    let out = Command::new("git").arg("-C").arg(crate::fsutil::plain_path(work)).args(["status", "--porcelain", "-z"]).output()
+    let out = git_command().arg("-C").arg(crate::fsutil::plain_path(work)).args(["status", "--porcelain", "-z"]).output()
         .map_err(|e| format!("cannot run git status: {e}"))?;
     if !out.status.success() { return Err("git status failed; the changed paths are unknown".into()); }
     let text = String::from_utf8_lossy(&out.stdout);
@@ -725,5 +752,24 @@ mod tests {
         let out = clipped("あ".repeat(170_000));
         assert!(out.ends_with("\n… output truncated by the desktop host"));
         assert!(out.len() <= MAX_CAPTURE + 64);
+    }
+
+    #[test]
+    fn git_commands_drop_inherited_repo_overrides() {
+        let c = git_command();
+        let removed: Vec<String> = c.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+        for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_LITERAL_PATHSPECS"] {
+            assert!(removed.iter().any(|r| r == k), "{k} is not stripped");
+        }
+    }
+
+    #[test]
+    fn a_caller_flag_cancels_and_the_loop_flag_is_not_read() {
+        let stop = AtomicBool::new(true);
+        let r = run_command_cancellable(&std::env::temp_dir(), &cmd("printf x"), Some(5), None, &stop).unwrap();
+        assert!(r.cancelled && r.exit_code.is_none());
+        let go = AtomicBool::new(false);
+        let r = run_command_cancellable(&std::env::temp_dir(), &cmd("printf ran"), Some(5), None, &go).unwrap();
+        assert_eq!(r.stdout.trim_end(), "ran");
     }
 }
