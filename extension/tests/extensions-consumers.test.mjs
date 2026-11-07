@@ -29,7 +29,7 @@ const GOLDEN = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(i
   'fixtures', 'extensions-baseline', 'baseline.json'), 'utf8'));
 const noRestrict = () => false;
 const flagOn = () => { process.env.LLMIDE_EXT_ACTIVE_SET = '1'; };
-const flagOff = () => { delete process.env.LLMIDE_EXT_ACTIVE_SET; };
+const flagOff = () => { process.env.LLMIDE_EXT_ACTIVE_SET = '0'; };
 const mcpNow = (u) => Object.keys(engine.buildUserMcpServers(u, 'execute', { restrictsToolsFn: noRestrict, readSecret: () => '' }).servers).sort();
 const delivery = (u) => registry.buildUserPluginDelivery(u, { nativeEnabled: true, cwd: world.root });
 const libraryIds = (u) => { skills._resetSkillLibraryCache(); return skills.listSkillLibrary(u).skills.map((s) => s.id).sort(); };

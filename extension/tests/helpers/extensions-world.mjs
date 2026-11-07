@@ -37,7 +37,7 @@ export function createWorld({ tag = 'ext-world' } = {}) {
   process.env.LLMIDE_PLUGIN_DIR = pluginDir;
   process.env.SKILLS_REPO = kit;
   process.env.LLMIDE_DB_PATH = path.join(root, 'data.db');
-  delete process.env.LLMIDE_EXT_ACTIVE_SET;
+  process.env.LLMIDE_EXT_ACTIVE_SET = '0';
   delete process.env.LLMIDE_EXT_ADAPTER;
   fs.mkdirSync(pluginDir, { recursive: true });
 

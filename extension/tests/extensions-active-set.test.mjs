@@ -135,15 +135,13 @@ test('shadow never throws and is off under test unless asked for', () => {
   } finally { delete process.env.LLMIDE_EXT_SHADOW; }
 });
 
-test('flags: active set default off; adapter default on with =off as the kill switch', () => {
-  assert.equal(flags.activeSetEnabled(), false);
+test('flags: active set and adapter default on, each with =off as the kill switch', () => {
+  delete process.env.LLMIDE_EXT_ACTIVE_SET; delete process.env.LLMIDE_EXT_ADAPTER;
+  assert.equal(flags.activeSetEnabled(), true);
   assert.equal(flags.adapterEnabled(), true);
-  for (const [name, fn, onVals, offVals] of [
-    ['LLMIDE_EXT_ACTIVE_SET', flags.activeSetEnabled, ['1', 'on', 'true', 'ON'], ['', '0', 'off', 'garbage']],
-    ['LLMIDE_EXT_ADAPTER', flags.adapterEnabled, ['', '1', 'on', 'garbage'], ['off', 'OFF', '0', 'false']],
-  ]) {
-    for (const v of onVals) { process.env[name] = v; assert.equal(fn(), true, `${name}=${v}`); }
-    for (const v of offVals) { process.env[name] = v; assert.equal(fn(), false, `${name}=${v}`); }
+  for (const [name, fn] of [['LLMIDE_EXT_ACTIVE_SET', flags.activeSetEnabled], ['LLMIDE_EXT_ADAPTER', flags.adapterEnabled]]) {
+    for (const v of ['', '1', 'on', 'garbage']) { process.env[name] = v; assert.equal(fn(), true, `${name}=${v}`); }
+    for (const v of ['off', 'OFF', '0', 'false', 'no']) { process.env[name] = v; assert.equal(fn(), false, `${name}=${v}`); }
     delete process.env[name];
   }
 });

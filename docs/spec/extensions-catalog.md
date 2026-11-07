@@ -56,7 +56,7 @@ A gate only restricts what the legacy builders already allow. Items match by kin
 
 `gateFor(userId)` returns `null` unless `LLMIDE_EXT_ACTIVE_SET` is on. Every legacy builder takes an optional `gate`: `undefined` resolves `gateFor`, `null` forces the legacy behaviour, an object forces that gate.
 
-## §5 Consumers behind `LLMIDE_EXT_ACTIVE_SET` (default off)
+## §5 Consumers behind `LLMIDE_EXT_ACTIVE_SET` (default on since API 118; off = legacy)
 
 | Consumer | With the flag on |
 |---|---|
@@ -65,7 +65,7 @@ A gate only restricts what the legacy builders already allow. Items match by kin
 | `listSkillLibrary`, `readSkillInstructions`, `load-skill`, the `/` menu | the source switch and `skill:<name>` members apply inside the build, before the first-wins dedupe, so a same-id skill from a later source can stand in; the gated result is cached under the gate `signature`, never in the legacy slot |
 | `buildUserMcpServers` | a server switched off is not mounted or pre-approved; a plugin-declared server also follows its plugin and its `mcp:<server>` member |
 
-With the flag off nothing reads the overlay. `extension/tests/extensions-baseline.test.mjs` pins today's output (golden `extension/tests/fixtures/extensions-baseline/baseline.json`); `extension/tests/extensions-consumers.test.mjs` proves flag off and flag on with nothing switched off are byte-identical to it, and that switched-off items never load.
+With `LLMIDE_EXT_ACTIVE_SET=off` nothing reads the overlay. `extension/tests/extensions-baseline.test.mjs` pins today's output (golden `extension/tests/fixtures/extensions-baseline/baseline.json`); `extension/tests/extensions-consumers.test.mjs` proves flag off and flag on with nothing switched off are byte-identical to it, and that switched-off items never load.
 
 ## §6 The generated plugin view
 
