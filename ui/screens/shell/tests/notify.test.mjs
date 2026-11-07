@@ -133,3 +133,21 @@ test("the Notifications card lists the five switches, the privacy line and the t
   assert.match(html, /never chat text, file names, meeting captions or device names/);
   assert.match(html, /libayatana-appindicator3-1/);
 });
+
+test("an admitted kind the user is away for is pushed with its count and key; nothing else is", async () => {
+  const pushed = [];
+  n.setPushSender(async (kind, count, key) => { pushed.push([kind, count, key ?? null]); });
+  const invoke = (out) => async () => out;
+  await n.notifyUser("approval_chat", { count: 3, key: "a1" }, invoke({ shown: true, push: true }));
+  await n.notifyUser("loop_done", {}, invoke({ shown: false, push: true }));
+  await n.notifyUser("loop_failed", {}, invoke({ shown: true, push: false }));
+  await n.notifyUser("graph_done", {}, invoke(true));
+  await n.notifyUser("docgen_done", {}, async () => { throw new Error("no host"); });
+  assert.deepEqual(pushed, [["approval_chat", 3, "a1"], ["loop_done", 1, null]]);
+  n.setPushSender(async () => { throw new Error("core down"); });
+  await n.notifyUser("loop_done", {}, invoke({ shown: true, push: true })); // never throws
+  n.setPushSender(null);
+  await n.notifyUser("loop_done", {}, invoke({ shown: true, push: true }));
+  assert.equal(n.wantsPush({ push: true }), true);
+  for (const v of [null, true, { push: "true" }, { shown: true }]) assert.equal(n.wantsPush(v), false);
+});

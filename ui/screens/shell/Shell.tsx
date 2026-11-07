@@ -29,7 +29,7 @@ import { shellBus } from "./bus";
 import { inboxStore } from "./approvals/inbox-store";
 import { decodeSyncStatus } from "../settings/sync-model.ts";
 import { installNotifyBridge } from "./notify/bridge";
-import { reportSection } from "./notify/notify";
+import { reportSection, setPushSender } from "./notify/notify";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
@@ -99,7 +99,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // Notifications and the tray (desktop only): counts and sync state to the host, tray actions back to the shell.
   useEffect(() => {
     if (!shellHost.isAvailable()) return undefined;
-    return installNotifyBridge({
+    // Admitted kinds also go to the paired phone / web app (the core pushes the kind and count, never text).
+    setPushSender((kind, count, key) => core.request("/host-api/push/send", { method: "POST", body: { kind, count, ...(key ? { key } : {}) } }));
+    const off = installNotifyBridge({
       invoke: (cmd, args) => invokeHost<unknown>(cmd, args),
       listen: (event, cb) => import("@tauri-apps/api/event").then(({ listen }) => listen<unknown>(event, (ev) => cb(ev.payload))),
       chatApprovals: { getSnapshot: chatApprovalStore.get, subscribe: chatApprovalStore.subscribe },
@@ -109,6 +111,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       publish: (ev) => shellBus.publish(ev),
       openInbox: () => globalThis.dispatchEvent?.(new Event("llmide:open-inbox")),
     });
+    return () => { setPushSender(null); off(); };
   }, []);
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
 

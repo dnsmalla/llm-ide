@@ -8,3 +8,10 @@ settingsRegistry.registerCard("general", {
   order: 10,
   load: () => import("./NotificationsCard.tsx") as unknown as Promise<{ default: SectionComponent }>,
 });
+
+settingsRegistry.registerCard("general", {
+  id: "push",
+  title: "Phone and web push",
+  order: 11,
+  load: () => import("./PushCard.tsx") as unknown as Promise<{ default: SectionComponent }>,
+});

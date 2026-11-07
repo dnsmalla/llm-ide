@@ -1,6 +1,8 @@
 // Native notifications and the tray, webview side. The HOST builds every word a notification shows from a fixed
 // table (desktop/src-tauri/src/notify.rs). This side names only a kind, an opaque de-dup key and a count, so chat
 // text, paths, captions, tokens and device names cannot reach a notification. Pure helpers; wiring is in bridge.ts.
+// When the host answers `push: true` (admitted while the window is not focused), the same kind, count and key go to
+// the core, which pushes them to the paired devices (routes/host-api/push.mjs).
 import { invokeHost, isHostAvailable } from "../host";
 import type { NotifyPrefs } from "../host-prefs";
 import { SECTIONS, type SectionId } from "../sections";
@@ -20,12 +22,27 @@ export type TaskSource = "loop" | "autotask" | "graph" | "docgen";
 
 export const taskKind = (source: TaskSource, ok: boolean): NotifyKind => `${source}_${ok ? "done" : "failed"}` as NotifyKind;
 
-/** Best effort: no host, a switched-off category, a refused permission or a missing notification daemon is silent. */
+/** Asks the core to push a kind to the paired devices; installed by the shell (Shell.tsx), null elsewhere. */
+export type PushSender = (kind: NotifyKind, count: number, key?: string) => Promise<unknown>;
+let pushSender: PushSender | null = null;
+export function setPushSender(fn: PushSender | null): void { pushSender = fn; }
+
+/** The host's `notify_user` answer says the paired devices should hear about it. */
+export const wantsPush = (out: unknown): boolean => !!out && typeof out === "object" && (out as { push?: unknown }).push === true;
+
+/** Best effort: no host, a switched-off category, a refused permission, a missing daemon or a core without push is silent. */
 export async function notifyUser(kind: NotifyKind, opts: { key?: string; count?: number } = {}, invoke: Invoke = defaultInvoke): Promise<void> {
+  let out: unknown;
   try {
-    await invoke("notify_user", { kind, key: opts.key ?? null, count: opts.count ?? null });
+    out = await invoke("notify_user", { kind, key: opts.key ?? null, count: opts.count ?? null });
   } catch {
-    // best effort
+    return; // best effort
+  }
+  if (!wantsPush(out) || !pushSender) return;
+  try {
+    await pushSender(kind, Math.min(Math.max(opts.count ?? 1, 1), 999), opts.key);
+  } catch {
+    // best effort: the core may not serve push, or may be restarting
   }
 }
 

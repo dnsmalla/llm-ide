@@ -8,6 +8,10 @@
 //! Clicks: tauri-plugin-notification 2.4 reports no click on desktop. The host keeps the last notification's route
 //! for `ROUTE_TTL_MS` and hands it to the webview once, when the main window next gains focus (a click on the
 //! notification activates the app) or when the tray opens the window.
+//!
+//! Push: `notify_user` also answers whether the paired phone / web app should get this kind (admitted by the switch,
+//! focus and gate rules, and the main window is not focused: the user is away). The webview then asks the core to push
+//! the same kind and count (ui/screens/shell/notify/notify.ts); the core never sees text either.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -195,6 +199,13 @@ pub fn section_id(s: &str) -> Option<&'static str> {
     SECTIONS.iter().copied().find(|x| *x == s)
 }
 
+/// What `fire` did: shown on this desktop, and whether the paired devices should get a push.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Outcome {
+    pub shown: bool,
+    pub push: bool,
+}
+
 // ---- process state and commands --------------------------------------------------------------------------------
 
 use std::sync::{Mutex, MutexGuard};
@@ -213,21 +224,36 @@ fn main_focused(app: &AppHandle) -> bool {
     app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
 }
 
-/// Shows `kind` unless its switch is off, the user is already looking, or the gate drops it. Ok(true) = shown.
-/// No lock is held across a window or notification call.
-fn fire(app: &AppHandle, kind: Kind, key: Option<&str>, count: u32) -> Result<bool, String> {
+/// Shows `kind` unless its switch is off, the user is already looking, or the gate drops it. A notification refused
+/// by the OS (no permission, no daemon) is logged and still counts as admitted for the push. No lock is held across a
+/// window or notification call.
+fn fire(app: &AppHandle, kind: Kind, key: Option<&str>, count: u32) -> Outcome {
     if !enabled(kind, &crate::prefs::stored().notifications) {
-        return Ok(false);
+        return Outcome::default();
     }
     let focused = main_focused(app);
     let active = *lock(&ACTIVE_SECTION);
     if suppressed(kind, focused, active) {
-        return Ok(false);
+        return Outcome::default();
     }
     let now = crate::confirm::now_ms();
     if !lock(&GATE).get_or_insert_with(Gate::default).admit(kind, key, now) {
-        return Ok(false);
+        return Outcome::default();
     }
+    let shown = match show(app, kind, count) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("notify: {}: {e}", kind.wire());
+            false
+        }
+    };
+    if shown && !focused {
+        *lock(&PENDING_ROUTE) = Some((kind.route(), now));
+    }
+    Outcome { shown, push: !focused }
+}
+
+fn show(app: &AppHandle, kind: Kind, count: u32) -> Result<(), String> {
     let n = app.notification();
     let mut state = n.permission_state().map_err(|e| e.to_string())?;
     if state == PermissionState::Prompt || state == PermissionState::PromptWithRationale {
@@ -236,28 +262,22 @@ fn fire(app: &AppHandle, kind: Kind, key: Option<&str>, count: u32) -> Result<bo
     if state != PermissionState::Granted {
         return Err("notification permission not granted".into());
     }
-    n.builder().title(TITLE).body(kind.body(count)).show().map_err(|e| e.to_string())?;
-    if !focused {
-        *lock(&PENDING_ROUTE) = Some((kind.route(), now));
-    }
-    Ok(true)
+    n.builder().title(TITLE).body(kind.body(count)).show().map_err(|e| e.to_string())
 }
 
-/// A host-side fact (update found, backend down). Failures are logged, never raised.
+/// A host-side fact (update found, backend down). Never pushed: the core has no such kind.
 pub fn fire_host(app: &AppHandle, kind: Kind, key: Option<&str>) {
-    if let Err(e) = fire(app, kind, key, 1) {
-        eprintln!("notify: {}: {e}", kind.wire());
-    }
+    let _ = fire(app, kind, key, 1);
 }
 
 /// The webview names a kind (never text), an optional opaque de-dup key and a count.
 #[tauri::command]
-pub fn notify_user(app: AppHandle, kind: String, key: Option<String>, count: Option<u32>) -> Result<bool, String> {
+pub fn notify_user(app: AppHandle, kind: String, key: Option<String>, count: Option<u32>) -> Result<Outcome, String> {
     let k = Kind::from_webview(&kind).ok_or("unknown notification kind")?;
     if key.as_deref().is_some_and(|x| !valid_key(x)) {
         return Err("invalid notification key".into());
     }
-    fire(&app, k, key.as_deref(), count.unwrap_or(1).min(999))
+    Ok(fire(&app, k, key.as_deref(), count.unwrap_or(1).min(999)))
 }
 
 /// The section the main window shows (for "already looking" suppression).
@@ -391,5 +411,12 @@ mod tests {
         assert_eq!(section_id("loop"), Some("loop"));
         assert_eq!(section_id("Loop"), None);
         assert_eq!(section_id("inbox"), None, "the inbox is a route, not a section");
+    }
+
+    #[test]
+    fn the_outcome_reaches_the_webview_as_two_flags() {
+        let v = serde_json::to_value(Outcome { shown: false, push: true }).unwrap();
+        assert_eq!(v, serde_json::json!({ "shown": false, "push": true }));
+        assert_eq!(Outcome::default(), Outcome { shown: false, push: false });
     }
 }
