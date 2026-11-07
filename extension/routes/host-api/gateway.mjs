@@ -19,11 +19,11 @@ export const MAX_SESSIONS = 4;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
 const TOP_LEVEL_ID = /^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})"/;
 export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every MAX_SESSIONS slot before auth
-// Refusals that clear by themselves; SESSION_TOKEN_LIMIT, SLASH_COMMAND_FAILED and ROLE_DENIED do not.
+// Refusals that clear by themselves; SESSION_TOKEN_LIMIT, SLASH_COMMAND_FAILED, ROLE_DENIED and USD_CAP do not.
 // ROLE_DENIED is the team clamp's refusal (ADR 0021): its message is the gateway's own text, so it is
 // relayed like the other known codes instead of the generic "turn failed" line.
 const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
-const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED', 'ROLE_DENIED']);
+const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED', 'ROLE_DENIED', 'USD_CAP']);
 // A viewer / max_mode none member is served the minimum: host + read + push only (ADR 0021). Chat,
 // approvals, tool_approvals and compose are all refused, and the pairing token never carries them.
 const MINIMAL_SCOPES = ['host', 'read', 'push'];

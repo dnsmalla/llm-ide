@@ -92,8 +92,14 @@ function makeRes() {
   };
 }
 
-const newUser = (email) =>
-  registerUser(getDb(), { email, password: 'CorrectHorseBattery', displayName: 't' });
+// ADR 0021: the turn clamp fails closed without a members row, and the register ROUTE writes one for every
+// account it creates. These tests create users directly, so they grant the same row here (owner, execute).
+const { ensureMember } = await import('../kb/members.mjs');
+const newUser = (email) => {
+  const u = registerUser(getDb(), { email, password: 'CorrectHorseBattery', displayName: 't' });
+  ensureMember(getDb(), u.id, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  return u;
+};
 
 // --- POST /agent/v2/stream ---------------------------------------------------
 

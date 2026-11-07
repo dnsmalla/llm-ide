@@ -133,7 +133,11 @@ function makeRes() {
   };
 }
 let n = 0;
+// ADR 0021: every account has a members row (the register route writes one); these tests create users
+// directly, so the turn clamp's authority row is granted here (owner, execute).
+const { ensureMember } = await import('../kb/members.mjs');
 const user = registerUser(getDb(), { email: 'host-approval@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+ensureMember(getDb(), user.id, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
 async function stream({ chat: chatIn, who = user, permissionMode, headers: headersIn, token, desktop = true, surface, remoteAddress, env = { LLMIDE_HOST_APPROVAL_KEY: KEY_HEX }, extra = {} }) {
   const chat = chatIn || `chat-ha-${++n}`;
   // token: a mint function of the chat id, a string, or undefined; desktop adds the desktop-ui class + bus host proof
@@ -321,6 +325,7 @@ test('redaction: the header, the key and a token in free text never survive reda
 // ---- per-chat grant (a token per Bypass enable, not per message) ---------------------------------------------------
 test('grant: a valid token enables Bypass for that chat only; other chats, other users, a mode switch and expiry end it', async () => {
   const other = registerUser(getDb(), { email: 'host-approval-2@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  ensureMember(getDb(), other.id, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
   const first = await stream({ chat: 'chat-grant-1', permissionMode: 'bypass', token: (c) => mint({ chat: c }) });
   assert.equal(first.permissionMode, 'bypass');
   const second = await stream({ chat: 'chat-grant-1', permissionMode: 'bypass' });

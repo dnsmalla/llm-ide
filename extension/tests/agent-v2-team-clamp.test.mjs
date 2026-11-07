@@ -95,6 +95,10 @@ function stream(user, body, deps) {
   }), res, deps).then((handled) => ({ handled, res }));
 }
 
+const spend = (userId, usd) => getDb().prepare(
+  "INSERT INTO usage_ledger (user_id, provider, model, source, runs, cost_usd) VALUES (?, 'anthropic', 'claude-sonnet-5', 'api', 1, ?)",
+).run(userId, usd);
+
 const auditRows = (userId) => getDb().prepare(
   "SELECT action, outcome, detail FROM audit_log WHERE user_id = ? AND action = 'team.deny' ORDER BY id DESC",
 ).all(userId);
@@ -189,16 +193,53 @@ test('an admin and an owner run execute turns like anyone else', async () => {
   }
 });
 
-// --- no members row = today's behaviour -----------------------------------
+// --- no members row fails closed (R-007#3) --------------------------------
 
-test('a user with no members row runs execute (solo install unchanged)', async () => {
+test('a user with no members row is treated as read-only, like the Host API gateway', async () => {
   const user = registerUser(getDb(), {
     email: `clamp-norow-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
   });
   const turn = fakeTurn();
   const { res } = await stream(user, { message: 'go', mode: 'execute' }, { runTurn: turn.runTurn });
   assert.equal(res.statusCode, 200);
-  assert.equal(turn.calls[0].mode, 'execute');
+  assert.equal(turn.calls[0].mode, 'ask', 'no authority row = the least privilege');
+});
+
+// --- the monthly USD cap (R-007#1) ----------------------------------------
+
+test('a member at the monthly USD cap is refused 429 USD_CAP, audited with the reason only', async () => {
+  const doer = member('member', 'execute');
+  getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
+  spend(doer.id, 20);
+  const turn = fakeTurn();
+  const { handled, res } = await stream(doer, { message: 'secret cost turn', mode: 'execute' }, { runTurn: turn.runTurn });
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 429);
+  assert.deepEqual(res.json(), { error: { code: 'USD_CAP', message: 'Monthly USD cap reached' } });
+  assert.equal(turn.calls.length, 0, 'the engine must not start');
+  const rows = auditRows(doer.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].outcome, 'denied');
+  assert.deepEqual(JSON.parse(rows[0].detail), { reason: 'usd_cap' });
+  assert.ok(!String(rows[0].detail).includes('secret cost turn'));
+});
+
+test('a member under the cap runs, and a cap of 0 never refuses', async () => {
+  const under = member('member', 'execute');
+  getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(under.id);
+  spend(under.id, 10);
+  const turn = fakeTurn();
+  const { res } = await stream(under, { message: 'go', mode: 'execute' }, { runTurn: turn.runTurn });
+  assert.equal(res.statusCode, 200);
+  assert.equal(turn.calls.length, 1);
+
+  const uncapped = member('member', 'execute'); // usd_cap_month 0 = no cap
+  spend(uncapped.id, 10_000);
+  const turn2 = fakeTurn();
+  const { res: res2 } = await stream(uncapped, { message: 'go', mode: 'execute' }, { runTurn: turn2.runTurn });
+  assert.equal(res2.statusCode, 200);
+  assert.equal(turn2.calls.length, 1);
+  assert.equal(auditRows(uncapped.id).length, 0);
 });
 
 // --- the same clamp on the in-process Host API turn -----------------------

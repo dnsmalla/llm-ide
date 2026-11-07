@@ -34,7 +34,7 @@ import {
   markAgentSessionUsed,
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
-import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
+import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -250,12 +250,15 @@ export function ledgerRowsForTurn(meteredModel, usageTotals) {
   // Round trips and the stop reason describe the WHOLE turn, so they ride the
   // main row only — never the :internal rows, or they would be counted twice.
   const turnInfo = { turns: usageTotals?.turns ?? null, stopReason: usageTotals?.stopReason ?? null };
-  if (!byModel.length) return [{ ...row(usageTotals, meteredModel, '/agent/v2/stream'), ...turnInfo }];
+  if (!byModel.length) {
+    return [{ ...row(usageTotals, meteredModel, '/agent/v2/stream'), ...turnInfo, costUsd: usageTotals?.costUsd ?? null }];
+  }
   // The main entry: the metered model by name (the SDK may add a suffix such
   // as "[1m]"), else the entry that produced the most output.
   const main = pickMainModelRow(byModel, meteredModel);
   return [
-    { ...row(main, meteredModel ?? main.model, '/agent/v2/stream'), ...turnInfo },
+    // The turn's USD cost rides the main row only: the SDK total already includes the internal rows.
+    { ...row(main, meteredModel ?? main.model, '/agent/v2/stream'), ...turnInfo, costUsd: usageTotals?.costUsd ?? null },
     ...byModel.filter((m) => m !== main).map((m) => row(m, m.model, '/agent/v2/stream:internal')),
   ];
 }
@@ -568,11 +571,19 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // after `mode` is final and before the lock, for the HTTP stream and startHostTurn alike (a phone
   // turn runs through this same function). No members row = an unregistered caller: execute, as today.
   const member = getMember(getDb(), userId);
-  const maxMode = member?.maxMode ?? 'execute';
+  // No members row fails closed: read-only, like the Host API gateway (a registration always writes one).
+  const maxMode = member?.maxMode ?? 'read_only';
   if (maxMode === 'none') {
     // The reason only — never the message, the chat id or any prompt text.
     recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'max_mode_none' } });
     return io.refuse({ code: 'ROLE_DENIED', status: 403, message: 'Your team role cannot run turns' });
+  }
+  // The member's USD cap is MONTHLY: refuse once the month's ledger sum reaches it (never a per-turn
+  // budget). 0 = no cap. Audited with the reason only, like the max_mode refusal.
+  const usdCap = Number(member?.usdCapMonth ?? 0);
+  if (usdCap > 0 && usedUsdMonth(getDb(), userId) >= usdCap) {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
+    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
   }
   if (maxMode === 'read_only' && !restrictsTools(mode)) {
     mode = clampToReadOnly(mode);

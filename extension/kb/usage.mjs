@@ -390,6 +390,9 @@ export function recordUsage(db, {
   // Model round trips for the whole run and why it stopped (migration 0039).
   // Null = not reported; a caller that does not know leaves both out.
   turns = null, stopReason = null,
+  // The turn's USD cost when the engine reports it (migration 0069). Null = unknown; the monthly
+  // member cap sums this column, so an unknown cost under-counts rather than guessing.
+  costUsd = null,
 } = {}) {
   addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens });
   if (!userId || !provider || !model) return null;
@@ -410,19 +413,20 @@ export function recordUsage(db, {
       request_id: clampStr(requestId, 128),
       turns: turns == null ? null : tokenCountOrNull(turns),
       stop_reason: clampStr(stopReason, 40),
+      cost_usd: costOrNull(costUsd),
     };
     // `ts` comes back from the insert itself, so the mirror carries the exact
     // timestamp the ledger stored.
     const info = db.prepare(
       `INSERT INTO usage_ledger
          (user_id, provider, model, source, endpoint, input_tokens, output_tokens,
-          cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason, cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id, ts`
     ).get(
       v.user_id, v.provider, v.model, v.source, v.endpoint,
       v.input_tokens, v.output_tokens, v.cache_read_tokens, v.cache_creation_tokens,
-      v.runs, v.request_id, v.turns, v.stop_reason,
+      v.runs, v.request_id, v.turns, v.stop_reason, v.cost_usd,
     );
     const ledgerId = Number(info.id);
     // Shadow (Stage 2a): best-effort, synchronous, and isolated. The mirror
@@ -521,6 +525,32 @@ export function flagQuota(db, userId, provider, model, now = new Date()) {
   } catch { /* best effort */ }
 }
 
+/** A non-negative finite USD amount, or null ("unknown" — never guessed). */
+function costOrNull(v) {
+  if (v === null || v === undefined || v === '') return null; // unknown, never zero
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6) / 1e6 : null;
+}
+
+/**
+ * The user's USD spend this month (all providers and models), from `usage_ledger.cost_usd` (migration
+ * 0069). The member cap is monthly, so it is enforced against this sum, never against a per-turn budget.
+ * A CLI-dispatched turn stores no cost, so such turns are under-counted here.
+ */
+export function usedUsdMonth(db, userId, now = new Date()) {
+  if (!userId) return 0;
+  try {
+    const start = toSqliteLocal(windowStart('monthly', now));
+    const row = db.prepare(
+      'SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM usage_ledger WHERE user_id = ? AND ts >= ?',
+    ).get(String(userId), start);
+    const n = Number(row?.usd);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0; // a ledger read must never fail a turn
+  }
+}
+
 // Per-query USD budget for the agent v2 engine (spec 2026-08-18 §7:
 // "maxBudgetUsd from the user's model-limits config when set"). The limits
 // UI writes runs/tokens caps only (VALID_UNITS), so today this returns null
@@ -542,12 +572,15 @@ export function usdCapForModel(db, userId, provider, model) {
     ).get(userId, provider, ...ids, live);
     const cap = Number(row?.limit_value);
     const modelCap = Number.isFinite(cap) && cap > 0 ? cap : null;
-    // ADR 0021: the member's monthly USD cap also bounds the turn. Both non-zero → the smaller; one
-    // non-zero → that one; 0 (or no members row) means "no cap", exactly as before.
+    // ADR 0021: the member's monthly USD cap bounds the turn by what is LEFT of the month, so one turn
+    // can never cross the month line (the clamp refuses a turn once the sum reaches the cap). Both
+    // non-zero → the smaller; one non-zero → that one; 0 (or no members row) means "no cap".
     const memberCap = Number(getMember(db, userId)?.usdCapMonth);
-    const memberUsd = Number.isFinite(memberCap) && memberCap > 0 ? memberCap : null;
-    if (modelCap != null && memberUsd != null) return Math.min(modelCap, memberUsd);
-    return modelCap ?? memberUsd;
+    const remaining = Number.isFinite(memberCap) && memberCap > 0
+      ? Math.max(0, memberCap - usedUsdMonth(db, userId))
+      : null;
+    if (modelCap != null && remaining != null) return Math.min(modelCap, remaining);
+    return modelCap ?? remaining;
   } catch {
     return null; // best-effort — a limits read must never fail the turn
   }

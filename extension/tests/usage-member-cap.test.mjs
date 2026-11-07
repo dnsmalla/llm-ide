@@ -18,7 +18,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { getDb } = await import('../kb/db.mjs');
 const { registerUser } = await import('../server/users.mjs');
-const { usdCapForModel, setLimits } = await import('../kb/usage.mjs');
+const { usdCapForModel, setLimits, recordUsage, usedUsdMonth } = await import('../kb/usage.mjs');
 
 const MODEL = 'claude-sonnet-5';
 
@@ -73,6 +73,44 @@ test('no members row behaves exactly like before', () => {
   assert.equal(usdCapForModel(getDb(), user.id, 'anthropic', MODEL), null);
   modelUsd(user.id, 7);
   assert.equal(usdCapForModel(getDb(), user.id, 'anthropic', MODEL), 7);
+});
+
+test('the member cap is MONTHLY: usdCapForModel answers what is LEFT of it (R-007#1)', () => {
+  const u = member(20);
+  // No spend yet → the whole cap.
+  assert.equal(usdCapForModel(getDb(), u, 'anthropic', MODEL), 20);
+  // 19.5 of 20 spent this month → one more turn may use at most 0.5.
+  recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, costUsd: 19.5 });
+  assert.equal(usedUsdMonth(getDb(), u), 19.5);
+  assert.equal(usdCapForModel(getDb(), u, 'anthropic', MODEL), 0.5);
+  // A model cap below the remaining budget still wins.
+  modelUsd(u, 0.25);
+  assert.equal(usdCapForModel(getDb(), u, 'anthropic', MODEL), 0.25);
+});
+
+test('usedUsdMonth sums only this month and only this user', () => {
+  const a = member(50);
+  const b = member(50);
+  recordUsage(getDb(), { userId: a, provider: 'anthropic', model: MODEL, costUsd: 2.5 });
+  recordUsage(getDb(), { userId: b, provider: 'anthropic', model: MODEL, costUsd: 7 });
+  // Backdated last month: excluded.
+  getDb().prepare(
+    "INSERT INTO usage_ledger (user_id, provider, model, source, runs, cost_usd, ts) VALUES (?, 'anthropic', ?, 'api', 1, 3.25, datetime('now', '-2 months', 'localtime'))",
+  ).run(a, MODEL);
+  assert.equal(usedUsdMonth(getDb(), a), 2.5);
+  assert.equal(usedUsdMonth(getDb(), b), 7);
+  assert.equal(usedUsdMonth(getDb(), null), 0);
+  // The spend lands on the ledger row itself (migration 0069).
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE user_id = ?').get(b).cost_usd, 7);
+});
+
+test('recordUsage stores an unknown cost as NULL, never zero or a guess', () => {
+  const u = member(0);
+  const id = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL });
+  assert.ok(id);
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(id).cost_usd, null);
+  const bad = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, costUsd: -1 });
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(bad).cost_usd, null);
 });
 
 test('a missing user/provider/model still answers null', () => {
