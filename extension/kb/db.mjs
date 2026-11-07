@@ -1057,6 +1057,8 @@ export function deleteUserCascade(userId) {
       // migration 0062 — host_api_identity is install-level (one row, no user_id), so it is NOT in this per-user list
       // migration 0063 — desktop schedules for bus kinds (standing approvals)
       'bus_schedules',
+      // migration 0067 — Self-Heal incidents (debug desktop builds)
+      'self_heal_incidents',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
