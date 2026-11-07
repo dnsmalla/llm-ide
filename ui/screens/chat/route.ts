@@ -239,38 +239,56 @@ export async function cancelTurn(core: CoreTransport, chatSessionId: string): Pr
 }
 
 interface SdkModelEntry { id: string; displayName?: string; name?: string; effortLevels?: string[] }
-interface CatalogProvider { id: string; name: string; connections: Array<{ id: string; provider: string; name: string; enabled: boolean; hasKey: boolean }> }
+interface CatalogProvider { id: string; name: string; keyRequired?: boolean; connections: Array<{ id: string; provider: string; name: string; enabled: boolean; hasKey: boolean }> }
+/** GET /kb/providers/custom rows: Claude-compatible endpoints (`connection` = connected in Settings, `synced` = the retired Mac's list). */
+interface ClaudeCompatible { id: string; provider: string; name: string; enabled: boolean; hasKey: boolean; source: "connection" | "synced" }
 
-/** Claude models (the SDK's live list) plus one group per enabled, keyed catalog connection. */
+/** One connection's models as a group (POST /kb/providers/catalog/models); a failed listing is a note, an abort rethrows. */
+async function connectionGroup(core: CoreTransport, c: { id: string; provider: string; name: string }, catalog: boolean, signal?: AbortSignal): Promise<ModelGroup> {
+  const base = { id: c.id, label: c.name, catalog, provider: c.provider };
+  try {
+    const m = await core.json<{ models?: Array<{ id: string; toolsSupported?: boolean }> }>("POST", "/kb/providers/catalog/models", { id: c.id }, signal);
+    return { ...base, models: (m.models ?? []).map((x) => ({ provider: c.provider, model: x.id, label: x.id, ...(catalog ? { toolsSupported: x.toolsSupported === true } : {}) })) };
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return { ...base, models: [], note: "Could not list models." };
+  }
+}
+
+/**
+ * Every provider the chat can run, in the Mac's menu order (CodeAssistantModelState.composerProviderSections): Claude (the
+ * SDK's live list, always first), the Claude-compatible endpoints connected in Settings, then one group per enabled
+ * catalog connection that has a key or needs none (a local server).
+ */
 export async function loadModelGroups(core: CoreTransport, signal?: AbortSignal): Promise<{ groups: ModelGroup[]; toolsEnabled: boolean }> {
   const groups: ModelGroup[] = [];
   try {
-    const r = await core.json<{ models?: string[]; entries?: SdkModelEntry[] }>("POST", "/kb/providers/models", { provider: "anthropic" }, signal);
+    const r = await core.json<{ models?: string[]; entries?: SdkModelEntry[]; detail?: string }>("POST", "/kb/providers/models", { provider: "anthropic" }, signal);
     const entries: SdkModelEntry[] = r.entries ?? (r.models ?? []).map((id) => ({ id }));
     groups.push({
       id: "anthropic", label: "Claude", catalog: false, provider: "anthropic",
       models: entries.map((e) => ({ provider: "anthropic", model: e.id, label: e.displayName ?? e.name ?? e.id, effortLevels: Array.isArray(e.effortLevels) ? e.effortLevels.filter((l): l is string => typeof l === "string" && l.length > 0) : [] })),
+      // The core answers 200 with no models and a reason when the SDK and the key listing both fail: say why.
+      ...(entries.length === 0 ? { note: r.detail ? `The model list is unavailable: ${r.detail}` : "The model list is unavailable." } : {}),
     });
   } catch (e) {
     if (signal?.aborted) throw e;
     groups.push({ id: "anthropic", label: "Claude", catalog: false, provider: "anthropic", models: [], note: "The model list is unavailable." });
+  }
+  try {
+    const cc = await core.json<{ providers?: ClaudeCompatible[] }>("GET", "/kb/providers/custom", undefined, signal);
+    // shortcut: `synced` rows (the retired Mac's list) carry no model list on this route; listed once the core serves one.
+    for (const c of (cc.providers ?? []).filter((x) => x.source === "connection" && x.enabled && x.hasKey)) groups.push(await connectionGroup(core, c, false, signal));
+  } catch (e) {
+    if (signal?.aborted) throw e; // older core without the route: no Claude-compatible groups
   }
   let toolsEnabled = false;
   try {
     const cat = await core.json<{ providers?: CatalogProvider[]; settings?: { toolsEnabled?: boolean } }>("GET", "/kb/providers/catalog", undefined, signal);
     toolsEnabled = cat.settings?.toolsEnabled === true;
     for (const p of cat.providers ?? []) {
-      for (const c of p.connections.filter((x) => x.enabled && x.hasKey)) {
-        try {
-          const m = await core.json<{ models?: Array<{ id: string; toolsSupported?: boolean }> }>("POST", "/kb/providers/catalog/models", { id: c.id }, signal);
-          groups.push({
-            id: c.id, label: c.name || p.name, catalog: true, provider: c.provider,
-            models: (m.models ?? []).map((x) => ({ provider: c.provider, model: x.id, label: x.id, toolsSupported: x.toolsSupported === true })),
-          });
-        } catch (e) {
-          if (signal?.aborted) throw e;
-          groups.push({ id: c.id, label: c.name || p.name, catalog: true, provider: c.provider, models: [], note: "Could not list models." });
-        }
+      for (const c of p.connections.filter((x) => x.enabled && (x.hasKey || p.keyRequired === false))) {
+        groups.push(await connectionGroup(core, { ...c, name: c.name || p.name }, true, signal));
       }
     }
   } catch (e) {
