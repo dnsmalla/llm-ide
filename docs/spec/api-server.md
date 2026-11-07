@@ -360,6 +360,7 @@ Additive; no new route. Four changes, each with its contract in `schema/http`:
 `GET /kb/self-heal/incidents`, `POST /kb/self-heal/incidents { incidents: [{ source, category, message, stack? }] }` (1-50), `POST /kb/self-heal/incidents/:id/ignore` and `DELETE /kb/self-heal/incidents` (`extension/routes/self-heal.mjs`, contract `schema/http/self-heal.schema.json`) exist only while the core runs with `LLMIDE_SELF_HEAL=1`. The Tauri host passes it only in a debug build (`self_heal.rs`). Without it, every path answers `404 { error: 'feature_disabled', feature: 'self_heal' }`, the module is never imported and `/health` does not advertise the paths.
 
 With the switch on:
+
 - **Guard:** JWT + bus host proof (`403 HOST_PROOF_REQUIRED` first), `kbWrite` bucket.
 - **Redaction** (`extension/core/incident.mjs`): the shared secret patterns, JWTs, `name=value` secrets, emails and the home folder; message 2000, stack 8000 characters.
 - **Signature:** the first 16 hex of sha256 over the source, category, normalized message and top own stack frame.
