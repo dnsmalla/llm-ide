@@ -71,6 +71,7 @@ import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
+import { enforceRouteAuthority } from '../server/route-authority.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -491,7 +492,11 @@ export async function handleKB(req, res) {
     // Install central skills kit into a project folder (New Project / Rebuild).
     // Body: { path: absoluteDir, language?: string, stacks?: string }.
     // Requires system/project.json so arbitrary paths cannot be written.
+    // Admin + execute (R-014#1): the kit spawns bash and writes into the project,
+    // so it is not a member-level action. The server dispatcher applies the same
+    // table; the call here keeps a direct handleKB caller on the one gate.
     if (req.method === 'POST' && url === '/kb/project/install-skills') {
+      if (enforceRouteAuthority(kb.getDb(), req, res)) return true;
       const body = parseJSON(await readBody(req)) || {};
       try {
         // Items this user unchecked in Central Skills (Library → LLM Sources)

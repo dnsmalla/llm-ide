@@ -27,6 +27,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb, addUserRepo, writeCodeGraph } = await import('../kb/db.mjs');
+const { ensureMember } = await import('../kb/members.mjs');
 const agentStoreRead = await import('../kb/agent-db.mjs');
 // Tool events live in agent.db (Stage 1b): flush the queue, then read.
 const agentReadDb = () => { agentStoreRead.flushAgentQueue(); return agentStoreRead.getAgentDb(); };
@@ -64,9 +65,13 @@ fs.symlinkSync(OUTSIDE, path.join(REPO, 'escape'));
 let seq = 0;
 function newUser() {
   seq += 1;
-  return registerUser(getDb(), {
+  const u = registerUser(getDb(), {
     email: `loop-agent-${seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
   });
+  // R-014#1: the Loop route enforces the member authority on every run (owner +
+  // execute + no cap is the solo install default these fixtures exercise).
+  ensureMember(getDb(), u.id, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  return u;
 }
 
 const user = newUser();

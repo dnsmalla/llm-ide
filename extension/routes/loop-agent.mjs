@@ -33,6 +33,7 @@ import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils
 import { beginLoopRun } from '../core/agent-busy.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
+import { enforceRouteAuthority } from '../server/route-authority.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -132,6 +133,12 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   }
   const provider = body.provider ? body.provider.trim() || undefined : undefined;
   const meteredProvider = provider || AGENT_SDK_PROVIDER;
+
+  // ADR 0021 + R-014#1: a Loop run edits files on the operator's model login.
+  // The server dispatcher applies the same table; this call keeps the direct
+  // handler (and its tests) on the one gate, after body validation and before
+  // the engine import, the root allow-list or any model call.
+  if (enforceRouteAuthority(getDb(), req, res)) return true;
 
   // The engine is imported only now: everything above is pure validation, so
   // a malformed request is answered without pulling in the Agent SDK. The

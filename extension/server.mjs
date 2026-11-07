@@ -16,6 +16,7 @@ import { handleExportRoutes } from './server/export-routes.mjs';
 
 import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireRole } from './server/auth.mjs';
+import { enforceRouteAuthority } from './server/route-authority.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
@@ -824,6 +825,11 @@ const server = http.createServer(async (req, res) => {
   // Auth-route dispatcher — registration, login, refresh, /me/*.
   // Runs before rate limiting because the auth-routes module applies
   // its own per-IP profile to login/register.
+  //
+  // These two dispatchers run before the rate limiter, so the authority table
+  // is applied here for them; the general hook below covers every other route.
+  if ((isAuthRoute(req.url || '') || isExtensionRoute(req.url || ''))
+      && enforceRouteAuthority(getDb({ logger }), req, res)) return;
   if (isAuthRoute(req.url || '')) {
     try {
       await handleAuth(req, res, { db: getDb({ logger }), logger: reqLog, requestId });
@@ -866,7 +872,14 @@ const server = http.createServer(async (req, res) => {
     req.rateLimitRefund = r.refund;
   }
 
-
+  // Team authority for routes that can run an agent/Loop, edit files, install
+  // skills, add a repo or spend model money (R-014#1). One table + one check
+  // (server/route-authority.mjs): requireRole + max_mode + the monthly USD cap,
+  // with a `team.deny` row carrying the reason only. It runs AFTER the rate
+  // limiter so a refused caller still spends its token, and a disabled feature
+  // is left to its own dispatcher's 404 feature_disabled.
+  if (!featureDisabledFor(req.url || '', config.features)
+      && enforceRouteAuthority(getDb({ logger }), req, res)) return;
 
   // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
   if (isBusRoute(req.url || '')) {

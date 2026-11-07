@@ -30,6 +30,7 @@ import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { assertDeletable, consumeInvite, ensureMember, getMember, ownerCount, peekInvite } from '../kb/members.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
+import { enforceRouteAuthority } from './route-authority.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
 // RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
@@ -790,6 +791,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       return;
     }
     if (method === 'POST') {
+      // R-014#1: a repo allow-list entry is what a later agent run may edit.
+      // Member + execute; a read_only member may still read the list (GET above).
+      if (enforceRouteAuthority(db, req, res)) return;
       let body;
       try { body = await readJson(req, bodyLimit); }
       catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
@@ -809,6 +813,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       return;
     }
     if (method === 'DELETE') {
+      if (enforceRouteAuthority(db, req, res)) return;
       const u = new URL(req.url, 'http://127.0.0.1');
       const repoPath = u.searchParams.get('path');
       if (!repoPath) {
