@@ -633,13 +633,13 @@ const VIEWER = () => ({ userId: 'u1', teamRole: 'viewer', maxMode: 'execute', us
 const NO_TURNS = () => ({ userId: 'u1', teamRole: 'member', maxMode: 'none', usdCapMonth: 20 });
 const READER = () => ({ userId: 'u1', teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20 });
 
-test('pairing as a viewer grants host + read + push only', async () => {
+test('pairing as a viewer grants Ask: host, chat, approvals and read', async () => {
   const t = harness({ read: true, member: VIEWER });
   const s = {};
   await t.paired(s);
-  assert.deepEqual(t.last().result.capabilities, ['host', 'read']);
+  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'read']);
   const token = t.last().result.token;
-  assert.deepEqual(t.tokens.get(token).scopes, ['host', 'read']);
+  assert.deepEqual(t.tokens.get(token).scopes, ['host', 'chat', 'approvals', 'read']);
 });
 
 test('pairing as a max_mode none member grants the same minimum', async () => {
@@ -664,7 +664,7 @@ test('a demoted member loses chat on the next token auth (stored scopes ∩ the 
   const token = t.last().result.token;
   assert.deepEqual(t.tokens.get(token).scopes, ['host', 'chat', 'approvals', 'read']);
 
-  current = VIEWER;
+  current = NO_TURNS;
   const s2 = { n: 2 };
   t.g.opened(s2, '127.0.0.1');
   await t.g.receive(s2, req('c-h', 'host.hello', HELLO));
@@ -675,4 +675,40 @@ test('a demoted member loses chat on the next token auth (stored scopes ∩ the 
   await t.g.receive(s2, req('c-send', 'chat.send', { text: 'hi' }));
   assert.equal(t.lastError(), 'denied');
   assert.equal(t.turns.length, 0);
+});
+
+test('every Host API command has a class (null only for pairing and heartbeat)', async () => {
+  const { COMMAND_CLASS } = await import('../routes/host-api/gateway.mjs');
+  const { HOST_API_COMMANDS } = await import('../routes/host-api/commands.generated.mjs');
+  for (const name of Object.keys(HOST_API_COMMANDS)) {
+    assert.ok(Object.prototype.hasOwnProperty.call(COMMAND_CLASS, name), `${name} has no class`);
+  }
+  for (const name of ['host.hello', 'host.auth.pair', 'host.auth.token', 'host.auth.revoke', 'host.ping']) {
+    assert.equal(COMMAND_CLASS[name], null, name);
+  }
+  assert.equal(COMMAND_CLASS['chat.send'], 'model.ask');
+  assert.equal(COMMAND_CLASS['approvals.answer'], 'model.ask');
+  assert.equal(COMMAND_CLASS['toolApprovals.answer'], 'model.exec');
+});
+
+test('a member demoted while connected loses chat on the very next frame', async () => {
+  let current = READER;
+  const t = harness({ read: true, member: () => current() });
+  const s = {};
+  await t.paired(s);
+  current = NO_TURNS;
+  await t.g.receive(s, req('c-send', 'chat.send', { text: 'hi' }));
+  assert.equal(t.lastError(), 'denied');
+  assert.equal(t.turns.length, 0);
+  assert.ok(t.audits.some(([event]) => event === 'role_denied'));
+  await t.g.receive(s, req('c-sessions', 'chat.sessions', {}));
+  assert.equal(t.last().error, undefined, 'a max_mode none member may still read');
+});
+
+test('a viewer paired on a phone may Ask', async () => {
+  const t = harness({ read: true, member: VIEWER });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-send', 'chat.send', { text: 'what changed today?' }));
+  assert.equal(t.turns.length, 1, 'the turn starts; runV2Turn forces it to ask');
 });

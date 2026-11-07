@@ -403,3 +403,21 @@ after(() => {
   }
   try { fs.rmSync(WS, { recursive: true, force: true }); } catch { /* ignore */ }
 });
+
+
+test('a viewer may only Ask: an Execute request runs as ask, with no permission mode', async () => {
+  const viewer = member('viewer', 'read_only');
+  const t = fakeTurn();
+  const { res } = await stream(viewer, { message: 'how does login work?', mode: 'execute', permissionMode: 'bypass', model: 'claude-sonnet-5' }, { runTurn: t.runTurn });
+  assert.notEqual(res.statusCode, 403);
+  assert.equal(t.calls.length, 1);
+  assert.equal(t.calls[0].mode, 'ask');
+});
+
+test('a viewer with max_mode none is still refused', async () => {
+  const viewer = member('viewer', 'none');
+  const t = fakeTurn();
+  const { res } = await stream(viewer, { message: 'hi', model: 'claude-sonnet-5' }, { runTurn: t.runTurn });
+  assert.equal(res.statusCode, 403);
+  assert.equal(t.calls.length, 0);
+});

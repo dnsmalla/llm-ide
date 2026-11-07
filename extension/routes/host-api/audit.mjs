@@ -12,7 +12,7 @@ export const AUDIT_DETAIL_MAX = 200;
 export const AUDIT_EVENT_CAP_PER_MINUTE = 60;
 const MAX_DEDUPE_KEYS = 1024;
 const SUCCESS = new Set(['pair_ok', 'revoke_self', 'revoke_host', 'identity_created', 'identity_reset', 'chat_options', 'chat_new', 'compose_send', 'push_register', 'push_unregister', 'push_apns_set', 'push_apns_removed']);
-const DENIED = new Set(['origin_refused', 'plaintext_refused', 'scope_denied']);
+const DENIED = new Set(['origin_refused', 'plaintext_refused', 'scope_denied', 'role_denied']);
 
 export const auditOutcome = (event) => (SUCCESS.has(event) ? 'success' : DENIED.has(event) ? 'denied' : 'failure');
 

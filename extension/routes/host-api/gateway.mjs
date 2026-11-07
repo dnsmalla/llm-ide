@@ -13,7 +13,7 @@ import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
-import { getMember } from '../../kb/members.mjs';
+import { getMember, classRefusal } from '../../kb/members.mjs';
 
 export const MAX_SESSIONS = 4;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
@@ -24,17 +24,41 @@ export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every 
 // relayed like the other known codes instead of the generic "turn failed" line.
 const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
 const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED', 'ROLE_DENIED', 'USD_CAP']);
-// A viewer / max_mode none member is served the minimum: host + read + push only (ADR 0021). Chat,
-// approvals, tool_approvals and compose are all refused, and the pairing token never carries them.
+// ADR 0021 + plan H1.2: a max_mode none member, or a caller with no authority row (fail closed), is
+// served host + read + push. A viewer may also Ask: chat + approvals (runV2Turn forces the turn to
+// `ask`). compose and tool_approvals stay off for both.
 const MINIMAL_SCOPES = ['host', 'read', 'push'];
-// The served/reserved capability list for this member (ADR 0021): the minimum for a viewer, a
-// `max_mode` none member, or a caller with no authority row at all (fail closed — registration always
-// writes one, so this only reaches a legacy/unknown user), everything otherwise.
+const VIEWER_SCOPES = ['host', 'read', 'push', 'chat', 'approvals'];
 function minimalFor(member, caps) {
-  return (!member || member.maxMode === 'none' || member.teamRole === 'viewer')
-    ? caps.filter((c) => MINIMAL_SCOPES.includes(c))
-    : caps;
+  if (!member || member.maxMode === 'none') return caps.filter((c) => MINIMAL_SCOPES.includes(c));
+  if (member.teamRole === 'viewer') return caps.filter((c) => VIEWER_SCOPES.includes(c));
+  return caps;
 }
+
+// Plan H1.2: each command's action class, checked on EVERY frame against the member's current row,
+// so a demotion applies on the next frame, not at the next re-auth. null = pairing / heartbeat.
+export const COMMAND_CLASS = Object.freeze({
+  'host.hello': null,
+  'host.auth.pair': null,
+  'host.auth.token': null,
+  'host.auth.revoke': null,
+  'host.ping': null,
+  'host.snapshot': 'self.read',
+  'chat.snapshot': 'self.read',
+  'chat.sessions': 'self.read',
+  'chat.history': 'self.read',
+  'usage.get': 'self.read',
+  'chat.options': 'self.read',
+  'push.config': 'self.read',
+  'chat.cancel': 'self.write',
+  'chat.history.clear': 'self.write',
+  'chat.new': 'self.write',
+  'push.register': 'self.write',
+  'push.unregister': 'self.write',
+  'chat.send': 'model.ask',
+  'approvals.answer': 'model.ask',
+  'toolApprovals.answer': 'model.exec',
+});
 
 export function hostApiCapabilities(env = process.env) {
   return ['host', 'chat', 'approvals',
@@ -401,6 +425,16 @@ export function createGateway(overrides) {
         const { userId: u, deviceId: d } = entry.state;
         audit('scope_denied', { peer: entry.peer, userId: u, deviceId: d, detail: capability, dedupeKey: `${d}:${capability}` });
         return fail(s, r.id, 'denied', `This device was not granted ${capability} — pair again to grant it.`);
+      }
+      const cls = COMMAND_CLASS[r.command];
+      if (cls) {
+        const { userId: u, deviceId: d } = entry.state;
+        const refusal = classRefusal(deps.member(u), cls);
+        if (refusal) {
+          deps.log(`Host API v1 connection ${entry.num} refused ${r.command} (${refusal})`);
+          audit('role_denied', { peer: entry.peer, userId: u, deviceId: d, detail: refusal, dedupeKey: `${d}:${refusal}` });
+          return fail(s, r.id, 'denied', 'Your team role no longer allows this.');
+        }
       }
     }
     const gate = entry.state.gate(r.command, new Set(entry.state.deviceId ? effective(entry) : served));

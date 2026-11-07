@@ -593,6 +593,13 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     body.permissionMode = null;
     bypassGrants.revoke(userId, chatSessionId);
   }
+  // User decision 2026-11-08 (plan H1.2): everyone but owners, admins and engineers may only Ask —
+  // a read-only question with no edit or command tools — whatever mode or permission they asked for.
+  if (member?.teamRole === 'viewer') {
+    mode = 'ask';
+    body.permissionMode = null;
+    bypassGrants.revoke(userId, chatSessionId);
+  }
 
   // Slash-command expansion — parity with the legacy loop: a message that
   // starts with "/" is looked up against the user's enabled command set
