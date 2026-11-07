@@ -340,8 +340,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           <>
             <div className="chat-badges"><HeaderBadges chatId={activeId} state={state} core={core} /></div>
             {projectMemoryOpen && (
-              <div role="dialog" aria-label="Project memory" className="chat-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeProjectMemory(); } }}>
-                <ProjectMemoryView client={memoryCore} repos={[]} workspaceRoot={host.projectRoot?.() ?? null} sessionId={activeId} onClose={closeProjectMemory} />
+              <div className="chat-memory-modal" onMouseDown={(e) => { if (e.target === e.currentTarget) closeProjectMemory(); }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeProjectMemory(); } }}>
+                <div role="dialog" aria-modal="true" aria-label="Project memory" className="chat-memory-sheet">
+                  <ProjectMemoryView client={memoryCore} repos={[]} workspaceRoot={host.projectRoot?.() ?? null} sessionId={activeId} onClose={closeProjectMemory} />
+                </div>
               </div>
             )}
             {remoteBusy && <StatusBanner severity="info" message="A turn is running for this chat on the core. Its live output cannot be shown here yet." />}
