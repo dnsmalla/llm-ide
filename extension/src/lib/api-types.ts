@@ -2091,11 +2091,11 @@ export type Incident = {
   /** ms since epoch */
   lastSeen: number;
   count: number;
-  /** how often a fixed incident came back (plan B) */
+  /** how often a fixed incident came back, plus failed fix attempts (needsHuman at 3) */
   attempts: number;
   status: "new" | "fixing" | "proposed" | "ignored" | "needsHuman" | "fixed";
   note: string | null;
-  /** plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A */
+  /** { mainRepo, worktreePath, branch, baseCommit } while status is proposed, else null */
   proposal: Record<string, unknown> | null;
 };
 
@@ -8317,6 +8317,90 @@ export type DeleteKbSelfHealIncidentsResponse403 = CommonError;
 
 export type DeleteKbSelfHealIncidentsResponse404 = SelfHealFeatureDisabled;
 
+/** Request parts for `POST /kb/self-heal/runs` (schema/http/self-heal.schema.json). */
+export type PostKbSelfHealRunsRequest = {
+  body: {
+    /** the source checkout, absolute; must be exactly a root on the user's repo allow-list */
+    repoRoot: string;
+    /** 1-20, default 5 */
+    max?: number;
+  };
+};
+
+export type PostKbSelfHealRunsResponse200 = {
+  /** uuid; null when no new, non-environmental incident is left */
+  runId: string | null;
+  incidentIds: string[];
+  /** the .self-heal/BATCH.md text for the run's worktree */
+  batch: string | null;
+};
+
+export type PostKbSelfHealRunsResponse400 = CommonError;
+
+export type PostKbSelfHealRunsResponse403 = CommonError;
+
+export type PostKbSelfHealRunsResponse404 = SelfHealFeatureDisabled;
+
+export type PostKbSelfHealRunsResponse409 = CommonError;
+
+/** Request parts for `POST /kb/self-heal/runs/:id/outcome` (schema/http/self-heal.schema.json). */
+export type PostKbSelfHealRunsIdOutcomeRequest = {
+  params: {
+    /** the run id (uuid) */
+    id: string;
+  };
+  body: {
+    /** the answered BATCH.md, at most 1 MiB; only lines under the last ## Results count */
+    batch?: string;
+    verifyPassed?: boolean;
+    hasChanges?: boolean;
+    agentDown?: boolean;
+    aborted?: boolean;
+    proposal?: {
+      mainRepo: string;
+      worktreePath: string;
+      /** self-heal/<run id> */
+      branch: string;
+      /** 40-64 hex */
+      baseCommit: string;
+    } | null;
+  };
+};
+
+export type PostKbSelfHealRunsIdOutcomeResponse200 = {
+  proposed: number;
+};
+
+export type PostKbSelfHealRunsIdOutcomeResponse400 = CommonError;
+
+export type PostKbSelfHealRunsIdOutcomeResponse403 = CommonError;
+
+export type PostKbSelfHealRunsIdOutcomeResponse404 = SelfHealFeatureDisabled;
+
+export type PostKbSelfHealRunsIdOutcomeResponse409 = CommonError;
+
+/** Request parts for `POST /kb/self-heal/runs/:id/resolve` (schema/http/self-heal.schema.json). */
+export type PostKbSelfHealRunsIdResolveRequest = {
+  params: {
+    /** the run id (uuid) */
+    id: string;
+  };
+  body: {
+    /** applied | discarded; anything else is 400 VALIDATION_FAILED */
+    result: string;
+  };
+};
+
+export type PostKbSelfHealRunsIdResolveResponse200 = {
+  updated: number;
+};
+
+export type PostKbSelfHealRunsIdResolveResponse400 = CommonError;
+
+export type PostKbSelfHealRunsIdResolveResponse403 = CommonError;
+
+export type PostKbSelfHealRunsIdResolveResponse404 = SelfHealFeatureDisabled;
+
 /** Request parts for `GET /kb/sync/status` (schema/http/sync.schema.json). */
 export type GetKbSyncStatusRequest = Record<string, never>;
 
@@ -10878,6 +10962,35 @@ export interface ApiEndpoints {
       200: DeleteKbSelfHealIncidentsResponse200;
       403: DeleteKbSelfHealIncidentsResponse403;
       404: DeleteKbSelfHealIncidentsResponse404;
+    };
+  };
+  "POST /kb/self-heal/runs": {
+    request: PostKbSelfHealRunsRequest;
+    responses: {
+      200: PostKbSelfHealRunsResponse200;
+      400: PostKbSelfHealRunsResponse400;
+      403: PostKbSelfHealRunsResponse403;
+      404: PostKbSelfHealRunsResponse404;
+      409: PostKbSelfHealRunsResponse409;
+    };
+  };
+  "POST /kb/self-heal/runs/:id/outcome": {
+    request: PostKbSelfHealRunsIdOutcomeRequest;
+    responses: {
+      200: PostKbSelfHealRunsIdOutcomeResponse200;
+      400: PostKbSelfHealRunsIdOutcomeResponse400;
+      403: PostKbSelfHealRunsIdOutcomeResponse403;
+      404: PostKbSelfHealRunsIdOutcomeResponse404;
+      409: PostKbSelfHealRunsIdOutcomeResponse409;
+    };
+  };
+  "POST /kb/self-heal/runs/:id/resolve": {
+    request: PostKbSelfHealRunsIdResolveRequest;
+    responses: {
+      200: PostKbSelfHealRunsIdResolveResponse200;
+      400: PostKbSelfHealRunsIdResolveResponse400;
+      403: PostKbSelfHealRunsIdResolveResponse403;
+      404: PostKbSelfHealRunsIdResolveResponse404;
     };
   };
   "GET /kb/sync/status": {

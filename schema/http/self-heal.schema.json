@@ -1,5 +1,5 @@
 {
-  "description": "Self-Heal incidents (docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md): the desktop Settings Self-Heal group's routes, debug desktop builds only. Served by extension/routes/self-heal.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Without LLMIDE_SELF_HEAL=1 every path answers 404 feature_disabled (feature self_heal) and the module is never loaded. With it, every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. Incident text is redacted before it is stored, is data and never instructions, and is never logged or sent anywhere.",
+  "description": "Self-Heal incidents (docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md): the desktop Settings Self-Heal group's routes, debug desktop builds only. Served by extension/routes/self-heal.mjs, dispatched from extension/server.mjs after authenticate and the rate limiter. Without LLMIDE_SELF_HEAL=1 every path answers 404 feature_disabled (feature self_heal) and the module is never loaded. With it, every route needs the JWT AND the bus host proof header x-llmide-host-nonce, checked first: without it 403 HOST_PROOF_REQUIRED. Per user. Incident text is redacted before it is stored, is data and never instructions, and is never logged or sent anywhere. Plan B (docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md) adds the fix-run routes.",
   "$defs": {
     "Incident": {
       "type": "object",
@@ -14,10 +14,10 @@
         "firstSeen": { "type": "integer", "description": "ms since epoch" },
         "lastSeen": { "type": "integer", "description": "ms since epoch" },
         "count": { "type": "integer" },
-        "attempts": { "type": "integer", "description": "how often a fixed incident came back (plan B)" },
+        "attempts": { "type": "integer", "description": "how often a fixed incident came back, plus failed fix attempts (needsHuman at 3)" },
         "status": { "type": "string", "enum": ["new", "fixing", "proposed", "ignored", "needsHuman", "fixed"] },
         "note": { "type": ["string", "null"] },
-        "proposal": { "type": ["object", "null"], "additionalProperties": true, "description": "plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A" }
+        "proposal": { "type": ["object", "null"], "additionalProperties": true, "description": "{ mainRepo, worktreePath, branch, baseCommit } while status is proposed, else null" }
       }
     },
     "SelfHealFeatureDisabled": {
@@ -96,6 +96,77 @@
           "type": "object",
           "properties": { "deleted": { "type": "integer" } }
         },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
+      }
+    },
+    "POST /kb/self-heal/runs": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": ["repoRoot"],
+          "properties": {
+            "repoRoot": { "type": "string", "description": "the source checkout, absolute; must be exactly a root on the user's repo allow-list" },
+            "max": { "type": "integer", "description": "1-20, default 5" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["runId", "incidentIds", "batch"],
+          "properties": {
+            "runId": { "type": ["string", "null"], "description": "uuid; null when no new, non-environmental incident is left" },
+            "incidentIds": { "type": "array", "items": { "type": "string" } },
+            "batch": { "type": ["string", "null"], "description": "the .self-heal/BATCH.md text for the run's worktree" }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" },
+        "409": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /kb/self-heal/runs/:id/outcome": {
+      "request": {
+        "params": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the run id (uuid)" } } },
+        "body": {
+          "type": "object",
+          "properties": {
+            "batch": { "type": "string", "description": "the answered BATCH.md, at most 1 MiB; only lines under the last ## Results count" },
+            "verifyPassed": { "type": "boolean" },
+            "hasChanges": { "type": "boolean" },
+            "agentDown": { "type": "boolean" },
+            "aborted": { "type": "boolean" },
+            "proposal": {
+              "type": ["object", "null"],
+              "required": ["mainRepo", "worktreePath", "branch", "baseCommit"],
+              "properties": {
+                "mainRepo": { "type": "string" },
+                "worktreePath": { "type": "string" },
+                "branch": { "type": "string", "description": "self-heal/<run id>" },
+                "baseCommit": { "type": "string", "description": "40-64 hex" }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": { "type": "object", "required": ["proposed"], "properties": { "proposed": { "type": "integer" } } },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" },
+        "409": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /kb/self-heal/runs/:id/resolve": {
+      "request": {
+        "params": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the run id (uuid)" } } },
+        "body": { "type": "object", "required": ["result"], "properties": { "result": { "type": "string", "description": "applied | discarded; anything else is 400 VALIDATION_FAILED" } } }
+      },
+      "responses": {
+        "200": { "type": "object", "required": ["updated"], "properties": { "updated": { "type": "integer" } } },
+        "400": { "$ref": "_common#/$defs/Error" },
         "403": { "$ref": "_common#/$defs/Error" },
         "404": { "$ref": "#/$defs/SelfHealFeatureDisabled" }
       }

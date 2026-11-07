@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 121` (`server.mjs:337`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 122` (`server.mjs:338`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -355,7 +355,7 @@ Additive; no new route. Four changes, each with its contract in `schema/http`:
 
 `POST /kb/issues/create { provider, repo, title, body?, idem }`, `POST /kb/issues/comment { provider, repo, number, body }` and `POST /kb/issues/close { provider, repo, number }` (`extension/routes/issue-writes.mjs`, feature `gantt_issues`, dispatched from `issue-schedule.mjs`) are the only writes the core makes to GitHub or GitLab for the Issues board. Order of checks: the bus host proof (`403 HOST_PROOF_REQUIRED`, desktop only), the body (`400 VALIDATION_FAILED` with `details.field`: provider `github|gitlab` required; repo GitHub `owner/name` or GitLab 2 to 20 segments, at most 200 characters, no `.`/`..` segment; title 1 to 255 characters after trimming; body at most 20 000 characters, never cut short; number a positive integer; `idem` 16 to 64 of `[A-Za-z0-9_-]`), the board allowlist (`kb.findTicket`: an imported ticket row of the caller for that provider, repo and, for comment and close, number, whose stored URL starts with `https://github.com/` or `https://gitlab.com/`, else `403 REPO_NOT_ALLOWED`; a PR or MR row is `400 NOT_AN_ISSUE`), then the vault token (`github.token` / `gitlab.token`, else `400 GITHUB_TOKEN_MISSING` / `GITLAB_TOKEN_MISSING`). The one provider call goes through the pinned fetch to the fixed host `api.github.com` or `gitlab.com/api/v4` (GitLab project paths URL-encoded as one segment), with a 15 s timeout. Answers: `200 { ok, id, url, state }` (`deduped` on create); the provider's 401 → `403 TOKEN_UNAUTHORIZED`, 403 or 404 → `403 TOKEN_FORBIDDEN`, 400 or 422 → `400 PROVIDER_REJECTED`, anything else → `502 PROVIDER_ERROR`, no answer → `502 PROVIDER_UNREACHABLE`. The core never answers 401 here. Create runs once per `(user, idem)` for 10 minutes, in memory with at most 500 keys: the same content replays the first answer with `deduped: true`, other content is `409 IDEM_CONFLICT`, and a failed attempt frees the key. A successful close sets the board row's `state` to `closed`. Each request writes one `audit_log` row (`issues.create|comment|close`, resource `<provider>:<repo>[#<number>]`, outcome, detail `{ status, code[, deduped] }`) with no title, body or token. Rides the `dispatch` bucket. A self-hosted GitLab and the operation toggles in Settings → Repositories are not enforced here (see the plan `docs/superpowers/plans/2026-11-07-hosted-issue-writes.md`).
 
-## 7m. Self-Heal incidents (API 121)
+## 7m. Self-Heal incidents (API 121) and fix runs (API 122)
 
 `GET /kb/self-heal/incidents`, `POST /kb/self-heal/incidents { incidents: [{ source, category, message, stack? }] }` (1-50), `POST /kb/self-heal/incidents/:id/ignore` and `DELETE /kb/self-heal/incidents` (`extension/routes/self-heal.mjs`, contract `schema/http/self-heal.schema.json`) exist only while the core runs with `LLMIDE_SELF_HEAL=1`. The Tauri host passes it only in a debug build (`self_heal.rs`). Without it, every path answers `404 { error: 'feature_disabled', feature: 'self_heal' }`, the module is never imported and `/health` does not advertise the paths.
 
@@ -370,7 +370,20 @@ With the switch on:
   - At most 200 per user; the least recently seen goes first, never `fixing` / `proposed`.
 - **Invalid reports:** an unusable report is skipped (`skipped`), not refused.
 
-Incident text is data. It is never logged, never sent anywhere, and never given to a model in plan A.
+**Fix runs (API 122, plan B):**
+
+- **`POST /kb/self-heal/runs { repoRoot, max? }`** starts the user's one run (in memory, 4 h lease).
+  - Answers: `409 RUN_ACTIVE` with `details.runId`, and `409 REPO_NOT_ALLOWED` unless `repoRoot` is exactly an allow-listed root.
+  - It picks up to `max` (default 5, at most 20) `new`, non-environmental incidents, most frequent first, and moves them to `fixing`. Environmental ones it meets become `ignored`.
+  - It returns `{ runId, incidentIds, batch }`, where `batch` is the `.self-heal/BATCH.md` text (`extension/core/self-heal-batch.mjs`), or `{ runId: null, … }` when there is nothing to fix.
+- **`POST /kb/self-heal/runs/:id/outcome`** ends the run (`409 RUN_NOT_ACTIVE` otherwise).
+  - Only the lines under the last `## Results` are read.
+  - `fixed` with `verifyPassed`, `hasChanges` and a `proposal` on branch `self-heal/<id>` → `proposed`. `environmental` → `ignored`. `agentDown` / `aborted` → `new`. Anything else → `attempts + 1`, `needsHuman` at 3.
+- **`POST /kb/self-heal/runs/:id/resolve { result: applied | discarded }`** turns the run's `proposed` incidents into `fixed` / `ignored` and clears the proposal.
+- **Suppression:** while a run is open, `POST /kb/self-heal/incidents` skips `log` and `server` reports.
+- **Who does what:** the desktop host owns the worktree, `make regression` and the patch (`desktop/src-tauri/src/self_heal_fix.rs`). The fix itself is one `POST /kb/loop/agent-run` on the worktree.
+
+Incident text is data. It is never logged, and it reaches a model only fenced inside `BATCH.md`, in a run the user started.
 
 ## 8. See also
 

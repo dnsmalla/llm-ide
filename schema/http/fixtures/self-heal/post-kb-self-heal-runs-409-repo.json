@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/self-heal/runs",
+  "status": 409,
+  "request": {
+    "body": {
+      "repoRoot": "/Users/dev/other"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_NOT_ALLOWED",
+      "message": "Add the source checkout under Settings → Repositories first"
+    }
+  }
+}

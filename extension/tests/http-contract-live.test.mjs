@@ -68,7 +68,14 @@ for (const group of readdirSync(FIXTURE_DIR).sort()) {
 fixtures.sort((a, b) => (a.endpoint === 'POST /auth/register' ? 0 : 1) - (b.endpoint === 'POST /auth/register' ? 0 : 1));
 
 const pairOf = (ep, status) => `${ep} ${status}`;
-const withFixturePairs = new Set(fixtures.map((fx) => pairOf(fx.endpoint, fx.status)));
+// Fixture groups whose routes exist only behind a switch this replay server never sets (the debug-only
+// LLMIDE_SELF_HEAL=1 plus the bus host proof, schema/http/self-heal.schema.json) cannot be replayed here at all: the
+// server answers 404 feature_disabled before the handler. Their fixtures stay in the skip table below and their pairs
+// stay in `declaredPairs`, but they must not push the replay ratio down, because no fixture of such a group can ever
+// replay. tests/self-heal-runs.test.mjs and tests/self-heal-server.test.mjs cover the handlers live.
+const NOT_REPLAYABLE_GROUPS = new Set(['self-heal']);
+const withFixturePairs = new Set(fixtures.filter((fx) => !NOT_REPLAYABLE_GROUPS.has(fx.file.split('/')[0]))
+  .map((fx) => pairOf(fx.endpoint, fx.status)));
 const declaredPairs = new Set();
 for (const [key, { spec }] of endpoints) for (const s of Object.keys(spec.responses ?? {})) declaredPairs.add(pairOf(key, s));
 

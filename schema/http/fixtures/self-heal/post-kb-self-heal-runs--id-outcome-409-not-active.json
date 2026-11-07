@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/self-heal/runs/:id/outcome",
+  "status": 409,
+  "request": {
+    "params": {
+      "id": "00000000-0000-4000-8000-000000000000"
+    },
+    "body": {
+      "aborted": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RUN_NOT_ACTIVE",
+      "message": "That Self-Heal run is not in progress"
+    }
+  }
+}

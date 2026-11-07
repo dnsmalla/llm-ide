@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 121
+  x-api-version: 122
 servers:
   - url: "https://{host}"
     variables:
@@ -14567,6 +14567,213 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+  /kb/self-heal/runs:
+    post:
+      tags:
+        - "self-heal"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "repoRoot"
+              properties:
+                repoRoot:
+                  type: "string"
+                  description: "the source checkout, absolute; must be exactly a root on the user's repo allow-list"
+                max:
+                  type: "integer"
+                  description: "1-20, default 5"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "runId"
+                  - "incidentIds"
+                  - "batch"
+                properties:
+                  runId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "uuid; null when no new, non-environmental incident is left"
+                  incidentIds:
+                    type: "array"
+                    items:
+                      type: "string"
+                  batch:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the .self-heal/BATCH.md text for the run's worktree"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/self-heal/runs/{id}/outcome:
+    post:
+      tags:
+        - "self-heal"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "the run id (uuid)"
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                batch:
+                  type: "string"
+                  description: "the answered BATCH.md, at most 1 MiB; only lines under the last ## Results count"
+                verifyPassed:
+                  type: "boolean"
+                hasChanges:
+                  type: "boolean"
+                agentDown:
+                  type: "boolean"
+                aborted:
+                  type: "boolean"
+                proposal:
+                  type:
+                    - "object"
+                    - "null"
+                  required:
+                    - "mainRepo"
+                    - "worktreePath"
+                    - "branch"
+                    - "baseCommit"
+                  properties:
+                    mainRepo:
+                      type: "string"
+                    worktreePath:
+                      type: "string"
+                    branch:
+                      type: "string"
+                      description: "self-heal/<run id>"
+                    baseCommit:
+                      type: "string"
+                      description: "40-64 hex"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "proposed"
+                properties:
+                  proposed:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/self-heal/runs/{id}/resolve:
+    post:
+      tags:
+        - "self-heal"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "the run id (uuid)"
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "result"
+              properties:
+                result:
+                  type: "string"
+                  description: "applied | discarded; anything else is 400 VALIDATION_FAILED"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "updated"
+                properties:
+                  updated:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SelfHealFeatureDisabled"
   /kb/session-purges:
     post:
       tags:
@@ -18747,7 +18954,7 @@ components:
           type: "integer"
         attempts:
           type: "integer"
-          description: "how often a fixed incident came back (plan B)"
+          description: "how often a fixed incident came back, plus failed fix attempts (needsHuman at 3)"
         status:
           type: "string"
           enum:
@@ -18766,7 +18973,7 @@ components:
             - "object"
             - "null"
           additionalProperties: true
-          description: "plan B: { mainRepo, worktreePath, branch, baseCommit }; always null in plan A"
+          description: "{ mainRepo, worktreePath, branch, baseCommit } while status is proposed, else null"
     IngestResult:
       type: "object"
       required:

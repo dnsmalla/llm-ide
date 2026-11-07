@@ -60,6 +60,8 @@ const ALLOWLIST = {
     '/auth/me/mcp-plugins/:id/resync': 'dispatched by the regex mcpVersionMatch in extension/routes/extension-routes.mjs (/^\\/auth\\/me\\/mcp-plugins\\/…\\/(update|resync)$/), which the literal scanner cannot see',
     '/kb/sync/devices/:id': 'dispatched by DEVICE_RE in extension/routes/sync/http-routes.mjs (/^\\/kb\\/sync\\/devices\\/([A-Za-z0-9_-]{22})$/)',
     '/kb/self-heal/incidents/:id/ignore': 'dispatched by IGNORE_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/incidents\\/([0-9a-f]{16})\\/ignore$/)',
+    '/kb/self-heal/runs/:id/outcome': 'dispatched by RUN_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/runs\\/(<uuid>)\\/(outcome|resolve)$/)',
+    '/kb/self-heal/runs/:id/resolve': 'dispatched by RUN_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/runs\\/(<uuid>)\\/(outcome|resolve)$/)',
   },
   clientNotInRoster: {
     '/auth/me/extensions': 'the BASE prefix ui/screens/library/extensions/api.ts builds its /auth/me/extensions/* calls from, not a call',

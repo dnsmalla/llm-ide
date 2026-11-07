@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/self-heal/runs",
+  "status": 404,
+  "request": {
+    "body": {
+      "repoRoot": "/Users/dev/llm-ide"
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "self_heal"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/self-heal/runs",
+  "status": 200,
+  "description": "No new, non-environmental incident is left.",
+  "request": {
+    "body": {
+      "repoRoot": "/Users/dev/llm-ide"
+    }
+  },
+  "response": {
+    "runId": null,
+    "incidentIds": [],
+    "batch": null
+  }
+}

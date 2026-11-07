@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/self-heal/runs/:id/resolve",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+    },
+    "body": {
+      "result": "applied"
+    }
+  },
+  "response": {
+    "updated": 1
+  }
+}

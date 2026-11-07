@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/self-heal/runs/:id/outcome",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+    },
+    "body": {
+      "proposal": {
+        "mainRepo": "/Users/dev/llm-ide",
+        "worktreePath": "/Users/dev/Library/Application Support/LLM-IDE/self-heal/loop-worktrees/6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+        "branch": "self-heal/other",
+        "baseCommit": "1ae10e0bce9896cea485c71fb1d6e981428428fb"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid outcome"
+    }
+  },
+  "description": "A proposal whose branch is not this run's: 400 VALIDATION_FAILED (the route test's { proposal: { ...proposal, branch: 'self-heal/other' } })."
+}
