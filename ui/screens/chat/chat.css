@@ -145,3 +145,4 @@
 .chat-empty-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--tok-space-sm); margin-top: var(--tok-space-xs); }
 .chat-suggestion { font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 999px; padding: var(--tok-space-xs) var(--tok-space-md); cursor: pointer; }
 .chat-suggestion:hover { color: var(--tok-color-text); border-color: var(--tok-color-accent); }
+.chat-ghost { margin: 0; padding: 0 var(--tok-space-sm); font-size: var(--tok-type-caption-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

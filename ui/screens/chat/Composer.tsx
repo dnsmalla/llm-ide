@@ -51,6 +51,19 @@ export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isCom
   return active && busy && e.key === "Escape" && !e.defaultPrevented && e.isComposing !== true;
 }
 
+/**
+ * The Mac's ghost prediction (ChatComposer.promptSuggestion): the newest sent prompt that extends the draft. None for
+ * an empty draft, while recalling history, or when it would only repeat the draft. Pure.
+ */
+export function promptSuggestion(draft: string, history: readonly string[], recalling: boolean): string | null {
+  if (!draft || recalling) return null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i]!;
+    if (h !== draft && h.startsWith(draft)) return h;
+  }
+  return null;
+}
+
 export function nextRecall(history: readonly string[], cursor: number | null, dir: "up" | "down"): { cursor: number | null; text: string | null } {
   if (history.length === 0) return { cursor, text: null };
   if (dir === "up") {
@@ -149,6 +162,9 @@ export function Composer(p: ComposerProps) {
   }, [p.active, p.busy]);
 
   const recall = useRef<number | null>(null);
+  // An Esc-dismissed prediction stays dismissed only for the draft it was dismissed on.
+  const [ghostOffFor, setGhostOffFor] = useState<string | null>(null);
+  const ghost = ghostOffFor === p.draft || p.extras?.menu ? null : promptSuggestion(p.draft, p.history, recall.current !== null);
   const ime = useRef<ImeGuard | null>(null);
   if (!ime.current) ime.current = new ImeGuard();
   const guard = ime.current;
@@ -184,6 +200,8 @@ export function Composer(p: ComposerProps) {
           if (guard.isIme(e)) return;
           if (voice && isDictationShortcut(e)) { e.preventDefault(); toggleVoice(); return; }
           if (p.extras?.onKeyDown(e)) return;
+          if (e.key === "Tab" && !e.shiftKey && ghost) { e.preventDefault(); p.onDraft(ghost); return; }
+          if (e.key === "Escape" && ghost && !p.busy) { e.preventDefault(); setGhostOffFor(p.draft); return; }
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           else if (e.key === "Escape" && p.busy) { e.preventDefault(); p.onStop(); }
           else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && (p.draft === "" || recall.current !== null)) {
@@ -192,6 +210,7 @@ export function Composer(p: ComposerProps) {
           }
         }}
       />
+      {ghost ? <p className="chat-muted chat-ghost" role="status">Tab: {ghost}</p> : null}
       {/* The Mac's toolbar order (ChatComposer.toolbarSingleRow): context buttons, pickers, memory | meter, key hint, voice, send. */}
       <div className="chat-composer-bar">
         {p.extras?.toolbar}
