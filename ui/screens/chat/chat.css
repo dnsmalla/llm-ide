@@ -116,3 +116,8 @@
 .chat-session-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .chat-session-picker-row { width: 100%; text-align: left; border: 0; border-radius: var(--tok-radius-sm); background: none; color: inherit; font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-session-picker-row:hover, .chat-session-picker-row[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
+.chat-library-picker { width: min(420px, 92vw); max-height: 60vh; display: flex; flex-direction: column; gap: 8px; }
+.chat-library-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-library-list { list-style: none; margin: 0; padding: 0; overflow: auto; display: grid; gap: 4px; }
+.chat-library-list button { width: 100%; text-align: left; border: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); border-radius: 8px; padding: 7px 9px; cursor: pointer; display: grid; }
+.chat-library-list small { color: var(--tok-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

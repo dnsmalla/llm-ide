@@ -15,6 +15,7 @@ import type { ChatState } from "./state";
 import { createBypassGate, type BypassGate } from "./bypass";
 import { createCatalogLoader } from "./slash/loader";
 import { createHostAttach } from "./attach/host";
+import { createNotesHost } from "../library/host.ts";
 import { createHostProjectFs } from "./mentions/project-fs";
 import { createMentionSearch } from "./mentions";
 import type { ComposeServices } from "./slash/extras";
@@ -130,6 +131,7 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
       project,
       mentions: createMentionSearch({ fs: project, core: transport }),
       attachHost: desktop ? createHostAttach(invokeHost) : null,
+      notesHost: desktop ? createNotesHost(invokeHost) : null,
       openSection: (section) => { const target = sections[section]; if (!target) return false; shellBus.publish({ type: "goto-section", section: target }); return true; },
       openLibraryTarget: () => shellBus.publish({ type: "goto-section", section: "library" }),
       initialPath: hasProject ? initialPath : null,

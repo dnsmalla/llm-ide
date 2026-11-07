@@ -9,6 +9,8 @@ import { ComposerModel, type ComposerActions } from "./model";
 import { runBuiltin } from "./builtin-actions";
 import type { CatalogLoader } from "./loader";
 import type { MentionSearch } from "../mentions";
+import type { NotesHost } from "../../library/host.ts";
+import { LibraryNotePicker } from "../LibraryNotePicker";
 import { MODES } from "../route";
 import type { ModelGroupLike } from "./items";
 
@@ -17,6 +19,8 @@ export interface ComposeServices {
   catalog: CatalogLoader;
   mentions: MentionSearch | null;
   attachHost: AttachHost | null;
+  /** The desktop notes folder: "Add from Library" attaches one note as text. */
+  notesHost?: NotesHost | null;
   /** The open project's root-confined fs (mentions, plan saving); null without a project or the desktop host. */
   project: ProjectFs | null;
   blobs?: BlobUrls | null;
@@ -81,6 +85,7 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
   const items = useSyncExternalStore(attachments.subscribe, attachments.getItems, attachments.getItems);
   const notices = useSyncExternalStore(attachments.subscribe, attachments.getNotices, attachments.getNotices);
   const [flash, setFlash] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const menuId = `chat-menu-${o.chatId}`;
 
   // The model reads the draft on every change (draft state is owned by the caller).
@@ -135,9 +140,13 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
         onDismissNotices={() => { attachments.dismissNotices(); setFlash(null); model.clearMessage(); }}
       />
     ),
-    toolbar: services.attachHost ? (
-      <button type="button" className="chat-btn" aria-label="Attach files" onClick={() => void attachments.pickFiles()}>Attach</button>
-    ) : null,
+    toolbar: (
+      <>
+        {services.notesHost ? <button type="button" className="chat-btn" aria-label="Add from Library" onClick={() => setLibraryOpen(true)}>Add from Library</button> : null}
+        {services.attachHost ? <button type="button" className="chat-btn" aria-label="Attach files" onClick={() => void attachments.pickFiles()}>Attach</button> : null}
+        {libraryOpen && services.notesHost ? <LibraryNotePicker host={services.notesHost} onPick={(label, text) => attachments.addNote(label, text)} onClose={() => setLibraryOpen(false)} /> : null}
+      </>
+    ),
     blockedReason: items.some((i) => i.status === "reading") ? "Reading attachments…"
       : o.busy && (items.length > 0 || st.skills.length > 0) ? "Attachments and skills send after the current turn ends." : null,
     prepareSend,
