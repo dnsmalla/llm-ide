@@ -140,3 +140,8 @@
 .chat-notes:empty { display: none; }
 .chat-assistant > .chat-badge { display: inline-block; margin-bottom: var(--tok-space-xs); padding: 0 var(--tok-space-sm); border-radius: 999px; font-size: var(--tok-type-caption-size); font-weight: 600; text-transform: uppercase; color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }
 .chat-assistant > .chat-badge:is([data-mode="auto"], [data-mode="execute"]) { color: var(--tok-color-text-muted); background: color-mix(in srgb, var(--tok-color-text-muted) 10%, transparent); }
+.chat-empty-state { display: grid; justify-items: center; align-content: center; gap: var(--tok-space-sm); min-height: 100%; padding: var(--tok-space-lg); text-align: center; }
+.chat-empty-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: 600; }
+.chat-empty-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--tok-space-sm); margin-top: var(--tok-space-xs); }
+.chat-suggestion { font: inherit; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 999px; padding: var(--tok-space-xs) var(--tok-space-md); cursor: pointer; }
+.chat-suggestion:hover { color: var(--tok-color-text); border-color: var(--tok-color-accent); }

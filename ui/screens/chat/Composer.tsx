@@ -31,6 +31,9 @@ export interface ComposerProps {
   meter?: ReactNode;
 }
 
+/** The Mac's empty-field prompt (ChatComposer.inputBar). */
+export const COMPOSER_PLACEHOLDER = "Ask Claude about the attached code…";
+
 /** Longest message the composer accepts (the server caps a turn near 500k characters). */
 export const MAX_MESSAGE_CHARS = 120_000;
 
@@ -156,7 +159,7 @@ export function Composer(p: ComposerProps) {
       {p.extras?.menu}
       <textarea
         {...p.extras?.textareaProps}
-        className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : "Message"}
+        className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : COMPOSER_PLACEHOLDER}
         onChange={(e) => p.onDraft(e.target.value)}
         onCompositionStart={guard.onCompositionStart} onCompositionEnd={guard.onCompositionEnd}
         onKeyDown={(e) => {

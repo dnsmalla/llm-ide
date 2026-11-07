@@ -11,6 +11,7 @@ import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { ContextMeter } from "./ContextMeter";
+import { EmptyChat } from "./EmptyChat";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
 import { EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
 import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./effort";
@@ -338,7 +339,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               initialScrollTop={controller.getView(activeId).stickToBottom ? null : controller.getView(activeId).scrollTop}
               onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files} onRetry={() => controller.retry(activeId)}
               onFullHistoryNext={onFullHistoryNext}
-              empty={<p className="chat-muted chat-pad">Ask anything. Mode and model are below.</p>}
+              empty={<EmptyChat onPick={(text) => { controller.setView(activeId, { draft: text }); setRefineNonce((n) => n + 1); }} />}
             />
             {showsPlanProgress(planRunChat, activeId, state.tasks) && <PlanProgress tasks={state.tasks} />}
             {state.tasks.length > 0 && (
