@@ -25,6 +25,8 @@ export interface ComposerProps {
   extras?: ComposerExtras;
   /** Bottom-bar leading control (session memory). */
   memory?: ReactNode;
+  /** Token/cap meter shown at the right of the bottom bar. */
+  meter?: ReactNode;
 }
 
 /** Longest message the composer accepts (the server caps a turn near 500k characters). */
@@ -177,6 +179,7 @@ export function Composer(p: ComposerProps) {
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
         {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
+        {p.meter}
         <KeyHint />
         {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>
