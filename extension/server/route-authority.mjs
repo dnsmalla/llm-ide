@@ -20,6 +20,37 @@ import { requireRole } from './auth.mjs';
 import { usedUsdMonth } from '../kb/usage.mjs';
 import { recordAudit } from './audit.mjs';
 import { sendJSON } from '../core/utils.mjs';
+import { getMember, classRefusal, CLASS_GRANTS } from '../kb/members.mjs';
+
+const REFUSALS = Object.freeze({
+  role_denied: { status: 403, code: 'ROLE_DENIED', message: (need) => `Requires team role ${need?.role ?? 'member'}` },
+  max_mode_none: { status: 403, code: 'ROLE_DENIED', message: () => 'Your team grant cannot run this' },
+  max_mode_insufficient: { status: 403, code: 'ROLE_DENIED', message: (need) => `Requires the ${need?.mode} run mode` },
+  usd_cap: { status: 429, code: 'USD_CAP', message: () => 'Monthly USD cap reached' },
+  unknown_class: { status: 403, code: 'ROLE_DENIED', message: () => 'This action is not permitted' },
+});
+
+function refuse(db, userId, reason, cls) {
+  try {
+    // The reason only: never the request body, a path, a prompt or a model.
+    recordAudit(db, { userId, action: 'team.deny', outcome: 'denied', detail: { reason } });
+  } catch { /* an audit failure must not turn a refusal into a 500 */ }
+  const r = REFUSALS[reason];
+  return { ok: false, reason, status: r.status, code: r.code, message: r.message(CLASS_GRANTS[cls]) };
+}
+
+/**
+ * The one audited check (plan H1.2). Reads the caller's members row now, so a grant change applies on
+ * the next request or tick. Used by the route policy, the Host API gateway and the background jobs.
+ */
+export function authorizeAction(db, userId, cls, { req = null } = {}) {
+  if (!userId) return refuse(db, null, 'role_denied', cls);
+  const member = getMember(db, userId);
+  const reason = classRefusal(member, cls, () => usedUsdMonth(db, userId));
+  if (reason) return refuse(db, userId, reason, cls);
+  if (req) req.member = member;
+  return { ok: true, member };
+}
 
 const exact = (path) => (p) => p === path;
 const prefix = (base) => (p) => p === base || p.startsWith(`${base}/`);

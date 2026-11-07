@@ -311,3 +311,51 @@ export function consumeInvite(db, token, { email = null, userId } = {}) {
     createdBy: row.created_by,
   };
 }
+
+// ── Action classes (plan H1.2): what each kind of action needs ──────────────────────────────────
+// One table. A route, a Host API command or a background job names its class; nothing else
+// decides who may do what. `null` = public (no account needed).
+export const CLASS_GRANTS = Object.freeze({
+  public: null,
+  'self.read': Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
+  'self.write': Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
+  // A viewer may only Ask (user decision 2026-11-08): the chat turn is forced to `ask` mode.
+  'model.ask': Object.freeze({ role: 'viewer', mode: 'read_only', cap: true }),
+  'model.read': Object.freeze({ role: 'member', mode: 'read_only', cap: true }),
+  'model.exec': Object.freeze({ role: 'member', mode: 'execute', cap: true }),
+  'fs.read': Object.freeze({ role: 'member', mode: 'read_only', cap: false }),
+  'fs.write': Object.freeze({ role: 'member', mode: 'execute', cap: false }),
+  'external.read': Object.freeze({ role: 'member', mode: 'read_only', cap: false }),
+  'external.write': Object.freeze({ role: 'member', mode: 'execute', cap: false }),
+  // Engineers install too (user decision 2026-11-08); only team management stays admin.
+  install: Object.freeze({ role: 'member', mode: 'execute', cap: false }),
+  admin: Object.freeze({ role: 'admin', mode: 'none', cap: false }),
+  host: Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
+});
+
+const MODE_RANK = Object.freeze({ none: 0, read_only: 1, execute: 2 });
+
+/**
+ * Why `member` may not perform an action of class `cls`, or null when it may. Pure. `usedUsd` is a
+ * function returning the member's USD spend this month (called only for a capped class with a
+ * non-zero cap); pass null to leave the cap to the caller.
+ */
+export function classRefusal(member, cls, usedUsd = null) {
+  if (!Object.prototype.hasOwnProperty.call(CLASS_GRANTS, cls)) return 'unknown_class';
+  const need = CLASS_GRANTS[cls];
+  if (need === null) return null;
+  if (!member || !atLeast(member.teamRole, need.role)) return 'role_denied';
+  if ((MODE_RANK[member.maxMode] ?? 0) < MODE_RANK[need.mode]) {
+    return member.maxMode === 'none' ? 'max_mode_none' : 'max_mode_insufficient';
+  }
+  if (need.cap && typeof usedUsd === 'function') {
+    const cap = Number(member.usdCapMonth);
+    if (cap > 0 && usedUsd() >= cap) return 'usd_cap';
+  }
+  return null;
+}
+
+/** The classes `member` may use (cap ignored), in table order. For `/auth/me`. */
+export function permittedClasses(member) {
+  return Object.keys(CLASS_GRANTS).filter((cls) => CLASS_GRANTS[cls] !== null && classRefusal(member, cls) === null);
+}
