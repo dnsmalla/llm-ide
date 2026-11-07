@@ -22,14 +22,17 @@ use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 pub const BATCH_REL: &str = ".self-heal/BATCH.md";
 const BATCH_MAX: usize = 1024 * 1024;
 /// The Mac's Verify stage budget: a cold `make regression` builds graph-kit in release mode.
 const VERIFY_TIMEOUT_SECS: u64 = 5_400;
 const OUTPUT_TAIL: usize = 4_000;
+const DIFF_TEXT_MAX: usize = 2 * 1024 * 1024;
 /// Never part of a proposal: the batch, the submodule copies and the borrowed dependencies.
-const EXCLUDES: &[&str] = &[":(exclude).self-heal", ":(exclude).skills", ":(exclude)graph-kit", ":(exclude,glob)**/node_modules"];
+// `**/node_modules` alone matches the folder, not the files under it: a glob pathspec must match the whole path.
+const EXCLUDES: &[&str] = &[":(exclude).self-heal", ":(exclude).skills", ":(exclude)graph-kit", ":(exclude,glob)**/node_modules/**"];
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +55,16 @@ pub struct Verified {
     /// Protected paths the agent touched, reverted before anything was judged.
     pub reverted: Vec<String>,
     pub output: String,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDiff {
+    /// The text diff the page shows (binary changes read "Binary files differ"), at most 2 MiB.
+    pub text: String,
+    pub truncated: bool,
+    /// sha256 of the `--binary` patch this text was derived from: Apply applies only that patch.
+    pub patch_id: String,
 }
 
 /// A run id is the core's lowercase uuid: it becomes a folder and a branch name, so nothing else is accepted.
@@ -257,6 +270,98 @@ pub fn remove_in(main: &Path, dir: &Path, run_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Stages once; the shown text and the applicable patch come from that one index state (the Mac's reviewedPatch).
+pub fn diff_in(main: &Path, dir: &Path, run_id: &str) -> Result<ProposalDiff, String> {
+    let wt = worktree_of(main, dir, run_id)?;
+    let patch = staged_patch(&wt, true)?;
+    let mut args = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD"];
+    args.extend(pathspec());
+    let full = String::from_utf8_lossy(&git(&wt, &args, None)?).into_owned();
+    let truncated = full.len() > DIFF_TEXT_MAX;
+    let text = if truncated {
+        let mut cut = DIFF_TEXT_MAX;
+        while !full.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        full[..cut].to_string()
+    } else {
+        full
+    };
+    Ok(ProposalDiff { text, truncated, patch_id: sha256_hex(&patch) })
+}
+
+/// Applies exactly the reviewed patch to the source checkout, never a commit, then removes the worktree.
+pub fn apply_in(main: &Path, dir: &Path, run_id: &str, patch_id: &str) -> Result<(), String> {
+    let wt = worktree_of(main, dir, run_id)?;
+    let patch = staged_patch(&wt, true)?;
+    if patch.is_empty() {
+        return Err("The proposal has no changes.".into());
+    }
+    if sha256_hex(&patch) != patch_id {
+        return Err("The proposal changed since you opened it. Close it and review it again.".into());
+    }
+    // All or nothing: a partial apply would leave the checkout half changed.
+    git(main, &["apply", "--check", "-"], Some(&patch))?;
+    git(main, &["apply", "-"], Some(&patch))?;
+    // Applied: a failed cleanup must not read as a failed apply (a retry would then fail its --check).
+    let _ = remove_in(main, dir, run_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn self_heal_source() -> Result<String, String> {
+    blocking(|| Ok(ready()?.0.to_string_lossy().into_owned())).await
+}
+
+#[tauri::command]
+pub async fn self_heal_prepare(run_id: String, batch: String) -> Result<Prepared, String> {
+    blocking(move || {
+        let (main, dir) = ready()?;
+        prepare_in(&main, &dir, &run_id, &batch)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn self_heal_verify(run_id: String) -> Result<Verified, String> {
+    blocking(move || {
+        let (main, dir) = ready()?;
+        verify_in(&main, &dir, &run_id, VERIFY_TIMEOUT_SECS)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn self_heal_diff(run_id: String) -> Result<ProposalDiff, String> {
+    blocking(move || {
+        let (main, dir) = ready()?;
+        diff_in(&main, &dir, &run_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn self_heal_apply(run_id: String, patch_id: String) -> Result<(), String> {
+    blocking(move || {
+        let (main, dir) = ready()?;
+        apply_in(&main, &dir, &run_id, &patch_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn self_heal_remove(run_id: String) -> Result<(), String> {
+    blocking(move || {
+        let (main, dir) = ready()?;
+        remove_in(&main, &dir, &run_id)
+    })
+    .await
+}
+
 fn ready() -> Result<(PathBuf, PathBuf), String> {
     if !crate::self_heal::enabled() {
         return Err("Self-Heal runs only in a debug build".into());
@@ -376,6 +481,32 @@ mod tests {
         std::fs::write(plain.join("extension/server.mjs"), "").unwrap();
         assert!(checked_source(&plain).is_err(), "not a git repo");
         remove_in(&main, &dir, RUN).unwrap();
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_takes_exactly_the_reviewed_patch_into_the_checkout_without_a_commit() {
+        let (main, dir) = checkout("apply", 0);
+        let p = prepare_in(&main, &dir, RUN, "batch").unwrap();
+        let wt = PathBuf::from(&p.worktree_path);
+        std::fs::write(wt.join("extension/server.mjs"), "export const v = 2;\n").unwrap();
+        std::fs::create_dir_all(wt.join("extension/node_modules")).unwrap();
+        std::fs::write(wt.join("extension/node_modules/x.js"), "borrowed\n").unwrap();
+        let d = diff_in(&main, &dir, RUN).unwrap();
+        assert!(d.text.contains("+export const v = 2;") && !d.text.contains("node_modules") && !d.truncated, "{}", d.text);
+        assert_eq!(d.patch_id.len(), 64);
+        // The worktree moves on after review: Apply refuses the stale id and changes nothing.
+        std::fs::write(wt.join("extension/server.mjs"), "export const v = 3;\n").unwrap();
+        assert!(apply_in(&main, &dir, RUN, &d.patch_id).unwrap_err().contains("changed since"));
+        assert_eq!(std::fs::read_to_string(main.join("extension/server.mjs")).unwrap(), "export const v = 1;\n");
+        let d = diff_in(&main, &dir, RUN).unwrap();
+        apply_in(&main, &dir, RUN, &d.patch_id).unwrap();
+        assert_eq!(std::fs::read_to_string(main.join("extension/server.mjs")).unwrap(), "export const v = 3;\n");
+        assert_eq!(sh_git(&main, &["status", "--porcelain"]).trim(), "M extension/server.mjs", "applied, never committed");
+        assert_eq!(sh_git(&main, &["rev-parse", "HEAD"]).trim(), p.base_commit);
+        assert!(!wt.exists(), "the worktree is removed after apply");
+        assert_eq!(self_heal_branches(&main), "");
         let _ = std::fs::remove_dir_all(main.parent().unwrap());
     }
 }
