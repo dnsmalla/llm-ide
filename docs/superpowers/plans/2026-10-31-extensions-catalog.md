@@ -380,6 +380,15 @@ P5 server half (spec section 9b): `POST updates/check` resolves refs (no downloa
 
 Open items for P6 and later: the Mac Extensions screen and the allowlist Settings UI; whether the Claude CLI passes the host environment to an installed stdio server (unverified, see spec 9a); running registry package servers (needs a pinned, sandboxed launcher); Workspace Trust; installing a registry `server.json` item (a remote endpoint) and per-user index sources; SDK behaviour on a generated subset plugin root (R3, unverified); real-data shadow numbers (the compare is implemented and tested on synthetic state only); a registry field for per-server private-network opt-in; per-tool MCP deny lists; pooling MCP connections across turns (today each adapter turn pays the connect time, bounded at 15 s).
 
+### 16b. Rollout status (2026-11-07, plan 2026-11-07-extensions-catalog-p9)
+
+- M8 closed on the server: toggle takes `commit`, API 118 (`COMMIT_CHANGED`); the desktop sends it.
+- `GET active` reports `turns { claude, providers }`; the desktop screen says which chats ignore the switches.
+- P8: `LLMIDE_EXT_ACTIVE_SET` default on, kill switch `off`. The real paired token bench (Y1) has not run.
+- Mac targets: the Mac screen became the desktop screen; the Mac N-1 fallback, the Mac screen preference and Mac Mobile Control are dropped.
+- Deferred: P7 skills diet, P9 per-tool MCP deny list, phone list, token-estimate labels. Dropped: family switches, required-item lock.
+- Real window: not run (no window in this session).
+
 ### 16a. P6 Mac screen status (2026-10-31)
 
 The Mac Extensions screen is implemented against the 13 existing routes (installed list grouped by kind, switches, member checkboxes, trust/scan/update badges, consent sheet per executable kind, update preview then apply, rollback, repair, cached Browse with user-initiated Refresh, install from a GitHub URL). Models are decode-checked against the fixtures by `make api-gates`; view-model logic is covered by `ExtensionsCatalogTests`. Not done: token estimate labels, lock for required items, family-level switches and an N-1 server fallback (the screen needs API 94); Real-app pass pending (user).
