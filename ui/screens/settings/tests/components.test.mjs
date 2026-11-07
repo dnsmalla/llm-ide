@@ -131,13 +131,16 @@ test("SettingsScreen: a deep link (id, settings:<id>, or an old anchor) opens th
   assert.equal(m.screen.targetGroup(reg, "nope"), null);
 });
 
-test("SettingsScreen: the real registry renders the 18 live App groups in order, uppercase via the kit class, no project band without a project", () => {
+test("SettingsScreen: the real registry renders the live App groups in order; Team stays hidden without an admin /auth/me", () => {
   const reg = m.registryDefault.createSettingsRegistry();
   const out = html(h(m.screen.SettingsScreen, { env: env({}), registry: reg, expanded: new m.groups.ExpandedGroups(memStore()) }));
   const titles = [...out.matchAll(/class="ui-settings-title">([^<]*)</g)].map((x) => x[1].replaceAll("&amp;", "&"));
-  assert.deepEqual(titles, m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only" && g.status !== "dev-only").map((g) => g.title));
+  // Team is admin/owner-only (ADR 0021): it is registered but the row is absent while the role is unknown.
+  const alwaysVisible = m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only" && g.status !== "dev-only" && g.id !== "team");
+  assert.deepEqual(titles, alwaysVisible.map((g) => g.title));
   assert.equal(titles.length, 18);
   assert.ok(titles.includes("Phone and browser"), "phone and browser pairing is reachable");
+  assert.ok(!titles.includes("Team"), "Team is hidden until /auth/me says admin or owner");
   assert.ok(!out.includes("st-band-project"));
 });
 

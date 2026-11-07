@@ -9,6 +9,8 @@ import type { SettingsEnv } from "./host.ts";
 import { APP_GROUPS, ExpandedGroups, resolveAnchor } from "./groups.ts";
 import { SettingsGroup } from "./SettingsGroup.tsx";
 import { selfHealEnabled, subscribeSelfHeal } from "../shell/self-heal.ts";
+import { call } from "./core-api.ts";
+import { canManageTeam, teamRoleFromMe, type TeamRole } from "./team-model.ts";
 
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   override state = { failed: false };
@@ -80,11 +82,27 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
     el?.scrollIntoView?.({ block: "start", behavior: "smooth" });
   }, [target]);
 
+  // Team is an admin/owner group (ADR 0021): read the enforced role from /auth/me, not `users.role`.
+  // Fail closed: while the role is unknown the row is absent, so a signed-out or demoted account never sees it.
+  const [teamRole, setTeamRole] = useState<TeamRole | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      call(env.client, "GET", "/auth/me").then(
+        (body) => { if (alive) setTeamRole(teamRoleFromMe(body)); },
+        () => { if (alive) setTeamRole(null); },
+      );
+    };
+    read();
+    window.addEventListener("focus", read);
+    return () => { alive = false; window.removeEventListener("focus", read); };
+  }, [env.client]);
+
   const hasProject = Boolean(env.host.activeProjectPath?.());
   // Self-Heal shows only after the host said this debug build records (shell/self-heal.ts); never in a release build.
   const devOn = useSyncExternalStore(subscribeSelfHeal, selfHealEnabled, () => false);
   const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only" || (g.status === "dev-only" && !devOn)).map((g) => g.id));
-  const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title));
+  const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title) && (s.id !== "team" || canManageTeam(teamRole)));
   const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title)) : [];
   const row = (s: ReturnType<SettingsRegistry<SectionComponent>["sections"]>[number]) => {
     const open = store.current!.isOpen(s.id) || q.length > 0;

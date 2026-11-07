@@ -15,7 +15,7 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
 - Auth: 279 token, 13 public
 - Handler found: 286; no handler found: 6
-- No app and no extension caller: 102 (tests only: 86, comments/docs only: 16, no reference: 0)
+- No app and no extension caller: 98 (tests only: 82, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
@@ -49,7 +49,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (102):
+Endpoints with no client caller (98):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -118,10 +118,6 @@ Endpoints with no client caller (102):
 - `/host-api/push/status` — tests only
 - `/host-api/push/apns` — tests only
 - `/kb/self-heal/incidents/:id/ignore` — tests only
-- `/admin/members` — tests only
-- `/admin/members/:userId` — tests only
-- `/admin/invites` — tests only
-- `/admin/invites/:id` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -363,10 +359,10 @@ Endpoints with no client caller (102):
 | `/kb/self-heal/runs` | ALL_ENDPOINTS | POST | token | core | `extension/routes/self-heal.mjs:116` | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/outcome` | ALL_ENDPOINTS | ANY | token | core | - | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/resolve` | ALL_ENDPOINTS | ANY | token | core | - | `SelfHealSection.tsx` | - | - |
-| `/admin/members` | ALL_ENDPOINTS | GET | token | core | `extension/routes/team-routes.mjs:87` | - | - | tests only |
-| `/admin/members/:userId` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:30` | - | - | tests only |
-| `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:109` | - | - | tests only |
-| `/admin/invites/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:31` | - | - | tests only |
+| `/admin/members` | ALL_ENDPOINTS | GET | token | core | `extension/routes/team-routes.mjs:87` | `team-model.ts` | - | - |
+| `/admin/members/:userId` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:30` | `team-model.ts` | - | - |
+| `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:109` | `team-model.ts` | - | - |
+| `/admin/invites/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:31` | `team-model.ts` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:927` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:96` | `core.ts` | `config.ts` | - |
@@ -381,7 +377,7 @@ Endpoints with no client caller (102):
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:418` | - | - | tests only |
 | `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:958` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:465` | `core.ts` | `config.ts` | - |
-| `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:647` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
+| `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:647` | `AboutSection.tsx`, `AccountSection.tsx`, `SettingsScreen.tsx`, `TeamSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:668` | - | - | tests only |
 | `/auth/me/password` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:707` | - | `UserAccountSettings.tsx` | - |
 | `/auth/me/secrets` | public+auth | GET, POST | token | core | `extension/server/auth-routes.mjs:722` | `RepositoriesSection.tsx`, `builtin-keys-model.ts`, `disconnect-all.ts`, `providers-model.ts`, `source-core.ts` | - | - |
@@ -453,7 +449,7 @@ Endpoints with no client caller (102):
 
 ## Consistency
 
-Checked: 292 roster entries, 561 app source files, 52 extension source files.
+Checked: 292 roster entries, 564 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

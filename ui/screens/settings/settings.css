@@ -131,3 +131,11 @@
 .sh-files li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .sh-files code { overflow-wrap: anywhere; }
 .sh-test-flag { color: var(--tok-color-warning); border: 1px solid color-mix(in srgb, var(--tok-color-warning) 45%, var(--tok-color-border)); border-radius: 6px; padding: 1px 5px; font-size: 10px; }
+
+/* Team (ADR 0021 H2 local part): member/invite rows, the inline grant editor and the one-time token. */
+.st-team-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.st-team-row { display: flex; align-items: center; gap: var(--tok-space-md); flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: color-mix(in srgb, var(--tok-color-surface2) 58%, transparent); }
+.st-team-row .st-item-text { flex: 1 1 220px; }
+.st-team-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.st-token { display: block; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); overflow-wrap: anywhere; }
+@media (max-width: 720px) { .st-team-fields { grid-template-columns: 1fr; } }

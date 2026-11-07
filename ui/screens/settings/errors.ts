@@ -39,6 +39,11 @@ const BY_CODE: Record<string, (ctx?: ErrorContext) => string> = {
   // Folders
   INVALID_PATH: () => "That folder is too broad to trust as one project. Pick the project folder itself.",
   NOT_FOUND: () => "That item no longer exists. Reload the list.",
+  // Team (ADR 0021): the server's role and last-owner rules read as guidance, never as a raw message.
+  ROLE_DENIED: () => "Your team role does not allow that. Only an owner can change an owner or grant owner; only an owner can invite an admin.",
+  SELF_GRANT: () => "You cannot change your own role or grants. Ask another admin or the owner.",
+  LAST_OWNER: () => "The last owner cannot be demoted. Make another member an owner first.",
+  INVITE_INVALID: () => "That invite is not valid. It may have been used, expired, or bound to another email address.",
   // Generic
   VALIDATION_FAILED: () => "The server did not accept that. Check the values and try again.",
   AUTH_REQUIRED: () => "You are signed out or the session expired. Sign in again.",

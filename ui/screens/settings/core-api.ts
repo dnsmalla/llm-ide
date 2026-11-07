@@ -8,7 +8,7 @@ export interface CoreResponse {
 }
 
 export interface CoreClient {
-  request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<CoreResponse>;
+  request(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<CoreResponse>;
 }
 
 /** A refusal or failure. `code` is the server's error code (or a local one), never shown raw. */
@@ -39,7 +39,7 @@ export function toApiError(res: CoreResponse): ApiError {
 }
 
 /** Runs a request; non-2xx throws ApiError, a transport failure throws ApiError(0, "UNREACHABLE"). */
-export async function call(client: CoreClient, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+export async function call(client: CoreClient, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
   let res: CoreResponse;
   try {
     res = await client.request(method, path, body, signal);

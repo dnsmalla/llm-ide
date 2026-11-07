@@ -32,6 +32,9 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "connections", title: "Connections", sf: "tray.and.arrow.down", icon: "plug", status: "partial", band: "app" },
   { id: "updates", title: "Updates & About", sf: "arrow.down.circle", icon: "circle-arrow-down", status: "partial", band: "app" },
   { id: "mobile", title: "Phone and browser", sf: "iphone", icon: "smartphone", status: "works", band: "app" },
+  // Team Hub (ADR 0021 H2 local part): members and invites over API 123. SettingsScreen hides this row
+  // unless `/auth/me.member.teamRole` is admin or owner; the body re-checks the same role.
+  { id: "team", title: "Team", sf: "person.3", icon: "circle-user", status: "works", band: "app" },
   { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app" },
   { id: "tool-permissions", title: "Tool permissions", sf: "hand.raised", icon: "hand", status: "works", band: "app" },
   { id: "agent-sdk", title: "Claude Agent SDK", sf: "shippingbox", icon: "package", status: "works", band: "app" },
