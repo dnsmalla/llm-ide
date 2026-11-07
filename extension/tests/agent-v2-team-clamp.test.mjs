@@ -22,7 +22,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const { handleAgentV2Routes, startHostTurn } = await import('../routes/agent-v2.mjs');
-const { usedUsdMonth } = await import('../kb/usage.mjs');
+const { usedUsdMonth, estimateTurnCostUsd } = await import('../kb/usage.mjs');
 
 // --- req/res doubles (the shape tests/agent-v2-routes.test.mjs uses) --------
 
@@ -243,9 +243,9 @@ test('a member under the cap runs, and a cap of 0 never refuses', async () => {
   assert.equal(auditRows(uncapped.id).length, 0);
 });
 
-// --- R-012#1: a cancelled/failed turn still reaches usedUsdMonth ----------
+// --- R-012#1 / R-013#1: a cancelled/failed turn charges a small estimate ---
 
-test('an aborted turn writes the cost-bearing ledger row and counts toward usedUsdMonth', async () => {
+test('an aborted turn is charged a small token estimate, not the whole remaining budget', async () => {
   const doer = member('member', 'execute');
   getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
   spend(doer.id, 5); // 15 of the 20 USD cap is left
@@ -271,23 +271,29 @@ test('an aborted turn writes the cost-bearing ledger row and counts toward usedU
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(usedUsdMonth(getDb(), doer.id), 20, 'the aborted turn charged the remaining turn budget');
+  // R-013#1: the charge is the token estimate (a fraction of a cent), NOT the 15 USD the turn was
+  // allowed to spend. The old behaviour locked a capped member out for the month after one Stop.
+  const estimate = estimateTurnCostUsd('claude-sonnet-5', { inputTokens: 120, outputTokens: 8 });
+  assert.ok(estimate > 0 && estimate < 0.01, `small estimate, got ${estimate}`);
+  const spent = usedUsdMonth(getDb(), doer.id);
+  assert.ok(Math.abs(spent - (5 + estimate)) < 1e-9, `charged the estimate (got ${spent})`);
+  assert.ok(spent < 6, 'one Stop never consumes the remaining monthly budget');
   const row = getDb().prepare(
     'SELECT model, endpoint, input_tokens, output_tokens, cost_usd FROM usage_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 1',
   ).get(doer.id);
   assert.deepEqual(row, {
     model: 'claude-sonnet-5', endpoint: '/agent/v2/stream',
-    input_tokens: 120, output_tokens: 8, cost_usd: 15,
+    input_tokens: 120, output_tokens: 8, cost_usd: estimate,
   });
 
-  // The month is now at the cap: the next turn is refused before the engine starts.
+  // The lost budget is still usable: the member can run another turn.
   const next = fakeTurn();
-  const { res: refused } = await stream(doer, { message: 'again', model: 'claude-sonnet-5' }, { runTurn: next.runTurn });
-  assert.equal(refused.statusCode, 429);
-  assert.equal(next.calls.length, 0);
+  const { res: allowed } = await stream(doer, { message: 'again', model: 'claude-sonnet-5' }, { runTurn: next.runTurn });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(next.calls.length, 1);
 });
 
-test('a failed turn with no reported cost also charges its budget, but one with no usage writes no row', async () => {
+test('a failed turn charges a token estimate, but one with no usage writes no row', async () => {
   const doer = member('member', 'execute');
   getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
   spend(doer.id, 4); // 16 left
@@ -301,7 +307,7 @@ test('a failed turn with no reported cost also charges its budget, but one with 
   }), makeRes(), { runTurn: async () => { throw Object.assign(new Error('no key'), { code: 'PROVIDER_UNAVAILABLE' }); } });
   assert.equal(usedUsdMonth(getDb(), doer.id), 4, 'no usage event = no charge');
 
-  // Failed after an API response: the usage event is the evidence, so charge the turn's budget.
+  // Failed after an API response: the usage event is the evidence, so charge its token estimate.
   await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
@@ -314,7 +320,51 @@ test('a failed turn with no reported cost also charges its budget, but one with 
       throw new Error('stream failed');
     },
   });
-  assert.equal(usedUsdMonth(getDb(), doer.id), 20, 'a failed turn with spend is charged conservatively');
+  const estimate = estimateTurnCostUsd('claude-sonnet-5', { inputTokens: 30, outputTokens: 3 });
+  const spent = usedUsdMonth(getDb(), doer.id);
+  assert.ok(Math.abs(spent - (4 + estimate)) < 1e-9, `a failed turn with spend is charged its estimate (got ${spent})`);
+});
+
+test('engine partial totals win: a reported partial cost is used as-is, otherwise its tokens are estimated', async () => {
+  const doer = member('member', 'execute');
+  getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
+
+  // The engine attaches a cost it already got from an interrupted result. No usage event is emitted.
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'go', mode: 'execute', model: 'claude-opus-5-5', agentContext: { chatSessionId: `partial-cost-${++seq}`, workspaceRoot: WS } },
+    user: doer,
+  }), makeRes(), {
+    runTurn: async ({ onEvent }) => {
+      onEvent({ type: 'init', sessionId: 'sdk-partial', model: 'claude-opus-5-5', tools: [], capabilities: [] });
+      throw Object.assign(new Error('stopped'), {
+        usageTotals: { inputTokens: 900, outputTokens: 40, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.0042 },
+      });
+    },
+  });
+  assert.equal(usedUsdMonth(getDb(), doer.id), 0.0042, 'the engine-reported partial cost is preferred');
+  const row = getDb().prepare(
+    'SELECT input_tokens, output_tokens, cost_usd FROM usage_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+  ).get(doer.id);
+  assert.deepEqual(row, { input_tokens: 900, output_tokens: 40, cost_usd: 0.0042 });
+
+  // Partial tokens with no cost: estimate from those tokens.
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'go', mode: 'execute', model: 'claude-opus-5-5', agentContext: { chatSessionId: `partial-tokens-${++seq}`, workspaceRoot: WS } },
+    user: doer,
+  }), makeRes(), {
+    runTurn: async () => {
+      throw Object.assign(new Error('stopped'), {
+        usageTotals: { inputTokens: 900, outputTokens: 40, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
+      });
+    },
+  });
+  const estimate = estimateTurnCostUsd('claude-opus-5-5', { inputTokens: 900, outputTokens: 40 });
+  const spent = usedUsdMonth(getDb(), doer.id);
+  assert.ok(Math.abs(spent - (0.0042 + estimate)) < 1e-9, `partial tokens are estimated (got ${spent})`);
 });
 
 // --- the same clamp on the in-process Host API turn -----------------------

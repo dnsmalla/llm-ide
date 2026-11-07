@@ -532,6 +532,57 @@ function costOrNull(v) {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6) / 1e6 : null;
 }
 
+// ---------------------------------------------------------------------------
+// Cost estimate for a turn that never reported one (R-013#1)
+// ---------------------------------------------------------------------------
+//
+// A successful turn carries the engine's own `costUsd`. A turn the user stops, or one that fails after
+// real work, has its tokens (the engine's usage event / partial totals) but no cost. Charging it the
+// member's WHOLE remaining monthly budget — the old conservative fallback — locked a capped member out
+// for a month after one Stop click, and wrote spend that never happened into `usage_ledger.cost_usd`.
+//
+// These rates are an order-of-magnitude ESTIMATE only, never a bill: the caller clamps the result to
+// the USD budget the turn was allowed to spend. USD per MILLION tokens. They follow the published
+// Anthropic 4.5-generation list prices (Opus 4.5 / Sonnet 4.5 / Haiku 4.5); a future id in the same
+// family is close enough for an estimate. An unknown family falls back to the Sonnet rates — the
+// middle tier, never the most expensive one, because this number is money the user is shown.
+export const MODEL_FAMILY_PRICES = Object.freeze({
+  opus: Object.freeze({ input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }),
+  sonnet: Object.freeze({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }),
+  haiku: Object.freeze({ input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }),
+  generic: Object.freeze({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }),
+});
+
+/** The price row for `model` by family substring (`opus`, `sonnet`, `haiku`), else `generic`. */
+export function priceForModel(model) {
+  const id = String(model ?? '').toLowerCase();
+  for (const family of Object.keys(MODEL_FAMILY_PRICES)) {
+    if (family !== 'generic' && id.includes(family)) return MODEL_FAMILY_PRICES[family];
+  }
+  return MODEL_FAMILY_PRICES.generic;
+}
+
+/**
+ * USD estimate for one turn's token counts — `{ inputTokens, outputTokens, cacheReadTokens,
+ * cacheCreationTokens }`, the shape of the engine's partial totals. Returns 0 for an empty usage and a
+ * non-negative rounded amount otherwise. Never reads or writes the DB; the caller decides whether the
+ * estimate applies (only a turn with no engine-reported cost).
+ */
+export function estimateTurnCostUsd(model, usage) {
+  const price = priceForModel(model);
+  const tokens = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const usd = (
+    tokens(usage?.inputTokens) * price.input
+    + tokens(usage?.outputTokens) * price.output
+    + tokens(usage?.cacheReadTokens) * price.cacheRead
+    + tokens(usage?.cacheCreationTokens) * price.cacheWrite
+  ) / 1_000_000;
+  return Math.round(usd * 1e6) / 1e6;
+}
+
 /**
  * The user's USD spend this month (all providers and models), from `usage_ledger.cost_usd` (migration
  * 0069). The member cap is monthly, so it is enforced against this sum, never against a per-turn budget.

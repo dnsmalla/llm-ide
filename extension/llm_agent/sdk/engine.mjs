@@ -1116,6 +1116,21 @@ function sumInto(totals, rows) {
   totals.cacheCreationTokens = rows.reduce((n, m) => n + m.cacheCreationTokens, 0);
 }
 
+/**
+ * Attach the turn's partial `usageTotals` to the error being thrown (R-013#1). The route meters a
+ * failed/stopped turn from this: the tokens it lists are real spend, and `costUsd` is the SDK's own
+ * accounting when an interrupted result already arrived. An error with no token and no cost evidence
+ * gets nothing, so the route does not invent a ledger row for a turn that never reached the model.
+ */
+function attachPartialUsage(err, usageTotals) {
+  if (!err || typeof err !== 'object' || !usageTotals) return;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const tokens = n(usageTotals.inputTokens) + n(usageTotals.outputTokens)
+    + n(usageTotals.cacheReadTokens) + n(usageTotals.cacheCreationTokens);
+  if (tokens === 0 && usageTotals.costUsd == null) return;
+  try { if (err.usageTotals == null) err.usageTotals = usageTotals; } catch { /* frozen error */ }
+}
+
 // `result.modelUsage` ({ [model]: ModelUsage }, sdk.d.ts) → a list with the
 // ledger's field names. Anything malformed is dropped rather than metered as 0.
 export function normalizeModelUsage(modelUsage) {
@@ -2038,6 +2053,12 @@ export async function runAgentV2Turn(
       }
     }
   } catch (err) {
+    // R-013#1: a stopped/failed turn throws instead of returning `usageTotals`, but its token counts
+    // (and, when an interrupted result already arrived, the SDK's own cost) are still in `usageTotals`.
+    // Attach them so the route meters an estimate from the real spend instead of charging the member's
+    // whole remaining budget. Only when there is evidence: a turn that failed before any model call
+    // attaches nothing, and the route then writes no ledger row (nothing was billed).
+    attachPartialUsage(err, usageTotals);
     // A resume the SDK cannot honor (session pruned / cleared) is
     // recoverable at the route layer: drop the mapping and start fresh. Only
     // while nothing has happened yet, though — the client answers
@@ -2046,7 +2067,9 @@ export async function runAgentV2Turn(
     // mid-turn failure whose message merely mentions "session" re-ran tools
     // that had already run (Bash, Edit) and threw the chat's history away.
     if (resume && !progressed && /session|conversation|resume/i.test(String(err?.message ?? ''))) {
-      throw Object.assign(new Error(err?.message ?? String(err)), { code: 'SESSION_UNRESUMABLE' });
+      throw Object.assign(new Error(err?.message ?? String(err)), {
+        code: 'SESSION_UNRESUMABLE', usageTotals: err?.usageTotals,
+      });
     }
     // The SDK reports EVERY spawn-time failure of an existing CLI binary as a
     // libc/musl mismatch (errorClass 'executable_launch_failed'), which on
