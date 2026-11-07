@@ -358,16 +358,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             />
             {approvals?.(state)}
             {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
-            <div className="chat-controls">
-              <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
-              <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
-                onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
-                userModels={userModels} onRemove={removeModel} />
-              <EffortPicker levels={effortLevels} value={effectiveEffort(effortPick, effortLevels)} onChange={effortStore.set} />
+            <div className="chat-notes">
               {modelNotice && <p className="chat-error" role="alert">{modelNotice}</p>}
               <ModelNotices kinds={modelNotices({ plainChat: plain, routerOn: route?.enabled, groups })} onAllowTools={() => void allowProviderTools()} />
               <PendingSwitchNote pending={route?.pending} />
-              <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
             <DraftComposer
               key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId} active={active}
@@ -375,6 +369,14 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
               meter={<ContextMeter usage={state.context} />}
+              controls={<>
+                <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} />
+                <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
+                  onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
+                  userModels={userModels} onRemove={removeModel} />
+                <EffortPicker levels={effortLevels} value={effectiveEffort(effortPick, effortLevels)} onChange={effortStore.set} />
+                <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
+              </>}
               memory={<>
                 <button ref={memoryChip} type="button" className="chat-icon-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} title="Session memory" onClick={() => setMemoryOpen((v) => !v)}>
                   <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>

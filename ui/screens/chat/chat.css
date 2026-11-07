@@ -63,7 +63,6 @@
 .chat-note { font-size: var(--tok-type-caption-size); color: var(--tok-color-warning); }
 .chat-error { color: var(--tok-color-danger); font-size: var(--tok-type-caption-size); }
 .chat-empty { margin: auto; text-align: center; display: grid; gap: var(--tok-space-md); }
-.chat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-md); padding: var(--tok-space-xs) var(--tok-space-md); }
 .chat-pick { display: inline-flex; align-items: center; gap: var(--tok-space-xs); }
 .chat-pick-label { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .chat-pick[data-bypass="true"] select { border-color: var(--tok-color-danger); color: var(--tok-color-danger); }
@@ -96,7 +95,6 @@
 .chat-dock-history { min-width: 0; max-width: 220px; font: inherit; font-size: 12px; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 2px 4px; }
 .chat-dock-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; }
 .chat-dock-btn:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
-.chat-dock-mode .chat-controls { flex-wrap: wrap; }
 .chat-dock-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-context { position: relative; }
 .chat-context-list { list-style: none; margin: var(--tok-space-xs) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); }
@@ -136,3 +134,7 @@
 .chat-context-list li { display: grid; grid-template-columns: 1fr auto 48px; }
 .chat-context-list li > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .chat-context-list li[data-muted] { color: var(--tok-color-text-muted); }
+.chat-composer-bar { flex-wrap: wrap; }
+.chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.chat-notes { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); padding: 0 var(--tok-space-md); }
+.chat-notes:empty { display: none; }

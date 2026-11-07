@@ -23,7 +23,9 @@ export interface ComposerProps {
   disabledReason?: string | null;
   /** Slash menu, @ mentions, skill chips and attachments (slash/extras.tsx); absent = the plain composer. */
   extras?: ComposerExtras;
-  /** Bottom-bar leading control (session memory). */
+  /** The mode, model, effort and permission pickers: in the bottom bar after Library/Attach, as on the Mac. */
+  controls?: ReactNode;
+  /** Session memory, after the pickers (the Mac's memoryButton). */
   memory?: ReactNode;
   /** Token/cap meter shown at the right of the bottom bar. */
   meter?: ReactNode;
@@ -170,17 +172,19 @@ export function Composer(p: ComposerProps) {
           }
         }}
       />
+      {/* The Mac's toolbar order (ChatComposer.toolbarSingleRow): context buttons, pickers, memory | meter, key hint, voice, send. */}
       <div className="chat-composer-bar">
-        {p.memory}
-        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button> : null}
         {p.extras?.toolbar}
         {!p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
+        {p.controls}
+        {p.memory}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
         {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
         {p.meter}
         <KeyHint />
+        {voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button> : null}
         {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>
       </div>
