@@ -37,6 +37,7 @@ import { featureStore } from "./feature-store";
 import { disabledSectionText, isSectionEnabled, keepSectionNotice, type SectionNotice } from "./features";
 import { quickSwitchRows } from "./menu-model";
 import { coreApiWarning } from "./core-api-floor";
+import { startSelfHealPump } from "./self-heal";
 declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 
 export interface ShellProps {
@@ -112,6 +113,14 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       openInbox: () => globalThis.dispatchEvent?.(new Event("llmide:open-inbox")),
     });
     return () => { setPushSender(null); off(); };
+  }, []);
+  useEffect(() => {
+    if (!shellHost.isAvailable()) return undefined;
+    // Self-Heal (debug builds only): the host answers enabled: false in a release build and the pump stops.
+    return startSelfHealPump({
+      take: () => invokeHost<unknown>("self_heal_take"),
+      post: (incidents) => core.request("/kb/self-heal/incidents", { method: "POST", body: { incidents } }),
+    });
   }, []);
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
 

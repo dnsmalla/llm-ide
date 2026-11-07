@@ -1,6 +1,7 @@
 // Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
 import { notifyTask } from "../../shell/notify/notify";
+import { reportUiIncident } from "../../shell/self-heal";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
@@ -668,6 +669,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
+      // The runner itself failed (not a stage verdict): a Self-Heal incident in debug builds.
+      reportUiIncident("loop", e instanceof Error ? e.message : String(e));
       void notifyTask("loop", false);
     } finally {
       runningRef.current = false;

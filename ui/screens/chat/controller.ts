@@ -14,6 +14,7 @@ import { describeError, httpLike, type CoreTransport, type ReplayFrame } from ".
 import { cancelTurn } from "./route";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, type BypassGate } from "./bypass";
 import { HISTORY_PAGE } from "./virtual";
+import { reportUiIncident } from "../shell/self-heal";
 
 export interface SendOptions {
   mode: string;
@@ -136,6 +137,8 @@ export class ChatController {
     const r = this.rt(id);
     const next = reduce(r.state, action);
     if (next !== r.state) {
+      // Self-Heal (debug builds): a turn that just failed is one incident (the Mac's ChatEngine.error didSet).
+      if (next.phase === "error" && r.state.phase !== "error" && next.error) reportUiIncident("chat", next.error.message);
       r.state = next;
       if (next.queue.length === 0) r.queued.length = 0; // aborted: the reducer dropped the whole queue
       this.emit();
