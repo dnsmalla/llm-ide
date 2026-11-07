@@ -2226,8 +2226,10 @@ export type PostAgentV2StreamRequest = {
     attachments?: Record<string, unknown>[];
     /** Skip the recorded SDK session id and start a new one */
     fresh?: boolean;
-    /** read only when fresh is true */
+    /** read only when fresh is true (with LLMIDE_V2_CONTINUE_SUMMARY=on, an ended chat's older turns are summarised instead of replayed) */
     history?: Record<string, unknown>[];
+    /** Ended-chat continuation (API 119): 'replay' gives this turn the chat's full history instead of a summary. Ignored unless LLMIDE_V2_CONTINUE_SUMMARY=on. */
+    continueMode?: "replay";
     /** The client's own copy of the chat's route (session router, K1 P6b): the server re-creates a missing route row from it before the cap check. It can only restore or raise, never lower an existing row. Ignored with the router off. */
     routeSeed?: {
       tokenLimit?: number;

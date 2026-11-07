@@ -162,14 +162,14 @@ Endpoints with no client caller (94):
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:210` | - | - | tests only |
-| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:304` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
-| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:307` | `controller.ts` | `agent-v2-client.ts` | - |
-| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:310` | - | `agent-v2-client.ts` | - |
-| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:313` | `route.ts` | - | - |
-| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:318` | `controller.ts` | - | - |
-| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:322` | `controller.ts` | - | - |
-| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:325` | `route.ts` | - | - |
-| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:331` | `Badges.tsx` | - | - |
+| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:306` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
+| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:309` | `controller.ts` | `agent-v2-client.ts` | - |
+| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:312` | - | `agent-v2-client.ts` | - |
+| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:315` | `route.ts` | - | - |
+| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:320` | `controller.ts` | - | - |
+| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:324` | `controller.ts` | - | - |
+| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:327` | `route.ts` | - | - |
+| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:333` | `Badges.tsx` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:111` | `NativeAutoTasksScreen.tsx`, `NativeLoopScreen.tsx`, `run-custom.ts` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `NativeLoopScreen.tsx` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:259` | - | `App.tsx`, `useQuestions.ts` | - |
@@ -347,7 +347,7 @@ Endpoints with no client caller (94):
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | `sync-model.ts` | - | - |
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:873` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:874` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:107` | `core.ts` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:132` | `core.ts` | `config.ts` | - |
@@ -358,7 +358,7 @@ Endpoints with no client caller (94):
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:331` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:376` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:904` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:905` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:423` | `core.ts` | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:605` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:620` | - | - | tests only |

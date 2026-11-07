@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 118
+  x-api-version: 119
 servers:
   - url: "https://{host}"
     variables:
@@ -573,7 +573,12 @@ paths:
                   type: "array"
                   items:
                     type: "object"
-                  description: "read only when fresh is true"
+                  description: "read only when fresh is true (with LLMIDE_V2_CONTINUE_SUMMARY=on, an ended chat's older turns are summarised instead of replayed)"
+                continueMode:
+                  type: "string"
+                  enum:
+                    - "replay"
+                  description: "Ended-chat continuation (API 119): 'replay' gives this turn the chat's full history instead of a summary. Ignored unless LLMIDE_V2_CONTINUE_SUMMARY=on."
                 routeSeed:
                   type: "object"
                   description: "The client's own copy of the chat's route (session router, K1 P6b): the server re-creates a missing route row from it before the cap check. It can only restore or raise, never lower an existing row. Ignored with the router off."
@@ -16360,7 +16365,7 @@ components:
                 - "null"
             raw: {}
         - title: "notice"
-          description: "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal | mcp_status (sent after the result, so the Mac, which stops at the terminal event, does not show it) | route_switch | session_budget (session router, K1 P6b, API 91: data {from, to, reason, cold, estimatedPrefillTokens} and {used, limit, remaining, level warn80 or reached}; decoded by the Mac, ignored by an older one). `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough."
+          description: "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal | mcp_status (sent after the result, so the Mac, which stops at the terminal event, does not show it) | route_switch | session_budget | chat_continued (ended-chat continuation, API 119, only with LLMIDE_V2_CONTINUE_SUMMARY=on: level info but shown by the desktop; data {reason fresh | no_session | idle, coveredTurns, keptTurns, cached}; sent right after mode_set) (session router, K1 P6b, API 91: data {from, to, reason, cold, estimatedPrefillTokens} and {used, limit, remaining, level warn80 or reached}; decoded by the Mac, ignored by an older one). `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough."
           additionalProperties: false
           required:
             - "type"

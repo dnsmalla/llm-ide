@@ -33,6 +33,10 @@ test("fixtures carry their fields through the decode", () => {
   const t = c.decodeEvent(by.approval_request_write).event;
   assert.equal(t.toolName, "Write");
   assert.equal(c.decodeEvent(by.notice_session_budget).event.data.limit, 50000);
+  const cont = c.decodeEvent(by.notice_chat_continued).event;
+  assert.equal(cont.kind, "chat_continued");
+  assert.equal(cont.level, "info");
+  assert.equal(cont.data.reason, "no_session");
   assert.equal(c.decodeEvent(by.error).event.retryable, true);
   assert.equal(c.decodeEvent(by.context_usage).event.categories.length, 4);
 });

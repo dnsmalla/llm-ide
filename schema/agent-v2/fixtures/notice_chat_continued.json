@@ -1,0 +1,7 @@
+{
+  "type": "notice",
+  "kind": "chat_continued",
+  "level": "info",
+  "text": "Continued from a summary of 8 earlier messages and the last 6 in full. Your full history is unchanged.",
+  "data": { "reason": "no_session", "coveredTurns": 8, "keptTurns": 6, "cached": false }
+}

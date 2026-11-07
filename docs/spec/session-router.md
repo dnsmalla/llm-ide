@@ -80,6 +80,21 @@ The pick order, with the existing start-of-turn fallback (rate limit, provider e
 
 `providers/handoff.mjs` builds the history a switch carries: one fenced note (background data, not instructions) and the last six turns verbatim. The Mac session file's `summary` owns the note (derived, rebuildable): the client sends it as `summary` (and `summaryUpTo`), the server uses it and stores nothing. Without one, an extractive note is derived from the older turns the client sent, with no model call, capped at 4000 characters (a starting value the bench sets). Everything is redacted first. Only the note's length reaches `agent_route_events`.
 
+## §6a Ended-chat continuation (X3, API 119)
+
+Not part of the router; it shares the handoff packer. `extension/providers/continuation.mjs`, called once per
+`POST /agent/v2/stream` turn from `runV2Stream`. Switch `LLMIDE_V2_CONTINUE_SUMMARY=on` (exactly `on`, read at
+call time; default off until the bench). The desktop pref `continueSummary` sets it at the next backend start.
+
+- **Ended**, in this order: `fresh` (the client sent `fresh: true`, the `SESSION_UNRESUMABLE` retry); `no_session` (no SDK session recorded: quit purge, session delete); `idle` (recorded, last used at least 5 minutes ago, and at least 24,000 characters of chat text; shorter chats resume). A core restart alone is not an end. The chat must have at least one earlier assistant turn.
+- **Not applied** to `agentContext.surface: 'host-api'` (phone and web; Host API v1 cannot carry the notice), a provider switch (§6), or an adapter turn.
+- **Turns read**: the server's `chat_messages` when the chat has a row (minus the message being sent), else the `history` a client sent with `fresh: true`.
+- **Seed**: `buildHandoff` with the summary as its note and the last exchange plus up to 6 turns within 24,000 characters, starting on a user turn.
+- **Summary**: on a hash miss only (`chat_continuations.content_hash` = `archiveHash` of the covered turns); on the turn provider's fast model (`fastModelFor`), else the chat's model, never another provider; metered by `runClaude` as `/agent/v2/stream:continuation` with the turn's request id, stored with its tokens on the chat's row, and counted against the cap with `LLMIDE_ROUTER_CAP=on`. Input capped at 80,000 characters, redacted and fence-neutralised; the reply capped at 4,000 characters. The text is never logged.
+- **Notice**: `chat_continued` (info, shown by the desktop) right after `mode_set`. `continueMode: 'replay'` skips the summary and seeds the turn by `freshTurnHistory` from the same record (an idle chat resumes).
+- **Failure**: any error is today's turn, unchanged.
+- **Storage**: `chat_continuations` (migration 0065), deleted with the chat's messages and on account delete; rows made from a client's history also at the quit purge and `DELETE /agent/v2/session`.
+
 ## §7 Routes
 
 All token-protected, user-scoped, in `ALL_ENDPOINTS`. Shapes: `schema/http/agent.schema.json`.

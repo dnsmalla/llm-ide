@@ -734,7 +734,13 @@
                 "type": "object"
               },
               "x-optional": true,
-              "description": "read only when fresh is true"
+              "description": "read only when fresh is true (with LLMIDE_V2_CONTINUE_SUMMARY=on, an ended chat's older turns are summarised instead of replayed)"
+            },
+            "continueMode": {
+              "type": "string",
+              "enum": ["replay"],
+              "x-optional": true,
+              "description": "Ended-chat continuation (API 119): 'replay' gives this turn the chat's full history instead of a summary. Ignored unless LLMIDE_V2_CONTINUE_SUMMARY=on."
             },
             "routeSeed": {
               "type": "object",
