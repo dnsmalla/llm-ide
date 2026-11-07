@@ -1854,8 +1854,9 @@ function freePort() {
   });
 }
 
-test('server.mjs admin routes refuse a member (403 ROLE_DENIED) and let the owner through', async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), 'llmide-admin-gate-'));
+// One spawned core per test: real env, real routes, a temp DB.
+async function withRealServer(fn) {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'llmide-team-server-'));
   const port = await freePort();
   const env = {
     ...process.env,
@@ -1881,39 +1882,69 @@ test('server.mjs admin routes refuse a member (403 ROLE_DENIED) and let the owne
       await new Promise((r) => setTimeout(r, 100));
     }
     assert.ok(up, `server booted: ${out.slice(-1500)}`);
-
-    const emailFor = (who) => `admin-gate-${who}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`;
-    const register = (email) => fetch(`${base}/auth/register`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD }),
+    const emailFor = (who) => `team-${who}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`;
+    const json = (method, pathname, body, tok) => fetch(base + pathname, {
+      method,
+      headers: { 'content-type': 'application/json', ...(tok ? { authorization: `Bearer ${tok}` } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const tokenFor = async (email) => {
-      const r = await fetch(`${base}/auth/login`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, password: PASSWORD }),
-      });
+    const newAccount = async (who) => {
+      const email = emailFor(who);
+      assert.equal((await json('POST', '/auth/register', { email, password: PASSWORD })).status, 201);
+      const r = await json('POST', '/auth/login', { email, password: PASSWORD });
       assert.equal(r.status, 200);
-      return (await r.json()).accessToken;
+      const tok = (await r.json()).accessToken;
+      const me = await (await json('GET', '/auth/me', undefined, tok)).json();
+      return { email, token: tok, id: me.id };
     };
-    const ownerEmail = emailFor('owner');
-    const memberEmail = emailFor('member');
-    assert.equal((await register(ownerEmail)).status, 201);
-    assert.equal((await register(memberEmail)).status, 201);
-    const ownerToken = await tokenFor(ownerEmail);
-    const memberToken = await tokenFor(memberEmail);
-
-    const backup = (tok) => fetch(`${base}/admin/backup`, { method: 'POST', headers: { authorization: `Bearer ${tok}` } });
-    const denied = await backup(memberToken);
-    assert.equal(denied.status, 403);
-    assert.equal((await denied.json()).error.code, 'ROLE_DENIED');
-    const allowed = await backup(ownerToken);
-    assert.equal(allowed.status, 200, out.slice(-1500));
-
-    const metrics = await fetch(`${base}/metrics`, { headers: { authorization: `Bearer ${memberToken}` } });
-    assert.equal(metrics.status, 403, 'a member cannot scrape /metrics');
+    await fn({ base, json, newAccount, log: () => out.slice(-1500) });
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => (child.exitCode != null ? r() : child.once('exit', r)));
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+test('server.mjs admin routes refuse a member (403 ROLE_DENIED) and let the owner through', async () => {
+  await withRealServer(async ({ json, newAccount, log }) => {
+    const owner = await newAccount('owner');
+    const member = await newAccount('member');
+
+    const denied = await json('POST', '/admin/backup', undefined, member.token);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'ROLE_DENIED');
+    const allowed = await json('POST', '/admin/backup', undefined, owner.token);
+    assert.equal(allowed.status, 200, log());
+
+    const scrape = await json('GET', '/metrics', undefined, member.token);
+    assert.equal(scrape.status, 403, 'a member cannot scrape /metrics');
+  });
+});
+
+// R-009#1: the owner rules hold on BOTH delete routes, not only on the PATCH route.
+test('DELETE /admin/users refuses an owner target for an admin and the last owner for anyone', async () => {
+  await withRealServer(async ({ json, newAccount, log }) => {
+    const owner = await newAccount('owner');
+    const admin = await newAccount('admin');
+    const promote = await json('PATCH', `/admin/members/${admin.id}`, { teamRole: 'admin' }, owner.token);
+    assert.equal(promote.status, 200, log());
+
+    // An admin cannot delete the owner (privilege takeover), and nothing is removed.
+    const denied = await json('DELETE', `/admin/users/${owner.id}`, undefined, admin.token);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'ROLE_DENIED');
+    const stillThere = await json('GET', '/auth/me', undefined, owner.token);
+    assert.equal(stillThere.status, 200, 'the owner survived the refused delete');
+
+    // A second owner may be deleted by the first.
+    const second = await newAccount('owner2');
+    assert.equal((await json('PATCH', `/admin/members/${second.id}`, { teamRole: 'owner' }, owner.token)).status, 200);
+    const removed = await json('DELETE', `/admin/users/${second.id}`, undefined, owner.token);
+    assert.equal(removed.status, 200, log());
+
+    // The sole owner cannot delete themselves through /auth/me/delete either.
+    const self = await json('POST', '/auth/me/delete', { password: PASSWORD }, owner.token);
+    assert.equal(self.status, 409);
+    assert.equal((await self.json()).error.code, 'LAST_OWNER');
+  });
 });

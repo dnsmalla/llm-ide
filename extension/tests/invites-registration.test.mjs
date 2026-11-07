@@ -168,6 +168,31 @@ test('an email-bound invite refuses another address and accepts the bound one (c
   assert.deepEqual(me.member, { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 });
 });
 
+test('a garbage invite on a closed server is refused before the password hash (R-008#1)', async () => {
+  const bcrypt = (await import('bcryptjs')).default;
+  // One hash at the server's cost (10 in this spawn) is the price this refusal must not pay.
+  const t0 = performance.now();
+  bcrypt.hashSync(PASSWORD, 10);
+  const hashMs = performance.now() - t0;
+
+  const times = [];
+  for (let i = 0; i < 4; i += 1) {
+    const addr = email(`garbage-${i}`);
+    const t = performance.now();
+    const res = await register(base, { email: addr, password: PASSWORD, invite: `garbage-token-${i}-000000000000000000` });
+    times.push(performance.now() - t);
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).error.code, 'REGISTRATION_CLOSED');
+    const loginRes = await fetch(`${base}/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: addr, password: PASSWORD }),
+    });
+    assert.equal(loginRes.status, 401, 'no account was created');
+  }
+  const fastest = Math.min(...times);
+  assert.ok(fastest < hashMs, `refused in ${fastest.toFixed(1)}ms, one bcrypt hash costs ${hashMs.toFixed(1)}ms`);
+});
+
 test('without an invite, closed registration is refused and no account is created', async () => {
   const addr = email('no-invite');
   const res = await register(base, { email: addr, password: PASSWORD });

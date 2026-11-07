@@ -138,6 +138,21 @@ export function setMember(db, actorId, userId, patch = {}) {
   return getMember(db, userId);
 }
 
+/**
+ * Refuse a delete that would take an owner the actor may not touch, or the last owner (self-delete
+ * included). Called by both delete routes — DELETE /admin/users/:id and POST /auth/me/delete — inside
+ * their delete flow, so the rule has one home (ADR 0021 Global Constraints).
+ */
+export function assertDeletable(db, actorId, targetId) {
+  const target = getMember(db, targetId);
+  if (!target || target.teamRole !== 'owner') return; // no authority row, or not an owner: nothing to protect
+  const actor = getMember(db, actorId);
+  if (!actor || actor.teamRole !== 'owner') {
+    throw err('ROLE_DENIED', 'Only an owner can delete an owner', 403);
+  }
+  if (ownerCount(db) === 1) throw err('LAST_OWNER', 'The last owner cannot be deleted', 409);
+}
+
 /** How many owners the install has (the last one is protected). */
 export function ownerCount(db) {
   return db.prepare("SELECT COUNT(*) AS n FROM members WHERE team_role = 'owner'").get().n;
@@ -223,20 +238,41 @@ export function revokeInvite(db, actorId, id) {
   return db.prepare('DELETE FROM invites WHERE id = ?').run(String(id)).changes > 0;
 }
 
+/** The invite row for a valid token, or INVITE_INVALID (unknown, used, expired, wrong email — one code). */
+function validInviteRow(db, token, email) {
+  if (typeof token !== 'string' || token.length < 16) throw inviteErr();
+  const row = db.prepare('SELECT * FROM invites WHERE token_hash = ?').get(hashToken(token));
+  if (!row) throw inviteErr();
+  const fresh = db.prepare("SELECT datetime('now') < ? AS ok").get(row.expires_at)?.ok;
+  if (!fresh) throw inviteErr();
+  if (row.used_at) throw inviteErr();
+  if (row.email && row.email.toLowerCase() !== String(email ?? '').trim().toLowerCase()) throw inviteErr();
+  return row;
+}
+
+/**
+ * Validate an invite WITHOUT burning it. The register route calls this before hashing a password, so a
+ * garbage token is refused cheaply on a closed server; the burn still happens in the same transaction.
+ */
+export function peekInvite(db, token, { email = null } = {}) {
+  const row = validInviteRow(db, token, email);
+  return {
+    id: row.id,
+    email: row.email,
+    teamRole: row.team_role,
+    maxMode: row.max_mode,
+    usdCapMonth: row.usd_cap_month,
+    createdBy: row.created_by,
+  };
+}
+
 /**
  * Validate and burn an invite (single use). `userId` is the account it is being used for; `email` is
  * compared case-insensitively when the invite is bound to one. Throws INVITE_INVALID for unknown, used,
  * expired or wrong-email tokens alike — the caller may not reveal which.
  */
 export function consumeInvite(db, token, { email = null, userId } = {}) {
-  if (typeof token !== 'string' || token.length < 16) throw inviteErr();
-  const hash = hashToken(token);
-  const row = db.prepare('SELECT * FROM invites WHERE token_hash = ?').get(hash);
-  if (!row) throw inviteErr();
-  const fresh = db.prepare("SELECT datetime('now') < ? AS ok").get(row.expires_at)?.ok;
-  if (!fresh) throw inviteErr();
-  if (row.used_at) throw inviteErr();
-  if (row.email && row.email.toLowerCase() !== String(email ?? '').trim().toLowerCase()) throw inviteErr();
+  const row = validInviteRow(db, token, email);
 
   const burned = db.prepare(
     "UPDATE invites SET used_at = datetime('now'), used_by = ? WHERE id = ? AND used_at IS NULL",

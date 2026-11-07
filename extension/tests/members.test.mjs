@@ -18,7 +18,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
 const members = await import('../kb/members.mjs');
-const { ROLE_ORDER, getMember, listMembers, ensureMember, setMember, ownerCount, atLeast } =
+const { ROLE_ORDER, getMember, listMembers, ensureMember, setMember, ownerCount, atLeast, assertDeletable } =
   members;
 
 const MIGRATION_SQL = fs.readFileSync(
@@ -258,6 +258,37 @@ test('setMember validates every enum and rejects an empty patch', () => {
   assert.throws(() => setMember(db.getDb(), owner, target, { usdCapMonth: 'lots' }), code('VALIDATION'));
   assert.throws(() => setMember(db.getDb(), owner, target, {}), code('VALIDATION'));
   assert.throws(() => setMember(db.getDb(), owner, 'no-such-user', { maxMode: 'none' }), code('NOT_FOUND'));
+});
+
+// ── assertDeletable (R-009#1) ───────────────────────────────────────────────
+
+test('an admin cannot delete an owner; an owner may delete another owner', () => {
+  reset();
+  const owner = seedMember(seedUser({ email: 'del-owner@example.com' }), 'owner');
+  const second = seedMember(seedUser({ email: 'del-owner2@example.com' }), 'owner');
+  const admin = seedMember(seedUser({ email: 'del-admin@example.com' }), 'admin');
+  assert.throws(() => assertDeletable(db.getDb(), admin, owner), code('ROLE_DENIED'));
+  assert.throws(() => assertDeletable(db.getDb(), admin, owner), (e) => e.status === 403);
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), owner, second));
+});
+
+test('the last owner cannot delete themselves; with a second owner either may', () => {
+  reset();
+  const owner = seedMember(seedUser({ email: 'del-last@example.com' }), 'owner');
+  assert.throws(() => assertDeletable(db.getDb(), owner, owner), code('LAST_OWNER'));
+  const second = seedMember(seedUser({ email: 'del-peer@example.com' }), 'owner');
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), owner, owner));
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), second, second));
+});
+
+test('a non-owner target and a target without a members row are always deletable', () => {
+  reset();
+  const admin = seedMember(seedUser({ email: 'del-admin2@example.com' }), 'admin');
+  const member = seedMember(seedUser({ email: 'del-member@example.com' }), 'member');
+  const noRow = seedUser({ email: 'del-norow@example.com' });
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), admin, member));
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), admin, noRow));
+  assert.doesNotThrow(() => assertDeletable(db.getDb(), member, member));
 });
 
 test('atLeast follows the role order and refuses unknown roles', () => {

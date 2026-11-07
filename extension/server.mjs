@@ -329,8 +329,11 @@ const HOST = config.host;
 //          (null for the legacy row); POST /auth/register accepts `invite` (a valid invite registers while registration is
 //          closed, with the invite's grants; an invalid one answers 403 REGISTRATION_CLOSED) and LLMIDE_HUB=1 closes
 //          registration and starts a no-invite member read-only with a 20 USD/month cap. A turn above the member's
-//          `max_mode` is refused 403 { error: { code: 'ROLE_DENIED' } } / clamped to a read-only mode, and Host API pairing
-//          filters served capabilities for a viewer / max_mode none member to host + read + push.
+//          `max_mode` is refused 403 { error: { code: 'ROLE_DENIED' } } / clamped to a read-only mode, a member past its
+//          monthly `usd_cap_month` is refused 429 { error: { code: 'USD_CAP' } }, and Host API pairing filters served
+//          capabilities for a viewer / max_mode none member to host + read + push. DELETE /admin/users/:id answers
+//          403 ROLE_DENIED for an owner target an admin may not touch and 409 LAST_OWNER for the last owner;
+//          POST /auth/me/delete answers 409 LAST_OWNER for the sole owner. Migration 0069 usage_ledger.cost_usd.
 //   v122 — Self-Heal fix runs (plan B), additive, debug desktop builds only (same switch, guard and 404 feature_disabled as v121; contract schema/http/self-heal.schema.json): POST /kb/self-heal/runs { repoRoot (absolute, exactly a root on the user's repo allow-list), max? (1-20, default 5) } → { runId (uuid) | null, incidentIds, batch (.self-heal/BATCH.md text) | null } (picks the most frequent new, non-environmental incidents → fixing; environmental ones met → ignored; 409 RUN_ACTIVE { details: { runId } } while the user's one run is open, 4 h lease; 409 REPO_NOT_ALLOWED); POST /kb/self-heal/runs/:id/outcome { batch?, verifyPassed?, hasChanges?, agentDown?, aborted?, proposal? { mainRepo, worktreePath, branch = self-heal/<id>, baseCommit } } → { proposed } (only verdicts under the last ## Results count; fixed + verify passed + a diff → proposed; environmental → ignored; agent down / aborted → new; else attempts + 1, needsHuman at 3; ends the run; 409 RUN_NOT_ACTIVE); POST /kb/self-heal/runs/:id/resolve { result: applied | discarded } → { updated } (proposed → fixed | ignored, proposal cleared). While a run is open POST /kb/self-heal/incidents skips log and server reports (the run's own). No migration.
 //   v121 — Self-Heal incidents (plan A), additive, debug desktop builds only (LLMIDE_SELF_HEAL=1, which the Tauri host passes only in a debug build; never with NODE_ENV=production; contract schema/http/self-heal.schema.json): GET /kb/self-heal/incidents → { incidents: Incident[] } (most recently seen first; Incident = { id (16 hex signature), source ui|log|crash|server, category, message, stack, environmental, firstSeen, lastSeen, count, attempts, status new|fixing|proposed|ignored|needsHuman|fixed, note, proposal }); POST /kb/self-heal/incidents { incidents: [{ source, category, message, stack? }] (1-50) } → { recorded, skipped } (redacted, deduped by signature, 200 per user; an unusable report is skipped); POST /kb/self-heal/incidents/:id/ignore → { ignored }; DELETE /kb/self-heal/incidents → { deleted } (keeps fixing and proposed). JWT + bus host proof (403 HOST_PROOF_REQUIRED first); without the switch every path answers 404 { error: 'feature_disabled', feature: 'self_heal' } and /health does not advertise them; 'kbWrite' bucket. Migration 0067 self_heal_incidents.
 //   v120 — push notifications sent by the desktop, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md `push`): POST /host-api/push/send { kind (one of the notifier's 11 webview kinds), key? (opaque de-dup key, [A-Za-z0-9_.:-]{1,64}), count? (1-999) } → { sent } (fans out to the user's paired devices with a push target and the `push` grant; de-dup per key, one per user and kind per 10 s, 30 per device per hour); GET /host-api/push/status → { served, apns: { configured, keyId, teamId }, devices: [{ deviceId, name, kind, lastResult, lastAt }] } (never an endpoint, token or key); PUT /host-api/push/apns { key (.p8 PEM, EC P-256), keyId, teamId (10 × [A-Z0-9]) } → { configured, keyId, teamId } (400 VALIDATION_FAILED "Invalid <field>"); DELETE /host-api/push/apns → { configured: false, keyId: null, teamId: null }. Same guards as the other /host-api routes: JWT + bus host proof (403 HOST_PROOF_REQUIRED first), then 404 HOST_API_DISABLED without a v1 listener; 'kbWrite' bucket. Pushes go out only when LLMIDE_HOST_API_PUSH=1. Migration 0066 host_api_push.
@@ -1099,13 +1102,16 @@ const server = http.createServer(async (req, res) => {
         sendError(res, errValidation("The 'legacy' system user cannot be deleted"), { logger: reqLog });
         return;
       }
-      const { deleteUserCascade } = await import('./kb/db.mjs');
+      const { deleteUserCascade, getDb: openDb } = await import('./kb/db.mjs');
       const { findUserById } = await import('./server/users.mjs');
+      const { assertDeletable } = await import('./kb/members.mjs');
       const target = findUserById(getDb({ logger }), targetId);
       if (!target) {
         sendError(res, errNotFound(`User ${targetId} not found`), { logger: reqLog });
         return;
       }
+      // Team authority: an admin cannot delete an owner, and nobody deletes the last owner (409 LAST_OWNER).
+      assertDeletable(openDb({ logger }), req.user.id, targetId);
       const counts = deleteUserCascade(targetId);
       try { (await import('./llm_agent/extensions/install.mjs')).forgetUserExtensions(targetId); } catch { /* best effort */ }
       // Re-import the audit helper inline to keep server.mjs lean.
@@ -1124,6 +1130,8 @@ const server = http.createServer(async (req, res) => {
       } catch { /* audit failure must not block the delete */ }
       sendJSON(res, 200, { ok: true, targetUserId: targetId, counts });
     } catch (err) {
+      // A team-authority refusal (ROLE_DENIED 403 / LAST_OWNER 409) keeps its status and code.
+      if (err instanceof AppError) { sendError(res, err, { logger: reqLog }); return; }
       reqLog.error('admin_user_delete_failed', { error: err.message, targetId });
       sendError(res, errInternal(`user delete failed: ${err.message}`), { logger: reqLog });
     }

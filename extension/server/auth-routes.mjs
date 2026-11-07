@@ -27,7 +27,7 @@ import {
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
-import { consumeInvite, ensureMember, getMember, ownerCount } from '../kb/members.mjs';
+import { assertDeletable, consumeInvite, ensureMember, getMember, ownerCount, peekInvite } from '../kb/members.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
 // RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
@@ -120,6 +120,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       // burns. A bad invite rolls the account back, so a used/expired token never leaves a user behind.
       const out = db.transaction(() => {
         const inviteToken = typeof body.invite === 'string' && body.invite ? body.invite : null;
+        // Cheap refusal first: a garbage token must not cost a bcrypt hash (R-008#1). The peek reads the
+        // invite; the burn below is still in this transaction, so the two commit or roll back together.
+        if (inviteToken) peekInvite(db, inviteToken, { email: body.email });
         const user = registerUser(db, {
           email: body.email,
           password: body.password,
@@ -675,6 +678,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const valid = await verifyPassword(db, req.user.id, String(body?.password ?? ''));
       if (!valid) throw errAuth('Password confirmation failed');
       const { deleteUserCascade } = await import('../kb/db.mjs');
+      // ADR 0021: the sole owner cannot delete themselves (409 LAST_OWNER); anyone else may.
+      assertDeletable(db, req.user.id, req.user.id);
       const counts = deleteUserCascade(req.user.id);
       try { (await import('../llm_agent/extensions/install.mjs')).forgetUserExtensions(req.user.id); } catch { /* best effort */ }
       dropAllHeldSecretsForUser(req.user.id);
