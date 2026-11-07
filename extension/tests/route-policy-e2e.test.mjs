@@ -24,15 +24,6 @@ function freePort() {
   });
 }
 
-/** Run a module-shaped snippet in a child against this fixture DB; returns its JSON stdout. */
-function nodeEval(code, env) {
-  const out = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
-    cwd: EXT, env, encoding: 'utf8',
-  });
-  assert.equal(out.status, 0, `seed/verify child failed: ${out.stderr}`);
-  return JSON.parse(out.stdout);
-}
-
 function baseEnv(extra = {}) {
   const env = { ...process.env, ...SECRETS, ...extra };
   for (const k of ['NODE_TEST_CONTEXT', 'NODE_ENV', 'LLMIDE_HUB', 'LLMIDE_ALLOW_REMOTE', 'LLMIDE_DISABLE_REGISTRATION', 'LLMIDE_TRUST_PROXY']) delete env[k];
