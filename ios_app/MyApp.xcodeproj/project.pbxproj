@@ -12,6 +12,8 @@
 		A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */; };
 		A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */; };
 		A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */; };
+		A1C0FF1CE0000000000000N2 /* PushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */; };
+		A1C0FF1CE0000000000000L2 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000L1 /* Localizable.strings */; };
 		A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A7138E88C6309A4CC79A8F /* SettingsView.swift */; };
 		A7B80010CC00000000000001 /* ConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000002 /* ConnectionService.swift */; };
 		A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000004 /* LlmIdeChatStore.swift */; };
@@ -53,6 +55,8 @@
 		A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
 		A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrar.swift; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000L1 /* Localizable.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = Localizable.strings; sourceTree = "<group>"; };
 		A36F27BA352AF7FF9AA51012 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000002 /* ConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionService.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000004 /* LlmIdeChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeChatStore.swift; sourceTree = "<group>"; };
@@ -96,6 +100,7 @@
 			children = (
 				0F05147F87FAE3E4689CB880 /* Info.plist */,
 				A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */,
+				A1C0FF1CE0000000000000L1 /* Localizable.strings */,
 			);
 			path = Supporting;
 			sourceTree = "<group>";
@@ -203,6 +208,7 @@
 				C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */,
 		C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */,
 				B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */,
+				A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */,
 				A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */,
 				C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */,
 				A7B80010CC00000000000002 /* ConnectionService.swift */,
@@ -287,6 +293,7 @@
 			files = (
 				D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */,
 				A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */,
+				A1C0FF1CE0000000000000L2 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -308,6 +315,7 @@
 				C2E0A1B2C3D4E5F6000000A6 /* SyncOfflineViews.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */,
 				B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */,
+				A1C0FF1CE0000000000000N2 /* PushRegistrar.swift in Sources */,
 				A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */,
 				A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */,
 				C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */,

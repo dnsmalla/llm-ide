@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct MyAppApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var connectionStore: ConnectionStore
     @StateObject private var connection: ConnectionService
     @StateObject private var llmIdeStore: LlmIdeChatStore
@@ -17,6 +18,7 @@ struct MyAppApp: App {
         let connection = ConnectionService()
         connection.connectionStore = connectionStore
         _connection = StateObject(wrappedValue: connection)
+        PushRegistrar.shared.connection = connection
 
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))

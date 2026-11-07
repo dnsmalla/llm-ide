@@ -199,6 +199,7 @@ final class ConnectionService: ObservableObject {
                     }
                 }
                 self.connectionStatus = .connected
+                PushRegistrar.shared.hostReady()
             case .unreachable:
                 self.handleRefusal(HostApiRejection(
                     replyTo: nil, code: "host_unreachable",
@@ -235,6 +236,7 @@ final class ConnectionService: ObservableObject {
             hostCapabilities = caps
             if !servesV1Read { reads.reset() }   // `read` revoked: clear what is on screen now
             llmIdeStore?.handle(event)
+            PushRegistrar.shared.hostReady()
         case .disconnected(let reason):
             if !reason.retryable { return handleRefusal(reason) }
             if errorMessage == nil { errorMessage = "Disconnected from the desktop. Retrying…" }
