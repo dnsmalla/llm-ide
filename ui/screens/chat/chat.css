@@ -179,3 +179,7 @@
 .chat-memory-modal { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--tok-color-body) 72%, transparent); }
 .chat-memory-sheet { width: min(560px, 94vw); max-height: 82vh; overflow: auto; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); }
 .chat-memory-sheet .mem-view { max-height: none; }
+/* Dock: a long provider/model note must never widen the picker row. */
+.chat-dock-mode .chat-pick .chat-muted { display: none; }
+.chat-dock-mode .chat-composer-bar .chat-error { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
+.chat-dock-mode .chat-composer-bar .chat-pick { min-width: 0; }
