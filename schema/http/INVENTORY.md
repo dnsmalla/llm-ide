@@ -407,20 +407,20 @@ Endpoints with no client caller (94):
 | `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:1000` | `legacy.ts` | - | - |
 | `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:1016` | `legacy.ts` | - | - |
 | `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:1042` | `legacy.ts` | - | - |
-| `/auth/me/extensions/allowlist` | public+auth | PUT | token | core | `extension/routes/extensions-catalog.mjs:121` | `trust-model.ts` | - | - |
-| `/auth/me/extensions/installed` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | - | - | tests only |
-| `/auth/me/extensions/updates` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | - | - | tests only |
-| `/auth/me/extensions/catalog` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | - | - | tests only |
-| `/auth/me/extensions/active` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:58` | - | - | tests only |
-| `/auth/me/extensions/install` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:160` | - | - | tests only |
-| `/auth/me/extensions/catalog/refresh` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:168` | - | - | tests only |
-| `/auth/me/extensions/updates/check` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:181` | - | - | tests only |
-| `/auth/me/extensions/update/preview` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:189` | - | - | tests only |
-| `/auth/me/extensions/update` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:189` | - | - | tests only |
-| `/auth/me/extensions/rollback` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:201` | - | - | tests only |
-| `/auth/me/extensions/repair` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:207` | - | - | tests only |
-| `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:213` | - | - | tests only |
-| `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:227` | - | - | tests only |
+| `/auth/me/extensions/allowlist` | public+auth | PUT | token | core | `extension/routes/extensions-catalog.mjs:124` | `trust-model.ts` | - | - |
+| `/auth/me/extensions/installed` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
+| `/auth/me/extensions/updates` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
+| `/auth/me/extensions/catalog` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
+| `/auth/me/extensions/active` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
+| `/auth/me/extensions/install` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:163` | - | - | tests only |
+| `/auth/me/extensions/catalog/refresh` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:171` | - | - | tests only |
+| `/auth/me/extensions/updates/check` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:184` | - | - | tests only |
+| `/auth/me/extensions/update/preview` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:192` | - | - | tests only |
+| `/auth/me/extensions/update` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:192` | - | - | tests only |
+| `/auth/me/extensions/rollback` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:204` | - | - | tests only |
+| `/auth/me/extensions/repair` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:210` | - | - | tests only |
+| `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:216` | - | - | tests only |
+| `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:230` | - | - | tests only |
 | `/auth/me/workspace-trust` | public+auth | ANY | token | core | `extension/routes/workspace-trust.mjs:17` | `TrustBanner.tsx`, `trust-model.ts` | - | - |
 | `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:852` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
 | `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:357` | - | - | tests only |

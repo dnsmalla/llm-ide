@@ -384,7 +384,7 @@ Open items for P6 and later: the Mac Extensions screen and the allowlist Setting
 
 - M8 closed on the server: toggle takes `commit`, API 118 (`COMMIT_CHANGED`); the desktop sends it.
 - `GET active` reports `turns { claude, providers }`; the desktop screen says which chats ignore the switches.
-- P8: `LLMIDE_EXT_ACTIVE_SET` default on, kill switch `off`. The real paired token bench (Y1) has not run.
+- P8 not done: the user kept today's behaviour (2026-11-07, "extension functions are good as they are now"); `LLMIDE_EXT_ACTIVE_SET` stays off, so Claude chats keep ignoring the catalog switches (`1aee2bb4` reverted).
 - Mac targets: the Mac screen became the desktop screen; the Mac N-1 fallback, the Mac screen preference and Mac Mobile Control are dropped.
 - Deferred: P7 skills diet, P9 per-tool MCP deny list, phone list, token-estimate labels. Dropped: family switches, required-item lock.
 - Real window: not run (no window in this session).
