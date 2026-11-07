@@ -15,7 +15,7 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
 - Auth: 272 token, 13 public
 - Handler found: 281; no handler found: 4
-- No app and no extension caller: 99 (tests only: 83, comments/docs only: 16, no reference: 0)
+- No app and no extension caller: 98 (tests only: 82, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
@@ -48,7 +48,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (99):
+Endpoints with no client caller (98):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -116,7 +116,6 @@ Endpoints with no client caller (99):
 - `/host-api/push/send` — tests only
 - `/host-api/push/status` — tests only
 - `/host-api/push/apns` — tests only
-- `/kb/self-heal/incidents` — tests only
 - `/kb/self-heal/incidents/:id/ignore` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
@@ -354,7 +353,7 @@ Endpoints with no client caller (99):
 | `/kb/sync/devices/enroll/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:183` | `sync-model.ts` | - | - |
 | `/kb/sync/devices/:id` | ALL_ENDPOINTS | ANY | token | core | - | `sync-model.ts` | - | - |
 | `/kb/sync/rotate` | ALL_ENDPOINTS | POST | token | core | `extension/routes/sync/http-routes.mjs:190` | `sync-model.ts` | - | - |
-| `/kb/self-heal/incidents` | ALL_ENDPOINTS | DELETE, GET, POST | token | core | `extension/routes/self-heal.mjs:26` | - | - | tests only |
+| `/kb/self-heal/incidents` | ALL_ENDPOINTS | DELETE, GET, POST | token | core | `extension/routes/self-heal.mjs:26` | `SelfHealSection.tsx`, `Shell.tsx` | - | - |
 | `/kb/self-heal/incidents/:id/ignore` | ALL_ENDPOINTS | ANY | token | core | - | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:894` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
@@ -442,7 +441,7 @@ Endpoints with no client caller (99):
 
 ## Consistency
 
-Checked: 285 roster entries, 551 app source files, 52 extension source files.
+Checked: 285 roster entries, 554 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 
