@@ -212,7 +212,7 @@ export function assistantText(m: AssistantMessage): string {
 
 // --- reducer --------------------------------------------------------------------------------
 
-const lastAssistantIndex = (messages: Message[]) => {
+export const lastAssistantIndex = (messages: Message[]) => {
   for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
   return -1;
 };

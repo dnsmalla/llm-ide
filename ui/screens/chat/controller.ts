@@ -8,7 +8,7 @@
 // stream; a dropped primary stream follows the same way from the last seen sequence number. Replayed frames pass the
 // same decoder and caps as live ones, and a frame whose sequence number is not above the last one is ignored.
 import { decodePayload, decodeReplayMarker, decodeRunningTurns, parseReplaySeq, type AgentEvent } from "./events";
-import { initialState, reduce, assistantText, type Action, type AssistantMessage, type ChatState } from "./state";
+import { initialState, reduce, assistantText, lastAssistantIndex, MAX_NOTICES_PER_MESSAGE, type Action, type AssistantMessage, type ChatState } from "./state";
 import { toMessages, type ChatStore } from "./store";
 import { describeError, httpLike, type CoreTransport, type ReplayFrame } from "./transport";
 import { cancelTurn } from "./route";
@@ -281,6 +281,10 @@ export class ChatController {
   fullHistoryNext(id: string): void {
     const r = this.rt(id);
     if (r.fullHistoryNext) return;
+    const at = lastAssistantIndex(r.state.messages);
+    if (at < 0) return;
+    const m = r.state.messages[at] as AssistantMessage;
+    if (m.notices.length >= MAX_NOTICES_PER_MESSAGE) return;
     r.fullHistoryNext = true;
     this.dispatch(id, { type: "marker", kind: "full_history_next", level: "info", text: FULL_HISTORY_NEXT_NOTICE });
   }
