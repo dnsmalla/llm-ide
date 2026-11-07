@@ -5,7 +5,7 @@ import { EFFORT_AUTO, effortLabel } from "./effort";
 import { validateModelId, type UserModels } from "./custom-models";
 import {
   CAP_APPROXIMATION_NOTE, CAP_COUNTED_NOTE, CAP_NOT_ENFORCED, CAP_PRESETS, MODES, PERMISSION_MODES, PLAIN_CHAT_TITLE, RAISE_LIMIT_HELP, capLevel, coldSwitchWarning, compactTokens,
-  meterText, modelDefaultLabel, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, toolsBadge, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
+  MORE_PROVIDERS_HINT, meterText, modelDefaultLabel, modelOptionText, modelPickerValue, parseLimit, plainChatDetail, raisedLimit, type ModelGroup, type ModelPickerRoute, type PermissionMode, type PlainChatReason, type RouteView,
 } from "./route";
 
 export function ModePicker({ value, resolved, onChange, disabled }: { value: string; resolved?: string | null; onChange: (m: string) => void; disabled?: boolean }) {
@@ -55,7 +55,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
             <optgroup key={g.id} label={g.label}>
               {g.models.map((m) => (
                 <option key={`${m.provider}|${m.model}`} value={`${m.provider}|${m.model}`}>
-                  {m.label}{g.catalog && m.toolsSupported !== undefined ? `  (${toolsBadge(m.toolsSupported)})` : ""}
+                  {modelOptionText(g, m, value === `${m.provider}|${m.model}`)}
                 </option>
               ))}
             </optgroup>
@@ -64,6 +64,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
       </label>
       {unlisted && <span className="chat-note" role="note">This chat is pinned to “{unlistedModel}”, which is not in the provider’s current model list. It is sent as-is; choose a listed model to use the provider’s current one.</span>}
       {groups.filter((g) => g.note).map((g) => <span key={g.id} className="chat-muted">{g.label}: {g.note}</span>)}
+      {groups.length > 0 && groups.every((g) => g.id === "anthropic") && <span className="chat-muted">{MORE_PROVIDERS_HINT}</span>}
       {plainChat && <span className="chat-note" role="note" title={plainChatDetail(plainChat)}>{PLAIN_CHAT_TITLE}</span>}
       {addGroup && onAdd && <AddModelControl groupLabel={addGroup.label} onAdd={(id) => onAdd(addGroup.id, id)} />}
       {removable && onRemove && model && <button type="button" className="chat-link-btn" onClick={() => onRemove(removable.id, model)}>Remove {model}</button>}

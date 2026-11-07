@@ -176,6 +176,17 @@ export function modelPickerValue(route: ModelPickerRoute | null | undefined, pro
 }
 export type ModelPickerRoute = Pick<RouteView, "enabled" | "pinned"> & Partial<Pick<RouteView, "provider" | "model" | "pending">>;
 
+/**
+ * One model option's text. The chosen one names its provider ("Groq · llama-3"), so the closed picker shows the
+ * provider and the model as the Mac's composer chip does; the open list keeps the bare name under its group. Pure.
+ */
+export function modelOptionText(g: Pick<ModelGroup, "label" | "catalog">, m: Pick<ModelChoice, "label" | "toolsSupported">, chosen: boolean): string {
+  const badge = g.catalog && m.toolsSupported !== undefined ? `  (${toolsBadge(m.toolsSupported)})` : "";
+  return `${chosen ? `${g.label} · ` : ""}${m.label}${badge}`;
+}
+/** The Mac's one row at the bottom of the menu while only Claude is set up (ComposerCatalog.moreProvidersHint). */
+export const MORE_PROVIDERS_HINT = "More providers: Settings → Providers";
+
 /** The select's empty option: "Default" with the router off, the Mac's "Not pinned (the composer's model)" with it on. */
 export function modelDefaultLabel(route: Pick<RouteView, "enabled"> | null | undefined, composerModelLabel: string | null, detected?: string | null): string {
   if (route?.enabled !== true) return detected ? `Auto · ${detected}` : "Default";
