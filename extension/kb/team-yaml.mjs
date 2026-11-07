@@ -1,0 +1,448 @@
+// Team Hub H1.1 (ADR 0021): auditable YAML user assignments.
+//
+// The file is the user's authority ledger, applied once at core boot:
+//
+//   <data dir>/team.yaml
+//
+// `members:` maps lower-cased account emails to exactly three grants (role,
+// max_mode, usd_cap_month). An account NOT listed is a viewer with
+// `read_only` and a 20 USD/month cap. The file holds USER ASSIGNMENTS ONLY;
+// the permissions of a role stay in code (`members.mjs`, `requireRole`, the
+// turn clamp, the gateway filter).
+//
+// First boot writes the file from the current `members` rows (so a solo
+// owner stays owner) and never rewrites it afterwards. Later boots parse the
+// user's file, apply it in one transaction and audit every actual change.
+// An invalid file refuses the boot instead of running with stale or wider
+// grants; unknown emails are reported and ignored (no user is ever created).
+//
+// The parser/serializer are a deliberately small, strict YAML subset: only
+// `members:` → `<email>:` → the three scalar keys, two-space indentation,
+// `#` comments, no anchors, aliases, sequences or flow maps. Unknown keys,
+// duplicate emails/fields, tabs and malformed values are errors. No
+// dependency is added for this schema.
+//
+// Layer note: every db-writing helper takes the db handle first (kb
+// convention). The module may not import `server/audit.mjs` (kb → core/kb
+// only), so `applyTeamYaml` accepts an `audit` callback; the boot adapter
+// (`server/team-boot.mjs`) supplies the existing `safeAudit` helper.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { ROLE_ORDER, MAX_MODES, MAX_USD_CAP_MONTH, getMember } from './members.mjs';
+
+export const TEAM_YAML_FILENAME = 'team.yaml';
+
+/** What an account that is absent from the file becomes. */
+export const DEFAULT_VIEWER_ASSIGNMENT = Object.freeze({
+  teamRole: 'viewer',
+  maxMode: 'read_only',
+  usdCapMonth: 20,
+});
+
+const ROLES = new Set(Object.keys(ROLE_ORDER));
+const MODES = new Set(MAX_MODES);
+const ENTRY_KEYS = new Set(['role', 'max_mode', 'usd_cap_month']);
+const TOP_KEY = 'members';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CAP_RE = /^\d+(?:\.\d+)?$/;
+const MAX_EMAIL = 254;
+
+export class TeamYamlError extends Error {
+  constructor(message, { reason = 'invalid', line = null } = {}) {
+    super(message);
+    this.name = 'TeamYamlError';
+    this.code = 'TEAM_YAML_INVALID';
+    this.reason = reason;
+    this.line = line;
+  }
+}
+
+const invalid = (message, line = null, reason = 'invalid') =>
+  new TeamYamlError(message, { reason, line });
+
+// ── parser ────────────────────────────────────────────────────────────────
+
+/**
+ * Parse and validate the team.yaml text. Returns `[{ email, teamRole,
+ * maxMode, usdCapMonth }]` sorted as written. Throws `TeamYamlError`
+ * (`code: 'TEAM_YAML_INVALID'`) on anything outside the strict subset.
+ */
+export function parseTeamYaml(text) {
+  if (typeof text !== 'string') throw invalid('team.yaml must be text', null, 'not_text');
+  const source = text.replace(/^\uFEFF/, '');
+  const lines = source.split(/\r?\n/);
+  const assignments = [];
+  const byEmail = new Map();
+  let seenTop = false;
+  let current = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineNo = index + 1;
+    const raw = lines[index];
+    if (raw.includes('\t')) throw invalid('tabs are not allowed; indent with spaces', lineNo);
+    const line = stripComment(raw, lineNo);
+    if (line.trim() === '') continue;
+
+    const indent = /^ */.exec(line)[0].length;
+    if (indent % 2 !== 0) throw invalid('indentation must be a multiple of two spaces', lineNo);
+    const depth = indent / 2;
+    const content = line.slice(indent).trimEnd();
+
+    if (depth === 0) {
+      if (content !== `${TOP_KEY}:`) {
+        const key = content.split(':')[0];
+        throw invalid(`unknown top-level key "${key}" (only "${TOP_KEY}")`, lineNo);
+      }
+      if (seenTop) throw invalid(`duplicate "${TOP_KEY}:"`, lineNo);
+      seenTop = true;
+      current = null;
+      continue;
+    }
+
+    if (!seenTop) throw invalid(`expected "${TOP_KEY}:" at the top level`, lineNo);
+
+    if (depth === 1) {
+      const match = /^(.+):$/.exec(content);
+      if (!match) throw invalid('expected "<email>:" with no value', lineNo);
+      const email = parseScalar(match[1].trim(), lineNo).trim().toLowerCase();
+      if (email.length > MAX_EMAIL || !EMAIL_RE.test(email)) {
+        throw invalid(`invalid email "${email}"`, lineNo);
+      }
+      if (byEmail.has(email)) throw invalid(`duplicate email "${email}"`, lineNo);
+      current = { email, teamRole: null, maxMode: null, usdCapMonth: null, line: lineNo };
+      assignments.push(current);
+      byEmail.set(email, current);
+      continue;
+    }
+
+    if (depth === 2) {
+      if (!current) throw invalid('a grant line must follow an email', lineNo);
+      const match = /^([a-z_]+):\s*(.*)$/.exec(content);
+      if (!match) throw invalid('expected "<key>: <value>"', lineNo);
+      const key = match[1];
+      if (!ENTRY_KEYS.has(key)) throw invalid(`unknown grant key "${key}"`, lineNo);
+      const value = parseScalar(match[2].trim(), lineNo);
+      if (key === 'role') {
+        if (current.teamRole !== null) throw invalid('duplicate "role"', lineNo);
+        if (!ROLES.has(value)) throw invalid(`unknown role "${value}"`, lineNo);
+        current.teamRole = value;
+      } else if (key === 'max_mode') {
+        if (current.maxMode !== null) throw invalid('duplicate "max_mode"', lineNo);
+        if (!MODES.has(value)) throw invalid(`unknown max_mode "${value}"`, lineNo);
+        current.maxMode = value;
+      } else {
+        if (current.usdCapMonth !== null) throw invalid('duplicate "usd_cap_month"', lineNo);
+        if (!CAP_RE.test(value)) throw invalid('usd_cap_month must be a non-negative number', lineNo);
+        const cap = Number(value);
+        if (!Number.isFinite(cap) || cap < 0 || cap > MAX_USD_CAP_MONTH) {
+          throw invalid(`usd_cap_month must be between 0 and ${MAX_USD_CAP_MONTH}`, lineNo);
+        }
+        current.usdCapMonth = cap;
+      }
+      continue;
+    }
+
+    throw invalid('unexpected indentation', lineNo);
+  }
+
+  if (!seenTop) throw invalid(`missing "${TOP_KEY}:"`, null, 'missing_members');
+  if (assignments.length === 0) return [];
+  for (const assignment of assignments) {
+    if (assignment.teamRole === null || assignment.maxMode === null || assignment.usdCapMonth === null) {
+      throw invalid(
+        `entry "${assignment.email}" needs role, max_mode and usd_cap_month`,
+        assignment.line,
+        'missing_grant',
+      );
+    }
+  }
+  return assignments.map(({ line: _line, ...assignment }) => assignment);
+}
+
+/**
+ * Remove a `#` comment that is outside quotes. A `#` only starts a comment at
+ * the start of a line or after whitespace (YAML's rule); an unclosed quote is
+ * an error, so a malformed line cannot silently lose its remainder.
+ */
+function stripComment(raw, lineNo) {
+  let quote = null;
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (quote === "'") {
+      if (char === "'") {
+        if (raw[i + 1] === "'") i += 1; // escaped single quote
+        else quote = null;
+      }
+      continue;
+    }
+    if (quote === '"') {
+      if (char === '\\') i += 1;
+      else if (char === '"') quote = null;
+      continue;
+    }
+    if (char === '#' && (i === 0 || /\s/.test(raw[i - 1]))) return raw.slice(0, i);
+    if (char === "'" || char === '"') quote = char;
+  }
+  if (quote) throw invalid('unterminated quoted value', lineNo);
+  return raw;
+}
+
+/** A scalar is either a single/double-quoted string or one whitespace-free atom. */
+function parseScalar(raw, lineNo) {
+  if (raw === '') throw invalid('missing value', lineNo);
+  if (raw[0] === "'" || raw[0] === '"') return parseQuoted(raw, lineNo);
+  if (/\s/.test(raw)) throw invalid('a plain value cannot contain spaces', lineNo);
+  if (/^[{[\]}&*!|>%@`,]/.test(raw)) throw invalid('unsupported YAML value', lineNo);
+  return raw;
+}
+
+function parseQuoted(raw, lineNo) {
+  const quote = raw[0];
+  let out = '';
+  let closed = false;
+  let i = 1;
+  for (; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (quote === "'" && char === "'") {
+      if (raw[i + 1] === "'") { out += "'"; i += 1; continue; }
+      closed = true;
+      i += 1;
+      break;
+    }
+    if (quote === '"' && char === '\\') {
+      const escaped = raw[i + 1];
+      const map = { n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' };
+      if (!(escaped in map)) throw invalid('unsupported escape in quoted value', lineNo);
+      out += map[escaped];
+      i += 1;
+      continue;
+    }
+    if (quote === '"' && char === '"') { closed = true; i += 1; break; }
+    out += char;
+  }
+  if (!closed) throw invalid('unterminated quoted value', lineNo);
+  if (raw.slice(i).trim() !== '') throw invalid('unexpected text after quoted value', lineNo);
+  return out;
+}
+
+// ── serializer ────────────────────────────────────────────────────────────
+
+const HEADER = [
+  '# Team Hub user assignments (ADR 0021, H1.1).',
+  '# Edit this file, then restart the core. It is read once at boot, never watched.',
+  '# An account NOT listed here is a viewer: max_mode read_only, 20 USD/month.',
+  '# Keys per entry: role (owner|admin|member|viewer),',
+  '#                 max_mode (none|read_only|execute),',
+  '#                 usd_cap_month (0 = no cap, maximum 100000).',
+  '# Emails are matched case-insensitively.',
+];
+
+/**
+ * Serialize assignments to the strict subset. Validates every entry first, so
+ * a bad row can never be written into the file the user audits.
+ */
+export function serializeTeamYaml(assignments) {
+  if (!Array.isArray(assignments)) throw invalid('assignments must be an array');
+  const clean = assignments.map(validateAssignment);
+  clean.sort((a, b) => {
+    const role = ROLE_ORDER[b.teamRole] - ROLE_ORDER[a.teamRole];
+    if (role !== 0) return role;
+    return a.email < b.email ? -1 : a.email > b.email ? 1 : 0;
+  });
+  const lines = [...HEADER, `${TOP_KEY}:`];
+  for (const assignment of clean) {
+    lines.push(`  ${assignment.email}:`);
+    lines.push(`    role: ${assignment.teamRole}`);
+    lines.push(`    max_mode: ${assignment.maxMode}`);
+    lines.push(`    usd_cap_month: ${formatCap(assignment.usdCapMonth)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function validateAssignment(assignment) {
+  if (!assignment || typeof assignment !== 'object') throw invalid('assignment must be an object');
+  const email = String(assignment.email ?? '').trim().toLowerCase();
+  if (email.length > MAX_EMAIL || !EMAIL_RE.test(email)) throw invalid(`invalid email "${email}"`);
+  if (!ROLES.has(assignment.teamRole)) throw invalid(`unknown role "${assignment.teamRole}"`);
+  if (!MODES.has(assignment.maxMode)) throw invalid(`unknown max_mode "${assignment.maxMode}"`);
+  const cap = Number(assignment.usdCapMonth);
+  if (!Number.isFinite(cap) || cap < 0 || cap > MAX_USD_CAP_MONTH) {
+    throw invalid(`usd_cap_month must be between 0 and ${MAX_USD_CAP_MONTH}`);
+  }
+  return { email, teamRole: assignment.teamRole, maxMode: assignment.maxMode, usdCapMonth: cap };
+}
+
+const formatCap = (cap) => String(Number(cap));
+
+// ── boot application ──────────────────────────────────────────────────────
+
+/**
+ * The current authority of every real account, in the file's shape. A user
+ * without a `members` row gets the least-privilege default. This is what the
+ * first boot writes, so an existing solo owner stays owner.
+ */
+export function listTeamAssignments(db) {
+  const rows = db.prepare(`
+    SELECT u.id, u.email, m.team_role, m.max_mode, m.usd_cap_month
+      FROM users u
+      LEFT JOIN members m ON m.user_id = u.id
+     WHERE u.id != 'legacy'
+     ORDER BY u.email
+  `).all();
+  return rows.map((row) => ({
+    userId: row.id,
+    email: String(row.email).trim().toLowerCase(),
+    teamRole: row.team_role ?? DEFAULT_VIEWER_ASSIGNMENT.teamRole,
+    maxMode: row.max_mode ?? DEFAULT_VIEWER_ASSIGNMENT.maxMode,
+    usdCapMonth: row.usd_cap_month == null ? DEFAULT_VIEWER_ASSIGNMENT.usdCapMonth : Number(row.usd_cap_month),
+  }));
+}
+
+/**
+ * Apply `<dir>/team.yaml` once. Creates the file from the current members when
+ * it is missing; never rewrites an existing one. Every actual grant change is
+ * written in one transaction and reported through `audit` (the boot adapter
+ * maps that to the existing audit helper with actor `team.yaml`).
+ *
+ * Throws `TeamYamlError` (`TEAM_YAML_INVALID`) for an unreadable or invalid
+ * file, before changing any row. Unknown emails are reported, audited and
+ * ignored; they never create users.
+ */
+export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
+  if (!db || typeof db.prepare !== 'function') throw new TypeError('applyTeamYaml requires a db handle');
+  if (typeof dir !== 'string' || dir === '') throw new TypeError('applyTeamYaml requires a directory');
+
+  const file = path.join(dir, TEAM_YAML_FILENAME);
+  let created = false;
+  let source = 'file';
+  let assignments;
+
+  if (!fs.existsSync(file)) {
+    const current = listTeamAssignments(db);
+    assignments = current.map(({ userId: _userId, ...assignment }) => assignment);
+    const text = serializeTeamYaml(assignments);
+    try {
+      writeFileAtomic(file, text);
+    } catch (err) {
+      throw invalid(`cannot write ${file}: ${err.message}`, null, 'write_failed');
+    }
+    created = true;
+    source = 'generated';
+    report(audit, { action: 'team.yaml.generate', detail: { users: assignments.length } });
+    if (logger) logger.info('team_yaml_generated', { path: file, users: assignments.length });
+  } else {
+    let text;
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      throw invalid(`cannot read ${file}: ${err.message}`, null, 'unreadable');
+    }
+    try {
+      assignments = parseTeamYaml(text);
+    } catch (err) {
+      if (err instanceof TeamYamlError) {
+        report(audit, {
+          action: 'team.yaml.invalid',
+          outcome: 'failure',
+          detail: { reason: err.reason, line: err.line },
+        });
+      }
+      throw err;
+    }
+  }
+
+  const userRows = db.prepare(
+    "SELECT id, email FROM users WHERE id != 'legacy' ORDER BY email",
+  ).all();
+  const usersByEmail = new Map(
+    userRows.map((row) => [String(row.email).trim().toLowerCase(), row]),
+  );
+  const byEmail = new Map(assignments.map((assignment) => [assignment.email, assignment]));
+  const unknownEmails = [...byEmail.keys()].filter((email) => !usersByEmail.has(email));
+  for (const email of unknownEmails) {
+    if (logger) logger.warn('team_yaml_unknown_email', { email });
+    report(audit, {
+      action: 'team.yaml.unknown_email',
+      outcome: 'failure',
+      detail: { email },
+    });
+  }
+
+  const changes = [];
+  const apply = db.transaction(() => {
+    for (const row of userRows) {
+      const email = String(row.email).trim().toLowerCase();
+      const desired = byEmail.get(email) ?? DEFAULT_VIEWER_ASSIGNMENT;
+      const current = getMember(db, row.id);
+      if (current && sameGrant(current, desired)) continue;
+
+      const from = current
+        ? { teamRole: current.teamRole, maxMode: current.maxMode, usdCapMonth: Number(current.usdCapMonth) }
+        : null;
+      if (current) {
+        db.prepare(`
+          UPDATE members
+             SET team_role = ?, max_mode = ?, usd_cap_month = ?, granted_by = NULL,
+                 updated_at = datetime('now')
+           WHERE user_id = ?
+        `).run(desired.teamRole, desired.maxMode, Number(desired.usdCapMonth), row.id);
+      } else {
+        db.prepare(`
+          INSERT INTO members (user_id, team_role, max_mode, usd_cap_month, granted_by)
+          VALUES (?, ?, ?, ?, NULL)
+        `).run(row.id, desired.teamRole, desired.maxMode, Number(desired.usdCapMonth));
+      }
+
+      const change = {
+        userId: row.id,
+        email,
+        from,
+        to: { teamRole: desired.teamRole, maxMode: desired.maxMode, usdCapMonth: Number(desired.usdCapMonth) },
+      };
+      changes.push(change);
+      report(audit, {
+        action: 'team.yaml.apply',
+        userId: row.id,
+        resource: row.id,
+        detail: { email, from, to: change.to },
+      });
+    }
+  });
+  apply();
+
+  return {
+    path: file,
+    created,
+    source,
+    assignments: assignments.length,
+    users: userRows.length,
+    changes,
+    unknownEmails,
+  };
+}
+
+function sameGrant(current, desired) {
+  return current.teamRole === desired.teamRole
+    && current.maxMode === desired.maxMode
+    && Number(current.usdCapMonth) === Number(desired.usdCapMonth);
+}
+
+/** Audit must never change the boot decision: a throwing sink is a no-op. */
+function report(audit, entry) {
+  if (typeof audit !== 'function') return;
+  try { audit(entry); } catch { /* the caller owns audit failure */ }
+}
+
+function writeFileAtomic(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+    throw err;
+  }
+}

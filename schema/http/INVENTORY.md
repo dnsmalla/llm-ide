@@ -368,7 +368,7 @@ Endpoints with no client caller (102):
 | `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:109` | - | - | tests only |
 | `/admin/invites/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:31` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:923` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:924` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:96` | `core.ts` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:108` | `core.ts` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:171` | `core.ts` | `config.ts` | - |
@@ -379,7 +379,7 @@ Endpoints with no client caller (102):
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:370` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:415` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:954` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:955` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:462` | `core.ts` | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:644` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:665` | - | - | tests only |

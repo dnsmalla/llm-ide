@@ -19,6 +19,7 @@ import { authenticate, requireRole } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
+import { applyTeamYamlAtBoot } from './server/team-boot.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
 import { handleHostApiRoute, isHostApiRoute } from './routes/host-api/http-routes.mjs';
 import { createBus, busEnabled } from './routes/bus/executor.mjs';
@@ -1483,13 +1484,21 @@ server.listen(PORT, HOST, () => {
   // Open the DB at boot so migrations apply BEFORE we accept traffic;
   // a slow first request would otherwise pay the migration cost.
   try {
-    getDb({ logger });
+    const db = getDb({ logger });
     // The DB opened healthily: the previous boot's move may now drop its .pre-move copies.
     {
       const grace = completeGraceAfterHealthyBoot(dataDirMigration);
       if (grace.removed.length) logger.info('data_move_grace_completed', { removed: grace.removed });
       if (grace.kept.length) logger.warn('data_move_grace_kept', { kept: grace.kept });
     }
+    // Team Hub H1.1 (ADR 0021): the auditable user assignments are authoritative at boot. Exactly
+    // once per boot, after migrations and before any request is handled; a malformed file exits
+    // (below) instead of serving with stale or wider grants. Never on a request path.
+    applyTeamYamlAtBoot({
+      db,
+      dir: config.dataDir ?? path.dirname(config.dbPath),
+      logger,
+    });
     // agent.db (Stage 1b): open and raise the id floors before any request
     // can write. Never throws; a failure leaves the store down (best-effort).
     openAgentStoreAtBoot({ logger });
@@ -1554,7 +1563,8 @@ server.listen(PORT, HOST, () => {
       }
 })();
   } catch (err) {
-    logger.error('db_open_failed_at_boot', { error: err.message });
+    // team-yaml already logged team_yaml_invalid with the reason and line.
+    if (err?.code !== 'TEAM_YAML_INVALID') logger.error('db_open_failed_at_boot', { error: err.message });
     process.exit(1);
   }
   // agent.db background work (quick_check, history copy, rollups): after listen,
