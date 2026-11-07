@@ -157,11 +157,12 @@ test("ChatScreen renders its landmarks and the empty state (server render, no ne
   assert.doesNotMatch(out, /aria-label="Chats"/, "the Mac uses the header session dropdown, not a column");
 });
 
-test("ChatScreen with an open chat has the conversation log, composer, mode and model controls", () => {
+test("ChatScreen with an open chat has the conversation log, composer and collapsed options", () => {
   const store = new c.MemoryChatStore();
   const controller = new c.ChatController({ core: fakeCore(), store, workspaceRoot: () => "/p" });
   const out = html(h(c.ChatScreen, { controller, store, core: fakeCore(), host: { openLink: noop, copy: noop }, initialSessionId: "x", approvals: () => h("div", { id: "slot-g" }) }));
-  for (const re of [/role="log"|chat-empty|Ask anything/, /aria-label="Mode"/, /aria-label="Model"/, /aria-label="Permission mode"/, /aria-label="Message composer"/, /id="slot-g"/]) assert.match(out, re);
+  for (const re of [/role="log"|chat-empty|Ask anything/, /aria-label="Show composer options"[^>]*aria-expanded="false"/, /aria-label="Message composer"/, /id="slot-g"/]) assert.match(out, re);
+  assert.doesNotMatch(out, /aria-label="Mode"/, "advanced controls wait behind Options");
 });
 
 test("source rules: no dangerouslySetInnerHTML, innerHTML, eval, <img>, remote URLs or inline colours in the chat screen", async () => {
