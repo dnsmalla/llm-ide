@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 122
+  x-api-version: 123
 servers:
   - url: "https://{host}"
     variables:
@@ -40,6 +40,7 @@ tags:
   - name: "review"
   - name: "self-heal"
   - name: "sync"
+  - name: "team"
 paths:
   /:
     get:
@@ -52,6 +53,234 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Health"
+  /admin/invites:
+    get:
+      tags:
+        - "team"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "invites"
+                properties:
+                  invites:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Invite"
+                    description: "Newest first; never the token or its hash"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      tags:
+        - "team"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                email:
+                  type: "string"
+                  description: "Optional: bind the invite to one address (at most 254 characters, compared case-insensitively)"
+                teamRole:
+                  type: "string"
+                  description: "admin | member | viewer (default member); an admin invite needs an owner actor"
+                maxMode:
+                  type: "string"
+                  description: "none | read_only | execute (default read_only)"
+                usdCapMonth:
+                  type: "number"
+                  description: "0-100000 (default 20)"
+                ttlHours:
+                  type: "integer"
+                  description: "1-168 (default 24)"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "id"
+                  - "token"
+                  - "expiresAt"
+                properties:
+                  id:
+                    type: "string"
+                  token:
+                    type: "string"
+                    description: "The invite token (32 random bytes, base64url) — shown once, never listed again"
+                  expiresAt:
+                    type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /admin/invites/{id}:
+    delete:
+      tags:
+        - "team"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "16 hex characters"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "revoked"
+                properties:
+                  revoked:
+                    type: "boolean"
+                    description: "false when no invite had that id"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /admin/members:
+    get:
+      tags:
+        - "team"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "members"
+                properties:
+                  members:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TeamMember"
+                    description: "Every member with a users row, ordered by role (owner first) then email"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /admin/members/{userId}:
+    patch:
+      tags:
+        - "team"
+      parameters:
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                teamRole:
+                  type: "string"
+                  description: "owner | admin | member | viewer; only an owner can grant owner, and the last owner cannot be demoted (409 LAST_OWNER)"
+                maxMode:
+                  type: "string"
+                  description: "none | read_only | execute"
+                usdCapMonth:
+                  type: "number"
+                  description: "0-100000; 0 = no cap"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "member"
+                properties:
+                  member:
+                    "$ref": "#/components/schemas/TeamMember"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /agent-sdk/spike:
     post:
       summary: "P0 spike — direct Claude Agent SDK query over SSE (temporary)"
@@ -1026,7 +1255,7 @@ paths:
           content:
             application/json:
               schema:
-                "$ref": "#/components/schemas/User"
+                "$ref": "#/components/schemas/Me"
         "401":
           description: "Unauthorized"
           content:
@@ -18651,6 +18880,22 @@ components:
         - "rule"
         - "file"
         - "detail"
+    ExtensionsMember:
+      type: "object"
+      properties:
+        memberId:
+          type: "string"
+        type:
+          type: "string"
+        name:
+          type: "string"
+        executable:
+          type: "boolean"
+      required:
+        - "memberId"
+        - "type"
+        - "name"
+        - "executable"
     ExtensionsSource:
       type: "object"
       properties:
@@ -18988,6 +19233,47 @@ components:
         entityCount:
           type: "integer"
           description: "entities in the request, before the allowed-kind filter"
+    Invite:
+      type: "object"
+      required:
+        - "id"
+        - "email"
+        - "teamRole"
+        - "maxMode"
+        - "usdCapMonth"
+        - "createdBy"
+        - "createdAt"
+        - "expiresAt"
+        - "usedAt"
+      properties:
+        id:
+          type: "string"
+          description: "16 hex characters"
+        email:
+          type:
+            - "string"
+            - "null"
+          description: "The address the invite is bound to, or null for any address"
+        teamRole:
+          type: "string"
+          description: "admin | member | viewer (an invite can never make an owner)"
+        maxMode:
+          type: "string"
+          description: "none | read_only | execute"
+        usdCapMonth:
+          type: "number"
+        createdBy:
+          type: "string"
+          description: "The admin who minted it"
+        createdAt:
+          type: "string"
+        expiresAt:
+          type: "string"
+        usedAt:
+          type:
+            - "string"
+            - "null"
+          description: "When the invite was burned; null while unused"
     Issue:
       type: "object"
       required:
@@ -19129,7 +19415,7 @@ components:
         members:
           type: "array"
           items:
-            "$ref": "#/components/schemas/Member"
+            "$ref": "#/components/schemas/ExtensionsMember"
         declared:
           type: "object"
           properties:
@@ -19670,6 +19956,52 @@ components:
           description: "e.g. up-to-date"
         reason:
           type: "string"
+    Me:
+      type: "object"
+      required:
+        - "id"
+        - "email"
+        - "displayName"
+        - "role"
+        - "status"
+        - "createdAt"
+        - "lastLoginAt"
+      properties:
+        id:
+          type: "string"
+        email:
+          type: "string"
+        displayName:
+          type: "string"
+        role:
+          type: "string"
+          description: "admin | user"
+        status:
+          type: "string"
+        createdAt:
+          type: "string"
+          description: "SQLite datetime, YYYY-MM-DD HH:MM:SS (UTC), not ISO 8601"
+        lastLoginAt:
+          type:
+            - "string"
+            - "null"
+          description: "SQLite datetime, or null before the first login"
+        member:
+          type:
+            - "object"
+            - "null"
+          description: "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only."
+          properties:
+            teamRole:
+              type: "string"
+              description: "owner | admin | member | viewer"
+            maxMode:
+              type: "string"
+              description: "none | read_only | execute"
+            usdCapMonth:
+              type: "number"
+              description: "Monthly USD cap; 0 = no cap"
+      description: "GET /auth/me: the profile plus the caller's team authority (ADR 0021)."
     Meeting:
       type: "object"
       required:
@@ -19728,22 +20060,6 @@ components:
           type: "object"
           additionalProperties: true
           description: "kind-specific metadata; open set"
-    Member:
-      type: "object"
-      properties:
-        memberId:
-          type: "string"
-        type:
-          type: "string"
-        name:
-          type: "string"
-        executable:
-          type: "boolean"
-      required:
-        - "memberId"
-        - "type"
-        - "name"
-        - "executable"
     ModelCapability:
       type: "object"
       required:
@@ -21450,6 +21766,39 @@ components:
           type:
             - "number"
             - "null"
+    TeamMember:
+      type: "object"
+      required:
+        - "userId"
+        - "email"
+        - "displayName"
+        - "status"
+        - "teamRole"
+        - "maxMode"
+        - "usdCapMonth"
+        - "updatedAt"
+      properties:
+        userId:
+          type: "string"
+        email:
+          type: "string"
+        displayName:
+          type: "string"
+        status:
+          type: "string"
+          description: "The users row status: active | disabled"
+        teamRole:
+          type: "string"
+          description: "owner | admin | member | viewer"
+        maxMode:
+          type: "string"
+          description: "The highest run mode this member may use: none | read_only | execute"
+        usdCapMonth:
+          type: "number"
+          description: "Monthly USD cap; 0 = no cap"
+        updatedAt:
+          type: "string"
+          description: "SQLite datetime of the last grant change"
     Template:
       type: "object"
       required:

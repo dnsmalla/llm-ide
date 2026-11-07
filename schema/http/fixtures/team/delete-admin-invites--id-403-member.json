@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /admin/invites/:id",
+  "status": 403,
+  "request": {
+    "params": {
+      "id": "706a5b734356ecad"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

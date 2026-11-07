@@ -1,0 +1,28 @@
+{
+  "endpoint": "GET /admin/members",
+  "status": 200,
+  "response": {
+    "members": [
+      {
+        "userId": "867862eb90e73220",
+        "email": "capture-owner@example.com",
+        "displayName": "capture-owner",
+        "status": "active",
+        "teamRole": "owner",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "updatedAt": "2026-11-07 08:17:33"
+      },
+      {
+        "userId": "12c2fcdf904d8d13",
+        "email": "capture-member@example.com",
+        "displayName": "capture-member",
+        "status": "active",
+        "teamRole": "member",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "updatedAt": "2026-11-07 08:17:33"
+      }
+    ]
+  }
+}

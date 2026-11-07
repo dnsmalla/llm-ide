@@ -100,8 +100,10 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
       const n = Number(patch.usdCapMonth);
       if (!Number.isFinite(n) || n < 0 || n > MAX_USD_CAP_MONTH) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid USD cap');
     }
-    const member = setMember(db, req.user.id, memberMatch[1], patch);
+    const updated = setMember(db, req.user.id, memberMatch[1], patch);
     audit('team.grant', patch, memberMatch[1]);
+    // The same row shape GET /admin/members returns (the store helper answers the four grant fields).
+    const member = listMembers(db).find((m) => m.userId === updated.userId) ?? updated;
     send(res, 200, { member });
     return true;
   }

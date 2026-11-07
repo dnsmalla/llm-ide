@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /admin/invites",
+  "status": 403,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

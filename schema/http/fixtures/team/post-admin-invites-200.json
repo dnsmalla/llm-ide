@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /admin/invites",
+  "status": 200,
+  "request": {
+    "body": {
+      "email": "new-member@example.com",
+      "teamRole": "viewer",
+      "maxMode": "read_only",
+      "usdCapMonth": 5,
+      "ttlHours": 24
+    }
+  },
+  "response": {
+    "id": "b06037719d59b647",
+    "token": "ZmFrZS1pbnZpdGUtdG9rZW4tZm9yLXRoZS10ZWFtLXNjaGVtYQ",
+    "expiresAt": "2026-11-08 08:17:35"
+  }
+}

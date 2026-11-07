@@ -1,0 +1,312 @@
+{
+  "description": "Team Hub H1 admin routes (ADR 0021): the team's members and the single-use invites that join it. Handled by extension/routes/team-routes.mjs, dispatched from server.mjs like routes/self-heal.mjs — always on, no feature group. Every route needs the JWT and the admin team role (403 ROLE_DENIED below admin; an unauthenticated request answers 401 AUTH_REQUIRED from the auth middleware first); writes ride the kbWrite rate-limit bucket. Roles are owner > admin > member > viewer; maxMode is the member's highest run mode (none | read_only | execute); usdCapMonth is a monthly USD cap where 0 means no cap. An invite token is 32 random bytes shown once at mint; the lists never return it or its hash. Every grant change, mint and revocation writes an audit row (team.grant / team.invite / team.invite.revoke) that carries no token and no message content. Fixtures are real responses from `node server.mjs` on a temp DB (two accounts: the first is the owner, the second a member).",
+  "$defs": {
+    "Member": {
+      "type": "object",
+      "required": [
+        "userId",
+        "email",
+        "displayName",
+        "status",
+        "teamRole",
+        "maxMode",
+        "usdCapMonth",
+        "updatedAt"
+      ],
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "The users row status: active | disabled"
+        },
+        "teamRole": {
+          "type": "string",
+          "description": "owner | admin | member | viewer"
+        },
+        "maxMode": {
+          "type": "string",
+          "description": "The highest run mode this member may use: none | read_only | execute"
+        },
+        "usdCapMonth": {
+          "type": "number",
+          "description": "Monthly USD cap; 0 = no cap"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "SQLite datetime of the last grant change"
+        }
+      }
+    },
+    "Invite": {
+      "type": "object",
+      "required": [
+        "id",
+        "email",
+        "teamRole",
+        "maxMode",
+        "usdCapMonth",
+        "createdBy",
+        "createdAt",
+        "expiresAt",
+        "usedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "16 hex characters"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The address the invite is bound to, or null for any address"
+        },
+        "teamRole": {
+          "type": "string",
+          "description": "admin | member | viewer (an invite can never make an owner)"
+        },
+        "maxMode": {
+          "type": "string",
+          "description": "none | read_only | execute"
+        },
+        "usdCapMonth": {
+          "type": "number"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "The admin who minted it"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "usedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "When the invite was burned; null while unused"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /admin/members": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "members"
+          ],
+          "properties": {
+            "members": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Member"
+              },
+              "description": "Every member with a users row, ordered by role (owner first) then email"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PATCH /admin/members/:userId": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "userId"
+          ],
+          "properties": {
+            "userId": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "teamRole": {
+              "type": "string",
+              "description": "owner | admin | member | viewer; only an owner can grant owner, and the last owner cannot be demoted (409 LAST_OWNER)"
+            },
+            "maxMode": {
+              "type": "string",
+              "description": "none | read_only | execute"
+            },
+            "usdCapMonth": {
+              "type": "number",
+              "description": "0-100000; 0 = no cap"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "member"
+          ],
+          "properties": {
+            "member": {
+              "$ref": "#/$defs/Member"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /admin/invites": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string",
+              "description": "Optional: bind the invite to one address (at most 254 characters, compared case-insensitively)"
+            },
+            "teamRole": {
+              "type": "string",
+              "description": "admin | member | viewer (default member); an admin invite needs an owner actor"
+            },
+            "maxMode": {
+              "type": "string",
+              "description": "none | read_only | execute (default read_only)"
+            },
+            "usdCapMonth": {
+              "type": "number",
+              "description": "0-100000 (default 20)"
+            },
+            "ttlHours": {
+              "type": "integer",
+              "description": "1-168 (default 24)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "id",
+            "token",
+            "expiresAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string",
+              "description": "The invite token (32 random bytes, base64url) — shown once, never listed again"
+            },
+            "expiresAt": {
+              "type": "string"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /admin/invites": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "invites"
+          ],
+          "properties": {
+            "invites": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Invite"
+              },
+              "description": "Newest first; never the token or its hash"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /admin/invites/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "16 hex characters"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "revoked"
+          ],
+          "properties": {
+            "revoked": {
+              "type": "boolean",
+              "description": "false when no invite had that id"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

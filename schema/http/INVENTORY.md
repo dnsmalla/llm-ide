@@ -11,17 +11,18 @@ Clients: the desktop and web app (`ui/screens`, `ui/kit/src`, `desktop/src`, `we
 
 ## Summary
 
-- Endpoints in `ALL_ENDPOINTS`: **205**
+- Endpoints in `ALL_ENDPOINTS`: **209**
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **83**
-- Auth: 275 token, 13 public
-- Handler found: 282; no handler found: 6
-- No app and no extension caller: 98 (tests only: 82, comments/docs only: 16, no reference: 0)
+- Auth: 279 token, 13 public
+- Handler found: 286; no handler found: 6
+- No app and no extension caller: 102 (tests only: 86, comments/docs only: 16, no reference: 0)
 
 By first path segment:
 
 | segment | endpoints |
 |---|---:|
 | `/` | 1 |
+| `/admin` | 4 |
 | `/agent` | 9 |
 | `/agent-sdk` | 1 |
 | `/auth` | 79 |
@@ -42,13 +43,13 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 274 |
+| core | 278 |
 | code_graph_3d | 1 |
 | gantt_issues | 4 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (98):
+Endpoints with no client caller (102):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -117,6 +118,10 @@ Endpoints with no client caller (98):
 - `/host-api/push/status` — tests only
 - `/host-api/push/apns` — tests only
 - `/kb/self-heal/incidents/:id/ignore` — tests only
+- `/admin/members` — tests only
+- `/admin/members/:userId` — tests only
+- `/admin/invites` — tests only
+- `/admin/invites/:id` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -166,14 +171,14 @@ Endpoints with no client caller (98):
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
 | `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:210` | - | - | tests only |
-| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:316` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
-| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:319` | `controller.ts` | `agent-v2-client.ts` | - |
-| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:322` | - | `agent-v2-client.ts` | - |
-| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:325` | `route.ts` | - | - |
-| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:330` | `controller.ts` | - | - |
-| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:334` | `controller.ts` | - | - |
-| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:337` | `route.ts` | - | - |
-| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:343` | `Badges.tsx` | - | - |
+| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:318` | `controller.ts` | `App.tsx`, `agent-v2-client.ts` | - |
+| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:321` | `controller.ts` | `agent-v2-client.ts` | - |
+| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:324` | - | `agent-v2-client.ts` | - |
+| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:327` | `route.ts` | - | - |
+| `/agent/v2/turns` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:332` | `controller.ts` | - | - |
+| `/agent/v2/turns/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:336` | `controller.ts` | - | - |
+| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:339` | `route.ts` | - | - |
+| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:345` | `Badges.tsx` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:111` | `NativeAutoTasksScreen.tsx`, `NativeLoopScreen.tsx`, `run-custom.ts`, `settings-adapter.ts` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `NativeLoopScreen.tsx` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:259` | - | `App.tsx`, `useQuestions.ts` | - |
@@ -358,67 +363,71 @@ Endpoints with no client caller (98):
 | `/kb/self-heal/runs` | ALL_ENDPOINTS | POST | token | core | `extension/routes/self-heal.mjs:116` | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/outcome` | ALL_ENDPOINTS | ANY | token | core | - | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/resolve` | ALL_ENDPOINTS | ANY | token | core | - | `SelfHealSection.tsx` | - | - |
+| `/admin/members` | ALL_ENDPOINTS | GET | token | core | `extension/routes/team-routes.mjs:89` | - | - | tests only |
+| `/admin/members/:userId` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:30` | - | - | tests only |
+| `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:111` | - | - | tests only |
+| `/admin/invites/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:31` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:898` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
-| `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:95` | `core.ts` | `config.ts` | - |
-| `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:107` | `core.ts` | `config.ts` | - |
-| `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:132` | `core.ts` | `config.ts` | - |
-| `/auth/refresh` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:153` | `core.ts` | `config.ts` | - |
-| `/auth/reset-request` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:191` | - | - | tests only |
-| `/auth/reset-confirm` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:228` | - | - | tests only |
-| `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:281` | - | - | tests only |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:923` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
+| `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:96` | `core.ts` | `config.ts` | - |
+| `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:108` | `core.ts` | `config.ts` | - |
+| `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:171` | `core.ts` | `config.ts` | - |
+| `/auth/refresh` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:192` | `core.ts` | `config.ts` | - |
+| `/auth/reset-request` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:230` | - | - | tests only |
+| `/auth/reset-confirm` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:267` | - | - | tests only |
+| `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:320` | - | - | tests only |
 | `/kb/sync/box/callback` | public+auth | GET | public | core | `extension/routes/sync/http-routes.mjs:82` | - | - | tests only |
-| `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:331` | - | - | tests only |
-| `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:376` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:929` | - | `App.tsx`, `service-worker.ts` | - |
-| `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:423` | `core.ts` | `config.ts` | - |
-| `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:605` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
-| `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:620` | - | - | tests only |
-| `/auth/me/password` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:657` | - | `UserAccountSettings.tsx` | - |
-| `/auth/me/secrets` | public+auth | GET, POST | token | core | `extension/server/auth-routes.mjs:672` | `RepositoriesSection.tsx`, `builtin-keys-model.ts`, `disconnect-all.ts`, `providers-model.ts`, `source-core.ts` | - | - |
-| `/auth/me/audit` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:781` | - | - | tests only |
-| `/auth/me/repos` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:69` | `RepositoriesSection.tsx`, `source-actions.ts` | - | - |
-| `/auth/me/prefs` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:70` | `app-model.ts` | - | - |
-| `/auth/me/connectors` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:810` | - | - | tests only |
-| `/auth/me/connectors/catalog` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:823` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
-| `/auth/me/connectors/add` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:833` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
-| `/auth/mcp-connector/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:556` | `source-actions.ts` | - | - |
-| `/auth/mcp-connector/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:588` | `source-actions.ts` | - | - |
-| `/auth/google/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:464` | - | - | tests only |
-| `/auth/google/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:512` | - | - | tests only |
-| `/auth/slack/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:525` | `source-actions.ts` | - | - |
-| `/auth/slack/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:540` | `source-actions.ts` | - | - |
-| `/auth/me/plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:148` | `legacy.ts`, `loader.ts` | - | - |
-| `/auth/me/plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:154` | `legacy.ts` | - | - |
-| `/auth/me/plugins/hook-trust` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:191` | `legacy.ts` | - | - |
-| `/auth/me/plugins/reload` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:216` | `legacy.ts` | - | - |
-| `/auth/me/plugins/install-git` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:232` | `legacy.ts` | - | - |
-| `/auth/me/plugins/install` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:280` | - | - | tests only |
-| `/auth/me/claude-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:398` | `legacy.ts` | - | - |
-| `/auth/me/claude-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:411` | `legacy.ts` | - | - |
-| `/auth/me/claude-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:427` | `legacy.ts` | - | - |
-| `/auth/me/claude-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:488` | - | - | tests only |
-| `/auth/me/claude-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:496` | `legacy.ts` | - | - |
-| `/auth/me/claude-plugins/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:510` | - | - | tests only |
-| `/auth/me/codex-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:553` | `legacy.ts` | - | - |
-| `/auth/me/codex-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:566` | - | - | tests only |
-| `/auth/me/codex-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:582` | `legacy.ts` | - | - |
-| `/auth/me/codex-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:633` | - | - | tests only |
-| `/auth/me/codex-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:641` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:672` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:682` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:690` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/items` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:720` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:753` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:774` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:849` | `legacy.ts`, `loader.ts` | - | - |
-| `/auth/me/mcp-plugins/catalog` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:909` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/claude-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:919` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/codex-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:926` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:933` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:1000` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:1016` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:1042` | `legacy.ts` | - | - |
+| `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:370` | - | - | tests only |
+| `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:415` | - | - | tests only |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:954` | - | `App.tsx`, `service-worker.ts` | - |
+| `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:462` | `core.ts` | `config.ts` | - |
+| `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:644` | `AboutSection.tsx`, `AccountSection.tsx` | `UserAccountSettings.tsx` | - |
+| `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:665` | - | - | tests only |
+| `/auth/me/password` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:702` | - | `UserAccountSettings.tsx` | - |
+| `/auth/me/secrets` | public+auth | GET, POST | token | core | `extension/server/auth-routes.mjs:717` | `RepositoriesSection.tsx`, `builtin-keys-model.ts`, `disconnect-all.ts`, `providers-model.ts`, `source-core.ts` | - | - |
+| `/auth/me/audit` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:826` | - | - | tests only |
+| `/auth/me/repos` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:70` | `RepositoriesSection.tsx`, `source-actions.ts` | - | - |
+| `/auth/me/prefs` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:71` | `app-model.ts` | - | - |
+| `/auth/me/connectors` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:855` | - | - | tests only |
+| `/auth/me/connectors/catalog` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:868` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
+| `/auth/me/connectors/add` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:878` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
+| `/auth/mcp-connector/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:595` | `source-actions.ts` | - | - |
+| `/auth/mcp-connector/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:627` | `source-actions.ts` | - | - |
+| `/auth/google/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:503` | - | - | tests only |
+| `/auth/google/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:551` | - | - | tests only |
+| `/auth/slack/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:564` | `source-actions.ts` | - | - |
+| `/auth/slack/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:579` | `source-actions.ts` | - | - |
+| `/auth/me/plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:149` | `legacy.ts`, `loader.ts` | - | - |
+| `/auth/me/plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:155` | `legacy.ts` | - | - |
+| `/auth/me/plugins/hook-trust` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:192` | `legacy.ts` | - | - |
+| `/auth/me/plugins/reload` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:217` | `legacy.ts` | - | - |
+| `/auth/me/plugins/install-git` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:233` | `legacy.ts` | - | - |
+| `/auth/me/plugins/install` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:281` | - | - | tests only |
+| `/auth/me/claude-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:396` | `legacy.ts` | - | - |
+| `/auth/me/claude-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:409` | `legacy.ts` | - | - |
+| `/auth/me/claude-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:425` | `legacy.ts` | - | - |
+| `/auth/me/claude-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:486` | - | - | tests only |
+| `/auth/me/claude-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:494` | `legacy.ts` | - | - |
+| `/auth/me/claude-plugins/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:508` | - | - | tests only |
+| `/auth/me/codex-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:551` | `legacy.ts` | - | - |
+| `/auth/me/codex-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:564` | - | - | tests only |
+| `/auth/me/codex-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:580` | `legacy.ts` | - | - |
+| `/auth/me/codex-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:631` | - | - | tests only |
+| `/auth/me/codex-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:639` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:670` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:680` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:688` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/items` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:718` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:751` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:772` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:844` | `legacy.ts`, `loader.ts` | - | - |
+| `/auth/me/mcp-plugins/catalog` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:904` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/claude-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:914` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/codex-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:921` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:928` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:995` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:1011` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:1037` | `legacy.ts` | - | - |
 | `/auth/me/extensions/allowlist` | public+auth | PUT | token | core | `extension/routes/extensions-catalog.mjs:124` | `trust-model.ts` | - | - |
 | `/auth/me/extensions/installed` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
 | `/auth/me/extensions/updates` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:59` | - | - | tests only |
@@ -434,17 +443,17 @@ Endpoints with no client caller (98):
 | `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:216` | - | - | tests only |
 | `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:230` | - | - | tests only |
 | `/auth/me/workspace-trust` | public+auth | ANY | token | core | `extension/routes/workspace-trust.mjs:17` | `TrustBanner.tsx`, `trust-model.ts` | - | - |
-| `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:852` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
-| `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:357` | - | - | tests only |
-| `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:795` | `legacy.ts` | - | - |
-| `/auth/me/llm-sources/:id/discovery` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:814` | `legacy.ts` | - | - |
-| `/auth/me/mcp-plugins/:id` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:1130` | `legacy.ts` | - | - |
+| `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:897` | `ConnectionsSection.tsx`, `source-actions.ts` | - | - |
+| `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:355` | - | - | tests only |
+| `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:793` | `legacy.ts` | - | - |
+| `/auth/me/llm-sources/:id/discovery` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:812` | `legacy.ts` | - | - |
+| `/auth/me/mcp-plugins/:id` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:1125` | `legacy.ts` | - | - |
 | `/auth/me/mcp-plugins/:id/update` | public+auth | ANY | token | core | - | `legacy.ts` | - | - |
 | `/auth/me/mcp-plugins/:id/resync` | public+auth | ANY | token | core | - | `legacy.ts` | - | - |
 
 ## Consistency
 
-Checked: 288 roster entries, 559 app source files, 52 extension source files.
+Checked: 292 roster entries, 560 app source files, 52 extension source files.
 
 Allowlisted client paths outside the roster (1 distinct paths, 1 reasons):
 

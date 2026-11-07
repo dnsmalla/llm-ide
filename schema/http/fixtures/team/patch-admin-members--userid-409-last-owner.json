@@ -1,0 +1,18 @@
+{
+  "endpoint": "PATCH /admin/members/:userId",
+  "status": 409,
+  "request": {
+    "params": {
+      "userId": "867862eb90e73220"
+    },
+    "body": {
+      "teamRole": "admin"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "LAST_OWNER",
+      "message": "The last owner cannot be demoted"
+    }
+  }
+}

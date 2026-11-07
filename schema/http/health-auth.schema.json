@@ -39,27 +39,6 @@
             "null"
           ],
           "description": "SQLite datetime, or null before the first login"
-        },
-        "member": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "description": "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only.",
-          "properties": {
-            "teamRole": {
-              "type": "string",
-              "description": "owner | admin | member | viewer"
-            },
-            "maxMode": {
-              "type": "string",
-              "description": "none | read_only | execute"
-            },
-            "usdCapMonth": {
-              "type": "number",
-              "description": "Monthly USD cap; 0 = no cap"
-            }
-          }
         }
       }
     },
@@ -1057,6 +1036,69 @@
           }
         }
       }
+    },
+    "Me": {
+      "type": "object",
+      "required": [
+        "id",
+        "email",
+        "displayName",
+        "role",
+        "status",
+        "createdAt",
+        "lastLoginAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "description": "admin | user"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "SQLite datetime, YYYY-MM-DD HH:MM:SS (UTC), not ISO 8601"
+        },
+        "lastLoginAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "SQLite datetime, or null before the first login"
+        },
+        "member": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only.",
+          "properties": {
+            "teamRole": {
+              "type": "string",
+              "description": "owner | admin | member | viewer"
+            },
+            "maxMode": {
+              "type": "string",
+              "description": "none | read_only | execute"
+            },
+            "usdCapMonth": {
+              "type": "number",
+              "description": "Monthly USD cap; 0 = no cap"
+            }
+          }
+        }
+      },
+      "description": "GET /auth/me: the profile plus the caller's team authority (ADR 0021)."
     }
   },
   "endpoints": {
@@ -1483,7 +1525,7 @@
     "GET /auth/me": {
       "responses": {
         "200": {
-          "$ref": "#/$defs/User"
+          "$ref": "#/$defs/Me"
         },
         "401": {
           "$ref": "_common#/$defs/Error"

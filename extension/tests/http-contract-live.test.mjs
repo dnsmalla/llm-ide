@@ -225,6 +225,11 @@ const SKIP_RULES = [
     when: (fx) => fx.status === 404 && /feature_disabled/.test(JSON.stringify(fx.response)),
   },
   {
+    why: 'team authority (ADR 0021): the replay seeds every fixture account as an admin, so a member refusal cannot be replayed, and a PATCH body validation needs a member id this DB does not have. Covered by tests/team-routes.test.mjs',
+    when: (fx) => fx.file.startsWith('team/') && (fx.status === 403
+      || (fx.endpoint.startsWith('PATCH /admin/members/') && fx.status !== 401 && fx.status !== 404)),
+  },
+  {
     why: 'registration closed by config (this server runs with registration open)',
     when: (fx) => fx.endpoint === 'POST /auth/register' && fx.status === 403,
   },

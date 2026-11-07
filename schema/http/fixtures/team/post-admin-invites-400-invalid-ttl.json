@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /admin/invites",
+  "status": 400,
+  "request": {
+    "body": {
+      "ttlHours": 169
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "ttlHours must be 1-168"
+    }
+  }
+}

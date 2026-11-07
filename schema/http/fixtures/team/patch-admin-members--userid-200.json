@@ -1,0 +1,26 @@
+{
+  "endpoint": "PATCH /admin/members/:userId",
+  "status": 200,
+  "request": {
+    "params": {
+      "userId": "12c2fcdf904d8d13"
+    },
+    "body": {
+      "teamRole": "viewer",
+      "maxMode": "read_only",
+      "usdCapMonth": 5
+    }
+  },
+  "response": {
+    "member": {
+      "userId": "12c2fcdf904d8d13",
+      "email": "capture-member@example.com",
+      "displayName": "capture-member",
+      "status": "active",
+      "teamRole": "viewer",
+      "maxMode": "read_only",
+      "usdCapMonth": 5,
+      "updatedAt": "2026-11-07 08:17:33"
+    }
+  }
+}

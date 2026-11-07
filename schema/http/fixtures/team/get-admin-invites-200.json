@@ -1,0 +1,19 @@
+{
+  "endpoint": "GET /admin/invites",
+  "status": 200,
+  "response": {
+    "invites": [
+      {
+        "id": "706a5b734356ecad",
+        "email": "new-member@example.com",
+        "teamRole": "member",
+        "maxMode": "read_only",
+        "usdCapMonth": 20,
+        "createdBy": "867862eb90e73220",
+        "createdAt": "2026-11-07 08:17:33",
+        "expiresAt": "2026-11-08 08:17:33",
+        "usedAt": null
+      }
+    ]
+  }
+}

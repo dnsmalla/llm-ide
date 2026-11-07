@@ -689,7 +689,7 @@ export type ExtensionsFinding = {
   excerpt?: string;
 };
 
-export type Member = {
+export type ExtensionsMember = {
   memberId: string;
   type: string;
   name: string;
@@ -716,7 +716,7 @@ export type Item = {
   pinnedCommit: string;
   installedAt: string;
   updatedAt?: string;
-  members: Member[];
+  members: ExtensionsMember[];
   declared: {
     executableKinds: string[];
   };
@@ -1161,6 +1161,29 @@ export type ClaudeUpdateNotFound = {
 
 export type PluginRows = {
   plugins: Record<string, unknown>[];
+};
+
+/** GET /auth/me: the profile plus the caller's team authority (ADR 0021). */
+export type Me = {
+  id: string;
+  email: string;
+  displayName: string;
+  /** admin | user */
+  role: string;
+  status: string;
+  /** SQLite datetime, YYYY-MM-DD HH:MM:SS (UTC), not ISO 8601 */
+  createdAt: string;
+  /** SQLite datetime, or null before the first login */
+  lastLoginAt: string | null;
+  /** ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only. */
+  member?: {
+    /** owner | admin | member | viewer */
+    teamRole?: string;
+    /** none | read_only | execute */
+    maxMode?: string;
+    /** Monthly USD cap; 0 = no cap */
+    usdCapMonth?: number;
+  } | null;
 };
 
 export type Device = {
@@ -2127,6 +2150,40 @@ export type EncryptedSyncStatus = {
   /** an error code only */
   lastError?: string | null;
   rotationPending?: boolean;
+};
+
+export type TeamMember = {
+  userId: string;
+  email: string;
+  displayName: string;
+  /** The users row status: active | disabled */
+  status: string;
+  /** owner | admin | member | viewer */
+  teamRole: string;
+  /** The highest run mode this member may use: none | read_only | execute */
+  maxMode: string;
+  /** Monthly USD cap; 0 = no cap */
+  usdCapMonth: number;
+  /** SQLite datetime of the last grant change */
+  updatedAt: string;
+};
+
+export type Invite = {
+  /** 16 hex characters */
+  id: string;
+  /** The address the invite is bound to, or null for any address */
+  email: string | null;
+  /** admin | member | viewer (an invite can never make an owner) */
+  teamRole: string;
+  /** none | read_only | execute */
+  maxMode: string;
+  usdCapMonth: number;
+  /** The admin who minted it */
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  /** When the invite was burned; null while unused */
+  usedAt: string | null;
 };
 
 /** Request parts for `GET /kb/storage` (schema/http/agent-history.schema.json). */
@@ -4292,7 +4349,7 @@ export type GetAuthMcpConnectorCallbackResponse200 = string;
 /** Request parts for `GET /auth/me` (schema/http/health-auth.schema.json). */
 export type GetAuthMeRequest = Record<string, never>;
 
-export type GetAuthMeResponse200 = User;
+export type GetAuthMeResponse200 = Me;
 
 export type GetAuthMeResponse401 = CommonError;
 
@@ -8544,6 +8601,105 @@ export type GetKbSyncBoxCallbackRequest = {
 
 export type GetKbSyncBoxCallbackResponse200 = string;
 
+/** Request parts for `GET /admin/members` (schema/http/team.schema.json). */
+export type GetAdminMembersRequest = Record<string, never>;
+
+export type GetAdminMembersResponse200 = {
+  /** Every member with a users row, ordered by role (owner first) then email */
+  members: TeamMember[];
+};
+
+export type GetAdminMembersResponse401 = CommonError;
+
+export type GetAdminMembersResponse403 = CommonError;
+
+/** Request parts for `PATCH /admin/members/:userId` (schema/http/team.schema.json). */
+export type PatchAdminMembersUserIdRequest = {
+  params: {
+    userId: string;
+  };
+  body: {
+    /** owner | admin | member | viewer; only an owner can grant owner, and the last owner cannot be demoted (409 LAST_OWNER) */
+    teamRole?: string;
+    /** none | read_only | execute */
+    maxMode?: string;
+    /** 0-100000; 0 = no cap */
+    usdCapMonth?: number;
+  };
+};
+
+export type PatchAdminMembersUserIdResponse200 = {
+  member: TeamMember;
+};
+
+export type PatchAdminMembersUserIdResponse400 = CommonError;
+
+export type PatchAdminMembersUserIdResponse401 = CommonError;
+
+export type PatchAdminMembersUserIdResponse403 = CommonError;
+
+export type PatchAdminMembersUserIdResponse404 = CommonError;
+
+export type PatchAdminMembersUserIdResponse409 = CommonError;
+
+/** Request parts for `POST /admin/invites` (schema/http/team.schema.json). */
+export type PostAdminInvitesRequest = {
+  body: {
+    /** Optional: bind the invite to one address (at most 254 characters, compared case-insensitively) */
+    email?: string;
+    /** admin | member | viewer (default member); an admin invite needs an owner actor */
+    teamRole?: string;
+    /** none | read_only | execute (default read_only) */
+    maxMode?: string;
+    /** 0-100000 (default 20) */
+    usdCapMonth?: number;
+    /** 1-168 (default 24) */
+    ttlHours?: number;
+  };
+};
+
+export type PostAdminInvitesResponse200 = {
+  id: string;
+  /** The invite token (32 random bytes, base64url) — shown once, never listed again */
+  token: string;
+  expiresAt: string;
+};
+
+export type PostAdminInvitesResponse400 = CommonError;
+
+export type PostAdminInvitesResponse401 = CommonError;
+
+export type PostAdminInvitesResponse403 = CommonError;
+
+/** Request parts for `GET /admin/invites` (schema/http/team.schema.json). */
+export type GetAdminInvitesRequest = Record<string, never>;
+
+export type GetAdminInvitesResponse200 = {
+  /** Newest first; never the token or its hash */
+  invites: Invite[];
+};
+
+export type GetAdminInvitesResponse401 = CommonError;
+
+export type GetAdminInvitesResponse403 = CommonError;
+
+/** Request parts for `DELETE /admin/invites/:id` (schema/http/team.schema.json). */
+export type DeleteAdminInvitesIdRequest = {
+  params: {
+    /** 16 hex characters */
+    id: string;
+  };
+};
+
+export type DeleteAdminInvitesIdResponse200 = {
+  /** false when no invite had that id */
+  revoked: boolean;
+};
+
+export type DeleteAdminInvitesIdResponse401 = CommonError;
+
+export type DeleteAdminInvitesIdResponse403 = CommonError;
+
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
   "GET /kb/storage": {
@@ -11081,6 +11237,50 @@ export interface ApiEndpoints {
     request: GetKbSyncBoxCallbackRequest;
     responses: {
       200: GetKbSyncBoxCallbackResponse200;
+    };
+  };
+  "GET /admin/members": {
+    request: GetAdminMembersRequest;
+    responses: {
+      200: GetAdminMembersResponse200;
+      401: GetAdminMembersResponse401;
+      403: GetAdminMembersResponse403;
+    };
+  };
+  "PATCH /admin/members/:userId": {
+    request: PatchAdminMembersUserIdRequest;
+    responses: {
+      200: PatchAdminMembersUserIdResponse200;
+      400: PatchAdminMembersUserIdResponse400;
+      401: PatchAdminMembersUserIdResponse401;
+      403: PatchAdminMembersUserIdResponse403;
+      404: PatchAdminMembersUserIdResponse404;
+      409: PatchAdminMembersUserIdResponse409;
+    };
+  };
+  "POST /admin/invites": {
+    request: PostAdminInvitesRequest;
+    responses: {
+      200: PostAdminInvitesResponse200;
+      400: PostAdminInvitesResponse400;
+      401: PostAdminInvitesResponse401;
+      403: PostAdminInvitesResponse403;
+    };
+  };
+  "GET /admin/invites": {
+    request: GetAdminInvitesRequest;
+    responses: {
+      200: GetAdminInvitesResponse200;
+      401: GetAdminInvitesResponse401;
+      403: GetAdminInvitesResponse403;
+    };
+  };
+  "DELETE /admin/invites/:id": {
+    request: DeleteAdminInvitesIdRequest;
+    responses: {
+      200: DeleteAdminInvitesIdResponse200;
+      401: DeleteAdminInvitesIdResponse401;
+      403: DeleteAdminInvitesIdResponse403;
     };
   };
 }

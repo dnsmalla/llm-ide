@@ -1,0 +1,18 @@
+{
+  "endpoint": "PATCH /admin/members/:userId",
+  "status": 401,
+  "request": {
+    "params": {
+      "userId": "12c2fcdf904d8d13"
+    },
+    "body": {
+      "maxMode": "none"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -161,9 +161,12 @@ test('PATCH /admin/members/:id changes grants (owner) and audits team.grant', as
     body: { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 },
   });
   assert.equal(res.statusCode, 200, res._body);
-  assert.deepEqual(res.json().member, {
-    userId: target, teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
+  const { userId, email, displayName, status, teamRole, maxMode, usdCapMonth, updatedAt } = res.json().member;
+  assert.deepEqual({ userId, email, displayName, status, teamRole, maxMode, usdCapMonth }, {
+    userId: target, email: `${target}@example.com`, displayName: 'N', status: 'active',
+    teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5,
   });
+  assert.ok(typeof updatedAt === 'string');
   const rows = auditRows('team.grant').filter((r) => r.resource === target);
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].detail, { teamRole: 'viewer', maxMode: 'none', usdCapMonth: 5 });

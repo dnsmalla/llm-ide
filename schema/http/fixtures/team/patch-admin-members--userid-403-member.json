@@ -1,0 +1,18 @@
+{
+  "endpoint": "PATCH /admin/members/:userId",
+  "status": 403,
+  "request": {
+    "params": {
+      "userId": "867862eb90e73220"
+    },
+    "body": {
+      "maxMode": "none"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

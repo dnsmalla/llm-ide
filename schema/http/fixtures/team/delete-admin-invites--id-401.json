@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /admin/invites/:id",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "706a5b734356ecad"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}
