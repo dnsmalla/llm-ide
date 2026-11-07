@@ -14,6 +14,8 @@ export * from "../MessageList";
 export * from "../SessionList";
 export * from "../Composer";
 export * from "../Pickers";
+export * from "../context-meter";
+export * from "../ContextMeter";
 export * from "../effort";
 export * from "../custom-models";
 export * from "../model-notices";
