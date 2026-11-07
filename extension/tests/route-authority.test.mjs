@@ -293,3 +293,9 @@ test('adding or removing a repo path needs a member with execute', () => {
   const doer = user('member', 'execute');
   assert.equal(authorizeRoute(getDb(), makeReq({ url: '/auth/me/repos', body: {}, user: doer }), { rule }).ok, true);
 });
+
+test('/auth/me reports the member permissions', async () => {
+  const { permittedClasses } = await import('../kb/members.mjs');
+  assert.deepEqual(permittedClasses({ teamRole: 'member', maxMode: 'read_only', usdCapMonth: 0 }),
+    ['self.read', 'self.write', 'model.ask', 'model.read', 'fs.read', 'external.read', 'host']);
+});

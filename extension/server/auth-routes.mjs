@@ -28,7 +28,7 @@ import {
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
-import { assertDeletable, consumeInvite, getMember, peekInvite } from '../kb/members.mjs';
+import { assertDeletable, consumeInvite, getMember, peekInvite, permittedClasses } from '../kb/members.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
 import { enforceRouteAuthority } from './route-authority.mjs';
 
@@ -668,7 +668,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const m = req.user.id === 'legacy' ? null : getMember(db, req.user.id);
     send(res, 200, {
       ...me,
-      member: m ? { teamRole: m.teamRole, maxMode: m.maxMode, usdCapMonth: m.usdCapMonth } : null,
+      member: m ? { teamRole: m.teamRole, maxMode: m.maxMode, usdCapMonth: m.usdCapMonth, permissions: permittedClasses(m) } : null,
     });
     return;
   }

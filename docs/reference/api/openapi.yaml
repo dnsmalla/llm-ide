@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 123
+  x-api-version: 124
 servers:
   - url: "https://{host}"
     variables:
@@ -19990,7 +19990,7 @@ components:
           type:
             - "object"
             - "null"
-          description: "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only."
+          description: "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth, permissions }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only."
           properties:
             teamRole:
               type: "string"
@@ -20001,6 +20001,11 @@ components:
             usdCapMonth:
               type: "number"
               description: "Monthly USD cap; 0 = no cap"
+            permissions:
+              type: "array"
+              items:
+                type: "string"
+              description: "Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124."
       description: "GET /auth/me: the profile plus the caller's team authority (ADR 0021)."
     Meeting:
       type: "object"

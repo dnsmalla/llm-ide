@@ -1081,7 +1081,7 @@
             "object",
             "null"
           ],
-          "description": "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only.",
+          "description": "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth, permissions }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only.",
           "properties": {
             "teamRole": {
               "type": "string",
@@ -1094,7 +1094,8 @@
             "usdCapMonth": {
               "type": "number",
               "description": "Monthly USD cap; 0 = no cap"
-            }
+            },
+            "permissions": { "type": "array", "items": { "type": "string" }, "description": "Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124." }
           }
         }
       },

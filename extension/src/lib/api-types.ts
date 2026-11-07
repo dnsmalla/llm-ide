@@ -1175,7 +1175,7 @@ export type Me = {
   createdAt: string;
   /** SQLite datetime, or null before the first login */
   lastLoginAt: string | null;
-  /** ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only. */
+  /** ADR 0021 team authority: { teamRole, maxMode, usdCapMonth, permissions }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only. */
   member?: {
     /** owner | admin | member | viewer */
     teamRole?: string;
@@ -1183,6 +1183,8 @@ export type Me = {
     maxMode?: string;
     /** Monthly USD cap; 0 = no cap */
     usdCapMonth?: number;
+    /** Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124. */
+    permissions?: string[];
   } | null;
 };
 

@@ -448,12 +448,21 @@ test('GET /auth/me carries the caller\'s member authority (ADR 0021)', async () 
   // The first account on the install is the owner; the one registered here is a member with execute.
   const owner = await callAuth({ method: 'GET', url: '/auth/me', user: ownerUser() });
   assert.equal(owner.statusCode, 200);
-  assert.deepEqual(owner.json().member, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  assert.deepEqual(owner.json().member, {
+    teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0,
+    permissions: ['self.read', 'self.write', 'model.ask', 'model.read', 'model.exec', 'fs.read', 'fs.write',
+      'external.read', 'external.write', 'install', 'admin', 'host'],
+  });
+  assert.ok(Array.isArray(owner.json().member.permissions) && owner.json().member.permissions.includes('self.read'));
 
   const { user } = await registerAndLogin();
   const me = await callAuth({ method: 'GET', url: '/auth/me', user: { id: user.id } });
   assert.equal(me.statusCode, 200);
-  assert.deepEqual(me.json().member, { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 });
+  assert.deepEqual(me.json().member, {
+    teamRole: 'member', maxMode: 'execute', usdCapMonth: 0,
+    permissions: ['self.read', 'self.write', 'model.ask', 'model.read', 'model.exec', 'fs.read', 'fs.write',
+      'external.read', 'external.write', 'install', 'host'],
+  });
 });
 
 test('registration grants a members row in the same request', async () => {
