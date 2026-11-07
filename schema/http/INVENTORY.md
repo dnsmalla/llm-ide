@@ -363,9 +363,9 @@ Endpoints with no client caller (102):
 | `/kb/self-heal/runs` | ALL_ENDPOINTS | POST | token | core | `extension/routes/self-heal.mjs:116` | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/outcome` | ALL_ENDPOINTS | ANY | token | core | - | `self-heal-run.ts` | - | - |
 | `/kb/self-heal/runs/:id/resolve` | ALL_ENDPOINTS | ANY | token | core | - | `SelfHealSection.tsx` | - | - |
-| `/admin/members` | ALL_ENDPOINTS | GET | token | core | `extension/routes/team-routes.mjs:89` | - | - | tests only |
+| `/admin/members` | ALL_ENDPOINTS | GET | token | core | `extension/routes/team-routes.mjs:87` | - | - | tests only |
 | `/admin/members/:userId` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:30` | - | - | tests only |
-| `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:111` | - | - | tests only |
+| `/admin/invites` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/team-routes.mjs:109` | - | - | tests only |
 | `/admin/invites/:id` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/team-routes.mjs:31` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:923` | `AboutSection.tsx`, `BuiltinKeys.tsx`, `ServerSection.tsx`, `Shell.tsx`, `SimpleSections.tsx` | - | - |
