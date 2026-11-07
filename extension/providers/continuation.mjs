@@ -17,6 +17,7 @@ import { redactSecrets, redactSecretsForStorage } from '../core/redact-secrets.m
 import { neutralizePromptFences } from '../core/utils.mjs';
 import { logger } from '../core/logger.mjs';
 import { buildHandoff, HANDOFF_NOTE_CHARS } from './handoff.mjs';
+import { PROVIDER_IDS } from './providers.mjs';
 
 const log = logger.child({ component: 'continuation' });
 
@@ -76,9 +77,12 @@ export function recentCount(turns, { keepTurns = CONTINUE_KEEP_TURNS, recentChar
 /** The cheap-model prompt over the older turns: the first request plus the newest that fit; the middle counted. */
 export function summaryPrompt(older, { inputChars = SUMMARY_INPUT_CHARS, turnChars = SUMMARY_TURN_CHARS } = {}) {
   const line = (t) => {
-    const text = t.content.length > turnChars ? `${t.content.slice(0, turnChars)}...(clipped)` : t.content;
-    return `${t.role === 'user' ? 'User' : 'Assistant'}: ${neutralizePromptFences(redactSecrets(text))}`;
+    const clean = redactSecrets(t.content);
+    const text = clean.length > turnChars ? `${clean.slice(0, turnChars)}...(clipped)` : clean;
+    return `${t.role === 'user' ? 'User' : 'Assistant'}: ${neutralizePromptFences(text)}`;
   };
+  const firstUser = older.findIndex((t) => t.role === 'user');
+  if (firstUser > 0) older = [...older.slice(firstUser), ...older.slice(0, firstUser)];
   const lines = older.map(line);
   let budget = inputChars - lines[0].length;
   const tail = [];
@@ -101,6 +105,7 @@ export function summaryPrompt(older, { inputChars = SUMMARY_INPUT_CHARS, turnCha
 
 /** The seed for an ended chat, or null when nothing is old enough to summarise or the summary came back empty. Throws on a failed call. */
 export async function buildContinuation({ userId, chatSessionId, turns, source, provider, model, requestId, summarize, signal }) {
+  if (!PROVIDER_IDS.includes(provider) && !String(provider).startsWith('custom:')) return null;
   const keep = recentCount(turns);
   const older = turns.slice(0, turns.length - keep);
   if (older.length === 0) return null;
