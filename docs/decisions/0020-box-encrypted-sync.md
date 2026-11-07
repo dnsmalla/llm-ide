@@ -8,7 +8,7 @@ amends: "0018 (decision 4); relay design sections 2, 4.5, 4.6, 7.2, D4, D6, X1"
 
 # ADR 0020: User-owned storage as the encrypted sync medium (own server, Box, MEGA)
 
-**Status:** Proposed. The user approved the direction on 2026-11-05: Box as the sync medium, phone and
+**Status:** Proposed; amended by [ADR 0021](0021-team-hub.md) (2026-11-07: the team path is the core in hub mode; sync stays for solo users). The user approved the direction on 2026-11-05: Box as the sync medium, phone and
 web working as far as possible with the desktop off, no desktop login, no money spent. Later the same
 day the user asked for MEGA and the user's own server over SSH as more adapters behind one interface.
 The first adapter is MEGA, by user decision on 2026-11-05; the own server (SFTP) and Box follow (see below).

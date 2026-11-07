@@ -215,3 +215,4 @@ You said "do the best, secure, usable for big projects" and agents decided. Each
 - [x] **UN-104** Token-affecting changes ship OFF until you run the bench and say go; paid or subscription bench runs happen after the end-to-end build (2026-10-30).
 - [x] **UN-105** Professional quality over speed; no gate compressed to hit a date (2026-10-29).
 - [x] **UN-106** Knowledge-kit Q1, Q3, Q4 and Q8 answered (2026-10-29): files are the truth, a rebuildable server index, no server copy of meetings.
+- [x] **UN-116** Team Hub (2026-11-07): LLM from every platform, every group member within an assigned authority; decisions D1–D5 as recommended (VPS hub, company key with caps, owner/admin/member/viewer, no execute from phone or browser, keep sync) (ADR 0021).
