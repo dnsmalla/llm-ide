@@ -54,6 +54,8 @@ import {
 } from './agent-v2-router.mjs';
 import { RouteError, deleteRoute, setHandoffPointer, recordRouteEvent, commitTurnUsage } from '../kb/chat-route.mjs';
 import { buildHandoff } from '../providers/handoff.mjs';
+import { planContinuation } from '../providers/continuation.mjs';
+import { runClaude } from '../providers/runtime.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
 import { routerEnabled, routerCapEnabled } from '../core/router-flags.mjs';
 
@@ -287,7 +289,7 @@ export function freshTurnHistory(body) {
 }
 
 // The production seams; tests pass their own (see the header).
-const DEFAULT_DEPS = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand };
+const DEFAULT_DEPS = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand, summarize: (prompt, opts) => runClaude(prompt, opts) };
 
 export async function handleAgentV2Routes(req, res, deps = DEFAULT_DEPS) {
   const url = req.url || '';
@@ -383,7 +385,8 @@ export function routeSeedFrom(body, userId, db) {
 //
 // Body: { message, language?, model?, provider?, mode?, skills?, planExecute?,
 // agentContext: { chatSessionId, workspaceRoot, … }, attachments?, fresh?,
-// history? (only read when fresh — see freshTurnHistory) } →
+// history? (only read when fresh — see freshTurnHistory), continueMode? ('replay':
+// the full history instead of an ended-chat summary, providers/continuation.mjs) } →
 // SSE stream of engine events with `mode_set` injected right after the first
 // `init`. `provider` is `anthropic` (or absent — older clients only ever sent
 // v2 turns for Anthropic) or an Anthropic-compatible `custom:<uuid>`; the
@@ -611,7 +614,7 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   const adapterTurn = begin.enabled && isAdapterProvider(provider);
   const freshTurn = body.fresh === true || (begin.enabled && begin.pick.freshSession);
   const row = getOrCreateAgentSession(db, userId, chatSessionId);
-  const resumeSdkSessionId = freshTurn || adapterTurn ? null : row.sdk_session_id;
+  let resumeSdkSessionId = freshTurn || adapterTurn ? null : row.sdk_session_id;
   const routeTurn = begin.enabled
     ? createRouteTurn({ db, userId, chatSessionId, begin, provider, model, send: (ev) => send(ev) })
     : null;
@@ -659,6 +662,33 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     replay.push(obj);
     if (!primaryGone && !io.isGone()) io.send(obj);
   };
+  // Joins this turn's tool accounting (turn_tool_events) and the continuation summary's ledger row to the turn's
+  // own ledger rows (usage_ledger.request_id).
+  const turnId = randomUUID();
+  // Ended-chat continuation (providers/continuation.mjs): OFF unless LLMIDE_V2_CONTINUE_SUMMARY=on, and never on a
+  // provider switch (its own handoff above) or an adapter turn (handed the history every turn). Runs after the
+  // abort is registered, so Stop also stops the summary call. null = exactly today's turn.
+  let continuedNotice = null;
+  if (!switching && !adapterTurn) {
+    const plan = await planContinuation({
+      userId, chatSessionId, agentContext, body, sdkSessionId: resumeSdkSessionId, provider, model,
+      requestId: turnId, summarize: deps.summarize ?? DEFAULT_DEPS.summarize, signal: ac.signal,
+    });
+    if (plan?.kind === 'replay') {
+      turnHistory = freshTurnHistory({ fresh: true, history: plan.turns });
+      resumeSdkSessionId = null;
+      currentSdkSessionId = null;
+    } else if (plan?.kind === 'summary') {
+      turnHistory = plan.history;
+      resumeSdkSessionId = null;
+      currentSdkSessionId = null;
+      continuedNotice = plan.notice;
+      // The summary call is a model call the chat caused: with the cap on it counts against the chat, like the classifier.
+      if (routerCapEnabled() && plan.usage?.calls > 0) {
+        try { commitTurnUsage(db, userId, chatSessionId, plan.usage, {}); } catch (e) { log.warn('continuation_tokens_not_counted', { message: String(e?.message || e).slice(0, 120) }); }
+      }
+    }
+  }
   // mode_set rides right after the first init event (spec §4 ordering) —
   // the engine doesn't know its resolved mode is a UI concern.
   let initSeen = false;
@@ -674,9 +704,6 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   // "Step 1 of 30" for the whole turn. A task tool can only change the list
   // by running, so a tool_result is the exact moment to re-check it.
   const emitTaskProgress = makeTaskProgressEmitter({ userId, agentContext, mode, send });
-  // Joins this turn's tool accounting (turn_tool_events) to its ledger rows
-  // (usage_ledger.request_id), which were written with no request id before.
-  const turnId = randomUUID();
   // agent.db run row (plan 2.5): run_id = turn id. Closed once, after the turn.
   const agentRun = beginAgentRun(userId, { runId: turnId, source: 'chat', engine: 'v2', mode, provider, model });
   let runUsage = null;
@@ -703,6 +730,7 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     if (!initSeen && ev && ev.type === 'init') {
       initSeen = true;
       send({ type: 'mode_set', mode });
+      if (continuedNotice) send(continuedNotice);
       if (begin.enabled) {
         const notice = routeSwitchNotice({ userId, chatSessionId, begin, provider, model });
         if (notice) send(notice);
