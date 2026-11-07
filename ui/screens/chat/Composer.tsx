@@ -43,6 +43,14 @@ export function KeyHint() {
   return <span className="chat-muted" role="img" aria-label={KEY_HINT} title={KEY_HINT}>{"\u21B5"}</span>;
 }
 
+/**
+ * Esc stops a running turn from anywhere on the chat surface (the Mac's Stop button is the window's cancel action).
+ * A key a popover, the textarea or an input method already handled is left alone. Pure.
+ */
+export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isComposing?: boolean }, active: boolean, busy: boolean): boolean {
+  return active && busy && e.key === "Escape" && !e.defaultPrevented && e.isComposing !== true;
+}
+
 export function nextRecall(history: readonly string[], cursor: number | null, dir: "up" | "down"): { cursor: number | null; text: string | null } {
   if (history.length === 0) return { cursor, text: null };
   if (dir === "up") {
@@ -130,6 +138,15 @@ export function Composer(p: ComposerProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [voice, p.active]);
+
+  const stopRef = useRef(p.onStop);
+  stopRef.current = p.onStop;
+  useEffect(() => {
+    if (!p.active || !p.busy) return undefined;
+    const onKey = (e: globalThis.KeyboardEvent) => { if (stopsOnEscape(e, true, true)) { e.preventDefault(); stopRef.current(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [p.active, p.busy]);
 
   const recall = useRef<number | null>(null);
   const ime = useRef<ImeGuard | null>(null);
