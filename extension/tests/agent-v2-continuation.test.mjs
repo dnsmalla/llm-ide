@@ -214,3 +214,12 @@ test('DELETE /agent/v2/session drops a client-made continuation', async () => {
   await v2.handleAgentV2Routes(req, res, {});
   assert.equal(getContinuation(u.id, 'client-chat'), null);
 });
+
+test('an engine failure before init still sends the continuation notice', async () => {
+  ON();
+  const u = mkUser(); const chat = seedChat(u);
+  const res = await turn(u, chat, { runTurn: async () => { throw Object.assign(new Error('boom'), { code: 'ENGINE_ERROR' }); }, summarize: fakeSummarize([]) });
+  const evs = res.sseEvents();
+  assert.ok(evs.some((e) => e.type === 'notice' && e.kind === 'chat_continued'));
+  assert.ok(evs.some((e) => e.type === 'error'));
+});

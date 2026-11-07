@@ -319,7 +319,7 @@ test("StrictMode double effect (mount, unmount, mount) leaves the controller ali
   assert.deepEqual(await ctl.reattachRunning(), [], "disposed: no re-attach");
 });
 
-test("fullHistoryNext: a marker, then exactly the next message carries continueMode replay (kept on its retry)", async () => {
+test("fullHistoryNext: a marker, then exactly the next message carries continueMode replay (cleared only after the next message is accepted)", async () => {
   const core = fakeCore({ streams: [turn(), turn(), turn()] });
   const { ctl } = make(core);
   ctl.send("a", "one", { mode: "ask" });

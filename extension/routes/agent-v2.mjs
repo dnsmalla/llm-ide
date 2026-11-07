@@ -856,6 +856,12 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
       send({ type: 'tasks', tasks: currentTasks, continueNeeded });
     } catch (err) {
       if (!runEngineDone) runErrorCode = err?.code || 'ENGINE_ERROR';
+      // A summary was already used for this turn: never let a pre-init engine failure hide that.
+      if (continuedNotice && !initSeen) {
+        initSeen = true;
+        send({ type: 'mode_set', mode });
+        send(continuedNotice);
+      }
       if (err?.code === 'SESSION_UNRESUMABLE') {
         // The resumed SDK session is gone (pruned/cleared). Terminal error
         // event carrying the code — the stream has already started, so the
