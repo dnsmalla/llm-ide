@@ -331,6 +331,64 @@ public struct HostApiHostSnapshotResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiPushConfigRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiPushConfigResult: Codable, Equatable, Sendable {
+    public var apns: Bool
+    public var registered: String
+    public var webPushKey: String
+
+    public init(apns: Bool, registered: String, webPushKey: String) {
+        self.apns = apns
+        self.registered = registered
+        self.webPushKey = webPushKey
+    }
+}
+
+public struct HostApiPushRegisterRequest: Codable, Equatable, Sendable {
+    public var auth: String?
+    public var endpoint: String?
+    public var environment: String?
+    public var kind: String
+    public var p256dh: String?
+    public var token: String?
+
+    public init(auth: String? = nil, endpoint: String? = nil, environment: String? = nil, kind: String, p256dh: String? = nil, token: String? = nil) {
+        self.auth = auth
+        self.endpoint = endpoint
+        self.environment = environment
+        self.kind = kind
+        self.p256dh = p256dh
+        self.token = token
+    }
+}
+
+public struct HostApiPushRegisterResult: Codable, Equatable, Sendable {
+    public var registered: Bool
+
+    public init(registered: Bool) {
+        self.registered = registered
+    }
+}
+
+public struct HostApiPushUnregisterRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiPushUnregisterResult: Codable, Equatable, Sendable {
+    public var removed: Bool
+
+    public init(removed: Bool) {
+        self.removed = removed
+    }
+}
+
 public struct HostApiToolApprovalsAnswerRequest: Codable, Equatable, Sendable {
     public var commandId: String
     public var decision: String

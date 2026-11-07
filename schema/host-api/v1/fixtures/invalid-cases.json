@@ -1,30 +1,130 @@
 {
   "envelope": {
-    "bad-command-shape.json": { "def": "Request", "at": ".command" },
-    "bad-command-pattern.json": { "def": "Request", "at": ".command" },
-    "bad-request-id.json": { "def": "Request", "at": ".id" },
-    "missing-api-version.json": { "def": "Request", "at": ".apiVersion" },
-    "unknown-field.json": { "def": "Request", "at": ".surprise" },
-    "unknown-error-code.json": { "def": "ErrorFrame", "at": ".error.code" },
-    "error-message-too-long.json": { "def": "ErrorFrame", "at": ".error.message" },
-    "error-missing-error.json": { "def": "ErrorFrame", "at": ".error" },
-    "response-missing-reply-to.json": { "def": "Response", "at": ".replyTo" },
-    "response-missing-rev.json": { "def": "Response", "at": ".rev" },
-    "event-missing-rev.json": { "def": "Event", "at": ".rev" }
+    "bad-command-shape.json": {
+      "def": "Request",
+      "at": ".command"
+    },
+    "bad-command-pattern.json": {
+      "def": "Request",
+      "at": ".command"
+    },
+    "bad-request-id.json": {
+      "def": "Request",
+      "at": ".id"
+    },
+    "missing-api-version.json": {
+      "def": "Request",
+      "at": ".apiVersion"
+    },
+    "unknown-field.json": {
+      "def": "Request",
+      "at": ".surprise"
+    },
+    "unknown-error-code.json": {
+      "def": "ErrorFrame",
+      "at": ".error.code"
+    },
+    "error-message-too-long.json": {
+      "def": "ErrorFrame",
+      "at": ".error.message"
+    },
+    "error-missing-error.json": {
+      "def": "ErrorFrame",
+      "at": ".error"
+    },
+    "response-missing-reply-to.json": {
+      "def": "Response",
+      "at": ".replyTo"
+    },
+    "response-missing-rev.json": {
+      "def": "Response",
+      "at": ".rev"
+    },
+    "event-missing-rev.json": {
+      "def": "Event",
+      "at": ".rev"
+    }
   },
   "commands": {
-    "chat.send.missing-text.json": { "command": "chat.send", "kind": "request", "at": ".text" },
-    "chat.send.empty-text.json": { "command": "chat.send", "kind": "request", "at": ".text" },
-    "chat.send.attachment-unknown-field.json": { "command": "chat.send", "kind": "request", "at": ".attachments[0].extra" },
-    "chat.cancel.unknown-field.json": { "command": "chat.cancel", "kind": "request", "at": ".x" },
-    "chat.snapshot.message-missing-content.json": { "command": "chat.snapshot", "kind": "result", "at": ".messages[0].content" },
-    "toolApprovals.answer.bad-decision.json": { "command": "toolApprovals.answer", "kind": "request", "at": ".decision" },
-    "chat.history.missing-session-id.json": { "command": "chat.history", "kind": "request", "at": ".sessionId" },
-    "chat.history.bad-session-id.json": { "command": "chat.history", "kind": "request", "at": ".sessionId" },
-    "chat.sessions.limit-too-large.json": { "command": "chat.sessions", "kind": "request", "at": ".limit" },
-    "usage.get.model-unknown-field.json": { "command": "usage.get", "kind": "result", "at": ".providers[0].models[0].apiKey" },
-    "chat.send.mode-execute.json": { "command": "chat.send", "kind": "request", "at": ".mode" },
-    "chat.send.model-bad.json": { "command": "chat.send", "kind": "request", "at": ".model" },
-    "chat.new.unknown-field.json": { "command": "chat.new", "kind": "request", "at": ".sessionId" }
+    "chat.send.missing-text.json": {
+      "command": "chat.send",
+      "kind": "request",
+      "at": ".text"
+    },
+    "chat.send.empty-text.json": {
+      "command": "chat.send",
+      "kind": "request",
+      "at": ".text"
+    },
+    "chat.send.attachment-unknown-field.json": {
+      "command": "chat.send",
+      "kind": "request",
+      "at": ".attachments[0].extra"
+    },
+    "chat.cancel.unknown-field.json": {
+      "command": "chat.cancel",
+      "kind": "request",
+      "at": ".x"
+    },
+    "chat.snapshot.message-missing-content.json": {
+      "command": "chat.snapshot",
+      "kind": "result",
+      "at": ".messages[0].content"
+    },
+    "toolApprovals.answer.bad-decision.json": {
+      "command": "toolApprovals.answer",
+      "kind": "request",
+      "at": ".decision"
+    },
+    "chat.history.missing-session-id.json": {
+      "command": "chat.history",
+      "kind": "request",
+      "at": ".sessionId"
+    },
+    "chat.history.bad-session-id.json": {
+      "command": "chat.history",
+      "kind": "request",
+      "at": ".sessionId"
+    },
+    "chat.sessions.limit-too-large.json": {
+      "command": "chat.sessions",
+      "kind": "request",
+      "at": ".limit"
+    },
+    "usage.get.model-unknown-field.json": {
+      "command": "usage.get",
+      "kind": "result",
+      "at": ".providers[0].models[0].apiKey"
+    },
+    "chat.send.mode-execute.json": {
+      "command": "chat.send",
+      "kind": "request",
+      "at": ".mode"
+    },
+    "chat.send.model-bad.json": {
+      "command": "chat.send",
+      "kind": "request",
+      "at": ".model"
+    },
+    "chat.new.unknown-field.json": {
+      "command": "chat.new",
+      "kind": "request",
+      "at": ".sessionId"
+    },
+    "push.register.endpoint-http.json": {
+      "command": "push.register",
+      "kind": "request",
+      "at": ".endpoint"
+    },
+    "push.register.bad-kind.json": {
+      "command": "push.register",
+      "kind": "request",
+      "at": ".kind"
+    },
+    "push.register.token-upper.json": {
+      "command": "push.register",
+      "kind": "request",
+      "at": ".token"
+    }
   }
 }
