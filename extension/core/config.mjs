@@ -291,6 +291,10 @@ export const config = Object.freeze({
   // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
   hostApiMode:          HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',
 
+  // Self-Heal incident capture (routes/self-heal.mjs): the Tauri host passes LLMIDE_SELF_HEAL=1 only in a debug build.
+  // Off: /kb/self-heal/* answers 404 feature_disabled and nothing is recorded. Never in production.
+  selfHeal:             process.env.LLMIDE_SELF_HEAL === '1' && !isProd,
+
   // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
   // the first chat turn does not pay ~200 ms of module loading; boot itself
   // never loads them. LLMIDE_ENGINE_PREWARM=0 skips it — module-count and

@@ -331,6 +331,7 @@ const HOST = config.host;
 //          against the provider's /user endpoint and answers { ok, login, name, scopes? }; no token is returned.
 //   v111 — command bus desktop schedules, additive (spec docs/spec/command-bus.md section 9, migration 0063): GET /bus/schedules → { items: BusSchedule[] } (desktop-ui and ios-native; else 403 TIER_DENIED); POST /bus/schedules { kind: 'sources.update', args, intervalHours 1-168, standing?, standingDays? 1-90 } → 201 { schedule } (desktop-ui only; 400 INVALID_ARGS, 429 QUOTA_EXCEEDED at 10); DELETE /bus/schedules/:id → { deleted: true } | 404 (desktop-ui only; revokes its standing approval). POST /bus/commands/:id/approve takes an optional scheduleId: with the nonce it approves a desktop-enqueued run on that schedule's live standing approval (same kind and args, idem sched:<id>:, T1, at most one per half interval), else 403 STANDING_APPROVAL_INVALID { reason }. No server timer.
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
+const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/self-heal' || p.startsWith('/kb/self-heal/'); };
 
 const SERVER_API_VERSION = 120;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
@@ -536,8 +537,11 @@ const ALL_ENDPOINTS = [
   '/kb/sync/devices/enroll/cancel',
   '/kb/sync/devices/:id',
   '/kb/sync/rotate',
+  '/kb/self-heal/incidents',
+  '/kb/self-heal/incidents/:id/ignore',
 ];
-const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
+// Self-Heal paths are advertised only while config.selfHeal is on (debug desktop builds).
+const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features).filter((e) => config.selfHeal || !isSelfHealRoute(e));
 // The command bus executor (routes/bus/executor.mjs), created and started after listen; null while LLMIDE_BUS=off.
 let bus = null;
 // Host API v1 listener (config.hostApiMode 'tls' or 'dev'); { gateway, listener, fingerprint } once started.
@@ -584,6 +588,7 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/google/calendars' || path === '/kb/google/drive/folders') return 'dispatch';
     if (path === '/kb/sync/test' || path === '/kb/sync/publish') return 'dispatch';
     if (path.startsWith('/kb/sync/')) return 'kbWrite';
+    if (path.startsWith('/kb/self-heal/')) return 'kbWrite';
     if (path === '/kb/calendar-ical/sources') return 'kbWrite';
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
@@ -604,6 +609,7 @@ function rateLimitProfile(url, method) {
     if (path.startsWith('/kb/docs/')) return 'kbWrite';
     if (path.startsWith('/kb/calendar-ical/')) return 'kbWrite';
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';
+    if (path.startsWith('/kb/self-heal/')) return 'kbWrite';
     if (path.startsWith('/host-api/')) return 'kbWrite';
     return null;
   }
@@ -643,6 +649,7 @@ function rateLimitProfile(url, method) {
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
   if (url === '/kb/sync/test' || url === '/kb/sync/publish') return 'dispatch';
   if (url.startsWith('/kb/sync/'))       return 'kbWrite';
+  if (url.startsWith('/kb/self-heal/'))  return 'kbWrite';
   // Everything under /auth/me/extensions that reaches GitHub or the MCP registry (user-initiated POSTs).
   if (['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair'].some((p) => url === `/auth/me/extensions/${p}`)) return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
@@ -842,6 +849,14 @@ const server = http.createServer(async (req, res) => {
   // Encrypted sync settings (/kb/sync/*): JWT + bus host proof.
   if (isSyncRoute(req.url || '')) {
     try { const { handleSyncRoute } = await import('./routes/sync/http-routes.mjs'); await handleSyncRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
+    return;
+  }
+
+  // Self-Heal incidents (/kb/self-heal/*): debug desktop builds only (config.selfHeal). Off: the feature-disabled 404
+  // and the module is never loaded. On: JWT + bus host proof inside the route.
+  if (isSelfHealRoute(req.url || '')) {
+    if (!config.selfHeal) { sendFeatureDisabled(res, 'self_heal'); return; }
+    try { const { handleSelfHealRoute } = await import('./routes/self-heal.mjs'); await handleSelfHealRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 
@@ -1510,6 +1525,11 @@ server.listen(PORT, HOST, () => {
   setImmediate(() => { startAgentStoreJobs({ logger }); });
   // Initial probe — non-blocking; result lands in the cache for /health.
   probeClaude().catch(() => { /* logged inside */ });
+  // Self-Heal (debug builds): a 'fixing' incident whose run died with the last core goes back to 'new' (plan B runs).
+  if (config.selfHeal) {
+    void import('./kb/incidents.mjs').then((m) => m.reopenOrphanedIncidents())
+      .catch((err) => logger.warn('self_heal_reopen_failed', { error: err.message }));
+  }
   logger.info('server_started', {
     host: HOST,
     port: PORT,
