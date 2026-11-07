@@ -19,7 +19,8 @@ test("only a fresh Escape on the active surface during a turn stops it", () => {
 });
 
 test("the listener is bound only while active and busy, and removed after", () => {
-  const src = readFileSync(join(CHAT, "Composer.tsx"), "utf8");
+  // Windows checkouts may use CRLF, so the two-line assertion below runs on normalized line endings.
+  const src = readFileSync(join(CHAT, "Composer.tsx"), "utf8").replace(/\r\n/g, "\n");
   assert.match(src, /if \(!p\.active \|\| !p\.busy\) return undefined;/);
   assert.match(src, /return \(\) => window\.removeEventListener\("keydown", onKey\);\n  \}, \[p\.active, p\.busy\]\);/);
 });
