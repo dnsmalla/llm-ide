@@ -50,6 +50,7 @@ mod pty;
 mod rtk;
 mod secrets;
 mod self_heal;
+mod self_heal_fix;
 mod source_pick;
 #[cfg(feature = "spike")]
 mod sse_replay;
