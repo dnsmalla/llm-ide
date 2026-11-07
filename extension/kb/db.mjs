@@ -981,6 +981,8 @@ export function deleteUserCascade(userId) {
     counts.agent_ask_messages = del('DELETE FROM agent_ask_messages WHERE user_id = ?');
     counts.chat_messages = del('DELETE FROM chat_messages WHERE user_id = ?');
     counts.chat_sessions = del('DELETE FROM chat_sessions WHERE user_id = ?');
+    // migration 0065 — derived continuation summaries of the user's chats.
+    counts.chat_continuations = del('DELETE FROM chat_continuations WHERE user_id = ?');
     // migration 0050 — derived note index (FTS rows follow by trigger), and the
     // live-then-archive tombstones and ack ledger, which carry owner_user_id
     // (not user_id: see the header of 0049/0050). Removed here so an account

@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 import { deleteAgentSession } from './agent-sessions.mjs';
 import { deleteRoute } from './chat-route.mjs';
+import { deleteContinuation } from './chat-continuations.mjs';
 import { deleteSessionMemory } from './session-memory.mjs';
 import { errValidation } from '../core/errors.mjs';
 
@@ -112,6 +113,8 @@ export function purgeWorkingState(userId, chatSessionIds) {
       // The route row (cache warmth, stickiness, counters) is working state too: the Mac file keeps the
       // chat's pick and limit and re-seeds it on the next open (plan 14.5).
       const hadRoute = deleteRoute(db, userId, id) > 0;
+      // A summary made from a client's history is working state; one made from chat_messages goes with them.
+      deleteContinuation(userId, id, { clientOnly: true });
       if (dropped || hadFacts || hadRoute) purged += 1;
     }
   });
@@ -271,6 +274,7 @@ export function archiveCommit(userId, sessionId, { fence, hash, acceptIncomplete
       VALUES (?, ?, ?, ?, 'commit', ?)
     `).run(uid, sid, h, digest.count, nowIso());
     lazyPrepare(db, 'DELETE FROM chat_messages WHERE user_id = ? AND session_id = ?').run(uid, sid);
+    deleteContinuation(uid, sid);
     lazyPrepare(db, 'DELETE FROM chat_sessions WHERE user_id = ? AND id = ?').run(uid, sid);
     return { status: 'deleted', count: digest.count };
   });

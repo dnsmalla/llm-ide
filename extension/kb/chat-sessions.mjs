@@ -2,6 +2,7 @@
 // SURFACES keeps 'mac' (migration 0023's CHECK) for rows the retired Swift app
 // may have written; that app used its own local chat store, not this table.
 import crypto from 'node:crypto';
+import { deleteContinuation } from './chat-continuations.mjs';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
 
@@ -161,6 +162,7 @@ export function deleteChatSession(userId, sessionId) {
   const db = getDb();
   const tx = db.transaction((uid, sid) => {
     lazyPrepare(db, 'DELETE FROM chat_messages WHERE user_id = ? AND session_id = ?').run(uid, sid);
+    deleteContinuation(uid, sid);
     return lazyPrepare(db, 'DELETE FROM chat_sessions WHERE user_id = ? AND id = ?').run(uid, sid).changes;
   });
   return tx(userId, sessionId) > 0;
@@ -171,6 +173,7 @@ export function clearChatMessages(userId, sessionId) {
   const db = getDb();
   const tx = db.transaction((uid, sid) => {
     const n = lazyPrepare(db, 'DELETE FROM chat_messages WHERE user_id = ? AND session_id = ?').run(uid, sid).changes;
+    deleteContinuation(uid, sid);
     lazyPrepare(db, 'UPDATE chat_sessions SET updated_at = ? WHERE user_id = ? AND id = ?').run(nowSec(), uid, sid);
     return n;
   });
