@@ -9,7 +9,7 @@ export const MAX_IDLE_MS = 30 * 24 * 3600 * 1000;
 export const LEGACY_SCOPES = Object.freeze(['host', 'chat', 'approvals']);
 const hash = (token) => createHash('sha256').update(token).digest('hex');
 
-function parseScopes(text) {
+export function parseScopes(text) {
   if (text == null) return [...LEGACY_SCOPES];
   try {
     const v = JSON.parse(text);

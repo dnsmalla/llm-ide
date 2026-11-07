@@ -9,6 +9,7 @@ import { createRateLimiter } from './rate.mjs';
 import { consumePin } from './pin.mjs';
 import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
 import { attachmentsToFiles, isBinaryAttachment, optionsOf, offersModel } from './compose.mjs';
+import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 
@@ -24,11 +25,13 @@ export function hostApiCapabilities(env = process.env) {
   return ['host', 'chat', 'approvals',
     ...(env.LLMIDE_HOST_API_TOOL_APPROVALS === '1' ? ['tool_approvals'] : []),
     ...(env.LLMIDE_HOST_API_READ === '1' ? ['read'] : []), // default off: a device gets read only if paired while served
-    ...(env.LLMIDE_HOST_API_COMPOSE === '1' ? ['compose'] : [])]; // default off, as read
+    ...(env.LLMIDE_HOST_API_COMPOSE === '1' ? ['compose'] : []), // default off, as read
+    ...(env.LLMIDE_HOST_API_PUSH === '1' ? ['push'] : [])]; // default off: push notifications sent by this desktop
 }
 
 const agentV2 = () => import('../agent-v2.mjs');
 const chatSessions = () => import('../../kb/chat-sessions.mjs');
+const pushModule = () => import('./push.mjs'); // Task 6; lazy, off the boot path
 
 function defaultDeps() {
   return {
@@ -55,6 +58,11 @@ function defaultDeps() {
     },
     // The account's Claude models, in process and cached by the SDK module (never HTTP). Lazy: off the boot path.
     models: async (userId) => (await import('../../llm_agent/sdk/models.mjs')).listSdkModels(userId),
+    push: {
+      config: async (userId, deviceId) => (await pushModule()).pushConfig(userId, deviceId),
+      register: async (userId, deviceId, target) => (await pushModule()).registerTarget(userId, deviceId, target),
+      unregister: async (userId, deviceId) => (await pushModule()).unregisterTarget(userId, deviceId),
+    },
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
@@ -524,6 +532,32 @@ export function createGateway(overrides) {
         deps.quickChat.set(userId, sessionId);
         audit('chat_new', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
         return respond(s, id, command, { sessionId });
+      }
+      case 'push.config': {
+        if (readRefused(s, entry, id)) return;
+        return respond(s, id, command, await deps.push.config(userId, entry.state.deviceId));
+      }
+      case 'push.register': {
+        const deviceId = entry.state.deviceId;
+        const t = pushTargetOf(p);
+        if (!t.ok) {
+          audit('push_refused', { peer: entry.peer, userId, deviceId, detail: String(p.kind), dedupeKey: `${deviceId}:push` });
+          return fail(s, id, 'invalid_payload', t.message);
+        }
+        const wait = rate.turn(deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        await deps.push.register(userId, deviceId, t.target);
+        const detail = t.target.kind === 'apns' ? `apns ${t.target.environment}` : `webpush ${new URL(t.target.endpoint).hostname}`;
+        audit('push_register', { peer: entry.peer, userId, deviceId, detail, dedupeKey: `${deviceId}:${detail}` });
+        return respond(s, id, command, { registered: true });
+      }
+      case 'push.unregister': {
+        const deviceId = entry.state.deviceId;
+        const wait = rate.turn(deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        const removed = Boolean(await deps.push.unregister(userId, deviceId));
+        audit('push_unregister', { peer: entry.peer, userId, deviceId });
+        return respond(s, id, command, { removed });
       }
       default:
         return fail(s, id, 'unknown_command', 'This host does not serve that command.');
