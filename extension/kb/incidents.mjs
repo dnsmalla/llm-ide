@@ -3,10 +3,11 @@
 //   - a repeat bumps count and lastSeen;
 //   - a fixed incident that recurs reopens as new with attempts + 1;
 //   - at most INCIDENT_CAP rows are kept per user (the least recently seen that is not fixing or proposed goes first).
-// cleanIncident redacts the text before anything is stored. Plan A writes only new and ignored. Plan B drives the
-// other statuses and the proposal columns. Nothing here logs incident text.
+// cleanIncident redacts the text before anything is stored. Plan A writes new and ignored; plan B's helpers at the end
+// drive fixing, proposed, needsHuman, fixed, attempts and the proposal columns. Nothing here logs incident text.
 import { getDb, requireUser } from './db.mjs';
 import { cleanIncident } from '../core/incident.mjs';
+import { MAX_ATTEMPTS } from '../core/self-heal-batch.mjs';
 
 export const INCIDENT_CAP = 200;
 const BUSY = "('fixing', 'proposed')";
@@ -88,4 +89,87 @@ export function clearIncidents(userId) {
  */
 export function reopenOrphanedIncidents() {
   return getDb().prepare("UPDATE self_heal_incidents SET status = 'new' WHERE status = 'fixing'").run().changes;
+}
+
+/**
+ * Plan B triage (the Mac's SelfHealBatch.select): up to `max` `new` incidents, most frequent first. An environmental
+ * one met on the way is ignored with its reason so it never returns to triage; a picked one moves to `fixing`, so no
+ * second run can pick it. One transaction.
+ */
+export function triageIncidents(userId, max) {
+  requireUser(userId);
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db.prepare("SELECT * FROM self_heal_incidents WHERE user_id = ? AND status = 'new' ORDER BY count DESC, last_seen DESC, id")
+      .all(userId);
+    const ignore = db.prepare("UPDATE self_heal_incidents SET status = 'ignored', note = ? WHERE user_id = ? AND id = ?");
+    const fix = db.prepare("UPDATE self_heal_incidents SET status = 'fixing' WHERE user_id = ? AND id = ?");
+    const picked = [];
+    for (const r of rows) {
+      if (picked.length >= max) break;
+      if (r.environmental) {
+        ignore.run(`environment: ${r.environmental}`, userId, r.id);
+        continue;
+      }
+      fix.run(userId, r.id);
+      picked.push(toIncident({ ...r, status: 'fixing' }));
+    }
+    return picked;
+  })();
+}
+
+/** A run that ended without an outcome (its lease ran out): its `fixing` incidents go back to `new`. */
+export function reopenIncidents(userId, ids) {
+  requireUser(userId);
+  const db = getDb();
+  const stmt = db.prepare("UPDATE self_heal_incidents SET status = 'new' WHERE user_id = ? AND id = ? AND status = 'fixing'");
+  return db.transaction(() => ids.reduce((n, id) => n + stmt.run(userId, String(id)).changes, 0))();
+}
+
+/**
+ * A finished run's verdicts onto its incidents (the Mac's SelfHealOutcome.apply):
+ *   - `fixed` on a run that succeeded (verify passed, the worktree has a diff, `proposal` given) → `proposed`;
+ *   - `environmental` → `ignored`;
+ *   - the agent was down or the run aborted → back to `new`, nothing else changes;
+ *   - anything else is a failed attempt: attempts + 1, `needsHuman` at MAX_ATTEMPTS.
+ * Rows no longer `fixing` (cleared, reopened) are left alone. Returns how many were proposed.
+ */
+export function applyRunOutcome(userId, ids, results, { runSucceeded, agentDown, aborted }, proposal) {
+  requireUser(userId);
+  const db = getDb();
+  return db.transaction(() => {
+    const get = db.prepare('SELECT status, attempts FROM self_heal_incidents WHERE user_id = ? AND id = ?');
+    const propose = db.prepare(`UPDATE self_heal_incidents SET status = 'proposed', note = ?, proposal_main_repo = ?,
+        proposal_worktree = ?, proposal_branch = ?, proposal_base_commit = ? WHERE user_id = ? AND id = ?`);
+    const setStatus = db.prepare('UPDATE self_heal_incidents SET status = ?, note = ? WHERE user_id = ? AND id = ?');
+    const reopen = db.prepare("UPDATE self_heal_incidents SET status = 'new' WHERE user_id = ? AND id = ?");
+    const failed = db.prepare('UPDATE self_heal_incidents SET attempts = ?, status = ?, note = ? WHERE user_id = ? AND id = ?');
+    let proposed = 0;
+    for (const id of ids) {
+      const row = get.get(userId, id);
+      if (!row || row.status !== 'fixing') continue;
+      const r = results.get(id);
+      if (r?.verdict === 'fixed' && runSucceeded && proposal) {
+        propose.run(r.reason || null, proposal.mainRepo, proposal.worktreePath, proposal.branch, proposal.baseCommit, userId, id);
+        proposed += 1;
+      } else if (r?.verdict === 'environmental') {
+        setStatus.run('ignored', `environment: ${r.reason}`, userId, id);
+      } else if (agentDown || aborted) {
+        reopen.run(userId, id);
+      } else {
+        const attempts = row.attempts + 1;
+        failed.run(attempts, attempts >= MAX_ATTEMPTS ? 'needsHuman' : 'new', r?.reason || null, userId, id);
+      }
+    }
+    return proposed;
+  })();
+}
+
+/** The user applied (→ `fixed`) or discarded (→ `ignored`) the proposal on `branch`. Returns the rows changed. */
+export function resolveProposal(userId, branch, applied) {
+  requireUser(userId);
+  return getDb().prepare(`UPDATE self_heal_incidents SET status = ?, note = COALESCE(?, note), proposal_main_repo = NULL,
+      proposal_worktree = NULL, proposal_branch = NULL, proposal_base_commit = NULL
+      WHERE user_id = ? AND status = 'proposed' AND proposal_branch = ?`)
+    .run(applied ? 'fixed' : 'ignored', applied ? null : 'proposal discarded', userId, String(branch)).changes;
 }
