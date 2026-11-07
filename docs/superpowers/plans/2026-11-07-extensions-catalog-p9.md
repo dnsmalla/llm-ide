@@ -707,6 +707,8 @@ git commit -m "docs(plan): extensions catalog rollout status and real-window res
 
 ## Decisions for the user (secure default first)
 
+**User answers (2026-11-07):** D1 = **wait** ("extension functions are good as they are now") — Task 4 is not run; D2-D7 = the secure defaults.
+
 | # | Decision | Secure default (recommended) | Alternative | Why |
 |---|---|---|---|---|
 | D1 | P8: turn the catalog switches on for Claude turns now (Task 4) | (a) Flip now, kill switch `LLMIDE_EXT_ACTIVE_SET=off`; proven equal to legacy for unchanged data by the golden tests; the real token bench is not run | (b) Wait for the Y1 paired bench before flipping | Today a switch the user turns off in the catalog is ignored on Claude chats, and nothing installed from GitHub ever loads there; on is the more restrictive and the more truthful behaviour |

@@ -363,7 +363,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Manual device verification list (`docs/mobile/verification.md`): written, no recorded run (you) Verified by you 2026-11-05: "iOS app is working".
 - [~] App Store readiness: bundle id `dotsoft.llmide.com` (`1f43789e`); offline reviewer demo (**Explore demo** on the first screen: local sample chat, one approval, history and usage, no network or Keychain; `fa8b2265`); privacy policy and support pages at `/app/privacy` and `/app/support` (`f26fa998`); review notes `ios_app/APP_REVIEW_NOTES.md`; open: App Store Connect record, screenshots, the privacy-policy and support URLs on your deployed site, and the submission itself (you)
 - [ ] Phone sees archived chats and notes through the desktop: Host API v1 History on the same network and the sync snapshots offline (SP4); verify on a real iPhone after a desktop capture is archived (you)
-- [ ] Push notifications (approvals, task done) (me)
+- [ ] Push notifications (approvals, task done): planned 2026-11-07, sent by the desktop (Web Push + APNs, no relay; `plans/2026-11-07-push-notifications.md`, day run order 3) (me)
 - [x] Background / reconnect behaviour verified on device: tested by you on a real iPhone 2026-11-05 (you)
 - [-] Phone works with the Mac off (needs relay, S4) (wait) **Replaced 2026-11-05** by Sync SP3/SP4 (ADR 0020).
 - [x] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait) Retired 2026-11-06 with the Mac app; the phone side removed in `109c18dc`.
@@ -494,7 +494,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] `extension/scripts/backup.mjs` online backup (me)
 - [~] Live-then-archive `lta.mode`: built and in shadow; on-by-default waits for Y2 (you)
 - [ ] Ledger step B: budget readers to `usage_calls` after 7 days of zero mismatches, fail closed (X5) (you)
-- [ ] Ended-chat continuation: per-chat summary on a cheap model plus last turns (X3, bench-gated) (me)
+- [ ] Ended-chat continuation: per-chat summary on a cheap model plus last turns (X3, bench-gated; planned 2026-11-07 `plans/2026-11-07-ended-chat-continuation.md`, ships off until Y1) (me)
 - [ ] 7-day shadow soak on real meeting notes, topK overlap, countDelta 0 (M2) (wait)
 - [ ] Delete legacy duplicate rows, destructive: export-before-delete, backup, rollback drill (L1) (wait)
 - [ ] Knowledge-kit K1: files stay the truth, server keeps a rebuildable index (L2; needs Q1-Q14) (you)

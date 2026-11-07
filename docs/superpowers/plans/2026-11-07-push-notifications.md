@@ -2934,6 +2934,8 @@ Until you do this, the app shows no error: `PushRegistrar.status` becomes `.fail
 
 ## E. Decisions for the user (secure default first)
 
+**User answer (2026-11-07):** all decisions = the defaults as written (push off unless LLMIDE_HOST_API_PUSH=1). Use the API version and migration numbers in `2026-11-07-day-run.md`.
+
 | # | Question | Default built (secure / least surprising first) | Alternative |
 |---|---|---|---|
 | D1 | Who sends, and when | The desktop core, only while it runs. No relay. | A hosted relay that queues pushes while the desktop is off (retired by ADR 0020). |

@@ -1554,6 +1554,8 @@ git commit -m "feat(bench): ended-chat continuation scenario and per-turn contin
 
 ## Decisions for the user (secure default first)
 
+**User answer (2026-11-07):** all decisions = the defaults as written (ships off until the Y1 bench). Use the API version and migration numbers in `2026-11-07-day-run.md`.
+
 | # | Decision | Default in this plan (secure first) | Alternatives |
 |---|---|---|---|
 | D1 | Ship state | **OFF** until your bench (Y1) passes the 3.4 gate (long seed at most 30% of replay, short seed unchanged) and a manual recall check | On by default after the gate |
