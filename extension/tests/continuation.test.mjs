@@ -152,3 +152,11 @@ test('replay on a warm session still sends the full history', async () => {
   assert.equal(plan.reason, 'requested');
   assert.ok(plan.turns.length >= 14);
 });
+
+test('summaryPrompt anchors on the first user turn without reordering', () => {
+  const turns = [{ role: 'assistant', content: 'a0' }, ...conv(3)];
+  const p = c.summaryPrompt(turns, { inputChars: 220, turnChars: 20 });
+  assert.match(p, /User: q0/);
+  assert.doesNotMatch(p, /a0/);
+  assert.ok(p.indexOf('q2') < p.indexOf('a2'), 'kept tail stays in order');
+});

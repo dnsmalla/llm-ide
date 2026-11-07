@@ -81,17 +81,17 @@ export function summaryPrompt(older, { inputChars = SUMMARY_INPUT_CHARS, turnCha
     const text = clean.length > turnChars ? `${clean.slice(0, turnChars)}...(clipped)` : clean;
     return `${t.role === 'user' ? 'User' : 'Assistant'}: ${neutralizePromptFences(text)}`;
   };
-  const firstUser = older.findIndex((t) => t.role === 'user');
-  if (firstUser > 0) older = [...older.slice(firstUser), ...older.slice(0, firstUser)];
+  const fuRaw = older.findIndex((t) => t.role === 'user');
+  const fu = fuRaw < 0 ? 0 : fuRaw;
   const lines = older.map(line);
-  let budget = inputChars - lines[0].length;
+  let budget = inputChars - lines[fu].length;
   const tail = [];
-  for (let i = lines.length - 1; i > 0 && lines[i].length <= budget; i -= 1) {
+  for (let i = lines.length - 1; i > fu && lines[i].length <= budget; i -= 1) {
     budget -= lines[i].length;
     tail.unshift(lines[i]);
   }
-  const dropped = lines.length - 1 - tail.length;
-  const body = [lines[0], ...(dropped > 0 ? [`(${dropped} middle turns not shown)`] : []), ...tail].join('\n\n');
+  const dropped = lines.length - fu - 1 - tail.length;
+  const body = [lines[fu], ...(dropped > 0 ? [`(${dropped} middle turns not shown)`] : []), ...tail].join('\n\n');
   return [
     'Summarise the earlier part of a chat so the conversation can continue without it.',
     'Write at most 400 words, in the language the chat uses. Keep, in order: every request the user made (one line each),',
