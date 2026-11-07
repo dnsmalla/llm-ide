@@ -8,6 +8,7 @@ import { config } from '../core/config.mjs';
 import { hashRefreshToken, newRefreshToken, signAccessToken } from './jwt.mjs';
 import { errAuth, errConflict, errForbidden, errValidation, errNotFound } from '../core/errors.mjs';
 import { migrateLegacySecrets } from './vault.mjs';
+import { ensureMember, ownerCount } from '../kb/members.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 10;
@@ -66,10 +67,21 @@ function validateEmail(email) {
   return e;
 }
 
+/**
+ * The grant a registration without an invite gets (ADR 0021): the first real account owns the install;
+ * later ones get the solo defaults, or the hub defaults (read_only, 20 USD/month) when LLMIDE_HUB=1.
+ */
+function defaultGrant(db) {
+  if (ownerCount(db) === 0) return { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 };
+  return config.hub
+    ? { teamRole: 'member', maxMode: 'read_only', usdCapMonth: 20 }
+    : { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 };
+}
+
 // `invite` is a plaintext invite token: its presence lets a registration through while registration is
 // closed (ADR 0021). The route validates and burns it in the same transaction, so a bad token rolls the
 // account back — this function never trusts it for anything else.
-export function registerUser(db, { email, password, displayName, invite = null }) {
+export function registerUser(db, { email, password, displayName, invite = null, grant = null }) {
   if (!config.registrationOpen && !invite) throw errForbidden('Registration is disabled');
   const e = validateEmail(email);
   validatePassword(password);
@@ -95,6 +107,9 @@ export function registerUser(db, { email, password, displayName, invite = null }
       INSERT INTO users (id, email, display_name, password_hash, role)
       VALUES (?, ?, ?, ?, ?)
     `).run(id, e, name, hash, role);
+    // ADR 0021 / plan H1.2: every account gets its authority row in the same transaction, so no code
+    // path can create an account the route policy would have to guess about.
+    ensureMember(db, id, grant ?? defaultGrant(db));
     return role;
   })();
 

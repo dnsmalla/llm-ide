@@ -21,7 +21,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb, closeDb } = await import('../kb/db.mjs');
-const { ensureMember } = await import('../kb/members.mjs');
+const { grant } = await import('./helpers/grant.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 const { handleKB } = await import('../routes/router.mjs');
 const {
@@ -38,12 +38,18 @@ function user(teamRole, maxMode, usdCapMonth = 0) {
   const u = registerUser(getDb(), {
     email: `authority-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
   });
-  ensureMember(getDb(), u.id, { teamRole, maxMode, usdCapMonth });
+  grant(getDb(), u.id, { teamRole, maxMode, usdCapMonth });
   return u;
 }
-const noRowUser = () => registerUser(getDb(), {
-  email: `authority-norow-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
-});
+// Plan H1.2: registerUser now writes a members row, so this account is inserted raw to keep testing
+// the fail-closed path for a user with no authority row (legacy / unregistered).
+const noRowUser = () => {
+  const id = `norow-${++seq}`;
+  getDb().prepare(
+    "INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, 't', 'x', 'user')",
+  ).run(id, `authority-norow-${seq}@example.com`);
+  return { id };
+};
 
 function makeReq({ method = 'POST', url, body, user: u }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];

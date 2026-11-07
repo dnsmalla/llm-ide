@@ -28,7 +28,7 @@ import {
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
-import { assertDeletable, consumeInvite, ensureMember, getMember, ownerCount, peekInvite } from '../kb/members.mjs';
+import { assertDeletable, consumeInvite, getMember, peekInvite } from '../kb/members.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
 import { enforceRouteAuthority } from './route-authority.mjs';
 
@@ -124,36 +124,23 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const out = db.transaction(() => {
         const inviteToken = typeof body.invite === 'string' && body.invite ? body.invite : null;
         // Cheap refusal first: a garbage token must not cost a bcrypt hash (R-008#1). The peek reads the
-        // invite; the burn below is still in this transaction, so the two commit or roll back together.
-        if (inviteToken) peekInvite(db, inviteToken, { email: body.email });
+        // invite's grant; the burn below is still in this transaction, so the two commit or roll back together.
+        const peeked = inviteToken ? peekInvite(db, inviteToken, { email: body.email }) : null;
         const user = registerUser(db, {
           email: body.email,
           password: body.password,
           displayName: body.displayName,
           invite: inviteToken,     // lets a closed installation accept this one registration
+          // No invite: registerUser applies the default (first account = owner; solo or hub defaults).
+          grant: peeked
+            ? { teamRole: peeked.teamRole, maxMode: peeked.maxMode, usdCapMonth: peeked.usdCapMonth, grantedBy: peeked.createdBy }
+            : null,
         });
         if (inviteToken) {
-          // Validate + burn first: an invalid token must not create a member, and rolling back the
-          // transaction restores it (a duplicate email does not eat the invite).
+          // Burn it (single use); a concurrent registration that won the token rolls this one back.
           const grants = consumeInvite(db, inviteToken, { email: body.email, userId: user.id });
-          ensureMember(db, user.id, {
-            teamRole: grants.teamRole,
-            maxMode: grants.maxMode,
-            usdCapMonth: grants.usdCapMonth,
-            grantedBy: grants.createdBy,
-          });
           return { user, invite: grants.id };
         }
-        // No invite: the first real user on a fresh install is the owner (a fresh DB has no owner
-        // until someone registers); everyone else gets today's solo defaults. Hub mode starts a new
-        // member read-only with a 20 USD/month cap (ADR 0021 decision 5).
-        const teamRole = ownerCount(db) === 0 ? 'owner' : 'member';
-        ensureMember(db, user.id, {
-          teamRole,
-          maxMode: config.hub ? 'read_only' : 'execute',
-          usdCapMonth: config.hub ? 20 : 0,
-          grantedBy: null,
-        });
         return { user, invite: null };
       })();
       // R-013#2: team.yaml is authoritative at every boot, so an invited member's grant must be in it or

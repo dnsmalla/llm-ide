@@ -22,14 +22,14 @@ const { usdCapForModel, setLimits, recordUsage, usedUsdMonth } = await import('.
 
 const MODEL = 'claude-sonnet-5';
 
+const { grant } = await import('./helpers/grant.mjs');
+
 let seq = 0;
 function member(usdCapMonth) {
   const user = registerUser(getDb(), {
     email: `cap-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
   });
-  getDb().prepare(
-    "INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', ?)",
-  ).run(user.id, usdCapMonth);
+  grant(getDb(), user.id, { teamRole: 'member', maxMode: 'execute', usdCapMonth });
   return user.id;
 }
 
@@ -67,12 +67,15 @@ test('member cap 0 means no cap: the model cap still applies (solo install uncha
 });
 
 test('no members row behaves exactly like before', () => {
-  const user = registerUser(getDb(), {
-    email: `cap-norow-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
-  });
-  assert.equal(usdCapForModel(getDb(), user.id, 'anthropic', MODEL), null);
-  modelUsd(user.id, 7);
-  assert.equal(usdCapForModel(getDb(), user.id, 'anthropic', MODEL), 7);
+  // Plan H1.2: registerUser now writes a members row, so this account is inserted raw to keep
+  // exercising the no-authority-row path.
+  const userId = `cap-norow-${++seq}`;
+  getDb().prepare(
+    "INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, 't', 'x', 'user')",
+  ).run(userId, `${userId}@example.com`);
+  assert.equal(usdCapForModel(getDb(), userId, 'anthropic', MODEL), null);
+  modelUsd(userId, 7);
+  assert.equal(usdCapForModel(getDb(), userId, 'anthropic', MODEL), 7);
 });
 
 test('the member cap is MONTHLY: usdCapForModel answers what is LEFT of it (R-007#1)', () => {

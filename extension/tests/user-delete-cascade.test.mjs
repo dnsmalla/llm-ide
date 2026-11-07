@@ -316,8 +316,9 @@ test('team members row and minted invites are wiped on user deletion (ADR 0021)'
   const alice = provision('alice-team@example.com').id;
   const bob = provision('bob-team@example.com').id;
   const handle = db.getDb();
-  handle.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(alice);
-  handle.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(bob);
+  // Plan H1.2: registerUser already wrote the row, so these set the grant rather than insert again.
+  handle.prepare("INSERT OR REPLACE INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(alice);
+  handle.prepare("INSERT OR REPLACE INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'member', 'execute', 0)").run(bob);
   handle.prepare("INSERT INTO invites (id, token_hash, created_by, expires_at) VALUES ('inv-a', 'hash-a', ?, datetime('now', '+1 day'))").run(alice);
   handle.prepare("INSERT INTO invites (id, token_hash, created_by, expires_at) VALUES ('inv-b', 'hash-b', ?, datetime('now', '+1 day'))").run(bob);
 
@@ -395,7 +396,8 @@ test('leaves no row in ANY user_id table (audit_log is anonymised instead)', () 
     }
     const q = names.map((n) => `"${n}"`).join(',');
     try {
-      handle.prepare(`INSERT INTO "${name}" (${q}) VALUES (${names.map(() => '?').join(',')})`).run(...vals);
+      // OR REPLACE: registerUser already wrote the members row for this account (plan H1.2).
+      handle.prepare(`INSERT OR REPLACE INTO "${name}" (${q}) VALUES (${names.map(() => '?').join(',')})`).run(...vals);
       seeded.push(name);
     } catch (e) {
       assert.fail(`could not seed ${name}: ${e.message}`);

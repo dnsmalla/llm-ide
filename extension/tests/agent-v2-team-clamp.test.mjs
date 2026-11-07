@@ -63,14 +63,14 @@ function makeRes() {
   };
 }
 
+const { grant } = await import('./helpers/grant.mjs');
+
 let seq = 0;
 function member(teamRole, maxMode) {
   const user = registerUser(getDb(), {
     email: `clamp-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
   });
-  getDb().prepare(
-    'INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, ?, ?, 0)',
-  ).run(user.id, teamRole, maxMode);
+  grant(getDb(), user.id, { teamRole, maxMode, usdCapMonth: 0 });
   return user;
 }
 
@@ -197,9 +197,13 @@ test('an admin and an owner run execute turns like anyone else', async () => {
 // --- no members row fails closed (R-007#3) --------------------------------
 
 test('a user with no members row is treated as read-only, like the Host API gateway', async () => {
-  const user = registerUser(getDb(), {
-    email: `clamp-norow-${++seq}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
-  });
+  // Plan H1.2: registerUser now writes a members row, so this account is inserted raw to keep
+  // exercising the no-authority-row path.
+  const userId = `clamp-norow-${++seq}`;
+  getDb().prepare(
+    "INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, 't', 'x', 'user')",
+  ).run(userId, `${userId}@example.com`);
+  const user = { id: userId };
   const turn = fakeTurn();
   const { res } = await stream(user, { message: 'go', mode: 'execute' }, { runTurn: turn.runTurn });
   assert.equal(res.statusCode, 200);

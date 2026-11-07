@@ -23,14 +23,14 @@ const users = await import('../server/users.mjs');
 const { beginLoopRun, agentBusySummary } = await import('../core/agent-busy.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 const { handleKB } = await import('../routes/router.mjs');
-const { ensureMember } = await import('../kb/members.mjs');
+const { grant } = await import('./helpers/grant.mjs');
 
 const SANDBOX = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'busy-')));
 const userId = users.registerUser(kb.getDb(), {
   email: `busy-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'busy',
 }).id;
 // R-014#1: the Loop route applies the member authority (owner + execute, no cap).
-ensureMember(kb.getDb(), userId, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+grant(kb.getDb(), userId, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
 
 function makeReq(url, body, method = 'POST') {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
