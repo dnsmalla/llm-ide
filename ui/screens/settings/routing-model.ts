@@ -40,6 +40,7 @@ export const SWITCH_TEXT = {
   cap: `Counts input, output and cache-write tokens and stops a chat at its limit with a one-click raise. ${NEXT_START_NOTE}`,
   compress: `Off by default: shortens long prompts before a provider turn to save tokens; needs the per-chat model and token limit. ${NEXT_START_NOTE}`,
   learn: `Off by default: remembers the limits a provider reports and avoids it before it is rate-limited again. ${NEXT_START_NOTE}`,
+  continueSummary: `Off by default: a chat you come back to after it ended continues from a short summary made on the provider's fast model plus its last messages, instead of the whole history. The chat says when this happened and lets you send the full history. ${NEXT_START_NOTE}`,
   noConnections: "Connect a provider in Providers to use these switches.",
 } as const;
 

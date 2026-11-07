@@ -184,7 +184,7 @@ export function MigrationNotice({ migration, toolsOn, routerState, onTurnOnRoute
 
 function ExtraPrefs({ host }: { host: SettingsHost }) {
   const { getExtraPrefs, setExtraPrefs, getRoutePrefs } = host;
-  const [prefs, setLocal] = useState<{ compress: boolean; learn: boolean; terminal: boolean } | null>(null);
+  const [prefs, setLocal] = useState<{ compress: boolean; learn: boolean; terminal: boolean; continueSummary: boolean } | null>(null);
   const [router, setRouter] = useState(false);
   useEffect(() => {
     let live = true;
@@ -199,6 +199,7 @@ function ExtraPrefs({ host }: { host: SettingsHost }) {
     <>
       {router ? <Switch label="Shorten long prompts (beta)" checked={prefs.compress} hint={SWITCH_TEXT.compress} onChange={(v) => save({ compress: v })} /> : null}
       <Switch label="Learn provider limits (beta)" checked={prefs.learn} hint={SWITCH_TEXT.learn} onChange={(v) => save({ learn: v })} />
+      <Switch label="Continue ended chats from a summary (beta)" checked={prefs.continueSummary} hint={SWITCH_TEXT.continueSummary} onChange={(v) => save({ continueSummary: v })} />
     </>
   );
 }

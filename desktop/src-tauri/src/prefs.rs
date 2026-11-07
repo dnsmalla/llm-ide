@@ -128,6 +128,8 @@ pub struct Prefs {
     pub cap: bool,
     pub compress: bool,
     pub learn: bool,
+    /// Continue an ended chat from a summary (bench-gated, beta): `LLMIDE_V2_CONTINUE_SUMMARY=on` at the next backend start.
+    pub continue_summary: bool,
     pub terminal: bool,
     pub theme: Theme,
     /// The feature profile (an explicit subset of `FEATURE_KEYS`; empty = every feature, the historical behaviour).
@@ -157,7 +159,7 @@ pub struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, terminal: true, theme: Theme::Dark,
+            lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
@@ -173,6 +175,7 @@ pub struct PrefsPatch {
     pub cap: Option<bool>,
     pub compress: Option<bool>,
     pub learn: Option<bool>,
+    pub continue_summary: Option<bool>,
     pub terminal: Option<bool>,
     pub theme: Option<Theme>,
     pub features: Option<Vec<String>>,
@@ -207,6 +210,7 @@ impl Prefs {
         if let Some(v) = p.cap { n.cap = v; }
         if let Some(v) = p.compress { n.compress = v; }
         if let Some(v) = p.learn { n.learn = v; }
+        if let Some(v) = p.continue_summary { n.continue_summary = v; }
         if let Some(v) = p.terminal { n.terminal = v; }
         if let Some(v) = p.theme { n.theme = v; }
         if let Some(v) = p.backend_source { n.backend_source = v; }
@@ -257,7 +261,7 @@ pub fn parse(text: &str) -> Prefs {
     serde_json::from_str::<Prefs>(text).map(|p| {
         let mut out = Prefs::default().patched(&PrefsPatch {
             lta_mode: Some(p.lta_mode), router: Some(p.router), cap: Some(p.cap), compress: Some(p.compress),
-            learn: Some(p.learn), terminal: Some(p.terminal), theme: Some(p.theme),
+            learn: Some(p.learn), continue_summary: Some(p.continue_summary), terminal: Some(p.terminal), theme: Some(p.theme),
             // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
             features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
             backend_source: Some(p.backend_source), backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
@@ -324,6 +328,7 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
         if p.compress { v.push(("LLMIDE_ROUTER_COMPRESS", "on".to_string())); }
     }
     if p.learn { v.push(("LLMIDE_ROUTER_LEARN", "on".to_string())); }
+    if p.continue_summary { v.push(("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())); }
     if !p.terminal || !p.features.is_empty() {
         if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
     }
@@ -456,10 +461,20 @@ mod tests {
     #[test]
     fn defaults_are_off_for_every_token_affecting_switch() {
         let d = Prefs::default();
-        assert!(!d.router && !d.cap && !d.compress && !d.learn);
+        assert!(!d.router && !d.cap && !d.compress && !d.learn && !d.continue_summary);
         assert_eq!(d.lta_mode, LtaMode::Off);
         assert!(d.terminal);
         assert!(core_env_pairs(&d, None).is_empty(), "defaults pass nothing to the core");
+    }
+
+    #[test]
+    fn continue_summary_reaches_the_core_as_exactly_on() {
+        let p = Prefs { continue_summary: true, ..Prefs::default() };
+        assert_eq!(core_env_pairs(&p, None), vec![("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())]);
+        let off = p.patched(&PrefsPatch { continue_summary: Some(false), ..Default::default() });
+        assert!(core_env_pairs(&off, None).is_empty());
+        let old: Prefs = serde_json::from_str(r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":true,"theme":"dark"}"#).unwrap();
+        assert!(!old.continue_summary, "an older prefs file reads as off");
     }
 
     #[test]

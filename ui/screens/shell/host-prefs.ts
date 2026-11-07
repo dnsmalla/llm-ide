@@ -35,6 +35,8 @@ export interface HostPrefs {
   cap: boolean;
   compress: boolean;
   learn: boolean;
+  /** Continue ended chats from a summary (beta, bench-gated); read at the next backend start. */
+  continueSummary: boolean;
   terminal: boolean;
   theme: "dark" | "light" | "midnight";
   /** The feature profile: an explicit subset of the server's feature keys; empty = every feature. */
@@ -106,7 +108,8 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
     ? (raw.graphAutoUpdateMinutes === 0 ? 0 : Math.max(5, raw.graphAutoUpdateMinutes))
     : 0;
   const updateChecks = raw.updateChecks !== false;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
+  const continueSummary = raw.continueSummary === true;
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
