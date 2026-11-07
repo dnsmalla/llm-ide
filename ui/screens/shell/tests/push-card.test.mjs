@@ -28,6 +28,7 @@ test("the card lists devices, asks for the key when none is saved, and never sho
   assert.match(empty, /iPhone · iPhone · Last push accepted/);
   assert.match(empty, /Apple Push key \(\.p8\)/);
   assert.match(empty, /Key ID/);
+  assert.match(empty, /value="9A3YFRQ7SM"/, "the team id is prefilled but editable");
   const saved = renderToStaticMarkup(React.createElement(c.PushBody, { status: { ...STATUS, apns: { configured: true, keyId: "ABCDE12345", teamId: "9A3YFRQ7SM" } }, error: null, onSave: noop, onRemove: noop }));
   assert.match(saved, /ABCDE12345/);
   assert.match(saved, /Remove key/);

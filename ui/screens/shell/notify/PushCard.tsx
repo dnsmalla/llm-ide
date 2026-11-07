@@ -36,11 +36,13 @@ export function resultLabel(r: string | null): string {
 }
 
 const ID_RE = /^[A-Z0-9]{10}$/;
+/** This app's Apple Developer team (public, not a secret); prefilled and still editable. */
+export const DEFAULT_APNS_TEAM_ID = "9A3YFRQ7SM";
 
 export function PushBody({ status, error, onSave, onRemove }: { status: PushStatus | null; error: string | null; onSave(v: { key: string; keyId: string; teamId: string }): void; onRemove(): void }) {
   const [key, setKey] = useState("");
   const [keyId, setKeyId] = useState("");
-  const [teamId, setTeamId] = useState("");
+  const [teamId, setTeamId] = useState(DEFAULT_APNS_TEAM_ID);
   if (!status) return <p className="st-hint">Push needs this computer's Host API (Settings → Mobile) on a backend started with LLMIDE_HOST_API_PUSH=1.</p>;
   const ready = key.includes("BEGIN PRIVATE KEY") && ID_RE.test(keyId) && ID_RE.test(teamId);
   return (
