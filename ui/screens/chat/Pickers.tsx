@@ -37,13 +37,16 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
   const composerLabel = provider && model ? (listed.find((m) => m.provider === provider && m.model === model)?.label ?? model) : null;
   // A pinned model that is not in the lists (a retired id) still shows as chosen, as the Mac's "Current" group does.
   const unlisted = value !== "" && !listed.some((m) => `${m.provider}|${m.model}` === value) ? value : null;
+  const unlistedModel = unlisted?.split("|").slice(1).join("|") ?? "";
+  const unlistedProvider = unlisted?.split("|")[0] ?? "";
+  const unlistedLabel = unlisted ? `${groups.find((g) => g.provider === unlistedProvider || g.models.some((m) => m.provider === unlistedProvider))?.label ?? unlistedProvider} · ${unlistedModel}` : null;
   return (
     <div className="chat-pick">
       <label>
         <span className="chat-pick-label">Model</span>
         <select aria-label="Model" value={value} disabled={loading} onChange={(e) => { const [p, ...m] = e.target.value.split("|"); if (p) onChange(p, m.join("|")); else onChange("", ""); }}>
           <option value="">{modelDefaultLabel(route, composerLabel)}</option>
-          {unlisted && <optgroup label="Current"><option value={unlisted}>{unlisted.split("|").slice(1).join("|")}</option></optgroup>}
+          {unlisted && <optgroup label="Current (not in the provider list)"><option value={unlisted}>{unlistedLabel}</option></optgroup>}
           {groups.map((g) => (
             <optgroup key={g.id} label={g.label}>
               {g.models.map((m) => (
@@ -55,6 +58,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
           ))}
         </select>
       </label>
+      {unlisted && <span className="chat-note" role="note">This chat is pinned to “{unlistedModel}”, which is not in the provider’s current model list. It is sent as-is; choose a listed model to use the provider’s current one.</span>}
       {groups.filter((g) => g.note).map((g) => <span key={g.id} className="chat-muted">{g.label}: {g.note}</span>)}
       {plainChat && <span className="chat-note" role="note" title={plainChatDetail(plainChat)}>{PLAIN_CHAT_TITLE}</span>}
       {addGroup && onAdd && <AddModelControl groupLabel={addGroup.label} onAdd={(id) => onAdd(addGroup.id, id)} />}

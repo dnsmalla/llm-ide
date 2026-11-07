@@ -180,7 +180,8 @@ test("a pinned chat shows its pinned model, a pending switch shows what runs nex
 
 test("a pinned model missing from the lists still shows as chosen, under Current", () => {
   const out = picker({ route: { enabled: true, pinned: true, provider: "anthropic", model: "claude-retired" } });
-  assert.match(out, /<optgroup label="Current"><option value="anthropic\|claude-retired" selected="">claude-retired<\/option>/);
+  assert.match(out, /<optgroup label="Current \(not in the provider list\)"><option value="anthropic\|claude-retired" selected="">Claude · claude-retired<\/option>/);
+  assert.match(out, /not in the provider’s current model list/);
 });
 
 test("a late refusal does not overwrite a pick made while the save was in flight", () => {
