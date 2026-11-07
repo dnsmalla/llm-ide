@@ -313,7 +313,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           meta={`${turnCount} turn${turnCount === 1 ? "" : "s"}${sessionTotal ? ` · ${sessionTotal.text}` : ""}`}
           onSelect={setActiveId} onNew={() => void newChat()} onCollapse={dock ? onCollapse : undefined}
           onRename={(title) => activeId && renameSession(activeId, title)}
-          onDelete={() => activeId && deleteSession(activeId)}
+          onDelete={() => activeId && deleteSession(activeId)} hasMessages={state.messages.length > 0}
           onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
         />
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}

@@ -41,9 +41,14 @@ export interface DockHeaderProps {
   onSetLimit: (limit: number | null) => Promise<{ coldSwitch?: boolean; estimatedPrefillTokens?: number } | void>;
   onRename?: (title: string) => void;
   onDelete?: () => void;
+  /** The open chat has messages: the header trash asks first (the Mac's clearChatButton); an empty chat goes at once. */
+  hasMessages?: boolean;
 }
 
-export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete }: DockHeaderProps) {
+/** What the header trash does (ChatSessionHeader.clearChatButton): an empty chat has nothing to lose. Pure. */
+export const deleteChatAction = (hasMessages: boolean): "confirm" | "delete" => (hasMessages ? "confirm" : "delete");
+
+export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete, hasMessages = false }: DockHeaderProps) {
   const options = historyOptions(sessions, activeId, busyIds);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -95,6 +100,12 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
             </>
           )}
         </div>
+      ) : null}
+      {activeId && onDelete ? (
+        <button type="button" className="chat-dock-btn" aria-label="Delete current chat" title="Delete current chat"
+          onClick={() => { if (deleteChatAction(hasMessages) === "delete") onDelete(); else { setRenaming(false); setConfirm(true); setActions(true); } }}>
+          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
       ) : null}
       <button type="button" className="chat-dock-btn" aria-label="New chat" title="New chat" onClick={onNew}><Icon name="plus" size={13} /></button>
       {onCollapse && <button type="button" className="chat-dock-btn" aria-label="Hide Code Assistant" title="Hide Code Assistant" onClick={onCollapse}><Icon name="panel-right" size={14} /></button>}
