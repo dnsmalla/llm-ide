@@ -125,13 +125,13 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
                 {` · ${formatSize(d.size)}`}
               </span>
             )}
+            {markdown && (d.status === "ready" || d.status === "range") ? (
+              <button type="button" className="ex-tool" aria-pressed={preview === "raw"} onClick={() => setPreview(preview === "render" ? "raw" : "render")} title={preview === "render" ? "Edit the Markdown source" : "Preview Markdown"}>
+                {preview === "render" ? "Edit" : "Preview"}
+              </button>
+            ) : null}
             {showEditor && (
               <>
-                {markdown ? (
-                  <button type="button" className="ex-tool" aria-pressed={preview === "render"} onClick={() => setPreview(preview === "render" ? "raw" : "render")} title={preview === "render" ? "Show the Markdown source" : "Preview Markdown"}>
-                    {preview === "render" ? "Source" : "Preview"}
-                  </button>
-                ) : null}
                 {showEditor ? <button type="button" className="ex-tool" onClick={() => editorRef.current?.find()} title="Find in file (Cmd/Ctrl+F)" aria-label="Find in file">Find</button> : null}
                 {snap.git && d.status === "ready" && (
                   <button type="button" className="ex-tool" aria-pressed={snap.diffPath === activeId} onClick={() => void controller.toggleDiff(activeId)} title="Compare with the last commit">Diff</button>

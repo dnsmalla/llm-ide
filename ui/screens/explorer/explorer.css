@@ -125,3 +125,15 @@
 .mem-confirm { border: 1px solid var(--tok-color-border); border-radius: 8px; background: var(--tok-color-surface); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 .mem-confirm p { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .mem-confirm-actions { display: flex; justify-content: flex-end; gap: var(--tok-space-md); }
+/* Markdown preview fills the editor column and scrolls; it is not laid out as a flex child of a relative box. */
+.ex-markdown { position: absolute; inset: 0; overflow: auto; }
+/* Dock header wraps instead of clipping Route and the window controls. */
+.chat-dock-mode .chat-dock-head { flex-wrap: wrap; row-gap: 6px; }
+.chat-dock-mode .chat-dock-meta { display: none; }
+.chat-dock-mode .chat-dock-title { flex: 0 0 auto; }
+.chat-dock-mode .chat-dock-head > * { min-width: 0; }
+.chat-dock-mode .chat-composer-bar > * { min-width: 0; }
+.chat-dock-mode .chat-composer-bar .chat-pick { flex: 1 1 145px; max-width: 100%; }
+.chat-dock-mode .chat-notes { display: block; }
+.chat-dock-mode .chat-notes > * { white-space: normal; overflow-wrap: anywhere; }
+.chat-dock-mode .chat-ghost { white-space: normal; overflow-wrap: anywhere; }
