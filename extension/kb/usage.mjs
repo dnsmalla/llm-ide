@@ -536,6 +536,9 @@ function costOrNull(v) {
  * The user's USD spend this month (all providers and models), from `usage_ledger.cost_usd` (migration
  * 0069). The member cap is monthly, so it is enforced against this sum, never against a per-turn budget.
  * A CLI-dispatched turn stores no cost, so such turns are under-counted here.
+ *
+ * A ledger read error fails CLOSED: the spend is unknown, so this answers +Infinity (any finite cap is
+ * already reached) instead of 0, which would silently lift the cap and let an unlimited turn run.
  */
 export function usedUsdMonth(db, userId, now = new Date()) {
   if (!userId) return 0;
@@ -547,7 +550,7 @@ export function usedUsdMonth(db, userId, now = new Date()) {
     const n = Number(row?.usd);
     return Number.isFinite(n) && n > 0 ? n : 0;
   } catch {
-    return 0; // a ledger read must never fail a turn
+    return Number.POSITIVE_INFINITY; // unknown spend: assume the cap is reached (fail closed)
   }
 }
 

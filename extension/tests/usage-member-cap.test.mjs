@@ -113,6 +113,15 @@ test('recordUsage stores an unknown cost as NULL, never zero or a guess', () => 
   assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(bad).cost_usd, null);
 });
 
+// R-012#5: a ledger read error must fail CLOSED. Returning 0 made the monthly sum look empty, so the
+// cap check let every turn through — an unlimited month on a transient DB error.
+test('usedUsdMonth fails closed on a ledger read error (Infinity, never 0)', () => {
+  const brokenDb = { prepare() { throw new Error('ledger unavailable'); } };
+  assert.equal(usedUsdMonth(brokenDb, 'u-broken'), Number.POSITIVE_INFINITY);
+  // ...so any finite member cap reads as already reached.
+  assert.ok(usedUsdMonth(brokenDb, 'u-broken') >= 20);
+});
+
 test('a missing user/provider/model still answers null', () => {
   const u = member(5);
   assert.equal(usdCapForModel(getDb(), null, 'anthropic', MODEL), null);

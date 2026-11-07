@@ -22,6 +22,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const { handleAgentV2Routes, startHostTurn } = await import('../routes/agent-v2.mjs');
+const { usedUsdMonth } = await import('../kb/usage.mjs');
 
 // --- req/res doubles (the shape tests/agent-v2-routes.test.mjs uses) --------
 
@@ -240,6 +241,80 @@ test('a member under the cap runs, and a cap of 0 never refuses', async () => {
   assert.equal(res2.statusCode, 200);
   assert.equal(turn2.calls.length, 1);
   assert.equal(auditRows(uncapped.id).length, 0);
+});
+
+// --- R-012#1: a cancelled/failed turn still reaches usedUsdMonth ----------
+
+test('an aborted turn writes the cost-bearing ledger row and counts toward usedUsdMonth', async () => {
+  const doer = member('member', 'execute');
+  getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
+  spend(doer.id, 5); // 15 of the 20 USD cap is left
+
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: {
+      message: 'go', mode: 'execute', model: 'claude-sonnet-5',
+      agentContext: { chatSessionId: `abort-${++seq}`, workspaceRoot: WS },
+    },
+    user: doer,
+  }), res, {
+    // The user pressed Stop (or the stream dropped): the engine reports its usage event, then throws
+    // without returning usageTotals — the exit path the old success-only meter skipped.
+    runTurn: async ({ onEvent, abortController }) => {
+      onEvent({ type: 'init', sessionId: 'sdk-abort', model: 'claude-sonnet-5', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+      onEvent({ type: 'usage', inputTokens: 120, outputTokens: 8, cacheReadTokens: 0, cacheCreationTokens: 0 });
+      abortController.abort();
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(usedUsdMonth(getDb(), doer.id), 20, 'the aborted turn charged the remaining turn budget');
+  const row = getDb().prepare(
+    'SELECT model, endpoint, input_tokens, output_tokens, cost_usd FROM usage_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+  ).get(doer.id);
+  assert.deepEqual(row, {
+    model: 'claude-sonnet-5', endpoint: '/agent/v2/stream',
+    input_tokens: 120, output_tokens: 8, cost_usd: 15,
+  });
+
+  // The month is now at the cap: the next turn is refused before the engine starts.
+  const next = fakeTurn();
+  const { res: refused } = await stream(doer, { message: 'again', model: 'claude-sonnet-5' }, { runTurn: next.runTurn });
+  assert.equal(refused.statusCode, 429);
+  assert.equal(next.calls.length, 0);
+});
+
+test('a failed turn with no reported cost also charges its budget, but one with no usage writes no row', async () => {
+  const doer = member('member', 'execute');
+  getDb().prepare("UPDATE members SET usd_cap_month = 20 WHERE user_id = ?").run(doer.id);
+  spend(doer.id, 4); // 16 left
+
+  // Failed before any usage event (e.g. auth/provider refusal): nothing was spent, nothing is charged.
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'go', mode: 'execute', model: 'claude-sonnet-5', agentContext: { chatSessionId: `fail-none-${++seq}`, workspaceRoot: WS } },
+    user: doer,
+  }), makeRes(), { runTurn: async () => { throw Object.assign(new Error('no key'), { code: 'PROVIDER_UNAVAILABLE' }); } });
+  assert.equal(usedUsdMonth(getDb(), doer.id), 4, 'no usage event = no charge');
+
+  // Failed after an API response: the usage event is the evidence, so charge the turn's budget.
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'go', mode: 'execute', model: 'claude-sonnet-5', agentContext: { chatSessionId: `fail-usage-${++seq}`, workspaceRoot: WS } },
+    user: doer,
+  }), makeRes(), {
+    runTurn: async ({ onEvent }) => {
+      onEvent({ type: 'init', sessionId: 'sdk-fail', model: 'claude-sonnet-5', tools: [], capabilities: [] });
+      onEvent({ type: 'usage', inputTokens: 30, outputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 0 });
+      throw new Error('stream failed');
+    },
+  });
+  assert.equal(usedUsdMonth(getDb(), doer.id), 20, 'a failed turn with spend is charged conservatively');
 });
 
 // --- the same clamp on the in-process Host API turn -----------------------

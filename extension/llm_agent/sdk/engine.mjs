@@ -1815,7 +1815,10 @@ export async function runAgentV2Turn(
   let contextUsageRaw = null;
   const usageTotals = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
-    costUsd: 0, numTurns: 0, durationMs: 0,
+    // NULL = cost unknown, never a guessed zero (migration 0069: the member's monthly cap sums this
+    // column, and the route stores unknown as NULL). A resumed session with no baseline cannot split the
+    // SDK's running total_cost_usd, so it must stay null rather than report 0 for a turn that did cost.
+    costUsd: null, numTurns: 0, durationMs: 0,
     // `thinkingTokens` (the SDK's estimate of the thinking inside outputTokens:
     // a breakdown, never an addition) is set only once a frame arrives, so a
     // turn without it keeps the shape every consumer already knows.
@@ -1981,8 +1984,9 @@ export async function runAgentV2Turn(
             usageTotals.costUsd = turn.reduce((n, m) => n + (m.costUsd ?? 0), 0);
           } else {
             // total_cost_usd is a running total too; only a fresh session's is
-            // this turn's alone.
-            if (!resume) usageTotals.costUsd += ev.costUsd ?? 0;
+            // this turn's alone. A result that reports no cost leaves it null
+            // (unknown) — never 0, which would read as "this turn was free".
+            if (!resume && ev.costUsd != null) usageTotals.costUsd = (usageTotals.costUsd ?? 0) + ev.costUsd;
             // No usable running-total split: the streamed sums stand, but
             // their output is only as good as the stream's message_delta. The
             // result's own `usage` (main loop, per turn) is a floor for every

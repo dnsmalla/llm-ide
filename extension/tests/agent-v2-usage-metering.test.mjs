@@ -25,7 +25,7 @@ const { runAgentV2Turn, normalizeModelUsage } = await import('../llm_agent/sdk/e
 const { ledgerRowsForTurn } = await import('../routes/agent-v2.mjs');
 const { parseCliJsonResult } = await import('../providers/runtime.mjs');
 
-function scriptedQuery({ sessionId, modelUsage }) {
+function scriptedQuery({ sessionId, modelUsage, totalCostUsd }) {
   return () => (async function* () {
     yield { type: 'system', subtype: 'init', session_id: sessionId, tools: [], capabilities: [] };
     // Streamed: two content blocks of ONE API response, each its own
@@ -35,7 +35,9 @@ function scriptedQuery({ sessionId, modelUsage }) {
         message: { id: 'msg_1', content: [], usage: { input_tokens: 3, output_tokens: 1,
           cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 } } };
     }
-    yield { type: 'result', subtype: 'success', session_id: sessionId, ...(modelUsage ? { modelUsage } : {}) };
+    yield { type: 'result', subtype: 'success', session_id: sessionId,
+      ...(modelUsage ? { modelUsage } : {}),
+      ...(totalCostUsd != null ? { total_cost_usd: totalCostUsd } : {}) };
   })();
 }
 
@@ -89,6 +91,25 @@ test('a resumed turn with no baseline (server restarted) falls back to its strea
   });
   assert.equal(usageTotals.cacheReadTokens, 1000, 'the streamed response, not the whole chat');
   assert.equal(usageTotals.byModel, undefined);
+});
+
+// R-012#4: costUsd starts at null, not 0. A resumed session's total_cost_usd is the chat's running
+// total and cannot be split without a baseline, so the cost is UNKNOWN (null) — recording 0 claimed the
+// turn was free and under-counted the member's monthly cap.
+test('a resumed turn with no baseline reports an unknown cost as null, never 0', async () => {
+  const { usageTotals } = await turn({
+    resume: 'sdk-cost', sessionId: 'sdk-cost', totalCostUsd: 0.42,
+    modelUsage: { 'claude-opus-5': { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } },
+  });
+  assert.equal(usageTotals.costUsd, null);
+  assert.equal(ledgerRowsForTurn('claude-opus-5', usageTotals)[0].costUsd, null);
+});
+
+test('a fresh turn keeps the SDK total_cost_usd, and a turn with none stays null', async () => {
+  const fresh = await turn({ sessionId: 'sdk-cost-fresh', totalCostUsd: 0.42 });
+  assert.equal(fresh.usageTotals.costUsd, 0.42);
+  const none = await turn({ sessionId: 'sdk-cost-none' });
+  assert.equal(none.usageTotals.costUsd, null, 'no reported cost is unknown, not free');
 });
 
 test('usageDelta: a model whose running total went down (a /clear) is taken whole', async () => {

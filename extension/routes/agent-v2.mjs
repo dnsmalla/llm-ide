@@ -34,7 +34,7 @@ import {
   markAgentSessionUsed,
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
-import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth } from '../kb/usage.mjs';
+import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth, usdCapForModel } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -580,6 +580,9 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   }
   // The member's USD cap is MONTHLY: refuse once the month's ledger sum reaches it (never a per-turn
   // budget). 0 = no cap. Audited with the reason only, like the max_mode refusal.
+  // Known limit (R-012#3): the in-flight lock is per CHAT, not per user, so concurrent turns of one
+  // member can each pass this check and overshoot the cap by up to (chats-1) × the remaining budget.
+  // Closing it needs a per-user in-flight USD reservation; until then the check is per turn start.
   const usdCap = Number(member?.usdCapMonth ?? 0);
   if (usdCap > 0 && usedUsdMonth(getDb(), userId) >= usdCap) {
     recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
@@ -672,6 +675,10 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   }
   // Billable tokens left under the chat's cap, handed to the engine as its ceiling (null = none).
   const capRemaining = begin.enabled && begin.capOn && begin.cap.limit !== null ? begin.cap.remaining : null;
+  // The USD ceiling this turn may spend — the same remaining monthly budget the engine resolves for the
+  // SDK's `maxBudgetUsd`. Captured before the turn so a cancelled/failed turn, whose cost never comes back
+  // from the engine, can be charged conservatively instead of skipping the ledger (R-012#1).
+  const turnBudgetUsd = usdCapForModel(db, userId, provider, model);
 
   io.start();
   const ac = new AbortController();
@@ -746,6 +753,10 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   // agent.db run row (plan 2.5): run_id = turn id. Closed once, after the turn.
   const agentRun = beginAgentRun(userId, { runId: turnId, source: 'chat', engine: 'v2', mode, provider, model });
   let runUsage = null;
+  // The turn's last `usage` event. Kept because a Stop, a dropped stream or an engine error throws
+  // before `runUsage` is assigned; that event still carries the tokens the turn spent (never a cost).
+  let liveUsage = null;
+  let usageRecorded = false;
   let runErrorCode = null;
   const toolAccounting = createToolAccounting();
   // SDK signals (rate limit, permission denial, refusal): audit and record only.
@@ -760,6 +771,14 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     // An adapter turn's session key is not an SDK session: never bind it as the chat's resume id.
     if (!adapterTurn && ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
+    // The one usage event the engine sends per turn (ahead of its result). Recorded here as well as in
+    // `runUsage` so an exit that never returns usageTotals can still meter the turn (R-012#1).
+    if (ev?.type === 'usage') {
+      liveUsage = {
+        inputTokens: ev.inputTokens, outputTokens: ev.outputTokens,
+        cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens,
+      };
+    }
     send(ev);
     // The engine reports ONE usage event per turn, ahead of its result: counted here so the chat's
     // counters move before any terminal event (a crash after this point loses nothing).
@@ -776,6 +795,21 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
       }
     }
     if (ev && ev.type === 'tool_result') emitTaskProgress();
+  };
+
+  // One ledger write per turn, on EVERY exit path (R-012#1). A success uses the engine's totals, which
+  // carry cost_usd. A cancelled / failed / dropped turn uses its usage event, which carries no cost, so it
+  // charges the turn's USD budget (the remaining monthly cap it was allowed to spend) instead of skipping:
+  // otherwise stopping every turn near its end never filled usedUsdMonth and the member cap never bound.
+  // An adapter turn writes its own ledger row (llm_agent/adapter/provider-turn.mjs).
+  const recordTurnUsage = (usage, { conservativeCost = false } = {}) => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    if (adapterTurn) return;
+    const meteredModel = resolvedModel ?? model;
+    for (const row of ledgerRowsForTurn(meteredModel, conservativeCost ? { ...usage, costUsd: turnBudgetUsd } : usage)) {
+      recordUsage(db, { userId, provider, requestId: turnId, ...row });
+    }
   };
 
   // Bind/refresh the chat→SDK-session mapping. Called on EVERY exit path that
@@ -809,7 +843,7 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     let answeredBy = null;   // set by an adapter turn the start-of-turn fallback moved to another provider
     try {
       const runTurn = adapterTurn ? (deps.runAdapterTurn ?? runAdapterTurn) : deps.runTurn;
-      const { usageTotals, composition, metered, answered } = await runTurn({
+      const { usageTotals, composition, answered } = await runTurn({
         message,
         // An adapter has no session to resume: it is handed the client's history on every turn.
         history: turnHistory,
@@ -867,18 +901,12 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
       // stream reported, then meter the turn. The engine-resolved model wins
       // over the client's request (the SDK resolves defaults/fallbacks); with
       // neither, model is null and recordUsage skips the row — accepted, since
-      // there is then genuinely no model name to meter under. (recordUsage's
-      // real params are userId/provider/model/source/endpoint/inputTokens/
-      // outputTokens/runs/requestId — cost is not a ledger column, so costUsd
-      // is not passed.)
-      const meteredModel = resolvedModel ?? model;
+      // there is then genuinely no model name to meter under. The ledger row
+      // carries the turn's USD cost on its main row (usage_ledger.cost_usd,
+      // migration 0069); ledgerRowsForTurn passes usageTotals.costUsd through
+      // and stores NULL when the engine reported none.
       bindSdkSession();
-      // An adapter turn wrote its own ledger row (llm_agent/adapter/provider-turn.mjs).
-      if (!metered) {
-        for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
-          recordUsage(db, { userId, provider, requestId: turnId, ...row });
-        }
-      }
+      recordTurnUsage(usageTotals ?? null);
       // Task parity with legacy /code-assist: emit after the SDK result so the
       // Mac can populate PlanTimelineCard and auto-continue when work remains.
       const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);
@@ -940,12 +968,20 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     io.end();
     return true;
   } finally {
+    // A turn that failed, was stopped, or whose stream dropped still spent tokens. The engine throws
+    // without returning its totals, so the usage event is the only evidence; meter from it and charge the
+    // turn's USD budget as the cost — a cancelled turn must still fill usedUsdMonth (R-012#1). A success
+    // has already recorded above (usageRecorded), and an adapter turn writes its own row.
+    if (!usageRecorded) {
+      if (runUsage) recordTurnUsage(runUsage);
+      else if (liveUsage) recordTurnUsage(liveUsage, { conservativeCost: true });
+    }
     replay.end();
     // Closed on every exit, a throw included: a run never stays 'running' because
     // bookkeeping failed. Status: cancelled (Stop / disconnect), error (the engine
     // failed), else ok.
     agentRun.finish({
-      ...runTotals(runUsage),
+      ...runTotals(runUsage ?? liveUsage),
       status: ac.signal.aborted ? 'cancelled' : (runErrorCode ? 'error' : 'ok'),
       toolCalls: toolAccounting.events().length,
       stopReason: runUsage?.stopReason ?? null,
