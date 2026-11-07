@@ -829,7 +829,7 @@ const server = http.createServer(async (req, res) => {
   // These two dispatchers run before the rate limiter, so the authority table
   // is applied here for them; the general hook below covers every other route.
   if ((isAuthRoute(req.url || '') || isExtensionRoute(req.url || ''))
-      && enforceRouteAuthority(getDb({ logger }), req, res)) return;
+      && enforceRouteAuthority(getDb({ logger }), req, res, { logger: reqLog })) return;
   if (isAuthRoute(req.url || '')) {
     try {
       await handleAuth(req, res, { db: getDb({ logger }), logger: reqLog, requestId });
@@ -872,14 +872,12 @@ const server = http.createServer(async (req, res) => {
     req.rateLimitRefund = r.refund;
   }
 
-  // Team authority for routes that can run an agent/Loop, edit files, install
-  // skills, add a repo or spend model money (R-014#1). One table + one check
-  // (server/route-authority.mjs): requireRole + max_mode + the monthly USD cap,
-  // with a `team.deny` row carrying the reason only. It runs AFTER the rate
-  // limiter so a refused caller still spends its token, and a disabled feature
-  // is left to its own dispatcher's 404 feature_disabled.
+  // Team authority for EVERY route (plan H1.2): server/route-authority.mjs gives each method + path one
+  // action class; an authenticated request that no rule declares is refused 404 and logged. Runs AFTER
+  // the rate limiter so a refused caller still spends its token; a disabled feature keeps its own
+  // 404 feature_disabled.
   if (!featureDisabledFor(req.url || '', config.features)
-      && enforceRouteAuthority(getDb({ logger }), req, res)) return;
+      && enforceRouteAuthority(getDb({ logger }), req, res, { logger: reqLog })) return;
 
   // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
   if (isBusRoute(req.url || '')) {

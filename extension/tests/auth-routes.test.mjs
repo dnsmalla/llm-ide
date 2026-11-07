@@ -83,6 +83,7 @@ _setRegistryFetchForTests(async (url) => {
   return { ok: true, status: 200, json: async () => ({ latest: registryLatest[name] }) };
 });
 const kb = await import('../kb/db.mjs');
+import { grant } from './helpers/grant.mjs';
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
 const { handleExtensionRoute, isExtensionRoute } = await import('../routes/extension-routes.mjs');
 const { authenticate, isPublicPath } = await import('../server/auth.mjs');
@@ -825,10 +826,11 @@ test('POST /auth/me/plugins/toggle validates the plugin slug and installed-state
   assert.equal(notInstalled.statusCode, 400);
 });
 
-test('plugin management routes need the admin team role (ADR 0021)', async () => {
+test('plugin management routes need an engineer with execute (plan H1.2)', async () => {
   // The 2026-08-20 "every user is an admin" rule is retired: authority comes from `members`.
   const { user } = await registerAndLogin(); // second+ account on this install → member
-  const member = { id: user.id };
+  const viewer = { id: user.id };
+  grant(kb.getDb(), user.id, { teamRole: 'viewer', maxMode: 'read_only' });
   const calls = [
     { method: 'POST', url: '/auth/me/plugins/reload' },
     { method: 'POST', url: '/auth/me/plugins/install', rawBody: Buffer.from('not a zip') },
@@ -836,10 +838,16 @@ test('plugin management routes need the admin team role (ADR 0021)', async () =>
     { method: 'POST', url: '/auth/me/claude-plugins/import', body: { source: 'installed', name: 'whatever' } },
   ];
   for (const c of calls) {
-    const res = await callAuth({ ...c, user: member });
-    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a member`);
+    const res = await callAuth({ ...c, user: viewer });
+    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a viewer`);
     assert.equal(res.json().error.code, 'ROLE_DENIED');
   }
+
+  // An engineer (member + execute) is not refused by the install gate.
+  const eng = await registerAndLogin();
+  const engineer = { id: eng.user.id };
+  const engRes = await callAuth({ ...calls[0], user: engineer });
+  assert.notEqual(engRes.json().error?.code, 'ROLE_DENIED', `${calls[0].method} ${calls[0].url} must not refuse an engineer`);
 
   // The owner (the first account) passes the same gate.
   const reload = await callAuth({ method: 'POST', url: '/auth/me/plugins/reload', user: ownerUser() });
@@ -1053,12 +1061,16 @@ test('GET /auth/me/claude-plugins/updates returns the new shape (cli:false with 
   assert.ok(Array.isArray(body.updates));
 });
 
-test('POST /auth/me/claude-plugins/update reaches validation for an admin, and refuses a member first', async () => {
+test('POST /auth/me/claude-plugins/update reaches validation for an admin, and refuses a viewer first', async () => {
   const { user } = await registerAndLogin();
+  grant(kb.getDb(), user.id, { teamRole: 'viewer', maxMode: 'read_only' });
   const denied = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id }, body: { name: 'some-plugin' } });
   assert.equal(denied.statusCode, 403);
   assert.equal(denied.json().error.code, 'ROLE_DENIED');
-  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: adminUser(user.id), body: { name: 'some-plugin' } });
+  // An engineer with execute reaches the route (which answers 404 for an unknown plugin), also as admin.
+  const eng = await registerAndLogin();
+  assert.equal((await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: eng.user.id }, body: { name: 'some-plugin' } })).statusCode, 404);
+  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: adminUser(eng.user.id), body: { name: 'some-plugin' } });
   assert.equal(res.statusCode, 404, res._body);
 });
 
@@ -1289,9 +1301,10 @@ test('GET /auth/me/llm-sources/updates reports a status per source and never err
   assert.equal(builtin.status, 'local');
 });
 
-test('llm-sources management routes need the admin team role (ADR 0021)', async () => {
+test('llm-sources management routes need an engineer with execute (plan H1.2)', async () => {
   const { user } = await registerAndLogin();
-  const member = { id: user.id };
+  const viewer = { id: user.id };
+  grant(kb.getDb(), user.id, { teamRole: 'viewer', maxMode: 'read_only' });
   const calls = [
     { method: 'POST', url: '/auth/me/llm-sources/add', body: { path: '/tmp' } },
     { method: 'POST', url: '/auth/me/llm-sources/update', body: { id: 'builtin' } },
@@ -1300,13 +1313,19 @@ test('llm-sources management routes need the admin team role (ADR 0021)', async 
     { method: 'GET', url: '/auth/me/llm-sources/builtin/discovery' },
   ];
   for (const c of calls) {
-    const res = await callAuth({ ...c, user: member });
-    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a member`);
+    const res = await callAuth({ ...c, user: viewer });
+    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a viewer`);
     assert.equal(res.json().error.code, 'ROLE_DENIED');
   }
 
+  // An engineer (member + execute) is not refused by the install gate.
+  const eng = await registerAndLogin();
+  const engineer = { id: eng.user.id };
+  const engRes = await callAuth({ ...calls[3], user: engineer });
+  assert.notEqual(engRes.json().error?.code, 'ROLE_DENIED', `${calls[3].method} ${calls[3].url} must not refuse an engineer`);
+
   // An admin reaches the route (the source id is what decides the rest).
-  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: adminUser(user.id) });
+  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: adminUser(eng.user.id) });
   assert.notEqual(discovery.statusCode, 403);
 });
 
@@ -1393,19 +1412,25 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongsi
 
 // ---- MCP plugins (SP1) --------------------------------------------------
 
-test('mcp-plugins routes need the admin team role (ADR 0021)', async () => {
+test('mcp-plugins routes need an engineer with execute (plan H1.2)', async () => {
   const { user } = await registerAndLogin();
-  const member = { id: user.id };
+  const viewer = { id: user.id };
+  grant(kb.getDb(), user.id, { teamRole: 'viewer', maxMode: 'read_only' });
   for (const [method, url] of [
     ['GET', '/auth/me/mcp-plugins/claude-sources'],
     ['GET', '/auth/me/mcp-plugins/codex-sources'],
     ['POST', '/auth/me/mcp-plugins/add'],
   ]) {
-    const res = await callAuth({ method, url, user: member, ...(method === 'POST' ? { body: { command: 'npx', args: [] } } : {}) });
-    assert.equal(res.statusCode, 403, `${method} ${url} must refuse a member`);
+    const res = await callAuth({ method, url, user: viewer, ...(method === 'POST' ? { body: { command: 'npx', args: [] } } : {}) });
+    assert.equal(res.statusCode, 403, `${method} ${url} must refuse a viewer`);
     assert.equal(res.json().error.code, 'ROLE_DENIED');
   }
-  const admin = adminUser(user.id);
+  // An engineer (member + execute) is not refused by the install gate.
+  const eng = await registerAndLogin();
+  const engineer = { id: eng.user.id };
+  const engRes = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: engineer });
+  assert.notEqual(engRes.json().error?.code, 'ROLE_DENIED', 'GET /auth/me/mcp-plugins/claude-sources must not refuse an engineer');
+  const admin = adminUser(eng.user.id);
   const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: admin });
   assert.equal(scan.statusCode, 200);
 });

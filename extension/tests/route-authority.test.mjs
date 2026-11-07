@@ -25,7 +25,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 const { handleKB } = await import('../routes/router.mjs');
 const {
-  ROUTE_AUTHORITY, authorizeRoute, enforceRouteAuthority, routeAuthorityFor,
+  ROUTE_POLICY, authorizeRoute, enforceRouteAuthority, routeAuthorityFor,
 } = await import('../server/route-authority.mjs');
 
 after(() => {
@@ -105,24 +105,46 @@ const loop = (u, body, deps) => {
 
 // ── the table ──────────────────────────────────────────────────────────────
 
-test('the table names the dangerous routes and their gate (role + max_mode + cap)', () => {
-  const byId = Object.fromEntries(ROUTE_AUTHORITY.map((r) => [r.id, r]));
-  for (const id of ['loop.agent-run', 'project.install-skills', 'repos.add', 'repos.remove',
-    'extensions.write', 'complete', 'agent.ask', 'generate.notes', 'generate.questions', 'extract.entities',
-    'generate.doc', 'plan.generate', 'plan.risks', 'plan.codegen', 'providers.turn',
-    'review.approve', 'dispatch', 'agent-sdk.update']) {
-    assert.ok(byId[id], `missing authority rule ${id}`);
-    assert.ok(['viewer', 'member', 'admin', 'owner'].includes(byId[id].role), `${id} role`);
-    assert.ok(['read_only', 'execute'].includes(byId[id].maxMode), `${id} maxMode`);
-    assert.equal(typeof byId[id].cap, 'boolean', `${id} cap`);
-  }
-  assert.equal(byId['project.install-skills'].role, 'admin');
-  assert.equal(byId['project.install-skills'].maxMode, 'execute');
-  assert.equal(byId['loop.agent-run'].maxMode, 'execute');
-  assert.equal(byId['loop.agent-run'].cap, true);
-  assert.equal(byId['complete'].maxMode, 'read_only', 'a one-shot completion is a read-only run mode');
-  assert.equal(routeAuthorityFor('GET', '/kb/loop/agent-run'), null, 'only the declared method is gated');
-  assert.equal(routeAuthorityFor('POST', '/kb/search'), null, 'a read route is not in the table');
+test('the dangerous routes carry the class that gates them', () => {
+  const cls = (m, p) => routeAuthorityFor(m, p)?.cls;
+  assert.equal(cls('POST', '/kb/loop/agent-run'), 'model.exec');
+  assert.equal(cls('POST', '/kb/providers/turn'), 'model.exec');
+  assert.equal(cls('POST', '/kb/agent/dispatch'), 'model.exec');
+  assert.equal(cls('POST', '/kb/project/install-skills'), 'install');
+  assert.equal(cls('POST', '/kb/agent-sdk/update'), 'install');
+  assert.equal(cls('POST', '/auth/me/repos'), 'fs.write');
+  assert.equal(cls('DELETE', '/auth/me/repos'), 'fs.write');
+  assert.equal(cls('POST', '/kb/complete'), 'model.read');
+  assert.equal(cls('POST', '/agent/v2/stream'), 'model.ask');
+  assert.equal(cls('POST', '/kb/agent/ask'), 'model.ask');
+  assert.equal(cls('POST', '/admin/invites'), 'admin');
+  assert.equal(cls('POST', '/kb/ingest-scip'), 'fs.write');
+  assert.equal(cls('POST', '/auth/me/plugins/hook-trust'), 'install');
+  assert.equal(cls('POST', '/auth/me/mcp-plugins/toggle'), 'install');
+  assert.equal(cls('PUT', '/auth/me/workspace-trust'), 'install');
+  assert.equal(cls('POST', '/kb/outcomes/retry-failed'), 'external.write');
+  assert.equal(cls('POST', '/kb/summarize'), 'model.read');
+  assert.equal(cls('GET', '/kb/loop/agent-run'), undefined, 'only the declared method');
+  assert.ok(ROUTE_POLICY.length > 300);
+});
+
+test('an authenticated request no rule declares is refused 404 and logged', () => {
+  const owner = user('owner', 'execute');
+  const res = makeRes();
+  const logged = [];
+  const logger = { error: (event, data) => logged.push([event, data]) };
+  assert.equal(enforceRouteAuthority(getDb(), makeReq({ method: 'GET', url: '/kb/no-such-route?q=1', user: owner }), res, { logger }), true);
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json().error.code, 'NOT_FOUND');
+  assert.deepEqual(logged, [['route_policy_unlisted', { method: 'GET', path: '/kb/no-such-route' }]]);
+});
+
+test('a viewer may read their own data and Ask, but not run any other model route', () => {
+  const viewer = user('viewer', 'read_only');
+  assert.equal(enforceRouteAuthority(getDb(), makeReq({ method: 'GET', url: '/auth/me', user: viewer }), makeRes()), false);
+  const res = makeRes();
+  assert.equal(enforceRouteAuthority(getDb(), makeReq({ url: '/kb/summarize', user: viewer }), res), true);
+  assert.equal(res.statusCode, 403);
 });
 
 // ── loop agent-run ─────────────────────────────────────────────────────────
@@ -177,7 +199,7 @@ test('a max_mode none member is refused even when the role would pass', async ()
   const run = fakeRun();
   const { res } = await loop(none, loopBody(), run.deps);
   assert.equal(res.statusCode, 403);
-  assert.deepEqual(res.json().error, { code: 'ROLE_DENIED', message: 'Your team role cannot run turns' });
+  assert.deepEqual(res.json().error, { code: 'ROLE_DENIED', message: 'Your team grant cannot run this' });
   assert.deepEqual(JSON.parse(auditRows(none.id)[0].detail), { reason: 'max_mode_none' });
   assert.equal(run.calls.length, 0);
 });
@@ -212,29 +234,39 @@ test('a member at the monthly USD cap is refused 429 before the Loop run; 0 mean
 
 // ── install-skills ─────────────────────────────────────────────────────────
 
-test('install-skills is admin-only: a member is refused before the kit runs, an admin passes the gate', async () => {
-  const member = user('member', 'execute');
+test('install-skills needs an engineer with execute: a viewer and a read_only member are refused, an execute member passes the gate', async () => {
+  const viewer = user('viewer', 'execute');
   const denied = makeRes();
   const handled = await handleKB(
-    makeReq({ url: '/kb/project/install-skills', body: { path: __dirname }, user: member }),
+    makeReq({ url: '/kb/project/install-skills', body: { path: __dirname }, user: viewer }),
     denied,
   );
   assert.equal(handled, true);
   assert.equal(denied.statusCode, 403);
-  assert.deepEqual(denied.json(), { error: { code: 'ROLE_DENIED', message: 'Requires team role admin' } });
-  assert.deepEqual(JSON.parse(auditRows(member.id)[0].detail), { reason: 'role_denied' });
+  assert.deepEqual(denied.json(), { error: { code: 'ROLE_DENIED', message: 'Requires team role member' } });
+  assert.deepEqual(JSON.parse(auditRows(viewer.id)[0].detail), { reason: 'role_denied' });
 
-  const admin = user('admin', 'execute');
+  const reader = user('member', 'read_only');
+  const modeDenied = makeRes();
+  await handleKB(
+    makeReq({ url: '/kb/project/install-skills', body: { path: __dirname }, user: reader }),
+    modeDenied,
+  );
+  assert.equal(modeDenied.statusCode, 403);
+  assert.deepEqual(modeDenied.json(), { error: { code: 'ROLE_DENIED', message: 'Requires the execute run mode' } });
+  assert.deepEqual(JSON.parse(auditRows(reader.id)[0].detail), { reason: 'max_mode_insufficient' });
+
+  const member = user('member', 'execute');
   const passed = makeRes();
   await handleKB(
-    makeReq({ url: '/kb/project/install-skills', body: { path: __dirname }, user: admin }),
+    makeReq({ url: '/kb/project/install-skills', body: { path: __dirname }, user: member }),
     passed,
   );
   // The gate passed and the route reached its own marker check; the kit never
   // ran against a path without system/project.json.
   assert.equal(passed.statusCode, 400);
   assert.equal(passed.json().error.code, 'NOT_A_PROJECT');
-  assert.equal(auditRows(admin.id).length, 0);
+  assert.equal(auditRows(member.id).length, 0);
 });
 
 test('an admin with read_only cannot install into a project either', () => {
@@ -250,7 +282,7 @@ test('an admin with read_only cannot install into a project either', () => {
 
 test('adding or removing a repo path needs a member with execute', () => {
   const rule = routeAuthorityFor('POST', '/auth/me/repos');
-  assert.deepEqual([rule.id, rule.role, rule.maxMode], ['repos.add', 'member', 'execute']);
+  assert.deepEqual([rule.role, rule.maxMode], ['member', 'execute']);
   const viewer = user('viewer', 'execute');
   const denied = authorizeRoute(getDb(), makeReq({ url: '/auth/me/repos', body: {}, user: viewer }), { rule });
   assert.equal(denied.ok, false);
