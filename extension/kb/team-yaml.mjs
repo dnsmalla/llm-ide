@@ -10,11 +10,16 @@
 // the permissions of a role stay in code (`members.mjs`, `requireRole`, the
 // turn clamp, the gateway filter).
 //
-// First boot writes the file from the current `members` rows (so a solo
-// owner stays owner) and never rewrites it afterwards. Later boots parse the
-// user's file, apply it in one transaction and audit every actual change.
-// An invalid file refuses the boot instead of running with stale or wider
-// grants; unknown emails are reported and ignored (no user is ever created).
+// The first boot that sees a real (non-legacy) account writes the file from
+// the current `members` rows (so a solo owner stays owner) and never rewrites
+// it afterwards. An install with no real accounts yet DEFERS generation:
+// writing an empty file would make it authoritative at the next boot and
+// demote the first registered owner (and the no_owner guard would refuse that
+// boot), so the file appears on the first boot after registration. Later boots
+// parse the user's file, apply it in one transaction and audit every actual
+// change. An invalid file refuses the boot instead of running with stale or
+// wider grants; unknown emails are reported and ignored (no user is ever
+// created).
 //
 // The parser/serializer are a deliberately small, strict YAML subset: only
 // `members:` → `<email>:` → the three scalar keys, two-space indentation,
@@ -304,9 +309,12 @@ export function listTeamAssignments(db) {
 
 /**
  * Apply `<dir>/team.yaml` once. Creates the file from the current members when
- * it is missing; never rewrites an existing one. Every actual grant change is
- * written in one transaction and reported through `audit` (the boot adapter
- * maps that to the existing audit helper with actor `team.yaml`).
+ * it is missing AND a real account exists; an install with no real accounts yet
+ * defers generation (`{ deferred: true }`, no file written) so the empty file
+ * cannot demote the first registered owner at the next boot. Never rewrites an
+ * existing file. Every actual grant change is written in one transaction and
+ * reported through `audit` (the boot adapter maps that to the existing audit
+ * helper with actor `team.yaml`).
  *
  * Throws `TeamYamlError` (`TEAM_YAML_INVALID`) for an unreadable or invalid
  * file, before changing any row. Unknown emails are reported, audited and
@@ -323,6 +331,16 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
 
   if (!fs.existsSync(file)) {
     const current = listTeamAssignments(db);
+    // A fresh install has no real accounts yet. Writing an empty file here would make the next boot
+    // refuse: the first registration creates the owner, but the file would not list them. Defer the
+    // file until an account exists; then it is generated from that owner and never rewritten.
+    if (current.length === 0) {
+      if (logger) logger.info('team_yaml_deferred', { path: file, reason: 'no_real_users' });
+      return {
+        path: file, created: false, source: 'deferred', deferred: true,
+        assignments: 0, users: 0, changes: [], unknownEmails: [],
+      };
+    }
     assignments = current.map(({ userId: _userId, ...assignment }) => assignment);
     const text = serializeTeamYaml(assignments);
     try {
@@ -462,6 +480,7 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
     path: file,
     created,
     source,
+    deferred: false,
     assignments: assignments.length,
     users: userRows.length,
     changes,

@@ -343,13 +343,50 @@ test('every actual change is audited with actor team.yaml and from/to only', () 
 
 // ── fail closed: zero owners (R-012#2) ───────────────────────────────────
 
-test('a fresh install with no real accounts still applies (the first registration creates the owner)', () => {
+// ── fresh install: deferred generation, then the first owner ─────────────
+
+test('a fresh install with no real accounts defers generation (no empty file)', () => {
   reset();
   const d = dir();
-  // Only the synthetic `legacy` user exists: nothing to demote, so the boot must not fail.
-  const result = applyTeamYaml(kb.getDb(), d, { logger: noopLogger });
-  assert.equal(result.created, true);
-  assert.equal(kb.getDb().prepare("SELECT COUNT(*) AS n FROM members WHERE team_role = 'owner'").get().n, 0);
+  const file = path.join(d, 'team.yaml');
+  const events = [];
+  const logger = { info: (event, detail) => events.push({ event, detail }), warn() {} };
+  // Only the synthetic `legacy` user exists. An empty file would become authoritative at the next boot
+  // and demote the first registered owner (and the no_owner guard would refuse that boot).
+  const result = applyTeamYaml(kb.getDb(), d, { logger });
+  assert.equal(result.deferred, true);
+  assert.equal(result.created, false);
+  assert.equal(result.source, 'deferred');
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(events.map((e) => e.event), ['team_yaml_deferred']);
+  assert.equal(events[0].detail.reason, 'no_real_users');
+});
+
+test('the first real account makes the next boot generate team.yaml; the boot after is idempotent', () => {
+  reset();
+  const d = dir();
+  const file = path.join(d, 'team.yaml');
+  assert.equal(applyTeamYaml(kb.getDb(), d, { logger: noopLogger }).deferred, true);
+
+  // What the first registration does: the first real account becomes the owner (auth-routes).
+  const owner = addUser('owner@example.com', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  const generated = applyTeamYamlAtBoot({ db: kb.getDb(), dir: d, logger: noopLogger });
+  assert.equal(generated.created, true);
+  assert.equal(generated.deferred, false);
+  assert.equal(generated.source, 'generated');
+  assert.deepEqual(parseTeamYaml(fs.readFileSync(file, 'utf8')),
+    [entry('owner@example.com', 'owner', 'execute', 0)]);
+  assert.deepEqual(grantOf(owner), { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+
+  // A second boot applies the same file without rewriting it or generating again.
+  const text = fs.readFileSync(file, 'utf8');
+  const generateRows = auditRows('team.yaml.generate').length;
+  const again = applyTeamYamlAtBoot({ db: kb.getDb(), dir: d, logger: noopLogger });
+  assert.equal(again.created, false);
+  assert.equal(again.source, 'file');
+  assert.equal(again.changes.length, 0);
+  assert.equal(fs.readFileSync(file, 'utf8'), text, 'an existing file is never rewritten');
+  assert.equal(auditRows('team.yaml.generate').length, generateRows, 'no second generate');
 });
 
 test('a file that would leave no owner refuses the boot and rolls back every change', () => {
