@@ -163,3 +163,6 @@ kb/llmide.db
 
 # Agent worktrees (local only)
 .worktrees/
+
+# Planner/reviewer <-> coder coordination (live, local; see agent-coord/README.md)
+agent-coord/
