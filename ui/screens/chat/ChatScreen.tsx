@@ -38,6 +38,7 @@ import type { FileRefs } from "./MessageView";
 import { describeError, type CoreTransport } from "./transport";
 import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE } from "./tauri-store";
 import { claimSession, sessionVisible } from "./surface-sessions";
+import { coreStatusStore } from "../shell/runtime";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -122,6 +123,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // The effort pick is one app-wide choice (the Mac's chat.effort), remembered across launches.
   const effortPick = useSyncExternalStore(effortStore.subscribe, effortStore.get, effortStore.get);
   const [route, setRoute] = useState<RouteView | null>(null);
+  // A supervised core restart invalidates running-turn state and provider/model caches: follow its restart counter.
+  const coreRestarts = useSyncExternalStore(coreStatusStore.subscribe, () => coreStatusStore.getSnapshot().status?.restarts ?? 0, () => 0);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
   const [refineNonce, setRefineNonce] = useState(0);
   useControllerVersion(controller); // re-render when any chat's busy flag changes
@@ -135,19 +138,27 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       .then((list) => setSessions(list.filter((x) => sessionVisible(surface, x.id))))
       .catch((e) => { if (!ac.signal.aborted) setListError(describeError(e).message); });
     return () => ac.abort();
-  }, [store, sessionsRev]);
+  }, [store, sessionsRev, coreRestarts, surface]);
 
   // No session column: open the most recent chat when none is open yet, as the Mac does.
   useEffect(() => {
     if (!activeId && sessions.length > 0) setActiveId(sessions[0]!.id);
   }, [activeId, sessions, setActiveId]);
 
-  // Model list once per screen.
+  // Model list once per screen and after every core restart.
   useEffect(() => {
     const ac = new AbortController();
     loadModelGroups(core, ac.signal).then((r) => { setListedGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
     return () => ac.abort();
-  }, [core]);
+  }, [core, coreRestarts]);
+
+  // A restarted core may have lost the live stream: pick up a turn that is still running.
+  useEffect(() => {
+    if (coreRestarts <= 0) return undefined;
+    const ac = new AbortController();
+    void controller.reattachRunning(ac.signal);
+    return () => ac.abort();
+  }, [controller, coreRestarts]);
 
   // Opening a chat: history, route (cap + pinned model), "running on the core" hint.
   useEffect(() => {
@@ -157,7 +168,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     void controller.refreshRemoteBusy(ac.signal);
     getRoute(core, activeId, ac.signal).then(setRoute).catch(() => setRoute(null));
     return () => ac.abort();
-  }, [activeId, controller, core]);
+  }, [activeId, controller, core, coreRestarts]);
 
   const state = useChatState(controller, activeId ?? "");
   useEffect(() => {
