@@ -85,3 +85,12 @@ test('registration: remote mode closes signup unless explicitly opted in', () =>
   assert.equal(computeRegistrationOpen(true, { LLMIDE_DISABLE_REGISTRATION: '0' }), true);
   assert.equal(computeRegistrationOpen(true, { LLMIDE_DISABLE_REGISTRATION: '0', LLMIDE_ALLOW_REMOTE: '1' }), false);
 });
+
+test('registration: hub mode closes it, and nothing reopens it', () => {
+  // ADR 0021: members join by invite only; POST /auth/register accepts an invite while closed.
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_HUB: '1' }), false);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_HUB: '1', LLMIDE_DISABLE_REGISTRATION: '0' }), false);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_HUB: '1', LLMIDE_ALLOW_REMOTE: '1', LLMIDE_ALLOW_REMOTE_REGISTRATION: '1' }), false);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_HUB: '0' }), true, 'off keeps the dev default');
+  assert.equal(config.hub, false, 'LLMIDE_HUB is unset here');
+});

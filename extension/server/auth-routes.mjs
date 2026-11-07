@@ -27,7 +27,7 @@ import {
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
-import { ensureMember, getMember, ownerCount } from '../kb/members.mjs';
+import { consumeInvite, ensureMember, getMember, ownerCount } from '../kb/members.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
 // RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
@@ -116,22 +116,53 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
     try {
-      const user = registerUser(db, {
-        email: body.email,
-        password: body.password,
-        displayName: body.displayName,
-      });
-      // ADR 0021: every account carries a members row from the moment it exists. The first real
-      // user is the owner (a fresh install has no owner until someone registers); everyone else
-      // starts as `member` with execute, which is exactly today's solo behaviour.
-      db.transaction(() => {
+      // ADR 0021: one transaction for the account, its `members` row and (when given) the invite it
+      // burns. A bad invite rolls the account back, so a used/expired token never leaves a user behind.
+      const out = db.transaction(() => {
+        const inviteToken = typeof body.invite === 'string' && body.invite ? body.invite : null;
+        const user = registerUser(db, {
+          email: body.email,
+          password: body.password,
+          displayName: body.displayName,
+          invite: inviteToken,     // lets a closed installation accept this one registration
+        });
+        if (inviteToken) {
+          // Validate + burn first: an invalid token must not create a member, and rolling back the
+          // transaction restores it (a duplicate email does not eat the invite).
+          const grants = consumeInvite(db, inviteToken, { email: body.email, userId: user.id });
+          ensureMember(db, user.id, {
+            teamRole: grants.teamRole,
+            maxMode: grants.maxMode,
+            usdCapMonth: grants.usdCapMonth,
+            grantedBy: grants.createdBy,
+          });
+          return { user, invite: grants.id };
+        }
+        // No invite: the first real user on a fresh install is the owner (a fresh DB has no owner
+        // until someone registers); everyone else gets today's solo defaults. Hub mode starts a new
+        // member read-only with a 20 USD/month cap (ADR 0021 decision 5).
         const teamRole = ownerCount(db) === 0 ? 'owner' : 'member';
-        ensureMember(db, user.id, { teamRole, maxMode: 'execute', usdCapMonth: 0, grantedBy: null });
+        ensureMember(db, user.id, {
+          teamRole,
+          maxMode: config.hub ? 'read_only' : 'execute',
+          usdCapMonth: config.hub ? 20 : 0,
+          grantedBy: null,
+        });
+        return { user, invite: null };
       })();
-      safeAudit(db, { userId: user.id, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'success' });
-      send(res, 201, { user });
+      safeAudit(db, {
+        userId: out.user.id, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'success',
+        ...(out.invite ? { detail: { invite: out.invite } } : {}),
+      });
+      send(res, 201, { user: out.user });
     } catch (err) {
       safeAudit(db, { userId: null, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'failure', detail: { error: err.code || err.message } });
+      // While registration is closed, an invalid / used / expired / wrong-email invite is answered
+      // exactly like a closed registration: never reveal whether the token existed.
+      if (!config.registrationOpen && err.code === 'INVITE_INVALID') {
+        send(res, 403, { error: { code: 'REGISTRATION_CLOSED', message: 'Registration is closed' } });
+        return;
+      }
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
     }
     return;

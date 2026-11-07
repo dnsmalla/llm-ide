@@ -1438,10 +1438,17 @@ server.listen(PORT, HOST, () => {
       logger.warn('server_remote_registration_open', {
         message:
           'Remote mode AND open registration (LLMIDE_ALLOW_REMOTE_REGISTRATION=1): any network ' +
-          'peer can self-register and, since every user is an admin, run agents, MCP stdio ' +
-          'commands and plugin installs. Unset it unless you intend this.',
+          'peer can self-register and become a member. Every member runs within the grants in ' +
+          '`members`, but open registration on a reachable server still lets any peer in. ' +
+          'Unset it unless you intend this.',
       });
     }
+  }
+
+  if (config.hub) {
+    logger.warn('server_hub_mode', {
+      message: 'Hub mode (LLMIDE_HUB=1): registration is closed; members join by invite only (ADR 0021).',
+    });
   }
 
   // Temp dirs a provider-CLI run left behind (crash / kill -9 before its

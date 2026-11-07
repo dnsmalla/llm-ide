@@ -35,14 +35,15 @@ function envInt(name, fallback) {
 }
 
 /**
- * Whether self-registration is open. Remote mode (LLMIDE_ALLOW_REMOTE=1)
- * closes it unless LLMIDE_ALLOW_REMOTE_REGISTRATION=1 is also set: every user
- * is an admin (agents, MCP stdio, plugin installs), so open signup on a
- * network-reachable server is remote code execution for any peer.
- * LLMIDE_DISABLE_REGISTRATION=1 still force-closes everywhere.
+ * Whether self-registration is open. Closed by LLMIDE_DISABLE_REGISTRATION=1 (prod default) and by
+ * hub mode (LLMIDE_HUB=1 — ADR 0021: members join by invite only, `POST /auth/register` accepts an
+ * invite while closed). Remote mode (LLMIDE_ALLOW_REMOTE=1) closes it too unless
+ * LLMIDE_ALLOW_REMOTE_REGISTRATION=1 is also set: every member runs within the grants in `members`,
+ * but an open registration on a network-reachable server still lets any peer become a member.
  */
 export function computeRegistrationOpen(prod, env = process.env) {
   const flag = (n) => /^(1|true|yes|on)$/i.test(env[n] ?? '');
+  if (flag('LLMIDE_HUB')) return false;
   const disabled = env.LLMIDE_DISABLE_REGISTRATION !== undefined
     ? flag('LLMIDE_DISABLE_REGISTRATION')
     : prod; // prod default closed, dev default open
@@ -290,6 +291,10 @@ export const config = Object.freeze({
   hostApiWebOrigins:    parseOriginAllowlist(process.env.LLMIDE_HOST_API_WEB_ORIGINS, console.warn),
   // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
   hostApiMode:          HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',
+
+  // Team Hub mode (ADR 0021): LLMIDE_HUB=1. H1 only closes registration here (computeRegistrationOpen)
+  // and switches a no-invite registration's defaults to read-only / 20 USD; the rest of hub mode is H2.
+  hub:                  envBool('LLMIDE_HUB', false),
 
   // Self-Heal incident capture (routes/self-heal.mjs): the Tauri host passes LLMIDE_SELF_HEAL=1 only in a debug build.
   // Off: /kb/self-heal/* answers 404 feature_disabled and nothing is recorded. Never in production.

@@ -66,8 +66,11 @@ function validateEmail(email) {
   return e;
 }
 
-export function registerUser(db, { email, password, displayName }) {
-  if (!config.registrationOpen) throw errForbidden('Registration is disabled');
+// `invite` is a plaintext invite token: its presence lets a registration through while registration is
+// closed (ADR 0021). The route validates and burns it in the same transaction, so a bad token rolls the
+// account back — this function never trusts it for anything else.
+export function registerUser(db, { email, password, displayName, invite = null }) {
+  if (!config.registrationOpen && !invite) throw errForbidden('Registration is disabled');
   const e = validateEmail(email);
   validatePassword(password);
   const name = String(displayName || '').trim().slice(0, MAX_NAME) || e.split('@')[0];

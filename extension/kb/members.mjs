@@ -5,14 +5,22 @@
 // Every helper takes the db handle first (kb convention: one SQLite store, the
 // caller owns the connection) and every write is one transaction.
 
+import { createHash, randomBytes } from 'node:crypto';
 import { AppError } from '../core/errors.mjs';
 
 // Role order: viewer < member < admin < owner.
 export const ROLE_ORDER = Object.freeze({ viewer: 0, member: 1, admin: 2, owner: 3 });
 export const MAX_MODES = Object.freeze(['none', 'read_only', 'execute']);
 export const MAX_USD_CAP_MONTH = 100_000;
+// Invites: single use, 24 h by default, never more than a week. The token is 32 random bytes, stored
+// only as its SHA-256 (a DB leak cannot be replayed).
+export const DEFAULT_INVITE_TTL_HOURS = 24;
+export const MAX_INVITE_TTL_HOURS = 168;
+export const INVITE_ROLES = Object.freeze(['admin', 'member', 'viewer']);
+export const INVITE_TOKEN_BYTES = 32;
 
 const ROLES = new Set(Object.keys(ROLE_ORDER));
+const INVITE_ROLE_SET = new Set(INVITE_ROLES);
 
 const err = (code, message, status) => new AppError(code, message, { status });
 
@@ -138,4 +146,108 @@ export function ownerCount(db) {
 function validUsdCap(v) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 && n <= MAX_USD_CAP_MONTH;
+}
+
+// ── Invites (ADR 0021: invite only) ────────────────────────────────────────
+// An admin mints a single-use invite carrying the new member's grants; the invitee registers with it even
+// while registration is closed. The raw token is shown once and never stored.
+
+const hashToken = (token) => createHash('sha256').update(token).digest('hex');
+const inviteErr = () => err('INVITE_INVALID', 'This invite is not valid', 400);
+
+function validEmail(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (s.length > 254 || !s.includes('@')) throw err('VALIDATION', 'Invalid email', 400);
+  return s;
+}
+
+function validTtlHours(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_INVITE_TTL_HOURS) {
+    throw err('VALIDATION', `ttlHours must be 1-${MAX_INVITE_TTL_HOURS}`, 400);
+  }
+  return n;
+}
+
+/** Mint an invite. Returns `{ id, token }` — the only time the token exists in plaintext. */
+export function createInvite(db, actorId, {
+  email = null, teamRole = 'member', maxMode = 'read_only', usdCapMonth = 20, ttlHours = DEFAULT_INVITE_TTL_HOURS,
+} = {}) {
+  const actor = getMember(db, actorId);
+  if (!actor || !atLeast(actor.teamRole, 'admin')) throw err('ROLE_DENIED', 'Requires team role admin', 403);
+  if (teamRole === 'owner') throw err('ROLE_DENIED', 'An invite cannot make an owner', 403);
+  if (!INVITE_ROLE_SET.has(teamRole)) throw err('VALIDATION', 'Invalid invite role', 400);
+  // An admin invite is a peer grant: only an owner may hand out the admin role.
+  if (teamRole === 'admin' && actor.teamRole !== 'owner') {
+    throw err('ROLE_DENIED', 'Only an owner can invite an admin', 403);
+  }
+  if (!MAX_MODES.includes(maxMode)) throw err('VALIDATION', 'Invalid max mode', 400);
+  if (!validUsdCap(usdCapMonth)) throw err('VALIDATION', 'Invalid USD cap', 400);
+  const boundEmail = validEmail(email);
+  const ttl = validTtlHours(ttlHours);
+
+  const token = randomBytes(INVITE_TOKEN_BYTES).toString('base64url');
+  const id = randomBytes(8).toString('hex');
+  const row = db.prepare(
+    `INSERT INTO invites (id, token_hash, email, team_role, max_mode, usd_cap_month, created_by, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
+     RETURNING expires_at`,
+  ).get(id, hashToken(token), boundEmail, teamRole, maxMode, Number(usdCapMonth), String(actorId), `+${ttl} hours`);
+  return { id, token, expiresAt: row.expires_at };
+}
+
+/** Every invite, newest first — never the token or its hash. */
+export function listInvites(db) {
+  return db.prepare(`
+    SELECT id, email, team_role, max_mode, usd_cap_month, created_by, created_at, expires_at, used_at
+      FROM invites ORDER BY created_at DESC, id
+  `).all().map((r) => ({
+    id: r.id,
+    email: r.email,
+    teamRole: r.team_role,
+    maxMode: r.max_mode,
+    usdCapMonth: r.usd_cap_month,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    usedAt: r.used_at,
+  }));
+}
+
+/** Delete an unused or used invite. An admin may revoke any invite. */
+export function revokeInvite(db, actorId, id) {
+  const actor = getMember(db, actorId);
+  if (!actor || !atLeast(actor.teamRole, 'admin')) throw err('ROLE_DENIED', 'Requires team role admin', 403);
+  return db.prepare('DELETE FROM invites WHERE id = ?').run(String(id)).changes > 0;
+}
+
+/**
+ * Validate and burn an invite (single use). `userId` is the account it is being used for; `email` is
+ * compared case-insensitively when the invite is bound to one. Throws INVITE_INVALID for unknown, used,
+ * expired or wrong-email tokens alike — the caller may not reveal which.
+ */
+export function consumeInvite(db, token, { email = null, userId } = {}) {
+  if (typeof token !== 'string' || token.length < 16) throw inviteErr();
+  const hash = hashToken(token);
+  const row = db.prepare('SELECT * FROM invites WHERE token_hash = ?').get(hash);
+  if (!row) throw inviteErr();
+  const fresh = db.prepare("SELECT datetime('now') < ? AS ok").get(row.expires_at)?.ok;
+  if (!fresh) throw inviteErr();
+  if (row.used_at) throw inviteErr();
+  if (row.email && row.email.toLowerCase() !== String(email ?? '').trim().toLowerCase()) throw inviteErr();
+
+  const burned = db.prepare(
+    "UPDATE invites SET used_at = datetime('now'), used_by = ? WHERE id = ? AND used_at IS NULL",
+  ).run(userId == null ? null : String(userId), row.id).changes;
+  if (burned !== 1) throw inviteErr(); // a concurrent registration won the same token
+  return {
+    id: row.id,
+    email: row.email,
+    teamRole: row.team_role,
+    maxMode: row.max_mode,
+    usdCapMonth: row.usd_cap_month,
+    createdBy: row.created_by,
+  };
 }
