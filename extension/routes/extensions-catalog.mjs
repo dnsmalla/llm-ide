@@ -65,7 +65,7 @@ const STATUS = {
   invalid_url: 400, invalid_ref: 400, invalid_commit: 400, invalid_path: 400, invalid_member: 400, invalid_user: 400,
   not_found: 404, catalog_disabled: 404, source_not_allowed: 403, consent_required: 409, already_installed: 409, busy: 409,
   invalid_source: 400, too_many_sources: 400, source_exceeds_ceiling: 403,
-  already_current: 409, update_changed: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
+  already_current: 409, update_changed: 409, commit_changed: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
   marketplace: 422, nothing_installable: 422, unsafe_path: 422, too_large: 422, bad_archive: 422,
   commit_not_in_repo: 422, verify_unavailable: 503,
   blocked: 403, upstream: 502, redirect_refused: 502, aborted: 499, state_unreadable: 500, write_failed: 500,
@@ -218,7 +218,7 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
       }
       const item = Array.isArray(body.members) && body.members.length
         ? setInstalledMembers(userId, body.id, body.members, body.enabled)
-        : setInstalledEnabled(userId, body.id, body.enabled, { consents: body.consents ?? [] });
+        : setInstalledEnabled(userId, body.id, body.enabled, { consents: body.consents ?? [], commit: body.commit });
       audit(body.members?.length ? 'extension.members' : (body.enabled ? 'extension.enable' : 'extension.disable'), body.id, 'success',
         { commit: item.pinnedCommit, ...(body.consents?.length ? { consents: capConsents(body.consents) } : {}) });
       send(res, 200, { ok: true, item });

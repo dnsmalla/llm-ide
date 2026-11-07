@@ -58,6 +58,7 @@ export const KNOWN_CODES = [
   "COMMIT_NOT_IN_REPO",
   "VERIFY_UNAVAILABLE",
   "UPDATE_CHANGED",
+  "COMMIT_CHANGED",
   "INVALID_REF",
   "INVALID_COMMIT",
   "INVALID_URL",
@@ -118,6 +119,8 @@ export function extErrorText(e: ExtApiError): string {
       return "That commit is not on the repository's default branch or the named ref, so it was refused.";
     case "VERIFY_UNAVAILABLE":
       return "GitHub could not confirm that commit right now. Nothing was changed. Try again in a minute.";
+    case "COMMIT_CHANGED":
+      return "That item changed while you were deciding, so it was not switched on. Switch it on again to review it.";
     case "UPDATE_CHANGED":
       return "That update changed while you were reviewing it. Review it again.";
     case "INVALID_REF":

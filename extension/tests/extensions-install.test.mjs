@@ -161,7 +161,7 @@ test('switches: per user, consent needed for executable kinds, members unchecked
   }
   assert.throws(() => inst.setInstalledEnabled('ua', item.id, true, { consents: ['hook', 'mcp'] }), (e) => e.code === 'consent_required');
   assert.equal(inst.listInstalled('ua').items[0].state.enabled, false);
-  const on = inst.setInstalledEnabled('ua', item.id, true, { consents: ['bin', 'hook', 'mcp'] });
+  const on = inst.setInstalledEnabled('ua', item.id, true, { consents: ['bin', 'hook', 'mcp'], commit: item.pinnedCommit });
   assert.equal(on.state.enabled, true);
   assert.deepEqual(Object.keys(on.consents), ['bin', 'hook', 'mcp']);
   assert.equal(inst.listInstalled('ub').items[0].state.enabled, false, 'another user is unaffected');

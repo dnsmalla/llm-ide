@@ -89,7 +89,7 @@ test('an item with executable parts needs consent per kind (409 names them)', as
   assert.equal(no.status, 409);
   assert.equal(no.body.error.code, 'CONSENT_REQUIRED');
   assert.deepEqual(no.body.error.details.kinds, ['hook']);
-  const yes = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'] });
+  const yes = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'], commit: SHA });
   assert.equal(yes.status, 200);
   assert.equal(yes.body.item.state.enabled, true);
 });
@@ -212,4 +212,30 @@ test('active: names and counts only, per user, no configs and no paths', async (
   assert.ok(Array.isArray(r.body.mcpServers) && Array.isArray(r.body.items) && Array.isArray(r.body.skills));
   assert.equal(typeof r.body.sdkPlugins, 'number');
   assert.ok(!JSON.stringify(r.body).includes(root), 'no file system path leaks');
+});
+
+test('M8: enabling is bound to the commit the user consented to', async () => {
+  const u = { id: 'm8' };
+  const ins = await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/runner', commit: SHA }, u);
+  assert.equal(ins.status, 200); const id = ins.body.item.id;
+  const noCommit = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'] }, u);
+  assert.equal(noCommit.status, 400); assert.equal(noCommit.body.error.code, 'INVALID_COMMIT');
+  const bad = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'], commit: 'abc' }, u);
+  assert.equal(bad.status, 400); assert.equal(bad.body.error.code, 'INVALID_COMMIT');
+  const other = 'f'.repeat(40);
+  const moved = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'], commit: other }, u);
+  assert.equal(moved.status, 409); assert.equal(moved.body.error.code, 'COMMIT_CHANGED'); assert.equal(moved.body.error.details.pinnedCommit, SHA);
+  assert.equal((await call('GET', '/auth/me/extensions/installed', undefined, u)).body.items[0].state.enabled, false);
+  const yes = await call('POST', '/auth/me/extensions/toggle', { id, enabled: true, consents: ['hook'], commit: SHA }, u);
+  assert.equal(yes.status, 200); assert.equal(yes.body.item.state.enabled, true);
+  const off = await call('POST', '/auth/me/extensions/toggle', { id, enabled: false, commit: other }, u);
+  assert.equal(off.status, 200); assert.equal(off.body.item.state.enabled, false);
+});
+test('M8: an item with no executable part still enables without a commit (older clients)', async () => {
+  const u = { id: 'm8b' };
+  await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/tidy', commit: SHA }, u);
+  const on = await call('POST', '/auth/me/extensions/toggle', { id: 'skill:acme/tidy', enabled: true }, u);
+  assert.equal(on.status, 200);
+  const moved = await call('POST', '/auth/me/extensions/toggle', { id: 'skill:acme/tidy', enabled: true, commit: 'f'.repeat(40) }, u);
+  assert.equal(moved.status, 409); assert.equal(moved.body.error.code, 'COMMIT_CHANGED');
 });

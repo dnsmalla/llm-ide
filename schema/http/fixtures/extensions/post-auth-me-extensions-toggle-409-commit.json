@@ -1,0 +1,6 @@
+{
+  "endpoint": "POST /auth/me/extensions/toggle",
+  "status": 409,
+  "request": { "body": { "id": "plugin:acme/runner", "enabled": true, "consents": ["hook"], "commit": "ffffffffffffffffffffffffffffffffffffffff" } },
+  "response": { "error": { "code": "COMMIT_CHANGED", "message": "the item is pinned to another commit; review it again", "details": { "pinnedCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" } } }
+}

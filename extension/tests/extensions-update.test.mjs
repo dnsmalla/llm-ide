@@ -104,7 +104,7 @@ test('apply: an executable kind new in the commit switches the item OFF unless c
   assert.equal(r.item.integrity.length, 64);
   // enable now needs consent at the new commit, and records it for that commit
   assert.throws(() => inst.setInstalledEnabled('u4', it.id, true), (e) => e.code === 'consent_required');
-  const on = inst.setInstalledEnabled('u4', it.id, true, { consents: ['hook'] });
+  const on = inst.setInstalledEnabled('u4', it.id, true, { consents: ['hook'], commit: S2 });
   assert.equal(on.consents.hook.commit, S2);
   // rollback: the old version has no executable kinds, so it stays on
   const rb = upd.rollback('u4', it.id);

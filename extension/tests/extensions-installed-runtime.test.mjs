@@ -123,7 +123,7 @@ test('executable plugin: consent is required, then it is delivered, its server i
   flagOn();
   await install(u1, 'runner');
   assert.throws(() => inst.setInstalledEnabled(u1, 'plugin:acme/runner', true), (e) => e.code === 'consent_required');
-  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'] });
+  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'plugin:acme/runner').pinnedCommit });
   assert.ok(delivery(u1).native.includes('runner'));
   const m = mcpNow(u1);
   const cfg = m.servers['runner-srv'];
@@ -148,7 +148,7 @@ test('executable plugin: consent is required, then it is delivered, its server i
 test('consent for another commit, a missing store, a catalog kill switch or a corrupt overlay load nothing', async () => {
   flagOn();
   await install(u1, 'runner');
-  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'] });
+  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'plugin:acme/runner').pinnedCommit });
   assert.ok('runner-srv' in mcpNow(u1).servers);
 
   process.env.LLMIDE_EXT_CATALOG = 'off';
@@ -208,8 +208,8 @@ test('an MCP registry item mounts its https remote only; a package-only item mou
   flagOn();
   await install(u1, 'remote');
   await install(u1, 'pkgonly');
-  inst.setInstalledEnabled(u1, 'mcp:acme/remote', true, { consents: ['mcp'] });
-  inst.setInstalledEnabled(u1, 'mcp:acme/pkgonly', true, { consents: ['mcp'] });
+  inst.setInstalledEnabled(u1, 'mcp:acme/remote', true, { consents: ['mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'mcp:acme/remote').pinnedCommit });
+  inst.setInstalledEnabled(u1, 'mcp:acme/pkgonly', true, { consents: ['mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'mcp:acme/remote').pinnedCommit });
   const m = mcpNow(u1);
   assert.deepEqual(m.servers.remote, { type: 'http', url: 'https://mcp.acme.example.com/mcp' });
   assert.equal('pkgonly' in m.servers, false);
@@ -233,7 +233,7 @@ test('SDK engine: an installed MCP tool parks an approval with no always-allow; 
   flagOn();
   process.env.ANTHROPIC_API_KEY = 'sk-ant-test-0123456789';
   await install(u1, 'runner');
-  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'] });
+  inst.setInstalledEnabled(u1, 'plugin:acme/runner', true, { consents: ['hook', 'mcp'], commit: inst.listInstalled(u1).items.find((i) => i.id === 'plugin:acme/runner').pinnedCommit });
   const events = [];
   const capture = { sessionId: 'sdk-ext-1' };
   await engine.runAgentV2Turn({

@@ -169,16 +169,19 @@ export function listInstalled(userId) {
  * declares executable parts (hooks, MCP servers, bin, LSP) needs the user's
  * consent for each kind it declares, named in `consents`.
  */
-export function setInstalledEnabled(userId, id, enabled, { consents = [] } = {}) {
+export function setInstalledEnabled(userId, id, enabled, { consents = [], commit } = {}) {
   const installed = readInstalled(userId);
   const rec = installed.items.get(id);
   if (!rec) throw new InstallError('not_found', 'not installed');
   if (installed.corrupt || readOverlay(userId).corrupt) throw new InstallError('state_unreadable', 'extensions state cannot be read');
   if (enabled === true) {
     const need = Array.isArray(rec.declared?.executableKinds) ? rec.declared.executableKinds : [];
+    if (commit !== undefined && !isCommitSha(commit)) throw new InstallError('invalid_commit', 'commit must be 40 hex characters');
     const given = new Set((Array.isArray(consents) ? consents : []).filter((c) => typeof c === 'string'));
     const missing = need.filter((k) => !given.has(k));
     if (missing.length) throw new InstallError('consent_required', 'this item can run code; consent to each kind first', { kinds: missing });
+    if (commit === undefined && need.length) throw new InstallError('invalid_commit', 'commit is required to enable an item that runs code');
+    if (commit !== undefined && commit !== rec.pinnedCommit) throw new InstallError('commit_changed', 'the item is pinned to another commit; review it again', { pinnedCommit: rec.pinnedCommit });
     if (need.length) {
       const next = { ...rec, consents: { ...rec.consents, ...Object.fromEntries(need.map((k) => [k, { grantedAt: new Date().toISOString(), commit: rec.pinnedCommit }])) } };
       if (!putInstalled(userId, id, next)) throw new InstallError('state_unreadable', 'extensions state cannot be written');

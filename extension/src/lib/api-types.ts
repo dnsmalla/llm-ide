@@ -3462,6 +3462,7 @@ export type PostAuthMeExtensionsToggleRequest = {
     enabled?: boolean | string;
     consents?: string[];
     members?: string[];
+    commit?: string;
   };
 };
 

@@ -469,7 +469,7 @@ test('an INSTALLED, enabled and consented plugin server is mounted on an adapter
   await inst.installFromGithub({ userId: s.a, url: 'https://github.com/acme/instsrv', commit: SHA }, { fetch: f });
   const off = await turn(s, [textStep('hi')]);
   assert.deepEqual(off.init.mcpServers, [], 'installed but not enabled');
-  inst.setInstalledEnabled(s.a, 'plugin:acme/instsrv', true, { consents: ['mcp'] });
+  inst.setInstalledEnabled(s.a, 'plugin:acme/instsrv', true, { consents: ['mcp'], commit: SHA });
   const on = await turn(s, [toolStep('c1', 'mcp__instsrv-fake__echo', { text: 'hi' }), textStep('done')], { answer: 'allow' });
   assert.deepEqual(on.init.mcpServers, [{ name: 'instsrv-fake', status: 'connected' }]);
   const req = on.evs.find((e) => e.type === 'approval_request');

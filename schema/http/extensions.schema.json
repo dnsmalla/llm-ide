@@ -588,6 +588,10 @@
                 "type": "string"
               },
               "x-optional": true
+            },
+            "commit": {
+              "type": "string",
+              "x-optional": true
             }
           }
         }
