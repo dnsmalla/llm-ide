@@ -46,9 +46,10 @@ export function Dialog({ title, onClose, children, role = "dialog", busy = false
   return (
     <div className="lib-modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div ref={ref} className="lib-modal" role={role} aria-modal="true" aria-labelledby={id} onKeyDown={onKey}>
-        <h2 id={id} className="lib-modal-title">
-          {title}
-        </h2>
+        <div className="lib-modal-head">
+          <h2 id={id} className="lib-modal-title">{title}</h2>
+          <button type="button" className="lib-modal-close" aria-label="Close dialog" title="Close" disabled={busy} onClick={onClose}>×</button>
+        </div>
         {children}
       </div>
     </div>

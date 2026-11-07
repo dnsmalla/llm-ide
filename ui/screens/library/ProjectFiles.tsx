@@ -201,6 +201,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
           ) : (
             <button type="button" role="menuitem" onClick={() => askRemove(menu.entry!)}>Remove…</button>
           )}
+          <button type="button" role="menuitem" onClick={() => setMenu(null)}>Close</button>
         </div>
       ) : null}
       {removal ? <RemoveDialog plan={removal} onConfirm={() => void confirmRemove(removal)} onCancel={() => setRemoval(null)} /> : null}
@@ -308,7 +309,7 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
   );
 }
 
-export function ProjectFileView({ path, deps }: { path: string; deps: ProjectFilesDeps }): ReactNode {
+export function ProjectFileView({ path, deps, onClose }: { path: string; deps: ProjectFilesDeps; onClose: () => void }): ReactNode {
   const [body, setBody] = useState<ReturnType<typeof decodeProjectFile> | "error" | undefined>(undefined);
   useEffect(() => {
     let live = true;
@@ -326,11 +327,11 @@ export function ProjectFileView({ path, deps }: { path: string; deps: ProjectFil
         <strong>{name}</strong>
         <span className="lib-muted">{path}</span>
         <span className="lib-project-spacer" />
-        <button type="button" className="lib-btn" onClick={() => shellBus.publish({ type: "open-file", path })}>Open in Explorer</button>
+        <button type="button" className="lib-btn" aria-label="Close file" title="Close" onClick={onClose}>Close</button>
       </div>
       {body === undefined ? <p className="lib-muted" role="status">Reading…</p>
         : body === "error" ? <p className="lib-muted">The file could not be read.</p>
-        : body === null ? <p className="lib-muted">This file is binary or too large to preview here. Open it in Explorer.</p>
+        : body === null ? <p className="lib-muted">This file is binary or too large to preview here.</p>
         : <pre className="lib-project-text">{body.text}</pre>}
     </div>
   );

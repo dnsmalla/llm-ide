@@ -169,3 +169,7 @@
 .lib-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .lib-controls .lib-select { display: inline-flex; align-items: center; gap: 4px; }
 .lib-controls .lib-link-btn { font-size: inherit; }
+.lib-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.lib-modal-close { border: 0; background: transparent; color: var(--tok-color-text-muted); font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.lib-modal-close:hover:not(:disabled) { color: var(--tok-color-text); }
+.lib-project-view-head { position: sticky; top: 0; z-index: 2; background: var(--tok-color-surface); }
