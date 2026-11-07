@@ -67,6 +67,22 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 - **Constants a route needs** come from `llm_agent/sdk/constants.mjs` (`AGENT_SDK_PROVIDER`, `RESERVED_MCP_NAME`; no imports), and the auth ladder + engine home from `llm_agent/sdk/auth.mjs` (no SDK). `engine.mjs` re-exports all of them. Never import `engine.mjs` or the SDK statically from a module on the boot path — add the value to one of those two files instead.
 - Test: `tests/lazy-engine.test.mjs` (module-load hook over the boot path; also spawns `server.mjs`, so it needs local listen).
 
+## Team Hub YAML assignments (ADR 0021 H1.1)
+
+- **File**: `<LLMIDE_DATA_DIR>/team.yaml` (desktop: `~/Library/Application Support/llm-ide-desktop/core/team.yaml`; repo-kb layout: beside `data.db`). The core reads it **once per boot**, after migrations and before any request is handled, and never watches it or reads it on a request path. Restart the core to apply an edit.
+- **Shape**: `members:` then one lower-cased `email:` mapping per account with exactly three keys:
+  - `role`: `owner | admin | member | viewer`
+  - `max_mode`: `none | read_only | execute`
+  - `usd_cap_month`: `0` = no cap, maximum `100000`
+  Two-space indentation, `#` comments allowed, no anchors/aliases/sequences/flow maps. Unknown keys, duplicate emails or fields, tabs and malformed values fail the boot.
+- **The file holds user assignments only.** Role permissions stay in code (`requireRole`, the turn clamp, the Host API gateway filter); this module only writes `members` at boot.
+- **Undefined is least privilege**: an account not in the file (or a user with no `members` row) becomes `viewer`, `read_only`, 20 USD/month. A user without a `members` row gets that row created.
+- **First boot generates it** from the current `members` rows (an existing solo owner stays owner; other accounts are listed with their current role/grants), then applies it. An existing file is never rewritten.
+- **Unknown email** in the file: ignored, never creates a user, logged and audited as `team.yaml.unknown_email`.
+- **Fail closed**: invalid YAML, an unknown role/mode or an invalid cap (or an unreadable/unwritable file) logs `team_yaml_invalid` with the line and **exits 1**; no partial grant change is written.
+- **Audit**: each real change is one `team.yaml.apply` row with `requestId`/`userAgent` = `team.yaml`, `detail.actor` = `team.yaml`, and `from`/`to` grants only (never file text or message content). Generation is `team.yaml.generate`; invalid files are `team.yaml.invalid`; unknown emails are `team.yaml.unknown_email`.
+- Code: `kb/team-yaml.mjs` (strict parser/serializer + one apply), `server/team-boot.mjs` (safeAudit adapter), tests `tests/team-yaml.test.mjs` and `tests/team-yaml-boot.test.mjs`.
+
 ## Host API v1 (desktop)
 
 - **Mode** (`config.hostApiMode`): `tls` when `LLMIDE_HOST_API_TLS=1` (release builds too), else `dev` when `LLMIDE_HOST_API_DEV=1` (never with `NODE_ENV=production`; the Tauri host passes it only in a debug build), else `off`. Any mode but `off` starts the listener and enables `/host-api/pin|devices` (else `404 HOST_API_DISABLED`; those routes also need the bus host proof). The PIN answer carries the certificate `fingerprint` and `addresses` (this computer's IPv4s for the Settings pairing QR, Tailscale first, then LAN, then container/VM bridges; `pairingAddresses` in `routes/host-api/http-routes.mjs`) in `tls` mode; `null` and `[]` in `dev`.

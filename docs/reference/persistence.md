@@ -24,6 +24,19 @@ any code.
 
 Tables: see `docs/explanation/architecture.md` § Storage.
 
+## Team assignments (server)
+
+| | |
+|---|---|
+| Location | `<LLMIDE_DATA_DIR>/team.yaml` (desktop: `~/Library/Application Support/llm-ide-desktop/core/team.yaml`); with no data dir, beside `data.db` (`<repo>/kb/team.yaml`) |
+| Shape | Strict YAML subset: `members:` → `<email>:` → `role`, `max_mode`, `usd_cap_month` (2-space indent, `#` comments) |
+| Written by | The core on first boot only, from the current `members` rows; the user edits it by hand thereafter |
+| Read by | `extension/kb/team-yaml.mjs` exactly once per boot, after migrations; invalid files refuse the boot |
+| Default | An account not listed is `viewer`, `read_only`, 20 USD/month |
+| Audit | Every actual change is an `audit_log` row with actor `team.yaml` (from/to only) |
+
+See [ADR 0021](../decisions/0021-team-hub.md) and `extension/CLAUDE.md` "Team Hub YAML assignments".
+
 ## ChatSessionStore (macOS)
 
 | | |

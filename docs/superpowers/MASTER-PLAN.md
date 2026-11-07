@@ -20,9 +20,9 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Shared server and core | 21 | 3 | 2 | 26 | API 121, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 2 | 5 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 11 | 27 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 12 | 2 | 4 | 18 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
+| Security | 13 | 2 | 4 | 19 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
 | Release and CI | 7 | 2 | 5 | 14 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 127 | 77 | 47 | 251 |  |
+| Total | 128 | 77 | 47 | 252 |  |
 
 ## What to do next
 
@@ -560,6 +560,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Signed builds and signed updates on every platform; plugins hash-pinned (S10): builds and updates are signed by the release pipeline (macOS Developer ID + notarized, Windows unsigned by decision, every updater artifact signed and verified; `docs/how-to/desktop-release.md`); open: plugin hash pinning (me), and the first real signed release with your updater key (UN-114, UN-115) (you)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5; confirmed by ADR 0021 D2) (you)
 - [x] Team Hub H1: enforced team roles (`members`), per-member `max_mode` and USD cap, single-use invites, Host API capabilities by grant, API 123, migration 0068 (ADR 0021; `plans/2026-11-07-team-hub-h1-authority.md`) (me)
+- [x] Team Hub H1.1: auditable YAML user assignments (`<LLMIDE_DATA_DIR>/team.yaml`), generated on first boot from the current members (solo owner preserved), strict dependency-free parser/serializer, undefined = viewer/read_only/20, unknown emails ignored, every change audited as actor `team.yaml`, invalid file refuses the boot, one application per boot (ADR 0021; `extension/kb/team-yaml.mjs`) (me)
 - [ ] Team Hub H2–H6: hub mode on the VPS behind TLS (invite only), desktop "Connect to hub", iPhone + web parity (Auto Tasks, sessions, images, discovery), project sharing and audit screens, external review before public invites (`plans/2026-11-07-team-hub-plan.md` §3) (me)
 - [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 - [-] Account sign-up open in production early: moot 2026-11-06, the account service is removed (ADR 0020); stop it on the VPS with the retire note in `deploy/vps/README.md`.
