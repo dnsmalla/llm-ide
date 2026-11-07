@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -143,6 +144,21 @@ async function registerAndLogin() {
   const login = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: PASSWORD } });
   assert.equal(login.statusCode, 200, login._body);
   return { email, ...login.json() };
+}
+
+// ADR 0021: an admin-gated route reads the caller's `members` row, never the JWT `role` claim. A test
+// that exercises an admin route grants its own account the admin role directly — the grant routes have
+// their own tests in team-routes.test.mjs.
+function adminUser(userId) {
+  kb.getDb().prepare("UPDATE members SET team_role = 'admin' WHERE user_id = ?").run(userId);
+  return { id: userId };
+}
+
+// The owner is the first account registered on this install (the register route promotes it).
+function ownerUser() {
+  const row = kb.getDb().prepare("SELECT user_id FROM members WHERE team_role = 'owner'").get();
+  assert.ok(row, 'the install has an owner');
+  return { id: row.user_id };
 }
 
 // ---- routing predicate -------------------------------------------------
@@ -427,6 +443,32 @@ test('GET /auth/me returns the profile; unknown id → 404', async () => {
   assert.equal(gone.statusCode, 404);
 });
 
+test('GET /auth/me carries the caller\'s member authority (ADR 0021)', async () => {
+  // The first account on the install is the owner; the one registered here is a member with execute.
+  const owner = await callAuth({ method: 'GET', url: '/auth/me', user: ownerUser() });
+  assert.equal(owner.statusCode, 200);
+  assert.deepEqual(owner.json().member, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+
+  const { user } = await registerAndLogin();
+  const me = await callAuth({ method: 'GET', url: '/auth/me', user: { id: user.id } });
+  assert.equal(me.statusCode, 200);
+  assert.deepEqual(me.json().member, { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 });
+});
+
+test('registration grants a members row in the same request', async () => {
+  const { user } = await registerAndLogin();
+  const row = kb.getDb().prepare('SELECT team_role, max_mode, usd_cap_month FROM members WHERE user_id = ?').get(user.id);
+  assert.deepEqual(row, { team_role: 'member', max_mode: 'execute', usd_cap_month: 0 });
+});
+
+test('the first account ever registered on a fresh install becomes the owner', async () => {
+  // This file's DB was created empty: the migration bootstrapped no owner (zero users), so the first
+  // POST /auth/register above made one. That owner is protected from demotion (team-routes tests cover
+  // the guard); here we only assert the bootstrap happened.
+  const owners = kb.getDb().prepare("SELECT COUNT(*) AS n FROM members WHERE team_role = 'owner'").get().n;
+  assert.equal(owners, 1);
+});
+
 test('POST /auth/logout revokes the access-token jti and all refresh tokens', async () => {
   const { user, refreshToken, accessToken } = await registerAndLogin();
   // Extract jti + exp from the real access token payload.
@@ -645,7 +687,7 @@ function buildPluginZip(manifest) {
 
 test('plugin lifecycle: install (admin) -> list -> toggle -> uninstall (admin)', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const plain = { id: user.id };
 
   const before = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: plain });
@@ -685,7 +727,7 @@ const GIT_SRC = { kind: 'git', url: 'https://github.com/example/demo.git', commi
 
 test('install with a git source header records it and lists it', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const zip = buildPluginZip({ name: 'src-plugin-a', version: '1.0.0', displayName: 'A', description: 'd', author: 't' });
   const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
   assert.equal(res.statusCode, 200, res._body);
@@ -698,7 +740,7 @@ test('install with a git source header records it and lists it', { skip: zipSkip
 
 test('invalid source header is 400 and installs nothing', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const zip = buildPluginZip({ name: 'src-plugin-b', version: '1.0.0', displayName: 'B', description: 'd', author: 't' });
   const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader({ kind: 'git', url: 'file:///etc' }) });
   assert.equal(res.statusCode, 400);
@@ -708,7 +750,7 @@ test('invalid source header is 400 and installs nothing', { skip: zipSkipReason 
 
 test('failed install keeps the old record', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const zip = buildPluginZip({ name: 'src-plugin-c', version: '1.0.0', displayName: 'C', description: 'd', author: 't' });
   await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
   const bad = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?replace=1', user: admin, rawBody: Buffer.from('not a zip'),
@@ -721,7 +763,7 @@ test('failed install keeps the old record', { skip: zipSkipReason || false }, as
 
 test('install without header clears a stale record when it replaces nothing', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const { getSource, setSource } = await import('../plugins/source-store.mjs');
   setSource('src-plugin-d', GIT_SRC);
   const zip = buildPluginZip({ name: 'src-plugin-d', version: '1.0.0', displayName: 'D', description: 'd', author: 't' });
@@ -734,7 +776,7 @@ test('install without header clears a stale record when it replaces nothing', { 
 
 test('install ?expect= guards an update against another plugin', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const meta = (name, version) => ({ name, version, displayName: 'X', description: 'd', author: 't' });
   await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: buildPluginZip(meta('expect-a', '1.0.0')), headers: srcHeader(GIT_SRC) });
   await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: buildPluginZip(meta('expect-b', '1.0.0')) });
@@ -763,7 +805,7 @@ test('install ?expect= guards an update against another plugin', { skip: zipSkip
 
 test('uninstall removes the record', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const zip = buildPluginZip({ name: 'src-plugin-e', version: '1.0.0', displayName: 'E', description: 'd', author: 't' });
   await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
   await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-e', user: admin });
@@ -783,30 +825,30 @@ test('POST /auth/me/plugins/toggle validates the plugin slug and installed-state
   assert.equal(notInstalled.statusCode, 400);
 });
 
-test('plugin management routes are open to every authenticated user (no admin concept)', async () => {
-  // Product decision (2026-08-20): LLM-IDE is a local-first single-operator
-  // install — there is no admin role distinction; every authenticated user
-  // has full permission. These calls may still fail per-route validation,
-  // but never with a 403 permission wall.
-  const { user } = await registerAndLogin();
-  const u = { id: user.id }; // no role claim — previously rejected as non-admin
+test('plugin management routes need the admin team role (ADR 0021)', async () => {
+  // The 2026-08-20 "every user is an admin" rule is retired: authority comes from `members`.
+  const { user } = await registerAndLogin(); // second+ account on this install → member
+  const member = { id: user.id };
+  const calls = [
+    { method: 'POST', url: '/auth/me/plugins/reload' },
+    { method: 'POST', url: '/auth/me/plugins/install', rawBody: Buffer.from('not a zip') },
+    { method: 'DELETE', url: '/auth/me/plugins/uninstall/whatever' },
+    { method: 'POST', url: '/auth/me/claude-plugins/import', body: { source: 'installed', name: 'whatever' } },
+  ];
+  for (const c of calls) {
+    const res = await callAuth({ ...c, user: member });
+    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a member`);
+    assert.equal(res.json().error.code, 'ROLE_DENIED');
+  }
 
-  const reload = await callAuth({ method: 'POST', url: '/auth/me/plugins/reload', user: u });
-  assert.notEqual(reload.statusCode, 403);
-
-  const install = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: u, rawBody: Buffer.from('not a zip') });
-  assert.notEqual(install.statusCode, 403);
-
-  const uninstallRes = await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/whatever', user: u });
-  assert.notEqual(uninstallRes.statusCode, 403);
-
-  const importReq = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: u, body: { source: 'installed', name: 'whatever' } });
-  assert.notEqual(importReq.statusCode, 403);
+  // The owner (the first account) passes the same gate.
+  const reload = await callAuth({ method: 'POST', url: '/auth/me/plugins/reload', user: ownerUser() });
+  assert.equal(reload.statusCode, 200, reload._body);
 });
 
 test('DELETE /auth/me/plugins/uninstall/<name> rejects a path-traversal name before touching the filesystem', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const res = await callAuth({ method: 'DELETE', url: `/auth/me/plugins/uninstall/${encodeURIComponent('../../etc')}`, user: admin });
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
@@ -876,7 +918,7 @@ test('GET /auth/me/claude-plugins/marketplace flags installedInClaude correctly'
 test('POST /auth/me/claude-plugins/import validates input and wires an imported plugin into the native list', async () => {
   writeClaudeInstalledFixture({ name: 'bridge-import-demo', packageVersion: '1.0.0' });
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const missingFields = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: admin, body: {} });
   assert.equal(missingFields.statusCode, 400);
@@ -904,7 +946,7 @@ test('POST /auth/me/claude-plugins/import validates input and wires an imported 
 test('POST /auth/me/claude-plugins/import stamps the Claude install so the check reports no tier', async () => {
   writeClaudeInstalledFixture({ name: 'bridge-stamp-demo', version: '1.4.0' });
   const { user } = await registerAndLogin();
-  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-stamp-demo', source: 'installed' } });
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: adminUser(user.id), body: { name: 'bridge-stamp-demo', source: 'installed' } });
   assert.equal(ok.statusCode, 200, ok._body);
   const { readImportStamp } = await import('../plugins/claude-adapter.mjs');
   const stamp = readImportStamp('claude-bridge-stamp-demo');
@@ -931,7 +973,7 @@ test('POST /auth/me/claude-plugins/import resets hook trust when a re-import cha
   fs.mkdirSync(path.join(installPath, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'bridge-trust-demo', version: '1.0.0' }), 'utf8');
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const post = () => callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: admin, body: { name: 'bridge-trust-demo', source: 'installed' } });
   assert.equal((await post()).statusCode, 200);
   const { setHooksTrusted, listHooksTrusted } = await import('../plugins/state.mjs');
@@ -949,7 +991,7 @@ test('POST /auth/me/claude-plugins/import resets hook trust when a re-import cha
 test('GET /auth/me/plugins reports the import origin', async () => {
   writeClaudeInstalledFixture({ name: 'bridge-origin-demo' });
   const { user } = await registerAndLogin();
-  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-origin-demo', source: 'installed' } });
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: adminUser(user.id), body: { name: 'bridge-origin-demo', source: 'installed' } });
   assert.equal(ok.statusCode, 200, ok._body);
   const list = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
   const row = list.json().plugins.find((p) => p.name === 'claude-bridge-origin-demo');
@@ -969,7 +1011,7 @@ test('POST /auth/me/claude-plugins/refresh returns live installed/marketplace co
 test('GET /auth/me/claude-plugins/updates detects a newer source version after import', async () => {
   writeClaudeInstalledFixture({ name: 'bridge-update-demo', packageVersion: '1.0.0' });
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const imported = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: admin, body: { name: 'bridge-update-demo', source: 'installed' } });
   assert.equal(imported.statusCode, 200, imported._body);
@@ -1011,18 +1053,18 @@ test('GET /auth/me/claude-plugins/updates returns the new shape (cli:false with 
   assert.ok(Array.isArray(body.updates));
 });
 
-test('POST /auth/me/claude-plugins/update uses requireAdmin (open to any authenticated user, no admin role)', async () => {
-  // requireAdmin only demands an authenticated user (see the "no admin
-  // concept" test above), so a role-less user reaches validation/lookup (404),
-  // never a 403 wall.
+test('POST /auth/me/claude-plugins/update reaches validation for an admin, and refuses a member first', async () => {
   const { user } = await registerAndLogin();
-  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id }, body: { name: 'some-plugin' } });
+  const denied = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id }, body: { name: 'some-plugin' } });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.json().error.code, 'ROLE_DENIED');
+  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: adminUser(user.id), body: { name: 'some-plugin' } });
   assert.equal(res.statusCode, 404, res._body);
 });
 
 test('POST /auth/me/claude-plugins/update validates name and acceptCommand', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const post = (body) => callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: admin, body });
   assert.equal((await post({ name: '../x' })).statusCode, 400);
   assert.equal((await post({})).statusCode, 400);
@@ -1032,7 +1074,7 @@ test('POST /auth/me/claude-plugins/update validates name and acceptCommand', asy
 
 test('POST /auth/me/claude-plugins/update on an unknown plugin is 404', async () => {
   const { user } = await registerAndLogin();
-  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id, role: 'admin' }, body: { name: 'never-imported' } });
+  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: adminUser(user.id), body: { name: 'never-imported' } });
   assert.equal(res.statusCode, 404, res._body);
 });
 
@@ -1103,7 +1145,7 @@ test('GET /auth/me/codex-plugins/marketplace flags installedInCodex correctly', 
 test('POST /auth/me/codex-plugins/import validates input and wires an imported plugin into the native list', async () => {
   writeCodexInstalledFixture({ name: 'bridge-import-demo' });
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const missingFields = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: {} });
   assert.equal(missingFields.statusCode, 400);
@@ -1141,7 +1183,7 @@ test('POST /auth/me/codex-plugins/refresh returns live installed/marketplace cou
 test('GET /auth/me/codex-plugins/updates detects a newer source version after import', async () => {
   writeCodexInstalledFixture({ name: 'bridge-update-demo', marketplace: 'update-mp' });
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const imported = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: { name: 'bridge-update-demo', source: 'installed' } });
   assert.equal(imported.statusCode, 200, imported._body);
@@ -1247,31 +1289,30 @@ test('GET /auth/me/llm-sources/updates reports a status per source and never err
   assert.equal(builtin.status, 'local');
 });
 
-test('llm-sources management routes are open to every authenticated user (no admin concept)', async () => {
+test('llm-sources management routes need the admin team role (ADR 0021)', async () => {
   const { user } = await registerAndLogin();
-  const u = { id: user.id }; // no role claim — previously rejected as non-admin
+  const member = { id: user.id };
+  const calls = [
+    { method: 'POST', url: '/auth/me/llm-sources/add', body: { path: '/tmp' } },
+    { method: 'POST', url: '/auth/me/llm-sources/update', body: { id: 'builtin' } },
+    { method: 'DELETE', url: '/auth/me/llm-sources/whatever' },
+    // Discovery surfaces absolute agent paths + hook/MCP command strings.
+    { method: 'GET', url: '/auth/me/llm-sources/builtin/discovery' },
+  ];
+  for (const c of calls) {
+    const res = await callAuth({ ...c, user: member });
+    assert.equal(res.statusCode, 403, `${c.method} ${c.url} must refuse a member`);
+    assert.equal(res.json().error.code, 'ROLE_DENIED');
+  }
 
-  const add = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/add', user: u, body: { path: '/tmp' } });
-  assert.notEqual(add.statusCode, 403);
-
-  const update = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/update', user: u, body: { id: 'builtin' } });
-  assert.notEqual(update.statusCode, 403);
-
-  const remove = await callAuth({ method: 'DELETE', url: '/auth/me/llm-sources/whatever', user: u });
-  assert.notEqual(remove.statusCode, 403);
-
-  // Discovery surfaces absolute agent paths + hook/MCP command strings. It is
-  // reachable by any AUTHENTICATED user, exactly like add/update/remove above:
-  // requireAdmin only asserts req.user since the 2026-08-20 no-admin-role
-  // decision, so gating discovery with it would be a no-op. Unauthenticated
-  // access is still refused by authenticate() upstream.
-  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: u });
+  // An admin reaches the route (the source id is what decides the rest).
+  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: adminUser(user.id) });
   assert.notEqual(discovery.statusCode, 403);
 });
 
 test('DELETE /auth/me/llm-sources/<id> rejects an invalid id and rejects removing builtin', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const badId = await callAuth({ method: 'DELETE', url: `/auth/me/llm-sources/${encodeURIComponent('../../etc')}`, user: admin });
   assert.equal(badId.statusCode, 400);
@@ -1284,7 +1325,7 @@ test('DELETE /auth/me/llm-sources/<id> rejects an invalid id and rejects removin
 
 test('POST /auth/me/llm-sources/add registers a local source (admin); GET reflects it; DELETE removes it', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const localSrc = path.join(__dirname, `_llm-sources-http-fixture-${process.pid}`);
   fs.mkdirSync(path.join(localSrc, 'skills', 'demo'), { recursive: true });
@@ -1309,7 +1350,7 @@ test('POST /auth/me/llm-sources/add registers a local source (admin); GET reflec
 
 test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongside skillCount; GET .../<id>/discovery lists them', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const localSrc = path.join(__dirname, `_llm-sources-discovery-fixture-${process.pid}`);
   fs.mkdirSync(path.join(localSrc, 'agents'), { recursive: true });
@@ -1352,15 +1393,21 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongsi
 
 // ---- MCP plugins (SP1) --------------------------------------------------
 
-test('mcp-plugins routes are open to every authenticated user (no admin concept)', async () => {
+test('mcp-plugins routes need the admin team role (ADR 0021)', async () => {
   const { user } = await registerAndLogin();
-  const u = { id: user.id }; // no role claim — previously rejected as non-admin
-  const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: u });
-  assert.equal(scan.statusCode, 200, 'the scan is read-only and must succeed outright for any user');
-  const codexScan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/codex-sources', user: u });
-  assert.equal(codexScan.statusCode, 200);
-  const add = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: u, body: { command: 'npx', args: [] } });
-  assert.notEqual(add.statusCode, 403, 'add may fail validation but never on permissions');
+  const member = { id: user.id };
+  for (const [method, url] of [
+    ['GET', '/auth/me/mcp-plugins/claude-sources'],
+    ['GET', '/auth/me/mcp-plugins/codex-sources'],
+    ['POST', '/auth/me/mcp-plugins/add'],
+  ]) {
+    const res = await callAuth({ method, url, user: member, ...(method === 'POST' ? { body: { command: 'npx', args: [] } } : {}) });
+    assert.equal(res.statusCode, 403, `${method} ${url} must refuse a member`);
+    assert.equal(res.json().error.code, 'ROLE_DENIED');
+  }
+  const admin = adminUser(user.id);
+  const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: admin });
+  assert.equal(scan.statusCode, 200);
 });
 
 test('GET /auth/me/mcp-plugins/codex-sources scans config.toml; POST add via codexName resolves it server-side', async () => {
@@ -1371,7 +1418,7 @@ args = ["-y", "@linear/mcp"]
 env = { TOKEN = "secret" }
 `);
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
 
   const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/codex-sources', user: admin });
   assert.equal(scan.statusCode, 200, scan._body);
@@ -1390,7 +1437,7 @@ env = { TOKEN = "secret" }
 
 test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { command: 'npx', args: ['-y', '@slack/mcp'], name: 'slack', source: 'manual' } });
   assert.equal(added.statusCode, 200, added._body);
@@ -1412,7 +1459,7 @@ test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete',
 
 test('POST /auth/me/mcp-plugins/add never echoes env or header VALUES back', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { command: 'npx', args: ['-y', '@x/mcp'], name: 'echo-check', env: { API_TOKEN: 'super-secret-value' } } });
   assert.equal(added.statusCode, 200, added._body);
@@ -1426,7 +1473,7 @@ test('POST /auth/me/mcp-plugins/add never echoes env or header VALUES back', asy
 
 test('GET /auth/me/mcp-plugins reports `effective` — what a turn would really mount', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { command: 'npx', args: ['-y', '@x/mcp'], name: 'eff-check' } });
   const id = added.json().plugin.id;
@@ -1444,7 +1491,7 @@ test('GET /auth/me/mcp-plugins reports `effective` — what a turn would really 
 test('`effective` ignores the reserved `llmide` name (the engine drops such a server)', async () => {
   const { readMcpRegistry, writeMcpRegistry } = await import('../mcp/state.mjs');
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const saved = readMcpRegistry();
   try {
     // An empty registry so the row really gets the id `llmide` (a collision
@@ -1467,7 +1514,7 @@ test('`effective` ignores the reserved `llmide` name (the engine drops such a se
 
 test('MCP responses mask a secret carried in the URL (query values, userinfo)', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { url: 'https://user:pw-secret@hosted.example/mcp?api_key=URL-SECRET&v=1', transport: 'http', name: 'hosted-url' } });
   assert.equal(added.statusCode, 200, added._body);
@@ -1479,7 +1526,7 @@ test('MCP responses mask a secret carried in the URL (query values, userinfo)', 
 
 test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-admin caller never sees another plugin\'s real secret', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { command: 'npx', args: [], name: 'slack', source: 'manual', env: { SLACK_TOKEN: 'xoxb-real-secret-value' } } });
   assert.equal(added.statusCode, 200, added._body);
@@ -1499,7 +1546,7 @@ test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-adm
 
 test('POST /auth/me/mcp-plugins/consent + toggle are per-user, not admin-gated, and validate the body', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
     body: { command: 'npx', args: [], name: 'linear', source: 'manual' } });
   const id = added.json().plugin.id;
@@ -1528,7 +1575,7 @@ test('POST /auth/me/mcp-plugins/consent + toggle are per-user, not admin-gated, 
 
 test('POST /auth/me/mcp-plugins/add with an unmatched claudeName fails with a clear message', async () => {
   const { user } = await registerAndLogin();
-  const admin = { id: user.id, role: 'admin' };
+  const admin = adminUser(user.id);
   const miss = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { claudeName: 'definitely-not-registered' } });
   assert.equal(miss.statusCode, 400);
   assert.match(miss.json().error.message, /no Claude MCP server named/);
@@ -1540,14 +1587,14 @@ test('claude import drops a same-named git/marketplace source record', async () 
   const { getSource, setSource } = await import('../plugins/source-store.mjs');
   setSource('claude-bridge-srcrec-demo', GIT_SRC);
   assert.ok(getSource('claude-bridge-srcrec-demo'));
-  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-srcrec-demo', source: 'installed' } });
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: adminUser(user.id), body: { name: 'bridge-srcrec-demo', source: 'installed' } });
   assert.equal(ok.statusCode, 200, ok._body);
   assert.equal(getSource('claude-bridge-srcrec-demo'), null);
 });
 
 test('plugin install: invalid expect is a 400 only after the body is read', async () => {
   const { user } = await registerAndLogin();
-  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?expect=BAD%20NAME', user: { id: user.id, role: 'admin' }, rawBody: Buffer.from('x') });
+  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?expect=BAD%20NAME', user: adminUser(user.id), rawBody: Buffer.from('x') });
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
@@ -1557,7 +1604,7 @@ test('plugin install: invalid expect is a 400 only after the body is read', asyn
 
 async function mcpAdmin() {
   const { user } = await registerAndLogin();
-  return { id: user.id, role: 'admin' };
+  return adminUser(user.id);
 }
 async function addNpx(admin, name, spec) {
   const r = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
@@ -1687,7 +1734,7 @@ args = ["-y", "resync-pkg@1.0.0"]
   assert.equal(nm.json().error.code, 'NOT_MANAGED');
 });
 
-test('mcp versions: update and resync refuse an unauthenticated caller (401 from auth; requireAdmin is a no-op for any signed-in user)', async () => {
+test('mcp versions: update and resync refuse an unauthenticated caller (401 from auth, before the team gate)', async () => {
   const admin = await mcpAdmin();
   const id = await addNpx(admin, 'ver-403', 'pkg-one@1.0.0');
   const upd = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/update`, body: {} });
@@ -1788,5 +1835,85 @@ test('mcp versions: update defaults expectArgs to the args read at the start (co
       return { ok: true, status: 200, json: async () => ({ latest: registryLatest[name] }) };
     });
     _resetRegistryCacheForTests();
+  }
+});
+
+// ---- server.mjs admin gate (a real server) -------------------------------
+// /admin/backup and /metrics are gated in server.mjs itself, which the handler-level tests above never
+// reach. ADR 0021: the gate is requireRole(db, req, 'admin'), so a member gets 403 ROLE_DENIED and the
+// owner of the install gets through.
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+test('server.mjs admin routes refuse a member (403 ROLE_DENIED) and let the owner through', async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'llmide-admin-gate-'));
+  const port = await freePort();
+  const env = {
+    ...process.env,
+    LLMIDE_PORT: String(port), LLMIDE_HOST: '127.0.0.1',
+    LLMIDE_DB_PATH: path.join(dir, 'kb.db'), LLMIDE_BACKUP_DIR: path.join(dir, 'backups'),
+    LLMIDE_LOG_FILE: 'none',
+    LLMIDE_JWT_SECRET: 'c'.repeat(48), LLMIDE_VAULT_KEY: 'd'.repeat(48),
+    LLMIDE_BACKUP_INTERVAL_HOURS: '0', LLMIDE_ENGINE_PREWARM: '0', LLMIDE_BCRYPT_COST: '10',
+  };
+  for (const k of ['NODE_TEST_CONTEXT', 'NODE_ENV', 'LLMIDE_ALLOW_REMOTE', 'LLMIDE_HUB', 'LLMIDE_DISABLE_REGISTRATION']) delete env[k];
+  const child = spawn(process.execPath, ['server.mjs'], {
+    cwd: path.resolve(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const deadline = Date.now() + 20_000;
+    let up = false;
+    while (Date.now() < deadline && child.exitCode == null) {
+      try { if ((await fetch(`${base}/health`)).ok) { up = true; break; } } catch { /* not yet */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(up, `server booted: ${out.slice(-1500)}`);
+
+    const emailFor = (who) => `admin-gate-${who}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`;
+    const register = (email) => fetch(`${base}/auth/register`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: PASSWORD }),
+    });
+    const tokenFor = async (email) => {
+      const r = await fetch(`${base}/auth/login`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password: PASSWORD }),
+      });
+      assert.equal(r.status, 200);
+      return (await r.json()).accessToken;
+    };
+    const ownerEmail = emailFor('owner');
+    const memberEmail = emailFor('member');
+    assert.equal((await register(ownerEmail)).status, 201);
+    assert.equal((await register(memberEmail)).status, 201);
+    const ownerToken = await tokenFor(ownerEmail);
+    const memberToken = await tokenFor(memberEmail);
+
+    const backup = (tok) => fetch(`${base}/admin/backup`, { method: 'POST', headers: { authorization: `Bearer ${tok}` } });
+    const denied = await backup(memberToken);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'ROLE_DENIED');
+    const allowed = await backup(ownerToken);
+    assert.equal(allowed.status, 200, out.slice(-1500));
+
+    const metrics = await fetch(`${base}/metrics`, { headers: { authorization: `Bearer ${memberToken}` } });
+    assert.equal(metrics.status, 403, 'a member cannot scrape /metrics');
+  } finally {
+    child.kill('SIGTERM');
+    await new Promise((r) => (child.exitCode != null ? r() : child.once('exit', r)));
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

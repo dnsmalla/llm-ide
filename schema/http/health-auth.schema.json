@@ -39,6 +39,27 @@
             "null"
           ],
           "description": "SQLite datetime, or null before the first login"
+        },
+        "member": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "ADR 0021 team authority: { teamRole, maxMode, usdCapMonth }; null when the account has no members row (the legacy data owner). Present on GET /auth/me only.",
+          "properties": {
+            "teamRole": {
+              "type": "string",
+              "description": "owner | admin | member | viewer"
+            },
+            "maxMode": {
+              "type": "string",
+              "description": "none | read_only | execute"
+            },
+            "usdCapMonth": {
+              "type": "number",
+              "description": "Monthly USD cap; 0 = no cap"
+            }
+          }
         }
       }
     },

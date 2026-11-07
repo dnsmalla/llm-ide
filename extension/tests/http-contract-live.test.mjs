@@ -342,9 +342,13 @@ async function seedUsers(toReplay, secrets) {
   try {
     const hash = bcrypt.hashSync(PASSWORD, 10);
     const insert = db.prepare('INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, ?, ?, ?)');
+    // ADR 0021: the admin-gated routes read the `members` row, so the replay account is this install's
+    // operator (admin, execute, no cap) — the fixtures that exercise those routes still replay live.
+    const insertMember = db.prepare("INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, 'admin', 'execute', 0)");
     const seed = (email) => {
       const id = randomBytes(8).toString('hex');
       insert.run(id, email, 'Contract', hash, 'user');
+      insertMember.run(id);
       return signAccessToken({ userId: id, role: 'user' });
     };
     db.transaction(() => {

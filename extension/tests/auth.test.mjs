@@ -1,14 +1,20 @@
 // Auth tests — JWT signing/verification, public-path middleware.
 // Uses the in-memory primitives only; HTTP path is integration-tested separately.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // Set fixed secrets BEFORE importing config-dependent modules so the
 // dev-fallback doesn't generate fresh ones per run.
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
+// requireRole reads a real `members` row; keep that DB out of the repo.
+const tmpDb = path.join(os.tmpdir(), `llmide-auth-unit-${process.pid}.db`);
+process.env.LLMIDE_DB_PATH = tmpDb;
 
 const { signAccessToken, verifyAccessToken, hashRefreshToken, newRefreshToken } =
   await import('../server/jwt.mjs');
@@ -199,4 +205,68 @@ test('authenticate skips token check on public path', () => {
 test('authenticate rejects malformed Bearer header', () => {
   const req = fakeReq({ authorization: 'NotBearer abc' });
   assert.throws(() => authenticate(req));
+});
+
+// ── requireRole (ADR 0021) ──────────────────────────────────────────────────
+// The role gate reads `members` on every call, never the JWT `role` claim.
+
+const { getDb } = await import('../kb/db.mjs');
+const { requireRole, requireAdmin } = await import('../server/auth.mjs');
+
+function seedPrincipal(id, teamRole) {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR IGNORE INTO users (id, email, display_name, password_hash, role) VALUES (?, ?, 'N', 'x', 'user')",
+  ).run(id, `${id}@example.com`);
+  if (teamRole) {
+    db.prepare(
+      "INSERT INTO members (user_id, team_role, max_mode, usd_cap_month) VALUES (?, ?, 'execute', 0)",
+    ).run(id, teamRole);
+  }
+  return id;
+}
+
+test('requireRole lets an owner and an admin through and records req.member', () => {
+  const db = getDb();
+  const owner = seedPrincipal('role-owner', 'owner');
+  const admin = seedPrincipal('role-admin', 'admin');
+  const req = { user: { id: owner, role: 'user' } }; // the JWT claim says "user": irrelevant
+  const m = requireRole(db, req, 'admin');
+  assert.equal(m.teamRole, 'owner');
+  assert.deepEqual(req.member, { userId: owner, teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  assert.equal(requireRole(db, { user: { id: admin } }, 'admin').teamRole, 'admin');
+});
+
+test('requireRole refuses a member, a viewer and a user with no members row (403 ROLE_DENIED)', () => {
+  const db = getDb();
+  const member = seedPrincipal('role-member', 'member');
+  const viewer = seedPrincipal('role-viewer', 'viewer');
+  const nobody = seedPrincipal('role-nobody');
+  for (const id of [member, viewer, nobody]) {
+    const req = { user: { id, role: 'admin' } }; // an admin claim grants nothing
+    assert.throws(() => requireRole(db, req, 'admin'), (e) => e.code === 'ROLE_DENIED' && e.status === 403);
+    assert.equal(req.member, undefined);
+  }
+});
+
+test('requireRole refuses an unauthenticated request', () => {
+  assert.throws(() => requireRole(getDb(), {}, 'admin'), (e) => e.status === 403);
+});
+
+test('requireRole enforces the exact minimum it is given', () => {
+  const db = getDb();
+  const admin = seedPrincipal('role-min-admin', 'admin');
+  const member = seedPrincipal('role-min-member', 'member');
+  assert.equal(requireRole(db, { user: { id: admin } }, 'member').teamRole, 'admin');
+  assert.throws(() => requireRole(db, { user: { id: member } }, 'admin'), (e) => e.code === 'ROLE_DENIED');
+});
+
+test('requireAdmin fails loudly instead of silently passing', () => {
+  assert.throws(() => requireAdmin(), /requireRole\(db, req, "admin"\)/);
+});
+
+after(() => {
+  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) {
+    try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+  }
 });

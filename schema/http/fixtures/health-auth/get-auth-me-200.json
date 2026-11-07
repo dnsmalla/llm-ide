@@ -8,6 +8,11 @@
     "role": "admin",
     "status": "active",
     "createdAt": "2026-10-26 04:31:31",
-    "lastLoginAt": "2026-10-26 04:31:31"
+    "lastLoginAt": "2026-10-26 04:31:31",
+    "member": {
+      "teamRole": "owner",
+      "maxMode": "execute",
+      "usdCapMonth": 0
+    }
   }
 }

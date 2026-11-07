@@ -25,6 +25,7 @@
 import { errAuth, errForbidden } from '../core/errors.mjs';
 import { extractBearer, verifyAccessToken } from './jwt.mjs';
 import { isJtiRevoked, tokensValidAfter } from '../kb/db.mjs';
+import { getMember, atLeast } from '../kb/members.mjs';
 
 const PUBLIC_PATHS = new Set([
   '/',
@@ -80,17 +81,26 @@ export function authenticate(req) {
   return true;
 }
 
-// Historically gated admin-only handlers. Product decision (2026-08-20):
-// LLM-IDE is a local-first, single-operator install — there is no admin
-// role distinction, and every authenticated user has full permission.
-// (The old first-registered-user-becomes-admin bootstrap was silently
-// defeated on real installs whose first-user slot was consumed by the
-// legacy-migration row or leaked fixture rows, permanently locking every
-// user out of the gated features with no recovery path.) The function and
-// its call sites stay so a future multi-operator deployment can reintroduce
-// a real check in one place; today it only requires authentication.
-export function requireAdmin(req) {
+// Enforced team authority (ADR 0021). Reads the members row on every call: it is one indexed
+// primary-key read, and a grant change must apply on the next request, not at the next login.
+// The six admin-gated call sites in server.mjs / extension-routes.mjs call this; a refused caller
+// gets 403 ROLE_DENIED and `req.member` is left unset. Never gate per route with a JWT claim:
+// `users.role` stays the legacy flag.
+export function requireRole(db, req, minRole = 'admin') {
   if (!req.user) {
     throw errForbidden('Authentication required');
   }
+  const m = getMember(db, req.user.id);
+  if (!m || !atLeast(m.teamRole, minRole)) {
+    const e = errForbidden(`Requires team role ${minRole}`);
+    e.code = 'ROLE_DENIED';
+    throw e;
+  }
+  req.member = m;
+  return m;
+}
+
+// Kept for one release so out-of-tree callers fail loudly instead of silently passing.
+export function requireAdmin() {
+  throw new Error('requireAdmin was replaced by requireRole(db, req, "admin") (ADR 0021)');
 }

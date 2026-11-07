@@ -7,7 +7,8 @@
 // Dispatch order is unchanged: server.mjs authenticates, then tries
 // isAuthRoute, then isExtensionRoute, both before rate limiting. Every route
 // here needs a signed-in user (the same 401 guard auth-routes applies below its
-// public block), and the admin-gated ones call requireAdmin per route.
+// public block), and the admin-gated ones call requireRole(db, req, 'admin')
+// per route (ADR 0021: the role is read from `members`, never the JWT claim).
 //
 // Layer: L4 route module. May import plugins/, mcp/, llm-sources/, llm_agent/
 // and connectors/; nothing imports this file except server.mjs.
@@ -15,7 +16,7 @@
 import { join } from 'node:path';
 import { config } from '../core/config.mjs';
 import { errValidation } from '../core/errors.mjs';
-import { requireAdmin } from '../server/auth.mjs';
+import { requireRole } from '../server/auth.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { RESERVED_MCP_NAME } from '../llm_agent/sdk/constants.mjs';
 import {
@@ -214,7 +215,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'POST' && url === '/auth/me/plugins/reload') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     const result = reloadPlugins();
     safeAudit(db, {
@@ -230,7 +231,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   // Body { url, ref? }. The server clones a public repo shallowly, packages it and hands the BYTES to the
   // same installer as a zip upload. The webview never runs git and never supplies a path.
   if (method === 'POST' && url.split('?')[0] === '/auth/me/plugins/install-git') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); } catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
     const ref = typeof body?.ref === 'string' && body.ref.trim() ? body.ref.trim() : null;
@@ -278,7 +279,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   // smaller surface. Body cap is 5 MB enforced by readRawBody — the
   // larger of bodyLimitMB or the installer's own internal cap.
   if (method === 'POST' && url.split('?')[0] === '/auth/me/plugins/install') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const u = new URL(url, 'http://127.0.0.1');
     const replace = u.searchParams.get('replace') === '1';
     // The plugin an update means to replace; the installer refuses a package
@@ -349,13 +350,10 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   //
   // Removes the plugin folder + prunes orphaned enable-state entries
   // for users who had it enabled. Plugin removal is a server-wide
-  // operation (plugins are global, enable state is per-user), so it goes
-  // through requireAdmin below — which on this local-first install means
-  // "authenticated" (see requireAdmin's doc comment in server/auth.mjs).
-  // The gate stays here so a future multi-operator deployment tightens it
-  // in one place.
+  // operation (plugins are global, enable state is per-user), so it needs the
+  // admin team role (ADR 0021). The one check is requireRole in server/auth.mjs.
   if (method === 'DELETE' && url.startsWith('/auth/me/plugins/uninstall/')) {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const pluginName = decodeURIComponent(url.slice('/auth/me/plugins/uninstall/'.length).split('?')[0]);
     // Validate the plugin slug before passing to the uninstaller — an
     // attacker who can call this endpoint could otherwise attempt path
@@ -425,7 +423,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'POST' && url === '/auth/me/claude-plugins/import') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -508,7 +506,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   // Update one Claude-imported plugin: Claude Code's own update first, then a
   // re-import. Admin-only. Statuses are the orchestrator's (see claude-update.mjs).
   if (method === 'POST' && url === '/auth/me/claude-plugins/update') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -580,7 +578,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'POST' && url === '/auth/me/codex-plugins/import') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -751,7 +749,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'POST' && url === '/auth/me/llm-sources/add') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -772,7 +770,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'POST' && url === '/auth/me/llm-sources/update') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -793,7 +791,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'DELETE' && url.startsWith('/auth/me/llm-sources/')) {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const id = decodeURIComponent(url.slice('/auth/me/llm-sources/'.length).split('?')[0]);
     if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
@@ -814,12 +812,9 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   if (method === 'GET' && url.split('?')[0].startsWith('/auth/me/llm-sources/') && url.split('?')[0].endsWith('/discovery')) {
     // Marked privileged like its add/update/remove siblings: this surfaces
     // absolute agent file paths and hook/MCP command strings, where the list
-    // endpoint returns only counts. NOTE requireAdmin only asserts req.user
-    // today — the 2026-08-20 decision made this a local-first, single-operator
-    // install with no admin role (see its doc comment in server/auth.mjs), so
-    // the call is the one place a real check returns if that ever changes, not
-    // a restriction that exists now.
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    // endpoint returns only counts. Admin team role required (ADR 0021), like
+    // its add/update/remove siblings.
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const id = decodeURIComponent(url.split('?')[0].slice('/auth/me/llm-sources/'.length, -'/discovery'.length));
     if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
@@ -833,8 +828,8 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
 
   // MCP plugins (SP1): servers imported from ~/.claude.json or registered
   // manually, gated by per-user consent + enable before they reach the
-  // Claude CLI's --mcp-config. Every authenticated user registers/scans/
-  // removes (no admin concept — see requireAdmin's doc comment); any user
+  // Claude CLI's --mcp-config. Registering, scanning and removing a
+  // server-wide plugin needs the admin team role (ADR 0021); any user
   // consents + enables their own dispatch.
   // GET    /auth/me/mcp-plugins                 → list + per-user consent/enable
   // GET    /auth/me/mcp-plugins/claude-sources   → scan ~/.claude.json
@@ -917,21 +912,21 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/claude-sources') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
     send(res, 200, { servers: scanClaudeMcpServers().map(redactServerSecrets) });
     return;
   }
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/codex-sources') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
     send(res, 200, { servers: scanCodexMcpServers().map(redactServerSecrets) });
     return;
   }
 
   if (method === 'POST' && url === '/auth/me/mcp-plugins/add') {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
@@ -1042,7 +1037,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/updates') {
     let force = new URL(url, 'http://x').searchParams.get('force') === '1';
     // Forced checks are admin-only; for anyone else it quietly degrades to the cached check.
-    if (force) { try { requireAdmin(req); } catch { force = false; } }
+    if (force) { try { requireRole(db, req, 'admin'); } catch { force = false; } }
     const { readMcpRegistry, managedPackageOf } = await import('../mcp/state.mjs');
     const { latestVersion } = await registryVersions();
     const servers = await Promise.all(readMcpRegistry().map(async (p) => {
@@ -1063,7 +1058,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   const mcpVersionMatch = /^\/auth\/me\/mcp-plugins\/([a-z][a-z0-9-]{1,40})\/(update|resync)$/.exec(url.split('?')[0]);
   if (mcpVersionMatch && ((mcpVersionMatch[2] === 'update' && method === 'POST')
       || (mcpVersionMatch[2] === 'resync' && (method === 'GET' || method === 'POST')))) {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const [, id, action] = mcpVersionMatch;
     const fail = (status, code, message) => send(res, status, { error: { code, message } });
     const state = await import('../mcp/state.mjs');
@@ -1128,7 +1123,7 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
   }
 
   if (method === 'DELETE' && url.startsWith('/auth/me/mcp-plugins/')) {
-    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const id = decodeURIComponent(url.slice('/auth/me/mcp-plugins/'.length).split('?')[0]);
     if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid id' } }); return;

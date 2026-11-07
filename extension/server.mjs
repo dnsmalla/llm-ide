@@ -15,7 +15,7 @@ import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
 
 import { logger, newRequestId } from './core/logger.mjs';
-import { authenticate, requireAdmin } from './server/auth.mjs';
+import { authenticate, requireRole } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
@@ -1008,7 +1008,7 @@ const server = http.createServer(async (req, res) => {
   // larger DBs the client may hit a timeout, but the backup completes
   // server-side regardless.
   if (req.method === 'POST' && (req.url === '/admin/backup' || req.url?.startsWith('/admin/backup?'))) {
-    try { requireAdmin(req); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
+    try { requireRole(getDb(), req, 'admin'); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
     try {
       const u = new URL(req.url, 'http://127.0.0.1');
       const defaultBackupDir = config.backupDir;
@@ -1058,7 +1058,7 @@ const server = http.createServer(async (req, res) => {
   //   - The whole operation runs in a single transaction so a
   //     mid-cascade failure leaves nothing partially deleted.
   if (req.method === 'DELETE' && req.url?.startsWith('/admin/users/')) {
-    try { requireAdmin(req); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
+    try { requireRole(getDb(), req, 'admin'); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
     const targetId = decodeURIComponent(req.url.slice('/admin/users/'.length).split('?')[0]);
     try {
       if (!/^[a-z0-9_-]{1,64}$/.test(targetId)) {
@@ -1107,7 +1107,7 @@ const server = http.createServer(async (req, res) => {
   // Prometheus scrape target.  Public so a scraper running in-cluster
   // Requires admin JWT — or lock down at the network layer (firewall to scraper subnet).
   if (req.method === 'GET' && req.url === '/metrics') {
-    try { requireAdmin(req); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
+    try { requireRole(getDb(), req, 'admin'); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
     try {
       const admin = statsAdmin();
       setKbGauge('meeting',  admin.meetings);

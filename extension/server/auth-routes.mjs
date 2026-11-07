@@ -27,6 +27,7 @@ import {
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
+import { ensureMember, getMember, ownerCount } from '../kb/members.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
 // RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
@@ -120,6 +121,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         password: body.password,
         displayName: body.displayName,
       });
+      // ADR 0021: every account carries a members row from the moment it exists. The first real
+      // user is the owner (a fresh install has no owner until someone registers); everyone else
+      // starts as `member` with execute, which is exactly today's solo behaviour.
+      db.transaction(() => {
+        const teamRole = ownerCount(db) === 0 ? 'owner' : 'member';
+        ensureMember(db, user.id, { teamRole, maxMode: 'execute', usdCapMonth: 0, grantedBy: null });
+      })();
       safeAudit(db, { userId: user.id, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'success' });
       send(res, 201, { user });
     } catch (err) {
@@ -605,7 +613,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   if (method === 'GET' && url === '/auth/me') {
     const me = findUserById(db, req.user.id);
     if (!me) { send(res, 404, { error: { code: 'NOT_FOUND', message: 'User not found' } }); return; }
-    send(res, 200, me);
+    // ADR 0021: the caller's authority, so a client can show what it may do. The legacy row is a
+    // disabled data owner, never a member: it never gets this field.
+    const m = req.user.id === 'legacy' ? null : getMember(db, req.user.id);
+    send(res, 200, {
+      ...me,
+      member: m ? { teamRole: m.teamRole, maxMode: m.maxMode, usdCapMonth: m.usdCapMonth } : null,
+    });
     return;
   }
 
