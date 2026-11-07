@@ -21,9 +21,9 @@ export interface GroupNotice {
 export const NOTICES: Readonly<Record<string, GroupNotice>> = {
   "self-heal": {
     mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
-    status: "Managed in the Mac app",
-    meanwhile: "Use the Mac app on a source checkout.",
-    blockedBy: "Swift-only (incident store and worktree repair). No desktop equivalent is planned.",
+    status: "Planned",
+    meanwhile: "Debug builds record the app's errors and list them below (Ignore and Clear work). Release builds record nothing and hide this group.",
+    blockedBy: "Proposing and applying fixes (git worktree, agent, make regression, review) is plan B and not built yet.",
   },
 };
 

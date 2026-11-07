@@ -8,6 +8,7 @@ import { SettingsEnvProvider } from "./context.tsx";
 import type { SettingsEnv } from "./host.ts";
 import { APP_GROUPS, ExpandedGroups, resolveAnchor } from "./groups.ts";
 import { SettingsGroup } from "./SettingsGroup.tsx";
+import { selfHealEnabled, subscribeSelfHeal } from "../shell/self-heal.ts";
 
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   override state = { failed: false };
@@ -80,7 +81,9 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   }, [target]);
 
   const hasProject = Boolean(env.host.activeProjectPath?.());
-  const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only").map((g) => g.id));
+  // Self-Heal shows only after the host said this debug build records (shell/self-heal.ts); never in a release build.
+  const devOn = useSyncExternalStore(subscribeSelfHeal, selfHealEnabled, () => false);
+  const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only" || (g.status === "dev-only" && !devOn)).map((g) => g.id));
   const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title));
   const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title)) : [];
   const row = (s: ReturnType<SettingsRegistry<SectionComponent>["sections"]>[number]) => {

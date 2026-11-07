@@ -134,14 +134,14 @@ test("SettingsScreen: the real registry renders the 18 live App groups in order,
   const reg = m.registryDefault.createSettingsRegistry();
   const out = html(h(m.screen.SettingsScreen, { env: env({}), registry: reg, expanded: new m.groups.ExpandedGroups(memStore()) }));
   const titles = [...out.matchAll(/class="ui-settings-title">([^<]*)</g)].map((x) => x[1].replaceAll("&amp;", "&"));
-  assert.deepEqual(titles, m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only").map((g) => g.title));
+  assert.deepEqual(titles, m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only" && g.status !== "dev-only").map((g) => g.title));
   assert.equal(titles.length, 18);
   assert.ok(titles.includes("Phone and browser"), "phone and browser pairing is reachable");
   assert.ok(!out.includes("st-band-project"));
 });
 
 test("Mac-only and planned groups render an honest status card with no control (buttons, inputs, switches)", () => {
-  for (const [name, status] of [["SelfHealGroup", "Managed in the Mac app"]]) {
+  for (const [name, status] of [["SelfHealGroup", "Status: planned"]]) {
     const out = html(h(m.notices[name], {}, null));
     assert.ok(out.includes(status), name);
     assert.match(out, /role="group" aria-label="Status on the desktop"/);

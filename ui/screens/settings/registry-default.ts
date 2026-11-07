@@ -11,7 +11,6 @@ const named = (file: () => Promise<Record<string, unknown>>, pick: string): Load
 const dflt = (file: () => Promise<{ default: unknown }>): Loader<SectionComponent> => () =>
   file().then((m) => ({ default: m.default as SectionComponent }));
 
-const notices = () => import("./sections/NoticeSections.tsx");
 const trust = () => import("./sections/ExtensionsTrustSection.tsx");
 
 const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
@@ -33,7 +32,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   "folder-trust": named(trust, "TrustedFolders"),
   "extension-sources": named(trust, "Allowlist"),
   "optional-components": dflt(() => import("./sections/OptionalComponentsSection.tsx")),
-  "self-heal": named(notices, "SelfHealGroup"),
+  "self-heal": dflt(() => import("./sections/SelfHealSection.tsx")),
   paths: dflt(() => import("./sections/PathsSection.tsx")),
   repositories: dflt(() => import("./sections/RepositoriesSection.tsx")),
   memory: dflt(() => import("./sections/MemorySection.tsx")),

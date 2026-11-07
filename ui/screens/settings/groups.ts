@@ -8,7 +8,8 @@ export type GroupStatus =
   | "partial" //        part of the Mac group works; the rest says so
   | "host" //           needs a desktop host command that does not exist yet
   | "core-route" //     needs a core route that does not exist yet
-  | "mac-only"; //      a Swift-app feature with no desktop counterpart
+  | "mac-only" //       a Swift-app feature with no desktop counterpart
+  | "dev-only"; //      shown only when the host reports a debug build that records (Self-Heal)
 
 export interface GroupDef {
   /** Stable id: the deep-link anchor (`settings:<id>`) and the storage key. */
@@ -43,7 +44,7 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "folder-trust", title: "Folder trust", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
   { id: "extension-sources", title: "Extension sources", sf: "checklist", icon: "list-checks", status: "works", band: "app" },
   { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app" },
-  { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "mac-only", band: "app" },
+  { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "dev-only", band: "app" },
 ];
 
 export const PROJECT_GROUPS: readonly GroupDef[] = [
