@@ -7,7 +7,7 @@ import { BrowseTab } from "./BrowseTab.tsx";
 import { InstallTab } from "./InstallTab.tsx";
 import { InstalledTab } from "./InstalledTab.tsx";
 import { ExtensionsModel, type ExtensionsState, type Tab } from "./model.ts";
-import { hasUpdate } from "./presentation.ts";
+import { activeScopeNote, hasUpdate } from "./presentation.ts";
 import { ConfirmSheet, ConsentSheet, PreviewSheet } from "./Sheets.tsx";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -79,9 +79,12 @@ export function ExtensionsView({ model, initialHeight, openRepository }: { model
         {state.tab === "install" && <InstallTab model={model} state={state} />}
       </div>
       {state.tab === "installed" && state.active && (
-        <p className="lib-muted ext-active" role="status">
-          In chats now: {state.active.skills.toLocaleString()} skills, {state.active.mcpServers.toLocaleString()} MCP servers, {state.active.sdkPlugins.toLocaleString()} plugins.
-        </p>
+        <>
+          <p className="lib-muted ext-active" role="status">
+            In chats now: {state.active.skills.toLocaleString()} skills, {state.active.mcpServers.toLocaleString()} MCP servers, {state.active.sdkPlugins.toLocaleString()} plugins.
+          </p>
+          {activeScopeNote(state.active) && <p className="lib-muted ext-active" role="note">{activeScopeNote(state.active)}</p>}
+        </>
       )}
       <Sheets model={model} state={state} initialHeight={initialHeight} />
     </div>

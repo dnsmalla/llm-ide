@@ -55,7 +55,7 @@ test("enabling an item with no executable kind needs no consent and sends no con
   await model.init();
   await model.requestEnable(model.item("skill:acme/tidy")!);
   assert.equal(model.getSnapshot().sheet, null);
-  assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "skill:acme/tidy", enabled: true });
+  assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "skill:acme/tidy", enabled: true, commit: E });
 });
 
 test("enabling an item that runs code opens the consent sheet and sends nothing until every kind is ticked", async () => {
@@ -77,7 +77,7 @@ test("enabling an item that runs code opens the consent sheet and sends nothing 
   assert.deepEqual((model.getSnapshot().sheet as { ticked: string[] }).ticked, []);
   model.tick("hook", true);
   await model.confirmConsent();
-  assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "plugin:acme/runner", enabled: true, consents: ["hook"] });
+  assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "plugin:acme/runner", enabled: true, consents: ["hook"], commit: E });
   assert.equal(runner(model).enabled, true);
   assert.equal(model.getSnapshot().sheet, null);
 });
@@ -507,4 +507,21 @@ test("M8: the installed list is re-read right before enabling; a commit that mov
   assert.ok(reads() > r0, "re-fetched installed before enabling");
   assert.equal(posts(core, "toggle").length, 0);
   assert.match(model.getSnapshot().notice!.text, /changed while you were deciding/);
+});
+
+test("M8: COMMIT_CHANGED from the core re-reads the list and switches nothing on", async () => {
+  const { core, model, setItems } = setup({ [`POST ${P}/toggle`]: () => err(409, "COMMIT_CHANGED", { pinnedCommit: F }) });
+  await model.init();
+  setItems([runnerBody({ pinnedCommit: F }), ...baseItems().filter((i) => i.id !== "plugin:acme/runner")]);
+  const reads = () => core.calls.filter((c) => c.method === "GET" && c.path === `${P}/installed`).length;
+  const r0 = reads();
+  await model.requestEnable(model.item("skill:acme/tidy")!);
+  assert.ok(reads() > r0);
+  assert.equal(model.getSnapshot().notice!.error, true);
+  assert.match(model.getSnapshot().notice!.text, /changed while you were deciding/);
+});
+test("disabling sends no commit", async () => {
+  const { core, model } = setup({ [`POST ${P}/toggle`]: () => reply("post-auth-me-extensions-toggle-200") });
+  await model.init(); await model.disable(model.item("skill:acme/tidy")!);
+  assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "skill:acme/tidy", enabled: false });
 });

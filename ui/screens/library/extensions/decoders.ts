@@ -437,6 +437,7 @@ export interface ActiveSummary {
   mcpServers: number;
   excluded: { kind: string; name: string; reason: string }[];
   warnings: string[];
+  turns: { claude: boolean; providers: boolean } | null;
 }
 /** Counts and short names only: the server never sends configs or paths here, and the screen shows no more than that. */
 export function decodeActive(body: unknown): ActiveSummary {
@@ -452,5 +453,9 @@ export function decodeActive(body: unknown): ActiveSummary {
       return { kind: text(r.kind, "excluded.kind", 30), name: text(r.name, "excluded.name", 120), reason: text(r.reason, "excluded.reason", 120) };
     }),
     warnings: strList(o.warnings, "active.warnings", 50, 200),
+    turns: o.turns == null ? null : (() => {
+      const t = rec(o.turns, "active.turns");
+      return { claude: bool(t.claude, "active.turns.claude"), providers: bool(t.providers, "active.turns.providers") };
+    })(),
   };
 }

@@ -300,10 +300,15 @@ export class ExtensionsModel {
   private async toggle(item: InstalledItem, enabled: boolean, consents: string[] | null): Promise<void> {
     await this.withBusy(item.id, async () => {
       try {
-        const r = await this.api.toggle({ id: item.id, enabled, consents: consents ?? undefined }, this.signal);
+        const r = await this.api.toggle({ id: item.id, enabled, consents: consents ?? undefined, commit: enabled ? item.pinnedCommit : undefined }, this.signal);
         this.replace(r.item);
         this.succeed(enabled ? `${item.name} is on.` : `${item.name} is off.`);
       } catch (e) {
+        if (enabled && e instanceof ExtApiError && e.code === "COMMIT_CHANGED") {
+          await this.loadInstalled();
+          this.info(`${item.name} changed while you were deciding. Switch it on again to review it.`);
+          return;
+        }
         if (enabled && e instanceof ExtApiError && e.code === "CONSENT_REQUIRED") {
           // The item's declared kinds changed since the list was read: reload and ask again with the real list.
           this.fail(e);

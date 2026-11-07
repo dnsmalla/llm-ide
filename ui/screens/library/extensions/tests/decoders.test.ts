@@ -116,6 +116,10 @@ test("lists are capped: a huge diff or finding list cannot flood the page", () =
 
 test("the active summary exposes counts, never configs", () => {
   const a = decodeActive(fx("get-auth-me-extensions-active-200").response);
+  assert.deepEqual(a.turns, { claude: false, providers: true });
+  const { turns: _drop, ...older } = fx("get-auth-me-extensions-active-200").response as Record<string, unknown>;
+  assert.equal(decodeActive(older).turns, null);
+  assert.throws(() => decodeActive({ ...older, turns: { claude: "yes", providers: true } }), DecodeError);
   assert.equal(a.items, 2);
   assert.equal(a.skills, 2);
   assert.equal(a.mcpServers, 0);

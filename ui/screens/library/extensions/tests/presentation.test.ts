@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeInstalled, decodeCatalog, decodeItem } from "../decoders.ts";
+import { decodeInstalled, decodeCatalog, decodeItem, decodeActive } from "../decoders.ts";
 import {
   catalogNeverFetched, consentLines, entryAction, flagText, groupItems, hasUpdate, orderKinds, outcomeText, reasonText, refreshSummary, repairText, repoName, sourceStatusText, trustLabel, validateInstallPath, validateInstallUrl,
-} from "../presentation.ts";
+  activeScopeNote } from "../presentation.ts";
 import { fx } from "./helpers.ts";
 
 const items = () => decodeInstalled(fx("get-auth-me-extensions-installed-200-2").response).items;
@@ -91,4 +91,12 @@ test("outcome, repair, flag and misc text", () => {
   assert.equal(repoName("https://github.com/acme/tidy.git"), "acme/tidy");
   assert.equal(repoName("not a url"), "not a url");
   assert.equal(decodeItem(fx("post-auth-me-extensions-update-200").response && (fx("post-auth-me-extensions-update-200").response as { item: unknown }).item).version, "2.0.0");
+});
+
+test("activeScopeNote says which chats ignore the switches, and nothing when all follow them", () => {
+  const base = decodeActive(fx("get-auth-me-extensions-active-200").response);
+  assert.equal(activeScopeNote({ ...base, turns: { claude: true, providers: true } }), null);
+  assert.equal(activeScopeNote({ ...base, turns: null }), null);
+  assert.match(activeScopeNote({ ...base, turns: { claude: false, providers: true } })!, /^Claude chats do not use these switches yet/);
+  assert.match(activeScopeNote({ ...base, turns: { claude: true, providers: false } })!, /^Provider-model chats do not load/);
 });

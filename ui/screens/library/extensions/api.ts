@@ -43,7 +43,7 @@ export interface ExtensionsApi {
   catalog(q: { query: string; kind: string | null; limit: number; offset: number }, signal?: AbortSignal): Promise<CatalogPage>;
   refreshCatalog(signal?: AbortSignal): Promise<RefreshResult>;
   install(req: { url: string; path: string | null }, signal?: AbortSignal): Promise<ItemResult>;
-  toggle(req: { id: string; enabled: boolean; consents?: readonly string[] }, signal?: AbortSignal): Promise<ItemResult>;
+  toggle(req: { id: string; enabled: boolean; consents?: readonly string[]; commit?: string }, signal?: AbortSignal): Promise<ItemResult>;
   toggleMember(req: { id: string; memberId: string; enabled: boolean }, signal?: AbortSignal): Promise<ItemResult>;
   uninstall(id: string, signal?: AbortSignal): Promise<void>;
   checkUpdates(id: string | null, signal?: AbortSignal): Promise<CheckResult>;
@@ -88,7 +88,7 @@ export function createExtensionsApi(core: ExtCore): ExtensionsApi {
     catalog: (q, signal) => call("GET", `${BASE}/catalog?${qs(q)}`, undefined, decodeCatalog, { signal }),
     refreshCatalog: (signal) => post(`${BASE}/catalog/refresh`, {}, decodeRefresh, signal, true),
     install: (req, signal) => post(`${BASE}/install`, req.path ? { url: req.url, path: req.path } : { url: req.url }, decodeItemResult, signal, true),
-    toggle: (req, signal) => post(`${BASE}/toggle`, req.consents && req.consents.length > 0 ? { id: req.id, enabled: req.enabled, consents: [...req.consents] } : { id: req.id, enabled: req.enabled }, decodeItemResult, signal),
+    toggle: (req, signal) => post(`${BASE}/toggle`, { id: req.id, enabled: req.enabled, ...(req.consents && req.consents.length > 0 ? { consents: [...req.consents] } : {}), ...(req.enabled && req.commit ? { commit: req.commit } : {}) }, decodeItemResult, signal),
     toggleMember: (req, signal) => post(`${BASE}/toggle`, { id: req.id, members: [req.memberId], enabled: req.enabled }, decodeItemResult, signal),
     uninstall: (id, signal) => post(`${BASE}/uninstall`, { id }, decodeOk, signal),
     checkUpdates: (id, signal) => post(`${BASE}/updates/check`, id ? { id } : {}, decodeCheck, signal, true),

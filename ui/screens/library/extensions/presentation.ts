@@ -1,5 +1,6 @@
 // Pure presentation rules for the Extensions screen: kind order and labels, what a consent names, trust and
 // badge text, summaries. No UI and no network, so all of it is unit tested.
+import type { ActiveSummary } from "./decoders.ts";
 import type { CatalogEntry, CatalogSource, InstalledItem, Member, Permission, RefreshResult, RepairResult, UpdateSummary } from "./decoders.ts";
 import { shortCommit } from "./sanitize.ts";
 
@@ -235,4 +236,13 @@ export function validateInstallPath(raw: string): string | null {
   // eslint-disable-next-line no-control-regex
   if (s.startsWith("/") || s.includes("\\") || /[\u0000-\u001f\u007f]/.test(s) || s.split("/").some((p) => p === ".." || p === ".")) return "Use a folder path inside the repository, like skills/pdf.";
   return null;
+}
+
+/** Which chats ignore the Extensions switches right now (operator flags), or null when every chat follows them or the core is too old to say. */
+export function activeScopeNote(a: ActiveSummary): string | null {
+  if (!a.turns) return null;
+  const parts: string[] = [];
+  if (!a.turns.claude) parts.push("Claude chats do not use these switches yet: they load what the Plugins, MCP and Skill bundle panes turned on, and no item installed here.");
+  if (!a.turns.providers) parts.push("Provider-model chats do not load MCP servers from here (turned off on this computer).");
+  return parts.length ? parts.join(" ") : null;
 }
