@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 122` (`server.mjs:338`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 123` (`server.mjs:351`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–392`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -238,7 +238,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/code-assist` (removed, 410), `/kb/agent/ask`, `/kb/complete`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models`, `/kb/providers/catalog/test`, `/kb/providers/catalog/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/kb/google/gmail/fetch`, `/kb/google/sync`, `/kb/google/calendars`, `/kb/google/drive/folders`, `/kb/calendar-ical/sync` (reaches the feed host), `/kb/sync/test`, `/kb/sync/publish` (MEGA calls), `/kb/repos/check-token` (reaches GitHub or GitLab), `/kb/issues/create`, `/kb/issues/comment`, `/kb/issues/close` (each one GitHub or GitLab write), `/auth/me/extensions/install`, `/auth/me/extensions/catalog/refresh`, `/auth/me/extensions/updates/check`, `/auth/me/extensions/update/preview`, `/auth/me/extensions/update`, `/auth/me/extensions/repair` (each reaches GitHub or the MCP registry), `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
-| `kbWrite` | 30 | 5/s | `/bus/` (every command bus route), `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `GET /agent/v2/turns`, `GET /agent/v2/turns/stream`, `GET /kb/index/search`, `GET /kb/providers/custom`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `/kb/google/start`, `/kb/google/options`, `/kb/google/disconnect`, `/kb/google/gmail/seen`, `/kb/calendar-ical/sources` (POST and GET), `/kb/calendar-ical/options`, `DELETE /kb/calendar-ical/` (prefix), `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack`, `/host-api/` (the pairing PIN `/host-api/pin`, devices), `/kb/sync/` (status, MEGA setup and the enable toggle), `/kb/self-heal/` (Self-Heal incidents, debug desktop builds) |
+| `kbWrite` | 30 | 5/s | `/bus/` (every command bus route), `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `GET /agent/v2/turns`, `GET /agent/v2/turns/stream`, `GET /kb/index/search`, `GET /kb/providers/custom`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `/kb/google/start`, `/kb/google/options`, `/kb/google/disconnect`, `/kb/google/gmail/seen`, `/kb/calendar-ical/sources` (POST and GET), `/kb/calendar-ical/options`, `DELETE /kb/calendar-ical/` (prefix), `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack`, `/host-api/` (the pairing PIN `/host-api/pin`, devices), `/kb/sync/` (status, MEGA setup and the enable toggle), `/kb/self-heal/` (Self-Heal incidents, debug desktop builds), `/admin/members` (PATCH), `/admin/invites` (POST, DELETE) |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
@@ -384,6 +384,37 @@ With the switch on:
 - **Who does what:** the desktop host owns the worktree, `make regression` and the patch (`desktop/src-tauri/src/self_heal_fix.rs`). The fix itself is one `POST /kb/loop/agent-run` on the worktree.
 
 Incident text is data. It is never logged, and it reaches a model only fenced inside `BATCH.md`, in a run the user started.
+
+## 7n. Team Hub H1: members and invites (API 123)
+
+The core enforces team authority (ADR 0021, `docs/decisions/0021-team-hub.md`). Authority lives in `members`
+(`extension/kb/members.mjs`, migration 0068): `teamRole` (`owner > admin > member > viewer`), `maxMode`
+(`none | read_only | execute`) and `usdCapMonth` (0 = no cap). `users.role` stays the legacy flag and is never read
+at a route. A solo install does not change: migration 0068 makes the earliest active non-legacy user `owner` with
+`execute`, every other existing user `member` with `execute`, and a registration with no invite keeps
+`member`/`execute` unless `LLMIDE_HUB=1` (then `member`/`read_only`/20 USD).
+
+`GET /auth/me` gains `member: { teamRole, maxMode, usdCapMonth }` (null for the `legacy` data-owner row).
+
+The admin routes (`extension/routes/team-routes.mjs`, contract `schema/http/team.schema.json`, always on, no feature
+group) need the JWT and the admin team role (`403 ROLE_DENIED`); writes ride `kbWrite`:
+
+- `GET /admin/members` → `{ members: [{ userId, email, displayName, status, teamRole, maxMode, usdCapMonth, updatedAt }] }`, role first then email.
+- `PATCH /admin/members/:userId { teamRole?, maxMode?, usdCapMonth? }` → `{ member }`. Closed body (`400 VALIDATION_FAILED`). Rules: an actor may only touch a member at or below their own role (`403 ROLE_DENIED` for an admin touching an owner, or granting above their own role), nobody edits their own role or grants (`403 SELF_GRANT`), and the last owner cannot be demoted (`409 LAST_OWNER`). `usdCapMonth` 0-100000.
+- `POST /admin/invites { email?, teamRole?, maxMode?, usdCapMonth?, ttlHours? }` → `{ id, token, expiresAt }`. The token is 32 random bytes (base64url) shown once; only its SHA-256 is stored; single use, 24 h by default, 1-168 allowed. An invite cannot make an owner (`403 ROLE_DENIED` as `teamRole` has no `owner` value), and an `admin` invite needs an owner actor. `email` ≤ 254 characters, compared case-insensitively.
+- `GET /admin/invites` → `{ invites: [...] }`, newest first, never the token or its hash.
+- `DELETE /admin/invites/:id` → `{ revoked }` (`false` when no invite had that id).
+
+`POST /auth/register` accepts an optional `invite` token. While registration is closed (`LLMIDE_DISABLE_REGISTRATION=1`,
+hub mode, or a remote bind without `LLMIDE_ALLOW_REMOTE_REGISTRATION=1`) a valid invite registers the account with the
+invite's grants and burns it in one transaction; unknown, used, expired or wrong-email tokens all answer
+`403 REGISTRATION_CLOSED` (never revealing whether the token existed). `LLMIDE_HUB=1` (`config.hub`) closes
+registration, switches a no-invite registration's defaults to `read_only` / 20 USD, and logs `server_hub_mode` at boot.
+
+A turn above the member's `maxMode` is refused `403 { error: { code: 'ROLE_DENIED', message: 'Your team role cannot run turns' } }`
+(`max_mode` `none`, audited `team.deny` with `{ reason }` and no message text) or clamped to a read-only mode. Host API
+pairing grants a viewer / `max_mode` none member only `host`, `read`, `push`. `usdCapForModel` applies
+`min(member cap, model cap)` and `PUT /kb/usage/limits` may not write a usd row above the member's cap.
 
 ## 8. See also
 

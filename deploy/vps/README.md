@@ -85,9 +85,11 @@ curl --resolve llm-ide.com:443:72.62.76.92 https://llm-ide.com/
 - The core's Claude CLI is installed but not authenticated. Model-generating pipeline steps will fail
   until `claude login` or a per-user API key is configured.
 - `/api/*` is closed (404) and `llmide-core` is disabled (2026-11-05). It exposed the full core to the
-  internet, and every core user is an admin (agents, MCP stdio, plugin installs), so one leaked login meant
-  code execution on the VPS. Do not reopen it: phones and browsers use encrypted sync (ADR 0020). Keep the admin
-  credentials in a password manager, not in `/root/llm-ide-admin.txt`.
+  internet; every member now runs within the grants in `members` (ADR 0021), but open registration on a
+  reachable server still lets any peer become a member, and a member with `execute` runs agents and plugin work
+  if granted. Reopening it needs hub mode (`LLMIDE_HUB=1`, invite-only, behind TLS) rather than the old public
+  sign-up. Phones and browsers use encrypted sync (ADR 0020). Keep the admin credentials in a password manager,
+  not in `/root/llm-ide-admin.txt`.
 - DNS was moved from Squarespace; old resolvers may serve the old A records until the 30-minute TTL
   expires. Flush the Mac cache with `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
 

@@ -388,7 +388,7 @@ Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`
 | Invariants (read before changing hot paths) | [docs/explanation/invariants.md](docs/explanation/invariants.md) |
 | API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
 | Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
-| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0020) |
+| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0021) |
 | Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
 | Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
 
