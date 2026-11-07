@@ -17,7 +17,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 17 | 6 | 5 | 28 | Native iPhone client on Host API v1 (desktop) with chat, approvals and History, plus the offline sync tier (SP4); the web client is an installable PWA; push notifications are built (off unless `LLMIDE_HOST_API_PUSH=1`; open: the Xcode Push capability and the APNs key) |
 | Web app and relay | 7 | 16 | 3 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; offline sync tier (SP3); the account service, device linking and relay were retired by ADR 0020 and removed (`3891a2d5`, web client 2026-11-07) |
 | Chrome extension | 8 | 4 | 5 | 17 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 21 | 3 | 2 | 26 | API 110, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
+| Shared server and core | 21 | 3 | 2 | 26 | API 121, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 2 | 5 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 11 | 27 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 11 | 2 | 3 | 16 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes are in place; relay and signing not started |
