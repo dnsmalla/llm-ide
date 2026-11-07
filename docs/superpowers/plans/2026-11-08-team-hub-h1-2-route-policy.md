@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Every HTTP route, Host API command and background job runs only within the caller's team role, run mode (`max_mode`) and monthly USD cap; anything not declared is refused.
+**Goal:** Every HTTP route, Host API command and background job runs only within the caller's team role, run mode (`max_mode`) and monthly USD cap; anything not declared is refused. Owners, admins and engineers (role `member`) can do all the work; everyone else (`viewer`) can only Ask.
 
 **Architecture:** One class table (`CLASS_GRANTS` in `extension/kb/members.mjs`) says what each kind of action needs. One route table (`ROUTE_POLICY` in `extension/server/route-authority.mjs`) gives every method + path exactly one class, and the server refuses an authenticated request that matches no rule (deny by default). The Host API gateway, the command-bus executor, the meeting agent and the outcome poller check the same classes at the moment they act, so a demotion takes effect on the next frame or tick. `/auth/me` reports the caller's permitted classes so the desktop can hide what it would refuse.
 
@@ -24,13 +24,22 @@
 - The desktop's own user is the install owner, so a solo install keeps working unchanged; every existing gate test must stay green.
 - Work on `main`, Conventional Commits, one concern per commit, never `--no-verify`.
 
+## User decision (2026-11-08)
+
+"Admin and engineers need all, but others only ask." Mapped onto the ADR 0021 roles:
+
+- **owner, admin, member (= engineer):** every work class — model with tools, files, connectors, pushes, installing plugins / MCP servers / extensions / the skills kit. The `member` role id stays; UI copy may call it "Engineer".
+- **viewer (everyone else):** only Ask — a chat turn forced to the read-only `ask` mode (no edit or command tools), within the USD cap, plus their own data. No one-shot model routes, files, connectors or installs.
+- **admin and owner only:** team and install management — members, invites, deleting users, backups, metrics.
+- `max_mode` still narrows a member: `read_only` keeps tools off, `none` refuses every model action.
+
 ## Decisions (recommended defaults — the user may change them before Task 2)
 
 | # | Decision | Default in this plan | To change |
 |---|---|---|---|
-| D1 | May a `viewer` spend model tokens? | **No.** Viewer = look only. Matches today's Host API (viewer gets host/read/push only) and `9c2a3e76` (model routes need `member`). | Set `CLASS_GRANTS['model.read'].role = 'viewer'`. |
+| D1 | What may a `viewer` do with the model? | **Ask only** (user decision): chat turns forced to `ask` mode, `/kb/agent/ask`, answering the agent's own questions; within the USD cap. | Change the `model.ask` routes or `CLASS_GRANTS['model.ask']`. |
 | D2 | What does an undeclared route answer? | **404 NOT_FOUND** + an error log. A missing rule looks like a missing route to the caller; the log and the coverage test tell the developer. | Change `enforceRouteAuthority`'s unlisted branch. |
-| D3 | Who may enable code that runs on the host (plugins, MCP servers, hook trust, workspace trust, extension installs, the skills kit, SDK update)? | **Admin + execute** (`install` class). | Move those paths to another class in `ROUTE_POLICY`. |
+| D3 | Who may enable code that runs on the host (plugins, MCP servers, hook trust, workspace trust, extension installs, the skills kit, SDK update)? | **Engineers too** (user decision): `install` = member + execute. Only team management (`/admin/*`, `/metrics`) stays admin. | Raise `CLASS_GRANTS.install.role`. |
 | D4 | Host-proof routes (`/kb/sync/*`, `/kb/self-heal/*`, `/host-api/*`, `/bus` approvals, `/kb/issues/*`) | Class `host` = any member row; the **host proof** in each module stays the gate. | Raise `CLASS_GRANTS.host.role`. |
 | D5 | Background work that is not per-user AI or shell (sync scheduler, auth GC, backups, agent-store jobs) | Not gated: it moves only the user's own data or is system maintenance. | Add a check in that job. |
 
@@ -41,14 +50,15 @@
 | `public` | — | — | — | pre-auth paths (health, login, register, OAuth callbacks) |
 | `self.read` | viewer | none | no | reading the caller's own data |
 | `self.write` | viewer | none | no | writing the caller's own data (notes, chats, settings, sessions) |
-| `model.read` | member | read_only | yes | a model call with no file-editing or command tools (chat turns are further clamped by the turn) |
+| `model.ask` | viewer | read_only | yes | Ask: a chat turn forced to the read-only `ask` mode; `/kb/agent/ask`; answering the agent's questions |
+| `model.read` | member | read_only | yes | any other model call with no file-editing or command tools (one-shot notes, summaries, plans, classify) |
 | `model.exec` | member | execute | yes | an agent that edits files or runs commands |
 | `fs.read` | member | read_only | no | reading host files outside the DB (repos, project dirs, plugin dirs) |
 | `fs.write` | member | execute | no | writing host files, or adding a path an agent may edit |
 | `external.read` | member | read_only | no | fetching from a third-party service with the user's credentials |
 | `external.write` | member | execute | no | pushing to a third-party service (GitHub/Linear/Backlog/Slack) |
-| `install` | admin | execute | no | enabling code that runs on the host |
-| `admin` | admin | none | no | affecting other users or the whole install |
+| `install` | member | execute | no | enabling code that runs on the host (engineers — user decision) |
+| `admin` | admin | none | no | team and install management: members, invites, deleting users, backups, metrics |
 | `host` | viewer | none | no | desktop-only routes; the host proof is the real gate (D4) |
 
 ## File Structure
@@ -277,6 +287,8 @@ const MATRIX = [
   ['self.read', null, 'role_denied'],
   ['self.read', m('viewer', 'none'), null],
   ['self.write', m('viewer', 'none'), null],
+  ['model.ask', m('viewer', 'read_only'), null],
+  ['model.ask', m('viewer', 'none'), 'max_mode_none'],
   ['model.read', m('viewer', 'execute'), 'role_denied'],
   ['model.read', m('member', 'none'), 'max_mode_none'],
   ['model.read', m('member', 'read_only'), null],
@@ -287,8 +299,9 @@ const MATRIX = [
   ['fs.write', m('member', 'read_only'), 'max_mode_insufficient'],
   ['external.read', m('member', 'read_only'), null],
   ['external.write', m('member', 'execute'), null],
-  ['install', m('member', 'execute'), 'role_denied'],
-  ['install', m('admin', 'read_only'), 'max_mode_insufficient'],
+  ['install', m('viewer', 'execute'), 'role_denied'],
+  ['install', m('member', 'execute'), null],
+  ['install', m('member', 'read_only'), 'max_mode_insufficient'],
   ['install', m('admin', 'execute'), null],
   ['admin', m('member', 'execute'), 'role_denied'],
   ['admin', m('admin', 'none'), null],
@@ -321,7 +334,7 @@ test('every class except public has a role and a mode; public is null', () => {
 });
 
 test('permittedClasses lists what the member may do, in table order', () => {
-  assert.deepEqual(permittedClasses(m('viewer', 'read_only')), ['self.read', 'self.write', 'host']);
+  assert.deepEqual(permittedClasses(m('viewer', 'read_only')), ['self.read', 'self.write', 'model.ask', 'host']);
   assert.deepEqual(permittedClasses(null), []);
   assert.ok(permittedClasses(m('owner', 'execute')).includes('install'));
 });
@@ -342,13 +355,16 @@ export const CLASS_GRANTS = Object.freeze({
   public: null,
   'self.read': Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
   'self.write': Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
+  // A viewer may only Ask (user decision 2026-11-08): the chat turn is forced to `ask` mode.
+  'model.ask': Object.freeze({ role: 'viewer', mode: 'read_only', cap: true }),
   'model.read': Object.freeze({ role: 'member', mode: 'read_only', cap: true }),
   'model.exec': Object.freeze({ role: 'member', mode: 'execute', cap: true }),
   'fs.read': Object.freeze({ role: 'member', mode: 'read_only', cap: false }),
   'fs.write': Object.freeze({ role: 'member', mode: 'execute', cap: false }),
   'external.read': Object.freeze({ role: 'member', mode: 'read_only', cap: false }),
   'external.write': Object.freeze({ role: 'member', mode: 'execute', cap: false }),
-  install: Object.freeze({ role: 'admin', mode: 'execute', cap: false }),
+  // Engineers install too (user decision 2026-11-08); only team management stays admin.
+  install: Object.freeze({ role: 'member', mode: 'execute', cap: false }),
   admin: Object.freeze({ role: 'admin', mode: 'none', cap: false }),
   host: Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
 });
@@ -441,6 +457,8 @@ git commit -m "feat(team): action classes and one audited authority check"
 - Rewrite: `extension/server/route-authority.mjs` (the table and the route functions; keep Task 2's `REFUSALS`, `refuse`, `authorizeAction`)
 - Modify: `extension/server.mjs` (the two `enforceRouteAuthority` calls, ~lines 831 and 881)
 - Modify: `extension/tests/route-authority.test.mjs` (the table test at line ~102)
+- Modify: `extension/routes/extension-routes.mjs` (its inline `requireRole(db, req, 'admin')` checks become the `install` class — engineers install too)
+- Modify: `extension/tests/auth-routes.test.mjs` (the three "must refuse a member" loops at ~840, ~1304, ~1405)
 - Create: `extension/tests/route-policy-coverage.test.mjs`
 
 **Interfaces:**
@@ -734,16 +752,18 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/plan/delete',
     '/kb/review/delete',
   ]),
-  ...rules('model.read', 'POST', [
+  ...rules('model.ask', 'POST', [
     '/agent/v2/decision',
     '/agent/v2/stream',
+    '/kb/agent/ask',
+  ]),
+  ...rules('model.read', 'POST', [
     '/bus/commands',
     '/extract-entities',
     '/generate-doc',
     '/generate-docx',
     '/generate-notes',
     '/generate-questions',
-    '/kb/agent/ask',
     '/kb/analyze-risks',
     '/kb/complete',
     '/kb/conflict-questions',
@@ -827,6 +847,12 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/outcomes/retry-failed',
     '/kb/review/approve',
   ]),
+  ...rules('install', 'GET', [
+    '/auth/me/llm-sources/:id/discovery',
+    '/auth/me/mcp-plugins/:id/resync',
+    '/auth/me/mcp-plugins/claude-sources',
+    '/auth/me/mcp-plugins/codex-sources',
+  ]),
   ...rules('install', 'POST', [
     '/auth/me/claude-plugins/import',
     '/auth/me/claude-plugins/update',
@@ -867,10 +893,6 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('admin', 'GET', [
     '/admin/invites',
     '/admin/members',
-    '/auth/me/llm-sources/:id/discovery',
-    '/auth/me/mcp-plugins/:id/resync',
-    '/auth/me/mcp-plugins/claude-sources',
-    '/auth/me/mcp-plugins/codex-sources',
     '/metrics',
   ]),
   ...rules('admin', 'POST', [
@@ -983,6 +1005,28 @@ and change the comment above the second call to:
   // 404 feature_disabled.
 ```
 
+- [ ] **Step 4b: Engineers pass the plugin / MCP / LLM-source gates** — `extension/routes/extension-routes.mjs`. Add `import { authorizeAction } from '../server/route-authority.mjs';` and `import { classRefusal, getMember } from '../kb/members.mjs';` (merge with existing imports). Replace every
+
+```js
+try { requireRole(db, req, 'admin'); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+```
+
+(keep each line's indentation) with
+
+```js
+{ const d = authorizeAction(db, req.user?.id, 'install', { req }); if (!d.ok) { send(res, d.status, { error: { code: d.code, message: d.message } }); return; } }
+```
+
+and the force-flag form at ~line 1040, `if (force) { try { requireRole(db, req, 'admin'); } catch { force = false; } }`, with (no audit row for a probe):
+
+```js
+if (force && classRefusal(getMember(db, req.user?.id), 'install') !== null) force = false;
+```
+
+Update the header comment at line ~10 to say the gated routes use the `install` class (member + execute, plan H1.2). After this, `grep -n "requireRole" extension/routes/extension-routes.mjs` must print nothing; remove the unused `requireRole` import.
+
+In `extension/tests/auth-routes.test.mjs`, the three loops that assert `must refuse a member` (~840, ~1304, ~1405) create their refused account as a member. Create it as a viewer instead (`grant(db, id, { teamRole: 'viewer', maxMode: 'read_only' })` from `./helpers/grant.mjs`), change the message to `must refuse a viewer`, keep `403 ROLE_DENIED`, and add one assertion per loop that a `member` + `execute` account is NOT refused with `ROLE_DENIED`. The `server.mjs admin routes refuse a member` test (~1908) is unchanged: `/admin/*` and `/metrics` stay admin.
+
 - [ ] **Step 5: Update the old table test** — in `extension/tests/route-authority.test.mjs`, change the import line to `ROUTE_POLICY, authorizeRoute, enforceRouteAuthority, routeAuthorityFor,` and replace the test `'the table names the dangerous routes and their gate (role + max_mode + cap)'` with:
 
 ```js
@@ -996,7 +1040,9 @@ test('the dangerous routes carry the class that gates them', () => {
   assert.equal(cls('POST', '/auth/me/repos'), 'fs.write');
   assert.equal(cls('DELETE', '/auth/me/repos'), 'fs.write');
   assert.equal(cls('POST', '/kb/complete'), 'model.read');
-  assert.equal(cls('POST', '/agent/v2/stream'), 'model.read');
+  assert.equal(cls('POST', '/agent/v2/stream'), 'model.ask');
+  assert.equal(cls('POST', '/kb/agent/ask'), 'model.ask');
+  assert.equal(cls('POST', '/admin/invites'), 'admin');
   assert.equal(cls('POST', '/kb/ingest-scip'), 'fs.write');
   assert.equal(cls('POST', '/auth/me/plugins/hook-trust'), 'install');
   assert.equal(cls('POST', '/auth/me/mcp-plugins/toggle'), 'install');
@@ -1018,7 +1064,7 @@ test('an authenticated request no rule declares is refused 404 and logged', () =
   assert.deepEqual(logged, [['route_policy_unlisted', { method: 'GET', path: '/kb/no-such-route' }]]);
 });
 
-test('a viewer may read their own data but not run a model', () => {
+test('a viewer may read their own data and Ask, but not run any other model route', () => {
   const viewer = user('viewer', 'read_only');
   assert.equal(enforceRouteAuthority(getDb(), makeReq({ method: 'GET', url: '/auth/me', user: viewer }), makeRes()), false);
   const res = makeRes();
@@ -1026,6 +1072,8 @@ test('a viewer may read their own data but not run a model', () => {
   assert.equal(res.statusCode, 403);
 });
 ```
+
+The existing test `'install-skills is admin-only: a member is refused before the kit runs, an admin passes the gate'` encodes the old rule: rename it `'install-skills needs an engineer with execute: a viewer and a read_only member are refused, an execute member passes the gate'` and change its member case to expect the gate to pass (`member`, `execute`) and its refused cases to a viewer and a `read_only` member.
 
 If an existing test in that file asserts a refusal message text that changed (`Your team role cannot run turns` → `Your team grant cannot run this`), update the expected text; keep its status, code and audit-reason assertions.
 
@@ -1040,25 +1088,55 @@ Expected: 0 failures. The live contract replay sends every fixture as an authori
 - [ ] **Step 7: Commit**
 
 ```bash
-git add extension/server/route-authority.mjs extension/server.mjs extension/tests/route-authority.test.mjs extension/tests/route-policy-coverage.test.mjs
+git add extension/server/route-authority.mjs extension/server.mjs extension/routes/extension-routes.mjs extension/tests/route-authority.test.mjs extension/tests/auth-routes.test.mjs extension/tests/route-policy-coverage.test.mjs
 git commit -m "feat(team): every route declares its action class; undeclared routes are refused"
 ```
 
 ---
 
-### Task 4: Host API commands check the class on every frame
+### Task 4: A viewer may only Ask; Host API commands check the class on every frame
 
-Pairing filters a device's capabilities once; a member demoted while a phone stays connected keeps chat until the next re-auth. Check each frame.
+Two things. (1) The user's rule "others only ask": a viewer's chat turn is forced to the read-only `ask` mode, on the desktop and on a paired phone or browser (today a viewer gets no chat at all on the Host API). (2) Pairing filters a device's capabilities once; a member demoted while a phone stays connected keeps chat until the next re-auth — check each frame.
 
 **Files:**
-- Modify: `extension/routes/host-api/gateway.mjs` (after the capability check, ~line 404)
-- Modify: `extension/tests/host-api-gateway.test.mjs` (append)
+- Modify: `extension/routes/agent-v2.mjs` (`runV2Turn`, the team clamp at ~573-595)
+- Modify: `extension/tests/agent-v2-team-clamp.test.mjs` (append)
+- Modify: `extension/routes/host-api/gateway.mjs` (`minimalFor`, ~line 30; the frame check after the capability check, ~line 404)
+- Modify: `extension/tests/host-api-gateway.test.mjs` (two existing tests + append)
 
 **Interfaces:**
 - Consumes: `classRefusal` (Task 2) — the gateway passes no spend function; `chat.send` is capped inside the turn (`runV2Turn`).
 - Produces: `COMMAND_CLASS` (exported, frozen): every command in `HOST_API_COMMANDS` → class or `null` (pairing and heartbeat).
 
-- [ ] **Step 1: Write the failing tests** — append to `extension/tests/host-api-gateway.test.mjs` (it already defines `harness`, `req`, `HELLO`, `READER`, `VIEWER`):
+- [ ] **Step 1: Write the failing tests.**
+
+Append to `extension/tests/agent-v2-team-clamp.test.mjs` (it defines `member(role, maxMode)`, `stream(user, body, deps)` and `fakeTurn()`):
+
+```js
+test('a viewer may only Ask: an Execute request runs as ask, with no permission mode', async () => {
+  const viewer = member('viewer', 'read_only');
+  const t = fakeTurn();
+  const { res } = await stream(viewer, { message: 'how does login work?', mode: 'execute', permissionMode: 'bypass', model: 'claude-sonnet-5' }, { runTurn: t.runTurn });
+  assert.notEqual(res.statusCode, 403);
+  assert.equal(t.calls.length, 1);
+  assert.equal(t.calls[0].mode, 'ask');
+});
+
+test('a viewer with max_mode none is still refused', async () => {
+  const viewer = member('viewer', 'none');
+  const t = fakeTurn();
+  const { res } = await stream(viewer, { message: 'hi', model: 'claude-sonnet-5' }, { runTurn: t.runTurn });
+  assert.equal(res.statusCode, 403);
+  assert.equal(t.calls.length, 0);
+});
+```
+
+Before running, open the file's `fakeTurn` and check the field the engine receives the mode under (`mode` in the call args); match it, keep the assertion that it is `ask`.
+
+Then, in `extension/tests/host-api-gateway.test.mjs` (it already defines `harness`, `req`, `HELLO`, `READER`, `VIEWER`, `NO_TURNS`):
+- change the test `'pairing as a viewer grants host + read + push only'` to `'pairing as a viewer grants Ask: host, chat, approvals and read'` expecting `['host', 'chat', 'approvals', 'read']` for both the result and the stored scopes;
+- in `'a demoted member loses chat on the next token auth (stored scopes ∩ the filter)'`, demote to `NO_TURNS` instead of `VIEWER` (the expected `['host', 'read']` stays);
+- append:
 
 ```js
 test('every Host API command has a class (null only for pairing and heartbeat)', async () => {
@@ -1070,7 +1148,8 @@ test('every Host API command has a class (null only for pairing and heartbeat)',
   for (const name of ['host.hello', 'host.auth.pair', 'host.auth.token', 'host.auth.revoke', 'host.ping']) {
     assert.equal(COMMAND_CLASS[name], null, name);
   }
-  assert.equal(COMMAND_CLASS['chat.send'], 'model.read');
+  assert.equal(COMMAND_CLASS['chat.send'], 'model.ask');
+  assert.equal(COMMAND_CLASS['approvals.answer'], 'model.ask');
   assert.equal(COMMAND_CLASS['toolApprovals.answer'], 'model.exec');
 });
 
@@ -1079,13 +1158,21 @@ test('a member demoted while connected loses chat on the very next frame', async
   const t = harness({ read: true, member: () => current() });
   const s = {};
   await t.paired(s);
-  current = VIEWER;
+  current = NO_TURNS;
   await t.g.receive(s, req('c-send', 'chat.send', { text: 'hi' }));
   assert.equal(t.lastError(), 'denied');
   assert.equal(t.turns.length, 0);
   assert.ok(t.audits.some(([event]) => event === 'role_denied'));
   await t.g.receive(s, req('c-sessions', 'chat.sessions', {}));
-  assert.equal(t.last().error, undefined, 'a viewer may still read');
+  assert.equal(t.last().error, undefined, 'a max_mode none member may still read');
+});
+
+test('a viewer paired on a phone may Ask', async () => {
+  const t = harness({ read: true, member: VIEWER });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-send', 'chat.send', { text: 'what changed today?' }));
+  assert.equal(t.turns.length, 1, 'the turn starts; runV2Turn forces it to ask');
 });
 ```
 
@@ -1096,7 +1183,36 @@ Check `HOST_API_COMMANDS`'s import path with `grep -n "HOST_API_COMMANDS" extens
 Run: `cd extension && node --test tests/host-api-gateway.test.mjs`
 Expected: FAIL — `COMMAND_CLASS` is undefined; the demoted send is not refused.
 
-- [ ] **Step 3: Implement** — `extension/routes/host-api/gateway.mjs`. Import `classRefusal` from `../../kb/members.mjs` (add it to the existing `kb/members.mjs` import if there is one). Add near `MINIMAL_SCOPES`:
+- [ ] **Step 3a: Force Ask for a viewer** — `extension/routes/agent-v2.mjs`, in `runV2Turn`, directly after the existing `if (maxMode === 'read_only' && !restrictsTools(mode)) { ... }` block:
+
+```js
+  // User decision 2026-11-08 (plan H1.2): everyone but owners, admins and engineers may only Ask —
+  // a read-only question with no edit or command tools — whatever mode or permission they asked for.
+  if (member?.teamRole === 'viewer') {
+    mode = 'ask';
+    body.permissionMode = null;
+    bypassGrants.revoke(userId, chatSessionId);
+  }
+```
+
+This covers `POST /agent/v2/stream` and the Host API `chat.send` (both go through `runV2Turn`).
+
+- [ ] **Step 3b: Let a viewer Ask over the Host API** — `extension/routes/host-api/gateway.mjs`, replace `MINIMAL_SCOPES` and `minimalFor` with:
+
+```js
+// ADR 0021 + plan H1.2: a max_mode none member, or a caller with no authority row (fail closed), is
+// served host + read + push. A viewer may also Ask: chat + approvals (runV2Turn forces the turn to
+// `ask`). compose and tool_approvals stay off for both.
+const MINIMAL_SCOPES = ['host', 'read', 'push'];
+const VIEWER_SCOPES = ['host', 'read', 'push', 'chat', 'approvals'];
+function minimalFor(member, caps) {
+  if (!member || member.maxMode === 'none') return caps.filter((c) => MINIMAL_SCOPES.includes(c));
+  if (member.teamRole === 'viewer') return caps.filter((c) => VIEWER_SCOPES.includes(c));
+  return caps;
+}
+```
+
+- [ ] **Step 3c: The per-frame check** — `extension/routes/host-api/gateway.mjs`. Import `classRefusal` from `../../kb/members.mjs` (add it to the existing `kb/members.mjs` import if there is one). Add near `MINIMAL_SCOPES`:
 
 ```js
 // Plan H1.2: each command's action class, checked on EVERY frame against the member's current row,
@@ -1119,8 +1235,8 @@ export const COMMAND_CLASS = Object.freeze({
   'chat.new': 'self.write',
   'push.register': 'self.write',
   'push.unregister': 'self.write',
-  'chat.send': 'model.read',
-  'approvals.answer': 'model.read',
+  'chat.send': 'model.ask',
+  'approvals.answer': 'model.ask',
   'toolApprovals.answer': 'model.exec',
 });
 ```
@@ -1144,14 +1260,14 @@ If `audit` rejects an unknown event name, add `'role_denied'` wherever the gatew
 
 - [ ] **Step 4: Run the Host API suites**
 
-Run: `cd extension && node --test tests/host-api-*.test.mjs`
+Run: `cd extension && node --test tests/host-api-*.test.mjs tests/agent-v2-team-clamp.test.mjs tests/agent-v2-routes.test.mjs`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/routes/host-api/gateway.mjs extension/tests/host-api-gateway.test.mjs
-git commit -m "feat(host-api): check each command's action class on every frame"
+git add extension/routes/agent-v2.mjs extension/tests/agent-v2-team-clamp.test.mjs extension/routes/host-api/gateway.mjs extension/tests/host-api-gateway.test.mjs
+git commit -m "feat(team): a viewer may only Ask; Host API checks each command's class on every frame"
 ```
 
 ---
@@ -1310,7 +1426,7 @@ git commit -m "feat(team): background jobs re-check the member's grant when they
 test('/auth/me reports the member permissions', async () => {
   const { permittedClasses } = await import('../kb/members.mjs');
   assert.deepEqual(permittedClasses({ teamRole: 'member', maxMode: 'read_only', usdCapMonth: 0 }),
-    ['self.read', 'self.write', 'model.read', 'fs.read', 'external.read', 'host']);
+    ['self.read', 'self.write', 'model.ask', 'model.read', 'fs.read', 'external.read', 'host']);
 });
 ```
 
@@ -1353,10 +1469,13 @@ test("an older core (no permissions) is unknown: nothing is hidden", () => {
   assert.deepEqual(allowedModes(null, modes), modes);
 });
 
-test("a viewer cannot chat; a read-only member cannot pick Execute", () => {
-  const viewer = permissionsFromMe({ member: { permissions: ["self.read", "self.write", "host"] } });
-  assert.match(chatBlockReason(viewer), /team role/);
-  const reader = permissionsFromMe({ member: { permissions: ["self.read", "self.write", "model.read"] } });
+test("a viewer may only Ask; a read-only member cannot pick Execute; no model class blocks chat", () => {
+  const viewer = permissionsFromMe({ member: { permissions: ["self.read", "self.write", "model.ask", "host"] } });
+  assert.equal(chatBlockReason(viewer), null);
+  assert.deepEqual(allowedModes(viewer, modes).map((m) => m.id), ["ask"]);
+  const none = permissionsFromMe({ member: { permissions: ["self.read", "self.write", "host"] } });
+  assert.match(chatBlockReason(none), /team role/);
+  const reader = permissionsFromMe({ member: { permissions: ["self.read", "self.write", "model.ask", "model.read"] } });
   assert.equal(chatBlockReason(reader), null);
   assert.deepEqual(allowedModes(reader, modes).map((m) => m.id), ["auto", "ask"]);
   const doer = permissionsFromMe({ member: { permissions: ["model.read", "model.exec"] } });
@@ -1378,16 +1497,18 @@ export function permissionsFromMe(body: unknown): ReadonlySet<string> | null {
 }
 
 export function chatBlockReason(perms: ReadonlySet<string> | null): string | null {
-  return perms && !perms.has("model.read") ? "Your team role cannot run chat. Ask a team admin for access." : null;
+  return perms && !perms.has("model.ask") && !perms.has("model.read") ? "Your team role cannot run chat. Ask a team admin for access." : null;
 }
 
-/** Execute needs model.exec; every other mode is clamped read-only by the core. */
+/** Engineers (model.exec) get every mode; a read-only member loses Execute; a viewer only Asks. */
 export function allowedModes<T extends { id: string }>(perms: ReadonlySet<string> | null, modes: readonly T[]): readonly T[] {
-  return perms && !perms.has("model.exec") ? modes.filter((m) => m.id !== "execute") : modes;
+  if (!perms || perms.has("model.exec")) return modes;
+  if (perms.has("model.read")) return modes.filter((m) => m.id !== "execute");
+  return modes.filter((m) => m.id === "ask");
 }
 ```
 
-In `ui/screens/chat/ChatScreen.tsx`: load `/auth/me` once per screen and after each core restart (the same effect pattern as the model list, keyed on `[core, coreRestarts]`), store `permissionsFromMe(body)` in state (`null` on any error); pass `allowedModes(perms, MODES)` wherever the screen passes `MODES` to the mode picker; and extend the composer's `disabledReason` expression so `chatBlockReason(perms)` comes first:
+In `ui/screens/chat/ChatScreen.tsx`: load `/auth/me` once per screen and after each core restart (the same effect pattern as the model list, keyed on `[core, coreRestarts]`), store `permissionsFromMe(body)` in state (`null` on any error); pass `allowedModes(perms, MODES)` wherever the screen passes `MODES` to the mode picker, and when the result has exactly one mode, set the chat's mode to it (`setCurrent({ mode: "ask" })`) so a viewer's picker never shows Auto; and extend the composer's `disabledReason` expression so `chatBlockReason(perms)` comes first:
 
 ```tsx
 disabledReason={chatBlockReason(perms) ?? (isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null)}
@@ -1406,7 +1527,7 @@ Expected: PASS.
 git add extension/server/auth-routes.mjs extension/server.mjs schema/http extension/tests
 git commit -m "feat(api): /auth/me reports the member's permitted action classes, API 124"
 git add ui/screens/shell/permissions.ts ui/screens/shell/tests/permissions.test.mjs ui/screens/chat/ChatScreen.tsx
-git commit -m "feat(chat): hide modes and sending the member's role cannot use"
+git commit -m "feat(chat): a viewer sees Ask only; hide modes the member's role cannot use"
 ```
 
 ---
@@ -1448,12 +1569,10 @@ async function register(email) {
 
 const DANGEROUS = [
   ['POST', '/kb/loop/agent-run', { message: 'x', repoRoot: '/tmp' }],
-  ['POST', '/agent/v2/stream', { message: 'x', agentContext: { chatSessionId: 'c1', workspaceRoot: '/tmp' } }],
   ['POST', '/kb/ingest-scip', { scipPath: '/tmp/x.scip' }],
   ['POST', '/auth/me/plugins/hook-trust', {}],
   ['POST', '/auth/me/mcp-plugins/toggle', {}],
   ['PUT', '/auth/me/workspace-trust', {}],
-  ['POST', '/agent/v2/decision', {}],
   ['DELETE', '/kb/agent/project-memory', {}],
   ['POST', '/kb/outcomes/retry-failed', {}],
   ['POST', '/kb/summarize', {}],
@@ -1462,6 +1581,10 @@ const DANGEROUS = [
   ['POST', '/kb/connect-git', {}],
   ['POST', '/kb/project/install-skills', {}],
   ['POST', '/auth/me/repos', { path: '/tmp' }],
+  ['POST', '/kb/complete', {}],
+  ['POST', '/generate-notes', {}],
+  ['POST', '/kb/email/fetch', {}],
+  ['POST', '/admin/invites', {}],
 ];
 
 test('a viewer is refused every dangerous route with ROLE_DENIED; reading their own account still works', async () => {
@@ -1476,10 +1599,10 @@ test('a viewer is refused every dangerous route with ROLE_DENIED; reading their 
   }
   const me = await api('GET', '/auth/me', v.token);
   assert.equal(me.status, 200);
-  assert.deepEqual(me.json.member.permissions, ['self.read', 'self.write', 'host']);
+  assert.deepEqual(me.json.member.permissions, ['self.read', 'self.write', 'model.ask', 'host']);
 });
 
-test('a read-only member may not run an editing agent or add a repo, and an undeclared route is 404', async () => {
+test('an engineer may install but not manage the team; a read-only member may not edit; an undeclared route is 404', async () => {
   const owner = await api('POST', '/auth/login', null, { email: 'owner@example.test', password: PASSWORD });
   const m = await register('reader@example.test');
   await api('PATCH', `/admin/members/${m.id}`, owner.json.accessToken, { teamRole: 'member', maxMode: 'read_only' });
@@ -1487,6 +1610,11 @@ test('a read-only member may not run an editing agent or add a repo, and an unde
     const r = await api(method, p, m.token, body);
     assert.equal(r.status, 403, `${method} ${p}`);
   }
+  const eng = await register('engineer@example.test'); // solo default: member + execute
+  const inv = await api('POST', '/admin/invites', eng.token, {});
+  assert.equal(inv.status, 403, 'team management stays admin');
+  const install = await api('POST', '/auth/me/plugins/hook-trust', eng.token, {});
+  assert.notEqual(install.status, 403, 'an engineer passes the install gate (the handler may still answer 400 for the empty body)');
   const unknown = await api('GET', '/kb/no-such-route', m.token);
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, 'NOT_FOUND');
@@ -1501,7 +1629,7 @@ Run: `cd extension && node --test tests/route-policy-e2e.test.mjs`
 Expected: PASS. A route that answers 400 or 404 instead of 403 means its handler validated the body before the policy ran — that is a bug in the dispatcher order, not in the test; fix the order.
 
 - [ ] **Step 3: Docs.**
-  - `docs/decisions/0021-team-hub.md`: add a section "H1.2 — every route within its role" with the Classes table from this plan, decisions D1–D5 as accepted, and the rule "a new route without a class is refused 404 and fails `route-policy-coverage.test.mjs`".
+  - `docs/decisions/0021-team-hub.md`: add a section "H1.2 — every route within its role" with the user decision ("admin and engineers need all, others only ask"), the Classes table from this plan, decisions D1–D5 as accepted, and the rule "a new route without a class is refused 404 and fails `route-policy-coverage.test.mjs`".
   - `docs/explanation/invariants.md`: replace the `9c2a3e76` team-authority line with: "Every HTTP route has exactly one action class in `extension/server/route-authority.mjs` `ROUTE_POLICY`; an authenticated request no rule declares answers 404. Host API commands (`COMMAND_CLASS`) and background jobs (bus executor, meeting agent, outcome poller) re-check the class when they act. Regression: R-014#1 (a viewer could run the Loop agent on the operator's login)."
   - `extension/CLAUDE.md`: in the Team Hub / authority section, add "Adding a route: add its method + path to `ROUTE_POLICY` under one class (see the class table in ADR 0021), or it will 404."
   - `docs/superpowers/MASTER-PLAN.md`: tick the H1.2 row (add it under Team Hub if absent) with this plan's path; run `node scripts/plan-status.mjs --fix` and `node scripts/user-needs.mjs` if the dashboard or user-needs counts change.
