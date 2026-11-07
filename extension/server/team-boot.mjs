@@ -33,6 +33,9 @@ function teamYamlAudit(db) {
 export function applyTeamYamlAtBoot({ db, dir, logger }) {
   try {
     const result = applyTeamYaml(db, dir, { logger, audit: teamYamlAudit(db) });
+    // A fresh install with no real accounts yet: nothing was applied and no file was written. The kb
+    // module already logged `team_yaml_deferred`; the next boot that sees an account generates the file.
+    if (result.deferred) return result;
     logger?.info?.('team_yaml_applied', {
       path: result.path,
       source: result.source,

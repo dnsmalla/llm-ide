@@ -43,8 +43,10 @@ The user decided that authority must be auditable and editable outside the DB, s
   repo-kb fallback: beside `data.db`) lists **user assignments only**: `email → role, max_mode,
   usd_cap_month`. Role permissions stay in code.
 - **An account not listed is a `viewer`** with `max_mode: read_only` and `usd_cap_month: 20`.
-- **First boot generates the file** from the current `members` rows, so an existing solo owner stays owner and
-  every other existing account is listed with its current grants. The core never rewrites an existing file.
+- **The first boot with a real account generates the file** from the current `members` rows, so an existing
+  solo owner stays owner and every other existing account is listed with its current grants. A fresh install
+  (only the synthetic `legacy` user) **defers** generation: an empty file would become authoritative at the
+  next boot and demote the first registered owner. The core never rewrites an existing file.
 - **One application per boot**, after migrations and before serving; never on a request path. Every actual
   change is an `audit_log` row with actor `team.yaml` (from/to only, never message text).
 - **Invalid YAML, an unknown role or an invalid grant fails closed**: the boot is refused with
