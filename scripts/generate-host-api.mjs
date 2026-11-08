@@ -134,6 +134,7 @@ function swiftType(schema, name) {
   switch (schema.type) {
     case "string": return "String";
     case "integer": return "Int";
+    case "number": return "Double";
     case "boolean": return "Bool";
     case "array": return `[${swiftType(schema.items, `${name}Item`)}]`;
     case "object": {
@@ -194,6 +195,7 @@ function tsType(schema) {
   switch (schema.type) {
     case "string": return "string";
     case "integer": return "number";
+    case "number": return "number";
     case "boolean": return "boolean";
     case "array": return `Array<${tsType(schema.items)}>`;
     case "object": {

@@ -29,6 +29,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case hostHello = "host.hello"
     case hostPing = "host.ping"
     case hostSnapshot = "host.snapshot"
+    case projectsList = "projects.list"
     case pushConfig = "push.config"
     case pushRegister = "push.register"
     case pushUnregister = "push.unregister"
@@ -52,6 +53,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostHello: return "host"
         case .hostPing: return "host"
         case .hostSnapshot: return "host"
+        case .projectsList: return "host"
         case .pushConfig: return "push"
         case .pushRegister: return "push"
         case .pushUnregister: return "push"
@@ -77,6 +79,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostHello: return true
         case .hostPing: return true
         case .hostSnapshot: return true
+        case .projectsList: return true
         case .pushConfig: return true
         case .pushRegister: return true
         case .pushUnregister: return true
@@ -105,6 +108,7 @@ public enum HostApi {
         "host.hello": .hostHello,
         "host.ping": .hostPing,
         "host.snapshot": .hostSnapshot,
+        "projects.list": .projectsList,
         "push.config": .pushConfig,
         "push.register": .pushRegister,
         "push.unregister": .pushUnregister,

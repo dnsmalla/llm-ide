@@ -17,7 +17,7 @@ import { validate } from "../extension/routes/bus/schema-validate.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = join(ROOT, "schema/host-api/v1");
-const EXPECTED_COMMANDS = 20;
+const EXPECTED_COMMANDS = 21;
 const EXPECTED_EVENT_COMMANDS = [
   "chat.delta",
   "chat.done",

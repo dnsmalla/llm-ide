@@ -14,6 +14,8 @@ import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
+import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
+import { projectsListResult, projectFrameAuthority } from './projects.mjs';
 
 // ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
 // global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
@@ -61,6 +63,8 @@ export const COMMAND_CLASS = Object.freeze({
   'chat.send': 'model.ask',
   'approvals.answer': 'model.ask',
   'toolApprovals.answer': 'model.exec',
+  // ADR 0022: every project-scoped command may carry projectId; checked on every frame.
+  'projects.list': 'self.read',
 });
 
 export function hostApiCapabilities(env = process.env) {
@@ -395,7 +399,7 @@ export function createGateway(overrides) {
       } catch (e) { deps.log(`Host API v1 engine event ${ev?.type ?? '?'} dropped (${e?.code ?? 'error'})`); }
     };
     Promise.resolve()
-      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), mode: p.mode ?? 'auto', model: p.model ?? null, onEvent }))
+      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), mode: p.mode ?? 'auto', model: p.model ?? null, projectId: p.projectId ?? null, onEvent }))
       // An aborted turn resolves without a terminal event: end it here (a cancelled done when the client asked).
       .then(() => push({ type: 'error', message: 'The turn ended without a reply.', retryable: true }))
       .catch((err) => {
@@ -453,6 +457,27 @@ export function createGateway(overrides) {
           deps.log(`Host API v1 connection ${entry.num} refused ${r.command} (${refusal})`);
           audit('role_denied', { peer: entry.peer, userId: u, deviceId: d, detail: refusal, dedupeKey: `${d}:${refusal}` });
           return fail(s, r.id, 'denied', 'Your team role no longer allows this.');
+        }
+        // ADR 0022: a frame that names a project is re-checked against the fresh project row on EVERY
+        // frame. An unassigned caller is a viewer (Ask only); a project demotion applies immediately.
+        const project = projectFrameAuthority(getDb(), u, r.command, r.payload, {
+          usedUsd: (projectId) => usedUsdMonthForProject(getDb(), u, projectId),
+        });
+        if (!project.ok) {
+          deps.log(`Host API v1 connection ${entry.num} refused ${r.command} (project ${project.reason})`);
+          audit('project_denied', {
+            peer: entry.peer, userId: u, deviceId: d, detail: project.reason,
+            dedupeKey: `${d}:project:${project.reason}`,
+          });
+          return fail(
+            s, r.id,
+            project.reason === 'not_found' ? 'not_found' : 'denied',
+            project.reason === 'not_found'
+              ? 'That project is not registered on this computer.'
+              : project.reason === 'usd_cap'
+                ? 'Monthly USD cap reached.'
+                : 'Your project role no longer allows this.',
+          );
         }
       }
     }
@@ -533,6 +558,9 @@ export function createGateway(overrides) {
         }
         const messages = await lines(userId, HOST_API_LIMITS.defaultListItems);
         return respond(s, id, command, { snapshots: { chat: { messages } } });
+      }
+      case 'projects.list': {
+        return respond(s, id, command, projectsListResult(getDb(), userId));
       }
       case 'chat.snapshot': {
         const limit = p.limit ?? HOST_API_LIMITS.defaultListItems;

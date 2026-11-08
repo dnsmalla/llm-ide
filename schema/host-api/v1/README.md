@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 20 commands are listed below.
+All 21 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -59,8 +59,11 @@ All 20 commands are listed below.
 | `push.config` | push | yes | — |
 | `push.register` | push | yes | — |
 | `push.unregister` | push | yes | — |
+| `projects.list` | host | yes | — |
 
 `read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes only `LLMIDE_HOST_API_TLS` and `LLMIDE_HOST_API_WEB_ORIGINS` to a core it starts (`desktop/src-tauri/src/core_env.rs` drops every other `LLMIDE_*`), so `read` works only on a core you start yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`), which the app then adopts; it fails closed otherwise. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.
+
+`projects.list` returns the paired device's projects and its effective role on each (`id`, `name`, `role`, `maxMode`, `usdCapMonth`, `permissions`). A project-scoped command (`chat.send`, `chat.new`, `chat.snapshot`, `chat.history.clear`, `chat.cancel`, `chat.options`, `approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the host checks the fresh project grant on every frame, and an unassigned device is a viewer on that project (Ask only). A frame with no `projectId` keeps the v1 team behavior, so existing pairings keep working.
 
 `compose` is the web chat's turn options: `chat.options` lists the modes a client may pick (read-only ones only: `auto`, which runs `auto_read_only`, `ask`, `plan`, `assist_plan`, `review`, `document`) and the account's Claude models; `chat.send` may then carry `mode` and `model`, which a host honours only for a session granted `compose` (`denied` with a re-pair hint otherwise) and re-checks against the same lists; `chat.new` starts a fresh phone chat (the previous one stays readable through `chat.history`). Served only when the host enables it (desktop: `LLMIDE_HOST_API_COMPOSE=1`, default off), never to a relay-bridged session, and only to a device paired while it was served. Bounds are pinned by `fixtures/security/compose.json`. Attachments stay under `chat`: text only, the host frames them as `{ path: name, content: text }` for the model.
 

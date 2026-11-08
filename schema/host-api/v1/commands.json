@@ -328,6 +328,10 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 500
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
           }
         }
       },
@@ -420,6 +424,10 @@
               }
             },
             "maxItems": 10
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
           }
         }
       },
@@ -449,7 +457,12 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
       },
       "result": {
         "type": "object",
@@ -472,7 +485,12 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
       },
       "result": {
         "type": "object",
@@ -517,6 +535,10 @@
               "type": "string",
               "maxLength": 2000
             }
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
           }
         }
       },
@@ -563,6 +585,10 @@
               "allow_once",
               "deny"
             ]
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
           }
         }
       },
@@ -846,7 +872,12 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
       },
       "result": {
         "type": "object",
@@ -905,7 +936,12 @@
       "request": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
       },
       "result": {
         "type": "object",
@@ -1036,6 +1072,84 @@
         "properties": {
           "removed": {
             "type": "boolean"
+          }
+        }
+      }
+    },
+    "projects.list": {
+      "capability": "host",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projects"
+        ],
+        "properties": {
+          "projects": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "role",
+                "maxMode",
+                "usdCapMonth",
+                "permissions"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "viewer",
+                    "member",
+                    "admin",
+                    "owner"
+                  ]
+                },
+                "maxMode": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "read_only",
+                    "execute"
+                  ]
+                },
+                "usdCapMonth": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "permissions": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  }
+                }
+              }
+            }
           }
         }
       }

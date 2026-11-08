@@ -23,6 +23,7 @@ export const HOST_API_COMMANDS = {
   "host.hello": { capability: "host", idempotent: true },
   "host.ping": { capability: "host", idempotent: true },
   "host.snapshot": { capability: "host", idempotent: true },
+  "projects.list": { capability: "host", idempotent: true },
   "push.config": { capability: "push", idempotent: true },
   "push.register": { capability: "push", idempotent: true },
   "push.unregister": { capability: "push", idempotent: true },
@@ -31,25 +32,26 @@ export const HOST_API_COMMANDS = {
 } as const;
 export type HostApiCommandName = keyof typeof HOST_API_COMMANDS;
 export interface HostApiCommandMap {
-  "approvals.answer": { request: { answers: Record<string, string>; commandId: string; requestId: string }; result: { accepted: boolean } };
-  "chat.cancel": { request: Record<string, never>; result: { cancelled: boolean } };
+  "approvals.answer": { request: { answers: Record<string, string>; commandId: string; projectId?: string; requestId: string }; result: { accepted: boolean } };
+  "chat.cancel": { request: { projectId?: string }; result: { cancelled: boolean } };
   "chat.history": { request: { beforeSeq?: number; limit?: number; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
-  "chat.history.clear": { request: Record<string, never>; result: { cleared: boolean } };
-  "chat.new": { request: Record<string, never>; result: { sessionId: string } };
-  "chat.options": { request: Record<string, never>; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document"> } };
-  "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document"; model?: string; text: string }; result: { accepted: boolean; requestId?: string } };
+  "chat.history.clear": { request: { projectId?: string }; result: { cleared: boolean } };
+  "chat.new": { request: { projectId?: string }; result: { sessionId: string } };
+  "chat.options": { request: { projectId?: string }; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document"> } };
+  "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document"; model?: string; projectId?: string; text: string }; result: { accepted: boolean; requestId?: string } };
   "chat.sessions": { request: { limit?: number; offset?: number }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
-  "chat.snapshot": { request: { limit?: number }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
+  "chat.snapshot": { request: { limit?: number; projectId?: string }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
   "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };
   "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push"> } };
   "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; certificateFingerprint?: string; hostKind: "mac" | "desktop"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
   "host.ping": { request: Record<string, never>; result: Record<string, never> };
   "host.snapshot": { request: { topics: Array<"chat" | "status" | "autotasks" | "loop"> }; result: { snapshots: Record<string, Record<string, unknown>> } };
+  "projects.list": { request: Record<string, never>; result: { projects: Array<{ id: string; maxMode: "none" | "read_only" | "execute"; name: string; permissions: Array<string>; role: "viewer" | "member" | "admin" | "owner"; usdCapMonth: number }> } };
   "push.config": { request: Record<string, never>; result: { apns: boolean; registered: "none" | "webpush" | "apns"; webPushKey: string } };
   "push.register": { request: { auth?: string; endpoint?: string; environment?: "sandbox" | "production"; kind: "webpush" | "apns"; p256dh?: string; token?: string }; result: { registered: boolean } };
   "push.unregister": { request: Record<string, never>; result: { removed: boolean } };
-  "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; requestId: string }; result: { accepted: boolean } };
+  "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "usage.get": { request: Record<string, never>; result: { providers: Array<{ activeModel?: string; models: Array<{ label?: string; limit: number; model: string; pct?: number; resetAt: number; state: "ok" | "warning" | "exhausted"; unit: "runs" | "tokens"; used: number; window: "daily" | "monthly" }>; provider: string; status: "ok" | "degraded" | "paused" | "unconfigured" }> } };
 }
 export type HostApiRequest<C extends HostApiCommandName> = HostApiCommandMap[C]["request"];

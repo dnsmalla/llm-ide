@@ -1,0 +1,21 @@
+{
+  "projects": [
+    {
+      "id": "p-demo",
+      "name": "Demo",
+      "role": "member",
+      "maxMode": "execute",
+      "usdCapMonth": 20,
+      "permissions": [
+        "self.read",
+        "self.write",
+        "model.ask",
+        "model.read",
+        "model.exec",
+        "fs.read",
+        "fs.write",
+        "install"
+      ]
+    }
+  ]
+}

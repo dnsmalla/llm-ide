@@ -1,1 +1,8 @@
-{"requestId":"a-1","commandId":"c-1","answers":{"Run it?":"yes"}}
+{
+  "requestId": "a-1",
+  "commandId": "c-1",
+  "answers": {
+    "Run it?": "yes"
+  },
+  "projectId": "p-demo"
+}

@@ -1,1 +1,6 @@
-{"requestId":"t-1","commandId":"c-1","decision":"allow_once"}
+{
+  "requestId": "t-1",
+  "commandId": "c-1",
+  "decision": "allow_once",
+  "projectId": "p-demo"
+}

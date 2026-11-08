@@ -4,11 +4,13 @@ import Foundation
 public struct HostApiApprovalsAnswerRequest: Codable, Equatable, Sendable {
     public var answers: [String: String]
     public var commandId: String
+    public var projectId: String?
     public var requestId: String
 
-    public init(answers: [String: String], commandId: String, requestId: String) {
+    public init(answers: [String: String], commandId: String, projectId: String? = nil, requestId: String) {
         self.answers = answers
         self.commandId = commandId
+        self.projectId = projectId
         self.requestId = requestId
     }
 }
@@ -22,8 +24,10 @@ public struct HostApiApprovalsAnswerResult: Codable, Equatable, Sendable {
 }
 
 public struct HostApiChatCancelRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
 
-    public init() {
+    public init(projectId: String? = nil) {
+        self.projectId = projectId
     }
 }
 
@@ -70,8 +74,10 @@ public struct HostApiChatHistoryResult: Codable, Equatable, Sendable {
 }
 
 public struct HostApiChatHistoryClearRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
 
-    public init() {
+    public init(projectId: String? = nil) {
+        self.projectId = projectId
     }
 }
 
@@ -84,8 +90,10 @@ public struct HostApiChatHistoryClearResult: Codable, Equatable, Sendable {
 }
 
 public struct HostApiChatNewRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
 
-    public init() {
+    public init(projectId: String? = nil) {
+        self.projectId = projectId
     }
 }
 
@@ -98,8 +106,10 @@ public struct HostApiChatNewResult: Codable, Equatable, Sendable {
 }
 
 public struct HostApiChatOptionsRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
 
-    public init() {
+    public init(projectId: String? = nil) {
+        self.projectId = projectId
     }
 }
 
@@ -137,12 +147,14 @@ public struct HostApiChatSendRequest: Codable, Equatable, Sendable {
     public var attachments: [HostApiChatSendRequestAttachmentsItem]?
     public var mode: String?
     public var model: String?
+    public var projectId: String?
     public var text: String
 
-    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, mode: String? = nil, model: String? = nil, text: String) {
+    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, mode: String? = nil, model: String? = nil, projectId: String? = nil, text: String) {
         self.attachments = attachments
         self.mode = mode
         self.model = model
+        self.projectId = projectId
         self.text = text
     }
 }
@@ -193,9 +205,11 @@ public struct HostApiChatSessionsResult: Codable, Equatable, Sendable {
 
 public struct HostApiChatSnapshotRequest: Codable, Equatable, Sendable {
     public var limit: Int?
+    public var projectId: String?
 
-    public init(limit: Int? = nil) {
+    public init(limit: Int? = nil, projectId: String? = nil) {
         self.limit = limit
+        self.projectId = projectId
     }
 }
 
@@ -331,6 +345,38 @@ public struct HostApiHostSnapshotResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiProjectsListRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiProjectsListResultProjectsItem: Codable, Equatable, Sendable {
+    public var id: String
+    public var maxMode: String
+    public var name: String
+    public var permissions: [String]
+    public var role: String
+    public var usdCapMonth: Double
+
+    public init(id: String, maxMode: String, name: String, permissions: [String], role: String, usdCapMonth: Double) {
+        self.id = id
+        self.maxMode = maxMode
+        self.name = name
+        self.permissions = permissions
+        self.role = role
+        self.usdCapMonth = usdCapMonth
+    }
+}
+
+public struct HostApiProjectsListResult: Codable, Equatable, Sendable {
+    public var projects: [HostApiProjectsListResultProjectsItem]
+
+    public init(projects: [HostApiProjectsListResultProjectsItem]) {
+        self.projects = projects
+    }
+}
+
 public struct HostApiPushConfigRequest: Codable, Equatable, Sendable {
 
     public init() {
@@ -392,11 +438,13 @@ public struct HostApiPushUnregisterResult: Codable, Equatable, Sendable {
 public struct HostApiToolApprovalsAnswerRequest: Codable, Equatable, Sendable {
     public var commandId: String
     public var decision: String
+    public var projectId: String?
     public var requestId: String
 
-    public init(commandId: String, decision: String, requestId: String) {
+    public init(commandId: String, decision: String, projectId: String? = nil, requestId: String) {
         self.commandId = commandId
         self.decision = decision
+        self.projectId = projectId
         self.requestId = requestId
     }
 }
