@@ -196,8 +196,9 @@ function persistedDevSecrets() {
 
 // LLMIDE_BACKUP_KEEP: how many server backups to keep (kb/backup-retention.mjs).
 // An integer, at least 1; anything else means the default of 2.
-export function backupKeepFromEnv(raw) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') return 2;
+export function backupKeepFromEnv(raw, hub = false) {
+  // A hub is a shared install: keep a week of nightly copies instead of two, unless the operator says otherwise.
+  if (raw === undefined || raw === null || String(raw).trim() === '') return hub ? 7 : 2;
   const n = Number(raw);
   if (!Number.isFinite(n)) return 2;
   return Math.max(1, Math.floor(n));
@@ -260,6 +261,7 @@ if (_bcryptCost < 10 || _bcryptCost > 14) {
 }
 
 // Host API v1 listener switches, read once so hostApiMode and the flags cannot disagree.
+const HUB_MODE = envBool('LLMIDE_HUB', false);
 const HOST_API_TLS = process.env.LLMIDE_HOST_API_TLS === '1';
 const HOST_API_DEV = process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production';
 
@@ -294,7 +296,7 @@ export const config = Object.freeze({
 
   // Team Hub mode (ADR 0021): LLMIDE_HUB=1. H1 only closes registration here (computeRegistrationOpen)
   // and switches a no-invite registration's defaults to read-only / 20 USD; the rest of hub mode is H2.
-  hub:                  envBool('LLMIDE_HUB', false),
+  hub:                  HUB_MODE,
   // The operator declares that the only thing in front of a non-loopback hub bind is a TLS terminator
   // (nginx, Caddy). server.mjs refuses to boot a hub on any other interface without it.
   tlsTerminated:        envBool('LLMIDE_TLS_TERMINATED', false),
@@ -329,7 +331,7 @@ export const config = Object.freeze({
   dataLocation: DATA_LAYOUT.location,
   backupDir:    DATA_LAYOUT.backupDir,
   // Newest server backups kept; older data-<unix>.db files in backupDir are deleted.
-  backupKeep:   backupKeepFromEnv(process.env.LLMIDE_BACKUP_KEEP),
+  backupKeep:   backupKeepFromEnv(process.env.LLMIDE_BACKUP_KEEP, HUB_MODE),
   backupPrune:  backupPrunePolicy({
     location: DATA_LAYOUT.location,
     backupDirSet: Boolean(envStr('LLMIDE_BACKUP_DIR')),

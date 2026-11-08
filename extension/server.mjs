@@ -32,7 +32,7 @@ import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLi
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
 import { getDb, closeDb, statsAdmin, purgeExpiredJti, pruneMissingCodeRepos } from './kb/db.mjs';
-import { backupDatabasesTo } from './kb/backup-databases.mjs';
+import { backupDatabasesInWorker } from './kb/backup-databases.mjs';
 import { runMaintenance } from './kb/maintenance.mjs';
 import { agentRunsInFlight } from './kb/agent-runs.mjs';
 import { openAgentStoreAtBoot, startAgentStoreJobs, stopAgentStoreJobs } from './kb/agent-jobs.mjs';
@@ -1087,7 +1087,7 @@ const server = http.createServer(async (req, res) => {
       const stamp = Math.floor(Date.now() / 1000);
       const filename = `data-${stamp}.db`;
       const target = path.join(targetDir, filename);
-      const made = backupDatabasesTo(target);
+      const made = await backupDatabasesInWorker(target);
       reqLog.info('db_backup_created', { path: made.path, bytes: made.bytes, agentPath: made.agentPath, agentBytes: made.agentBytes });
       const pruned = pruneBackups(targetDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
       for (const file of pruned.deleted) reqLog.info('db_backup_pruned', { file });
@@ -1477,7 +1477,7 @@ const BACKUP_INTERVAL_HOURS = (() => {
 })();
 let backupTimer = null;
 
-function runAutoBackup() {
+async function runAutoBackup() {
   if (shuttingDown) return;
   if (BACKUP_INTERVAL_HOURS === 0) return;
   try {
@@ -1485,7 +1485,7 @@ function runAutoBackup() {
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp  = Math.floor(Date.now() / 1000);
     const target = path.join(backupDir, `data-${stamp}.db`);
-    const made = backupDatabasesTo(target);
+    const made = await backupDatabasesInWorker(target);
     logger.info('auto_backup_created', { path: made.path, bytes: made.bytes, agentPath: made.agentPath, agentBytes: made.agentBytes });
 
     const pruned = pruneBackups(backupDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
@@ -1608,8 +1608,8 @@ server.listen(PORT, HOST, () => {
 
     // Automatic backup scheduler. Skip when disabled (interval=0).
     if (BACKUP_INTERVAL_HOURS > 0) {
-      runAutoBackup();  // first backup at boot
-      backupTimer = setInterval(runAutoBackup, BACKUP_INTERVAL_HOURS * 60 * 60 * 1000);
+      void runAutoBackup();  // first backup at boot (in a child process; never blocks listen)
+      backupTimer = setInterval(() => void runAutoBackup(), BACKUP_INTERVAL_HOURS * 60 * 60 * 1000);
       if (typeof backupTimer.unref === 'function') backupTimer.unref();
     }
     // Server-side outcome poller — polls all dispatched tasks on a

@@ -72,6 +72,8 @@ test('a missing directory is a no-op', () => {
 
 test('LLMIDE_BACKUP_KEEP parses to an integer of at least 1, default 2', () => {
   assert.equal(backupKeepFromEnv(undefined), 2);
+  assert.equal(backupKeepFromEnv(undefined, true), 7, 'a hub keeps a week by default');
+  assert.equal(backupKeepFromEnv('2', true), 2, 'an explicit keep still wins on a hub');
   assert.equal(backupKeepFromEnv(''), 2);
   assert.equal(backupKeepFromEnv('abc'), 2);
   assert.equal(backupKeepFromEnv('5'), 5);

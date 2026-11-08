@@ -8,8 +8,13 @@
 // long exclusive lock, and a single clean file (no -wal/-shm to copy).
 
 import fs from 'fs';
+import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { backupTo } from './db.mjs';
 import { backupAgentTo, agentDbFile } from './agent-db.mjs';
+import { config } from '../core/config.mjs';
+
+const WORKER = fileURLToPath(new URL('./backup-worker.mjs', import.meta.url));
 
 /** `backups/data-<stamp>.db` -> `backups/data-<stamp>.agent.db` (same directory). */
 export function agentBackupPath(targetPath) {
@@ -34,4 +39,36 @@ export function backupDatabasesTo(targetPath, { agentDbPath = agentDbFile(), inc
     agentBytes = fs.statSync(agentPath).size;
   }
   return { path: targetPath, bytes: fs.statSync(targetPath).size, agentPath, agentBytes };
+}
+
+/**
+ * Snapshot data.db (and agent.db when it exists) in a forked child process, so the synchronous VACUUM INTO never
+ * blocks the server's event loop. Resolves with the same shape as `backupDatabasesTo`; rejects when the worker
+ * fails, so a caller never treats a missing snapshot as success. The child gets a minimal env: no secrets.
+ */
+export function backupDatabasesInWorker(targetPath, { agentDbPath = agentDbFile(), dataDbPath = config.dbPath, includeAgent = true } = {}) {
+  const agentTarget = agentBackupPath(targetPath);
+  const args = [dataDbPath, targetPath, includeAgent ? agentDbPath : '', includeAgent ? agentTarget : ''];
+  return new Promise((resolve, reject) => {
+    const child = fork(WORKER, args, {
+      execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      env: { NODE_ENV: process.env.NODE_ENV ?? 'production' },
+    });
+    let stderr = '';
+    child.stderr?.on('data', (d) => { stderr += d; });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`backup worker failed (${code ?? 'signal'}): ${stderr.trim().slice(-500)}`));
+        return;
+      }
+      try {
+        const agentPath = includeAgent && fs.existsSync(agentTarget) ? agentTarget : null;
+        resolve({
+          path: targetPath, bytes: fs.statSync(targetPath).size,
+          agentPath, agentBytes: agentPath ? fs.statSync(agentPath).size : null,
+        });
+      } catch (err) { reject(err); }
+    });
+  });
 }
