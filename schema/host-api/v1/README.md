@@ -113,7 +113,7 @@ are the desktop's host-specific rules; a future second host must document its di
   `denied` unless `LLMIDE_HOST_API_CHAT_CLEAR=1`; `read` (`chat.sessions`, `chat.history`, `usage.get`) only with
   `LLMIDE_HOST_API_READ=1`, rate-limited per device (20-read bucket at 2/s). Chats are the server `chat_sessions`
   rows; the per-user "Phone chat" is flagged `phoneChat`.
-- **`hello`.** `hostKind` is `desktop`; `protocolVersion` is `1`.
+- **`hello`.** `hostKind` is `desktop` or `hub` (the core runs `LLMIDE_HUB=1`); `protocolVersion` is `1`.
 - **Upgrade paths.** The desktop refuses an upgrade to any path but `/host-api/v1`.
 - **Audit.** `audit_log` rows named `host_api.<event>` with an outcome; the write cap closes with 1013.
 - **Bind.** In TLS mode the desktop binds IPv4 `0.0.0.0` only.

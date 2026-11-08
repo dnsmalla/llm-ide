@@ -541,6 +541,44 @@ pub async fn remote_logs(target: SshTarget, lines: u16) -> Result<String, String
 }
 
 /// Removes the service and vhost; keeps `/var/lib/llmide` unless `purge` and the exact hostname are given.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDiagnostics {
+    pub service: String,
+    pub disk_free_mb: u64,
+    pub version: Option<String>,
+    pub last_backup: Option<String>,
+    pub health: Option<String>,
+}
+
+pub fn parse_diagnostics(text: &str) -> RemoteDiagnostics {
+    let line = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_string());
+    RemoteDiagnostics {
+        service: line("SERVICE=").unwrap_or_else(|| "unknown".into()),
+        disk_free_mb: line("DISK_MB=").and_then(|v| v.parse().ok()).unwrap_or(0),
+        version: line("VERSION=").filter(|v| !v.is_empty()),
+        last_backup: line("BACKUP=").filter(|v| !v.is_empty()),
+        health: line("HEALTH=").filter(|v| !v.is_empty()),
+    }
+}
+
+pub const DIAGNOSTICS_SCRIPT: &str = r#"printf 'SERVICE=%s\n' "$(systemctl is-active llmide-core 2>/dev/null || true)"
+printf 'DISK_MB=%s\n' "$(df -Pk /var/lib/llmide 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024}')"
+printf 'VERSION=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null | tr -cd 'A-Za-z0-9._-' | head -c 40)"
+printf 'BACKUP=%s\n' "$(ls -t /var/lib/llmide/backups/data-*.db 2>/dev/null | head -1 | xargs -r basename)"
+printf 'HEALTH=%s\n' "$(curl -fsS --max-time 5 http://127.0.0.1:3457/health 2>/dev/null | head -c 300 | tr -d '\n')"
+"#;
+
+#[tauri::command]
+pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target)?;
+        let out = SystemDeploy.run(&prepared, DIAGNOSTICS_SCRIPT, None)?;
+        if out.code != Some(0) { return Err(herr("diagnostics_failed", "the hub diagnostics probe did not finish")); }
+        Ok(parse_diagnostics(&out.stdout))
+    }).await.map_err(|e| herr("internal", format!("the diagnostics did not finish: {e}")))?
+}
+
 #[tauri::command]
 pub async fn remote_update(target: SshTarget, version: String, confirmation: String) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -700,6 +738,15 @@ mod tests {
         for bad in ["NODE_OPTIONS=--require /tmp/x", "LD_PRELOAD=/tmp/x.so", "BASH_ENV=/tmp/x", "EVIL=1", "no_equals"] {
             assert!(validate_env_text(&format!("NODE_ENV=production\n{bad}\n")).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    #[test]
+    fn diagnostics_parse_fixed_markers_only() {
+        let d = parse_diagnostics("SERVICE=active\nDISK_MB=4096\nVERSION=1.2.3\nBACKUP=data-1.db\nHEALTH={\"ok\":true}\n");
+        assert_eq!(d.service, "active");
+        assert_eq!(d.disk_free_mb, 4096);
+        assert_eq!(d.version.as_deref(), Some("1.2.3"));
+        assert!(d.health.unwrap().contains("ok"));
     }
 
     #[test]

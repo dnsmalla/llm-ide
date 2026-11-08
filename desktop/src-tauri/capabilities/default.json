@@ -168,6 +168,7 @@
     "allow-remote-logs",
     "allow-remote-uninstall",
     "allow-remote-update",
+    "allow-remote-diagnostics",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",

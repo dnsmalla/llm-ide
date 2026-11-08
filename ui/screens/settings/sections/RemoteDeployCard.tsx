@@ -19,23 +19,24 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
   } as DeployIo, () => config));
   const s = useStore(m);
   const [version, setVersion] = useState("");
-  const [ops, setOps] = useState<{ busy: string | null; note: string | null; error: string | null; logs: string }>({ busy: null, note: null, error: null, logs: "" });
+  const [ops, setOps] = useState<{ busy: string | null; note: string | null; error: string | null; logs: string; diag: string }>({ busy: null, note: null, error: null, logs: "", diag: "" });
   const target = { host: config.host.trim(), port: config.port, user: config.user.trim(), keyPath: config.keyPath.trim() };
-  const run = async (what: "update" | "backup" | "logs" | "uninstall", purge = false) => {
-    setOps({ busy: what, note: null, error: null, logs: ops.logs });
+  const run = async (what: "update" | "backup" | "logs" | "diag" | "uninstall", purge = false) => {
+    setOps({ busy: what, note: null, error: null, logs: ops.logs, diag: ops.diag });
     try {
       if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); await host.remoteUpdate(target, version, config.host); }
       else if (what === "backup") { if (!host.remoteBackupNow) throw new Error("Backup needs the desktop host."); await host.remoteBackupNow(target); }
-      else if (what === "logs") { if (!host.remoteLogs) throw new Error("Logs need the desktop host."); setOps({ busy: null, note: null, error: null, logs: await host.remoteLogs(target, 200) }); return; }
+      else if (what === "diag") { if (!host.remoteDiagnostics) throw new Error("Diagnostics need the desktop host."); const d = await host.remoteDiagnostics(target); setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: `service ${d.service}; disk ${d.diskFreeMb} MB; version ${d.version ?? "?"}; last backup ${d.lastBackup ?? "none"}; health ${d.health ?? "unreachable"}` }); return; }
+      else if (what === "logs") { if (!host.remoteLogs) throw new Error("Logs need the desktop host."); setOps({ busy: null, note: null, error: null, logs: await host.remoteLogs(target, 200), diag: ops.diag }); return; }
       else {
         if (!host.remoteUninstall) throw new Error("Uninstall needs the desktop host.");
         const typed = globalThis.prompt?.(`Type ${config.host} to uninstall the hub (data is kept).`) ?? null;
-        if (typed === null) { setOps({ busy: null, note: null, error: null, logs: ops.logs }); return; }
+        if (typed === null) { setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: ops.diag }); return; }
         if (typed !== config.host) throw new Error("The hostname did not match; nothing was removed.");
         await host.remoteUninstall(target, typed, purge);
       }
-      setOps({ busy: null, note: what === "update" ? `Updated to ${version}.` : what === "backup" ? "Backup started." : "Hub removed; data kept.", error: null, logs: ops.logs });
-    } catch (e) { setOps({ busy: null, note: null, error: e instanceof Error ? e.message : "The operation failed.", logs: ops.logs }); }
+      setOps({ busy: null, note: what === "update" ? `Updated to ${version}.` : what === "backup" ? "Backup started." : "Hub removed; data kept.", error: null, logs: ops.logs, diag: ops.diag });
+    } catch (e) { setOps({ busy: null, note: null, error: e instanceof Error ? e.message : "The operation failed.", logs: ops.logs, diag: ops.diag }); }
   };
   if (!available) return <p className="st-hint">Deploy needs the desktop host.</p>;
   if (!deployReady(config)) return <p className="st-hint">Enter and save the host, SSH user and private key path first.</p>;
@@ -98,10 +99,12 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
         <div className="st-row">
           <Button disabled={ops.busy !== null} onClick={() => void run("backup")}>{ops.busy === "backup" ? "Backing up…" : "Backup now"}</Button>
           <Button disabled={ops.busy !== null} onClick={() => void run("logs")}>{ops.busy === "logs" ? "Reading…" : "Show logs"}</Button>
+          <Button disabled={ops.busy !== null} onClick={() => void run("diag")}>{ops.busy === "diag" ? "Checking…" : "Diagnostics"}</Button>
           <Button tone="danger" disabled={ops.busy !== null} onClick={() => void run("uninstall")}>{ops.busy === "uninstall" ? "Removing…" : "Uninstall…"}</Button>
         </div>
         {ops.note ? <p className="st-ok" role="status">{ops.note}</p> : null}
         <ErrorText text={ops.error} />
+        {ops.diag ? <p className="st-hint" role="status">{ops.diag}</p> : null}
         {ops.logs ? <pre className="st-log" aria-label="Hub logs">{ops.logs}</pre> : null}
       </div>
     </div>

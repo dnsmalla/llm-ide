@@ -522,6 +522,14 @@ authoritative: a missing account row is deleted (implicit viewer). Generation wr
 membership change writes through atomically. Invalid YAML/role/mode/cap/project id fails the boot closed;
 unknown project ids and emails are ignored and audited.
 
+## 7r. Hub pairing (API 129)
+
+On a hub (`LLMIDE_HUB=1`) the Host API listener binds loopback behind nginx. `POST /host-api/pin`
+answers `port: 443`, `url` (`wss://<hub>/host-api/v1`), the **front certificate's leaf SPKI**
+`fingerprint`, and the hub hostname in `addresses`; a missing `LLMIDE_HOST_API_FINGERPRINT_FILE` or
+`LLMIDE_HUB_PUBLIC_URL` is `503 HUB_PIN_UNAVAILABLE`. Outside hub mode the answer is unchanged.
+`host.hello` gains `hostKind: "hub"`.
+
 ## 7q. Per-project chat history (API 128)
 
 Host API v1 clients (phone/web) can keep one chat history per project. Migration 0074 indexes

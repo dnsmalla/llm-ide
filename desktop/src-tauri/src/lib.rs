@@ -456,6 +456,7 @@ macro_rules! product_handlers {
                 remote_deploy::remote_logs,
                 remote_deploy::remote_uninstall,
                 remote_deploy::remote_update,
+                remote_deploy::remote_diagnostics,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,
