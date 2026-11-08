@@ -130,6 +130,11 @@ async function* gitAwareWalk(root, depth = 0) {
   }
 }
 
+/** True when `chunkLines` cuts the file at MAX_CHUNKS_PER_FILE (so its tail is not indexed). */
+export function isTruncatedText(text) {
+  return Math.ceil(String(text).split(/\r?\n/).length / CHUNK_LINES) > MAX_CHUNKS_PER_FILE;
+}
+
 export function chunkLines(text) {
   const lines = text.split(/\r?\n/);
   const chunks = [];
@@ -170,6 +175,7 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   let filesScanned = 0;
   let filesIndexed = 0;
   let unchanged = 0;
+  let truncatedFiles = 0;
 
   for await (const filePath of walk(absRoot)) {
     filesScanned += 1;
@@ -188,6 +194,8 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
     const text = buf.toString('utf8');
     const rel = path.relative(absRoot, filePath);
     const chunks = chunkLines(text);
+    const truncated = isTruncatedText(text);
+    if (truncated) truncatedFiles += 1;
     chunks.forEach((c, idx) => {
       items.push({
         kind: 'code',
@@ -202,6 +210,8 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
           startLine: c.startLine,
           endLine: c.endLine,
           contentHash,
+          // R-014 C6: the file was cut at MAX_CHUNKS_PER_FILE; its tail is not searchable.
+          ...(truncated ? { truncated: true } : {}),
         },
       });
     });
@@ -229,6 +239,6 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   // how many of them this run actually rewrote.
   return {
     repo: absRoot, filesScanned, filesIndexed, filesWritten: changedRefs.length, unchanged,
-    removed: replace ? removedRefs.length : 0, chunks: written,
+    removed: replace ? removedRefs.length : 0, chunks: written, truncatedFiles,
   };
 }

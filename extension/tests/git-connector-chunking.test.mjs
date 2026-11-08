@@ -58,3 +58,24 @@ test('isProbablyBinary: only samples the first N bytes', () => {
   const buf = Buffer.concat([Buffer.alloc(10, 0x61), Buffer.from([0x00])]);
   assert.equal(isProbablyBinary(buf, 10), false);
 });
+
+test('C6: a 3,000-line file is indexed with truncated: true and counted in the result', async () => {
+  const { indexLocalRepo, isTruncatedText } = await import('../connectors/git.mjs');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'git-trunc-'));
+  const file = path.join(dir, 'big.mjs');
+  fs.writeFileSync(file, Array.from({ length: 3000 }, (_, i) => `const v${i} = ${i};`).join('\n'));
+  fs.writeFileSync(path.join(dir, 'small.mjs'), 'const a = 1;');
+  const { getDb } = await import('../kb/db.mjs');
+  getDb().prepare("INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES ('u-trunc','t@e.st','T','x','user','active')").run();
+  try {
+    const out = await indexLocalRepo('u-trunc', dir, { walk: async function* () { yield file; yield path.join(dir, 'small.mjs'); } });
+    assert.equal(out.truncatedFiles, 1);
+    assert.equal(isTruncatedText(fs.readFileSync(file, 'utf8')), true);
+    assert.equal(out.chunks, 21, 'the big file contributes 20 chunks, the small one 1');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
