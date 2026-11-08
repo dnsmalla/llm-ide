@@ -48,6 +48,7 @@ case "$stage" in
   check)
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
+    echo "helper=1"
     echo "ok"
     ;;
 
@@ -204,9 +205,10 @@ LLMIDE_LOG
       esac
     fi
     ln -sfn "/opt/llmide/releases/$VERSION" /opt/llmide/current
-    if [ -d "$work/core/root/web" ]; then
+    release=/opt/llmide/releases/$VERSION
+    if [ -d "$release/core/root/web" ]; then
       install -d -m 0755 -o root -g root /var/www/llmide-web
-      cp -a "$work/core/root/web/." /var/www/llmide-web/
+      cp -a "$release/core/root/web/." /var/www/llmide-web/
       chown -R root:root /var/www/llmide-web
     fi
     # Keep current, previous and one older release.
@@ -219,6 +221,10 @@ LLMIDE_LOG
     conf
     [ -f "$STAGING/llm-ide-hub.nginx" ] || die "llm-ide-hub.nginx is missing"
     cert="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+    renewal="/etc/letsencrypt/renewal/$DOMAIN.conf"
+    if [ -f "$renewal" ] && ! grep -Eq '^[[:space:]]*reuse_key[[:space:]]*=[[:space:]]*True' "$renewal"; then
+      die "the certificate was not issued with --reuse-key; run: certbot certonly --webroot -w /var/www/llmide-web -d $DOMAIN --key-type ecdsa --reuse-key"
+    fi
     if [ ! -f "$cert" ]; then
       die "no certificate at $cert; run: certbot certonly --webroot -w /var/www/llmide-web -d $DOMAIN --key-type ecdsa --reuse-key"
     fi
@@ -322,8 +328,9 @@ HOOK
     case "$new" in *.*.*) ;; *) die "the new version is not x.y.z" ;; esac
     current=$(cat /opt/llmide/current/VERSION 2>/dev/null || true)
     [ "$new" = "$current" ] && die "the hub already runs $new"
-    replace_line "$CONF" LLMIDE_HUB_VERSION "$new"
     "$0" bundle
+    printf 'LLMIDE_UPDATE_SWITCHED=%s\n' "$new"
+    replace_line "$CONF" LLMIDE_HUB_VERSION "$new"
     "$0" start
     say "ok ($new)"
     ;;

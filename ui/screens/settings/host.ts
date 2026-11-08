@@ -256,7 +256,7 @@ export interface SettingsHost {
   remoteTlsPin?(hubUrl: string, fingerprint: string): Promise<void>;
   /** Restart the app so a saved mode change takes effect. */
   restartApp?(): Promise<void>;
-  remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string): Promise<void>;
+  remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;
   remoteBackupNow?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   remoteLogs?(target: { host: string; port: number; user: string; keyPath: string }, lines: number): Promise<string>;
   remoteDiagnostics?(target: { host: string; port: number; user: string; keyPath: string }): Promise<{ service: string; diskFreeMb: number; version: string | null; lastBackup: string | null; health: string | null }>;

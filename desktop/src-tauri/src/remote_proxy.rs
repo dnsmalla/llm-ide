@@ -122,8 +122,9 @@ fn origin_allowed(origin: &str) -> bool {
     crate::core_env::webview_origins(crate::fsutil::current_os()).iter().any(|o| *o == origin)
 }
 
-fn respond(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8], content_type: &str) {
-    let _ = write!(stream, "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len());
+fn respond(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8], content_type: &str, origin: Option<&str>) {
+    let cors = origin.map(|o| format!("Access-Control-Allow-Origin: {o}\r\nVary: Origin\r\n")).unwrap_or_default();
+    let _ = write!(stream, "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\n{cors}Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len());
     let _ = stream.write_all(body);
 }
 
@@ -132,15 +133,15 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent, hub: &str, token: &str) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
     let (head, leftover) = match read_headers(&mut stream) {
         Ok(v) => v,
-        Err(e) => { let code = if e.code == "proxy_too_large" { 413 } else { 400 }; respond(&mut stream, code, "Bad Request", b"", "text/plain"); return; }
+        Err(e) => { let code = if e.code == "proxy_too_large" { 413 } else { 400 }; respond(&mut stream, code, "Bad Request", b"", "text/plain", None); return; }
     };
     let req = match parse_request(&head, token, &leftover, &mut stream) {
         Ok(v) => v,
-        Err(e) => { let code = if e.code == "proxy_not_found" { 404 } else if e.code == "proxy_too_large" { 413 } else { 400 }; respond(&mut stream, code, "Bad Request", b"", "text/plain"); return; }
+        Err(e) => { let code = if e.code == "proxy_not_found" { 404 } else if e.code == "proxy_too_large" { 413 } else { 400 }; respond(&mut stream, code, "Bad Request", b"", "text/plain", None); return; }
     };
     let origin = req.origin.clone();
     if let Some(o) = origin.as_deref() {
-        if !origin_allowed(o) { respond(&mut stream, 403, "Forbidden", b"", "text/plain"); return; }
+        if !origin_allowed(o) { respond(&mut stream, 403, "Forbidden", b"", "text/plain", None); return; }
     }
     if req.method == "OPTIONS" {
         let _ = write!(stream, "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {}\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: authorization, content-type, accept, last-event-id, x-llmide-client\r\nAccess-Control-Max-Age: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", origin.as_deref().unwrap_or(""));
@@ -178,9 +179,9 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent, hub: &str, token: &str) {
             let content_type = resp.header("content-type").unwrap_or("application/json").to_string();
             let mut body = Vec::new();
             let _ = resp.into_reader().take(64 * 1024).read_to_end(&mut body);
-            respond(&mut stream, status, "Error", &body, &content_type);
+            respond(&mut stream, status, "Error", &body, &content_type, origin.as_deref());
         }
-        Err(_) => respond(&mut stream, 502, "Bad Gateway", b"{\"error\":{\"code\":\"HUB_UNREACHABLE\"}}", "application/json"),
+        Err(_) => respond(&mut stream, 502, "Bad Gateway", b"{\"error\":{\"code\":\"HUB_UNREACHABLE\"}}", "application/json", origin.as_deref()),
     }
 }
 
@@ -274,7 +275,7 @@ mod tests {
                     if n == 0 { break; }
                     buf.extend_from_slice(&chunk[..n]);
                     if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let head = String::from_utf8_lossy(&buf[..pos]).to_string();
+                        let head = String::from_utf8_lossy(&buf[..pos]).to_ascii_lowercase();
                         let len = head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
                         while buf.len() < pos + 4 + len {
                             let m = s.read(&mut chunk).unwrap_or(0);
@@ -328,6 +329,27 @@ mod tests {
         let refused = send("https://evil.example.com");
         assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
         p.stop();
+    }
+
+    #[test]
+    fn an_unauthorized_upstream_answer_keeps_the_webview_cors_header() {
+        let l = StdListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut b = [0u8; 1024]; let _ = s.read(&mut b);
+                let _ = write!(s, "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}");
+            }
+        });
+        let p = start_test(ureq::agent(), &format!("http://127.0.0.1:{port}"));
+        let allowed = crate::core_env::webview_origins(crate::fsutil::current_os())[0];
+        let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        let raw = format!("GET /{}/health HTTP/1.1\r\nHost: x\r\nOrigin: {allowed}\r\n\r\n", p.token);
+        s.write_all(raw.as_bytes()).unwrap();
+        let mut out = String::new(); let _ = s.read_to_string(&mut out);
+        assert!(out.starts_with("HTTP/1.1 401"), "{out}");
+        assert!(out.contains(&format!("Access-Control-Allow-Origin: {allowed}")), "{out}");
+        p.stop(); h.join().unwrap();
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub const VHOST_TEMPLATE: &str = include_str!("../../../deploy/hub/llm-ide-hub.n
 pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
+/// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
+pub const HELPER_VERSION: &str = "1";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 
@@ -291,23 +293,6 @@ const ENV_KEYS: &[&str] = &[
 ];
 
 /// Root-side shape check mirrored in the helper: only known keys, no loader/option injection, no CR.
-/// Keeps the existing JWT/vault values on a re-deploy; a new install uses the generated pair.
-pub fn preserve_env_secrets(new_env: &str, old_env: &str) -> String {
-    let get = |text: &str, key: &str| text.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).map(str::to_string)
-        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_hexdigit()));
-    let mut out = String::new();
-    for line in new_env.lines() {
-        let mut written = line.to_string();
-        for key in ["LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY"] {
-            if line.starts_with(&format!("{key}=")) {
-                if let Some(old) = get(old_env, key) { written = format!("{key}={old}"); }
-            }
-        }
-        out.push_str(&written); out.push('\n');
-    }
-    out
-}
-
 pub fn validate_env_text(text: &str) -> Result<(), FsError> {
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else { return Err(herr("env_invalid", "the env contains a line without '='")) };
@@ -367,7 +352,7 @@ fn upload_staging<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &s
 pub fn bootstrap_with<R: DeployRunner>(runner: &R, target: &PreparedTarget) -> Result<Bootstrap, FsError> {
     let dir = staging_for(&target.user);
     if let Ok(o) = runner.run(target, "sudo -n /usr/local/sbin/llmide-deploy check", None) {
-        if o.code == Some(0) {
+        if o.code == Some(0) && o.stdout.contains(&format!("helper={HELPER_VERSION}")) {
             let base = runner.run(target, "sudo -n /usr/local/sbin/llmide-deploy base", None)?;
             if base.code != Some(0) { return Err(herr("bootstrap_failed", "the deploy helper could not create the service user")); }
             return Ok(Bootstrap { installed: true, command: String::new(), staging: dir });
@@ -622,7 +607,7 @@ pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, 
 }
 
 #[tauri::command]
-pub async fn remote_update(target: SshTarget, version: String, confirmation: String) -> Result<(), FsError> {
+pub async fn remote_update(target: SshTarget, version: String, confirmation: String, hub_url: String) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
@@ -638,10 +623,16 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
         upload_staging(&SystemDeploy, &prepared, "VERSION", format!("{version}\n").as_bytes())?;
         let o = SystemDeploy.run(&prepared, &stage_command("update").unwrap(), None)?;
         if o.code != Some(0) {
-            let _ = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None);
-            return Err(herr("update_failed", "the hub update failed; the previous release was restored when available"));
+            // The helper refuses a same-version update (and a failed upload) before switching; never
+            // roll a healthy hub back for a request that changed nothing.
+            if update_switched(o.code, &o.stdout) {
+                let _ = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None);
+                return Err(herr("update_failed", "the hub update failed after the switch; the previous release was restored when available"));
+            }
+            return Err(herr("update_refused", "the hub refused the update; nothing was switched"));
         }
-        if !wait_healthy(&SystemHealth, &format!("https://{}/health", target.host)) {
+        let host = crate::remote_tls::split_hub(hub_url.trim()).map(|(h, _)| h).unwrap_or_else(|_| target.host.clone());
+        if !wait_healthy(&SystemHealth, &format!("https://{host}/health")) {
             let _ = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None);
             return Err(herr("update_unhealthy", "the updated hub did not become healthy; the previous release was restored"));
         }
@@ -697,6 +688,10 @@ pub fn redact_logs(text: &str) -> String {
         out.push_str(&cleaned); out.push('\n');
     }
     out
+}
+
+pub fn update_switched(code: Option<i32>, stdout: &str) -> bool {
+    code != Some(0) && stdout.contains("LLMIDE_UPDATE_SWITCHED=")
 }
 
 pub fn uninstall<R: DeployRunner>(runner: &R, target: &PreparedTarget, confirmation: &str, purge: bool) -> Result<(), FsError> {
@@ -782,16 +777,6 @@ mod tests {
     }
 
     #[test]
-    fn a_redeploy_keeps_the_existing_secret_pair() {
-        let new = "NODE_ENV=production\nLLMIDE_JWT_SECRET=newjwt\nLLMIDE_VAULT_KEY=newvault\n";
-        let old = "LLMIDE_JWT_SECRET=aaaa\nLLMIDE_VAULT_KEY=bbbb\n";
-        let merged = preserve_env_secrets(new, old);
-        assert!(merged.contains("LLMIDE_JWT_SECRET=aaaa"));
-        assert!(merged.contains("LLMIDE_VAULT_KEY=bbbb"));
-        assert!(!merged.contains("newjwt"));
-    }
-
-    #[test]
     fn a_hostile_env_line_is_refused_before_it_reaches_root() {
         assert!(validate_env_text("NODE_ENV=production\nLLMIDE_JWT_SECRET=abc\n").is_ok());
         for bad in ["NODE_OPTIONS=--require /tmp/x", "LD_PRELOAD=/tmp/x.so", "BASH_ENV=/tmp/x", "EVIL=1", "no_equals"] {
@@ -827,6 +812,14 @@ mod tests {
     }
 
     #[test]
+    fn a_same_version_update_refusal_never_rolls_back() {
+        assert!(!update_switched(Some(1), "llmide-deploy: update: the hub already runs 1.2.3\n"));
+        assert!(!update_switched(Some(1), "llmide-deploy: upload: checksum mismatch\n"));
+        assert!(update_switched(Some(1), "LLMIDE_UPDATE_SWITCHED=1.2.4\nllmide-deploy: start: fail\n"));
+        assert!(!update_switched(Some(0), "LLMIDE_UPDATE_SWITCHED=1.2.4\n"), "a successful switch needs no rollback");
+    }
+
+    #[test]
     fn uninstall_refuses_a_wrong_hostname() {
         let fake = Fake::new();
         let prepared = target();
@@ -856,6 +849,12 @@ mod tests {
         assert!(HELPER.contains("case \"$node_version\" in v22.*)"));
         assert!(UNIT.contains("ReadWritePaths=/var/lib/llmide /srv/llmide/projects"));
         assert!(UNIT.contains("EnvironmentFile=-/etc/llmide/bootstrap.env"));
+    }
+
+    #[test]
+    fn a_helper_version_mismatch_forces_a_reinstall() {
+        assert!(format!("helper={HELPER_VERSION}\nok\n").contains(&format!("helper={HELPER_VERSION}")));
+        assert!(!format!("helper=0\nok\n").contains(&format!("helper={HELPER_VERSION}")));
     }
 
     #[test]

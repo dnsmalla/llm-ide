@@ -19,12 +19,13 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
   } as DeployIo, () => config));
   const s = useStore(m);
   const [version, setVersion] = useState("");
+  const [updateConfirm, setUpdateConfirm] = useState("");
   const [ops, setOps] = useState<{ busy: string | null; note: string | null; error: string | null; logs: string; diag: string }>({ busy: null, note: null, error: null, logs: "", diag: "" });
   const target = { host: config.host.trim(), port: config.port, user: config.user.trim(), keyPath: config.keyPath.trim() };
   const run = async (what: "update" | "backup" | "logs" | "diag" | "uninstall", purge = false) => {
     setOps({ busy: what, note: null, error: null, logs: ops.logs, diag: ops.diag });
     try {
-      if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); await host.remoteUpdate(target, version, config.host); }
+      if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); await host.remoteUpdate(target, version, updateConfirm, config.hubUrl); }
       else if (what === "backup") { if (!host.remoteBackupNow) throw new Error("Backup needs the desktop host."); await host.remoteBackupNow(target); }
       else if (what === "diag") { if (!host.remoteDiagnostics) throw new Error("Diagnostics need the desktop host."); const d = await host.remoteDiagnostics(target); setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: `service ${d.service}; disk ${d.diskFreeMb} MB; version ${d.version ?? "?"}; last backup ${d.lastBackup ?? "none"}; health ${d.health ?? "unreachable"}` }); return; }
       else if (what === "logs") { if (!host.remoteLogs) throw new Error("Logs need the desktop host."); setOps({ busy: null, note: null, error: null, logs: await host.remoteLogs(target, 200), diag: ops.diag }); return; }
@@ -96,7 +97,8 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
         <span className="st-label">Operations</span>
         <div className="st-row">
           <input className="st-input" value={version} onChange={(e) => setVersion(e.currentTarget.value)} placeholder="Hub version (x.y.z)" />
-          <Button disabled={ops.busy !== null || !version.trim()} onClick={() => void run("update")}>{ops.busy === "update" ? "Updating…" : "Update hub"}</Button>
+          <input className="st-input" value={updateConfirm} onChange={(e) => setUpdateConfirm(e.currentTarget.value)} placeholder={`Type ${config.host} to update`} />
+          <Button disabled={ops.busy !== null || !version.trim() || updateConfirm !== config.host} onClick={() => void run("update")}>{ops.busy === "update" ? "Updating…" : "Update hub"}</Button>
         </div>
         <div className="st-row">
           <Button disabled={ops.busy !== null} onClick={() => void run("backup")}>{ops.busy === "backup" ? "Backing up…" : "Backup now"}</Button>

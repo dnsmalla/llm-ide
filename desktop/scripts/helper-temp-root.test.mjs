@@ -101,8 +101,12 @@ function fakeBundle(h) {
   const node = join(core, 'node');
   writeFileSync(node, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo v22.0.0; else echo fake; fi\n');
   chmodSync(node, 0o755);
+  const web = join(h.stage, 'fake/core/root/web');
+  mkdirSync(web, { recursive: true });
+  writeFileSync(join(web, 'index.html'), '<!doctype html>hub');
+  writeFileSync(join(h.stage, 'fake/VERSION'), '1.2.3\n');
   const tar = join(h.stage, 'bundle.tar.gz');
-  execFileSync('tar', ['-czf', tar, '-C', join(h.stage, 'fake'), 'core']);
+  execFileSync('tar', ['-czf', tar, '-C', join(h.stage, 'fake'), 'core', 'VERSION']);
   const sha = execFileSync('sha256sum', [tar], { encoding: 'utf8' }).split(/\s+/)[0];
   h.run('upload', Buffer.concat([Buffer.from('bundle.tar.gz\n'), readFileSync(tar)]));
   h.run('upload', `bundle.sha256\n${sha}  bundle.tar.gz\n`);
@@ -144,6 +148,10 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     h.run('bundle');
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
+    assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
+    assert.match(h.run('check'), /helper=1/, 'check reports the helper version');
+    h.run('upload', 'VERSION\n1.2.3\n');
+    assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
     h.run('start');
     const calls = readFileSync(h.systemctlLog, 'utf8');
