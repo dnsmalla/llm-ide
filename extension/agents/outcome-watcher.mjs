@@ -209,7 +209,15 @@ const OUTCOME_POLL_INTERVAL_MS = (() => {
   return Number.isFinite(v) && v > 0 ? v : 5 * 60_000;  // default 5 min
 })();
 
+// A fallback interval for the self-rescheduling poll below; 60 min is the ceiling when nothing changes.
+const OUTCOME_POLL_MAX_MS = 60 * 60_000;
 let _bgTimer = null;
+let _bgIntervalMs = OUTCOME_POLL_INTERVAL_MS;
+
+/** Next wake-up: back to the base interval after a cycle that changed something, else double up to the ceiling. */
+export function nextPollDelayMs(currentMs, changed, { base = OUTCOME_POLL_INTERVAL_MS, max = OUTCOME_POLL_MAX_MS } = {}) {
+  return changed ? base : Math.min(Math.max(currentMs, base) * 2, max);
+}
 
 async function runBackgroundPoll() {
   const db = getDb();
@@ -252,16 +260,40 @@ async function runBackgroundPoll() {
     }
   }
   log.info('outcome_bg_poll_done', { users: userIds.length, totalChanged });
+  return totalChanged > 0;
+}
+
+/**
+ * One poll, then the next wake-up: every cycle is re-scheduled instead of a fixed interval, so a quiet
+ * install backs off to one poll an hour and any real change snaps it back to the base. A cycle that throws
+ * counts as "nothing changed" (the backoff bounds a broken provider loop). Safe to call after stop: the
+ * timer is only re-armed while the poller is started.
+ */
+async function pollAndReschedule() {
+  let changed = false;
+  try {
+    changed = (await runBackgroundPoll()) === true;
+  } catch (err) {
+    log.error('outcome_bg_poll_failed', { error: redactTokens(err?.message || 'poll failed') });
+  } finally {
+    if (_bgTimer !== null) {
+      _bgIntervalMs = nextPollDelayMs(_bgIntervalMs, changed);
+      _bgTimer = setTimeout(() => { void pollAndReschedule(); }, _bgIntervalMs);
+      if (typeof _bgTimer.unref === 'function') _bgTimer.unref(); // don't block shutdown
+      log.info('outcome_bg_poll_next', { intervalMs: _bgIntervalMs, changed });
+    }
+  }
 }
 
 export function startBackgroundOutcomePoller() {
   if (_bgTimer) return; // already running
   // First poll after one full interval so server boot isn't slowed.
-  _bgTimer = setInterval(runBackgroundPoll, OUTCOME_POLL_INTERVAL_MS);
+  _bgIntervalMs = OUTCOME_POLL_INTERVAL_MS;
+  _bgTimer = setTimeout(() => { void pollAndReschedule(); }, _bgIntervalMs);
   if (typeof _bgTimer.unref === 'function') _bgTimer.unref(); // don't block shutdown
-  log.info('outcome_bg_poller_started', { intervalMs: OUTCOME_POLL_INTERVAL_MS });
+  log.info('outcome_bg_poller_started', { intervalMs: _bgIntervalMs });
 }
 
 export function stopBackgroundOutcomePoller() {
-  if (_bgTimer) { clearInterval(_bgTimer); _bgTimer = null; }
+  if (_bgTimer) { clearTimeout(_bgTimer); _bgTimer = null; }
 }
