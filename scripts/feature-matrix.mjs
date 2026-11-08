@@ -156,6 +156,7 @@ export function serverEnv(row, dir, port, src = process.env) {
     ...cleanInherited(src),
     LLMIDE_PORT: String(port), LLMIDE_HOST: '127.0.0.1',
     LLMIDE_DB_PATH: path.join(dir, 'kb.db'),
+    LLMIDE_PLUGIN_DIR: path.join(dir, 'plugins'),
     LLMIDE_JWT_SECRET: 'a'.repeat(48), LLMIDE_VAULT_KEY: 'b'.repeat(48),
     LLMIDE_BACKUP_INTERVAL_HOURS: '0', LLMIDE_ENGINE_PREWARM: '0',
     LLMIDE_BCRYPT_COST: '10',

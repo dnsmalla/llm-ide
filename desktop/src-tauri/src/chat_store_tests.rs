@@ -101,21 +101,19 @@ fn layout_per_os() {
         "LOCALAPPDATA" => Some(format!("{r}/win/Local")),
         _ => None,
     };
-    let none = |_: &Path| false;
-    let mac = layout_for(Os::Mac, &env, "u1", &none).unwrap();
+    let mac = layout_for(Os::Mac, &env, "u1").unwrap();
     assert_eq!(mac.sessions, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide-desktop/chats/u1/sessions")));
     // The retired Mac app's folder is never used, even when it exists.
-    let both = |_: &Path| true;
-    assert_eq!(layout_for(Os::Mac, &env, "u1", &both).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide-desktop/chats/u1")));
-    let lin = layout_for(Os::Linux, &env, "u1", &none).unwrap();
+    assert_eq!(layout_for(Os::Mac, &env, "u1").unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide-desktop/chats/u1")));
+    let lin = layout_for(Os::Linux, &env, "u1").unwrap();
     assert_eq!(lin.sessions, PathBuf::from(format!("{r}/Users/me/.local/share/llm-ide-desktop/chats/u1/sessions")));
-    let win = layout_for(Os::Windows, &env, "u1", &none).unwrap();
+    let win = layout_for(Os::Windows, &env, "u1").unwrap();
     assert!(win.base.ends_with("llm-ide-desktop/chats/u1") || win.base.ends_with("llm-ide-desktop\\chats\\u1"));
     let over = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| format!("{r}/tmp/x"));
-    assert_eq!(layout_for(Os::Mac, &over, "u1", &none).unwrap().sessions, PathBuf::from(format!("{r}/tmp/x/sessions")));
+    assert_eq!(layout_for(Os::Mac, &over, "u1").unwrap().sessions, PathBuf::from(format!("{r}/tmp/x/sessions")));
     let rel = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| "rel".to_string());
-    assert!(layout_for(Os::Mac, &rel, "u1", &none).is_err());
-    assert!(layout_for(Os::Linux, &env, "../u", &none).is_err());
+    assert!(layout_for(Os::Mac, &rel, "u1").is_err());
+    assert!(layout_for(Os::Linux, &env, "../u").is_err());
 }
 
 // ---- the Mac format (Swift-produced fixtures) --------------------------------------------------

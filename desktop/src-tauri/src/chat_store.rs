@@ -196,7 +196,6 @@ pub fn layout_for(
     os: crate::fsutil::Os,
     env: &dyn Fn(&str) -> Option<String>,
     user_id: &str,
-    path_exists: &dyn Fn(&Path) -> bool,
 ) -> std::result::Result<StoreLayout, String> {
     if !valid_user_id(user_id) {
         return Err("invalid user id".into());
@@ -215,7 +214,7 @@ pub fn layout_for(
 }
 
 pub fn layout_here(user_id: &str) -> std::result::Result<StoreLayout, String> {
-    layout_for(crate::fsutil::current_os(), &|k| std::env::var(k).ok(), user_id, &|p| p.exists())
+    layout_for(crate::fsutil::current_os(), &|k| std::env::var(k).ok(), user_id)
 }
 
 // ---- process identity and the lock file ------------------------------------------------------

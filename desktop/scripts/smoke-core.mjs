@@ -74,6 +74,7 @@ const child = spawn(NODE, [join(EXT, 'server.mjs')], {
   env: hostEnv({
     LLMIDE_PORT: String(port), LLMIDE_DATA_DIR: coreDir, LLMIDE_DB_PATH: join(coreDir, 'data.db'),
     LLMIDE_CORE_NONCE: nonce, LLMIDE_JWT_SECRET: pre.jwt, LLMIDE_VAULT_KEY: pre.vault,
+    LLMIDE_PLUGIN_DIR: join(coreDir, 'plugins'),
     LLMIDE_ENGINE_PREWARM: '0', LLMIDE_BACKUP_INTERVAL_HOURS: '0',
   }),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -118,7 +119,7 @@ try {
   try {
     const out = execFileSync(NODE, ['--input-type=module', '-e', probeJs], {
       cwd: EXT, encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'ignore'],
-      env: hostEnv({ LLMIDE_DATA_DIR: coreDir, LLMIDE_DB_PATH: join(coreDir, 'data.db') }), windowsHide: true,
+      env: hostEnv({ LLMIDE_DATA_DIR: coreDir, LLMIDE_DB_PATH: join(coreDir, 'data.db'), LLMIDE_PLUGIN_DIR: join(coreDir, 'plugins') }), windowsHide: true,
     });
     const line = out.split('\n').find((l) => l.startsWith('LLMIDE_CLAUDE_PROBE '));
     if (!line) fail('claude probe printed no marker');

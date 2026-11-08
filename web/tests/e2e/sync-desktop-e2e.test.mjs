@@ -12,7 +12,7 @@ const skip = process.env.LLMIDE_E2E === '0' ? 'LLMIDE_E2E=0'
 
 test('pair, read, queue and reply against the real desktop sync code', { skip }, async () => {
   const db = join(tmpdir(), `llmide-web-sync-e2e-${process.pid}.db`);
-  Object.assign(process.env, { LLMIDE_JWT_SECRET: 'a'.repeat(48), LLMIDE_VAULT_KEY: 'b'.repeat(48), NODE_ENV: 'test', LLMIDE_LOG_FILE: 'none', LLMIDE_DB_PATH: db });
+  Object.assign(process.env, { LLMIDE_JWT_SECRET: 'a'.repeat(48), LLMIDE_VAULT_KEY: 'b'.repeat(48), NODE_ENV: 'test', LLMIDE_LOG_FILE: 'none', LLMIDE_DB_PATH: db, LLMIDE_PLUGIN_DIR: join(tmpdir(), `llmide-web-addons-${process.pid}`) });
   const kb = await import('../../../extension/kb/db.mjs');
   const users = await import('../../../extension/server/users.mjs');
   const st = await import('../../../extension/kb/sync-state.mjs');
