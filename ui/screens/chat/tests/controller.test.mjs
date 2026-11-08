@@ -338,3 +338,26 @@ test("fullHistoryNext: a marker, then exactly the next message carries continueM
   assert.equal(bodies[1].continueMode, "replay");
   assert.equal(bodies[2].continueMode, undefined);
 });
+
+test("a stream that dies mid-reply keeps the partial text as Interrupted", async () => {
+  // A generator stream yields payloads (the framing is stripped, as the real transport does).
+  const dying = async function* () {
+    yield JSON.stringify(FX.init);
+    yield JSON.stringify({ type: "delta", text: "half a repl" });
+    throw new Error("the core went away");
+  };
+  const core = fakeCore({ streams: [dying] });
+  const { ctl, store } = make(core);
+  ctl.send("a", "go", { mode: "execute" });
+  await until(() => ctl.getState("a").phase === "error");
+  const live = ctl.getState("a").messages.at(-1);
+  assert.equal(live.role, "assistant");
+  assert.equal(live.interrupted, true, "the live bubble says Interrupted, not only after a reload");
+  await tick(5);
+  const rows = await msgs(store, "a");
+  const last = rows.at(-1);
+  assert.equal(last.role, "assistant");
+  assert.equal(last.content, "half a repl", "what arrived before the stream died is kept");
+  assert.equal(last.meta?.interrupted, true);
+  assert.equal(last.meta?.status, "interrupted");
+});

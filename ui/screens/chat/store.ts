@@ -59,7 +59,8 @@ export function toMessages(rows: readonly StoredMessage[]): Message[] {
     if (r.role === "user") out.push({ role: "user", id: `s${r.seq}`, seq: r.seq, text: r.content });
     else if (r.role === "assistant") {
       const usage = decodeUsage(r.meta?.tokenUsage);
-      out.push({ role: "assistant", id: `s${r.seq}`, seq: r.seq, parts: [textPartOf(r.content)], notices: [], status: "done", ...(usage ? { usage } : {}) });
+      out.push({ role: "assistant", id: `s${r.seq}`, seq: r.seq, parts: [textPartOf(r.content)], notices: [], status: "done",
+        ...(usage ? { usage } : {}), ...(r.meta?.interrupted === true ? { interrupted: true } : {}) });
     }
   }
   return out;

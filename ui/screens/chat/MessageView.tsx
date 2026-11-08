@@ -176,6 +176,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
             : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
         {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
         {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} host={host} />)}
+        {m.interrupted && <p className="chat-muted" role="status">Interrupted.</p>}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
         {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
         {m.usage && !live && <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens</p>}

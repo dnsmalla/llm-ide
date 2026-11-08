@@ -88,6 +88,8 @@ interface Runtime {
   attachedTurn: string | null;
   /** The user asked for the full history on the next message (one message, then cleared). */
   fullHistoryNext: boolean;
+  /** The dead turn's partial reply was already written once, so a later path cannot duplicate it. */
+  partialPersisted: boolean;
 }
 
 /** Micro-batching of stream events. */
@@ -121,7 +123,7 @@ export class ChatController {
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
     if (!r) {
-      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false };
+      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false, partialPersisted: false };
       this.runtimes.set(id, r);
     }
     return r;
@@ -352,14 +354,14 @@ export class ChatController {
   private async runAttached(id: string): Promise<void> {
     const r = this.rt(id);
     const ac = new AbortController();
-    r.ac = ac; r.userAborted = false; r.reattached = true;
+    r.ac = ac; r.userAborted = false; r.reattached = true; r.partialPersisted = false;
     this.dispatch(id, { type: "reattach", id: (this.deps.newId ?? defaultId)() });
     try {
       await this.follow(id, ac, true);
     } catch (e) {
       if (this.disposed || r.ac !== ac) return;
       if (ac.signal.aborted || r.userAborted) this.dispatch(id, { type: "aborted" });
-      else { const d = describeError(e); this.dispatch(id, { type: "transport_error", code: d.code, message: d.message, retryable: d.retryable }); }
+      else { this.persistPartial(id); const d = describeError(e); this.dispatch(id, { type: "transport_error", code: d.code, message: d.message, retryable: d.retryable }); }
     }
     if (this.disposed || r.ac !== ac) return;
     r.ac = null;
@@ -387,7 +389,7 @@ export class ChatController {
         const h = httpLike(e);
         if (h?.status === 404 && h.code === "NO_TURN") {
           // The turn ended and its buffer expired: the saved history is the truth now.
-          if (initial) { this.dispatch(id, { type: "reattach_cancel" }); r.reattached = false; r.loaded = false; void this.open(id); }
+          if (initial) { this.persistPartial(id); this.dispatch(id, { type: "reattach_cancel" }); r.reattached = false; r.loaded = false; void this.open(id); }
           else this.dispatch(id, { type: "stream_end" });
           return;
         }
@@ -404,7 +406,7 @@ export class ChatController {
     // Taken into the options (so a retry of this message keeps it) and cleared: one message only.
     if (r.fullHistoryNext) { opts = { ...opts, continueMode: "replay" }; r.fullHistoryNext = false; }
     const ac = new AbortController();
-    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts, workspaceRoot }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
+    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts, workspaceRoot }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null; r.partialPersisted = false;
     if (persistUser) this.persist(id, { role: "user", content: text, meta: { mode: opts.mode } });
     // Built per attempt: the single-use Bypass token goes out with the first attempt only (a later attempt rides the
     // grant the core opened, or is sent as Ask), and a queued message never takes a waiting token.
@@ -545,9 +547,13 @@ export class ChatController {
   private afterTurn(id: string): void {
     const r = this.rt(id);
     const last = [...r.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
-    if (last && last.seq === undefined && (last.status === "done" || last.status === "aborted") && !r.gap) {
-      const content = assistantText(last);
-      if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status, tokenUsage: last.usage ?? null } });
+    if (last && last.seq === undefined && !r.gap) {
+      // A dead turn keeps what had arrived: "Interrupted", not a vanished reply (core restart or engine death).
+      if (last.status === "error") this.persistPartial(id);
+      else if (last.status === "done" || last.status === "aborted") {
+        const content = assistantText(last);
+        if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status, tokenUsage: last.usage ?? null } });
+      }
     }
     while (r.state.queue.length > 0 && r.state.phase === "idle") {
       const [text] = r.state.queue;
@@ -560,6 +566,18 @@ export class ChatController {
       void this.runTurn(id, text, entry.opts, entry.workspaceRoot, true, true);
       return;
     }
+  }
+
+  /** Write the text a dead turn streamed so far as one interrupted reply (once per turn). */
+  private persistPartial(id: string): void {
+    const r = this.rt(id);
+    if (r.partialPersisted) return;
+    const last = [...r.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant" && m.seq === undefined);
+    const content = last ? assistantText(last) : "";
+    if (!last || !content.trim()) return;
+    r.partialPersisted = true;
+    this.dispatch(id, { type: "interrupted" });
+    this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: "interrupted", interrupted: true, tokenUsage: last.usage ?? null } });
   }
 
   private persist(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }): void {

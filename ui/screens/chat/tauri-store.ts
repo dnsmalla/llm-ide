@@ -108,7 +108,9 @@ export function fromFileMessage(m: unknown, index: number): StoredMessage {
   const role = o.role === "user" || o.role === "assistant" ? o.role : "system";
   const metadata = o.metadata && typeof o.metadata === "object" ? o.metadata as Record<string, unknown> : null;
   const usage = decodeUsage(metadata?.tokenUsage);
-  return { seq: index + 1, role, content: asString(o.content), meta: usage ? { tokenUsage: usage } : null, createdAt: typeof o.createdAt === "number" ? toEpoch(o.createdAt) : 0 };
+  const interrupted = metadata?.interrupted === true || o.status === "interrupted";
+  const meta = { ...(usage ? { tokenUsage: usage } : {}), ...(interrupted ? { interrupted: true } : {}) };
+  return { seq: index + 1, role, content: asString(o.content), meta: Object.keys(meta).length ? meta : null, createdAt: typeof o.createdAt === "number" ? toEpoch(o.createdAt) : 0 };
 }
 
 /** A new message in the Mac `ChatMessage` shape (extra keys are kept verbatim by the host and ignored by the Mac). */
@@ -118,6 +120,8 @@ export function toFileMessage(msg: { role: "user" | "assistant"; content: string
   if (msg.role === "assistant" && typeof msg.meta?.mode === "string" && msg.meta.mode) metadata.mode = msg.meta.mode;
   const usage = decodeUsage(msg.meta?.tokenUsage);
   if (usage) metadata.tokenUsage = usage;
+  // A reply whose stream died mid-way: the text is kept, and every surface says "Interrupted".
+  if (msg.role === "assistant" && msg.meta?.interrupted === true) metadata.interrupted = true;
   return {
     id: newChatId(), role: msg.role, content: msg.content, status: stopped ? "stopped" : "done", toolSteps: [],
     ...(Object.keys(metadata).length ? { metadata } : {}), createdAt: toApple(nowMs),

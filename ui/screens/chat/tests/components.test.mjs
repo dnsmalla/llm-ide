@@ -65,6 +65,7 @@ test("MessageView: tool cards are collapsed buttons with aria-expanded; thinking
   assert.match(out, /role="alert"/);
   assert.match(html(h(c.MessageView, { host: {}, m: asst({ status: "streaming" }) })), /Thinking/);
   assert.match(html(h(c.MessageView, { host: {}, m: asst({ status: "aborted" }) })), /Stopped/);
+  assert.match(html(h(c.MessageView, { host: {}, m: asst({ status: "error", interrupted: true, parts: [c.appendText(c.emptyText(), "half a reply")] }) })), /Interrupted\./);
 });
 
 test("tool output preview is capped; 'show more' steps reveal the rest lazily", () => {

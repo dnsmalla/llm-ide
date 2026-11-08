@@ -58,6 +58,8 @@ export interface AssistantMessage {
   usage?: UsageCounts;
   /** The mode the server ran this reply in (`mode_set`), shown as the Mac's ModeBadge. Live turns only. */
   mode?: string;
+  /** The stream died mid-reply (core restart, engine death); the text is what arrived before it. */
+  interrupted?: boolean;
 }
 export type Message = UserMessage | AssistantMessage;
 
@@ -137,6 +139,8 @@ export type Action =
   | { type: "abort_requested" }
   | { type: "aborted" }
   | { type: "transport_error"; code: string; message: string; retryable: boolean }
+  /** The stream died mid-reply: the text so far stays, labelled Interrupted. */
+  | { type: "interrupted" }
   | { type: "dequeue" }
   | { type: "drop_queued"; index: number }
   | { type: "clear_error" }
@@ -335,6 +339,11 @@ export function reduce(state: ChatState, action: Action): ChatState {
       return {
         ...state, phase: "error", messages: finishLast(state.messages, "error"), pendingApprovals: [],
         error: { code: action.code, message: action.message, retryable: action.retryable },
+      };
+    case "interrupted":
+      return {
+        ...state,
+        messages: state.messages.map((m, i) => (i === state.messages.length - 1 && m.role === "assistant" ? { ...m, interrupted: true } : m)),
       };
     case "dequeue":
       return { ...state, queue: state.queue.slice(1) };

@@ -30,3 +30,14 @@ test("history rows recover usage and ignore malformed counts", () => {
   assert.deepEqual(roundTrip.meta?.tokenUsage, usage);
   assert.equal(c.toMessages([{ seq: 1, role: "assistant", content: "x", meta: null, createdAt: 0 }])[0].usage, undefined);
 });
+
+test("an interrupted reply keeps its marker through the file and the view mapping", () => {
+  const file = c.toFileMessage({ role: "assistant", content: "half a reply", meta: { status: "interrupted", interrupted: true } }, 0);
+  assert.equal(file.status, "done", "the row is a normal done row with an interrupted marker");
+  assert.equal(file.metadata.interrupted, true);
+  const back = c.fromFileMessage(file, 0);
+  assert.equal(back.content, "half a reply");
+  assert.equal(back.meta?.interrupted, true);
+  assert.equal(c.toMessages([back])[0].interrupted, true);
+  assert.equal(c.toMessages([{ seq: 1, role: "assistant", content: "x", meta: null, createdAt: 0 }])[0].interrupted, undefined);
+});
