@@ -263,7 +263,12 @@ HOOK
     chown root:root /etc/letsencrypt/renewal-hooks/deploy/llmide-pin
     [ -f "$STAGING/setup.html" ] && install -m 0644 -o root -g root "$STAGING/setup.html" /var/www/llmide-web/setup.html || true
     backup=""
-    if [ -f "$SITE" ]; then backup="$SITE.bak.$$"; cp -p "$SITE" "$backup"; fi
+    rm -f /etc/nginx/sites-enabled/llm-ide-hub.bak.* 2>/dev/null || true
+    if [ -f "$SITE" ]; then
+      install -d -m 0700 -o root -g root /var/lib/llmide-deploy
+      backup="/var/lib/llmide-deploy/llm-ide-hub.bak.$$"
+      cp -p "$SITE" "$backup"
+    fi
     sed "s/__DOMAIN__/$DOMAIN/g" "$STAGING/llm-ide-hub.nginx" > "$SITE"
     chmod 0644 "$SITE"; chown root:root "$SITE"
     if ! nginx -t; then
