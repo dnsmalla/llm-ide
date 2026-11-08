@@ -129,7 +129,7 @@ export default function ServerSection() {
         </p>
         {host.coreStart || host.coreStop || host.coreRestart ? (
           <div className="st-row">
-            {info?.coreState === "stopped" || info?.coreState === "failed" || !info ? (
+            {!health || info?.coreState === "stopped" || info?.coreState === "failed" || !info ? (
               <Button tone="primary" disabled={coreBusy !== null} onClick={() => void coreAction("start")}>{coreBusy === "start" ? "Starting…" : "Start backend"}</Button>
             ) : (
               <>
