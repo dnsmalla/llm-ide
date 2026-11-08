@@ -207,10 +207,11 @@ function isInterruptedMeta(metaJson) {
 }
 
 /**
- * Drops ONE interrupted assistant reply from a chat's history (U#F5): a retry replaces the partial with the
- * full answer, so the partial must not come back on a reload. Scoped by `userId` AND `sessionId` AND `seq`, so
- * another user's row (or another chat's) can never match, and only a row whose stored meta says it was
- * interrupted can be dropped — a complete reply is refused.
+ * Drops the NEWEST interrupted assistant reply from a chat's history (U#F5): a retry replaces the partial
+ * with the full answer, so the partial must not come back on a reload. Scoped by `userId` AND `sessionId` AND
+ * `seq`, so another user's row (or another chat's) can never match; only a row whose stored meta says it was
+ * interrupted can be dropped — a complete reply is refused — and only when it is the session's `MAX(seq)`,
+ * matching the desktop store's `drop_interrupted` (an older partial the user kept is history, not a retry).
  *
  * Hard delete, not a marker/tombstone: `chat_messages` has no soft-delete column, and every reader (history
  * paging, the archive hash/fence, the pre-archive count) would have to learn to filter a tombstone — a much
@@ -218,7 +219,7 @@ function isInterruptedMeta(metaJson) {
  * the retry's full reply replaces it. Idempotent: an already-gone row answers `already_gone` (the route 200s),
  * while a session this user does not own answers `not_found` (the route 404s).
  *
- * Returns { status: 'deleted' | 'already_gone' | 'not_interrupted' | 'not_found', seq }.
+ * Returns { status: 'deleted' | 'already_gone' | 'not_interrupted' | 'not_latest' | 'not_found', seq }.
  */
 export function deleteChatMessage(userId, sessionId, seq) {
   requireUser(userId);
@@ -235,6 +236,13 @@ export function deleteChatMessage(userId, sessionId, seq) {
     if (row.role !== 'assistant' || !isInterruptedMeta(row.meta_json)) {
       return { status: 'not_interrupted', seq: n };
     }
+    // The desktop store only ever pops its newest row; the core route must agree, or it could drop an
+    // older interrupted partial the user deliberately kept. Checked after `already_gone` so a repeat of
+    // the drop that succeeded stays idempotent (MAX(seq) has moved down since).
+    const newest = lazyPrepare(db, `
+      SELECT MAX(seq) AS seq FROM chat_messages WHERE session_id = ? AND user_id = ?
+    `).get(sid, uid)?.seq;
+    if (newest !== n) return { status: 'not_latest', seq: n };
     const changes = lazyPrepare(db, `
       DELETE FROM chat_messages WHERE session_id = ? AND user_id = ? AND seq = ?
     `).run(sid, uid, n).changes;

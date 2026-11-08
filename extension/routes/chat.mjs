@@ -211,10 +211,11 @@ export async function handleChatRoutes(req, res, ctx) {
     return true;
   }
 
-  // DELETE /kb/chat/sessions/:id/messages/:seq — drop ONE interrupted assistant reply (U#F5). A retry of a
+  // DELETE /kb/chat/sessions/:id/messages/:seq — drop the NEWEST interrupted assistant reply (U#F5). A retry of a
   // dead turn replaces its partial with the full answer, so the partial must not reappear on a reload.
-  // Ownership is the session's (WHERE user_id = ? AND id = ?); only a row whose meta says it was interrupted
-  // can be dropped (409 MESSAGE_NOT_INTERRUPTED otherwise) and a repeat DELETE is a 200 with deleted:false.
+  // Ownership is the session's (WHERE user_id = ? AND id = ?); only the newest row can be dropped, only when
+  // its meta says it was interrupted (409 MESSAGE_NOT_LATEST / MESSAGE_NOT_INTERRUPTED otherwise), and a
+  // repeat DELETE is a 200 with deleted:false.
   const one = /^messages\/([^/]+)$/.exec(sub);
   if (req.method === 'DELETE' && one) {
     const seq = /^\d{1,15}$/.test(one[1]) ? Number(one[1]) : NaN;
@@ -229,6 +230,10 @@ export async function handleChatRoutes(req, res, ctx) {
     }
     if (result.status === 'not_interrupted') {
       sendJSON(res, 409, { error: { code: 'MESSAGE_NOT_INTERRUPTED', message: 'only an interrupted assistant message can be dropped' } });
+      return true;
+    }
+    if (result.status === 'not_latest') {
+      sendJSON(res, 409, { error: { code: 'MESSAGE_NOT_LATEST', message: 'only the newest message can be dropped' } });
       return true;
     }
     sendJSON(res, 200, { deleted: result.status === 'deleted', seq, status: result.status });

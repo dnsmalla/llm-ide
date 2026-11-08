@@ -2274,7 +2274,7 @@
       }
     },
     "DELETE /kb/chat/sessions/:id/messages/:seq": {
-      "description": "Drop ONE interrupted assistant reply (the partial a retried turn replaces, U#F5). Scoped to the caller's session; only a row whose meta says it was interrupted can be removed. A repeat is a 200 with deleted:false (idempotent).",
+      "description": "Drop the newest interrupted assistant reply (the partial a retried turn replaces, U#F5). Scoped to the caller's session; only the newest row, and only when its meta says it was interrupted, can be removed (409 MESSAGE_NOT_INTERRUPTED / MESSAGE_NOT_LATEST otherwise). A repeat is a 200 with deleted:false (idempotent).",
       "request": {
         "params": {
           "type": "object",

@@ -92,9 +92,9 @@ The half reply is not kept beside the retry's answer:
 - **Why no marker/tombstone** — a marker inside the Mac-format file would be a shape the Mac app does not
   read, and this row is the failed turn's partial (replaced by the retry's answer), not history. The same
   reasoning applies to the core's server-held chats: `DELETE /kb/chat/sessions/:id/messages/:seq` (API 127,
-  `kb/chat-sessions.mjs` `deleteChatMessage`) hard-deletes exactly one interrupted assistant row, scoped by
-  the session's `user_id`; a complete reply is refused (`409 MESSAGE_NOT_INTERRUPTED`) and a repeat is a
-  `200 { deleted: false }`.
+  `kb/chat-sessions.mjs` `deleteChatMessage`) hard-deletes the newest interrupted assistant row, scoped by
+  the session's `user_id`; a complete reply is refused (`409 MESSAGE_NOT_INTERRUPTED`), an older
+  interrupted partial is refused (`409 MESSAGE_NOT_LATEST`), and a repeat is a `200 { deleted: false }`.
 
 A retry of a turn that failed with no text (for example an engine error before the first delta) has nothing
 in the file to remove, so the drop is skipped. Tests: `ui/screens/chat/tests/controller.test.mjs`,
