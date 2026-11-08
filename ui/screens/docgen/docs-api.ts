@@ -24,7 +24,7 @@ export async function projectIdFor(root: string, subtle: SubtleCrypto = globalTh
 }
 
 export interface DocsApi {
-  register(signal?: AbortSignal): Promise<void>;
+  register(signal?: AbortSignal): Promise<{ id: string }>;
   templates(signal?: AbortSignal): Promise<Page<DocTemplate>>;
   commands(signal?: AbortSignal): Promise<Page<DocCommand>>;
   putTemplate(folder: string, t: { name: string; sections: string[]; surface: Surface; rawContent?: string; createOnly?: boolean }, signal?: AbortSignal): Promise<DocTemplate>;
@@ -44,7 +44,9 @@ export function createDocsApi(client: DocsClient, projectId: string, projectRoot
   };
   return {
     async register(signal) {
-      decodeRegistered(await client.request("/kb/projects/register", { method: "POST", body: { id: projectId, root: projectRoot }, signal }));
+      // R-021 #4: the server issues a new project's id; report it so the caller can address the project with it.
+      const registered = decodeRegistered(await client.request("/kb/projects/register", { method: "POST", body: { id: projectId, root: projectRoot }, signal }));
+      return { id: registered.id };
     },
     async templates(signal) {
       return decodeTemplates(await client.request(`/kb/docs/templates${q}`, { signal }));

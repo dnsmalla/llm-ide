@@ -166,8 +166,10 @@ export class DocGenStore {
     this.set({ setup: "loading", setupError: null });
     try {
       const id = await (this.deps.idFor ?? projectIdFor)(root);
-      const api = this.deps.makeApi(id, root);
-      await api.register(ctl.signal);
+      let api = this.deps.makeApi(id, root);
+      // R-021 #4: a new project gets a server-issued id; adopt it for every later call on this project.
+      const registered = await api.register(ctl.signal);
+      if (registered.id !== id) api = this.deps.makeApi(registered.id, root);
       // First use of a project: write the kit's default templates and commands (write-if-absent, never overwrites).
       let [t, c] = await Promise.all([api.templates(ctl.signal), api.commands(ctl.signal)]);
       if (my !== this.loadToken) return;

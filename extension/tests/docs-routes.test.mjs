@@ -89,7 +89,7 @@ function makeProject() {
 async function registered(user, root, id = 'proj-1') {
   const res = await call(user, 'POST', '/kb/projects/register', { id, root });
   assert.equal(res.statusCode, 200, res._body);
-  return id;
+  return res.json().id; // R-021 #4: the server issues the id; the client value is ignored
 }
 
 test('register: a marked project is stored and its root is the realpath', async () => {
@@ -108,7 +108,10 @@ test('register: refuses an over-broad root, a missing marker, a bad id and a rel
   try {
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: '/' })).statusCode, 400);
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: bare })).json().error.code, 'INVALID_ROOT');
-    assert.equal((await call(u, 'POST', '/kb/projects/register', { id: '../x', root: makeProject() })).json().error.code, 'INVALID_PROJECT_ID');
+    // R-021 #4: the client's id is ignored (the server issues one), so an odd id no longer fails the request.
+    const odd = await call(u, 'POST', '/kb/projects/register', { id: '../x', root: makeProject() });
+    assert.equal(odd.statusCode, 200);
+    assert.match(odd.json().id, /^[A-Za-z0-9_-]{1,128}$/);
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: 'relative' })).statusCode, 400);
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: os.homedir() })).statusCode, 400);
   } finally {
@@ -331,8 +334,8 @@ test('register cap: 200 projects per user, a re-registration does not count, the
     const db = kb.getDb();
     const insert = db.prepare('INSERT INTO doc_project_roots (user_id, project_id, root) VALUES (?, ?, ?)');
     for (let i = 0; i < 199; i++) insert.run(u, `filler-${i}`, `/nonexistent/${i}`);
-    await registered(u, root, 'real-200');
-    const over = await call(u, 'POST', '/kb/projects/register', { id: 'real-201', root });
+    const id = await registered(u, root, 'real-200');
+    const over = await call(u, 'POST', '/kb/projects/register', { id: 'real-201', root: makeProject() });
     assert.equal(over.statusCode, 409);
     assert.equal(over.json().error.code, 'TOO_MANY_PROJECTS');
     const again = await call(u, 'POST', '/kb/projects/register', { id: 'real-200', root });
@@ -551,10 +554,11 @@ test('R-020 #6: a new project is written through to team.yaml, and a failed writ
   try {
     const ok = await call(u, 'POST', '/kb/projects/register', { id: 'proj-yaml-a', root }, null, dir);
     assert.equal(ok.statusCode, 200, ok._body);
+    const newId = ok.json().id;
     const text = fs.readFileSync(path.join(dir, 'team.yaml'), 'utf8');
     assert.match(text, /projects:/, 'the projects section exists');
-    assert.match(text, /proj-yaml-a:/, 'the new project is in it');
-    assert.match(text, /proj-yaml-a:[\s\S]*?role: owner/, 'with its owner');
+    assert.ok(text.includes(`${newId}:`), 'the new project is in it');
+    assert.match(text, new RegExp(`${newId}:[\\s\\S]*?role: owner`), 'with its owner');
 
     // A corrupt team.yaml makes the write-through fail: the project must not survive.
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-team-yaml-bad-'));
@@ -565,5 +569,30 @@ test('R-020 #6: a new project is written through to team.yaml, and a failed writ
     fs.rmSync(dir2, { recursive: true, force: true });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('R-021 #4: the server issues project ids; a client id cannot be pre-claimed and a root always keeps one id', async () => {
+  reset();
+  const owner = mkUser('id-owner');
+  const other = mkUser('id-other');
+  const root = makeProject();
+  try {
+    const first = await call(owner, 'POST', '/kb/projects/register', { id: 'victim-claim', root });
+    assert.equal(first.statusCode, 200);
+    const id = first.json().id;
+    assert.notEqual(id, 'victim-claim', 'the client id is ignored');
+    assert.match(id, /^[A-Za-z0-9_-]{1,128}$/);
+
+    // The other user opening the same folder gets the SAME project id, not their own claim.
+    const second = await call(other, 'POST', '/kb/projects/register', { id: 'other-claim', root });
+    assert.equal(second.statusCode, 200);
+    assert.equal(second.json().id, id);
+
+    // A second, different root gets a different id.
+    const third = await call(owner, 'POST', '/kb/projects/register', { id: 'third', root: makeProject() });
+    assert.notEqual(third.json().id, id);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

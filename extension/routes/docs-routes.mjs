@@ -20,6 +20,7 @@
 // handleDocsRoutes(req, res, ctx) -> boolean, ctx = { userId, url }.
 
 import nodePath from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { AppError } from '../core/errors.mjs';
 import { config } from '../core/config.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
@@ -32,7 +33,7 @@ import {
 import { SURFACES } from '../kb/doc-templates.mjs';
 import { PROJECT_ID_RE, registerProjectRoot, resolveProjectRoot } from '../kb/project-roots.mjs';
 import { getDb } from '../kb/db.mjs';
-import { canManageProject, getProject, registerProject } from '../kb/projects.mjs';
+import { canManageProject, getProject, projectIdForRoot, registerProject } from '../kb/projects.mjs';
 
 const REGISTER = '/kb/projects/register';
 const DOCS = '/kb/docs/';
@@ -122,11 +123,14 @@ export async function handleDocsRoutes(req, res, ctx) {
     try {
       const body = await objectBody(req);
       if (!body) return invalid(res, 'body must be a JSON object { id, root, name? }');
-      const stored = registerProjectRoot(userId, { id: body.id, root: body.root });
+      // R-021 #4: the SERVER chooses a new project's id (a client-supplied one is ignored, so it cannot be
+      // pre-claimed with another root). A root that is already registered keeps its server-issued id.
+      const db = getDb();
+      const id = projectIdForRoot(db, body.root) ?? randomUUID();
+      const stored = registerProjectRoot(userId, { id, root: body.root });
       // ADR 0022: the per-user Doc Gen map stays as it was; the canonical registry row is team-wide.
       // A viewer opening an existing project may register their own folder mapping but never rewrite
       // the project's root/name; a new project's registrar becomes its project owner.
-      const db = getDb();
       let canonical = getProject(db, stored.id);
       if (!canonical || canManageProject(db, userId, stored.id)) {
         const registered = registerProject(db, userId, { id: stored.id, root: stored.root, name: body.name });

@@ -1,6 +1,7 @@
 // Strict decoders for the core's Doc Gen answers (schema/http/docs.schema.json, notes-generation.schema.json).
 // Unknown or malformed fields are dropped, never trusted: a bad item is skipped rather than failing the list.
 import { MAX_REPORTED_NAMES, type DocCommand, type DocTemplate, type GenerateResult, type Surface } from "./model.ts";
+import { PROJECT_ID_RE } from "./docs-api.ts";
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = 100_000): string => (typeof v === "string" ? v.slice(0, max) : "");
@@ -98,6 +99,12 @@ export function decodeSeed(v: unknown): { written: number } {
   return { written: count(v.count, v.written.length) };
 }
 
-export function decodeRegistered(v: unknown): void {
+export function decodeRegistered(v: unknown): { id: string; root: string | null; name: string | null } {
   if (!isRecord(v)) throw new DecodeError("register answer");
+  if (typeof v.id !== "string" || !PROJECT_ID_RE.test(v.id)) throw new DecodeError("register answer: id");
+  return {
+    id: v.id,
+    root: typeof v.root === "string" ? v.root : null,
+    name: typeof v.name === "string" ? v.name : null,
+  };
 }
