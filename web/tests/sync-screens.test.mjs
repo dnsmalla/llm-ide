@@ -55,6 +55,12 @@ test('ready: last seen, stale and offline banners, chats (phone chat openable), 
   assert.match(out, /read-only/);
 });
 
+test('a truncated snapshot says only the most recent items are on this device', () => {
+  const truncated = { ...snap, kinds: { ...snap.kinds, meetings: { ...snap.kinds.meetings, truncated: true } } };
+  assert.match(view({ snapshot: truncated }), /Only the most recent items are on this device\./);
+  assert.doesNotMatch(view({ snapshot: snap }), /Only the most recent items/);
+});
+
 test('queued and answered prompts render as text; error codes read as sentences', () => {
   const out = view({ snapshot: snap, pending: [{ requestId: 'r1', issuedAt: 1, text: '<b>q</b>' }],
     answered: [{ requestId: 'r2', issuedAt: 1, text: null, ok: true, reply: '<img src=x onerror=alert(1)>', code: null },

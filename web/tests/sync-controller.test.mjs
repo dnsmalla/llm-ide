@@ -112,6 +112,25 @@ test('queue a prompt, the desktop answers, the answer appears and the queue empt
   assert.match(r.c.getState().error, /already waiting/);
 });
 
+test('a queued prompt older than the desktop\'s 7 days is shown as expired', async () => {
+  const r = await ready();
+  assert.equal(await r.c.send('still there?'), true);
+  r.clock += 7 * 86_400_000 + 1;
+  await r.c.refresh();
+  const s = r.c.getState();
+  assert.deepEqual(s.pending, []);
+  const a = s.answered.find((x) => x.text === 'still there?');
+  assert.equal(a?.ok, false);
+  assert.equal(a?.code, 'expired');
+});
+
+test('a truncated frame decodes with truncated true', async () => {
+  const r = await ready();
+  await r.desk.publish(r.dev, { ...kinds(), meetings: { truncated: true, items: [] } }, r.clock);
+  await r.c.refresh();
+  assert.equal(r.c.getState().snapshot.kinds.meetings.truncated, true);
+});
+
 test('offline stops polling; online refreshes at once; pause (desktop live) and resume', async () => {
   const r = await ready();
   r.net[0](false);
