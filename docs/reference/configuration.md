@@ -11,7 +11,7 @@ at the bottom to pick where it lives.
 
 ## UI preferences (macOS)
 
-Owned by `AppConfig` (`mac/Sources/LlmIdeMac/Core/Platform/Config.swift`) and
+Owned by the core (`extension/core/config.mjs`) and the desktop host (`desktop/src-tauri/src/`) and
 written through `UserDefaults`. `@Published` for SwiftUI binding.
 
 | Setting | Store | Default | Notes |
@@ -123,7 +123,7 @@ JS code.
 | `LLMIDE_SIGN_TIMESTAMP` | shell env | `0` | `1` makes `sign.sh` request a secure timestamp (needed for notarization). Automatic for a `Developer ID Application:` identity; `release.sh` always sets it. Off for ad-hoc and local dev certs. |
 | `LLMIDE_NOTARY_PROFILE` | shell env | unset | Keychain profile name for `xcrun notarytool`. Notarize step skips if unset. |
 
-See `mac/Scripts/` for the per-phase build scripts.
+See `scripts/` for the per-phase build scripts.
 
 ## Where does this go?
 

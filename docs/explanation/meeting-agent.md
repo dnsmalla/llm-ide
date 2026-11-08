@@ -190,7 +190,9 @@ Key design choices:
   user captions and agent-question rows (the latter styled via the
   `source="agent-question"` field).
 
-### Desktop (originally `mac/`)
+### Desktop
+
+(The first desktop surface was the Mac app, since removed; the Tauri desktop uses the same routes.)
 
 - The transcript view polls the same `/kb/live/:sessionId?since=N` and
   renders agent-question rows with a distinct color/icon.

@@ -14,6 +14,9 @@ is only trusted once the runs below are green.
 | `codeql` | ubuntu-latest | code scanning | 3-5 min |
 | `skills-drift` | ubuntu-latest | the central skills submodule is installed and unchanged | 10 s |
 
+`desktop-release` (tag-only) installs and launches the packaged app on macOS, Windows and Linux; it is not on
+`main` pushes because it builds full bundles.
+
 `make regression` is the same command the pre-push hook runs locally; it needs
 the Xcode toolchain (graph-kit is Swift), which is why its CI job is macOS.
 Broad changes that touch only one surface still run the fast job for that

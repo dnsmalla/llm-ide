@@ -1,6 +1,6 @@
 ---
 title: Project folder layout
-source: mac/Sources/LlmIdeMac/Core/Project/ProjectLayout.swift
+source: docs/reference/project-structure.md and the repository tree
 ---
 
 # Project folder layout

@@ -133,8 +133,8 @@ description says to start.
   git access, PTY), `ui/screens/` holds one folder per section (shared
   with the web app) and `ui/kit/` the shared React components and
   tokens. Start at `desktop/src-tauri/src/lib.rs` and
-  `ui/screens/shell/Shell.tsx`. (The SwiftUI Mac app under `mac/` was
-  removed on 2026-11-06; it is in git history.)
+  `ui/screens/shell/Shell.tsx`. (The SwiftUI Mac app under `mac/` was removed
+  on 2026-11-06; it is in git history.)
 - **`web/`** — the browser app (Host API v1 pairing and encrypted sync).
 - **`ios_app/`** — the iPhone app and its wire types (`SharedProtocol`).
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user

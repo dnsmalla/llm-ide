@@ -83,6 +83,21 @@ gh workflow run desktop-release.yml -f signed=true -f windows_signed=true   # al
 An unsigned dry run makes no `latest.json` and no updater signatures. Only signed runs make them.
 Watch it with `gh run watch`. Files are in the run's artifacts.
 
+### Packaged smoke (tag-only)
+
+Every `desktop-release.yml` run installs the packaged app and launches it once (`smoke-app.mjs` starts the app,
+waits for the bundled core's `/health`, then exits; it also verifies the installed core files). That job is
+tag-only (`v*`) or manual — never a normal `main` push, because it builds four full bundles. The same checks run
+locally against a built bundle:
+
+```bash
+node desktop/scripts/smoke-core.mjs                    # the staged core answers /health
+node desktop/scripts/smoke-app.mjs <path-to-installed-binary>
+```
+
+The Linux AppImage path uses `APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node desktop/scripts/smoke-app.mjs <app>`.
+A failure here means the package, not the source tree, is broken — do not publish it.
+
 ## 4. Cut a release
 
 1. Set the version `X.Y.Z` in both `desktop/src-tauri/tauri.conf.json` (`version`) and
