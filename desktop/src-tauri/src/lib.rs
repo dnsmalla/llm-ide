@@ -547,19 +547,21 @@ pub fn run() {
             // keychain secrets and the DB. (Benches opt out and run on a temp setup.)
             if autobench_env().is_none() {
                 if let Ok(dir) = fsutil::desktop_data_dir() {
-                    // A data folder whose parent is gone is reported when the core starts (the message names the
-                    // path); the app window still opens so the user can change the location in Settings.
-                    match fsutil::private_dir(&dir) {
-                        Ok(dir) => match fsutil::acquire_instance_lock(&dir) {
-                            Ok(lock) => {
-                                let _ = INSTANCE_LOCK.set(lock);
-                            }
-                            Err(e) => {
-                                eprintln!("{e}; exiting");
-                                return Err(e.into());
-                            }
-                        },
-                        Err(e) => eprintln!("{e}"),
+                    // A configured data root on a drive that is gone is a startup error, not a fresh install on
+                    // another disk. Failing here (instead of skipping the lock silently) keeps the message visible.
+                    if let Err(e) = fsutil::data_root_available(&dir) {
+                        eprintln!("{e}");
+                        return Err(e.into());
+                    }
+                    let dir = fsutil::private_dir(&dir)?;
+                    match fsutil::acquire_instance_lock(&dir) {
+                        Ok(lock) => {
+                            let _ = INSTANCE_LOCK.set(lock);
+                        }
+                        Err(e) => {
+                            eprintln!("{e}; exiting");
+                            return Err(e.into());
+                        }
                     }
                 }
             }

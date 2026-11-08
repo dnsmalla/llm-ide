@@ -99,24 +99,36 @@ pub fn data_dir_for(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Result<Path
     Ok(base.join(DATA_DIR_NAME))
 }
 
-/// A resolved app data dir, refused when its PARENT is gone: a configured folder on an unplugged drive (or a
-/// deleted one) is unavailable, and silently recreating the chain on another disk would look like a fresh install.
-/// The default location's parent (Application Support, LOCALAPPDATA, XDG_DATA_HOME) always exists.
-fn checked_data_dir(dir: PathBuf) -> Result<PathBuf, String> {
-    if let Some(parent) = dir.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
+/// The data dir for this machine and process environment. `private_dir` creates it (and a missing default base).
+pub fn desktop_data_dir() -> Result<PathBuf, String> {
+    data_dir_for(current_os(), &|k| std::env::var(k).ok())
+}
+
+fn data_dir_is_explicit() -> bool {
+    std::env::var("LLMIDE_DESKTOP_DATA_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false)
+}
+
+/// Whether the CONFIGURED app data root can be used. Only an EXPLICIT `LLMIDE_DESKTOP_DATA_DIR` is strict: a folder
+/// whose parent is gone (an unplugged drive, a deleted folder) is unavailable and must not be recreated on another
+/// disk, which would look like a fresh install. The platform default keeps its historical behaviour: its base
+/// (Application Support / LOCALAPPDATA / XDG_DATA_HOME, e.g. a missing `~/.local/share`) is created.
+/// This is for the data ROOT only — `private_dir` still creates nested folders under an existing root.
+pub fn data_root_available(dir: &Path) -> Result<(), String> {
+    data_root_available_for(dir, data_dir_is_explicit())
+}
+
+fn data_root_available_for(dir: &Path, explicit: bool) -> Result<(), String> {
+    let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) else { return Ok(()) };
+    if explicit {
+        if !parent.exists() {
             return Err(format!(
                 "Your data folder is not available: {}. Reconnect the drive or change the location in Settings.",
                 dir.display()
             ));
         }
+        return Ok(());
     }
-    Ok(dir)
-}
-
-/// The data dir for this machine and process environment.
-pub fn desktop_data_dir() -> Result<PathBuf, String> {
-    checked_data_dir(data_dir_for(current_os(), &|k| std::env::var(k).ok())?)
+    std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))
 }
 
 /// Holds the single-instance lock for the life of the process (drop releases it).
@@ -331,17 +343,35 @@ mod tests {
     }
 
     #[test]
-    fn the_app_data_dir_refuses_a_missing_parent_instead_of_creating_it() {
+    fn the_explicit_data_root_refuses_a_missing_parent_instead_of_creating_it() {
         let root = std::env::temp_dir().join(format!("llmide-fsutil-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let target = root.join("gone").join("llmide-desktop");
-        let err = checked_data_dir(target.clone()).unwrap_err();
+        let err = data_root_available_for(&target, true).unwrap_err();
         assert!(err.contains("Your data folder is not available"), "{err}");
         assert!(err.contains("Reconnect the drive or change the location in Settings."), "{err}");
         assert!(!root.join("gone").exists(), "nothing was created");
         std::fs::create_dir_all(&root).unwrap();
-        let existing = root.join("llmide-desktop");
-        assert_eq!(checked_data_dir(existing.clone()).unwrap(), existing, "an existing parent is fine");
+        assert!(data_root_available_for(&root.join("llmide-desktop"), true).is_ok(), "an existing parent is fine");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn private_dir_still_creates_a_nested_chain_under_a_new_parent() {
+        let root = std::env::temp_dir().join(format!("llmide-fsutil-nested-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let made = private_dir(&root.join("a").join("b").join("c")).unwrap();
+        assert!(made.is_dir(), "nested creation is unchanged");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_default_data_root_creates_its_missing_base() {
+        let root = std::env::temp_dir().join(format!("llmide-fsutil-default-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("share").join("llmide-desktop");
+        assert!(data_root_available_for(&dir, false).is_ok());
+        assert!(root.join("share").is_dir(), "the platform base was created");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
