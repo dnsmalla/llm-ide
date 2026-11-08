@@ -23,7 +23,7 @@ const {
   PROJECT_ROLE_ORDER, computeProjectGrant, tighterMode, tighterUsdCap, projectPermissions,
   canManageProjectGrant, registerProject, getProject, getProjectMember, effectiveProjectGrant,
   canManageProject, listProjectsForUser, listProjectMembers, setProjectMember,
-  addProjectMemberByEmail, removeProjectMember, listProjectAssignmentRows,
+  addProjectMemberByEmail, removeProjectMember, listProjectAssignmentRows, projectIdForRoot,
 } = projects;
 
 after(() => {
@@ -283,4 +283,13 @@ test('migration 0070 adds the registry, membership and usage project columns', (
   for (const col of ['user_id', 'project_id', 'role', 'max_mode', 'usd_cap_month', 'granted_by']) {
     assert.ok(memberCols.includes(col), col);
   }
+});
+
+test('a turn can inherit the registered project from its canonical root', () => {
+  const owner = user('root@example.com', 'owner');
+  registerProject(db(), owner, { id: 'p-root', name: 'Root', root: '/work/root' });
+  assert.equal(projectIdForRoot(db(), '/work/root'), 'p-root');
+  assert.equal(projectIdForRoot(db(), '/work/other'), null);
+  assert.equal(projectIdForRoot(db(), ''), null);
+  assert.equal(projectIdForRoot(db(), null), null);
 });

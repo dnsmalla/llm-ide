@@ -140,6 +140,13 @@ export function requireProject(db, projectId) {
   return project;
 }
 
+/** The registered project whose canonical root is this folder, or null. Lets a turn inherit the project
+ *  from the desktop's workspaceRoot without a client change. */
+export function projectIdForRoot(db, root) {
+  if (typeof root !== 'string' || root.length === 0 || root.length > MAX_PROJECT_ROOT) return null;
+  return db.prepare('SELECT id FROM projects WHERE root = ? ORDER BY updated_at DESC, id LIMIT 1').get(root)?.id ?? null;
+}
+
 /** Every registered project, newest name order. Team-wide: the install has one registry. */
 export function listProjects(db) {
   return db.prepare('SELECT id, name, created_at FROM projects ORDER BY name, id').all();
