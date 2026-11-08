@@ -23,7 +23,7 @@ import { logger } from '../core/logger.mjs';
 import { resolveClaudeExecutable, CLAUDE_INSTALL_MESSAGE } from './claude-path.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { Semaphore } from '../core/semaphore.mjs';
-import { recordUsage, flagQuota, recordRateLimits, resolveModel as resolveUsageModel, noteUnmeteredModelCall } from '../kb/usage.mjs';
+import { recordUsage, estimateTurnCostUsd, flagQuota, recordRateLimits, resolveModel as resolveUsageModel, noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { isWarmCliEnabled, spawnWithWarm } from './warm-cli-pool.mjs';
@@ -403,11 +403,16 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
       // Best-effort usage metering — never let a ledger write break the call.
       if (meter?.userId) {
         try {
+          // One-shot calls (notes, plans, summaries, email classify) meter tokens only; the member's
+          // monthly USD cap sums `cost_usd`, so price the usage here (F4). No token counts → unknown, null.
+          const spent = usage && [usage.inputTokens, usage.outputTokens, usage.cacheReadTokens, usage.cacheCreationTokens]
+            .some((n) => Number(n) > 0);
           recordUsage(getDb(), {
             userId: meter.userId, provider, model, source: 'api', endpoint: meter.endpoint,
             inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens,
             cacheReadTokens: usage?.cacheReadTokens, cacheCreationTokens: usage?.cacheCreationTokens,
             requestId: meter.requestId,
+            costUsd: spent ? estimateTurnCostUsd(model, usage) : null,
           });
         } catch { /* ignore */ }
         try { if (headers) recordRateLimits(meter.userId, { provider, model, headers }); } catch { /* ignore */ }

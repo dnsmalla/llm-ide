@@ -29,8 +29,9 @@ test('returns the reply text, sends no tools, meters the call under the connecti
   const out = await completeViaAdapter(s.provider, { userId: s.a, model: 'deepseek-chat', prompt: 'summarise', meter: { userId: s.a, endpoint: '/generate-notes' }, deps: { db: s.db, modelFor: () => model } });
   assert.equal(out, 'the summary');
   assert.ok(!model.doStreamCalls[0].tools?.length, 'a completion never offers tools');
-  const row = s.db.prepare('SELECT provider, model, endpoint, input_tokens, output_tokens FROM usage_ledger WHERE user_id=?').get(s.a);
-  assert.deepEqual({ ...row }, { provider: s.provider, model: 'deepseek-chat', endpoint: '/generate-notes', input_tokens: 12, output_tokens: 3 });
+  const row = s.db.prepare('SELECT provider, model, endpoint, input_tokens, output_tokens, cost_usd FROM usage_ledger WHERE user_id=?').get(s.a);
+  assert.deepEqual({ ...row, cost_usd: row.cost_usd > 0 }, { provider: s.provider, model: 'deepseek-chat', endpoint: '/generate-notes', input_tokens: 12, output_tokens: 3, cost_usd: true },
+    'a one-shot call carries a USD cost so the member monthly cap counts it');
 });
 
 test('a connection that is missing, another user\'s, or keyless is PROVIDER_UNAVAILABLE', async () => {

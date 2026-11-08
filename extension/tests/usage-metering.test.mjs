@@ -110,3 +110,19 @@ test('completeViaApi reactively falls back to the next model on a 429 quota erro
   // gpt-4o was flagged exhausted; usage recorded against the fallback model.
   assert.equal(usage.usedForModel(db.getDb(), userId, 'openai', 'gpt-4o-mini', 'runs', 'daily'), 1);
 });
+
+test('a one-shot provider call stores its USD cost, so it counts toward the monthly cap', async () => {
+  const userId = freshUser();
+  vault.setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-openai-test');
+  const restore = mockFetch(async () => ({
+    ok: true, status: 200, headers: new Map(),
+    json: async () => ({ choices: [{ message: { content: 'counted' } }], usage: { prompt_tokens: 1000, completion_tokens: 100 } }),
+    text: async () => '{}',
+  }));
+  try {
+    assert.equal(await runClaude('hi', { userId, model: 'gpt-4o' }), 'counted');
+  } finally { restore(); }
+  const row = db.getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE user_id = ?').get(userId);
+  assert.ok(row.cost_usd > 0, 'the ledger row carries the estimated cost, not NULL');
+  assert.equal(usage.usedUsdMonth(db.getDb(), userId), row.cost_usd);
+});

@@ -9,7 +9,7 @@
 // code PROVIDER_UNAVAILABLE (the envelope /kb/complete and /code-assist map to a 400).
 
 import { getDb } from '../kb/db.mjs';
-import { recordUsage, flagQuota, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
+import { recordUsage, estimateTurnCostUsd, flagQuota, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { resolveCustomProviderDispatch } from './providers.mjs';
 import { createChatModel, runToolTurn } from './adapter/index.mjs';
@@ -75,7 +75,9 @@ export async function completeViaAdapter(provider, { userId, model, prompt, maxT
     if (meter?.userId || userId) {
       try {
         if (totals.inputTokens || totals.outputTokens) {
-          recordUsage(db, { userId, provider, model: modelId, source: 'api', endpoint: meter?.endpoint, requestId: meter?.requestId, ...totals });
+          // Same as the HTTP path: price the tokens so a one-shot call counts toward the monthly USD cap (F4).
+          recordUsage(db, { userId, provider, model: modelId, source: 'api', endpoint: meter?.endpoint, requestId: meter?.requestId,
+            costUsd: estimateTurnCostUsd(modelId, totals), ...totals });
         }
         if (headers) recordRateLimits(userId, { provider, model: modelId, headers });
       } catch { /* best effort */ }
