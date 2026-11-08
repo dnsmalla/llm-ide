@@ -20,7 +20,7 @@ const { getDb } = await import('../kb/db.mjs');
 const { registerProject } = await import('../kb/projects.mjs');
 const { grant } = await import('./helpers/grant.mjs');
 const chats = await import('../kb/chat-sessions.mjs');
-const { setQuickChatId } = await import('../kb/host-api-devices.mjs');
+const { getQuickChatId, setQuickChatId } = await import('../kb/host-api-devices.mjs');
 const { createGateway } = await import('../routes/host-api/gateway.mjs');
 
 after(() => {
@@ -193,6 +193,22 @@ test('hub: a project-scoped Host API command without projectId is refused PROJEC
   await flush();
   assert.equal(g.turns.length, 1);
   assert.equal(g.turns[0].projectId, 'p-alpha');
+});
+
+test('a stale or cross-project current-chat pointer is refused, so a turn never writes into another project', async () => {
+  const g = gatewayFor(owner);
+  await g.open();
+  const beta = chats.createChatSession(owner, { title: 'Phone chat', surface: 'any', mode: 'agent', projectId: 'p-beta' });
+  // A corrupt/stale pointer: alpha's slot names beta's session.
+  setQuickChatId(owner, beta.id, 'p-alpha');
+  assert.equal(getQuickChatId(owner, 'p-alpha'), null, 'the store refuses a pointer to another project');
+
+  await g.ask('c-send', 'chat.send', { projectId: 'p-alpha', text: 'go' });
+  await flush();
+  assert.notEqual(g.turns.at(-1).chatSessionId, beta.id);
+  const made = chats.getChatSession(owner, g.turns.at(-1).chatSessionId);
+  assert.equal(made.projectId, 'p-alpha');
+  assert.deepEqual(chats.getChatSession(owner, beta.id).messages, [], 'beta was not written through');
 });
 
 test('unassigned project member is a viewer: Ask only, and the list is still scoped', async () => {

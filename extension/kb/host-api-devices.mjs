@@ -69,10 +69,19 @@ export function listDevices(userId) {
 // One current Host API chat per (user, project). No project means the legacy/global chat, stored under
 // project_id '' (migration 0074); `host_api_quick_chat` is the pre-0074 pointer and is only read by the
 // migration that copies it.
+// The pointer is valid only while its session still exists AND belongs to the same project. A stale or
+// cross-project row reads as absent, so a turn creates a chat in the frame's project instead of writing
+// history into another project's session (API 128 PROJECT_MISMATCH).
 export function getQuickChatId(userId, projectId = null) {
   requireUser(userId);
-  return getDb().prepare('SELECT chat_session_id FROM host_api_project_chat WHERE user_id = ? AND project_id = ?')
-    .get(userId, projectId || '')?.chat_session_id ?? null;
+  const pid = projectId || '';
+  return getDb().prepare(`
+    SELECT q.chat_session_id
+      FROM host_api_project_chat q
+      JOIN chat_sessions s ON s.id = q.chat_session_id AND s.user_id = q.user_id
+     WHERE q.user_id = ? AND q.project_id = ?
+       AND ((? = '' AND s.project_id IS NULL) OR s.project_id = ?)
+  `).get(userId, pid, pid, pid)?.chat_session_id ?? null;
 }
 
 export function setQuickChatId(userId, chatSessionId, projectId = null) {
