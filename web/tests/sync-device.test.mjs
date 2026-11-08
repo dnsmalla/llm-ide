@@ -138,3 +138,14 @@ test('nothing in storage is plaintext: no device name, prompt or snapshot text i
     assert.ok(!Buffer.from(bytes).includes(Buffer.from('sync@example.com')), `MEGA email in ${path}`);
   }
 });
+
+test('C5: a manifest more than 7 days past validUntil is refused as stale_manifest', async () => {
+  const { store, desk, dev, d } = await linked();
+  const m = await desk.publish(dev, kinds(), T + 3000);
+  // Within the 7-day grace it still reads (stale, but usable).
+  const late = m.validUntil + 6 * 86_400_000;
+  const ok = await readSnapshot(store, d, late);
+  assert.ok(ok, 'a manifest inside the grace window still reads');
+  const tooLate = m.validUntil + 8 * 86_400_000;
+  await assert.rejects(readSnapshot(store, d, tooLate), (e) => e.code === 'stale_manifest');
+});

@@ -104,6 +104,9 @@ async function readNewerWrap(store: DeviceStore, d: LinkedDevice, now: number): 
   return true;
 }
 
+/** C5: a manifest more than this far past `validUntil` is not merely stale — its keys may have rotated. */
+export const STALE_MANIFEST_MS = 7 * 86_400_000;
+
 /** Design 4.3: manifest (rollback-checked, epoch-checked), then each named blob by its SHA-256, then its envelope. */
 export async function readSnapshot(store: DeviceStore, d: LinkedDevice, now: number, cache: BlobCache = new Map()): Promise<Snapshot | null> {
   const raw = await store.get(`${base(d)}/manifest.bin`);
@@ -121,6 +124,7 @@ export async function readSnapshot(store: DeviceStore, d: LinkedDevice, now: num
   if (!exactKeys(m, ["v", "manifestSeq", "epoch", "generatedAt", "validUntil", "kinds"]) || m.v !== 1 || m.epoch !== d.epoch || m.manifestSeq !== env.seq
     || ![m.manifestSeq, m.generatedAt, m.validUntil].every(safeInt) || !m.kinds || typeof m.kinds !== "object" || Array.isArray(m.kinds)) fail("bad_manifest");
   if (m.manifestSeq < d.manifestSeq) fail("rollback");
+  if (m.validUntil + STALE_MANIFEST_MS < now) fail("stale_manifest");
   const kinds: Record<string, unknown> = {};
   const keep = new Set<string>();
   for (const [kind, e] of Object.entries(m.kinds as Record<string, any>)) {
