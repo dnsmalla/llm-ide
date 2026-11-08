@@ -36,6 +36,7 @@
     ],
     "rotationPending": false,
     "lastPublishAt": null,
-    "lastError": null
+    "lastError": null,
+    "passwordChangedAt": null
   }
 }

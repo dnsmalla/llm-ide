@@ -124,6 +124,9 @@ export function pollEnrollSerially(client: CoreClient, onPoll: (p: EnrollPoll) =
 }
 export const cancelEnroll = async (client: CoreClient) => { await call(client, "POST", "/kb/sync/devices/enroll/cancel", {}); };
 export const revokeSyncDevice = async (client: CoreClient, deviceId: string) => decodeSyncStatus(await call(client, "DELETE", `/kb/sync/devices/${encodeURIComponent(deviceId)}`));
+
+/** C5: record that the storage password was changed after a revoke (the Settings reminder's Done). */
+export const markSyncPasswordChanged = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/password-changed", {}));
 export const rotateSyncKeys = async (client: CoreClient) => decodeSyncStatus(await call(client, "POST", "/kb/sync/rotate", {}));
 
 export const STORE_CHOICES: ReadonlyArray<{ kind: StoreKind; label: string; built: boolean }> = [

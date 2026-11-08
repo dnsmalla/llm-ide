@@ -5,7 +5,7 @@ import { config } from '../../core/config.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret, setSecret } from '../../server/vault.mjs';
-import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice } from '../../kb/sync-state.mjs';
+import { getSyncState, ensureSyncState, setSyncEnabled, listSyncDevices, resetSyncPublish, deleteSyncDevice, markPasswordChanged } from '../../kb/sync-state.mjs';
 import { DEFAULT_SFTP_ROOT, DEFAULT_SFTP_USER, DEFAULT_WEB_HOST, generateSyncSshKey, parseHostFingerprint, validateSftpConfig } from '../../connectors/sync-store/sftp.mjs';
 import { DEFAULT_MEGA_FOLDER, maskEmail, validateMegaConfig } from '../../connectors/sync-store/mega.mjs';
 import { DEFAULT_BOX_FOLDER, validateBoxConfig } from '../../connectors/sync-store/box.mjs';
@@ -39,13 +39,14 @@ export function isSyncRoute(url) {
 
 function status(userId) {
   const s = getSyncState(userId);
-  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], rotationPending: false, lastPublishAt: null, lastError: null };
+  if (!s) return { configured: false, enabled: false, storeKind: null, store: null, syncId: null, epoch: null, signingFingerprint: null, devices: [], rotationPending: false, lastPublishAt: null, lastError: null, passwordChangedAt: null };
   return {
     configured: true, enabled: s.enabled, storeKind: s.storeKind,
     store: s.storeKind === 'mega' ? { folder: s.storeConfig.folder ?? DEFAULT_MEGA_FOLDER, account: maskEmail(getSecret(getDb(), userId, 'sync.megaEmail')) } : s.storeKind === 'sftp' ? sftpView(s.storeConfig) : s.storeKind === 'box' ? { folder: s.storeConfig.folder ?? DEFAULT_BOX_FOLDER, account: s.storeConfig.account ?? '' } : null,
     syncId: s.syncId, epoch: s.epoch, signingFingerprint: existingSigningFingerprint(userId),
     devices: listSyncDevices(userId).map((d) => ({ deviceId: d.deviceId, name: d.name, tier: d.tier, addedAt: d.addedAt, folderHint: d.dir.slice(0, 6) })),
     rotationPending: rotationPending(userId), lastPublishAt: s.lastPublishAt, lastError: s.lastError,
+    passwordChangedAt: s.passwordChangedAt ?? null,
   };
 }
 
@@ -143,6 +144,14 @@ export async function handleSyncRoute(req, res, { deps = {}, env = process.env }
       if (!getSyncState(userId)) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
       setSyncEnabled(userId, b.enabled);
       if (!b.enabled) await dropStore(userId);
+      send(res, 200, status(userId)); return true;
+    }
+    if (req.method === 'POST' && path === '/kb/sync/password-changed') {
+      const b = await readJson(req, 1024);
+      if (!getSyncState(userId)) return fail(res, 409, 'SYNC_NOT_SET_UP', 'Set up a sync store first');
+      const at = b.changedAt === undefined ? Date.now() : Number(b.changedAt);
+      if (!Number.isFinite(at) || at < 0) return fail(res, 400, 'VALIDATION_FAILED', 'changedAt must be a Unix ms timestamp', { field: 'changedAt' });
+      markPasswordChanged(userId, at);
       send(res, 200, status(userId)); return true;
     }
     if (req.method === 'POST' && (path === '/kb/sync/test' || path === '/kb/sync/publish')) {

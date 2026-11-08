@@ -23,7 +23,8 @@
     ],
     "lastPublishAt": null,
     "lastError": null,
-    "rotationPending": false
+    "rotationPending": false,
+    "passwordChangedAt": null
   },
   "request": {
     "body": {

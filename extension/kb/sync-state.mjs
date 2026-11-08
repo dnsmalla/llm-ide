@@ -7,6 +7,7 @@ const parse = (t) => { try { const v = JSON.parse(t); return v && typeof v === '
 const rowToState = (r) => r && ({
   syncId: r.sync_id, enabled: r.enabled === 1, storeKind: r.store_kind, storeConfig: parse(r.store_config),
   epoch: r.epoch, seq: r.seq, lastPublishAt: r.last_publish_at ?? null, lastError: r.last_error ?? null,
+  passwordChangedAt: r.password_changed_at ?? null,
 });
 
 export function getSyncState(userId) {
@@ -21,6 +22,12 @@ export function ensureSyncState(userId, { storeKind, storeConfig }) {
               ON CONFLICT(user_id) DO UPDATE SET store_kind = excluded.store_kind, store_config = excluded.store_config`)
     .run(userId, randomBytes(16).toString('base64url'), storeKind, JSON.stringify(storeConfig ?? {}));
   return getSyncState(userId);
+}
+
+/** Record that the storage password was changed after a revoke (C5); the Settings reminder reads it back. */
+export function markPasswordChanged(userId, at = Date.now()) {
+  requireUser(userId);
+  getDb().prepare('UPDATE sync_state SET password_changed_at = ? WHERE user_id = ?').run(Number(at) || Date.now(), userId);
 }
 
 export function setSyncEnabled(userId, enabled) {

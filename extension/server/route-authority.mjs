@@ -527,6 +527,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/sync/devices/enroll/confirm',
     '/kb/sync/devices/enroll/poll',
     '/kb/sync/enabled',
+    '/kb/sync/password-changed',
     '/kb/sync/mega',
     '/kb/sync/publish',
     '/kb/sync/rotate',

@@ -582,6 +582,7 @@ const ALL_ENDPOINTS = [
   '/kb/sync/box/start',
   '/kb/sync/test',
   '/kb/sync/enabled',
+  '/kb/sync/password-changed',
   '/kb/sync/publish',
   '/kb/sync/devices/enroll',
   '/kb/sync/devices/enroll/poll',

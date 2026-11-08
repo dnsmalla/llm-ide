@@ -2189,6 +2189,7 @@ export type EncryptedSyncStatus = {
   /** an error code only */
   lastError?: string | null;
   rotationPending?: boolean;
+  passwordChangedAt?: number | null;
 };
 
 export type TeamMember = {
@@ -8747,6 +8748,15 @@ export type GetKbSyncBoxCallbackRequest = {
 
 export type GetKbSyncBoxCallbackResponse200 = string;
 
+/** Request parts for `POST /kb/sync/password-changed` (schema/http/sync.schema.json). */
+export type PostKbSyncPasswordChangedRequest = {
+  body: {
+    changedAt?: number;
+  };
+};
+
+export type PostKbSyncPasswordChangedResponse200 = EncryptedSyncStatus;
+
 /** Request parts for `GET /admin/members` (schema/http/team.schema.json). */
 export type GetAdminMembersRequest = Record<string, never>;
 
@@ -11428,6 +11438,12 @@ export interface ApiEndpoints {
     request: GetKbSyncBoxCallbackRequest;
     responses: {
       200: GetKbSyncBoxCallbackResponse200;
+    };
+  };
+  "POST /kb/sync/password-changed": {
+    request: PostKbSyncPasswordChangedRequest;
+    responses: {
+      200: PostKbSyncPasswordChangedResponse200;
     };
   };
   "GET /admin/members": {

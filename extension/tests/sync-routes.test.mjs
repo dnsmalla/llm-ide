@@ -254,3 +254,17 @@ test('a setup failure records one sync_attention activity row with no account or
   assert.equal(rows.length, 1);
   assert.equal(rows[0].title, 'Sync was turned off and needs your attention in Settings');
 });
+
+test('C5: the password-changed reminder is recorded and read back in the status', async () => {
+  const u = user();
+  assert.equal((await call('POST', '/kb/sync/password-changed', { userId: u, body: {} })).status, 409, 'needs a configured store');
+  await call('POST', '/kb/sync/mega', { userId: u, body: MEGA });
+  const before = await call('GET', '/kb/sync/status', { userId: u });
+  assert.equal(before.body.passwordChangedAt, null);
+  const at = Date.now() - 1000;
+  const done = await call('POST', '/kb/sync/password-changed', { userId: u, body: { changedAt: at } });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.passwordChangedAt, at);
+  assert.equal((await call('GET', '/kb/sync/status', { userId: u })).body.passwordChangedAt, at);
+  assert.equal((await call('POST', '/kb/sync/password-changed', { userId: u, body: { changedAt: 'nope' } })).status, 400);
+});

@@ -82,6 +82,12 @@
         },
         "rotationPending": {
           "type": "boolean"
+        },
+        "passwordChangedAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     }
@@ -427,6 +433,23 @@
         "200": {
           "x-content": "text",
           "type": "string"
+        }
+      }
+    },
+    "POST /kb/sync/password-changed": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "changedAt": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/EncryptedSyncStatus"
         }
       }
     }

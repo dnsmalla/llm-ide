@@ -15576,6 +15576,26 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/EncryptedSyncStatus"
+  /kb/sync/password-changed:
+    post:
+      tags:
+        - "sync"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                changedAt:
+                  type: "integer"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EncryptedSyncStatus"
   /kb/sync/publish:
     post:
       tags:
@@ -18650,6 +18670,10 @@ components:
           description: "an error code only"
         rotationPending:
           type: "boolean"
+        passwordChangedAt:
+          type:
+            - "integer"
+            - "null"
     Entity:
       type: "object"
       required:

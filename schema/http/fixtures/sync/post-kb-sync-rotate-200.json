@@ -23,6 +23,7 @@
     ],
     "rotationPending": false,
     "lastPublishAt": 1762300000000,
-    "lastError": null
+    "lastError": null,
+    "passwordChangedAt": null
   }
 }

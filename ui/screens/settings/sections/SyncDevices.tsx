@@ -7,7 +7,7 @@ import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { invokeHost, isHostAvailable } from "../../shell/host.ts";
 import { PairingQr } from "./HostApiPairing.tsx";
-import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, enrollFailureText, enrollScreen, describeSyncError,
+import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, markSyncPasswordChanged, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
 
 // Kept outside React on purpose: navigating within Settings unmounts this card. The desktop must keep the pending
@@ -24,6 +24,9 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // C5: a revoked phone keeps a working MEGA session until the account password changes; remind, then record it.
+  const [passwordNotice, setPasswordNotice] = useState(false);
+  const [passwordDone, setPasswordDone] = useState(false);
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied] = useState(false);
   const { host } = useEnv();
@@ -116,7 +119,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
                   <p className="st-hint">Its sync folder is deleted and the keys of every other device are replaced. It must be added again to sync.</p>
                   <div className="st-row">
                     <button type="button" className="st-btn" onClick={() => setConfirming(null)} disabled={busy}>Cancel</button>
-                    <Button tone="danger" disabled={busy} onClick={() => void run(async () => { onStatus(await revokeSyncDevice(client, d.deviceId)); setConfirming(null); })}>Revoke</Button>
+                    <Button tone="danger" disabled={busy} onClick={() => void run(async () => { onStatus(await revokeSyncDevice(client, d.deviceId)); setConfirming(null); setPasswordNotice(true); })}>Revoke</Button>
                   </div>
                 </div>
               ) : null}
@@ -124,6 +127,21 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
           ))}
         </ul>
       )}
+      {passwordNotice ? (
+        <div className="st-dialog" role="note" aria-label="Change the sync password">
+          <strong>Change the MEGA account password now; the phone still holds a session.</strong>
+          <p className="st-hint">Revoking the device deletes its folder and rotates the keys, but a copy already on the phone can stay logged in. Changing the account password ends it.</p>
+          <label className="st-row">
+            <input
+              type="checkbox"
+              checked={passwordDone}
+              disabled={busy}
+              onChange={() => void run(async () => { onStatus(await markSyncPasswordChanged(client)); setPasswordDone(true); setPasswordNotice(false); })}
+            />
+            <span>Done — the password is changed</span>
+          </label>
+        </div>
+      ) : null}
       <p className="st-hint">Lost a device while this computer is off? Delete its folder (it starts with the letters shown above) inside the sync folder in the MEGA web app. This desktop removes the device when it next starts.</p>
       <div className="st-row">
         <Button disabled={busy} onClick={() => void run(async () => { onStatus(await rotateSyncKeys(client)); })}>Rotate keys</Button>
