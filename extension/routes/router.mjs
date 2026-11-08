@@ -10,7 +10,6 @@ import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
 import { projectIdForRoot } from '../kb/projects.mjs';
-import { projectScopeRefusal } from './route-authority.mjs';
 // generatePlan, analyzeRisks, codeSync, dispatchPlan, generateCodeForTask
 // moved into routes/planning.mjs.
 // applyCodegen + openPullRequest moved into routes/review.mjs.
@@ -73,7 +72,7 @@ import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
-import { enforceRouteAuthority } from '../server/route-authority.mjs';
+import { enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
