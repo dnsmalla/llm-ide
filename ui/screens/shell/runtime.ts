@@ -42,7 +42,7 @@ export const core = createCoreClient({
 trustGate.subscribe(() => core.republishAccessToken());
 
 /** Binds the signed-in session to the host's chat store (desktop only; a no-op in a plain browser). */
-export const chatBinding = createChatBinding(core, invokeHost, isHostAvailable);
+export const chatBinding = createChatBinding(core, invokeHost, () => isHostAvailable() && (coreStatusStore.getSnapshot().status?.mode ?? "local") === "local");
 
 // A restarted or replaced core means the host's bound session (and its core URL) is stale: bind again with the
 // current token. Only a change of URL or restart count while ready triggers it.

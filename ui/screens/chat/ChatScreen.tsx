@@ -18,6 +18,7 @@ import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./eff
 import { enableProviderTools, ModelNotices, modelNotices } from "./model-notices";
 import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
 import { ModeBanner } from "./approvals/ModeBanner";
+import { remoteProjectId, subscribeRemoteProject } from "../shell/remote-selection";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
@@ -97,6 +98,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [remoteId, setRemoteId] = useState<string | null>(remoteProjectId);
+  useEffect(() => subscribeRemoteProject(() => setRemoteId(remoteProjectId())), []);
   const [projectMemoryOpen, setProjectMemoryOpen] = useState(false);
   const memoryCore = useMemo(() => memoryClient(core), [core]);
   const memoryChip = useRef<HTMLButtonElement>(null);
@@ -165,8 +168,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     const ac = new AbortController();
     core.json<unknown>("GET", "/auth/me", undefined, ac.signal)
       .then(async (body) => {
-        if (openProjectRoot) {
-          const projectId = await projectIdFor(openProjectRoot);
+        const remote = remoteProjectId();
+        if (remote || openProjectRoot) {
+          const projectId = remote ?? await projectIdFor(openProjectRoot!);
           if (ac.signal.aborted) return; // unmounted or another core restart superseded this read
           const project = projectsFromMe(body)?.find((p) => p.id === projectId);
           if (project) { setPerms(new Set(project.permissions)); return; }
@@ -175,7 +179,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       })
       .catch(() => setPerms(null));
     return () => ac.abort();
-  }, [core, coreRestarts, openProjectRoot]);
+  }, [core, coreRestarts, openProjectRoot, remoteId]);
 
   // A restarted core may have lost the live stream: pick up a turn that is still running.
   useEffect(() => {
@@ -263,7 +267,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 
   const newChat = useCallback(async () => {
     try {
-      const s = await store.createSession({}); claimSession(surface, s.id);
+      const s = await store.createSession({ projectId: remoteProjectId() ?? undefined }); claimSession(surface, s.id);
       setSessions((cur) => [s, ...cur]);
       setActiveId(s.id);
       bumpSessions();

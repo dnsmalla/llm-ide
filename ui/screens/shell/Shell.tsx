@@ -22,7 +22,9 @@ import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
-import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type SectionDef, type SectionId } from "./sections";
+import { RemoteProjectBar } from "./RemoteProjectBar";
+import { remoteBanner } from "./remote-status";
 import { landingFor, readHome, selectHome } from "./landing";
 import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
@@ -83,6 +85,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
+  const remoteMode = coreStatusStore.getSnapshot().status?.mode === "remote";
+  const visibleSections = visibleSectionsFor(remoteMode ? "remote" : "local");
   // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.
   const [crash, setCrash] = useState<CrashNotice | null>(null);
   useEffect(() => {
@@ -323,7 +327,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       </header>
       <div className="sh-body">
         <div className="sh-section-column">
-        <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
+        <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={visibleSections.find((s) => s.id === nav.active)?.label}>
+          {remoteMode ? <div className="sh-row"><RemoteProjectBar /></div> : null}
+          {remoteMode && remoteBanner(view.down ? "offline" : "online", session.signedIn) ? <StatusBanner severity="warning" message={remoteBanner(view.down ? "offline" : "online", session.signedIn)!.title} /> : null}
           <LiveBanner activeSection={nav.active} onOpen={() => dispatch({ type: "select", id: "live" })} />
           {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
@@ -340,7 +346,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             </div>
           )}
           {mount &&
-            SECTIONS.filter((s) => nav.visited.includes(s.id)).map((def) => (
+            visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
               <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} inert={inert} spike={spike} />
             ))}
           {gate === "core" && (

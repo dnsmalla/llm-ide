@@ -92,6 +92,12 @@ export function deriveStatusView(state: StatusState): StatusView {
   if (state.pollError !== null) {
     return { level: "error", label: "Host not responding", detail: state.pollError, down: true, fatal: false, trustNotice, claudeNotice, hints };
   }
+  if (s.mode === "remote" && s.state === "remote") {
+    return { level: "ok", label: "Hub connected", detail: null, down: false, fatal: false, trustNotice, claudeNotice, hints };
+  }
+  if (s.mode === "remote" && s.state !== "starting") {
+    return { level: "error", label: "Hub unreachable", detail: s.error ?? "The pinned hub did not answer.", down: true, fatal: false, trustNotice, claudeNotice, hints };
+  }
   switch (s.state) {
     case "ready":
       return {
