@@ -104,7 +104,7 @@ test('a 50 MB backup while /health still answers in under 200 ms', async () => {
       await new Promise((r) => setTimeout(r, 1));
     }
     const started = performance.now();
-    const healthRes = await fetch(`${base}/health`);
+    await fetch(`${base}/health`);
     const healthMs = performance.now() - started;
     const backup = await backupPromise;
     const body = await backup.json();
