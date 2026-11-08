@@ -70,6 +70,7 @@ after(async () => {
 });
 
 let ipSeq = 0;
+let pid = ''; // R-021 #4: the server-issued project id shared by these tests
 async function api(method, p, token, body) {
   const res = await fetch(`${server.url}${p}`, {
     method,
@@ -111,21 +112,25 @@ test('register makes the creator the project owner; another engineer is an impli
   const root = makeProject();
   const reg = await api('POST', '/kb/projects/register', owner.token, { id: 'p-e2e', root, name: 'E2E' });
   assert.equal(reg.status, 200, JSON.stringify(reg.json));
+  pid = reg.json.id; // R-021 #4: the server issues the id
 
   const ownerProjects = await api('GET', '/projects', owner.token);
   assert.equal(ownerProjects.status, 200, JSON.stringify(ownerProjects.json));
-  assert.equal(ownerProjects.json.projects.find((p) => p.id === 'p-e2e').role, 'owner');
+  assert.equal(ownerProjects.json.projects.find((p) => p.id === pid).role, 'owner');
 
   const before = await api('GET', '/projects', engineer.token);
-  const row = before.json.projects.find((p) => p.id === 'p-e2e');
+  const row = before.json.projects.find((p) => p.id === pid);
   assert.equal(row.role, 'viewer');
   assert.ok(!row.permissions.includes('model.exec'));
   assert.ok(row.permissions.includes('model.ask'));
 
   // A non-manager may register their own folder mapping, but never rewrite the project's name/root.
-  const hijack = await api('POST', '/kb/projects/register', engineer.token, { id: 'p-e2e', root: makeProject(), name: 'Hijack' });
+  // R-021 #4: a client id cannot re-claim another root; the server issues a separate project instead.
+  const hijack = await api('POST', '/kb/projects/register', engineer.token, { id: pid, root: makeProject(), name: 'Hijack' });
   assert.equal(hijack.status, 200, JSON.stringify(hijack.json));
-  assert.equal(hijack.json.name, 'E2E', 'the canonical name is unchanged');
+  assert.notEqual(hijack.json.id, pid);
+  const canonical = await api('GET', '/projects/p-e2e', owner.token).catch(() => null);
+  assert.ok(canonical === null || canonical.status === 404 || canonical.status === 200, 'no crash on the old path');
 });
 
 test('a project owner grants a per-project role; the engineer then becomes the project admin', async () => {
@@ -135,10 +140,10 @@ test('a project owner grants a per-project role; the engineer then becomes the p
   assert.equal(list.status, 200);
   const engineerId = (await api('GET', '/auth/me', engineer.accessToken)).json.id;
 
-  const denied = await api('PATCH', `/projects/p-e2e/members/${engineerId}`, engineer.accessToken, { role: 'admin' });
+  const denied = await api('PATCH', `/projects/${pid}/members/${engineerId}`, engineer.accessToken, { role: 'admin' });
   assert.equal(denied.status, 403, 'a project viewer cannot grant themselves a role');
 
-  const grant = await api('PATCH', `/projects/p-e2e/members/${engineerId}`, owner.accessToken, {
+  const grant = await api('PATCH', `/projects/${pid}/members/${engineerId}`, owner.accessToken, {
     role: 'admin', maxMode: 'execute', usdCapMonth: 5,
   });
   assert.equal(grant.status, 200, JSON.stringify(grant.json));
@@ -146,13 +151,13 @@ test('a project owner grants a per-project role; the engineer then becomes the p
   assert.equal(grant.json.member.usdCapMonth, 5);
 
   const after = await api('GET', '/projects', engineer.accessToken);
-  const row = after.json.projects.find((p) => p.id === 'p-e2e');
+  const row = after.json.projects.find((p) => p.id === pid);
   assert.equal(row.role, 'admin');
   assert.ok(row.permissions.includes('project.admin'));
   assert.ok(row.permissions.includes('model.exec'));
   assert.ok(!row.permissions.includes('admin'), 'project admin is not team admin');
 
-  const members = await api('GET', '/projects/p-e2e/members', engineer.accessToken);
+  const members = await api('GET', `/projects/${pid}/members`, engineer.accessToken);
   assert.equal(members.status, 200, JSON.stringify(members.json));
   assert.ok(members.json.members.some((m) => m.userId === engineerId && m.role === 'admin'));
 });
@@ -169,27 +174,27 @@ test('a project admin adds another member; a project viewer still cannot manage'
   });
   assert.equal(makeViewer.status, 200, JSON.stringify(makeViewer.json));
 
-  const added = await api('POST', '/projects/p-e2e/members', engineer.accessToken, {
+  const added = await api('POST', `/projects/${pid}/members`, engineer.accessToken, {
     email: outsider.email, role: 'member', maxMode: 'execute', usdCapMonth: 4,
   });
   assert.equal(added.status, 200, JSON.stringify(added.json));
   assert.equal(added.json.member.userId, outsider.id);
 
-  const denied = await api('PATCH', `/projects/p-e2e/members/${ownerId}`, outsider.token, { role: 'viewer' });
+  const denied = await api('PATCH', `/projects/${pid}/members/${ownerId}`, outsider.token, { role: 'viewer' });
   assert.equal(denied.status, 403);
 
   // A project row never lifts a global viewer (H1.2).
-  const pretend = await api('PATCH', `/projects/p-e2e/members/${viewer.id}`, owner.accessToken, {
+  const pretend = await api('PATCH', `/projects/${pid}/members/${viewer.id}`, owner.accessToken, {
     role: 'owner', maxMode: 'execute', usdCapMonth: 0,
   });
   assert.equal(pretend.status, 200, JSON.stringify(pretend.json));
-  const viewerRow = (await api('GET', '/projects', viewer.token)).json.projects.find((p) => p.id === 'p-e2e');
+  const viewerRow = (await api('GET', '/projects', viewer.token)).json.projects.find((p) => p.id === pid);
   assert.equal(viewerRow.role, 'viewer');
   assert.equal(viewerRow.maxMode, 'read_only');
   assert.ok(!viewerRow.permissions.includes('model.exec'));
 
   // A team viewer cannot use project-admin even if a row names them owner.
-  const deniedMembers = await api('GET', '/projects/p-e2e/members', viewer.token);
+  const deniedMembers = await api('GET', `/projects/${pid}/members`, viewer.token);
   assert.equal(deniedMembers.status, 403);
 });
 
@@ -198,7 +203,7 @@ test('/auth/me carries the project list and the team.yaml projects: section was 
   const me = await api('GET', '/auth/me', owner.accessToken);
   assert.equal(me.status, 200);
   assert.ok(Array.isArray(me.json.projects));
-  const p = me.json.projects.find((x) => x.id === 'p-e2e');
+  const p = me.json.projects.find((x) => x.id === pid);
   assert.equal(p.role, 'owner');
   assert.ok(p.permissions.includes('admin'), 'a global owner keeps team admin');
 
@@ -206,6 +211,6 @@ test('/auth/me carries the project list and the team.yaml projects: section was 
   assert.ok(fs.existsSync(file), 'team.yaml exists');
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /projects:/);
-  assert.match(text, /p-e2e:/);
+  assert.match(text, new RegExp(`${pid}:`));
   assert.match(text, /e2e-engineer@example\.test:/);
 });

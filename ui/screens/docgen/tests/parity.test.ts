@@ -14,7 +14,7 @@ const tpl: DocTemplate = { id: "t", name: "Retro", sections: ["A"], rawContent: 
 function makeStore(destination?: string) {
   const fs = new MemFs();
   const api = {
-    async register() {},
+    async register() { return { id: 'p1' }; },
     async templates() { return { items: [tpl], truncated: false }; },
     async commands() { return { items: [], truncated: false }; },
     async seed() { return { written: 0 }; },

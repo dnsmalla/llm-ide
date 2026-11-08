@@ -13,7 +13,7 @@ function make(opts: { templates?: DocTemplate[]; commands?: DocCommand[]; surfac
   let templates = opts.templates ?? [t("Retro"), t("Sketch", "visual")];
   const commands = opts.commands ?? [c("Summarize"), c("Read", "visual")];
   const api = {
-    async register() { log.push("register"); if (opts.registerError) throw opts.registerError; },
+    async register() { log.push("register"); if (opts.registerError) throw opts.registerError; return { id: "p1" }; },
     async templates() { log.push("templates"); return { items: templates, truncated: false }; },
     async commands() { log.push("commands"); return { items: commands, truncated: false }; },
     async seed() { log.push("seed"); templates = [t("Seeded")]; return { written: 1 }; },
@@ -79,7 +79,7 @@ test("a stale load never overwrites a newer project's state", async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const api = (name: string, slow: boolean) => ({
-    register: async () => { if (slow) await gate; },
+    register: async () => { if (slow) await gate; return { id: 'p' }; },
     templates: async () => ({ items: [t(name)], truncated: false }),
     commands: async () => ({ items: [], truncated: false }),
     seed: async () => ({ written: 0 }), generate: async () => okResult("x"), putTemplate: async () => null, deleteTemplate: async () => true,

@@ -20,7 +20,7 @@ function make(opts: { listed?: DocTemplate[]; commands?: DocCommand[]; taken?: s
   const puts: PutArgs[] = [];
   const taken = new Set((opts.taken ?? []).map((f) => f.toLowerCase()));
   const api = {
-    async register() {},
+    async register() { return { id: 'p1' }; },
     async templates() { return { items: opts.listed ?? [], truncated: false }; },
     async commands() { return { items: opts.commands ?? [], truncated: false }; },
     async seed() { return { written: 0 }; },

@@ -11,7 +11,7 @@ const t = (name: string, folder = name.toLowerCase()): DocTemplate => ({ id: `id
 function make(existing: DocTemplate[]) {
   const puts: string[] = [];
   const api = {
-    async register() {},
+    async register() { return { id: 'p1' }; },
     async templates() { return { items: existing, truncated: false }; },
     async commands() { return { items: [], truncated: false }; },
     async seed() { return { written: 0 }; },

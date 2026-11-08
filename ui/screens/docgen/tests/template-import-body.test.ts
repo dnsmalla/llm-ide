@@ -30,7 +30,7 @@ function make(existing: DocTemplate[] = []) {
   const stored = new Map<string, { name: string; rawContent?: string; surface: Surface }>();
   const bodies: Array<{ folder: string; rawContent?: string }> = [];
   const api = {
-    async register() {},
+    async register() { return { id: 'p1' }; },
     async templates() {
       const items = [...existing, ...[...stored].map(([folder, v]) => ({ ...t(v.name, folder, v.surface), rawContent: v.rawContent ?? "" }))];
       return { items, truncated: false };
@@ -97,7 +97,7 @@ test("a Visual-menu import is stored as a visual template (the marker travels wi
   const d = make();
   d.store.dispose();
   const visual = new DocGenStore({ surface: "visual", makeApi: () => ({
-    register: async () => {}, templates: async () => ({ items: [], truncated: false }), commands: async () => ({ items: [], truncated: false }),
+    register: async () => ({ id: 'p' }), templates: async () => ({ items: [], truncated: false }), commands: async () => ({ items: [], truncated: false }),
     seed: async () => ({ written: 0 }), generate: async () => { throw new Error("unused"); }, deleteTemplate: async () => true,
     putTemplate: async (folder: string, x: { rawContent?: string; surface: Surface }) => { d.bodies.push({ folder, rawContent: x.rawContent }); return t("X", folder, x.surface); },
   }) as never, run: { readers: readersFrom({}), fs: new MemFs() }, idFor: async () => "p1" });
