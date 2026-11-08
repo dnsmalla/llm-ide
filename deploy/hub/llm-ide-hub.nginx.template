@@ -55,6 +55,8 @@ server {
         try_files $uri $uri/ /app/index.html;
     }
     location = /metrics { return 404; }
+    # R-026 #8: the owner console is reached through the desktop, never the public hub edge.
+    location ^~ /admin/ { return 404; }
 
     location / {
         proxy_pass http://127.0.0.1:3457;
