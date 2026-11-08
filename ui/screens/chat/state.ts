@@ -356,9 +356,11 @@ export function reduce(state: ChatState, action: Action): ChatState {
     case "trust_granted":
       return state.workspaceTrust && state.workspaceTrust.path === action.path ? { ...state, workspaceTrust: null } : state;
     case "drop_interrupted": {
-      // U#F5: a retried turn replaces the interrupted partial instead of keeping both.
-      if (!state.messages.some((m) => m.role === "assistant" && m.interrupted)) return state;
-      return { ...state, messages: state.messages.filter((m) => !(m.role === "assistant" && m.interrupted)) };
+      // U#F5/R-023 #6: drop ONLY the current turn's partial — the last message, and only if it is an interrupted
+      // assistant reply. An older interrupted partial the user kept is history and stays.
+      const last = state.messages[state.messages.length - 1];
+      if (!last || last.role !== "assistant" || !last.interrupted) return state;
+      return { ...state, messages: state.messages.slice(0, -1) };
     }
     case "clear_error":
       return state.phase === "error" ? { ...state, phase: "idle", error: null } : { ...state, error: null };

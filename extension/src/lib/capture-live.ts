@@ -2,7 +2,7 @@
 // /kb/live/* API over authFetch. Kept apart so capture-store stays testable.
 import { authFetch, getServerUrl } from './config';
 import { setDraftLock, finalizeBodies } from './capture-store';
-import type { FinalizePayload, FinalizeResult, LiveApi, LiveState, StatusResult, StorageArea } from './capture-store';
+import type { FinalizeResult, LiveApi, LiveState, StatusResult, StorageArea } from './capture-store';
 
 const STATES: readonly string[] = ['live', 'finalized', 'acked', 'expired', 'unknown'];
 

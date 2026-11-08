@@ -253,7 +253,6 @@ export async function expectedOf(c: CaptureLike, now = Date.now()): Promise<Expe
   if (Number.isFinite(c.duration) && c.duration >= 0 && c.duration <= 7 * 24 * 3600)
     payload.durationSec = Math.round(c.duration);
   const lines = countLines(captions);
-  const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
   return {
     payload,
     lines,
@@ -266,7 +265,12 @@ export async function expectedOf(c: CaptureLike, now = Date.now()): Promise<Expe
 export function finalizeBodies(payload: FinalizePayload): Array<FinalizePayload & { part?: number; of?: number }> {
   const parts = splitFinalizeParts(payload.captions ?? []);
   if (parts.length <= 1) return [payload];
-  return parts.map((captions, i) => ({ ...payload, captions: captions as FinalizePayload["captions"], part: i + 1, of: parts.length }));
+  return parts.map((captions, i) => ({
+    ...payload,
+    captions: captions as FinalizePayload['captions'],
+    part: i + 1,
+    of: parts.length,
+  }));
 }
 
 /** The server's copy equals what we would send (lines, hash, language, start). */

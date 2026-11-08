@@ -129,7 +129,10 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
       )}
       {passwordNotice ? (
         <div className="st-dialog" role="note" aria-label="Change the sync password">
-          <strong>Change the MEGA account password now; the phone still holds a session.</strong>
+          <strong>
+            Change the {status.storeKind === "mega" ? "MEGA" : status.storeKind === "box" ? "Box" : "storage"} account
+            password now; the phone still holds a session.
+          </strong>
           <p className="st-hint">Revoking the device deletes its folder and rotates the keys, but a copy already on the phone can stay logged in. Changing the account password ends it.</p>
           <label className="st-row">
             <input

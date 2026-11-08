@@ -275,13 +275,14 @@ export class ChatController {
     if (!r.lastSend || r.state.phase !== "error") return;
     const { text, opts, workspaceRoot } = r.lastSend;
     const unresumable = r.state.error?.code === "SESSION_UNRESUMABLE";
-    // U#F5: an interrupted partial is replaced by the retry, not kept beside the full reply, and the turn starts
-    // a fresh engine context so the model does not see the partial twice.
-    const hasPartial = r.state.messages.some((m) => m.role === "assistant" && m.interrupted);
-    if (hasPartial) this.dispatch(id, { type: "drop_interrupted" });
+    // U#F5/R-023 #6: drop only this turn's interrupted partial (the last message) so the retry's answer does not
+    // sit beside the half reply, but KEEP the conversation — resuming the session is what gives the retry its
+    // history (forcing `fresh` would send the last message alone).
+    const last = r.state.messages[r.state.messages.length - 1];
+    if (last?.role === "assistant" && last.interrupted) this.dispatch(id, { type: "drop_interrupted" });
     this.dispatch(id, { type: "clear_error" });
     if (workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); return; }
-    this.send(id, text, { ...opts, fresh: unresumable || hasPartial || opts.fresh }, true);
+    this.send(id, text, { ...opts, fresh: unresumable || opts.fresh }, true);
   }
 
   clearError(id: string): void { this.dispatch(id, { type: "clear_error" }); }

@@ -378,5 +378,5 @@ test("retry replaces the interrupted partial and starts a fresh context (U#F5)",
   assert.equal(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.interrupted), false,
     "the partial is gone, the full reply is the only assistant turn");
   const body = core.calls.filter((x) => x.method === "STREAM").at(-1).body;
-  assert.equal(body.fresh, true, "the retry does not resume the dead session");
+  assert.notEqual(body.fresh, true, "the retry keeps the conversation context (no fresh session)");
 });

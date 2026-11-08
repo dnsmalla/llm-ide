@@ -59,6 +59,7 @@ export const TEXT: Record<string, string> = {
   SYNC_BAD_EMAIL: "Enter the sync account's email address.",
   SYNC_BAD_PASSWORD: "Enter the sync account's password.",
   SYNC_MISSING: "The sync folder for this browser was not found.",
+  stale_manifest: "The desktop has not updated sync for over a week (it may be off). Open the desktop app to refresh.",
   bad_pair: "This is not a valid LLM-IDE pairing link.",
   unsupported_store: "This link is for a storage this browser cannot open yet.",
   bad_desktop_key: "This pairing link does not match the desktop key in storage. Show a new code on the desktop.",

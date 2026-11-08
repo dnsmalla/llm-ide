@@ -405,7 +405,10 @@ function showPanelClosedBanner(): void {
 }
 
 function clearPanelClosedBanner(): void {
-  if (panelBanner) { panelBanner.remove(); panelBanner = null; }
+  if (panelBanner) {
+    panelBanner.remove();
+    panelBanner = null;
+  }
 }
 
 /** An in-page banner (the only feedback a caption-only tab can show). */
@@ -485,7 +488,8 @@ function sendUpdate(speaker: string, text: string, sessionId: string): void {
     timestamp: Date.now(),
     sessionId,
   };
-  chrome.runtime.sendMessage(msg)
+  chrome.runtime
+    .sendMessage(msg)
     .then((resp: { ok?: boolean; reason?: string } | undefined) => {
       if (resp?.ok === false && resp.reason === 'no_panel') showPanelClosedBanner();
       else clearPanelClosedBanner();
