@@ -12,6 +12,7 @@
 // Every helper takes the db handle first (kb convention); every multi-step write is one transaction.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { AppError } from '../core/errors.mjs';
 import {
   MAX_USD_CAP_MONTH, ROLE_ORDER, atLeast, classRefusal, getMember, permittedClasses,
@@ -156,6 +157,26 @@ export function canonicalRoot(root) {
   if (stripped) p = stripped; // keep a bare "/" or "C:\\"
   try { p = fs.realpathSync.native(p); } catch { /* not created yet: the trimmed spelling is the best we have */ }
   return CASE_INSENSITIVE_FS ? p.toLowerCase() : p;
+}
+
+/**
+ * The registered project whose root CONTAINS this folder (longest match, path-segment prefix), or null. R-022 #1:
+ * a turn inside a project's subfolder belongs to that project, and `/a/bc` is not inside `/a/b`.
+ */
+export function projectIdForFolder(db, folder) {
+  const key = canonicalRoot(folder);
+  if (!key) return null;
+  const sep = path.sep;
+  let best = null;
+  for (const row of db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL').all()) {
+    const root = canonicalRoot(row.root);
+    if (!root) continue;
+    const prefix = root.endsWith(sep) ? root : root + sep;
+    if (key === root || key.startsWith(prefix)) {
+      if (best === null || root.length > best.root.length) best = { id: row.id, root };
+    }
+  }
+  return best?.id ?? null;
 }
 
 /** The registered project whose canonical root is this folder, or null. Lets a turn inherit the project

@@ -28,7 +28,8 @@ const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 const db = getDb();
 db.prepare("INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES ('hub-u1', 'hub1@example.com', 'H', 'x', 'user', 'active')").run();
 grant(db, 'hub-u1', { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 });
-registerProject(db, 'hub-u1', { id: 'p-hub', root: '/r/hub', name: 'Hub project' });
+const PROJECT_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-proj-'));
+registerProject(db, 'hub-u1', { id: 'p-hub', root: PROJECT_ROOT, name: 'Hub project' });
 const user = { id: 'hub-u1' };
 
 function makeReq(body) {
@@ -59,19 +60,20 @@ const fakeTurn = async ({ onEvent }) => {
 };
 const run = async (body) => {
   const res = makeRes();
-  await handleAgentV2Routes(makeReq({ message: 'go', mode: 'execute', agentContext: { chatSessionId: 'chat-hub', workspaceRoot: WS }, ...body }), res, { runTurn: fakeTurn });
+  const base = { message: 'go', mode: 'execute', agentContext: { chatSessionId: 'chat-hub', workspaceRoot: PROJECT_ROOT } };
+  await handleAgentV2Routes(makeReq({ ...base, ...body }), res, { runTurn: fakeTurn });
   return res;
 };
 
 test('a hub turn in an unregistered folder without a projectId is refused PROJECT_DENIED', async () => {
-  const res = await run({});
+  const res = await run({ agentContext: { chatSessionId: 'chat-hub', workspaceRoot: WS } });
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error.code, 'PROJECT_DENIED');
   assert.equal(turns, 0);
 });
 
 test('a hub turn with an unknown projectId is refused PROJECT_DENIED', async () => {
-  const res = await run({ projectId: 'p-does-not-exist' });
+  const res = await run({ projectId: 'p-does-not-exist', agentContext: { chatSessionId: 'chat-hub', workspaceRoot: WS } });
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error.code, 'PROJECT_DENIED');
   assert.equal(turns, 0);
@@ -92,4 +94,13 @@ test('R-021 #1: a projectId that does not own the turn folder is PROJECT_MISMATC
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error.code, 'PROJECT_MISMATCH');
   assert.equal(turns, before, 'the mismatch never reached the engine');
+});
+
+test('R-022 #1: a turn inside the project subfolder runs as that project', async () => {
+  const before = turns;
+  const src = path.join(PROJECT_ROOT, 'src');
+  fs.mkdirSync(src, { recursive: true });
+  const res = await run({ projectId: 'p-hub', agentContext: { chatSessionId: 'chat-sub', workspaceRoot: src } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(turns, before + 1);
 });

@@ -36,7 +36,7 @@ import {
 } from '../kb/agent-sessions.mjs';
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth, usdCapForModel, estimateTurnCostUsd } from '../kb/usage.mjs';
 import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
-import { effectiveProjectGrant, getProject, getProjectMember, projectIdForRoot } from '../kb/projects.mjs';
+import { effectiveProjectGrant, getProject, getProjectMember, projectIdForFolder } from '../kb/projects.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -575,9 +575,15 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     : (typeof agentContext?.projectId === 'string' && agentContext.projectId ? agentContext.projectId : '');
   // R-021 #1: the FOLDER decides. A request that names a project and runs in another registered project's folder
   // is refused rather than trusted; a hub turn in an unregistered folder has no project at all.
-  const folderProjectId = projectIdForRoot(getDb(), agentContext?.workspaceRoot);
+  const folder = typeof agentContext?.workspaceRoot === 'string' && agentContext.workspaceRoot
+    ? agentContext.workspaceRoot : null;
+  const folderProjectId = folder ? projectIdForFolder(getDb(), folder) : null;
   if (requestedProjectId && folderProjectId && requestedProjectId !== folderProjectId) {
     return io.refuse({ code: 'PROJECT_MISMATCH', status: 403, message: 'That project does not own this folder' });
+  }
+  // R-022 #1: on a hub a folder inside no project cannot borrow a named project.
+  if (config.hub && folder && !folderProjectId) {
+    return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'This folder is not in a project on this hub' });
   }
   const turnProjectId = folderProjectId || requestedProjectId || null;
   if (config.hub) {

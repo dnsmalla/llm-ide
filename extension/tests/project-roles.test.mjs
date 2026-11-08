@@ -23,7 +23,7 @@ const {
   PROJECT_ROLE_ORDER, computeProjectGrant, tighterMode, tighterUsdCap, projectPermissions,
   canManageProjectGrant, registerProject, getProject, getProjectMember, effectiveProjectGrant,
   canManageProject, listProjectsForUser, listProjectMembers, setProjectMember,
-  addProjectMemberByEmail, removeProjectMember, listProjectAssignmentRows, projectIdForRoot,
+  addProjectMemberByEmail, removeProjectMember, listProjectAssignmentRows, projectIdForRoot, projectIdForFolder,
 } = projects;
 
 after(() => {
@@ -408,4 +408,24 @@ test('#6 adding an existing project member is refused, never a silent defaults o
   const row = getProjectMember(db(), eng, 'p-add');
   assert.equal(row.role, 'admin', 'the existing grant is untouched');
   assert.equal(row.usdCapMonth, 5);
+});
+
+// ── R-022 #1/#2 ───────────────────────────────────────────────────────────
+test('#1 a folder resolves to the longest registered root that contains it (path segments only)', () => {
+  const owner = user('folder-owner@example.com', 'owner', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-a', root: '/r/a' });
+  registerProject(db(), owner, { id: 'p-b', root: '/r/a/b' });
+  assert.equal(projectIdForFolder(db(), '/r/a/src'), 'p-a', 'a subfolder belongs to its project');
+  assert.equal(projectIdForFolder(db(), '/r/a/b/src'), 'p-b', 'the longest root wins');
+  assert.equal(projectIdForFolder(db(), '/r/abc'), null, '/a/bc is not inside /a/b');
+  assert.equal(projectIdForFolder(db(), '/r/a'), 'p-a', 'the root itself matches');
+});
+
+test('#2 install-skills denies a team engineer who is only a project viewer', () => {
+  const owner = user('inst-owner@example.com', 'owner', 'execute', 0);
+  const eng = user('inst-eng@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-inst', root: '/r/inst' });
+  addProjectMemberByEmail(db(), owner, 'p-inst', { email: 'inst-eng@example.com', role: 'viewer' });
+  assert.equal(authorizeAction(db(), eng, 'model.read', { projectId: 'p-inst' }).ok, false, 'project viewer cannot read');
+  assert.equal(authorizeAction(db(), eng, 'install', { projectId: 'p-inst' }).ok, false, 'nor install');
 });

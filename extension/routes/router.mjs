@@ -9,7 +9,7 @@ import { indexScip } from '../connectors/scip.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
-import { projectIdForRoot } from '../kb/projects.mjs';
+import { projectIdForFolder } from '../kb/projects.mjs';
 // generatePlan, analyzeRisks, codeSync, dispatchPlan, generateCodeForTask
 // moved into routes/planning.mjs.
 // applyCodegen + openPullRequest moved into routes/review.mjs.
@@ -72,7 +72,7 @@ import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
-import { enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
+import { authorizeAction, enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -500,7 +500,8 @@ export async function handleKB(req, res) {
       // R-021 #2: the folder decides the project (a named project must own it), and a hub requires one.
       const early = parseJSON(await readBody(req)) || {};
       const named = typeof early.projectId === 'string' && early.projectId ? early.projectId : null;
-      const folder = projectIdForRoot(kb.getDb(), typeof early.path === 'string' ? early.path : null);
+      const folderPath = typeof early.path === 'string' && early.path ? early.path : null;
+      const folder = folderPath ? projectIdForFolder(kb.getDb(), folderPath) : null;
       if (named && folder && named !== folder) {
         sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
         return true;
@@ -509,6 +510,10 @@ export async function handleKB(req, res) {
       const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
       if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
       if (enforceRouteAuthority(kb.getDb(), req, res)) return true;
+      if (projectId) {
+        const decision = authorizeAction(kb.getDb(), userId, 'install', { projectId, req });
+        if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
+      }
       const body = early;
       try {
         // Items this user unchecked in Central Skills (Library → LLM Sources)
