@@ -22,7 +22,7 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -74,7 +74,11 @@ test("archiving mode and router/cap round-trip through get_prefs/set_prefs with 
   await host.setRoutePrefs({ router: true, cap: true });
   assert.deepEqual(await host.getRoutePrefs(), { router: true, cap: true });
   await host.setExtraPrefs({ learn: true });
-  assert.deepEqual(await host.getExtraPrefs(), { compress: false, learn: true, terminal: true, continueSummary: false });
+  assert.deepEqual(await host.getExtraPrefs(), { compress: false, learn: true, terminal: true, continueSummary: false,
+    hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false });
+  await host.setExtraPrefs({ hostApiTls: true, hostApiRead: true });
+  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { hostApiTls: true, hostApiRead: true } }]);
+  assert.equal((await host.getExtraPrefs()).hostApiTls, true, "a Host API capability is a stored pref");
   assert.equal(state.stored.learn, true);
   await host.setExtraPrefs({ continueSummary: true });
   assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { continueSummary: true } }]);

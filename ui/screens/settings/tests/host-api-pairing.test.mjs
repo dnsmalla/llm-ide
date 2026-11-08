@@ -27,15 +27,17 @@ const fake = (routes) => {
 };
 
 let m;
+let ctx;
 before(async () => {
   const outdir = bundleDir("settings-host-api");
   await build({
-    entryPoints: { card: join(SETTINGS, "sections/HostApiPairing.tsx") },
+    entryPoints: { card: join(SETTINGS, "sections/HostApiPairing.tsx"), context: join(SETTINGS, "context.tsx") },
     outdir, bundle: true, splitting: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent",
     loader: { ".css": "text" },
     alias: { "@llmide/ui-kit/styles.css": resolve(SETTINGS, "../../kit/src/styles/kit.css"), "@llmide/ui-kit": resolve(SETTINGS, "../../kit/src/index.ts") },
   });
   m = await import(`${pathToFileURL(join(outdir, "card.js")).href}?t=${Date.now()}`);
+  ctx = await import(`${pathToFileURL(join(outdir, "context.js")).href}?t=${Date.now()}`);
 });
 
 test("the card hides on HOST_API_DISABLED and on a missing host proof, and shows the list otherwise", async () => {
@@ -120,4 +122,31 @@ test("Revoke asks first (Cancel focused first), then deletes the device", async 
   const client = fake({ [`DELETE /host-api/devices/${id}`]: reply("delete-host-api-devices--id-200") });
   assert.equal(await m.revokeDevice(client, id), true);
   assert.deepEqual(client.calls, [`DELETE /host-api/devices/${id}`]);
+});
+
+test("the five capability switches render with the next-core-start notice", () => {
+  const off = { hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false };
+  const html = renderToStaticMarkup(h(m.HostApiSettingsView, { prefs: off, onSave() {} }));
+  assert.match(html, /role="switch"/);
+  for (const l of ["Serve the pairing listener (TLS)", "Let paired devices read chats, history and usage",
+    "Let paired devices compose chats (modes, models, new chat)", "Send push notifications to paired devices", "Let paired devices answer tool approvals"]) {
+    assert.match(html, new RegExp(l.replace(/[()]/g, "\\$&")));
+  }
+  assert.match(html, /Applies on the next core start\./);
+});
+
+test("when the PIN route answers 404 the card shows the pairing hint instead of nothing", async () => {
+  // The 404 is what makes the device probe return null; the card must then explain how to turn the listener on.
+  assert.equal(await m.loadDevices(fake({ "GET /host-api/devices": reply("get-host-api-devices-404-disabled") })), null);
+  const host = {
+    getExtraPrefs: async () => ({ compress: false, learn: false, terminal: true, continueSummary: false,
+      hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false }),
+    setExtraPrefs: async () => {},
+  };
+  const client = fake({ "GET /host-api/devices": reply("get-host-api-devices-404-disabled") });
+  const html = renderToStaticMarkup(h(ctx.SettingsEnvProvider, { env: { client, host } }, h(m.default)));
+  assert.match(html, /The pairing listener is off\./);
+  assert.match(html, /Serve the pairing listener \(TLS\)/);
+  assert.match(html, /restart the core/);
+  assert.doesNotMatch(html, /Show pairing PIN/);
 });

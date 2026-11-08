@@ -2,13 +2,14 @@
 // (routes POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id; contract schema/http/host-api.schema.json).
 // The routes need the bus host proof, which the shell's core client attaches; a core started without
 // LLMIDE_HOST_API_TLS=1 or LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
-// the card then renders nothing. The PIN lives in component state only: never persisted, logged or sent anywhere.
+// the card then shows a hint instead of nothing. The five capabilities are desktop prefs applied at the NEXT core
+// start (core_env_pairs → LLMIDE_HOST_API_*). The PIN lives in component state only: never persisted, logged or sent anywhere.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import qrcode from "qrcode-generator";
 import { ApiError, call, type CoreClient } from "../core-api.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { describeError } from "../errors.ts";
-import { Button, ErrorText } from "../ui.tsx";
+import { Button, ErrorText, Switch } from "../ui.tsx";
 
 /** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener.
  *  `addresses`: this computer's IPv4s for the pairing QR, best first; [] for the dev listener (or an older core). */
@@ -164,9 +165,35 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
   );
 }
 
+/** The five Host API v1 capabilities the desktop passes to the core it spawns (desktop prefs, exact `1`). */
+export interface HostApiPrefs {
+  hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean;
+}
+
+/** The capability switches. All five apply at the NEXT core start; the pairing listener is the first one. */
+export function HostApiSettingsView({ prefs, onSave }: { prefs: HostApiPrefs; onSave: (patch: Partial<HostApiPrefs>) => void }): ReactNode {
+  return (
+    <div className="st-stack" role="group" aria-label="Host API settings">
+      <span className="st-label">Host API</span>
+      <Switch label="Serve the pairing listener (TLS)" checked={prefs.hostApiTls}
+        hint="Pinned TLS on all interfaces (port 3016+), so a phone or browser on your network can pair." onChange={(v) => onSave({ hostApiTls: v })} />
+      <Switch label="Let paired devices read chats, history and usage" checked={prefs.hostApiRead} onChange={(v) => onSave({ hostApiRead: v })} />
+      <Switch label="Let paired devices compose chats (modes, models, new chat)" checked={prefs.hostApiCompose} onChange={(v) => onSave({ hostApiCompose: v })} />
+      <Switch label="Send push notifications to paired devices" checked={prefs.hostApiPush} onChange={(v) => onSave({ hostApiPush: v })} />
+      <Switch label="Let paired devices answer tool approvals" checked={prefs.hostApiToolApprovals} onChange={(v) => onSave({ hostApiToolApprovals: v })} />
+      <p className="st-hint">Applies on the next core start.</p>
+    </div>
+  );
+}
+
+/** Shown instead of an empty card when this core does not serve the Host API to this window (404 HOST_API_DISABLED or
+ *  a missing host proof, e.g. an adopted core). */
+export const PAIRING_UNAVAILABLE_HINT = "The pairing listener is off. Turn on \u201cServe the pairing listener (TLS)\u201d above, then restart the core to pair a phone or browser.";
+
 export default function HostApiPairing(): ReactNode {
-  const { client } = useEnv();
+  const { client, host } = useEnv();
   const [devices, setDevices] = useState<HostDevice[] | null>(null);
+  const [prefs, setPrefs] = useState<HostApiPrefs | null>(null);
   const [pin, setPin] = useState<HostPin | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -175,6 +202,18 @@ export default function HostApiPairing(): ReactNode {
 
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    let live = true;
+    void host.getExtraPrefs?.().then((p) => {
+      if (live) setPrefs({ hostApiTls: p.hostApiTls, hostApiRead: p.hostApiRead, hostApiCompose: p.hostApiCompose, hostApiPush: p.hostApiPush, hostApiToolApprovals: p.hostApiToolApprovals });
+    });
+    return () => { live = false; };
+  }, [host]);
+  const savePrefs = (patch: Partial<HostApiPrefs>) => {
+    if (!prefs) return;
+    setPrefs({ ...prefs, ...patch });
+    void host.setExtraPrefs?.(patch);
+  };
   const refresh = useCallback(async () => {
     // A failed first load keeps the card hidden; a later failure keeps the last list and shows why.
     try {
@@ -194,19 +233,23 @@ export default function HostApiPairing(): ReactNode {
     return () => window.clearInterval(t);
   }, [pin]);
 
-  if (devices === null) return null;
   const run = async (f: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try { await f(); } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
   };
   return (
-    <HostApiPairingView
-      devices={devices} pin={pin} now={now} busy={busy} error={error} confirming={confirming}
-      onShowPin={() => void run(async () => { const p = await mintPin(client); setNow(Date.now()); setPin(p); })}
-      onAskRevoke={setConfirming}
-      onCancelRevoke={() => setConfirming(null)}
-      onRevoke={(id) => void run(async () => { await revokeDevice(client, id); setConfirming(null); await refresh(); })}
-    />
+    <div className="st-stack">
+      {prefs && host.getExtraPrefs ? <HostApiSettingsView prefs={prefs} onSave={savePrefs} /> : null}
+      {devices === null
+        ? <p className="st-hint" role="status">{PAIRING_UNAVAILABLE_HINT}</p>
+        : <HostApiPairingView
+            devices={devices} pin={pin} now={now} busy={busy} error={error} confirming={confirming}
+            onShowPin={() => void run(async () => { const p = await mintPin(client); setNow(Date.now()); setPin(p); })}
+            onAskRevoke={setConfirming}
+            onCancelRevoke={() => setConfirming(null)}
+            onRevoke={(id) => void run(async () => { await revokeDevice(client, id); setConfirming(null); await refresh(); })}
+          />}
+    </div>
   );
 }

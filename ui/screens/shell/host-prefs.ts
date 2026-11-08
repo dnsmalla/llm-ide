@@ -50,6 +50,12 @@ export interface HostPrefs {
   backendPort: number;
   /** Start the core when the app launches. */
   backendAutoStart: boolean;
+  /** Host API v1 capabilities passed to the spawned core (exact `1`); all apply at the next core start. */
+  hostApiTls: boolean;
+  hostApiRead: boolean;
+  hostApiCompose: boolean;
+  hostApiPush: boolean;
+  hostApiToolApprovals: boolean;
   /** Defaults applied to loops the Loop screen re-adds to a project. */
   loopDefaults: LoopDefaults;
   /** Minutes between automatic Code Graph refreshes; 0 = off. Host raises 1-4 to 5. */
@@ -109,7 +115,9 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
     : 0;
   const updateChecks = raw.updateChecks !== false;
   const continueSummary = raw.continueSummary === true;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart,
+    hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
+    loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
