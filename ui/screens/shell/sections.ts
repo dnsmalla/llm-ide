@@ -143,6 +143,20 @@ export function navReducer(state: NavState, action: NavAction): NavState {
 }
 
 /** Props every section screen receives from the shell. */
+/** Sections that work against a hub (all data over HTTP; no local filesystem or host process). */
+export const REMOTE_SECTIONS: readonly SectionId[] = ["welcome", "issues", "gantt", "library", "chat", "settings"];
+/** Settings groups that are local-only in remote mode. */
+export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
+export const LOCAL_ONLY_NOTICE = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.";
+
+export function visibleSectionsFor(mode: "local" | "remote"): readonly SectionDef[] {
+  if (mode === "remote") return SECTIONS.filter((s) => REMOTE_SECTIONS.includes(s.id));
+  return visibleSections();
+}
+export function isSelectableFor(id: string, mode: "local" | "remote"): boolean {
+  return visibleSectionsFor(mode).some((s) => s.id === id) && BY_ID.get(id)?.enabled === true && (id !== "spike" || devToolsEnabled());
+}
+
 export interface SectionProps {
   /** False while another section is shown: pause polling, timers and focus grabbing. */
   active: boolean;
