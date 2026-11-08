@@ -146,6 +146,15 @@ pub struct Prefs {
     pub backend_port: u16,
     /// Start the core when the app starts (false leaves it stopped until Start).
     pub backend_auto_start: bool,
+    // ---- Host API v1 (Settings > Phone and browser) ----
+    /// Serve the pairing listener (pinned TLS, all interfaces) from the spawned core: `LLMIDE_HOST_API_TLS=1`.
+    /// All five apply at the NEXT core start, like every other backend pref; a packaged app used to pass none of
+    /// them, so read / compose / push / tool approvals could never be on.
+    pub host_api_tls: bool,
+    pub host_api_read: bool,
+    pub host_api_compose: bool,
+    pub host_api_push: bool,
+    pub host_api_tool_approvals: bool,
     /// App-wide defaults for loops added to a newly detected project.
     pub loop_defaults: LoopDefaults,
     /// Minutes between automatic Code Graph refreshes; 0 = off. Values 1-4 are raised to 5.
@@ -161,6 +170,7 @@ impl Default for Prefs {
         Self {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
+            host_api_tls: false, host_api_read: false, host_api_compose: false, host_api_push: false, host_api_tool_approvals: false,
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
     }
@@ -183,6 +193,11 @@ pub struct PrefsPatch {
     pub backend_source: Option<bool>,
     pub backend_port: Option<u16>,
     pub backend_auto_start: Option<bool>,
+    pub host_api_tls: Option<bool>,
+    pub host_api_read: Option<bool>,
+    pub host_api_compose: Option<bool>,
+    pub host_api_push: Option<bool>,
+    pub host_api_tool_approvals: Option<bool>,
     pub loop_defaults: Option<LoopDefaults>,
     pub graph_auto_update_minutes: Option<u32>,
     pub update_checks: Option<bool>,
@@ -216,6 +231,11 @@ impl Prefs {
         if let Some(v) = p.backend_source { n.backend_source = v; }
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
+        if let Some(v) = p.host_api_tls { n.host_api_tls = v; }
+        if let Some(v) = p.host_api_read { n.host_api_read = v; }
+        if let Some(v) = p.host_api_compose { n.host_api_compose = v; }
+        if let Some(v) = p.host_api_push { n.host_api_push = v; }
+        if let Some(v) = p.host_api_tool_approvals { n.host_api_tool_approvals = v; }
         if let Some(v) = &p.loop_defaults {
             n.loop_defaults = v.clone().clamped();
         }
@@ -265,6 +285,8 @@ pub fn parse(text: &str) -> Prefs {
             // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
             features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
             backend_source: Some(p.backend_source), backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
+            host_api_tls: Some(p.host_api_tls), host_api_read: Some(p.host_api_read), host_api_compose: Some(p.host_api_compose),
+            host_api_push: Some(p.host_api_push), host_api_tool_approvals: Some(p.host_api_tool_approvals),
             loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
             update_checks: Some(p.update_checks), notifications: Some(p.notifications),
         });
@@ -329,6 +351,13 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
     }
     if p.learn { v.push(("LLMIDE_ROUTER_LEARN", "on".to_string())); }
     if p.continue_summary { v.push(("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())); }
+    // Host API v1 capabilities: exact `1`, the value the core reads. A packaged app enables them in Settings; the
+    // core only sees them at its next start.
+    if p.host_api_tls { v.push(("LLMIDE_HOST_API_TLS", "1".to_string())); }
+    if p.host_api_read { v.push(("LLMIDE_HOST_API_READ", "1".to_string())); }
+    if p.host_api_compose { v.push(("LLMIDE_HOST_API_COMPOSE", "1".to_string())); }
+    if p.host_api_push { v.push(("LLMIDE_HOST_API_PUSH", "1".to_string())); }
+    if p.host_api_tool_approvals { v.push(("LLMIDE_HOST_API_TOOL_APPROVALS", "1".to_string())); }
     if !p.terminal || !p.features.is_empty() {
         if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
     }
@@ -462,9 +491,30 @@ mod tests {
     fn defaults_are_off_for_every_token_affecting_switch() {
         let d = Prefs::default();
         assert!(!d.router && !d.cap && !d.compress && !d.learn && !d.continue_summary);
+        assert!(!d.host_api_tls && !d.host_api_read && !d.host_api_compose && !d.host_api_push && !d.host_api_tool_approvals);
         assert_eq!(d.lta_mode, LtaMode::Off);
         assert!(d.terminal);
         assert!(core_env_pairs(&d, None).is_empty(), "defaults pass nothing to the core");
+    }
+
+    #[test]
+    fn host_api_prefs_reach_the_core_as_exactly_one_and_nothing_else() {
+        let p = Prefs { host_api_tls: true, host_api_read: true, host_api_compose: true, host_api_push: true, host_api_tool_approvals: true, ..Prefs::default() };
+        assert_eq!(core_env_pairs(&p, None), vec![
+            ("LLMIDE_HOST_API_TLS", "1".to_string()),
+            ("LLMIDE_HOST_API_READ", "1".to_string()),
+            ("LLMIDE_HOST_API_COMPOSE", "1".to_string()),
+            ("LLMIDE_HOST_API_PUSH", "1".to_string()),
+            ("LLMIDE_HOST_API_TOOL_APPROVALS", "1".to_string()),
+        ]);
+        // A patch turns them back off; each one alone passes only its own key.
+        let off = p.patched(&PrefsPatch { host_api_read: Some(false), ..Default::default() });
+        assert!(!core_env_pairs(&off, None).iter().any(|(k, _)| *k == "LLMIDE_HOST_API_READ"));
+        let only_push = Prefs { host_api_push: true, ..Prefs::default() };
+        assert_eq!(core_env_pairs(&only_push, None), vec![("LLMIDE_HOST_API_PUSH", "1".to_string())]);
+        // An older prefs file reads all five as off.
+        let old: Prefs = serde_json::from_str(r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":true,"theme":"dark"}"#).unwrap();
+        assert!(!old.host_api_tls && !old.host_api_read && !old.host_api_compose && !old.host_api_push && !old.host_api_tool_approvals);
     }
 
     #[test]
