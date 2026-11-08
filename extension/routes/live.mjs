@@ -43,6 +43,12 @@ function takeFinalizeParts(userId, sessionId, body) {
   if (!Number.isInteger(of) || of < 2 || !Number.isInteger(part) || part < 1 || part > of) return { error: 'part/of are invalid' };
   if (of > MAX_FINALIZE_PARTS) return { error: `of must be at most ${MAX_FINALIZE_PARTS}` };
   if (!Array.isArray(body.captions)) return { error: 'captions must be an array' };
+  // R-024: `of` alone bounded the part COUNT, not the part size. Without this one part could be a full
+  // 8 MB body, so 4 pending captures × 25 parts × 8 MB was reachable; the assembled total is then bounded
+  // too (MAX_FINALIZE_PARTS × FINALIZE_PART_LINES = MAX_ASSEMBLED_LINES).
+  if (body.captions.length > FINALIZE_PART_LINES) {
+    return { error: `each part must have at most ${FINALIZE_PART_LINES} captions` };
+  }
   const now = Date.now();
   for (const [k, v] of pendingFinalize) if (now - v.at > FINALIZE_PART_TTL_MS) pendingFinalize.delete(k);
   const key = `${userId}\0${sessionId}`;

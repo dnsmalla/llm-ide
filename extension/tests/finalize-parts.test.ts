@@ -88,6 +88,28 @@ test('the route assembles three parts and finalizes all 4,500 lines', async () =
   assert.equal(last?.captionCount, 4500);
 });
 
+test('R-024: a part with more than FINALIZE_PART_LINES captions is refused before it is stored', async () => {
+  const tooBig = Array.from({ length: FINALIZE_PART_LINES + 1 }, (_, i) => caption(i));
+  const r = res();
+  await handleLiveRoutes(req({ captions: tooBig, part: 1, of: 2 }), r, {
+    userId: 'u1',
+    url: '/kb/live/s-too-big/finalize',
+  });
+  assert.equal(r.statusCode, 400, r.body);
+  assert.equal(r.json().error.code, 'VALIDATION_FAILED');
+  assert.match(r.json().error.message, new RegExp(`at most ${FINALIZE_PART_LINES} captions`));
+
+  // A full part is still accepted (pending), and the exact cap is not off by one.
+  const full = Array.from({ length: FINALIZE_PART_LINES }, (_, i) => caption(i));
+  const ok = res();
+  await handleLiveRoutes(req({ captions: full, part: 1, of: 2 }), ok, {
+    userId: 'u1',
+    url: '/kb/live/s-too-big/finalize',
+  });
+  assert.equal(ok.statusCode, 200, ok.body);
+  assert.equal(ok.json().pending, true);
+});
+
 test('C7 defaults: capture mode starts at captions, and a closed panel warns on the page', async () => {
   const fs = await import('node:fs');
   const hook = fs.readFileSync(new URL('../src/sidepanel/hooks/useTranscript.ts', import.meta.url), 'utf8');
