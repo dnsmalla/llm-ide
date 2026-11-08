@@ -52,7 +52,7 @@ export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {
       if (d.keys) { for (const k of Object.values(d.keys)) k.fill(0); d.keys = null; d.pair.es = ''; }
       return true;
     },
-    async readSnapshot(store) {
+    async readSnapshot(store, { now = Date.now() } = {}) {
       const raw = await store.get(`${base()}/manifest.bin`);
       if (!raw) failWith('removed');
       const env = J(raw);
@@ -60,6 +60,7 @@ export function createReferenceDevice({ tier = 'ios', name = 'Test iPhone' } = {
       const m = JSON.parse(S.open({ env, key: d.wrapKeys.manifest, verifyKey: d.desktop.verifyKey,
         expect: { purpose: 'manifest', userId: d.userId, desktopId: d.pair.sid, from: d.pair.sid, to: d.deviceId, epoch: d.epoch } }));
       if (m.manifestSeq < d.manifestSeq) failWith('rollback');
+      if (S.manifestState(m.validUntil, now) === 'stale_manifest') failWith('stale_manifest');
       d.manifestSeq = m.manifestSeq;
       const kinds = {};
       for (const [kind, e] of Object.entries(m.kinds)) {

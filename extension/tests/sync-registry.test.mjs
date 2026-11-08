@@ -59,7 +59,7 @@ test('revoke from Settings: folder gone, row gone, epoch rotated, the other devi
   assert.deepEqual(st.listSyncDevices(u).map((d) => d.name), ['B']);
   assert.equal(st.getSyncState(u).epoch, e0 + 1);
   await publishOnce({ userId: u, store, now: T + 30, loadKinds: kinds });
-  assert.equal((await b.readSnapshot(store)).manifest.epoch, e0 + 1);
+  assert.equal((await b.readSnapshot(store, { now: T + 40 })).manifest.epoch, e0 + 1);
   assert.equal(await revokeDevice(u, a.deviceId, { store }), false, 'unknown device');
 });
 
@@ -84,7 +84,7 @@ test('desktop-off revoke: a deleted folder drops the device, rotates, records a 
   assert.equal(st.getSyncState(u).epoch, e0 + 1);
   assert.deepEqual(under(store, `${sid}/d/${a.pair.dir}/`), [], 'never recreated');
   assert.ok(listActivity(u, {}).some((r) => r.kind === 'sync_device_removed' && r.title.includes('Lost phone')));
-  assert.equal((await b.readSnapshot(store)).manifest.epoch, e0 + 1);
+  assert.equal((await b.readSnapshot(store, { now: T + 30 })).manifest.epoch, e0 + 1);
 });
 
 test('a reset location (wrapEpoch 0, SP1 store change) is republished, not pruned', async () => {

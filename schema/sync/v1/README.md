@@ -35,10 +35,32 @@ Adding `enroll`/`enrollack` is additive: no existing byte changes, so `v` stays 
 - Browser (WebCrypto, SP3): `web/src/sync/` — `envelope.ts`, `enroll.ts`, `device.ts`; vectors checked by
   `web/tests/sync-envelope.test.mjs` and `web/tests/sync-enroll.test.mjs`; end to end against the real desktop in
   `web/tests/e2e/sync-desktop-e2e.test.mjs`.
+- iPhone (SP4): `ios_app/SharedProtocol` — `SyncDeviceTests`, `SyncEnvelopeTests`, `SyncPolicyTests`.
 - Two device choices, both safe under the threat model: a missing `manifest.bin` while `key.bin` is present means
   "waiting for the first snapshot" (the desktop publishes up to 60 s after confirm), not "removed"; and the device
   switches to a newer epoch's keys as soon as the newer `wrap.bin` verifies (it is desktop-signed), keeping the old
   reply key for 24 h.
+
+## Lifetime and clock (C5)
+
+Two rules every client executes, pinned by `vectors/v1.json` → `devicePolicy`:
+
+- **Manifest staleness.** The desktop sets `validUntil = generatedAt + 45 min` and refreshes it on a 15 min
+  heartbeat. A device reads the manifest while `validUntil` has not passed, shows "withheld" after it, and refuses
+  `stale_manifest` once `validUntil + 7 days < now`. The check runs after signature, epoch and rollback
+  verification and before any `kinds` blob is fetched, so a desktop that was off for a week cannot feed old keys.
+  Exactly 7 days past `validUntil` still reads (`<`, not `<=`). Node reference device:
+  `extension/tests/helpers/sync-device.mjs`; browser: `web/src/sync/device.ts`; iPhone:
+  `SyncDevice.readSnapshot` + `SyncPolicy`.
+- **Device-token lifetime (Host API v1).** A token lives at most 90 days from **pairing**, even if it stays
+  active; exactly 90 days is still valid. The desktop checks it at authentication and on every frame of an open
+  session, deletes the expired row and answers non-retryable `auth_failed` ("past its 90 days — pair again"). The
+  phone clears the saved token and shows the pairing screen with a direct re-pair action. Rule:
+  `extension/core/device-lifetime.mjs`; vector cases: `devicePolicy.deviceToken`.
+
+Both runners execute these rows: `node scripts/sync-vectors.mjs` plus
+`node --test extension/tests/sync-policy.test.mjs` (Node), and `SyncPolicyTests` (Swift). `make
+test-shared-protocol` runs both sides.
 
 ## Typed negatives and device implementations
 

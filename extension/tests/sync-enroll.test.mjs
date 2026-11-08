@@ -61,8 +61,10 @@ test('happy path: same SAS on both screens, desktop tier, wrap, first snapshot, 
   assert.equal(await dev.readWrap(store), true);
   assert.equal(dev.epoch, st.getSyncState(u).epoch);
   await publishOnce({ userId: u, store, now: T + 3000, loadKinds: kinds });
-  const snap = await dev.readSnapshot(store);
+  const snap = await dev.readSnapshot(store, { now: T + 4000 });
   assert.deepEqual(Object.keys(snap.kinds).sort(), ['chats', 'meetings', 'plans', 'usage']);
+  // C5: the shared devicePolicy vector, executed by this reference device too (45 min valid + 7 d grace).
+  await assert.rejects(() => dev.readSnapshot(store, { now: T + 3000 + 45 * 60_000 + 7 * 86_400_000 + 1 }), /stale_manifest/);
   assert.deepEqual(await store.list(`${sid}/e/${pair.slot}`), [], 'the slot is deleted');
   assert.equal((await pollEnrollment(u, { now: T + 4000 })).phase, 'none');
 

@@ -61,7 +61,7 @@ async function linked() {
 test('enroll, publish, queued prompt and reply: the device uses only the nginx allow-list', async () => {
   const { u, store, web, dev } = await linked();
   await publishOnce({ userId: u, store, now: T + 3000, loadKinds: kinds });
-  const snap = await dev.readSnapshot(web);
+  const snap = await dev.readSnapshot(web, { now: T + 4000 });
   assert.deepEqual(Object.keys(snap.kinds).sort(), ['chats', 'meetings', 'plans', 'usage']);
   const id = await dev.sendRequest(web, 'hello from the phone', { now: T + 4000 });
   await drainOnce({ userId: u, store, now: T + 5000, deps: turnDeps });

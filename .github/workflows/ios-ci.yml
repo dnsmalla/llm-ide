@@ -10,11 +10,19 @@ on:
     paths:
       - 'ios_app/**'
       - 'Makefile'
+      - 'schema/sync/**'
+      - 'scripts/sync-vectors.mjs'
+      - 'extension/core/device-lifetime.mjs'
+      - 'extension/tests/sync-policy.test.mjs'
       - '.github/workflows/ios-ci.yml'
   pull_request:
     paths:
       - 'ios_app/**'
       - 'Makefile'
+      - 'schema/sync/**'
+      - 'scripts/sync-vectors.mjs'
+      - 'extension/core/device-lifetime.mjs'
+      - 'extension/tests/sync-policy.test.mjs'
       - '.github/workflows/ios-ci.yml'
 
 concurrency:

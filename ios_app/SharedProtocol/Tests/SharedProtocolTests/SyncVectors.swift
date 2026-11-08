@@ -19,6 +19,7 @@ enum SV {
 
     static func d(_ x: Any?) -> [String: Any] { x as! [String: Any] }
     static func s(_ x: Any?) -> String { x as! String }
+    static func i(_ x: Any?) -> Int { x as! Int }
     static func b(_ x: Any?) -> Data { SyncB64.decode(x as! String)! }
     static func hex(_ x: Any?) -> Data {
         let c = Array((x as! String).utf8)

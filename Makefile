@@ -66,9 +66,13 @@ export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-sele
 # Requires full Xcode — Command Line Tools alone lack the XCTest module.
 HAS_XCTEST := $(shell test -d "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework" && echo 1)
 
-# SharedProtocol wire-format tests (used by ios_app).
+# SharedProtocol wire-format tests (used by ios_app). The sync v1 vectors are shared: the Node reference
+# runner and the Swift suite both execute `devicePolicy` (stale_manifest + 90-day device lifetime), so a
+# change that only one side understands fails here.
 test-shared-protocol:
 	node scripts/generate-host-api.mjs --check
+	node scripts/sync-vectors.mjs
+	node --test extension/tests/sync-policy.test.mjs
 	cd ios_app/SharedProtocol && swift build
 ifeq ($(HAS_XCTEST),1)
 	cd ios_app/SharedProtocol && swift test

@@ -89,6 +89,12 @@ export function openAck({ env, pair, tier, claim, keys, verifyKey }) {
   return { userId: env.userId, nD: Buffer.from(nD) };
 }
 
+// C5 policy (schema/sync/v1 vectors `devicePolicy`). Kept here, not imported from the implementation, so the
+// reference device and the shipped device cannot share a mistake. Arithmetic only.
+export const STALE_MANIFEST_MS = 7 * 86_400_000;
+export const manifestState = (validUntil, nowMs) =>
+  validUntil + STALE_MANIFEST_MS < nowMs ? 'stale_manifest' : nowMs > validUntil ? 'withheld' : 'fresh';
+
 // Key wrap (design 4.3): ECDH with the desktop's ephemeral key, then the four per-device keys.
 export function unwrapSync({ env, ecdhPrivate, deviceEcdhSpki, desktopSpki, verifyKey, currentEpoch, deviceId }) {
   if (env?.purpose !== 'syncwrap' || !env.eph) fail('bad_purpose');

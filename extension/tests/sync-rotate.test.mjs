@@ -70,7 +70,7 @@ test('rotateNow: every device gets a new wrap, a full republish, old blobs delet
   assert.equal(await rotateNow(u, { store, now: T + 20 }), 'done');
   assert.equal(st.getSyncState(u).epoch, e0 + 1);
   await publishOnce({ userId: u, store, now: T + 30, loadKinds: kinds });
-  const snap = await a.readSnapshot(store);
+  const snap = await a.readSnapshot(store, { now: T + 40 });
   assert.equal(a.epoch, e0 + 1, 'the device unwrapped the new epoch from the manifest hint');
   assert.equal(snap.manifest.epoch, e0 + 1);
   const newBlobs = (await store.list(`${sid}/d/${a.pair.dir}/s`)).map((f) => f.name);

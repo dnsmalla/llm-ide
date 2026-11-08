@@ -2,11 +2,13 @@
 // shown once, at pairing. Lookup is by hash (a unique index), so the token itself never touches SQL.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getDb, requireUser } from './db.mjs';
+import { DEVICE_TOKEN_MAX_LIFETIME_MS, isDeviceTokenExpired } from '../core/device-lifetime.mjs';
 
 export const MAX_DEVICES_PER_USER = 20;
 export const MAX_IDLE_MS = 30 * 24 * 3600 * 1000;
 // C5: a paired device is never permanent — 90 days after pairing it must re-pair, whatever its activity.
-export const MAX_LIFETIME_MS = 90 * 24 * 3600 * 1000;
+// The rule is shared with the sync manifest grace in core/device-lifetime.mjs (vector: schema/sync/v1).
+export const MAX_LIFETIME_MS = DEVICE_TOKEN_MAX_LIFETIME_MS;
 // What a token paired before scopes existed (scopes NULL) may use: never tool_approvals.
 export const LEGACY_SCOPES = Object.freeze(['host', 'chat', 'approvals']);
 const hash = (token) => createHash('sha256').update(token).digest('hex');
@@ -40,7 +42,7 @@ export function authenticateDeviceToken(token, now = Date.now()) {
   const db = getDb();
   const row = db.prepare('SELECT user_id, device_id, paired_at, last_seen_at, scopes FROM host_api_devices WHERE token_hash = ?').get(hash(token));
   if (!row) return null;
-  if (now - row.paired_at > MAX_LIFETIME_MS) {
+  if (isDeviceTokenExpired(row.paired_at, now)) {
     // Past its lifetime: delete it, so the next request re-pairs instead of reusing a stale grant.
     db.prepare('DELETE FROM host_api_devices WHERE user_id = ? AND device_id = ?').run(row.user_id, row.device_id);
     return null;

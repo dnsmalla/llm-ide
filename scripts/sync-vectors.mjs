@@ -107,13 +107,42 @@ function build() {
     ],
   };
 
+  // C5 device policy: the two clocks every implementation must agree on. The manifest cases are the existing
+  // manifest's validUntil (± the 7-day grace); the token cases are 90 days from pairing. Both fail closed.
+  const DAY = 86_400_000;
+  const manifestValidUntil = 1762302700000;
+  const devicePolicy = {
+    manifest: {
+      staleAfterMs: 7 * DAY,
+      validUntil: manifestValidUntil,
+      cases: [
+        { name: 'at_validUntil', nowMs: manifestValidUntil, expect: 'fresh' },
+        { name: 'just_past_validUntil', nowMs: manifestValidUntil + 1, expect: 'withheld' },
+        { name: 'at_grace_boundary', nowMs: manifestValidUntil + 7 * DAY, expect: 'withheld' },
+        { name: 'past_grace', nowMs: manifestValidUntil + 7 * DAY + 1, expect: 'stale_manifest' },
+      ],
+    },
+    deviceToken: {
+      maxLifetimeMs: 90 * DAY,
+      pairedAt: 1762300000000,
+      cases: [
+        { name: 'at_pairing', nowMs: 1762300000000, expect: 'live' },
+        { name: 'at_89_days', nowMs: 1762300000000 + 89 * DAY, expect: 'live' },
+        { name: 'at_90_days', nowMs: 1762300000000 + 90 * DAY, expect: 'live' },
+        { name: 'past_90_days', nowMs: 1762300000000 + 90 * DAY + 1, expect: 'expired' },
+      ],
+    },
+  };
+  const manifestState = (validUntil, now) => (validUntil + devicePolicy.manifest.staleAfterMs < now ? 'stale_manifest' : now > validUntil ? 'withheld' : 'fresh');
+  const tokenState = (pairedAt, now) => (now - pairedAt > devicePolicy.deviceToken.maxLifetimeMs ? 'expired' : 'live');
+
   return {
     v: 1, ids, epoch, rootHex: hex(root),
     keys: { desktopSigningPkcs8: keys.desktopSigningPkcs8, desktopSigningSpki: keys.desktopSigningSpki, deviceEcdhPkcs8: keys.deviceEcdhPkcs8, deviceEcdhSpki: keys.deviceEcdhSpki, deviceSigningPkcs8: keys.deviceSigningPkcs8, deviceSigningSpki: keys.deviceSigningSpki, ephPkcs8: keys.ephPkcs8, ephSpki: keys.ephSpki },
     desktopSigningFingerprint: sha(deskSpki).toString('base64url'),
     requestKeyHex: hex(k.request), replyKeyHex: hex(k.reply), snapshotKeyHex: hex(k.snapshot), manifestKeyHex: hex(k.manifest),
     snapshot: { plaintext: snapPlain, env: snapshot }, manifest: { plaintext: manPlain, env: manifest }, syncwrap: { env: syncwrap }, enroll,
-    request: { plaintext: reqPlain, env: request }, reply: { plaintext: replyPlain, env: reply }, typedNegatives,
+    request: { plaintext: reqPlain, env: request }, reply: { plaintext: replyPlain, env: reply }, typedNegatives, devicePolicy,
     negatives: ['flip:ct', 'flip:sig', 'truncate:ct', 'purpose=manifest', 'epoch=4', 'to=h1-00000000-0000-4000-8000-000000000002', 'v=2'],
   };
 }
@@ -137,6 +166,14 @@ if (write) {
   const verifyEnv = (e, spki) => verify('sha256', Buffer.concat([Buffer.from(`llmide/${e.purpose}/v1\0`), R.enc([...R.headerFields(e), e.eph ? b(e.eph) : Buffer.alloc(0), b(e.nonce), b(e.ct)])]), { key: pub(spki), dsaEncoding: 'ieee-p1363' }, b(e.sig));
   const enrollOk = !!current.enroll && verifyEnv(current.enroll.claim.env, current.enroll.deviceSigningSpki) && verifyEnv(current.enroll.ack.env, current.keys.desktopSigningSpki);
   const deviceOk = !!current.request && verifyEnv(current.request.env, current.keys.deviceSigningSpki) && verifyEnv(current.reply.env, current.keys.desktopSigningSpki);
-  if (!same || !sigOk || !enrollOk || !deviceOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
+  // Execute the policy cases here too: the shared vector is a spec, not a snapshot. Any implementation that
+  // imports these numbers (Node core, Swift, WebCrypto) must get the same answer for every row.
+  const policy = current.devicePolicy;
+  const manifestState = (validUntil, now) => (validUntil + policy.manifest.staleAfterMs < now ? 'stale_manifest' : now > validUntil ? 'withheld' : 'fresh');
+  const tokenState = (pairedAt, now) => (now - pairedAt > policy.deviceToken.maxLifetimeMs ? 'expired' : 'live');
+  const policyOk = !!policy && policy.manifest.staleAfterMs === 7 * 86_400_000 && policy.deviceToken.maxLifetimeMs === 90 * 86_400_000
+    && policy.manifest.cases.every((c) => manifestState(policy.manifest.validUntil, c.nowMs) === c.expect)
+    && policy.deviceToken.cases.every((c) => tokenState(policy.deviceToken.pairedAt, c.nowMs) === c.expect);
+  if (!same || !sigOk || !enrollOk || !deviceOk || !policyOk) { console.error('sync v1 vectors out of date: run node scripts/sync-vectors.mjs --write'); process.exit(1); }
   console.log('sync v1 vectors ok');
 }

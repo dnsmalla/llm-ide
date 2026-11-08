@@ -497,6 +497,60 @@
       "error": "bad_signature"
     }
   ],
+  "devicePolicy": {
+    "manifest": {
+      "staleAfterMs": 604800000,
+      "validUntil": 1762302700000,
+      "cases": [
+        {
+          "name": "at_validUntil",
+          "nowMs": 1762302700000,
+          "expect": "fresh"
+        },
+        {
+          "name": "just_past_validUntil",
+          "nowMs": 1762302700001,
+          "expect": "withheld"
+        },
+        {
+          "name": "at_grace_boundary",
+          "nowMs": 1762907500000,
+          "expect": "withheld"
+        },
+        {
+          "name": "past_grace",
+          "nowMs": 1762907500001,
+          "expect": "stale_manifest"
+        }
+      ]
+    },
+    "deviceToken": {
+      "maxLifetimeMs": 7776000000,
+      "pairedAt": 1762300000000,
+      "cases": [
+        {
+          "name": "at_pairing",
+          "nowMs": 1762300000000,
+          "expect": "live"
+        },
+        {
+          "name": "at_89_days",
+          "nowMs": 1769989600000,
+          "expect": "live"
+        },
+        {
+          "name": "at_90_days",
+          "nowMs": 1770076000000,
+          "expect": "live"
+        },
+        {
+          "name": "past_90_days",
+          "nowMs": 1770076000001,
+          "expect": "expired"
+        }
+      ]
+    }
+  },
   "negatives": [
     "flip:ct",
     "flip:sig",
