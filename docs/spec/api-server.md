@@ -522,6 +522,32 @@ authoritative: a missing account row is deleted (implicit viewer). Generation wr
 membership change writes through atomically. Invalid YAML/role/mode/cap/project id fails the boot closed;
 unknown project ids and emails are ignored and audited.
 
+## 7q. Per-project chat history (API 128)
+
+Host API v1 clients (phone/web) can keep one chat history per project. Migration 0074 indexes
+`chat_sessions(user_id, project_id, updated_at DESC)` and adds `host_api_project_chat(user_id, project_id,
+chat_session_id)`; `project_id` has existed on `chat_sessions` since 0023. A session written before 0074 has
+`project_id` NULL and is the **legacy/global** chat (an existing pairing that sends no project keeps its
+conversation). The desktop app's local chat store is a different store and is unchanged.
+
+`chat.sessions` and `chat.history` now accept the same optional `projectId` (`[A-Za-z0-9_-]{1,128}`) as the
+other chat frames. A Host API list is always scoped: with `projectId` it is that project's sessions; without
+one it is the `project_id IS NULL` legacy/global sessions, so one project's chats never appear in another
+project's list. `chat.new` creates (and points the project's current phone chat at) a session with that
+`project_id`; `chat.send` / `chat.snapshot` / `chat.history.clear` use the current chat of the frame's
+project. `chat.history` compares the stored `project_id` with the frame's: a session belonging to another
+project answers the error frame's 403 class (`denied`) with a message starting `PROJECT_MISMATCH`, and a
+cross-user id stays `not_found`.
+
+On a hub (`LLMIDE_HUB=1`) every project-scoped Host API command must name a project; the gateway answers
+`denied` with `PROJECT_REQUIRED` otherwise. An unassigned caller is a viewer on that project (Ask only), as
+in API 126. `GET /kb/chat/sessions` accepts an optional `projectId` query (omitted = every chat, unchanged;
+an invalid id is 400 `VALIDATION_FAILED`) for a shared server-side list. The web and iOS History views send
+the picker's selected project on `chat.sessions`/`chat.history` and clear the previous project's rows when the
+picker changes. Tests: `extension/tests/host-api-project-chat.test.mjs`,
+`extension/tests/migration-0074-chat-project.test.mjs`, `extension/tests/chat-sessions.test.mjs`,
+`web/tests/read-controller.test.mjs`, `ios_app/SharedProtocol/Tests/SharedProtocolTests/HostApiReadsTests.swift`.
+
 ## 8. See also
 
 - [`../explanation/server-internals.md`](../explanation/server-internals.md) — narrative explanation of request flow, shutdown, and background tasks

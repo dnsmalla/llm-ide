@@ -105,10 +105,15 @@ projects:
 ## Host API / phone / web
 
 `projects.list` returns the paired device's projects and effective roles. A project-scoped frame
-(`chat.send`, `chat.new`, `chat.snapshot`, `chat.history.clear`, `chat.cancel`, `chat.options`,
-`approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the host re-checks the fresh
-project grant on every frame. An unassigned device is a viewer on that project (Ask only). A frame
-without `projectId` keeps the v1 team behavior, so existing pairings keep working. The web app calls
-`projects.list` on connect, shows each project with your role, remembers the picker choice in browser
-storage, and sends `projectId` on every project-scoped frame (`chat.history` is session-scoped and has
-no project field).
+(`chat.send`, `chat.new`, `chat.snapshot`, `chat.sessions`, `chat.history`, `chat.history.clear`,
+`chat.cancel`, `chat.options`, `approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the
+host re-checks the fresh project grant on every frame. An unassigned device is a viewer on that project
+(Ask only). A frame without `projectId` keeps the legacy/global chat, so existing pairings keep working.
+The web app calls `projects.list` on connect, shows each project with your role, remembers the picker
+choice in browser storage, and sends `projectId` on every project-scoped frame, including the History
+list (`chat.sessions`) and one chat's history (`chat.history`).
+
+Each project has its own chat history. `chat.new` starts a fresh chat in the selected project; the
+project's list never shows another project's chats, and `chat.history` for a chat from another project is
+refused (`denied` with `PROJECT_MISMATCH`, the frame's 403 class). On a hub every project-scoped frame
+must name a project (`PROJECT_REQUIRED`). See [chat history per project](project-chat-history.md).
