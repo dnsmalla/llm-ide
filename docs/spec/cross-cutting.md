@@ -187,7 +187,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0070` (`0070_projects.sql`: `projects`, `project_members` and `usage_ledger.project_id`, the project-scoped team roles of ADR 0022; `0069_usage_cost_usd.sql` added `usage_ledger.cost_usd`, the monthly USD sum behind the member cap; `0068_team_members.sql` added `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0071` (`0071_project_root_unique.sql`: one project per canonical folder, ADR 0022; `0070_projects.sql` added `projects`, `project_members` and `usage_ledger.project_id`, the project-scoped team roles; `0069_usage_cost_usd.sql` added `usage_ledger.cost_usd`, the monthly USD sum behind the member cap; `0068_team_members.sql` added `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 
