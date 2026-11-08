@@ -76,7 +76,9 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
       ) : null}
       {s.report ? (
         <div className="st-note" role="status">
-          <p>{s.report.rolledBack ? `Deploy failed at ${s.report.failedStage ?? "a stage"}; the previous release was restored.` : `Hub is live at ${s.report.url} (API ${s.report.apiVersion}).`}</p>
+          <p>{s.report.failedStage
+            ? `Deploy failed at ${s.report.failedStage}; ${s.report.rolledBack ? "the previous release was restored." : "nothing was restored (first install)."}`
+            : `Hub is live at ${s.report.url} (API ${s.report.apiVersion}).`}</p>
           {s.report.ownerWindowOpen && s.report.setupUrl ? (
             <>
               <p className="st-hint">Create the owner in this one-time window:</p>

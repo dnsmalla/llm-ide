@@ -32,7 +32,8 @@ task list are in `docs/superpowers/plans/2026-11-08-remote-server-modes.md` (D1â
    `desktop/dist/hub/llmide-core-<version>-linux-x64.tar.gz`.
 6. Type the domain in the confirmation field and press **Deploy**. The stages are: pre-deploy backup
    (existing installs), service user/dirs, secret env over stdin, bundle + SHA-256, nginx, start,
-   health gate, then a one-time owner setup window. Any failure runs the previous release back.
+   health gate, then a one-time owner setup window. A failure restores the previous release when one
+   exists; on a first install there is nothing to restore, and the card says so.
 7. Open the setup link shown once. It uses a 32-byte `#fragment` token (never a query string or an
    access log); create the owner, then press **I created the owner â€” close registration**. Verify
    `/auth/well-known` says registration is closed.
@@ -43,11 +44,13 @@ task list are in `docs/superpowers/plans/2026-11-08-remote-server-modes.md` (D1â
   redacted data (no env file, no prompt text).
 - **Backups:** the core's daily backup keeps 7 stamps under `/var/lib/llmide/backups`; **Backup
   now** runs the fixed one-shot. Copy them off the host (see `deploy/vps/README.md`).
-- **Update:** build a new bundle, upload/switch (the same `bundle`/`start` stages with a health gate),
-  and keep the previous release for rollback. A failed health check restores it automatically.
+- **Update:** build a new bundle, upload/switch (pre-update backup + the same health gate as a deploy),
+  and keep the previous release. A failed health check restores it automatically; a failed first install
+  has nothing to restore and says so.
 - **Revoke:** Settings â†’ Phone and browser revokes a device; it is disconnected immediately.
-- **Uninstall:** stops/disables the service, removes the unit/vhost/helper and keeps
-  `/var/lib/llmide`; the purge stage deletes data only after typing the hostname.
+- **Uninstall:** stops/disables the service and removes the unit/vhost, helper and sudoers entry; it keeps
+  `/var/lib/llmide` and `/srv/llmide/projects`. Purge is a helper stage (runbook only), not a UI button; it
+  also removes `/etc/llmide` (the JWT/vault keys) after the same hostname confirmation.
 
 ## Limits (stated plainly)
 
