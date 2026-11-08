@@ -6,6 +6,7 @@
 // that provider's web host (kb.findTicket). Audit rows carry the action, repo/number and outcome, never the text.
 import { createHash } from 'node:crypto';
 import * as kb from '../kb/db.mjs';
+import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { getSecret } from '../server/vault.mjs';
@@ -142,6 +143,14 @@ export async function handleIssueWriteRoutes(req, res, { userId, url }) {
   }
   let raw;
   try { raw = parseJSON(await readBody(req, 128 * 1024)); } catch { return fail(res, 400, 'VALIDATION_FAILED', 'Invalid JSON body'); }
+  // R-021 #2: issue writes are project work; a hub requires a known project and its grant may only narrow.
+  const projectId = typeof raw?.projectId === 'string' && raw.projectId ? raw.projectId : null;
+  const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
+  if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
+  if (projectId) {
+    const decision = authorizeAction(kb.getDb(), userId, 'external.write', { projectId, req });
+    if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
+  }
   const w = parseIssueWrite(op, raw);
   if (w.error) { sendJSON(res, 400, w); return true; }
   const resource = `${w.provider}:${w.repo}${w.number ? `#${w.number}` : ''}`;

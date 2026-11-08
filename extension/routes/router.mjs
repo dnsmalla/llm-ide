@@ -9,6 +9,8 @@ import { indexScip } from '../connectors/scip.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
+import { projectIdForRoot } from '../kb/projects.mjs';
+import { projectScopeRefusal } from './route-authority.mjs';
 // generatePlan, analyzeRisks, codeSync, dispatchPlan, generateCodeForTask
 // moved into routes/planning.mjs.
 // applyCodegen + openPullRequest moved into routes/review.mjs.
@@ -496,8 +498,19 @@ export async function handleKB(req, res) {
     // so it is not a member-level action. The server dispatcher applies the same
     // table; the call here keeps a direct handleKB caller on the one gate.
     if (req.method === 'POST' && url === '/kb/project/install-skills') {
+      // R-021 #2: the folder decides the project (a named project must own it), and a hub requires one.
+      const early = parseJSON(await readBody(req)) || {};
+      const named = typeof early.projectId === 'string' && early.projectId ? early.projectId : null;
+      const folder = projectIdForRoot(kb.getDb(), typeof early.path === 'string' ? early.path : null);
+      if (named && folder && named !== folder) {
+        sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
+        return true;
+      }
+      const projectId = folder || named;
+      const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
+      if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
       if (enforceRouteAuthority(kb.getDb(), req, res)) return true;
-      const body = parseJSON(await readBody(req)) || {};
+      const body = early;
       try {
         // Items this user unchecked in Central Skills (Library → LLM Sources)
         // stay out of the project too — "unchecked" means everywhere. The

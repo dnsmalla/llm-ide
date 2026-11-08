@@ -19,6 +19,8 @@ import { dispatchPlan } from '../agents/dispatcher.mjs';
 import { nudgeOutcomePoller } from '../agents/outcome-watcher.mjs';
 import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
+import { projectIdForRoot } from '../kb/projects.mjs';
 
 // Config keys that name WHERE a dispatch lands (github repo; backlog space +
 // project; linear team + project). Pinned to the approved review.
@@ -329,6 +331,21 @@ export async function handlePlanningRoutes(req, res, ctx) {
     if (!body?.taskId) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing taskId' } });
       return true;
+    }
+    // R-021 #2: code generation is project work; a named project must own the repo folder (R-021 #1) and a hub
+    // requires one.
+    const named = typeof body.projectId === 'string' && body.projectId ? body.projectId : null;
+    const folder = projectIdForRoot(kb.getDb(), typeof body.repo === 'string' ? body.repo : null);
+    if (named && folder && named !== folder) {
+      sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
+      return true;
+    }
+    const projectId = folder || named;
+    const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
+    if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
+    if (projectId) {
+      const decision = authorizeAction(kb.getDb(), userId, 'model.ask', { projectId, req });
+      if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
     }
     try {
       const result = await generateCodeForTask(userId, {

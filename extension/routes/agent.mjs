@@ -12,6 +12,7 @@ import * as kb from '../kb/db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../agents/meeting-agent.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt, onClientDisconnect } from '../core/utils.mjs';
+import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
 import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../llm_agent/skills/index.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../providers/prompt-utils.mjs';
 import {
@@ -194,6 +195,13 @@ export async function handleAgentRoutes(req, res, ctx) {
   if (req.method === 'POST' && url === '/kb/agent/ask') {
     // 8 MB cap leaves room for a base64 image (capped per-image below).
     const body = parseJSON(await readBody(req, 8 * 1024 * 1024)) || {};
+    // R-021 #2: on a hub the ask belongs to a known project; the project grant may only narrow.
+    const scope = projectScopeRefusal(kb.getDb(), userId, typeof body.projectId === 'string' ? body.projectId : null);
+    if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
+    if (body.projectId) {
+      const decision = authorizeAction(kb.getDb(), userId, 'model.ask', { projectId: body.projectId, req });
+      if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
+    }
     const rawMessage = String(body.message || '');
     const message = sanitizeForPrompt(rawMessage).slice(0, 8000);
     const { images, error: imageError } = parseAskImages(body.image);
