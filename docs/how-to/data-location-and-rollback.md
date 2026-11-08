@@ -203,3 +203,11 @@ healthy boot they are deleted. So:
   backup refusal, pair-wide rollback, dry run.
 - `extension/tests/dev-secrets.test.mjs`: fallback to the legacy file, and refusal
   to regenerate over an unreadable one.
+
+## Add-on state
+
+`plugins/`, `extensions/`, `llm-sources/` and their JSON state live under
+`<desktop data dir>/core/addons/` on every OS. The desktop sets `LLMIDE_PLUGIN_DIR` to
+`<core>/addons/plugins` for its core. On first start after this change, the host copies the named
+entries from the retired Mac app folder (`~/Library/Application Support/llm-ide`) once, without
+following symlinks and without changing the old folder.

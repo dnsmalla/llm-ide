@@ -141,3 +141,10 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 - Tests:
   - node: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen), `tests/self-heal-batch.test.mjs`, `tests/self-heal-fix-store.test.mjs`, `tests/self-heal-runs.test.mjs` (local listen)
   - cargo: `self_heal_fix` (real git in temp folders)
+
+### Add-on state location
+
+`LLMIDE_PLUGIN_DIR` defaults to the OS plugin root, but the desktop host always sets it to
+`<desktop data dir>/core/addons/plugins`. The sibling add-on bundles and JSON state live under
+`<core>/addons/`. A one-time host copy imports the retired Mac app's add-ons; spawned-core tests must
+set `LLMIDE_PLUGIN_DIR` to their temp dir so they never write real user data.

@@ -1261,6 +1261,59 @@ fn host_api_env(key: &str, value: Option<&str>) -> Option<String> {
     }
 }
 
+
+/// The retired Mac app's add-on entries. A plain copy is valid: no JSON stores an absolute path here.
+const ADDON_ENTRIES: &[&str] = &[
+    "plugins", "extensions", "llm-sources", "llm-sources.json", "llm-sources-state.json",
+    "mcp-plugins.json", "mcp-plugins-state.json", "connector-state.json", "plugin-state.json",
+    "plugin-sources.json", "extensions-state.json", "extensions-installed.json",
+    "skills-sources.json", "skills-sources-state.json",
+];
+
+fn copy_tree_no_symlinks(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(src)?;
+    if meta.file_type().is_symlink() { return Ok(()); }
+    if meta.is_dir() {
+        std::fs::create_dir_all(dst)?;
+        for e in std::fs::read_dir(src)? {
+            let e = e?;
+            copy_tree_no_symlinks(&e.path(), &dst.join(e.file_name()))?;
+        }
+    } else if meta.is_file() {
+        std::fs::copy(src, dst)?;
+    }
+    Ok(())
+}
+
+/// One-time copy of the retired Mac app's add-ons into `<core>/addons`. The old folder is never
+/// modified; a failure leaves no partial `addons` (the core starts on an empty one).
+pub(crate) fn migrate_addons(core_dir: &Path) -> Result<bool, String> {
+    if core_dir.join("addons").exists() || fsutil::current_os() != fsutil::Os::Mac {
+        return Ok(false);
+    }
+    let home = std::env::var("HOME").map(PathBuf::from).ok().filter(|p| p.is_absolute())
+        .ok_or("HOME is not set")?;
+    let support = home.join("Library").join("Application Support");
+    let modern = support.join("llm-ide");
+    let legacy = support.join("LLM IDE");
+    let old = if modern.exists() { modern } else { legacy };
+    let present: Vec<&str> = ADDON_ENTRIES.iter().copied().filter(|n| old.join(n).exists()).collect();
+    if present.is_empty() { return Ok(false); }
+    let tmp = core_dir.join(format!("addons.tmp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| format!("cannot create the add-on staging folder: {e}"))?;
+    let result = (|| -> std::io::Result<()> {
+        for name in &present { copy_tree_no_symlinks(&old.join(name), &tmp.join(name))?; }
+        std::fs::rename(&tmp, core_dir.join("addons"))?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!("cannot copy the old add-ons: {e}"));
+    }
+    Ok(true)
+}
+
 /// `node` with the cleared + allowlisted environment, cwd `extension/`, and the data
 /// layout: `LLMIDE_DATA_DIR` and `LLMIDE_DB_PATH` both point into `<data>/core`. The
 /// explicit DB path makes the server's repo-kb -> data-dir boot migration a no-op, so a
@@ -1268,6 +1321,7 @@ fn host_api_env(key: &str, value: Option<&str>) -> Option<String> {
 fn core_command(rt: &Runtime, db_dir: &Path) -> Command {
     let parent: Vec<(String, String)> = std::env::vars().collect();
     let node_dir = (rt.mode == "bundled").then(|| rt.node.parent().map(Path::to_path_buf)).flatten();
+    if let Err(e) = migrate_addons(db_dir) { eprintln!("core: add-on migration failed: {e}"); }
     let (env, path) = crate::core_env::core_env(fsutil::current_os(), &parent, node_dir.as_deref());
     let mut cmd = Command::new(&rt.node);
     cmd.env_clear()
@@ -1275,6 +1329,7 @@ fn core_command(rt: &Runtime, db_dir: &Path) -> Command {
         .env("PATH", path)
         .env("LLMIDE_DATA_DIR", db_dir)
         .env("LLMIDE_DB_PATH", db_dir.join("data.db"))
+        .env("LLMIDE_PLUGIN_DIR", db_dir.join("addons").join("plugins"))
         .current_dir(rt.root.join("extension"));
     cmd
 }
@@ -2064,6 +2119,7 @@ process.on('SIGTERM', () => process.exit(0));
         let envs: std::collections::HashMap<_, _> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().to_string(), v.map(|v| v.to_string_lossy().to_string()))).collect();
         assert_eq!(envs["LLMIDE_DATA_DIR"].as_deref(), Some("/data/core"));
         assert_eq!(envs["LLMIDE_DB_PATH"].as_deref(), Some("/data/core/data.db"));
+        assert_eq!(envs["LLMIDE_PLUGIN_DIR"].as_deref(), Some("/data/core/addons/plugins"));
         assert!(envs["PATH"].as_deref().unwrap().ends_with("/App/core/node"));
         for leaked in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "NODE_OPTIONS", "LLMIDE_JWT_SECRET", "GITHUB_TOKEN"] {
             assert!(!envs.contains_key(leaked), "{leaked} must not reach the core");
@@ -2115,5 +2171,31 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_LIVE_ACK", "1")));
         let host = vec![("LLMIDE_LIVE_ACK".to_string(), "0".to_string())];
         assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn addons_are_copied_once_from_the_old_app_without_following_symlinks() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("llmide-addons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("home/Library/Application Support/llm-ide/plugins/p1")).unwrap();
+        std::fs::create_dir_all(root.join("home/Library/Application Support/llm-ide/llm-sources")).unwrap();
+        std::fs::write(root.join("home/Library/Application Support/llm-ide/plugins/p1/a.txt"), "a").unwrap();
+        std::fs::write(root.join("home/Library/Application Support/llm-ide/llm-sources.json"), "{}").unwrap();
+        let outside = root.join("outside.txt");
+        std::fs::write(&outside, "secret").unwrap();
+        symlink(&outside, root.join("home/Library/Application Support/llm-ide/plugins/leak")).unwrap();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", root.join("home"));
+        let core = root.join("core");
+        std::fs::create_dir_all(&core).unwrap();
+        assert!(migrate_addons(&core).unwrap());
+        assert_eq!(std::fs::read_to_string(core.join("addons/plugins/p1/a.txt")).unwrap(), "a");
+        assert!(core.join("addons/llm-sources.json").exists());
+        assert!(!core.join("addons/plugins/leak").exists(), "symlinks are not followed");
+        assert!(!migrate_addons(&core).unwrap(), "second run is a no-op");
+        assert!(root.join("home/Library/Application Support/llm-ide/plugins/p1/a.txt").exists(), "the old folder is untouched");
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
