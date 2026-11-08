@@ -23,6 +23,7 @@ const users = await import('../server/users.mjs');
 const { handleDocsRoutes } = await import('../routes/docs-routes.mjs');
 const { handleKB } = await import('../routes/router.mjs');
 const { featureDisabledFor, FEATURE_ROUTE_GROUPS } = await import('../routes/feature-routes.mjs');
+const { getProject } = await import('../kb/projects.mjs');
 const { GOLDEN_VISUAL_TEMPLATE } = await import('./fixtures/docgen/golden.mjs');
 
 function makeReq({ method, url, rawBody, body, user }) {
@@ -50,10 +51,10 @@ function makeRes() {
   };
 }
 
-async function call(user, method, url, body, rawBody) {
+async function call(user, method, url, body, rawBody, dir) {
   const req = makeReq({ method, url, body, rawBody, user: user ? { id: user } : undefined });
   const res = makeRes();
-  await handleDocsRoutes(req, res, { userId: user, url });
+  await handleDocsRoutes(req, res, { userId: user, url, dir });
   return res;
 }
 
@@ -535,5 +536,30 @@ test('createOnly: an unreadable template, a plain file and a symlink at the name
   } finally {
     try { fs.chmodSync(path.join(tdir, 'locked', 'template.md'), 0o600); } catch { /* gone */ }
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('R-020 #6: a new project is written through to team.yaml, and a failed write rolls the registration back', async () => {
+  reset();
+  const u = mkUser('proj-yaml');
+  const root = makeProject();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-team-yaml-'));
+  try {
+    const ok = await call(u, 'POST', '/kb/projects/register', { id: 'proj-yaml-a', root }, null, dir);
+    assert.equal(ok.statusCode, 200, ok._body);
+    const text = fs.readFileSync(path.join(dir, 'team.yaml'), 'utf8');
+    assert.match(text, /projects:/, 'the projects section exists');
+    assert.match(text, /proj-yaml-a:/, 'the new project is in it');
+    assert.match(text, /proj-yaml-a:[\s\S]*?role: owner/, 'with its owner');
+
+    // A corrupt team.yaml makes the write-through fail: the project must not survive.
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-team-yaml-bad-'));
+    fs.writeFileSync(path.join(dir2, 'team.yaml'), 'members:\n  - not a map\n');
+    const bad = await call(u, 'POST', '/kb/projects/register', { id: 'proj-yaml-b', root: makeProject() }, null, dir2);
+    assert.equal(bad.statusCode, 500);
+    assert.equal(getProject(kb.getDb(), 'proj-yaml-b'), null, 'the project row was rolled back');
+    fs.rmSync(dir2, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

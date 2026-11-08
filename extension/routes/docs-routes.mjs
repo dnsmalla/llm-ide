@@ -19,7 +19,10 @@
 //
 // handleDocsRoutes(req, res, ctx) -> boolean, ctx = { userId, url }.
 
+import nodePath from 'node:path';
 import { AppError } from '../core/errors.mjs';
+import { config } from '../core/config.mjs';
+import { persistTeamYaml } from '../kb/team-yaml.mjs';
 import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
 import { listGenerationLibrary } from '../llm_agent/skills/generation-library.mjs';
 import {
@@ -110,7 +113,8 @@ function checkWriteFields(body, { allowSections }) {
  * the caller can keep dispatching.
  */
 export async function handleDocsRoutes(req, res, ctx) {
-  const { userId, url } = ctx;
+  const { userId, url, dir } = ctx;
+  const dataDir = typeof dir === 'string' && dir ? dir : (config.dataDir ?? nodePath.dirname(config.dbPath));
   const path = new URL(url, 'http://127.0.0.1').pathname;
 
   if (path === REGISTER) {
@@ -125,7 +129,21 @@ export async function handleDocsRoutes(req, res, ctx) {
       const db = getDb();
       let canonical = getProject(db, stored.id);
       if (!canonical || canManageProject(db, userId, stored.id)) {
-        canonical = registerProject(db, userId, { id: stored.id, root: stored.root, name: body.name }).project;
+        const registered = registerProject(db, userId, { id: stored.id, root: stored.root, name: body.name });
+        canonical = registered.project;
+        // R-020 #6: team.yaml is authoritative once it has a projects: section, so a new registration is written
+        // through at once (as membership changes are); a failed write rolls the project and its owner row back.
+        if (registered.created) {
+          try {
+            persistTeamYaml(db, dataDir, { trigger: 'project.register' });
+          } catch {
+            db.transaction(() => {
+              db.prepare('DELETE FROM project_members WHERE project_id = ?').run(stored.id);
+              db.prepare('DELETE FROM projects WHERE id = ?').run(stored.id);
+            })();
+            return fail(res, 500, 'INTERNAL_ERROR', 'Could not write team.yaml; the project registration was rolled back');
+          }
+        }
       }
       sendJSON(res, 200, { id: stored.id, root: stored.root, name: canonical?.name ?? null });
     } catch (err) {
