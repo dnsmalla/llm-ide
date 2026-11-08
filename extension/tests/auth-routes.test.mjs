@@ -217,6 +217,16 @@ test('POST /auth/register rejects invalid JSON body with 400', async () => {
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
 
+test('POST /auth/login is throttled per email even when every request uses a new IP', async () => {
+  const email = uniqueEmail();
+  const { tryConsume } = await import('../server/rate-limit.mjs');
+  // Fill only the per-email bucket directly; every request below still uses a fresh IP.
+  for (let i = 0; i < 10; i++) tryConsume('authPublic', `login:email:${email}`);
+  const blocked = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.1', body: { email, password: PASSWORD } });
+  assert.equal(blocked.statusCode, 429, blocked._body);
+  assert.equal(blocked.json().error.code, 'RATE_LIMITED');
+});
+
 test('POST /auth/login returns a session; wrong password → 401', async () => {
   const email = uniqueEmail();
   await callAuth({ method: 'POST', url: '/auth/register', body: { email, password: PASSWORD } });

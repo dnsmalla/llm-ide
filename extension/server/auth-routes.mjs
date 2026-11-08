@@ -200,6 +200,16 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    // R-026 #7: key a second bucket by normalized email, so rotating source IPs cannot spray one account.
+    const emailKey = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : '';
+    if (emailKey) {
+      const e = tryConsume('authPublic', `login:email:${emailKey}`);
+      if (!e.ok) {
+        res.setHeader('Retry-After', String(e.retryAfterSec));
+        send(res, 429, { error: { code: 'RATE_LIMITED', message: 'Too many requests' } });
+        return;
+      }
+    }
     try {
       const session = login(db, { email: body.email, password: body.password, userAgent: ua });
       safeAudit(db, { userId: session.user.id, requestId, ip, userAgent: ua, action: 'auth.login', outcome: 'success' });
