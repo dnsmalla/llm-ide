@@ -24,6 +24,7 @@ const INVENTORY = [
   'kb/db.mjs',
   'kb/learned-limits.mjs',
   'kb/os-state.mjs',
+  'kb/project-usage.mjs',
   'kb/tool-events-summary.mjs',
   'kb/tool-events.mjs',
   'kb/turn-composition.mjs',

@@ -451,7 +451,7 @@ test('GET /auth/me carries the caller\'s member authority (ADR 0021)', async () 
   assert.deepEqual(owner.json().member, {
     teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0,
     permissions: ['self.read', 'self.write', 'model.ask', 'model.read', 'model.exec', 'fs.read', 'fs.write',
-      'external.read', 'external.write', 'install', 'admin', 'host'],
+      'external.read', 'external.write', 'install', 'admin', 'project.admin', 'host'],
   });
   assert.ok(Array.isArray(owner.json().member.permissions) && owner.json().member.permissions.includes('self.read'));
 
