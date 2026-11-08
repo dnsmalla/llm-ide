@@ -10,6 +10,7 @@ const vhost = readFileSync(join(REPO, 'deploy/hub/llm-ide-hub.nginx.template'), 
 test('the public hub edge never proxies /admin/', () => {
   const admin = vhost.indexOf('location ^~ /admin/');
   const root = vhost.lastIndexOf('location / {');
+  assert.ok(vhost.includes('location = /admin { return 404; }'), 'the bare /admin is refused too');
   assert.ok(admin > 0, 'an explicit /admin/ block exists');
   assert.ok(admin < root, '/admin/ is matched before the catch-all proxy');
   assert.match(vhost.slice(admin, admin + 80), /return 404/);
