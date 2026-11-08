@@ -96,6 +96,7 @@ struct HostApiPinningTests {
         let fp = try Self.vector().fingerprint
         #expect(HostApiPairingOffer(port: "3016", fingerprint: fp) == HostApiPairingOffer(port: 3016, fingerprint: fp))
         #expect(HostApiPairingOffer(port: "80", fingerprint: fp) == nil)
+        #expect(HostApiPairingOffer(port: "443", fingerprint: fp)?.port == 443, "a hub behind nginx uses 443")
         #expect(HostApiPairingOffer(port: "3016", fingerprint: "nope") == nil)
         #expect(HostApiPairingOffer(port: nil, fingerprint: fp) == nil)
         #expect(HostApiPairingOffer(port: "3016", fingerprint: nil) == nil)

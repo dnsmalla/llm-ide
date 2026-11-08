@@ -103,7 +103,7 @@ public struct HostApiPairingOffer: Sendable, Equatable {
     public init(port: Int, fingerprint: String) { self.port = port; self.fingerprint = fingerprint }
 
     public init?(port: String?, fingerprint: String?) {
-        guard let p = port.flatMap(Int.init), (1024...65_535).contains(p),
+        guard let p = port.flatMap(Int.init), (p == 443 || (1024...65_535).contains(p)),
               let fingerprint, HostApiPinning.isValidFingerprint(fingerprint) else { return nil }
         self.init(port: p, fingerprint: fingerprint)
     }
