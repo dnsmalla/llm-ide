@@ -9,6 +9,7 @@
     "addresses": [
       "100.101.102.103",
       "192.168.1.20"
-    ]
+    ],
+    "url": "wss://hub.example.com/host-api/v1"
   }
 }
