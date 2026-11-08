@@ -11,6 +11,7 @@
 //
 // Every helper takes the db handle first (kb convention); every multi-step write is one transaction.
 
+import fs from 'node:fs';
 import { AppError } from '../core/errors.mjs';
 import {
   MAX_USD_CAP_MONTH, ROLE_ORDER, atLeast, classRefusal, getMember, permittedClasses,
@@ -140,11 +141,32 @@ export function requireProject(db, projectId) {
   return project;
 }
 
+const CASE_INSENSITIVE_FS = process.platform === 'darwin' || process.platform === 'win32';
+
+/**
+ * The canonical spelling of a project root for comparison: trimmed, trailing separators removed, symlinks and
+ * `..` resolved where the folder exists, and case-folded on the case-insensitive platforms (R-020 #5). Returns
+ * null for anything that is not a usable path string.
+ */
+export function canonicalRoot(root) {
+  if (typeof root !== 'string') return null;
+  let p = root.trim();
+  if (!p || p.length > MAX_PROJECT_ROOT) return null;
+  const stripped = p.replace(/[\\/]+$/, '');
+  if (stripped) p = stripped; // keep a bare "/" or "C:\\"
+  try { p = fs.realpathSync.native(p); } catch { /* not created yet: the trimmed spelling is the best we have */ }
+  return CASE_INSENSITIVE_FS ? p.toLowerCase() : p;
+}
+
 /** The registered project whose canonical root is this folder, or null. Lets a turn inherit the project
- *  from the desktop's workspaceRoot without a client change. */
+ *  from the desktop's workspaceRoot without a client change. Compared canonically, not as a raw string. */
 export function projectIdForRoot(db, root) {
-  if (typeof root !== 'string' || root.length === 0 || root.length > MAX_PROJECT_ROOT) return null;
-  return db.prepare('SELECT id FROM projects WHERE root = ? ORDER BY updated_at DESC, id LIMIT 1').get(root)?.id ?? null;
+  const key = canonicalRoot(root);
+  if (!key) return null;
+  // A small team-wide registry: compare each stored root canonically, so older non-canonical rows still match.
+  const rows = db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL ORDER BY updated_at DESC, id').all();
+  for (const row of rows) if (canonicalRoot(row.root) === key) return row.id;
+  return null;
 }
 
 /** Every registered project, newest name order. Team-wide: the install has one registry. */
@@ -187,8 +209,16 @@ export function registerProject(db, actorId, { id, root = null, name = null } = 
     throw err('VALIDATION', 'Invalid project root', 400);
   }
 
+  const canonical = root == null ? null : (canonicalRoot(root) ?? root);
   return db.transaction(() => {
     const existing = getProject(db, id);
+    // R-020 #4: one project per canonical root. A second id on the same folder would win root resolution and
+    // bypass the real project's grants; the caller must use the id already registered.
+    if (canonical != null) {
+      const clash = db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL AND id <> ?').all(id)
+        .find((r) => canonicalRoot(r.root) === canonical || canonicalRoot(r.root) === canonicalRoot(canonical));
+      if (clash) throw err('PROJECT_EXISTS', 'This folder is already registered to another project; open that project', 409);
+    }
     if (existing) {
       const grant = effectiveProjectGrant(db, actorId, id);
       if (!canManageProjectGrant(grant)) throw err('ROLE_DENIED', 'Requires project admin', 403);
@@ -196,7 +226,7 @@ export function registerProject(db, actorId, { id, root = null, name = null } = 
         UPDATE projects
            SET name = COALESCE(?, name), root = COALESCE(?, root), updated_at = datetime('now')
          WHERE id = ?
-      `).run(cleanName, root, id);
+      `).run(cleanName, canonical, id);
       return { project: getProject(db, id), created: false };
     }
 
@@ -205,7 +235,7 @@ export function registerProject(db, actorId, { id, root = null, name = null } = 
     db.prepare(`
       INSERT INTO projects (id, name, root, created_by)
       VALUES (?, ?, ?, ?)
-    `).run(id, cleanName ?? defaultName(root), root, String(actorId));
+    `).run(id, cleanName ?? defaultName(root), canonical, String(actorId));
     db.prepare(`
       INSERT INTO project_members (user_id, project_id, role, max_mode, usd_cap_month, granted_by)
       VALUES (?, ?, 'owner', 'execute', 0, ?)
