@@ -118,6 +118,7 @@ test("the contract's refusals map to the project reason the picker shows", () =>
   assert.deepEqual(projectRefusal(Object.assign(new Error("That project is not registered on this computer."), { code: "not_found" }), "p-1"),
     { code: "PROJECT_MISMATCH", message: "That project is not registered on this computer." });
   assert.equal(projectRefusal(new Error("PROJECT_REQUIRED: a project is required on this hub"), null)?.code, "PROJECT_REQUIRED");
+  assert.deepEqual(projectRefusal(Object.assign(new Error("Refused."), { code: "PROJECT_DENIED" }), null), { code: "PROJECT_DENIED", message: "Refused." });
   assert.equal(projectRefusal(Object.assign(new Error("Your team role no longer allows this."), { code: "denied" }), null), null);
   assert.equal(projectRefusal(new Error("network down"), "p-1"), null);
 });

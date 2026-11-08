@@ -29,17 +29,20 @@ const errorCode = (e: unknown): string | null =>
   e && typeof e === "object" && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : null;
 
 // The contract has no PROJECT_* error codes yet: the gateway answers `denied` (role/project refusal) or `not_found`
-// (the named project is not registered here). Also accept a host that puts a PROJECT_* code in the message, so this
-// page is ready for the narrower contract without pretending the old one already sends it.
+// (the named project is not registered here). Also accept a host that names a PROJECT_* code (in the error or its
+// message), so this page is ready for the narrower contract without pretending the old one already sends it.
 const LITERAL = /\bPROJECT_(REQUIRED|DENIED|MISMATCH)\b/;
+const PROJECT_CODES = new Set<ProjectRefusalCode>(["PROJECT_REQUIRED", "PROJECT_DENIED", "PROJECT_MISMATCH"]);
 
 export function projectRefusal(e: unknown, selectedId: string | null): ProjectRefusal | null {
   const message = e instanceof Error && e.message ? e.message.slice(0, 500) : null;
+  const raw = errorCode(e);
+  if (raw && PROJECT_CODES.has(raw as ProjectRefusalCode)) return { code: raw as ProjectRefusalCode, message: message ?? raw };
   const literal = message ? LITERAL.exec(message) : null;
   if (literal) return { code: `PROJECT_${literal[1]}` as ProjectRefusalCode, message: message ?? literal[0] };
   if (!selectedId) return null; // a team-role refusal is not a project refusal
-  if (errorCode(e) === "denied") return { code: "PROJECT_DENIED", message: message ?? "The desktop refused this project." };
-  if (errorCode(e) === "not_found") return { code: "PROJECT_MISMATCH", message: message ?? "That project is not registered on this computer." };
+  if (raw === "denied") return { code: "PROJECT_DENIED", message: message ?? "The desktop refused this project." };
+  if (raw === "not_found") return { code: "PROJECT_MISMATCH", message: message ?? "That project is not registered on this computer." };
   return null;
 }
 
