@@ -12,6 +12,10 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 process.env.LLMIDE_LOG_FILE = 'none';
+const pinDir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "_hub-pin-"));
+process.env.LLMIDE_HOST_API_FINGERPRINT_FILE = path.join(pinDir, "pin");
+fs.writeFileSync(process.env.LLMIDE_HOST_API_FINGERPRINT_FILE, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n");
+process.env.LLMIDE_HUB_PUBLIC_URL = "wss://hub.example.com/host-api/v1";
 const tmpDb = path.join(path.dirname(fileURLToPath(import.meta.url)), '_host-api-hub-pairing-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
@@ -32,7 +36,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
-after(() => { server.close(); for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } } });
+after(() => { server.close(); fs.rmSync(pinDir, { recursive: true, force: true }); for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } } });
 
 async function call(method, p, { proof } = {}) {
   const r = await fetch(base + p, { method, headers: proof ? { 'x-llmide-host-nonce': proof } : {} });
@@ -45,7 +49,10 @@ test('hub mode: a member mints a PIN, lists devices and reads push status with n
   const pin = await call('POST', '/host-api/pin');
   assert.equal(pin.status, 200, JSON.stringify(pin.body));
   assert.match(pin.body.pin, /^[0-9]{6}$/);
-  assert.equal(pin.body.port, 3016);
+  assert.equal(pin.body.port, 443);
+  assert.equal(pin.body.url, 'wss://hub.example.com/host-api/v1');
+  assert.equal(pin.body.fingerprint, 'sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.deepEqual(pin.body.addresses, ['hub.example.com']);
   assert.equal((await call('GET', '/host-api/devices')).status, 200);
   assert.equal((await call('GET', '/host-api/push/status')).status, 200);
   assert.equal((await call('DELETE', '/host-api/devices/h1-none')).status, 200);
