@@ -36,7 +36,6 @@ struct Bound {
     core: CoreProvider,
     store: ChatStore,
     journal_path: PathBuf,
-    shared_with_mac: bool,
 }
 
 struct Svc {
@@ -84,7 +83,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[serde(rename_all = "camelCase")]
 pub struct BindInfo {
     pub user_id: String,
-    pub shared_with_mac: bool,
     /// The recovery sweep for this user was started by this call.
     pub sweep_started: bool,
 }
@@ -118,14 +116,13 @@ impl ChatService {
             return Err(err("invalid_user", "the core returned a user id this store cannot use"));
         }
         let layout = layout_for(&user_id).map_err(|_| err("io", "cannot resolve the chat directory"))?;
-        let shared = layout.shared_with_mac;
         let priv_dir = data_dir.map(|d| d.join("chat-store").join(&user_id));
         let index = priv_dir.as_ref().map(|d| d.join("index.json"));
         let journal_path = priv_dir.clone().unwrap_or_else(|| layout.base.join(".chat-private")).join("archive-journal.json");
         let store = ChatStore::open(layout, &user_id, index)?;
         {
             let mut b = lock(&self.0.bound);
-            *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone(), shared_with_mac: shared });
+            *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone() });
         }
         // The same verified session archives finished extension captures (capture_archivist.rs).
         crate::capture_archivist::bind(core.clone(), token);
@@ -144,7 +141,7 @@ impl ChatService {
                 }
             });
         }
-        Ok(BindInfo { user_id, shared_with_mac: shared, sweep_started: first })
+        Ok(BindInfo { user_id, sweep_started: first })
     }
 
     /// Forgets the session (sign-out). The token leaves host memory.
@@ -235,7 +232,6 @@ pub struct DeleteResult {
 pub struct ArchiveStatus {
     pub bound: bool,
     pub user_id: Option<String>,
-    pub shared_with_mac: bool,
     /// `reliable` | `best_effort`: how dependable the quit hook is on this OS (docs/how-to/desktop-chat-store.md).
     pub quit_hook: &'static str,
     pub journal: Option<JournalDoc>,
@@ -443,19 +439,18 @@ pub async fn chat_archive_status(svc: State<'_, ChatService>) -> Result<ArchiveS
     blocking(move || {
         let b = lock(&svc.0.bound);
         let hook = if cfg!(target_os = "macos") { "reliable" } else { "best_effort" };
-        let (user, shared, journal, pending, quarantined) = match b.as_ref() {
+        let (user, journal, pending, quarantined) = match b.as_ref() {
             Some(b) => (
                 Some(b.user_id.clone()),
-                b.shared_with_mac,
                 crate::chat_archive::Journal::new(Some(b.journal_path.clone())).read(),
                 b.store.pending_delete_count(),
                 b.store.quarantined_count(),
             ),
-            None => (None, false, None, 0, 0),
+            None => (None, None, 0, 0),
         };
         let bound = b.is_some();
         drop(b);
-        Ok(ArchiveStatus { bound, user_id: user, shared_with_mac: shared, quit_hook: hook, journal, last_sweep: lock(&svc.0.last_sweep).clone(), last_quit: lock(&svc.0.last_quit).clone(), pending_deletes: pending, quarantined })
+        Ok(ArchiveStatus { bound, user_id: user, quit_hook: hook, journal, last_sweep: lock(&svc.0.last_sweep).clone(), last_quit: lock(&svc.0.last_quit).clone(), pending_deletes: pending, quarantined })
     })
     .await
 }
@@ -473,7 +468,7 @@ mod tests {
     }
 
     fn layout(t: &Tmp) -> impl Fn(&str) -> Result<StoreLayout, String> + '_ {
-        move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions"), shared_with_mac: false })
+        move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions") })
     }
 
     #[test]

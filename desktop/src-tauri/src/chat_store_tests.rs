@@ -22,7 +22,7 @@ impl Drop for Tmp {
 }
 
 pub(crate) fn layout(t: &Tmp) -> StoreLayout {
-    StoreLayout { base: t.0.clone(), sessions: t.0.join("sessions"), shared_with_mac: false }
+    StoreLayout { base: t.0.clone(), sessions: t.0.join("sessions") }
 }
 
 pub(crate) fn store(t: &Tmp, user: &str) -> ChatStore {
@@ -103,16 +103,12 @@ fn layout_per_os() {
     };
     let none = |_: &Path| false;
     let mac = layout_for(Os::Mac, &env, "u1", &none).unwrap();
-    assert_eq!(mac.sessions, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide/sessions")));
-    assert!(mac.shared_with_mac);
-    // Only the legacy folder exists: use it in place (the Mac app migrates it later, never us).
-    let legacy_only = |p: &Path| p.ends_with("LLM IDE");
-    assert_eq!(layout_for(Os::Mac, &env, "u1", &legacy_only).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/LLM IDE")));
+    assert_eq!(mac.sessions, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide-desktop/chats/u1/sessions")));
+    // The retired Mac app's folder is never used, even when it exists.
     let both = |_: &Path| true;
-    assert_eq!(layout_for(Os::Mac, &env, "u1", &both).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide")));
+    assert_eq!(layout_for(Os::Mac, &env, "u1", &both).unwrap().base, PathBuf::from(format!("{r}/Users/me/Library/Application Support/llm-ide-desktop/chats/u1")));
     let lin = layout_for(Os::Linux, &env, "u1", &none).unwrap();
     assert_eq!(lin.sessions, PathBuf::from(format!("{r}/Users/me/.local/share/llm-ide-desktop/chats/u1/sessions")));
-    assert!(!lin.shared_with_mac);
     let win = layout_for(Os::Windows, &env, "u1", &none).unwrap();
     assert!(win.base.ends_with("llm-ide-desktop/chats/u1") || win.base.ends_with("llm-ide-desktop\\chats\\u1"));
     let over = |k: &str| (k == "LLMIDE_CHAT_STORE_DIR").then(|| format!("{r}/tmp/x"));
@@ -620,7 +616,7 @@ fn concurrent_writers_never_lose_or_corrupt_a_chat() {
             let base = base.clone();
             let done = Arc::clone(&done);
             std::thread::spawn(move || {
-                let s = ChatStore::open(StoreLayout { base: base.clone(), sessions: base.join("sessions"), shared_with_mac: false }, "u1", None).unwrap();
+                let s = ChatStore::open(StoreLayout { base: base.clone(), sessions: base.join("sessions") }, "u1", None).unwrap();
                 for i in 0..12u32 {
                     loop {
                         let cur = s.load(ID1, None, 1).unwrap();
@@ -751,25 +747,22 @@ fn replace_refuses_a_big_message_count_drop_unless_explicitly_allowed() {
 }
 
 
-// ---- the Mac app's shared folder is never rearranged ----------------------------------------------
+// ---- an unreadable file is quarantined inside the app-owned store ----------------------------------
 
 #[test]
-fn unreadable_files_in_the_shared_mac_folder_are_reported_never_moved() {
+fn unreadable_files_are_quarantined_inside_the_app_store() {
     let t = Tmp::new("shared-corrupt");
-    let lay = StoreLayout { base: t.0.clone(), sessions: t.0.join("sessions"), shared_with_mac: true };
+    let lay = StoreLayout { base: t.0.clone(), sessions: t.0.join("sessions") };
     let s = ChatStore::open(lay, "u1", None).unwrap();
     put(&t, ID1, CORRUPT_BODY);
     put(&t, ID2, &fixture("session-v2-no-engine-no-project.json"));
     let page = s.list(&q(10)).unwrap();
-    assert_eq!((page.total, page.quarantined, page.unreadable), (1, 0, 1));
-    assert!(t.0.join("sessions").join(format!("{ID1}.json")).exists(), "the Mac's file stays where it is");
-    assert_eq!(s.quarantined_count(), 0);
-    // load reports it without moving it either, and still leaks nothing
+    assert_eq!((page.total, page.quarantined), (1, 1));
+    assert!(!t.0.join("sessions").join(format!("{ID1}.json")).exists(), "moved to quarantine");
+    assert_eq!(s.quarantined_count(), 1);
     let e = s.load(ID1, None, 5).unwrap_err();
-    assert_eq!(e.code, "corrupt");
-    assert!(t.0.join("sessions").join(format!("{ID1}.json")).exists());
-    // a second list does not re-parse into a different answer
-    assert_eq!(s.list(&q(10)).unwrap().unreadable, 1);
+    assert_eq!(e.code, "not_found", "the quarantined file is no longer a live chat");
+    assert_eq!(s.list(&q(10)).unwrap().quarantined, 0, "quarantined once");
 }
 
 #[test]
@@ -854,7 +847,7 @@ fn per_user_folders_differing_only_by_case_are_refused() {
     let t = Tmp::new("case");
     let mk = |user: &str| {
         let base = t.0.join("chats").join(user);
-        ChatStore::open(StoreLayout { sessions: base.join("sessions"), base, shared_with_mac: false }, user, None)
+        ChatStore::open(StoreLayout { sessions: base.join("sessions"), base }, user, None)
     };
     mk("Alice").unwrap();
     assert_eq!(mk("alice").err().unwrap().code, "user_dir_collision");

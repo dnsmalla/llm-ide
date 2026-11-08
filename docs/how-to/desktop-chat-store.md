@@ -9,7 +9,7 @@ Decision record: [Phase 3 plan, section 4](../superpowers/plans/2026-10-31-tauri
 
 | OS | Directory |
 |---|---|
-| macOS | the Mac app's `~/Library/Application Support/llm-ide/sessions/` in place (the legacy `LLM IDE` folder while only that exists; never created beside it) |
+| macOS | `~/Library/Application Support/llm-ide-desktop/chats/<userId>/sessions/` |
 | Windows | `%LOCALAPPDATA%\llm-ide-desktop\chats\<userId>\sessions\` |
 | Linux | `$XDG_DATA_HOME` or `~/.local/share` + `/llm-ide-desktop/chats/<userId>/sessions/` |
 

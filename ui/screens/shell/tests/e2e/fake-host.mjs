@@ -17,7 +17,7 @@ export function createFakeChatHost({ token = null } = {}) {
       case "chat_bind_session":
         if (typeof args?.token !== "string" || args.token.length < 10) throw fail("invalid");
         bound = args.token;
-        return { userId: "u1", sharedWithMac: false, sweepStarted: false };
+        return { userId: "u1", sweepStarted: false };
       case "chat_unbind_session": bound = null; return undefined;
       case "chat_list": {
         need();

@@ -1,8 +1,7 @@
 //! Desktop chat store: one file per chat, in the Mac app's own `sessions/<UUID>.json` format.
 //!
-//! "One stored copy" (data-lifecycle, plan section 4): on macOS the desktop app reads and writes
-//! the Mac app's `~/Library/Application Support/llm-ide/sessions/` in place; on Windows and Linux
-//! the same layout lives in `<desktop data dir>/chats/<userId>/`. Nothing here is a second format:
+//! "One stored copy" (data-lifecycle, plan section 4): every OS stores chats under
+//! `<desktop data dir>/chats/<userId>/`. Nothing here is a second format:
 //! a file written by this module decodes in the Swift `ChatSession` and the other way round
 //! (see `schema/chat-session/` fixtures and the round-trip tests below).
 //!
@@ -188,14 +187,11 @@ pub fn now_apple() -> f64 {
 pub struct StoreLayout {
     pub base: PathBuf,
     pub sessions: PathBuf,
-    /// True when the directory is the Mac app's own (macOS shared mode).
-    pub shared_with_mac: bool,
 }
 
 /// Pure layout resolution (each OS is testable on any host).
-/// `LLMIDE_CHAT_STORE_DIR` (absolute) overrides `base` (tests, ops); otherwise macOS uses the Mac
-/// app's `Application Support/llm-ide` (or its legacy `LLM IDE` folder while only that exists, so the
-/// Mac app's own migration still finds it), Windows and Linux use `<data dir>/chats/<userId>`.
+/// `LLMIDE_CHAT_STORE_DIR` (absolute) overrides `base` (tests, ops); otherwise every OS uses
+/// `<data dir>/chats/<userId>`.
 pub fn layout_for(
     os: crate::fsutil::Os,
     env: &dyn Fn(&str) -> Option<String>,
@@ -211,19 +207,11 @@ pub fn layout_for(
         if !p.is_absolute() {
             return Err("LLMIDE_CHAT_STORE_DIR must be an absolute path".into());
         }
-        return Ok(StoreLayout { sessions: p.join("sessions"), base: p, shared_with_mac: false });
-    }
-    if os == crate::fsutil::Os::Mac {
-        let home = get("HOME").map(PathBuf::from).filter(|p| p.is_absolute()).ok_or("HOME is not set")?;
-        let support = home.join("Library").join("Application Support");
-        let modern = support.join("llm-ide");
-        let legacy = support.join("LLM IDE");
-        let base = if !path_exists(&modern) && path_exists(&legacy) { legacy } else { modern };
-        return Ok(StoreLayout { sessions: base.join("sessions"), base, shared_with_mac: true });
+        return Ok(StoreLayout { sessions: p.join("sessions"), base: p });
     }
     let data = crate::fsutil::data_dir_for(os, env)?;
     let base = data.join("chats").join(user_id);
-    Ok(StoreLayout { sessions: base.join("sessions"), base, shared_with_mac: false })
+    Ok(StoreLayout { sessions: base.join("sessions"), base })
 }
 
 pub fn layout_here(user_id: &str) -> std::result::Result<StoreLayout, String> {
@@ -912,7 +900,7 @@ impl ChatStore {
             return Err(StoreError::new("invalid_user", "invalid user id"));
         }
         // Per-user folder names must not alias on a case-insensitive filesystem.
-        if !layout.shared_with_mac && layout.base.file_name().and_then(|n| n.to_str()) == Some(user_id) {
+        if layout.base.file_name().and_then(|n| n.to_str()) == Some(user_id) {
             if let Some(parent) = layout.base.parent() {
                 let names: Vec<String> = std::fs::read_dir(parent).map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().map(str::to_owned)).collect()).unwrap_or_default();
                 let refs: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -1142,7 +1130,7 @@ impl ChatStore {
                     continue;
                 }
             };
-            if p == Parsed::Invalid && !self.inner.layout.shared_with_mac {
+            if p == Parsed::Invalid {
                 if quarantine(&dir, id).is_some() {
                     quarantined += 1;
                 }
@@ -1425,12 +1413,9 @@ impl ChatStore {
         }
     }
 
-    /// Quarantines an unreadable file, but only in a folder this app owns: the Mac app's shared folder is
-    /// never rearranged (a chat there that this build cannot read may be fine for the Mac).
+    /// Quarantines an unreadable file (the folder is this app's own store).
     fn set_aside(&self, id: &str) {
-        if !self.inner.layout.shared_with_mac {
-            quarantine(&self.inner.layout.sessions, id);
-        }
+        quarantine(&self.inner.layout.sessions, id);
     }
 
     fn deleted_dir(&self) -> PathBuf {
