@@ -13,7 +13,7 @@
 // any other module that needs it (today only this one).
 
 import {
-  appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
+  appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents, MAX_ASSEMBLED_FINAL_CAPTIONS,
   ackLiveSession, liveSessionStatus, listUnackedLiveSessions, validateCaptureMeta, liveCaptureOf,
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
@@ -26,6 +26,28 @@ import { tryConsume } from '../server/rate-limit.mjs';
 // tabs) while keeping the worst case bounded.
 const sseStreams = new Map(); // userId -> count
 const MAX_SSE_PER_USER = 4;
+
+// C7: a large finalize is sent as numbered parts (2,000 lines / 3 MB each), assembled here before the one
+// finalize. In memory with a short TTL: a lost part is resent from the panel's draft, never half-kept.
+const pendingFinalize = new Map(); // `${userId}\0${sessionId}` -> { of, parts[], at }
+const FINALIZE_PART_TTL_MS = 10 * 60_000;
+function takeFinalizeParts(userId, sessionId, body) {
+  const part = Number(body.part);
+  const of = Number(body.of);
+  if (!Number.isInteger(of) || of < 2 || !Number.isInteger(part) || part < 1 || part > of) return { error: 'part/of are invalid' };
+  if (!Array.isArray(body.captions)) return { error: 'captions must be an array' };
+  const now = Date.now();
+  for (const [k, v] of pendingFinalize) if (now - v.at > FINALIZE_PART_TTL_MS) pendingFinalize.delete(k);
+  const key = `${userId}\0${sessionId}`;
+  let entry = pendingFinalize.get(key);
+  if (!entry || entry.of !== of) entry = { of, parts: new Array(of).fill(null), at: now };
+  entry.at = now;
+  entry.parts[part - 1] = body.captions;
+  pendingFinalize.set(key, entry);
+  if (entry.parts.some((p) => p === null)) return { pending: true, part, of };
+  pendingFinalize.delete(key);
+  return { captions: entry.parts.flat() };
+}
 
 export async function handleLiveRoutes(req, res, ctx) {
   const { userId, url } = ctx;
@@ -120,9 +142,25 @@ export async function handleLiveRoutes(req, res, ctx) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'captions must be an array' } });
       return true;
     }
+    let captions = Array.isArray(body.captions) ? body.captions : undefined;
+    let assembled = false;
+    if (body.of !== undefined || body.part !== undefined) {
+      const partResult = takeFinalizeParts(userId, sessionId, body);
+      if (partResult.error) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: partResult.error } });
+        return true;
+      }
+      if (partResult.pending) {
+        sendJSON(res, 200, { pending: true, part: partResult.part, of: partResult.of });
+        return true;
+      }
+      captions = partResult.captions;
+      assembled = true;
+    }
     const result = finalizeSession(userId, sessionId, {
       ...meta,
-      ...(Array.isArray(body.captions) ? { captions: body.captions } : {}),
+      ...(Array.isArray(captions) ? { captions } : {}),
+      ...(assembled ? { captionsCap: MAX_ASSEMBLED_FINAL_CAPTIONS } : {}),
       ...(typeof body.meetingTitle === 'string' ? { meetingTitle: body.meetingTitle } : {}),
     });
     sendJSON(res, 200, result || { sessionId, finalized: true, captionCount: 0 });

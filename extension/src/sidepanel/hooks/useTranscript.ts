@@ -83,7 +83,8 @@ export function useTranscript() {
   const [bilingual, setBilingual] = useState(false);
   const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
   const [participants, setParticipants] = useState<string[]>([]);
-  const [captureMode, setCaptureMode] = useState<CaptureMode>('mic');
+  // C7: captions are the default on every supported platform; mic mode is an explicit fallback.
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('captions');
   const [meetingTitle, setMeetingTitle] = useState('');
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({
     platform: null,

@@ -460,7 +460,6 @@ export function debug(...args: unknown[]): void {
 // Timing constants used across the extension
 export const TIMING = {
   SESSION_GAP_MS: 5_000,
-  MAX_SESSION_DURATION_MS: 2 * 60 * 1_000,
   UPDATE_THROTTLE_MS: 800,
   RECENT_DEDUP_WINDOW_MS: 2_000,
   CC_ENABLE_RETRY_MS: [2_000, 5_000],

@@ -393,6 +393,30 @@ const CC_ENABLERS: Record<PlatformId, () => boolean> = {
 // and surface a visible banner so the user knows to reload the tab.
 
 let contextInvalidated = false;
+let panelClosedBannerShown = false;
+
+/** An in-page banner (the only feedback a caption-only tab can show). */
+function showBanner(text: string, background: string): HTMLDivElement | null {
+  const banner = document.createElement('div');
+  Object.assign(banner.style, {
+    position: 'fixed',
+    bottom: '70px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: '2147483647',
+    background,
+    color: '#fff',
+    fontFamily: 'Google Sans, Roboto, sans-serif',
+    fontSize: '13px',
+    padding: '10px 18px',
+    borderRadius: '8px',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+    whiteSpace: 'nowrap',
+  });
+  banner.textContent = text;
+  document.body?.appendChild(banner);
+  return banner;
+}
 
 function handleSendError(e: Error): void {
   const msg = e?.message ?? '';
@@ -433,6 +457,19 @@ function handleSendError(e: Error): void {
     return;
   }
 
+  // No receiver: the side panel is closed. Captions are intentionally not buffered (content and API key stay out
+  // of page storage), so say so once instead of failing silently (C7).
+  if (
+    (msg.includes('Could not establish connection') || msg.includes('receiving end does not exist')) &&
+    !panelClosedBannerShown
+  ) {
+    panelClosedBannerShown = true;
+    showBanner('LLM-IDE panel is closed; captions are not being saved', '#b26a00');
+    setTimeout(() => {
+      panelClosedBannerShown = false;
+    }, 60_000);
+    return;
+  }
   // Transient errors — retry silently; debug channel only when LLMIDE_DEBUG=1.
   debug('[caption-scraper] send failed (will retry):', msg);
 }

@@ -100,6 +100,29 @@ export interface LiveApi {
   finalize(id: string, payload?: FinalizePayload): Promise<FinalizeResult>;
 }
 
+/** C7: the server's finalize limits (2,000 lines, 3 MB of JSON per request). */
+export const FINALIZE_PART_LINES = 2000;
+export const FINALIZE_PART_BYTES = 3 * 1024 * 1024;
+
+/** Split captions into sequential parts under both limits; always at least one (possibly empty) part. */
+export function splitFinalizeParts(captions: readonly unknown[]): unknown[][] {
+  const parts: unknown[][] = [];
+  let cur: unknown[] = [];
+  let bytes = 0;
+  for (const c of captions) {
+    const size = JSON.stringify(c)?.length ?? 0;
+    if (cur.length > 0 && (cur.length >= FINALIZE_PART_LINES || bytes + size > FINALIZE_PART_BYTES)) {
+      parts.push(cur);
+      cur = [];
+      bytes = 0;
+    }
+    cur.push(c);
+    bytes += size;
+  }
+  parts.push(cur);
+  return parts;
+}
+
 export const DRAFT_PREFIX = 'transcriptDraft:';
 export const STAGE_PREFIX = 'draftStage:';
 // A live panel rewrites its draft every few seconds; one untouched this long

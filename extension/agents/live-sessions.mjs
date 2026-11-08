@@ -358,6 +358,8 @@ export function listActiveSessions(userId) {
 }
 
 export const MAX_FINAL_CAPTIONS = MAX_CAPTIONS_PER_SESSION;
+// C7: a capture sent in numbered parts is assembled here and may be larger than one request's cap.
+export const MAX_ASSEMBLED_FINAL_CAPTIONS = 50_000;
 
 /**
  * Finalize. With `final.captions` the client sends its COMPLETE transcript: it
@@ -374,8 +376,8 @@ export function finalizeSession(userId, sessionId, final = null) {
     // Lossless: a transcript the client says is complete keeps its repeated lines
     // ("はい。" twice); only the live stream dedupes.
     const list = normalizeBatch(final.captions, new Set(), false);
-    if (list.length > MAX_FINAL_CAPTIONS) {
-      throw new AppError('CAPTURE_TOO_LARGE', `a capture holds at most ${MAX_FINAL_CAPTIONS} lines; this one has ${list.length}`, { status: 413 });
+    if (list.length > (final.captionsCap ?? MAX_FINAL_CAPTIONS)) {
+      throw new AppError('CAPTURE_TOO_LARGE', `a capture holds at most ${final.captionsCap ?? MAX_FINAL_CAPTIONS} lines; this one has ${list.length}`, { status: 413 });
     }
     if (!s) {
       // A capture that never streamed (legacy import, crash re-send). A durable
