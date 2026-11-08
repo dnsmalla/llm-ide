@@ -361,3 +361,22 @@ test("a stream that dies mid-reply keeps the partial text as Interrupted", async
   assert.equal(last.meta?.interrupted, true);
   assert.equal(last.meta?.status, "interrupted");
 });
+
+test("retry replaces the interrupted partial and starts a fresh context (U#F5)", async () => {
+  const dying = async function* () {
+    yield JSON.stringify(FX.init);
+    yield JSON.stringify({ type: "delta", text: "half a repl" });
+    throw new Error("the core went away");
+  };
+  const core = fakeCore({ streams: [dying, turn()] });
+  const { ctl } = make(core);
+  ctl.send("a", "go", { mode: "execute" });
+  await until(() => ctl.getState("a").phase === "error");
+  assert.equal(ctl.getState("a").messages.at(-1).interrupted, true);
+  ctl.retry("a");
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done" || ctl.getState("a").phase === "done");
+  assert.equal(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.interrupted), false,
+    "the partial is gone, the full reply is the only assistant turn");
+  const body = core.calls.filter((x) => x.method === "STREAM").at(-1).body;
+  assert.equal(body.fresh, true, "the retry does not resume the dead session");
+});

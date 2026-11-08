@@ -141,6 +141,7 @@ export type Action =
   | { type: "transport_error"; code: string; message: string; retryable: boolean }
   /** The stream died mid-reply: the text so far stays, labelled Interrupted. */
   | { type: "interrupted" }
+  | { type: "drop_interrupted" }
   | { type: "dequeue" }
   | { type: "drop_queued"; index: number }
   | { type: "clear_error" }
@@ -354,6 +355,11 @@ export function reduce(state: ChatState, action: Action): ChatState {
         ? { ...state, pendingApprovals: state.pendingApprovals.filter((a) => a.requestId !== action.requestId) } : state;
     case "trust_granted":
       return state.workspaceTrust && state.workspaceTrust.path === action.path ? { ...state, workspaceTrust: null } : state;
+    case "drop_interrupted": {
+      // U#F5: a retried turn replaces the interrupted partial instead of keeping both.
+      if (!state.messages.some((m) => m.role === "assistant" && m.interrupted)) return state;
+      return { ...state, messages: state.messages.filter((m) => !(m.role === "assistant" && m.interrupted)) };
+    }
     case "clear_error":
       return state.phase === "error" ? { ...state, phase: "idle", error: null } : { ...state, error: null };
   }

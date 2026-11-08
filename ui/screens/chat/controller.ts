@@ -275,9 +275,13 @@ export class ChatController {
     if (!r.lastSend || r.state.phase !== "error") return;
     const { text, opts, workspaceRoot } = r.lastSend;
     const unresumable = r.state.error?.code === "SESSION_UNRESUMABLE";
+    // U#F5: an interrupted partial is replaced by the retry, not kept beside the full reply, and the turn starts
+    // a fresh engine context so the model does not see the partial twice.
+    const hasPartial = r.state.messages.some((m) => m.role === "assistant" && m.interrupted);
+    if (hasPartial) this.dispatch(id, { type: "drop_interrupted" });
     this.dispatch(id, { type: "clear_error" });
     if (workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); return; }
-    this.send(id, text, { ...opts, fresh: unresumable || opts.fresh }, true);
+    this.send(id, text, { ...opts, fresh: unresumable || hasPartial || opts.fresh }, true);
   }
 
   clearError(id: string): void { this.dispatch(id, { type: "clear_error" }); }
