@@ -625,6 +625,7 @@ export {
   deleteChatSession,
   clearChatMessages,
   appendChatMessage,
+  deleteChatMessage,
 } from './chat-sessions.mjs';
 
 

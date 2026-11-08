@@ -180,6 +180,60 @@ export function clearChatMessages(userId, sessionId) {
   return tx(userId, sessionId);
 }
 
+/**
+ * True when a stored row's meta marks it as a reply the stream cut off mid-way (the client writes
+ * `{ interrupted: true, status: 'interrupted' }`; older writers may set only one of them).
+ */
+function isInterruptedMeta(metaJson) {
+  if (!metaJson) return false;
+  try {
+    const meta = JSON.parse(metaJson);
+    return meta?.interrupted === true || meta?.status === 'interrupted';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Drops ONE interrupted assistant reply from a chat's history (U#F5): a retry replaces the partial with the
+ * full answer, so the partial must not come back on a reload. Scoped by `userId` AND `sessionId` AND `seq`, so
+ * another user's row (or another chat's) can never match, and only a row whose stored meta says it was
+ * interrupted can be dropped — a complete reply is refused.
+ *
+ * Hard delete, not a marker/tombstone: `chat_messages` has no soft-delete column, and every reader (history
+ * paging, the archive hash/fence, the pre-archive count) would have to learn to filter a tombstone — a much
+ * larger surface than the one partial this is allowed to remove. The partial is not history the user keeps:
+ * the retry's full reply replaces it. Idempotent: an already-gone row answers `already_gone` (the route 200s),
+ * while a session this user does not own answers `not_found` (the route 404s).
+ *
+ * Returns { status: 'deleted' | 'already_gone' | 'not_interrupted' | 'not_found', seq }.
+ */
+export function deleteChatMessage(userId, sessionId, seq) {
+  requireUser(userId);
+  if (!Number.isInteger(seq) || seq < 1) throw new Error('seq must be an integer >= 1');
+  const db = getDb();
+  const tx = db.transaction((uid, sid, n) => {
+    const owned = lazyPrepare(db, 'SELECT id FROM chat_sessions WHERE user_id = ? AND id = ?').get(uid, sid);
+    if (!owned) return { status: 'not_found', seq: n };
+    const row = lazyPrepare(db, `
+      SELECT role, meta_json FROM chat_messages
+       WHERE session_id = ? AND user_id = ? AND seq = ?
+    `).get(sid, uid, n);
+    if (!row) return { status: 'already_gone', seq: n };
+    if (row.role !== 'assistant' || !isInterruptedMeta(row.meta_json)) {
+      return { status: 'not_interrupted', seq: n };
+    }
+    const changes = lazyPrepare(db, `
+      DELETE FROM chat_messages WHERE session_id = ? AND user_id = ? AND seq = ?
+    `).run(sid, uid, n).changes;
+    // The chat's `updated_at` is intentionally untouched: dropping a partial is a repair of the turn that just
+    // failed, not new activity, and it must not reorder the chat list. `seq` is not reused either (the append path
+    // takes MAX(seq)+1), so an older page cursor still means what it meant.
+    return { status: changes > 0 ? 'deleted' : 'already_gone', seq: n };
+  });
+  return tx(userId, sessionId, seq);
+}
+
 export function appendChatMessage(userId, sessionId, { role, content, meta = null }) {
   requireUser(userId);
   if (!ROLES.has(role)) throw new Error(`invalid role: ${role}`);

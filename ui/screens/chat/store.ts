@@ -2,7 +2,7 @@
 // (`/kb/chat/sessions/*`, plan section 4); the archive-to-disk side is S-D's (host commands) and is not
 // reachable from here. Two implementations: HttpChatStore (the core's existing chat routes) and
 // MemoryChatStore (tests, previews).
-import { CoreHttpError, type CoreTransport } from "./transport";
+import { CoreHttpError, httpLike, type CoreTransport } from "./transport";
 import { textPartOf, type Message } from "./state";
 import { decodeUsage } from "./usage";
 
@@ -50,6 +50,20 @@ export interface ChatStore {
   /** The newest `limit` messages, or the `limit` messages just older than `beforeSeq`. */
   loadMessages(id: string, opts: { limit: number; beforeSeq?: number }, signal?: AbortSignal): Promise<MessagePage>;
   appendMessage(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }, signal?: AbortSignal): Promise<void>;
+  /**
+   * Removes the interrupted assistant partial of the newest turn from stored history (U#F5): a retry replaces
+   * the half reply with the full answer, so a reload must not bring the partial back. Only the newest message,
+   * and only when it is an interrupted assistant reply; an older interrupted partial the user kept stays.
+   * Resolves true when a row was removed, false when there is nothing to remove (already gone, or a store
+   * that predates the operation). A genuine store failure rejects and the retry reports it, still running.
+   */
+  dropInterruptedMessage(id: string, signal?: AbortSignal): Promise<boolean>;
+}
+
+/** True when a stored row is the partial of a turn whose stream died (what a retry removes). */
+export function storedMessageInterrupted(m: Pick<StoredMessage, "role" | "meta">): boolean {
+  if (m.role !== "assistant") return false;
+  return m.meta?.interrupted === true || m.meta?.status === "interrupted";
 }
 
 /** History row -> view message. Only user and assistant rows are shown; system rows are dropped. */
@@ -60,7 +74,7 @@ export function toMessages(rows: readonly StoredMessage[]): Message[] {
     else if (r.role === "assistant") {
       const usage = decodeUsage(r.meta?.tokenUsage);
       out.push({ role: "assistant", id: `s${r.seq}`, seq: r.seq, parts: [textPartOf(r.content)], notices: [], status: "done",
-        ...(usage ? { usage } : {}), ...(r.meta?.interrupted === true ? { interrupted: true } : {}) });
+        ...(usage ? { usage } : {}), ...(storedMessageInterrupted(r) ? { interrupted: true } : {}) });
     }
   }
   return out;
@@ -125,6 +139,30 @@ export class HttpChatStore implements ChatStore {
   async appendMessage(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }, signal?: AbortSignal): Promise<void> {
     await this.core.json("POST", `/kb/chat/sessions/${encodeURIComponent(id)}/messages`, msg, signal);
   }
+
+  /**
+   * The core drops one interrupted assistant row by seq (API 127), so the seq has to be read first: the
+   * controller only knows the live message, not the stored one. An older core has no such route (404/405):
+   * that resolves false and the retry still runs (the partial stays, the pre-fix behaviour).
+   */
+  async dropInterruptedMessage(id: string, signal?: AbortSignal): Promise<boolean> {
+    let page: MessagePage;
+    try { page = await this.loadMessages(id, { limit: 1 }, signal); } catch (e) {
+      if (httpLike(e)?.status === 404) return false;
+      throw e;
+    }
+    const last = page.messages.at(-1);
+    if (!last || !storedMessageInterrupted(last)) return false;
+    try {
+      await this.core.json("DELETE", `/kb/chat/sessions/${encodeURIComponent(id)}/messages/${last.seq}`, undefined, signal);
+    } catch (e) {
+      const h = httpLike(e);
+      // A missing row/route or a row that is no longer a partial: nothing was removed, and the retry is unaffected.
+      if (h?.status === 404 || h?.status === 405 || h?.status === 409) return false;
+      throw e;
+    }
+    return true;
+  }
 }
 
 /** In-memory store: same contract, no network. */
@@ -134,10 +172,10 @@ export class MemoryChatStore implements ChatStore {
   private clock = 1_700_000_000;
   private n = 0;
 
-  seed(id: string, title: string, rows: Array<Pick<StoredMessage, "role" | "content">> = [], updatedAt?: number): void {
+  seed(id: string, title: string, rows: Array<Pick<StoredMessage, "role" | "content"> & { meta?: Record<string, unknown> | null }> = [], updatedAt?: number): void {
     const t = updatedAt ?? ++this.clock;
     this.sessions.set(id, { id, title, surface: "any", mode: null, projectId: null, createdAt: t, updatedAt: t });
-    this.messages.set(id, rows.map((r, i) => ({ seq: i + 1, role: r.role, content: r.content, meta: null, createdAt: t })));
+    this.messages.set(id, rows.map((r, i) => ({ seq: i + 1, role: r.role, content: r.content, meta: r.meta ?? null, createdAt: t })));
   }
 
   async listSessions(opts: { limit: number; offset: number }): Promise<SessionSummary[]> {
@@ -169,5 +207,12 @@ export class MemoryChatStore implements ChatStore {
     rows.push({ seq: rows.length + 1, role: msg.role, content: msg.content, meta: msg.meta ?? null, createdAt: ++this.clock });
     this.messages.set(id, rows);
     s.updatedAt = this.clock;
+  }
+  async dropInterruptedMessage(id: string): Promise<boolean> {
+    this.need(id);
+    const rows = this.messages.get(id) ?? [];
+    if (!rows.length || !storedMessageInterrupted(rows[rows.length - 1])) return false;
+    rows.pop();
+    return true;
   }
 }

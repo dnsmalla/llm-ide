@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id/messages/:seq",
+  "status": 409,
+  "description": "The named row is not an interrupted assistant reply, so it is not a retry partial.",
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "seq": 1
+    }
+  },
+  "response": {
+    "error": {
+      "code": "MESSAGE_NOT_INTERRUPTED",
+      "message": "only an interrupted assistant message can be dropped"
+    }
+  }
+}

@@ -414,6 +414,7 @@ macro_rules! product_handlers {
                 chat_cmds::chat_list,
                 chat_cmds::chat_load,
                 chat_cmds::chat_save,
+                chat_cmds::chat_drop_message,
                 chat_cmds::chat_delete,
                 chat_cmds::chat_confirm_truncate,
                 chat_cmds::chat_archive_status,

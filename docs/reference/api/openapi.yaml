@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 126
+  x-api-version: 127
 servers:
   - url: "https://{host}"
     variables:
@@ -8206,6 +8206,60 @@ paths:
                 properties:
                   cleared:
                     type: "integer"
+  /kb/chat/sessions/{id}/messages/{seq}:
+    delete:
+      tags:
+        - "agent"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "seq"
+          in: "path"
+          required: true
+          schema:
+            type: "integer"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "deleted"
+                  - "seq"
+                  - "status"
+                properties:
+                  deleted:
+                    type: "boolean"
+                  seq:
+                    type: "integer"
+                  status:
+                    type: "string"
+                    enum:
+                      - "deleted"
+                      - "already_gone"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/code-sync:
     post:
       summary: "Annotate plan tasks with matching code file references from the KB"

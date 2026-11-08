@@ -141,7 +141,6 @@ export type Action =
   | { type: "transport_error"; code: string; message: string; retryable: boolean }
   /** The stream died mid-reply: the text so far stays, labelled Interrupted. */
   | { type: "interrupted" }
-  | { type: "drop_interrupted" }
   | { type: "dequeue" }
   | { type: "drop_queued"; index: number }
   | { type: "clear_error" }
@@ -355,13 +354,6 @@ export function reduce(state: ChatState, action: Action): ChatState {
         ? { ...state, pendingApprovals: state.pendingApprovals.filter((a) => a.requestId !== action.requestId) } : state;
     case "trust_granted":
       return state.workspaceTrust && state.workspaceTrust.path === action.path ? { ...state, workspaceTrust: null } : state;
-    case "drop_interrupted": {
-      // U#F5/R-023 #6: drop ONLY the current turn's partial — the last message, and only if it is an interrupted
-      // assistant reply. An older interrupted partial the user kept is history and stays.
-      const last = state.messages[state.messages.length - 1];
-      if (!last || last.role !== "assistant" || !last.interrupted) return state;
-      return { ...state, messages: state.messages.slice(0, -1) };
-    }
     case "clear_error":
       return state.phase === "error" ? { ...state, phase: "idle", error: null } : { ...state, error: null };
   }

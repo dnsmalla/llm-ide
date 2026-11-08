@@ -860,6 +860,16 @@ pub struct SaveOutcome {
     pub last_used_at: f64,
 }
 
+/// Result of dropping one interrupted assistant partial (`drop_interrupted`, U#F5).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DropOutcome {
+    /// A message was removed. False = nothing to remove (already dropped, or the newest message is not a partial).
+    pub dropped: bool,
+    pub message_count: usize,
+    pub revision: String,
+}
+
 /// What the archive protocol needs to know about a chat file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveFacts {
@@ -1346,6 +1356,65 @@ impl ChatStore {
         Ok(SaveOutcome { revision: revision_of(&meta), message_count: count, last_used_at: obj.get("lastUsedAt").and_then(Value::as_f64).unwrap_or(0.0) })
     }
 
+    /// Drops the newest message when it is an interrupted assistant reply (the partial a retry replaces, U#F5).
+    ///
+    /// This is a one-message repair, never a truncation: it only ever removes the LAST message, and only when the
+    /// stored row says the stream cut it off (`metadata.interrupted` or `status: "interrupted"`), so an older
+    /// interrupted partial the user kept, a user row, a toolResult and a complete reply are all left alone. `seq`
+    /// is the UI's 1-based message index and pins the caller's intent: a value that is not the newest message is a
+    /// no-op (`dropped: false`), which also makes a repeated call idempotent. The write goes through `save_with`'s
+    /// lock, revision CAS and atomic rename, and keeps every header field this build does not model. No tombstone:
+    /// a marker inside the Mac-format file would be a shape the Mac app does not know, and this row is the failed
+    /// turn's partial (replaced by the retry's answer), not history — see docs/how-to/desktop-chat-store.md.
+    pub fn drop_interrupted(&self, raw_id: &str, seq: Option<usize>) -> Result<DropOutcome> {
+        let id = self.id_arg(raw_id)?;
+        for attempt in 0..2 {
+            let path = self.file_path(&id);
+            let meta = std::fs::symlink_metadata(&path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    StoreError::new("not_found", "no such chat")
+                } else {
+                    io_err("stat chat", &e)
+                }
+            })?;
+            if !meta.is_file() {
+                return Err(StoreError::new("invalid", "chat path is not a regular file"));
+            }
+            if meta.len() > MAX_WRITE_BYTES as u64 {
+                return Err(StoreError::new("too_large", "chat file is too large to modify"));
+            }
+            let bytes = read_small(&path, MAX_WRITE_BYTES as u64 + 1).map_err(|e| io_err("read chat", &e))?;
+            let Value::Object(mut obj) = serde_json::from_slice::<Value>(&bytes)
+                .map_err(|_| StoreError::new("conflict", "the stored chat is unreadable; it will be set aside on the next list"))?
+            else {
+                return Err(StoreError::new("invalid", "chat must be an object"));
+            };
+            if !self.may_access(obj.get("ownerUserId").and_then(Value::as_str)) {
+                return Err(StoreError::new("not_found", "no such chat"));
+            }
+            let Some(raw_messages) = obj.get("messages").and_then(Value::as_array) else {
+                return Err(StoreError::new("unsupported", "chat file has no messages array"));
+            };
+            let mut messages = raw_messages.clone();
+            let count = messages.len();
+            let revision = revision_of(&meta);
+            // Only the newest message, and only when the caller means it (seq) and it is an interrupted partial.
+            let targets_newest = seq.map_or(true, |n| n == count);
+            if !targets_newest || !messages.last().is_some_and(is_interrupted_assistant) {
+                return Ok(DropOutcome { dropped: false, message_count: count, revision });
+            }
+            messages.pop();
+            obj.insert("messages".into(), Value::Array(messages));
+            match self.save_with(Value::Object(obj), SaveMode::Replace, Some(&revision), false, false) {
+                Ok(out) => return Ok(DropOutcome { dropped: true, message_count: out.message_count, revision: out.revision }),
+                // Another writer (the Mac app) changed the file between our read and the CAS: re-read once.
+                Err(e) if e.code == "conflict" && attempt == 0 => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(StoreError::new("conflict", "the chat kept changing on disk"))
+    }
+
     // -- delete --
 
     /// Tombstone first (durable), then remove the file. Returns whether a file existed.
@@ -1689,6 +1758,18 @@ pub fn quarantine(sessions: &Path, id: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// True when a stored message is an assistant reply the stream cut off mid-way. The Tauri writer sets
+/// `metadata.interrupted: true` (chat_cmds / tauri-store `toFileMessage`); a Mac-written row may use
+/// `status: "interrupted"`. Anything else (user, toolResult, a completed assistant reply) is never a partial.
+fn is_interrupted_assistant(m: &Value) -> bool {
+    let Some(o) = m.as_object() else { return false };
+    if o.get("role").and_then(Value::as_str) != Some("assistant") {
+        return false;
+    }
+    o.get("metadata").and_then(Value::as_object).and_then(|m| m.get("interrupted")).and_then(Value::as_bool) == Some(true)
+        || o.get("status").and_then(Value::as_str) == Some("interrupted")
 }
 
 fn validate_session(obj: &Map<String, Value>) -> Result<()> {

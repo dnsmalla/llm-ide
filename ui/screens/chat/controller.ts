@@ -275,13 +275,20 @@ export class ChatController {
     if (!r.lastSend || r.state.phase !== "error") return;
     const { text, opts, workspaceRoot } = r.lastSend;
     const unresumable = r.state.error?.code === "SESSION_UNRESUMABLE";
-    // U#F5/R-023 #6: drop only this turn's interrupted partial (the last message) so the retry's answer does not
-    // sit beside the half reply, but KEEP the conversation — resuming the session is what gives the retry its
-    // history (forcing `fresh` would send the last message alone).
+    // U#F5/R-023 #6: drop only this turn's interrupted partial at the end of the failed turn, keep the
+    // conversation — resuming the session is what gives the retry its history (forcing `fresh` would send the
+    // last message alone). `send(..., isRetry)` replaces the failed user+assistant pair in the view, so the
+    // retried message appears once.
     const last = r.state.messages[r.state.messages.length - 1];
-    if (last?.role === "assistant" && last.interrupted) this.dispatch(id, { type: "drop_interrupted" });
+    const partial = last?.role === "assistant" && last.interrupted === true;
     this.dispatch(id, { type: "clear_error" });
     if (workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); return; }
+    // The partial was already written to the chat store when the stream died. Remove exactly that stored row
+    // before the retry's turn can finish, so a reload cannot show the half reply beside the full answer. The
+    // store only ever drops the newest row and only when it is an interrupted assistant reply, so an older
+    // interrupted partial (and every other turn) is untouched; a failure here is reported and never blocks the
+    // retry (the old behaviour: the partial stays).
+    if (partial) void this.deps.store.dropInterruptedMessage(id).catch((e) => this.deps.onPersistError?.(id, e));
     this.send(id, text, { ...opts, fresh: unresumable || opts.fresh }, true);
   }
 

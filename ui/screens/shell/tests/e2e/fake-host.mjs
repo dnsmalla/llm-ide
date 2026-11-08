@@ -70,6 +70,22 @@ export function createFakeChatHost({ token = null } = {}) {
         tokens.add(`${args.args.id}:${tok}`);
         return tok;
       }
+      case "chat_drop_message": {
+        need();
+        const f = files.get(args.args.id);
+        if (!f) throw fail("not_found");
+        const msgs = f.doc.messages;
+        const seq = args.args.seq;
+        // Only the newest message, and only an interrupted assistant partial (same rule as chat_store.rs).
+        const last = msgs[msgs.length - 1];
+        const interrupted = !!last && last.role === "assistant" && ((last.metadata && last.metadata.interrupted === true) || last.status === "interrupted");
+        if ((seq !== undefined && seq !== msgs.length) || !interrupted) {
+          return { dropped: false, messageCount: msgs.length, revision: String(f.rev) };
+        }
+        const doc = { ...f.doc, messages: msgs.slice(0, -1) };
+        files.set(f.doc.id, { doc, rev: ++rev });
+        return { dropped: true, messageCount: doc.messages.length, revision: String(rev) };
+      }
       case "chat_delete": { need(); if (knobs.pendingCorrupt) throw fail("pending_corrupt"); if (knobs.declineDelete) throw fail("declined"); const existed = files.delete(args.args.id); return { existed, tombstone: "done" }; }
       default: throw fail("unknown_command", command);
     }

@@ -745,6 +745,100 @@ fn replace_refuses_a_big_message_count_drop_unless_explicitly_allowed() {
 }
 
 
+// ---- retry removes exactly the interrupted partial (U#F5) ---------------------------------------
+
+/// user, interrupted assistant, user, interrupted assistant (the newest row is the partial a retry replaces).
+fn partial_session(id: &str) -> Value {
+    let mut v = session(id, 4);
+    v["messages"][1]["metadata"] = json!({ "interrupted": true });
+    v["messages"][3]["metadata"] = json!({ "interrupted": true, "mode": "execute" });
+    v["route"] = json!({ "provider": "anthropic", "model": "claude-x" });
+    v
+}
+
+fn file_bytes(t: &Tmp, id: &str) -> Vec<u8> {
+    std::fs::read(t.0.join("sessions").join(format!("{id}.json"))).unwrap()
+}
+
+#[test]
+fn drop_interrupted_removes_only_the_newest_partial_and_keeps_an_older_one() {
+    let t = Tmp::new("drop");
+    let s = store(&t, "u1");
+    s.save(partial_session(ID1), SaveMode::Replace, None, true).unwrap();
+    let out = s.drop_interrupted(ID1, Some(4)).unwrap();
+    assert!(out.dropped);
+    assert_eq!(out.message_count, 3);
+
+    // A reload is the file on disk: the partial is gone, the older interrupted reply and the header survive.
+    let loaded = s.load(ID1, None, 100).unwrap();
+    assert_eq!(loaded.total, 3);
+    let msgs = loaded.session["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[1]["metadata"]["interrupted"], true, "the older interrupted partial is history and stays");
+    assert_eq!(loaded.session["route"]["provider"], "anthropic", "header fields this build does not model survive");
+
+    // Idempotent: the newest row is now a user message, so a repeat removes nothing and does not rewrite the file.
+    let before = file_bytes(&t, ID1);
+    let again = s.drop_interrupted(ID1, Some(3)).unwrap();
+    assert!(!again.dropped);
+    assert_eq!(again.message_count, 3);
+    assert_eq!(file_bytes(&t, ID1), before, "a no-op does not touch the file");
+}
+
+#[test]
+fn drop_interrupted_requires_the_newest_seq_and_an_interrupted_assistant() {
+    let t = Tmp::new("drop-seq");
+    let s = store(&t, "u1");
+    s.save(partial_session(ID1), SaveMode::Replace, None, true).unwrap();
+    let before = file_bytes(&t, ID1);
+    // seq pins the caller's intent: 2 is not the newest message, so nothing is removed.
+    let out = s.drop_interrupted(ID1, Some(2)).unwrap();
+    assert!(!out.dropped);
+    assert_eq!(out.message_count, 4);
+    assert_eq!(file_bytes(&t, ID1), before);
+
+    // A user row or a completed assistant reply is never a partial.
+    let complete = session(ID2, 2);
+    let saved = s.save(complete, SaveMode::Replace, None, true).unwrap();
+    assert!(!s.drop_interrupted(ID2, None).unwrap().dropped);
+    let mut user_only = session(ID2, 1);
+    user_only["messages"][0]["metadata"] = json!({ "interrupted": true });
+    user_only["lastUsedAt"] = json!(807271261.0);
+    s.save(user_only, SaveMode::Replace, Some(&saved.revision), true).unwrap();
+    assert!(!s.drop_interrupted(ID2, None).unwrap().dropped, "a user row is never dropped");
+}
+
+#[test]
+fn drop_interrupted_is_scoped_to_the_owner_and_a_missing_chat_is_not_found() {
+    let t = Tmp::new("drop-own");
+    let owner = store(&t, "alice");
+    owner.save(partial_session(ID1), SaveMode::Replace, None, true).unwrap();
+    let other = store(&t, "bob");
+    assert_eq!(other.drop_interrupted(ID1, None).unwrap_err().code, "not_found");
+    assert_eq!(owner.load(ID1, None, 100).unwrap().total, 4, "the other user changed nothing");
+    assert_eq!(owner.drop_interrupted(ID2, None).unwrap_err().code, "not_found");
+}
+
+#[test]
+fn drop_interrupted_can_empty_a_single_partial_chat_and_accepts_status_interrupted() {
+    let t = Tmp::new("drop-one");
+    let s = store(&t, "u1");
+    let mut v = session(ID1, 1);
+    v["messages"][0] = json!({ "role": "assistant", "content": "half", "status": "interrupted", "toolSteps": [], "createdAt": 807271200.0 });
+    s.save(v, SaveMode::Replace, None, true).unwrap();
+    assert!(s.drop_interrupted(ID1, Some(1)).unwrap().dropped);
+    assert_eq!(s.load(ID1, None, 10).unwrap().total, 0);
+}
+
+#[test]
+fn drop_interrupted_never_touches_an_unreadable_file() {
+    let t = Tmp::new("drop-corrupt");
+    let s = store(&t, "u1");
+    put(&t, ID1, CORRUPT_BODY);
+    assert_eq!(s.drop_interrupted(ID1, None).unwrap_err().code, "conflict");
+    assert_eq!(file_bytes(&t, ID1), CORRUPT_BODY, "the unreadable file is left for the list to quarantine");
+}
+
 // ---- an unreadable file is quarantined inside the app-owned store ----------------------------------
 
 #[test]

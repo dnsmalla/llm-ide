@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id/messages/:seq",
+  "status": 200,
+  "description": "The interrupted partial was removed. Repeating the call answers { deleted: false, status: 'already_gone' }.",
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "seq": 4
+    }
+  },
+  "response": {
+    "deleted": true,
+    "seq": 4,
+    "status": "deleted"
+  }
+}

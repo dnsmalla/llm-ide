@@ -18,7 +18,7 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::chat_archive::{ArchiveReport, Archiver, HttpRemote, JournalDoc, LifecycleRemote, RemoteError, QUIT_CAP, SWEEP_CAP};
-use crate::chat_store::{layout_here, valid_user_id, ChatStore, ListPage, ListQuery, LoadedChat, SaveMode, SaveOutcome, StoreError, StoreLayout, MAX_LIST_PAGE, MAX_PAGE};
+use crate::chat_store::{layout_here, valid_user_id, ChatStore, DropOutcome, ListPage, ListQuery, LoadedChat, SaveMode, SaveOutcome, StoreError, StoreLayout, MAX_LIST_PAGE, MAX_PAGE};
 use crate::confirm::RateLimit;
 use crate::core_host::{CoreHost, Phase};
 
@@ -301,6 +301,24 @@ pub async fn chat_save(svc: State<'_, ChatService>, args: SaveArgs) -> Result<Sa
         store.save_with(args.session, mode, args.expected_revision.as_deref(), args.touch.unwrap_or(true), allow)
     })
     .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DropMessageArgs {
+    pub id: String,
+    /// 1-based index of the message the caller means (the UI's seq). Must be the newest message; omit to target it.
+    pub seq: Option<usize>,
+}
+
+/// Drops the interrupted assistant partial a retried turn replaces (U#F5), so a reload cannot show it beside the
+/// retry's full answer. One message, only when the newest row says it was interrupted: no truncation confirmation
+/// (the "fewer than half" rule is for a replace that loses history, and one row from the tail never is), no
+/// tombstone, and a repeated call is a no-op (`dropped: false`). The store's own owner check applies.
+#[tauri::command]
+pub async fn chat_drop_message(svc: State<'_, ChatService>, args: DropMessageArgs) -> Result<DropOutcome, StoreError> {
+    let store = svc.store()?;
+    blocking(move || store.drop_interrupted(&args.id, args.seq)).await
 }
 
 #[derive(Deserialize)]

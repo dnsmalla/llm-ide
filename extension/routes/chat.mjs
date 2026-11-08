@@ -9,6 +9,7 @@ import {
   deleteChatSession,
   clearChatMessages,
   appendChatMessage,
+  deleteChatMessage,
 } from '../kb/chat-sessions.mjs';
 
 export async function handleChatRoutes(req, res, ctx) {
@@ -192,6 +193,30 @@ export async function handleChatRoutes(req, res, ctx) {
       return true;
     }
     sendJSON(res, 200, { deleted: result.status === 'deleted', status: result.status });
+    return true;
+  }
+
+  // DELETE /kb/chat/sessions/:id/messages/:seq — drop ONE interrupted assistant reply (U#F5). A retry of a
+  // dead turn replaces its partial with the full answer, so the partial must not reappear on a reload.
+  // Ownership is the session's (WHERE user_id = ? AND id = ?); only a row whose meta says it was interrupted
+  // can be dropped (409 MESSAGE_NOT_INTERRUPTED otherwise) and a repeat DELETE is a 200 with deleted:false.
+  const one = /^messages\/(\d{1,15})$/.exec(sub);
+  if (req.method === 'DELETE' && one) {
+    const seq = Number(one[1]);
+    if (!Number.isSafeInteger(seq) || seq < 1) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'seq must be an integer >= 1' } });
+      return true;
+    }
+    const result = deleteChatMessage(userId, sessionId, seq);
+    if (result.status === 'not_found') {
+      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'session not found' } });
+      return true;
+    }
+    if (result.status === 'not_interrupted') {
+      sendJSON(res, 409, { error: { code: 'MESSAGE_NOT_INTERRUPTED', message: 'only an interrupted assistant message can be dropped' } });
+      return true;
+    }
+    sendJSON(res, 200, { deleted: result.status === 'deleted', seq, status: result.status });
     return true;
   }
 

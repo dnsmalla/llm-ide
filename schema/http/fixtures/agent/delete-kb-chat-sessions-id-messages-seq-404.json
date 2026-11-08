@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id/messages/:seq",
+  "status": 404,
+  "description": "No such chat for the caller (missing or another user's).",
+  "request": {
+    "params": {
+      "id": "4392f026-5251-4aaa-8360-cd63d004a477",
+      "seq": 4
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found"
+    }
+  }
+}

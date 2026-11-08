@@ -38,6 +38,11 @@ interface HostSaved {
   revision: string;
   messageCount: number;
 }
+interface HostDropped {
+  dropped: boolean;
+  messageCount: number;
+  revision: string;
+}
 
 interface Tracked {
   count: number;
@@ -250,6 +255,34 @@ export class TauriChatStore implements ChatStore {
 
   async appendMessage(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }): Promise<void> {
     await this.serial(id, () => this.appendRaw(id, [toFileMessage(msg, this.now())], {}));
+  }
+
+  /**
+   * Remove the newest message when it is an interrupted assistant partial (U#F5): the retry replaces it with
+   * the full answer, so a reload must not show both. `seq` is the index the store believes is last (index + 1);
+   * the host refuses anything but the newest row and is idempotent (`dropped: false`). Serialised with appends,
+   * so the partial written when the stream died always precedes the removal, and the retry's own messages follow.
+   * One retry after a conflict, like append: a page or the Mac app may have changed the file.
+   */
+  async dropInterruptedMessage(id: string): Promise<boolean> {
+    return this.serial(id, async () => {
+      for (let attempt = 0; ; attempt++) {
+        const t = this.tracked.get(id) ?? (await this.refresh(id));
+        if (t.count < 1) return false;
+        try {
+          const out = await this.call<HostDropped>("chat_drop_message", { args: { id, seq: t.count } });
+          this.tracked.set(id, { ...t, count: out.messageCount, revision: out.revision });
+          return out.dropped === true;
+        } catch (e) {
+          const err = toStoreError(e);
+          if (err.code === "CONFLICT" && attempt === 0) {
+            this.tracked.delete(id);
+            continue;
+          }
+          throw err;
+        }
+      }
+    });
   }
 
   /** Append with the expected count and revision; one retry after a conflict (re-read the file's state first). */

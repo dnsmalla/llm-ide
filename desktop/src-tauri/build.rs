@@ -140,6 +140,7 @@ const COMMANDS: &[&str] = &[
     "chat_list",
     "chat_load",
     "chat_save",
+    "chat_drop_message",
     "chat_delete",
     "chat_confirm_truncate",
     "chat_archive_status",

@@ -191,6 +191,10 @@ const SKIP_RULES = [
     when: (fx) => fx.status === 409 && /^POST \/kb\/chat\/sessions\/:id\/archive\/(begin|commit)$/.test(fx.endpoint),
   },
   {
+    why: 'needs an existing chat with a non-interrupted row seeded through /kb/chat/sessions, so the retry-repair route can answer 409; covered by tests/chat-message-drop.test.mjs',
+    when: (fx) => fx.status === 409 && fx.endpoint === 'DELETE /kb/chat/sessions/:id/messages/:seq',
+  },
+  {
     why: 'provider catalog: needs a connection seeded through POST /kb/providers/catalog/connect (and, for models and test, a reachable provider; for the turn, the tools switch on); the replay user starts with none. Covered with a stand-in for fetch by tests/provider-catalog-route.test.mjs',
     when: (fx) => (/^POST \/kb\/providers\/catalog\/(models|test)$/.test(fx.endpoint) && fx.status < 300)
       || (fx.endpoint === 'POST /kb/providers/turn' && (fx.status === 400 || fx.status === 403 || fx.status === 404))

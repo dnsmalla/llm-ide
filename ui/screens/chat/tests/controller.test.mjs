@@ -362,14 +362,14 @@ test("a stream that dies mid-reply keeps the partial text as Interrupted", async
   assert.equal(last.meta?.status, "interrupted");
 });
 
-test("retry replaces the interrupted partial and starts a fresh context (U#F5)", async () => {
+test("retry replaces the interrupted partial and keeps the conversation context (U#F5)", async () => {
   const dying = async function* () {
     yield JSON.stringify(FX.init);
     yield JSON.stringify({ type: "delta", text: "half a repl" });
     throw new Error("the core went away");
   };
   const core = fakeCore({ streams: [dying, turn()] });
-  const { ctl } = make(core);
+  const { ctl, store } = make(core);
   ctl.send("a", "go", { mode: "execute" });
   await until(() => ctl.getState("a").phase === "error");
   assert.equal(ctl.getState("a").messages.at(-1).interrupted, true);
@@ -377,6 +377,50 @@ test("retry replaces the interrupted partial and starts a fresh context (U#F5)",
   await until(() => ctl.getState("a").messages.at(-1)?.status === "done" || ctl.getState("a").phase === "done");
   assert.equal(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.interrupted), false,
     "the partial is gone, the full reply is the only assistant turn");
+  assert.equal(ctl.getState("a").messages.filter((m) => m.role === "user").length, 1, "the retried message appears once in the view");
   const body = core.calls.filter((x) => x.method === "STREAM").at(-1).body;
   assert.notEqual(body.fresh, true, "the retry keeps the conversation context (no fresh session)");
+  await tick(5);
+  const rows = await msgs(store, "a");
+  assert.deepEqual(rows.map((r) => [r.role, r.content]), [["user", "go"], ["assistant", "Hello world"]],
+    "the dead turn's partial is gone from the store too; the full reply is the only assistant row");
 });
+
+test("retry drops only THIS turn's partial: an older interrupted partial and other turns stay, and a reload is clean (U#F5)", async () => {
+  const dying = async function* () {
+    yield JSON.stringify(FX.init);
+    yield JSON.stringify({ type: "delta", text: "half a repl" });
+    throw new Error("the core went away");
+  };
+  const core = fakeCore({ streams: [dying, turn()] });
+  const { ctl, store } = make(core);
+  store.seed("a", "Chat A", [
+    { role: "user", content: "q1" },
+    { role: "assistant", content: "old partial", meta: { interrupted: true, status: "interrupted" } },
+    { role: "user", content: "q2" },
+    { role: "assistant", content: "a2" },
+  ]);
+  await ctl.open("a");
+  ctl.send("a", "go", { mode: "execute" });
+  await until(() => ctl.getState("a").phase === "error");
+  ctl.retry("a");
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done");
+  await tick(5);
+
+  const rows = await msgs(store, "a");
+  assert.deepEqual(rows.map((r) => [r.role, r.content]), [
+    ["user", "q1"], ["assistant", "old partial"], ["user", "q2"], ["assistant", "a2"], ["user", "go"], ["assistant", "Hello world"],
+  ], "the older interrupted partial and every earlier turn survive; the dead turn's partial is gone");
+  assert.equal(rows.filter((r) => r.content === "go").length, 1, "the retried user message is stored once");
+  assert.equal(rows[1].meta?.interrupted, true, "the kept older partial is still marked Interrupted");
+
+  // A reload is a new controller over the same store (the app reopens the chat from the file).
+  const ctl2 = new c.ChatController({ core: fakeCore(), store, workspaceRoot: () => "/proj", newId: () => "reload", sleep: () => tick(1) });
+  await ctl2.open("a");
+  const view = ctl2.getState("a").messages;
+  assert.deepEqual(view.map((m) => (m.role === "user" ? m.text : c.assistantText(m))), [
+    "q1", "old partial", "q2", "a2", "go", "Hello world",
+  ], "the reload shows history + the retried turn, never the partial and the full reply side by side");
+  assert.equal(view.some((m) => m.role === "assistant" && m.interrupted && c.assistantText(m) === "half a repl"), false);
+});
+

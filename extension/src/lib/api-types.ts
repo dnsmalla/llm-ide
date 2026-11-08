@@ -2958,6 +2958,26 @@ export type DeleteKbChatSessionsIdMessagesResponse200 = {
   cleared: number;
 };
 
+/** Request parts for `DELETE /kb/chat/sessions/:id/messages/:seq` (schema/http/agent.schema.json). */
+export type DeleteKbChatSessionsIdMessagesSeqRequest = {
+  params: {
+    id: string;
+    seq: number;
+  };
+};
+
+export type DeleteKbChatSessionsIdMessagesSeqResponse200 = {
+  deleted: boolean;
+  seq: number;
+  status: "deleted" | "already_gone";
+};
+
+export type DeleteKbChatSessionsIdMessagesSeqResponse400 = CommonError;
+
+export type DeleteKbChatSessionsIdMessagesSeqResponse404 = CommonError;
+
+export type DeleteKbChatSessionsIdMessagesSeqResponse409 = CommonError;
+
 /** Request parts for `GET /agent/v2/session/route` (schema/http/agent.schema.json). */
 export type GetAgentV2SessionRouteRequest = {
   query: {
@@ -9156,6 +9176,15 @@ export interface ApiEndpoints {
     request: DeleteKbChatSessionsIdMessagesRequest;
     responses: {
       200: DeleteKbChatSessionsIdMessagesResponse200;
+    };
+  };
+  "DELETE /kb/chat/sessions/:id/messages/:seq": {
+    request: DeleteKbChatSessionsIdMessagesSeqRequest;
+    responses: {
+      200: DeleteKbChatSessionsIdMessagesSeqResponse200;
+      400: DeleteKbChatSessionsIdMessagesSeqResponse400;
+      404: DeleteKbChatSessionsIdMessagesSeqResponse404;
+      409: DeleteKbChatSessionsIdMessagesSeqResponse409;
     };
   };
   "GET /agent/v2/session/route": {

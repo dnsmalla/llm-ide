@@ -350,6 +350,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/calendar-ical/sources/:id',
     '/kb/chat/sessions/:id',
     '/kb/chat/sessions/:id/messages',
+    '/kb/chat/sessions/:id/messages/:seq',
     '/kb/delete',
     '/kb/index/notes/:key',
     '/kb/issue-schedule',

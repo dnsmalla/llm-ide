@@ -157,6 +157,7 @@
     "allow-chat-list",
     "allow-chat-load",
     "allow-chat-save",
+    "allow-chat-drop-message",
     "allow-chat-delete",
     "allow-chat-confirm-truncate",
     "allow-chat-archive-status",

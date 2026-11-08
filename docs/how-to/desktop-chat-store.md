@@ -74,8 +74,36 @@ extension's server-held chats (`/kb/chat/sessions`, archive begin/commit) are NO
 app yet; the Mac app does that, and without it those rows stay on the server.
 Orphaned working state (file gone, no tombstone) is reported as `fileMissing` and not purged here.
 
+## Retry and interrupted replies
+
+When a turn's stream dies mid-reply (core restart, engine death), the controller writes what arrived as one
+assistant message with `metadata.interrupted: true` (the live bubble says **Interrupted**). Pressing **Retry**
+resends the same message with the same conversation context — it never forces a `fresh` SDK session except
+for `SESSION_UNRESUMABLE`, because the resume is what gives the retry its history.
+
+The half reply is not kept beside the retry's answer:
+
+- **View** — the retried turn replaces the failed user+assistant pair (one bubble per message, not two).
+- **File** — before the retry's turn can finish, the controller calls `chat_drop_message`, and the host
+  removes the newest message of that chat **only when it is an interrupted assistant partial**. It is a
+  one-row repair, not a truncation: the "fewer than half" confirmation does not apply (and cannot trigger),
+  a repeated call is a no-op (`dropped: false`), and an older interrupted partial the user kept is history
+  and stays. Nothing else in the file changes; header fields this build does not model are preserved.
+- **Why no marker/tombstone** — a marker inside the Mac-format file would be a shape the Mac app does not
+  read, and this row is the failed turn's partial (replaced by the retry's answer), not history. The same
+  reasoning applies to the core's server-held chats: `DELETE /kb/chat/sessions/:id/messages/:seq` (API 127,
+  `kb/chat-sessions.mjs` `deleteChatMessage`) hard-deletes exactly one interrupted assistant row, scoped by
+  the session's `user_id`; a complete reply is refused (`409 MESSAGE_NOT_INTERRUPTED`) and a repeat is a
+  `200 { deleted: false }`.
+
+A retry of a turn that failed with no text (for example an engine error before the first delta) has nothing
+in the file to remove, so the drop is skipped. Tests: `ui/screens/chat/tests/controller.test.mjs`,
+`ui/screens/chat/tests/retry-persist.test.mjs` (controller over the real `TauriChatStore` plus a reload),
+`desktop/src-tauri/src/chat_store_tests.rs`, and `extension/tests/chat-message-drop.test.mjs`.
+
 ## Commands
 
 `chat_bind_session`, `chat_unbind_session`, `chat_list` (paged, newest first, 10k+ chats via a cached
 index keyed by mtime and size), `chat_load` (page), `chat_save` (`replace`, or `append` with the expected
-count; the revision is required once the chat exists), `chat_delete`, `chat_archive_status`.
+count; the revision is required once the chat exists), `chat_drop_message` (drop the newest interrupted
+assistant partial; see "Retry and interrupted replies"), `chat_delete`, `chat_archive_status`.

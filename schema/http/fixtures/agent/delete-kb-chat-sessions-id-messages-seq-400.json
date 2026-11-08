@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id/messages/:seq",
+  "status": 400,
+  "description": "seq is not an integer >= 1.",
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "seq": 0
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "seq must be an integer >= 1"
+    }
+  }
+}
