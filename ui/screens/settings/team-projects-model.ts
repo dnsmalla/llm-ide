@@ -8,6 +8,9 @@ import {
   roleAtLeast, type MaxMode, type TeamMember, type TeamRole,
 } from "./team-model.ts";
 
+// The project picker speaks the same role vocabulary as the team screen; re-export so its sections import one module.
+export type { TeamRole };
+
 const isRec = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 

@@ -16,6 +16,7 @@ import {
 import {
   InviteFormView, InviteRowView, InviteTokenView, MemberEditorView, MemberRowView, TeamAccessNotice,
 } from "./team-view.tsx";
+import TeamProjectsSection from "./TeamProjectsSection.tsx";
 
 type Gate =
   | { kind: "checking" }
