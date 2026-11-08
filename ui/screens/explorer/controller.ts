@@ -30,6 +30,9 @@ export interface DocView {
 
 export type GitDeco = "modified" | "added" | "untracked" | "deleted" | "conflicted";
 
+/** What the host can watch: `fs_watch_set` refuses more than MAX_DIRS, and the UI caps below it. */
+export const WATCH_DIR_CAP = 500;
+
 export interface Notice {
   severity: "error" | "warning" | "info";
   message: string;
@@ -93,6 +96,9 @@ export class ExplorerController {
   private refreshing = new Set<string>();
   private treeWidth: number | null = null;
   private treeBase = "";
+  /** The host watches at most this many folders (desktop/src-tauri/src/fs_watch.rs MAX_DIRS). */
+  private watchCapped = false;
+  private watchErrorShown = false;
 
   constructor(deps: ControllerDeps) {
     this.fs = deps.fs;
@@ -863,7 +869,19 @@ export class ExplorerController {
       const want = new Set<string>(["", ".git", this.treeBase]);
       for (const t of this.snap.tabs.tabs) want.add(parentOf(t.id));
       for (const p of this.snap.tree.expanded) if (this.snap.tree.dirs.has(p)) want.add(p);
-      void this.fs.watchSet([...want].slice(0, 500)).catch(() => undefined);
+      // Say it once when the expanded set outgrows what the host watches, instead of silently watching a prefix.
+      const capped = want.size > WATCH_DIR_CAP;
+      if (capped && !this.watchCapped) {
+        this.notify("warning", `Changes in folders beyond the first ${WATCH_DIR_CAP} expanded are not watched; collapse some folders.`);
+      }
+      this.watchCapped = capped;
+      void this.fs.watchSet([...want].slice(0, WATCH_DIR_CAP))
+        .then(() => { this.watchErrorShown = false; })
+        .catch((e) => {
+          // Never swallow it: a watcher that cannot follow every folder must be visible (once).
+          if (!this.watchErrorShown) this.notify("warning", `The file watcher could not follow every folder: ${toFsError(e).message}`);
+          this.watchErrorShown = true;
+        });
     }, 0);
   }
 

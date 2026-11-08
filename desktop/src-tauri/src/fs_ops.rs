@@ -398,6 +398,15 @@ fn cache_put(key: CacheKey, mtime: Option<std::time::SystemTime>, v: &RawList) {
     }
 }
 
+/// A listing past `LIST_SCAN_CAP` names what it reached and the cap, so the Explorer row can say both instead of
+/// a bare "too large".
+fn too_large_listing(scanned: usize) -> FsError {
+    FsError {
+        code: "too_large",
+        message: format!("folder has more than {LIST_SCAN_CAP} entries (counted {scanned}; the listing cap is {LIST_SCAN_CAP})"),
+    }
+}
+
 fn build_raws(
     dir: &Path,
     req: &ListReq,
@@ -411,7 +420,7 @@ fn build_raws(
     for ent in rd {
         scanned += 1;
         if scanned > LIST_SCAN_CAP {
-            return err("too_large", "folder has too many entries to list");
+            return Err(too_large_listing(scanned));
         }
         let Ok(ent) = ent else { continue };
         let Ok(name) = ent.file_name().into_string() else {
@@ -1641,5 +1650,13 @@ mod tests {
         }
         eprintln!("BENCH all {} pages: {:?}", pages + 1, t.elapsed());
         assert_eq!(first.total, 100_000);
+    }
+
+    #[test]
+    fn a_too_large_listing_names_the_count_and_the_cap() {
+        let e = too_large_listing(LIST_SCAN_CAP + 1);
+        assert_eq!(e.code, "too_large");
+        assert!(e.message.contains(&(LIST_SCAN_CAP + 1).to_string()), "the count it reached: {}", e.message);
+        assert!(e.message.contains(&format!("listing cap is {LIST_SCAN_CAP}")), "the cap: {}", e.message);
     }
 }

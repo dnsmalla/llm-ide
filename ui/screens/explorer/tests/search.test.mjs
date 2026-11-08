@@ -134,7 +134,7 @@ test("controller: results stream in, done closes, stale-run events are ignored",
   second.onEvent(done(second.id, { truncated: "matches" }));
   const s = c.getSnapshot();
   assert.deepEqual([s.phase, s.files.map((f) => f.path), s.done.truncated], ["done", ["b.ts"], "matches"]);
-  assert.match(model.truncationNotice(s.done), /first results/);
+  assert.equal(model.truncationNotice(s.done), "Showing the first 5,000 matches; narrow the search.");
 });
 
 test("controller: events that arrive before start resolves are buffered and replayed for the right id", async () => {

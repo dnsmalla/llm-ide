@@ -213,9 +213,12 @@ export function summaryText(s: SearchState): string {
   return base;
 }
 
+/** The host's match cap (desktop/src-tauri/src/project_search.rs MAX_MATCHES). */
+export const SEARCH_MATCH_CAP = 5000;
+
 export function truncationNotice(d: DoneInfo | null): string | null {
   if (!d) return null;
-  if (d.truncated === "matches") return "Showing the first results only. Narrow the search with a more specific query or file filters.";
+  if (d.truncated === "matches") return `Showing the first ${SEARCH_MATCH_CAP.toLocaleString("en-US")} matches; narrow the search.`;
   if (d.truncated === "files") return "The project is very large: only part of it was searched. Use include / exclude filters.";
   if (d.truncated === "time") return "The search took too long and stopped. Use include / exclude filters to narrow it.";
   return null;

@@ -96,7 +96,7 @@ export function makeFs(initial = {}) {
       for (const d of [...dirs]) if (d === path || d.startsWith(path + "/")) dirs.delete(d);
     },
     async watchStart(cb) { state.watchCb = cb; return { mode: "native" }; },
-    async watchSet(d) { state.watched = d; },
+    async watchSet(d) { if (state.watchFails) throw new FsErr("too_large", "at most 512 folders can be watched"); state.watched = d; },
     async watchStop() { state.watchCb = null; },
     async gitStatus() {
       if (state.gitError) throw new FsErr(state.gitError);

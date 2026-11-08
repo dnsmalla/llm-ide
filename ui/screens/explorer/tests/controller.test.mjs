@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
-import { makeFs, makeEditor, settle, tick, sha } from "./fakes.mjs";
+import { makeFs, makeEditor, settle, tick, sha, FsErr } from "./fakes.mjs";
 
 const { ExplorerController, gitDecoFor } = await load("controller.ts");
 const T = await load("tree-model.ts");
@@ -477,4 +477,42 @@ test("a pending session save is written before a project switch", async () => {
   await c.toggleDir("src", true);
   await c.init("/two");
   assert.match([...kv.m.values()].join(" "), /src/);
+});
+
+test("more than the watcher cap is said once, and a failed watchSet is shown not swallowed", async () => {
+  const { projectKey } = await load("session.ts");
+  const dirs = Array.from({ length: 501 }, (_, i) => `d${i}`);
+  const files = Object.fromEntries(dirs.map((d, i) => [`${d}/f${i}.txt`, "x"]));
+  const kv = memKv();
+  kv.setItem(projectKey("/proj"), JSON.stringify({ expanded: dirs.slice(0, 500), tabs: null, treeWidth: null }));
+  const { c, fs } = await setup(files, { kv });
+  await settle();
+  assert.equal(fs.state.watched.length, 500, "the host gets at most 500 folders");
+  assert.match(c.getSnapshot().notice?.message ?? "", /beyond the first 500 expanded are not watched/);
+  assert.equal(c.getSnapshot().notice.severity, "warning");
+  // Said once: another sync while still over the cap leaves a dismissed notice dismissed.
+  c.dismissNotice();
+  await c.toggleDir("d500", true);
+  await settle();
+  assert.equal(c.getSnapshot().notice, null, "the cap is not repeated on every sync");
+
+  // A refused watchSet is surfaced, never swallowed.
+  fs.state.watchFails = true;
+  await c.toggleDir("d500", false);
+  await settle();
+  assert.match(c.getSnapshot().notice?.message ?? "", /file watcher could not follow every folder/);
+});
+
+test("a folder too large to list shows the count and the cap", async () => {
+  const { c, fs } = await setup({ "a.txt": "x", "big/f.txt": "y" });
+  const real = fs.list;
+  fs.list = async (p, o) => {
+    if (p === "big") throw new FsErr("too_large", "folder has more than 1000000 entries (counted 1000001; the listing cap is 1000000)");
+    return real(p, o);
+  };
+  await c.toggleDir("big", true);
+  await settle();
+  const message = c.getSnapshot().tree.dirs.get("big")?.error ?? "";
+  assert.match(message, /1000001/, "the count it reached");
+  assert.match(message, /listing cap is 1000000/, "and the cap, not a bare 'too large'");
 });
