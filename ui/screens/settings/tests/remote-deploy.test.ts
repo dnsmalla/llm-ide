@@ -24,6 +24,7 @@ function io(over: Partial<DeployIo> = {}): DeployIo {
 test("preflight loads a plan, and only the exact typed domain enables deploy", async () => {
   const m = new RemoteDeployModel(io(), () => config);
   m.setDomain("Hub.Example.com");
+  m.setReviewAck(true);
   await m.preflight();
   assert.equal(m.getState().plan?.id, "p1");
   assert.equal(canDeploy(m.getState()), false);
@@ -36,6 +37,7 @@ test("preflight loads a plan, and only the exact typed domain enables deploy", a
 test("a rollback report is surfaced, not hidden as success", async () => {
   const m = new RemoteDeployModel(io({ run: async () => ({ ...report, ownerWindowOpen: false, rolledBack: true, failedStage: "start" }) }), () => config);
   m.setDomain("hub.example.com");
+  m.setReviewAck(true);
   await m.preflight();
   m.setConfirmation("hub.example.com");
   await m.deploy();

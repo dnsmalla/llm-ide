@@ -28,7 +28,8 @@
   <p id="s" class="status" role="status"></p>
   <script>
     (function () {
-      var token = new URLSearchParams(location.search).get("t") || "";
+      // The one-time token travels in the fragment: a fragment is never sent to the server or written to an access log.
+      var token = new URLSearchParams(location.hash.replace(/^#/, "")).get("t") || "";
       history.replaceState(null, "", location.pathname);
       document.getElementById("f").addEventListener("submit", async function (e) {
         e.preventDefault();

@@ -101,6 +101,10 @@
           "type": "integer",
           "description": "SERVER_API_VERSION"
         },
+        "hub": {
+          "type": "boolean",
+          "description": "true when this core is a hub (LLMIDE_HUB=1); additive"
+        },
         "schemaVersion": {
           "type": "integer",
           "description": "current migration number"

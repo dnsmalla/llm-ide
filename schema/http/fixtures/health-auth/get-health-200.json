@@ -4,6 +4,7 @@
   "response": {
     "status": "degraded",
     "apiVersion": 80,
+    "hub": false,
     "schemaVersion": 44,
     "uptimeSec": 0,
     "endpoints": [

@@ -28,14 +28,28 @@ function refuse(socket, status, text) {
 /** The refusal for an upgrade request before the WebSocket handshake check, or null. `event` names the audit
  *  event (null for a wrong path). Plaintext refuses every non-loopback peer; TLS accepts any peer that pinned it.
  *  The plaintext listener honours only the loopback http:// entries: https:// entries exist for the TLS listener. */
-export function upgradeRefusal(req, { tls, allowlist }) {
-  if (!tls) allowlist = allowlist.filter((o) => o.startsWith('http://'));
+export function upgradeRefusal(req, { tls, hub = false, allowlist }) {
+  if (!tls && !hub) allowlist = allowlist.filter((o) => o.startsWith('http://'));
+  // Behind the hub's TLS terminator the socket peer is always nginx (loopback); the front must say https.
+  if (hub && req.headers['x-forwarded-proto'] !== 'https') return { status: 403, event: 'plaintext_refused', detail: '' };
   if ((req.url ?? '').split('?')[0] !== PATH) return { status: 404, event: null, detail: '' };
   if (!tls && !LOOPBACK.has(req.socket?.remoteAddress)) return { status: 403, event: 'plaintext_refused', detail: '' };
   if (originRefused(req.headers, allowlist)) {
     return { status: 403, event: 'origin_refused', detail: String(req.headers.origin ?? '').slice(0, 200) };
   }
   return null;
+}
+
+/** The client address for throttles/audit. Behind the hub's nginx every socket peer is 127.0.0.1; the
+ *  rightmost X-Forwarded-For is the address nginx appended (never a client-supplied left entry). */
+export function clientPeer(req, { hub = false } = {}) {
+  const socketPeer = req.socket?.remoteAddress ?? '-';
+  if (!hub || !LOOPBACK.has(socketPeer)) return socketPeer;
+  const xff = String(req.headers?.['x-forwarded-for'] ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+  if (!xff.length) return socketPeer;
+  const last = xff[xff.length - 1];
+  // Keep the key bounded and header-safe; a malformed value is not a usable identity.
+  return last.length <= 64 && [...last].every((c) => /[0-9A-Fa-f:.]/.test(c)) ? last : socketPeer;
 }
 
 function listenOn(server, port, host) {
@@ -46,7 +60,7 @@ function listenOn(server, port, host) {
   });
 }
 
-export async function startHostApiListener({ gateway, tls = null, basePort = 3016, candidates = 10, log = () => {},
+export async function startHostApiListener({ gateway, tls = null, hub = false, basePort = 3016, candidates = 10, log = () => {},
   onRefused = () => {}, originAllowlist = config.hostApiWebOrigins, limits = LISTENER_LIMITS }) {
   let nextId = 0;
   const live = new Set();
@@ -74,7 +88,7 @@ export async function startHostApiListener({ gateway, tls = null, basePort = 301
 
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => {});
-    const why = upgradeRefusal(req, { tls: !!tls, allowlist: originAllowlist });
+    const why = upgradeRefusal(req, { tls: !!tls, hub, allowlist: originAllowlist });
     if (why) {
       if (why.event) onRefused(why.event, socket.remoteAddress ?? '-', why.detail);
       return refuse(socket, why.status, why.status === 404 ? 'Not Found' : 'Forbidden');
@@ -86,7 +100,7 @@ export async function startHostApiListener({ gateway, tls = null, basePort = 301
     live.add(conn);
     conn.on('message', (text) => gateway.receive(session, text));
     conn.on('close', () => { live.delete(conn); gateway.closed(session); });
-    gateway.opened(session, socket.remoteAddress);
+    gateway.opened(session, clientPeer(req, { hub }));
   });
 
   let port = null;

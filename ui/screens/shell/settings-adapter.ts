@@ -144,8 +144,8 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           if (!result) throw new Error("the desktop host returned an SSH result this app cannot read");
           return result;
         },
-        async remoteDeployPlan(target, domain) {
-          const plan = decodeDeployPlan(await d.invoke<unknown>("remote_deploy_plan", { target, domain }));
+        async remoteDeployPlan(target, domain, reviewAck) {
+          const plan = decodeDeployPlan(await d.invoke<unknown>("remote_deploy_plan", { target, domain, reviewAck }));
           if (!plan) throw new Error("the desktop host returned a deploy plan this app cannot read");
           return plan;
         },

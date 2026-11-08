@@ -37,8 +37,10 @@ conf() {
   VERSION=$(sed -n 's/^LLMIDE_HUB_VERSION=//p' "$CONF" | head -1)
   [ -n "$DOMAIN" ] || die "LLMIDE_HUB_DOMAIN is missing"
   [ -n "$VERSION" ] || die "LLMIDE_HUB_VERSION is missing"
-  case "$DOMAIN" in *[!A-Za-z0-9.-]*) die "the domain is not valid" ;; esac
-  case "$VERSION" in *[!A-Za-z0-9._-]*) die "the version is not valid" ;; esac
+  case "$DOMAIN" in ''|-*|*.|*[!a-z0-9.-]*) die "the domain is not valid" ;; esac
+  case "$DOMAIN" in *.*.*) ;; *.*) ;; *) die "the domain has no dot" ;; esac
+  case "$VERSION" in ''|.*|*.|*[!0-9.]*) die "the version is not valid" ;; esac
+  case "$VERSION" in *.*.*) ;; *) die "the version is not x.y.z" ;; esac
 }
 
 case "$stage" in
@@ -81,6 +83,14 @@ case "$stage" in
     [ -d /etc/llmide ] || die "base has not run"
     tmp=$(mktemp /etc/llmide/.core.env.XXXXXX)
     cat > "$tmp"
+    # Root-side validation: only KEY=value lines, only the template's keys, no loader/option injection.
+    if grep -Ev '^(NODE_ENV|PATH|LLMIDE_[A-Z0-9_]+)=' "$tmp" | grep -q .; then
+      rm -f "$tmp"; die "the env contains a line outside the allowed key set"
+    fi
+    if grep -Eq '^(NODE_OPTIONS|LD_[A-Z0-9_]*|BASH_ENV|ENV)=' "$tmp"; then
+      rm -f "$tmp"; die "the env contains a forbidden loader variable"
+    fi
+    if grep -Eq '\r' "$tmp"; then rm -f "$tmp"; die "the env contains a carriage return"; fi
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
     if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi
@@ -163,7 +173,7 @@ case "$stage" in
     chmod 0600 /etc/llmide/bootstrap.env; chown root:root /etc/llmide/bootstrap.env
     sed -i 's/^LLMIDE_DISABLE_REGISTRATION=.*/LLMIDE_DISABLE_REGISTRATION=0/' "$CONF"
     systemctl restart llmide-core
-    printf 'LLMIDE_SETUP_URL=https://%s/setup?t=%s\n' "$DOMAIN" "$token"
+    printf 'LLMIDE_SETUP_URL=https://%s/setup#t=%s\n' "$DOMAIN" "$token"
     say "ok"
     ;;
 

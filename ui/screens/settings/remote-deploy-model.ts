@@ -17,7 +17,7 @@ export interface DeployReport {
 export interface DeployTarget { host: string; port: number; user: string; keyPath: string }
 
 export interface DeployIo {
-  plan(target: DeployTarget, domain: string): Promise<DeployPlan>;
+  plan(target: DeployTarget, domain: string, reviewAck: boolean): Promise<DeployPlan>;
   bootstrap(target: DeployTarget): Promise<Bootstrap>;
   run(target: DeployTarget, planId: string, confirmation: string): Promise<DeployReport>;
   lock(target: DeployTarget): Promise<void>;
@@ -29,6 +29,7 @@ export type DeployPhase = "idle" | "planning" | "bootstrapping" | "deploying" | 
 export interface DeployState {
   domain: string;
   confirmation: string;
+  reviewAck: boolean;
   phase: DeployPhase;
   plan: DeployPlan | null;
   report: DeployReport | null;
@@ -37,7 +38,7 @@ export interface DeployState {
 }
 
 export const DEPLOY_INITIAL: DeployState = {
-  domain: "", confirmation: "", phase: "idle", plan: null, report: null, bootstrap: null, error: null,
+  domain: "", confirmation: "", reviewAck: false, phase: "idle", plan: null, report: null, bootstrap: null, error: null,
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -84,13 +85,14 @@ export class RemoteDeployModel extends Store<DeployState> {
 
   setDomain(domain: string): void { this.set({ domain: domain.trim().toLowerCase(), plan: null, report: null, error: null, phase: "idle" }); }
   setConfirmation(v: string): void { this.set({ confirmation: v.trim() }); }
+  setReviewAck(v: boolean): void { this.set({ reviewAck: v, plan: null, error: null }); }
 
   async preflight(): Promise<void> {
     const c = this.#config();
     if (!deployReady(c)) { this.set({ error: "Enter the server details and save them first." }); return; }
     this.set({ phase: "planning", error: null, report: null });
     try {
-      const plan = await this.#io.plan(targetOf(c), this.getState().domain);
+      const plan = await this.#io.plan(targetOf(c), this.getState().domain, this.getState().reviewAck);
       this.set({ plan, phase: "idle", error: plan.blockers.length ? `Cannot deploy: ${plan.blockers.join(", ")}` : null });
     } catch (e) { this.set({ phase: "failed", error: text(e) }); }
   }

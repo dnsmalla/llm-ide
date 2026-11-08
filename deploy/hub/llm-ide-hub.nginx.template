@@ -25,6 +25,7 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 3600s;
         access_log off;
@@ -43,7 +44,9 @@ server {
     location = /setup {
         root /var/www/llmide-web;
         try_files /setup.html =404;
+        access_log off;
         add_header Cache-Control "no-store" always;
+        add_header Referrer-Policy no-referrer always;
     }
     location /app/ {
         alias /var/www/llmide-web/;

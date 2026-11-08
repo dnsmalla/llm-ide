@@ -11,7 +11,7 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
   const { host } = useEnv();
   const available = Boolean(host.remoteDeployPlan && host.remoteDeployBootstrap && host.remoteDeployRun && host.remoteDeployLock && host.remoteDeployRollback);
   const m = useModel(() => new RemoteDeployModel({
-    plan: (t, d) => host.remoteDeployPlan!(t, d),
+    plan: (t, d, a) => host.remoteDeployPlan!(t, d, a),
     bootstrap: (t) => host.remoteDeployBootstrap!(t),
     run: (t, id, c) => host.remoteDeployRun!(t, id, c),
     lock: (t) => host.remoteDeployLock!(t),
@@ -30,8 +30,12 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
         <input className="st-input" value={s.domain} onChange={(e) => m.setDomain(e.currentTarget.value)} placeholder="hub.example.com" spellCheck={false} />
         <span className="st-hint">The certificate must already exist for this name (certbot).</span>
       </label>
+      <label className="st-row">
+        <input type="checkbox" checked={s.reviewAck} onChange={(e) => m.setReviewAck(e.currentTarget.checked)} />
+        <span>External security review completed or explicitly accepted for this public hub</span>
+      </label>
       <div className="st-row">
-        <Button disabled={s.phase === "planning" || s.phase === "deploying"} onClick={() => void m.preflight()}>{s.phase === "planning" ? "Checking…" : "Run preflight"}</Button>
+        <Button disabled={s.phase === "planning" || s.phase === "deploying" || !s.reviewAck} onClick={() => void m.preflight()}>{s.phase === "planning" ? "Checking…" : "Run preflight"}</Button>
         <Button disabled={s.phase === "bootstrapping" || s.phase === "deploying"} onClick={() => void m.bootstrapHelper()}>{s.phase === "bootstrapping" ? "Installing…" : "Install helper"}</Button>
       </div>
       {s.bootstrap && !s.bootstrap.installed ? <p className="st-hint" role="alert">{s.bootstrap.command}</p> : null}

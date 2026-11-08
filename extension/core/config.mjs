@@ -263,6 +263,7 @@ if (_bcryptCost < 10 || _bcryptCost > 14) {
 // Host API v1 listener switches, read once so hostApiMode and the flags cannot disagree.
 const HUB_MODE = envBool('LLMIDE_HUB', false);
 const HOST_API_TLS = process.env.LLMIDE_HOST_API_TLS === '1';
+const HOST_API_HUB = process.env.LLMIDE_HOST_API_HUB === '1';
 const HOST_API_DEV = process.env.LLMIDE_HOST_API_DEV === '1' && process.env.NODE_ENV !== 'production';
 
 export const config = Object.freeze({
@@ -290,9 +291,10 @@ export const config = Object.freeze({
   hostApiToolApprovals: process.env.LLMIDE_HOST_API_TOOL_APPROVALS === '1',
   hostApiChatClear:     process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
   hostApiTls:           HOST_API_TLS,
+  hostApiHub:           HOST_API_HUB,
   hostApiWebOrigins:    parseOriginAllowlist(process.env.LLMIDE_HOST_API_WEB_ORIGINS, console.warn),
   // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
-  hostApiMode:          HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',
+  hostApiMode:          HOST_API_HUB ? 'hub' : HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',
 
   // Team Hub mode (ADR 0021): LLMIDE_HUB=1. H1 only closes registration here (computeRegistrationOpen)
   // and switches a no-invite registration's defaults to read-only / 20 USD; the rest of hub mode is H2.

@@ -230,8 +230,9 @@ pub fn bundle_path(version: &str) -> Option<String> {
     candidates.into_iter().find(|p| std::path::Path::new(p).is_file())
 }
 
-pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now: u64) -> DeployPlan {
+pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now: u64, review_ack: bool) -> DeployPlan {
     let mut blockers = plan_blockers(p, domain);
+    if !review_ack { blockers.push("external_security_review_required".to_string()); }
     if !std::path::Path::new(bundle).is_file() { blockers.push("bundle_missing".to_string()); }
     DeployPlan {
         id: random_hex(16),
@@ -275,6 +276,27 @@ pub fn env_bytes(s: &DeploySecrets, domain: &str, version: &str) -> Vec<u8> {
         "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
         s.jwt, s.vault
     ).into_bytes()
+}
+
+const ENV_KEYS: &[&str] = &[
+    "NODE_ENV", "PATH", "LLMIDE_HOST", "LLMIDE_PORT", "LLMIDE_HUB", "LLMIDE_TLS_TERMINATED",
+    "LLMIDE_HUB_DOMAIN", "LLMIDE_HUB_VERSION", "LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_PROJECTS_ROOT",
+    "LLMIDE_BACKUP_DIR", "LLMIDE_BACKUP_KEEP", "LLMIDE_DISABLE_REGISTRATION", "LLMIDE_TRUST_PROXY",
+    "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
+    "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY",
+];
+
+/// Root-side shape check mirrored in the helper: only known keys, no loader/option injection, no CR.
+pub fn validate_env_text(text: &str) -> Result<(), FsError> {
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else { return Err(herr("env_invalid", "the env contains a line without '='")) };
+        if !ENV_KEYS.contains(&key) { return Err(herr("env_invalid", format!("the env key {key} is not in the template"))); }
+        if key == "NODE_OPTIONS" || key.starts_with("LD_") || key == "BASH_ENV" || key == "ENV" {
+            return Err(herr("env_invalid", "the env contains a forbidden loader variable"));
+        }
+        if value.contains('\r') || value.contains('\n') { return Err(herr("env_invalid", "the env contains a newline in a value")); }
+    }
+    Ok(())
 }
 
 pub const PREFLIGHT_SCRIPT: &str = r#"set -u
@@ -378,7 +400,13 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
     for stage in plan.stages.iter().take_while(|s| s.id != "lock-registration") {
         let Some(cmd) = stage_command(&stage.id) else { continue };
         let result = match stage.id.as_str() {
-            "env" => runner.run(target, &cmd, Some(&env_bytes(secrets, &plan.domain, &plan.version))),
+            "env" => {
+                let bytes = env_bytes(secrets, &plan.domain, &plan.version);
+                match std::str::from_utf8(&bytes).map_err(|_| herr("env_invalid", "the env is not UTF-8")).and_then(validate_env_text) {
+                    Ok(()) => runner.run(target, &cmd, Some(&bytes)),
+                    Err(e) => Err(e),
+                }
+            }
             "bundle" => {
                 let sha = hex(&Sha256::digest(bundle));
                 let up = format!("mkdir -p \"{staging}\" && cat > \"{staging}/bundle.tar.gz\"");
@@ -457,13 +485,13 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
 }
 
 #[tauri::command]
-pub async fn remote_deploy_plan(target: SshTarget, domain: String) -> Result<DeployPlan, FsError> {
+pub async fn remote_deploy_plan(target: SshTarget, domain: String, review_ack: bool) -> Result<DeployPlan, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         let p = run_preflight(&SystemDeploy, &prepared)?;
         let version = env!("CARGO_PKG_VERSION").to_string();
         let bundle = bundle_path(&version).unwrap_or_default();
-        let plan = build_plan(&p, &domain.trim().to_ascii_lowercase(), &version, &bundle, crate::confirm::now_ms());
+        let plan = build_plan(&p, &domain.trim().to_ascii_lowercase(), &version, &bundle, crate::confirm::now_ms(), review_ack);
         remember_plan(plan.clone());
         Ok(plan)
     }).await.map_err(|e| herr("internal", format!("the preflight did not finish: {e}")))?
@@ -582,11 +610,19 @@ mod tests {
     }
 
     #[test]
+    fn a_hostile_env_line_is_refused_before_it_reaches_root() {
+        assert!(validate_env_text("NODE_ENV=production\nLLMIDE_JWT_SECRET=abc\n").is_ok());
+        for bad in ["NODE_OPTIONS=--require /tmp/x", "LD_PRELOAD=/tmp/x.so", "BASH_ENV=/tmp/x", "EVIL=1", "no_equals"] {
+            assert!(validate_env_text(&format!("NODE_ENV=production\n{bad}\n")).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
     fn a_changed_or_wrong_confirmation_is_refused() {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
         let bundle = std::env::temp_dir().join(format!("llmide-bundle-{}.tar.gz", random_hex(4)));
         std::fs::write(&bundle, b"x").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1_000);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1_000, true);
         assert!(plan.blockers.is_empty());
         remember_plan(plan.clone());
         assert_eq!(confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap().id, plan.id);
@@ -626,7 +662,7 @@ mod tests {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
         let bundle = std::env::temp_dir().join(format!("llmide-run-{}.tar.gz", random_hex(4)));
         std::fs::write(&bundle, b"bundle").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let report = deploy_run(&fake, &HealthFail, &target(), &plan, &secrets, b"bundle").unwrap();
         assert!(report.rolled_back);
