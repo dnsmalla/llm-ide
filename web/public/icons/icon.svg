@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LLM-IDE">
-  <rect x="40" y="40" width="432" height="432" rx="92" fill="#0f1115"/>
-  <path d="M154 133v246M154 379h204" stroke="#5b8cff" stroke-width="48" stroke-linecap="round" fill="none"/>
-  <text x="300" y="300" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="154" font-weight="600" fill="#eef2ff" text-anchor="middle">L</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><image href="./icon-512.png" width="512" height="512"/></svg>
