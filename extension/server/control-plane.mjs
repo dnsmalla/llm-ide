@@ -8,10 +8,13 @@ export function buildHealthPayload({
   skillsAvailable,
   features = null,
   storage = null,
+  hub = false,
 }) {
   return {
     status: dbOk && claude?.ok && skillsAvailable !== false ? 'ok' : 'degraded',
     apiVersion,
+    // True when this core is a hub (LLMIDE_HUB=1); additive, so an older client ignores it.
+    hub,
     schemaVersion: migration?.current ?? 0,
     uptimeSec: Math.round((Date.now() - serverStartedAt) / 1000),
     endpoints,

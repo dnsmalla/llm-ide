@@ -81,8 +81,13 @@ function defaultGrant(db) {
 // `invite` is a plaintext invite token: its presence lets a registration through while registration is
 // closed (ADR 0021). The route validates and burns it in the same transaction, so a bad token rolls the
 // account back — this function never trusts it for anything else.
-export function registerUser(db, { email, password, displayName, invite = null, grant = null }) {
-  if (!config.registrationOpen && !invite) throw errForbidden('Registration is disabled');
+export function registerUser(db, { email, password, displayName, invite = null, grant = null, bootstrap = null }) {
+  // P2.6: a one-time bootstrap token opens exactly one registration while no real account exists.
+  const bootstrapOk = typeof bootstrap === 'string' && bootstrap.length > 0
+    && typeof config.bootstrapToken === 'string' && config.bootstrapToken.length > 0
+    && bootstrap === config.bootstrapToken
+    && ownerCount(db) === 0;
+  if (!config.registrationOpen && !invite && !bootstrapOk) throw errForbidden('Registration is disabled');
   const e = validateEmail(email);
   validatePassword(password);
   const name = String(displayName || '').trim().slice(0, MAX_NAME) || e.split('@')[0];

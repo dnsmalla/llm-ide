@@ -50,6 +50,7 @@ mod prefs;
 mod project_search;
 mod pty;
 mod remote;
+mod remote_deploy;
 mod rtk;
 mod secrets;
 mod self_heal;
@@ -437,6 +438,11 @@ macro_rules! product_handlers {
                 prefs::get_prefs,
                 prefs::set_prefs,
                 remote::remote_ssh_test,
+                remote_deploy::remote_deploy_plan,
+                remote_deploy::remote_deploy_bootstrap,
+                remote_deploy::remote_deploy_run,
+                remote_deploy::remote_deploy_lock,
+                remote_deploy::remote_deploy_rollback,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,

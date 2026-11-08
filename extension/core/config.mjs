@@ -297,6 +297,10 @@ export const config = Object.freeze({
   // Team Hub mode (ADR 0021): LLMIDE_HUB=1. H1 only closes registration here (computeRegistrationOpen)
   // and switches a no-invite registration's defaults to read-only / 20 USD; the rest of hub mode is H2.
   hub:                  HUB_MODE,
+  // Hub-only: the folder a new project may be created under. Unset = no confinement (local install).
+  projectsRoot:         envStr('LLMIDE_PROJECTS_ROOT', ''),
+  // One-time first-owner token, written only for the setup window (Phase 2 P2.6). Empty = no bootstrap.
+  bootstrapToken:       envStr('LLMIDE_BOOTSTRAP_TOKEN', ''),
   // The operator declares that the only thing in front of a non-loopback hub bind is a TLS terminator
   // (nginx, Caddy). server.mjs refuses to boot a hub on any other interface without it.
   tlsTerminated:        envBool('LLMIDE_TLS_TERMINATED', false),

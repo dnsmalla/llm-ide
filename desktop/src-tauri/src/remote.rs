@@ -188,8 +188,8 @@ pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
     })
 }
 
-/// The argv after `ssh`: a fixed option list, then `user@host`, then the fixed remote command. No shell.
-pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
+/// The argv after `ssh`: a fixed option list, then `user@host`, then one remote command. No shell.
+pub fn ssh_args_with(target: &PreparedTarget, command: &str) -> Vec<String> {
     vec![
         "-v".to_string(),
         "-o".to_string(),
@@ -205,8 +205,13 @@ pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
         "-i".to_string(),
         target.key_path.clone(),
         format!("{}@{}", target.user, target.host),
-        REMOTE_COMMAND.to_string(),
+        command.to_string(),
     ]
+}
+
+/// The argv for the fixed Phase-1 probe. Deploy uses [`ssh_args_with`] with a constant stage command.
+pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
+    ssh_args_with(target, REMOTE_COMMAND)
 }
 
 /// Checks the user-supplied key path without reading the file. A directory, FIFO or missing path is refused

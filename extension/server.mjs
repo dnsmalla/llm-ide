@@ -1335,6 +1335,7 @@ async function collectHealth() {
     serverStartedAt: SERVER_STARTED_AT,
     skillsAvailable,
     features: config.features,
+    hub: config.hub,
     storage: {
       location: config.dataLocation,
       migration: dataDirMigration.status,

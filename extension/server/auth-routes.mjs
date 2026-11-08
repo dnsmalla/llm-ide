@@ -124,6 +124,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       // burns. A bad invite rolls the account back, so a used/expired token never leaves a user behind.
       const out = db.transaction(() => {
         const inviteToken = typeof body.invite === 'string' && body.invite ? body.invite : null;
+        const bootstrap = typeof body.bootstrap === 'string' && body.bootstrap ? body.bootstrap : null;
         // Cheap refusal first: a garbage token must not cost a bcrypt hash (R-008#1). The peek reads the
         // invite's grant; the burn below is still in this transaction, so the two commit or roll back together.
         const peeked = inviteToken ? peekInvite(db, inviteToken, { email: body.email }) : null;
@@ -132,6 +133,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
           password: body.password,
           displayName: body.displayName,
           invite: inviteToken,     // lets a closed installation accept this one registration
+          bootstrap,               // one-time first-owner token (P2.6); ignored when a real user exists
           // No invite: registerUser applies the default (first account = owner; solo or hub defaults).
           grant: peeked
             ? { teamRole: peeked.teamRole, maxMode: peeked.maxMode, usdCapMonth: peeked.usdCapMonth, grantedBy: peeked.createdBy }
