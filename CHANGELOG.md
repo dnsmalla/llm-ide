@@ -287,6 +287,50 @@ Maintenance rules: [docs/how-to/maintain-the-changelog.md](docs/how-to/maintain-
   index (via the local `scip` CLI) into per-user symbol FTS rows + a node/edge graph,
   giving code-sync compiler-derived relationship grounding. Server API version 21.
 
+## [2.0.0] - 2026-11-08
+
+The 2.0 line replaced the Swift Mac app with the Tauri desktop app and turned the core into a
+multi-member Team Hub (ADR 0021). Highlights from the 1.0.0..2.0.0 range, grouped by type.
+
+### Added
+
+- Desktop app (Tauri host + React screens) supersedes the Mac app: Library, Chat, Issues, Gantt, Code
+  Graph, Doc Gen, Auto Tasks, Terminal, Settings; the host spawns and supervises the Node core.
+- Team Hub (ADR 0021): `members` roles (`owner | admin | member | viewer`), `max_mode` and a monthly USD
+  cap, invite-only registration, `team.yaml` as the authoritative assignment file, and route authority
+  (`ROUTE_POLICY`) over every HTTP route.
+- Project-scoped team roles (ADR 0022): a per-project grant that can only narrow the team role, project
+  admin for membership, and a project id on turns and Host API frames.
+- Host API v1 (pinned TLS WSS) for the iPhone and web companion: chat, approvals, read and compose
+  capabilities, per-device tokens, and `projects.list`.
+- Encrypted sync to user-owned storage (MEGA, own-server SFTP, Box): snapshot kinds, device enrollment,
+  queued prompts and replies, with a desktop-off read path in the web app.
+- Provider catalog and per-user connections (OpenAI, Google, DeepSeek, custom/OpenAI-compatible, GLM),
+  provider-adapter turns with tools, and per-role model routing.
+- Push notifications (Web Push/VAPID, APNs), Self-Heal capture and the manual fix loop, the SCIP code
+  graph, Doc Gen projects and the agent-v2 engine with approvals.
+- Node 22 is the supported runtime.
+
+### Changed
+
+- One `make regression` gate for contracts, desktop/ui/web node suites, agent/v2 and graph-kit; generated
+  HTTP inventory and OpenAPI snapshots are checked by coverage, never by committing the snapshot.
+- Migrations are JS+SQL, append-only, at head 0071; `SERVER_API_VERSION` 126.
+
+### Fixed
+
+- Security hardening across the 2.0 line: disabled accounts are refused on their access token, hub mode
+  requires TLS and known projects, stdio MCP servers are refused on a hub, the core receives its secrets
+  over stdin (not the environment), and backups run in a read-only child that never leaves a partial
+  snapshot.
+- Reliability: transcript captures are archived by the desktop host, the outcome poller backs off when
+  idle, sync re-uploads only changed kinds, and one semaphore bounds in-flight chat turns.
+
+### Removed
+
+- The Swift Mac app (`mac/`) and the public registration default; the Mac-era `transcripts`/`chatMessages`
+  extension storage.
+
 ## [1.0.0] - 2026-07-02
 
 ### Added
