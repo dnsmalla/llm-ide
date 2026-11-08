@@ -59,6 +59,9 @@ export const PROJECT_GROUPS: readonly GroupDef[] = [
 
 export const ALL_GROUPS: readonly GroupDef[] = [...APP_GROUPS, ...PROJECT_GROUPS];
 
+/** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
+export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
+
 /** Mac cards that are not groups on the desktop because the desktop folds them into another group. */
 export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
   "Chat archive": "agent-history", // the archiving mode lives inside Agent history

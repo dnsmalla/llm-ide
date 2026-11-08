@@ -168,6 +168,10 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async remoteTlsPin(hubUrl, fingerprint) { await d.invoke("remote_tls_pin", { hubUrl, fingerprint }); },
         async restartApp() { await d.invoke("app_restart"); },
+        async remoteUpdate(target, version, confirmation) { await d.invoke("remote_update", { target, version, confirmation }); },
+        async remoteBackupNow(target) { await d.invoke("remote_backup_now", { target }); },
+        async remoteLogs(target, lines) { const r = await d.invoke<unknown>("remote_logs", { target, lines }); return typeof r === "string" ? r : ""; },
+        async remoteUninstall(target, confirmation, purge) { await d.invoke("remote_uninstall", { target, confirmation, purge }); },
         async pickNode() {
           const r = await d.invoke<unknown>("backend_pick_node");
           return typeof r === "string" && r.length > 0 ? r : null;

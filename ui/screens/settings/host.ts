@@ -256,6 +256,10 @@ export interface SettingsHost {
   remoteTlsPin?(hubUrl: string, fingerprint: string): Promise<void>;
   /** Restart the app so a saved mode change takes effect. */
   restartApp?(): Promise<void>;
+  remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string): Promise<void>;
+  remoteBackupNow?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
+  remoteLogs?(target: { host: string; port: number; user: string; keyPath: string }, lines: number): Promise<string>;
+  remoteUninstall?(target: { host: string; port: number; user: string; keyPath: string }, confirmation: string, purge: boolean): Promise<void>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;
@@ -331,4 +335,6 @@ export interface SettingsHost {
 export interface SettingsEnv {
   client: CoreClient;
   host: SettingsHost;
+  /** The host's server mode; remote hides the local-only groups. */
+  serverMode?: "local" | "remote";
 }
