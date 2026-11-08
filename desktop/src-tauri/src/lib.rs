@@ -51,6 +51,7 @@ mod project_search;
 mod pty;
 mod remote;
 mod remote_deploy;
+mod remote_session;
 mod rtk;
 mod secrets;
 mod self_heal;
@@ -444,6 +445,9 @@ macro_rules! product_handlers {
                 remote_deploy::remote_deploy_run,
                 remote_deploy::remote_deploy_lock,
                 remote_deploy::remote_deploy_rollback,
+                remote_session::remote_session_store,
+                remote_session::remote_session_load,
+                remote_session::remote_session_clear,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,

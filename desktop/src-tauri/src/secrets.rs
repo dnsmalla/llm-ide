@@ -23,6 +23,7 @@ use serde::Serialize;
 pub const SERVICE: &str = "com.llmide.desktop";
 pub const ACCOUNT_JWT: &str = "jwt-secret";
 pub const ACCOUNT_VAULT: &str = "vault-key";
+pub const ACCOUNT_HUB_SESSION: &str = "hub-session";
 pub const BACKEND_ENV: &str = "LLMIDE_KEYCHAIN_BACKEND";
 /// The server rejects secrets shorter than this (`extension/core/config.mjs`).
 const MIN_LEN: usize = 32;
@@ -143,6 +144,7 @@ pub struct SecretsStatus {
     pub available: bool,
     pub jwt_secret: bool,
     pub vault_key: bool,
+    pub hub_session: bool,
 }
 
 fn generate() -> Result<String, SecretError> {
@@ -182,11 +184,13 @@ pub fn load_or_create(b: &dyn SecretBackend) -> Result<Secrets, SecretError> {
 pub fn status(b: &dyn SecretBackend) -> SecretsStatus {
     let probe = |a| b.get(a).map(|v| v.is_some_and(|v| usable(&v)));
     let (jwt, vault) = (probe(ACCOUNT_JWT), probe(ACCOUNT_VAULT));
+    let hub = b.get(ACCOUNT_HUB_SESSION).map(|v| v.is_some_and(|v| !v.is_empty())).unwrap_or(false);
     SecretsStatus {
         backend: b.name(),
         available: jwt.is_ok() && vault.is_ok(),
         jwt_secret: jwt.unwrap_or(false),
         vault_key: vault.unwrap_or(false),
+        hub_session: hub,
     }
 }
 
@@ -281,7 +285,7 @@ mod tests {
     fn status_reports_booleans_and_creates_nothing() {
         let b = MemoryBackend::default();
         let s = status(&b);
-        assert_eq!(s, SecretsStatus { backend: "memory", available: true, jwt_secret: false, vault_key: false });
+        assert_eq!(s, SecretsStatus { backend: "memory", available: true, jwt_secret: false, vault_key: false, hub_session: false });
         assert!(b.get(ACCOUNT_JWT).unwrap().is_none());
         load_or_create(&b).unwrap();
         let s = status(&b);
@@ -319,7 +323,7 @@ mod tests {
     #[test]
     fn status_is_cached_until_invalidated_and_errors_are_not_cached() {
         let cache: StatusCache = Mutex::new(None);
-        let st = |jwt| SecretsStatus { backend: "t", available: true, jwt_secret: jwt, vault_key: jwt };
+        let st = |jwt| SecretsStatus { backend: "t", available: true, jwt_secret: jwt, vault_key: jwt, hub_session: false };
         let mut calls = 0;
         let ttl = Duration::from_secs(60);
         for _ in 0..3 {
