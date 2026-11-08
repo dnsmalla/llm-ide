@@ -1,0 +1,206 @@
+#!/bin/sh
+# LLM-IDE hub deploy helper (Phase 2). Root-owned, installed at /usr/local/sbin/llmide-deploy.
+#
+# Only ONE argument is accepted: a stage name from the fixed list below. Every path and value comes
+# from a root-owned file under /etc/llmide or from stdin; no caller-supplied text is interpolated.
+# The sudoers drop-in grants exactly the stage commands, never a wildcard.
+set -eu
+umask 077
+
+[ "$(id -u)" -eq 0 ] || { echo "llmide-deploy: must run as root" >&2; exit 1; }
+[ "$#" -eq 1 ] || { echo "llmide-deploy: exactly one stage is required" >&2; exit 2; }
+stage="$1"
+
+die() { echo "llmide-deploy: $stage: $*" >&2; exit 1; }
+say() { echo "llmide-deploy: $stage: $*" >&2; }
+
+CONF=/etc/llmide/core.env
+STAGING_FILE=/etc/llmide/staging
+UNIT=/etc/systemd/system/llmide-core.service
+BACKUP_UNIT=/etc/systemd/system/llmide-backup.service
+SITE=/etc/nginx/sites-enabled/llm-ide-hub
+
+staging() {
+  [ -r "$STAGING_FILE" ] || die "staging path is not set (run base first)"
+  STAGING=$(cat "$STAGING_FILE")
+  case "$STAGING" in
+    /?*) ;;
+    *) die "staging path is not absolute" ;;
+  esac
+  [ -d "$STAGING" ] || die "staging directory is missing"
+}
+
+conf() {
+  [ -r "$CONF" ] || die "the env file is missing (run env first)"
+  # Only non-secret values are sourced for paths/domain. The secrets stay in the service's environment.
+  DOMAIN=$(sed -n 's/^LLMIDE_HUB_DOMAIN=//p' "$CONF" | head -1)
+  VERSION=$(sed -n 's/^LLMIDE_HUB_VERSION=//p' "$CONF" | head -1)
+  [ -n "$DOMAIN" ] || die "LLMIDE_HUB_DOMAIN is missing"
+  [ -n "$VERSION" ] || die "LLMIDE_HUB_VERSION is missing"
+  case "$DOMAIN" in *[!A-Za-z0-9.-]*) die "the domain is not valid" ;; esac
+  case "$VERSION" in *[!A-Za-z0-9._-]*) die "the version is not valid" ;; esac
+}
+
+case "$stage" in
+  check)
+    [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
+    systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
+    echo "ok"
+    ;;
+
+  base)
+    staging_path=$(cat)
+    case "$staging_path" in
+      /?*) ;;
+      *) die "the staging path must be absolute" ;;
+    esac
+    case "$staging_path" in *'
+'*) die "the staging path must be one line" ;; esac
+    printf '%s\n' "$staging_path" > "$STAGING_FILE"
+    chmod 0600 "$STAGING_FILE"; chown root:root "$STAGING_FILE"
+    if ! id llmide >/dev/null 2>&1; then
+      useradd --system --home /var/lib/llmide --shell /usr/sbin/nologin llmide
+    fi
+    install -d -m 0755 -o root -g root /opt/llmide /opt/llmide/releases
+    install -d -m 0700 -o llmide -g llmide /var/lib/llmide /var/lib/llmide/backups /srv/llmide/projects
+    install -d -m 0700 -o root -g root /etc/llmide
+    install -d -m 0755 -o root -g root /var/www/llmide-web
+    [ -f "$STAGING/llmide-core.service" ] || die "the unit file is missing from the staging directory"
+    install -m 0644 -o root -g root "$STAGING/llmide-core.service" "$UNIT"
+    if [ -f "$STAGING/llmide-backup.service" ]; then
+      install -m 0644 -o root -g root "$STAGING/llmide-backup.service" "$BACKUP_UNIT"
+    fi
+    if [ -f "$STAGING/logrotate" ]; then
+      install -m 0644 -o root -g root "$STAGING/logrotate" /etc/logrotate.d/llmide
+    fi
+    systemctl daemon-reload
+    say "ok"
+    ;;
+
+  env)
+    [ -d /etc/llmide ] || die "base has not run"
+    tmp=$(mktemp /etc/llmide/.core.env.XXXXXX)
+    cat > "$tmp"
+    chown root:root "$tmp"; chmod 0600 "$tmp"
+    mv "$tmp" "$CONF"
+    if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi
+    say "ok"
+    ;;
+
+  bundle)
+    staging
+    conf
+    [ -f "$STAGING/bundle.tar.gz" ] || die "bundle.tar.gz is missing"
+    [ -f "$STAGING/bundle.sha256" ] || die "bundle.sha256 is missing"
+    ( cd "$STAGING" && sha256sum -c bundle.sha256 --status ) || die "the bundle checksum does not match"
+    work="/opt/llmide/releases/$VERSION.tmp"
+    rm -rf "$work"
+    install -d -m 0755 -o root -g root "$work"
+    tar -xzf "$STAGING/bundle.tar.gz" -C "$work" --no-same-owner --no-same-permissions
+    [ -x "$work/core/node/node" ] || die "the bundle has no node binary"
+    node_version=$("$work/core/node/node" --version 2>/dev/null || true)
+    case "$node_version" in v22.*) ;; *) die "the bundled node is not 22 ($node_version)" ;; esac
+    install -d -m 0755 -o root -g root "/opt/llmide/releases/$VERSION"
+    # Replace a same-version directory atomically enough for a single-host deploy.
+    rm -rf "/opt/llmide/releases/$VERSION"
+    mv "$work" "/opt/llmide/releases/$VERSION"
+    if [ -L /opt/llmide/current ]; then
+      old=$(readlink -f /opt/llmide/current || true)
+      case "$old" in
+        /opt/llmide/releases/*) ln -sfn "$old" /opt/llmide/previous ;;
+      esac
+    fi
+    ln -sfn "/opt/llmide/releases/$VERSION" /opt/llmide/current
+    # Keep current, previous and one older release.
+    ls -1dt /opt/llmide/releases/* 2>/dev/null | sed -n '4,$p' | xargs -r rm -rf
+    say "ok ($VERSION)"
+    ;;
+
+  nginx)
+    staging
+    conf
+    [ -f "$STAGING/llm-ide-hub.nginx" ] || die "llm-ide-hub.nginx is missing"
+    cert="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+    if [ ! -f "$cert" ]; then
+      die "no certificate at $cert; run: certbot certonly --webroot -w /var/www/llmide-web -d $DOMAIN --key-type ecdsa --reuse-key"
+    fi
+    if [ ! -f "$STAGING/host-api-fingerprint" ]; then
+      openssl x509 -in "$cert" -pubkey -noout \
+        | openssl pkey -pubin -outform der \
+        | openssl dgst -sha256 -binary \
+        | basenc --base64url | tr -d '=' > "$STAGING/host-api-fingerprint" || true
+    fi
+    printf 'sha256:%s\n' "$(cat "$STAGING/host-api-fingerprint")" > /etc/llmide/host-api-fingerprint
+    chmod 0644 /etc/llmide/host-api-fingerprint; chown root:root /etc/llmide/host-api-fingerprint
+    [ -f "$STAGING/setup.html" ] && install -m 0644 -o root -g root "$STAGING/setup.html" /var/www/llmide-web/setup.html || true
+    backup=""
+    if [ -f "$SITE" ]; then backup="$SITE.bak.$$"; cp -p "$SITE" "$backup"; fi
+    sed "s/__DOMAIN__/$DOMAIN/g" "$STAGING/llm-ide-hub.nginx" > "$SITE"
+    chmod 0644 "$SITE"; chown root:root "$SITE"
+    if ! nginx -t; then
+      if [ -n "$backup" ]; then cp -p "$backup" "$SITE"; rm -f "$backup"; fi
+      die "nginx rejected the vhost; the previous site was restored"
+    fi
+    systemctl reload nginx
+    [ -n "$backup" ] && rm -f "$backup" || true
+    say "ok"
+    ;;
+
+  start)
+    [ -x /opt/llmide/current/core/node/node ] || die "no current release"
+    systemctl enable llmide-core >/dev/null 2>&1 || true
+    systemctl restart llmide-core
+    say "ok"
+    ;;
+
+  open-registration)
+    conf
+    token=$(cat)
+    case "$token" in
+      *[!A-Fa-f0-9]*|'') die "the bootstrap token must be hex" ;;
+    esac
+    printf 'LLMIDE_BOOTSTRAP_TOKEN=%s\n' "$token" > /etc/llmide/bootstrap.env
+    chmod 0600 /etc/llmide/bootstrap.env; chown root:root /etc/llmide/bootstrap.env
+    sed -i 's/^LLMIDE_DISABLE_REGISTRATION=.*/LLMIDE_DISABLE_REGISTRATION=0/' "$CONF"
+    systemctl restart llmide-core
+    printf 'LLMIDE_SETUP_URL=https://%s/setup?t=%s\n' "$DOMAIN" "$token"
+    say "ok"
+    ;;
+
+  lock-registration)
+    conf
+    rm -f /etc/llmide/bootstrap.env
+    sed -i 's/^LLMIDE_DISABLE_REGISTRATION=.*/LLMIDE_DISABLE_REGISTRATION=1/' "$CONF"
+    systemctl restart llmide-core
+    say "ok"
+    ;;
+
+  backup)
+    [ -x /opt/llmide/current/core/node/node ] || die "no current release"
+    runuser -u llmide -- /opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
+    say "ok"
+    ;;
+
+  predeploy-backup)
+    was_active=0
+    systemctl is-active --quiet llmide-core 2>/dev/null && was_active=1 || true
+    [ "$was_active" -eq 1 ] && systemctl stop llmide-core || true
+    if [ -x /opt/llmide/current/core/node/node ]; then
+      runuser -u llmide -- /opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs || true
+    fi
+    [ "$was_active" -eq 1 ] && systemctl start llmide-core || true
+    say "ok"
+    ;;
+
+  rollback)
+    if [ ! -L /opt/llmide/previous ]; then die "no previous release to roll back to"; fi
+    ln -sfn "$(readlink -f /opt/llmide/previous)" /opt/llmide/current
+    systemctl restart llmide-core
+    say "ok"
+    ;;
+
+  *)
+    echo "llmide-deploy: unknown stage '$stage'" >&2
+    exit 2
+    ;;
+esac

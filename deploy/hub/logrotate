@@ -1,0 +1,8 @@
+/var/lib/llmide/*.log {
+  weekly
+  rotate 4
+  notifempty
+  compress
+  missingok
+  copytruncate
+}

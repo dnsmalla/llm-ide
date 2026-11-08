@@ -17,7 +17,14 @@ import { isSecretName, makeCopyFilter, verifyStagedCore } from './stage-filter.m
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const REPO = resolve(DESKTOP, '..');
-const OUT = join(DESKTOP, 'resources', 'core');
+function outDir(argv, fallback) {
+  const i = argv.indexOf('--out');
+  if (i < 0) return fallback;
+  const value = argv[i + 1];
+  if (!value || !value.startsWith('/')) throw new Error('--out needs an absolute path');
+  return value;
+}
+const OUT = outDir(process.argv, join(DESKTOP, 'resources', 'core'));
 
 // --target <platform>-<arch> (Node process names: darwin-arm64, darwin-x64, win32-x64, linux-x64);
 // default is the machine running this script.
