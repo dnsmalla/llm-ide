@@ -141,8 +141,8 @@ export class HttpChatStore implements ChatStore {
   }
 
   /**
-   * The core drops one interrupted assistant row by seq (API 127), so the seq has to be read first: the
-   * controller only knows the live message, not the stored one. An older core has no such route (404/405):
+   * The core drops the newest interrupted assistant row by seq (API 127), so the seq has to be read first:
+   * the controller only knows the live message, not the stored one. An older core has no such route (404/405):
    * that resolves false and the retry still runs (the partial stays, the pre-fix behaviour).
    */
   async dropInterruptedMessage(id: string, signal?: AbortSignal): Promise<boolean> {

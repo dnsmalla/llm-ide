@@ -111,6 +111,31 @@ test("HttpChatStore: never asks for more than the server caps, list pages by off
   assert.deepEqual(core.calls.slice(-2).map((x) => x.method), ["PATCH", "DELETE"]);
 });
 
+test("HttpChatStore.dropInterruptedMessage: reads the last row, DELETEs its seq, and maps 409/complete to false", async () => {
+  const row = (seq, role, content, meta = null) => ({ seq, role, content, meta, createdAt: 1 });
+  const core = fakeCore({ json: {
+    "GET /kb/chat/sessions/s1": { session: { messages: [row(1, "user", "q"), row(2, "assistant", "half", { interrupted: true })] } },
+    "DELETE /kb/chat/sessions/s1/messages/2": { deleted: true, seq: 2, status: "deleted" },
+  } });
+  const store = new c.HttpChatStore(core);
+  assert.equal(await store.dropInterruptedMessage("s1"), true);
+  assert.deepEqual(core.calls.map((x) => `${x.method} ${x.path}`),
+    ["GET /kb/chat/sessions/s1?limit=1", "DELETE /kb/chat/sessions/s1/messages/2"]);
+
+  const complete = fakeCore({ json: {
+    "GET /kb/chat/sessions/s2": { session: { messages: [row(1, "assistant", "done", { status: "done" })] } },
+  } });
+  assert.equal(await new c.HttpChatStore(complete).dropInterruptedMessage("s2"), false);
+  assert.equal(complete.calls.filter((x) => x.method === "DELETE").length, 0, "a complete reply is never deleted");
+
+  const refused = fakeCore({ json: {
+    "GET /kb/chat/sessions/s3": { session: { messages: [row(7, "assistant", "half", { interrupted: true })] } },
+    "DELETE /kb/chat/sessions/s3/messages/7": () => { throw Object.assign(new Error("only the newest message can be dropped"), { status: 409, code: "MESSAGE_NOT_LATEST" }); },
+  } });
+  assert.equal(await new c.HttpChatStore(refused).dropInterruptedMessage("s3"), false, "a 409 means nothing was removed, not a failing retry");
+  assert.equal(refused.calls.filter((x) => x.method === "DELETE").length, 1);
+});
+
 test("toMessages drops system rows and maps history to sealed text", () => {
   const out = c.toMessages([{ seq: 1, role: "system", content: "s" }, { seq: 2, role: "user", content: "u" }, { seq: 3, role: "assistant", content: "a" }]);
   assert.deepEqual(out.map((m) => m.role), ["user", "assistant"]);
