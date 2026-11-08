@@ -605,6 +605,22 @@ export function usedUsdMonth(db, userId, now = new Date()) {
   }
 }
 
+/**
+ * What is left of the member's monthly USD cap, or `null` when the member has none (cap 0, or no members
+ * row). The cap is monthly, so a turn is bounded by this remainder, never by the cap itself (ADR 0021).
+ * A member read or spend read failure answers 0 (fail closed): the route clamp already refuses at the line.
+ */
+export function remainingMonthlyUsd(db, userId, now = new Date()) {
+  if (!userId) return null;
+  try {
+    const memberCap = Number(getMember(db, userId)?.usdCapMonth);
+    if (!Number.isFinite(memberCap) || memberCap <= 0) return null;
+    return Math.max(0, memberCap - usedUsdMonth(db, userId, now));
+  } catch {
+    return 0;
+  }
+}
+
 // Per-query USD budget for the agent v2 engine (spec 2026-08-18 §7:
 // "maxBudgetUsd from the user's model-limits config when set"). The limits
 // UI writes runs/tokens caps only (VALID_UNITS), so today this returns null
@@ -629,10 +645,7 @@ export function usdCapForModel(db, userId, provider, model) {
     // ADR 0021: the member's monthly USD cap bounds the turn by what is LEFT of the month, so one turn
     // can never cross the month line (the clamp refuses a turn once the sum reaches the cap). Both
     // non-zero → the smaller; one non-zero → that one; 0 (or no members row) means "no cap".
-    const memberCap = Number(getMember(db, userId)?.usdCapMonth);
-    const remaining = Number.isFinite(memberCap) && memberCap > 0
-      ? Math.max(0, memberCap - usedUsdMonth(db, userId))
-      : null;
+    const remaining = remainingMonthlyUsd(db, userId);
     if (modelCap != null && remaining != null) return Math.min(modelCap, remaining);
     return modelCap ?? remaining;
   } catch {

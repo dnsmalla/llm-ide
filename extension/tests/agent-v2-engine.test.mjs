@@ -1703,6 +1703,33 @@ test('resolveMaxBudgetUsd: runs/tokens caps (all model-limits stores today) yiel
   assert.equal(resolveMaxBudgetUsd(null, 'claude-sonnet-5'), null);
 });
 
+test('resolveMaxBudgetUsd: the month\'s remaining member budget bounds the turn, never below the floor', () => {
+  const db = getDb();
+  const user = registerUser(db, {
+    email: `v2remaining-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
+  });
+  db.prepare('UPDATE members SET usd_cap_month = 20 WHERE user_id = ?').run(user.id);
+  db.prepare(
+    `INSERT INTO model_limits (user_id, provider, model, priority, enabled, limit_value, unit, window_kind, threshold_pct)
+     VALUES (?, 'anthropic', 'claude-sonnet-5', 0, 1, 5, 'usd', 'monthly', 90)`,
+  ).run(user.id);
+  const spend = (usd) => db.prepare(
+    `INSERT INTO usage_ledger (user_id, provider, model, source, runs, cost_usd) VALUES (?, 'anthropic', 'claude-sonnet-5', 'turn', 1, ?)`,
+  ).run(user.id, usd);
+
+  spend(19.5);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 0.5, 'the per-model 5 USD cap is cut to what is left');
+  // A cheaper per-model cap still wins.
+  db.prepare("UPDATE model_limits SET limit_value = 0.25 WHERE user_id = ? AND model = 'claude-sonnet-5'").run(user.id);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 0.25);
+  // At the month line a turn that was already allowed to start still gets its first hop, not zero.
+  spend(0.75);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 0.01);
+  // 0 = no cap: the per-model value is unchanged.
+  db.prepare('UPDATE members SET usd_cap_month = 0 WHERE user_id = ?').run(user.id);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 0.25);
+});
+
 test('auth: no key throws the spike error unless allowAmbientAuth',
   withAnthropicKey(undefined, async () => {
     // Fresh test DB has no vault key for u1 and the env key is deleted →

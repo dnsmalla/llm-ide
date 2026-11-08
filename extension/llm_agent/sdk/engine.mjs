@@ -62,7 +62,7 @@ import { isBareGreeting } from '../memory/memory-extract.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
-import { usdCapForModel, getLimits } from '../../kb/usage.mjs';
+import { usdCapForModel, remainingMonthlyUsd, getLimits } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { selectSessionMemory } from '../memory/session-memory-select.mjs';
@@ -1159,17 +1159,30 @@ export function normalizeModelUsage(modelUsage) {
 // runs/tokens cap into dollars would mean inventing an exchange rate that
 // silently rots as prices change. This resolver deliberately does NOT do
 // that; it resolves a budget only from a usd-unit row (usdCapForModel —
-// setLimits currently rejects that unit, so no such row can exist via the
-// API yet; the read path is wired so the moment the limits system grows a
-// USD unit, v2 turns pick it up with no engine change). Until then every v2
-// turn runs uncapped, with the per-model caps still enforced AFTER the fact
-// by the usage ledger: every result is metered via recordUsage in the route,
-// so resolveModel's window caps and auto-fallback keep working unchanged.
-export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel, provider = AGENT_SDK_PROVIDER } = {}) {
+// setLimits stores that unit, clamped to the member cap; no row = no per-model
+// USD cap) plus the member's month (ADR 0021): what is LEFT of
+// `usd_cap_month`, so one turn can never cross the month line. The per-model
+// caps are still enforced AFTER the fact by the usage ledger: every result is
+// metered via recordUsage in the route, so resolveModel's window caps and
+// auto-fallback keep working unchanged.
+//
+// A turn that was already allowed to start may reach the line while it runs
+// (another chat spent the rest — R-012#3's known limit). The SDK would stop it
+// at a zero budget, so the resolved budget never goes below this floor: the
+// first hop can finish; the route-entry clamp still refuses a new turn at or
+// over the cap.
+const TURN_BUDGET_FLOOR_USD = 0.01;
+
+export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel, remaining = remainingMonthlyUsd, provider = AGENT_SDK_PROVIDER } = {}) {
   // `provider` is the id the turn actually runs on: first-party Anthropic by
   // default, or an Anthropic-compatible `custom:<uuid>` (whose limits chain is
-  // empty today, so usdCapForModel answers null and the turn runs uncapped).
-  return usdCap(getDb(), userId, provider, typeof model === 'string' && model ? model : null);
+  // empty today, so usdCapForModel answers null and only the member month caps it).
+  const db = getDb();
+  const perQuery = usdCap(db, userId, provider, typeof model === 'string' && model ? model : null);
+  const leftThisMonth = remaining(db, userId);
+  if (perQuery == null && leftThisMonth == null) return null; // no cap at all
+  const bounded = Math.min(perQuery ?? Number.POSITIVE_INFINITY, leftThisMonth ?? Number.POSITIVE_INFINITY);
+  return Math.max(TURN_BUDGET_FLOOR_USD, bounded);
 }
 
 // Native tools outside the gated roster (and any unknown tool) stay denied —
