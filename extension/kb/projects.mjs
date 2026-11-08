@@ -1,0 +1,446 @@
+// Project-scoped team roles (ADR 0021 H1.3): the canonical project registry and the per-project
+// grant that every project command and turn resolves through.
+//
+// A `project_members` row exists only for an explicit assignment. NO ROW IS A VIEWER: read/Ask only.
+// The effective grant is computed in ONE place (`computeProjectGrant`):
+//   - a global team owner/admin overrides every project (team management stays theirs);
+//   - a global viewer is never raised above viewer by a project row (H1.2 is not weakened);
+//   - a global member/engineer gets the project row's role, or viewer when there is no row;
+//   - the run mode is the tighter of the global and project modes;
+//   - the USD cap is the tighter positive cap (0 = no cap).
+//
+// Every helper takes the db handle first (kb convention); every multi-step write is one transaction.
+
+import { AppError } from '../core/errors.mjs';
+import {
+  MAX_USD_CAP_MONTH, ROLE_ORDER, atLeast, classRefusal, getMember, permittedClasses,
+} from './members.mjs';
+
+/** Project roles use the same order as team roles: viewer < member < admin < owner. */
+export const PROJECT_ROLES = Object.freeze(['viewer', 'member', 'admin', 'owner']);
+export const PROJECT_ROLE_ORDER = ROLE_ORDER;
+/** The project id rule Doc Gen already enforces (`kb/project-roots.mjs` PROJECT_ID_RE). */
+export const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+export const MAX_PROJECT_NAME = 120;
+export const MAX_PROJECT_ROOT = 4096;
+
+const PROJECT_ROLE_SET = new Set(PROJECT_ROLES);
+const MODE_RANK = Object.freeze({ none: 0, read_only: 1, execute: 2 });
+const MODES = Object.freeze(['none', 'read_only', 'execute']);
+
+const err = (code, message, status) => new AppError(code, message, { status });
+
+export function isProjectRole(v) {
+  return typeof v === 'string' && PROJECT_ROLE_SET.has(v);
+}
+
+export function isProjectMaxMode(v) {
+  return typeof v === 'string' && MODES.includes(v);
+}
+
+export function validUsdCap(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_USD_CAP_MONTH;
+}
+
+/** Tighter of two run modes (none < read_only < execute). */
+export function tighterMode(a, b) {
+  return (MODE_RANK[a] ?? 0) <= (MODE_RANK[b] ?? 0) ? a : b;
+}
+
+/** The tighter positive cap; 0 means "no cap", so it never wins over a real cap. */
+export function tighterUsdCap(a, b) {
+  const caps = [Number(a), Number(b)].filter((n) => Number.isFinite(n) && n > 0);
+  return caps.length ? Math.min(...caps) : 0;
+}
+
+/**
+ * Pure effective project grant. `member` is the caller's `members` row (or null); `projectMember` is
+ * their `project_members` row (or null). Returns the role/mode/cap plus the source that won, so a UI
+ * can explain it and the tests can pin the matrix.
+ */
+export function computeProjectGrant(member, projectMember) {
+  const globalRole = member?.teamRole ?? 'viewer';
+  const globalMax = member?.maxMode ?? 'read_only';
+  const globalCap = Number(member?.usdCapMonth ?? 0);
+  const projectRole = projectMember?.role ?? null;
+
+  if (globalRole === 'owner' || globalRole === 'admin') {
+    return {
+      role: globalRole,
+      maxMode: globalMax,
+      usdCapMonth: Number.isFinite(globalCap) ? globalCap : 0,
+      source: 'team',
+      projectRole,
+    };
+  }
+  if (globalRole === 'viewer') {
+    // H1.2: a team viewer only ever Asks, whatever a project row says.
+    return {
+      role: 'viewer',
+      maxMode: 'read_only',
+      usdCapMonth: Number.isFinite(globalCap) ? globalCap : 0,
+      source: 'implicit',
+      projectRole,
+    };
+  }
+
+  // member (engineer): the project row decides, and no row means the implicit viewer default.
+  const projectMax = projectMember ? projectMember.maxMode : 'read_only';
+  return {
+    role: projectRole ?? 'viewer',
+    maxMode: tighterMode(globalMax, projectMax),
+    usdCapMonth: tighterUsdCap(globalCap, projectMember?.usdCapMonth ?? 0),
+    source: projectMember ? 'project' : 'implicit',
+    projectRole,
+  };
+}
+
+/**
+ * The action classes a project grant may use. `project.admin` is project membership management; it is
+ * never the team `admin` class. A project-derived grant does not carry team management (`admin`).
+ */
+export function projectPermissions(grant) {
+  const memberLike = {
+    teamRole: grant.role, maxMode: grant.maxMode, usdCapMonth: grant.usdCapMonth,
+  };
+  const out = new Set(permittedClasses(memberLike));
+  if (grant.role === 'admin' || grant.role === 'owner') out.add('project.admin');
+  if (grant.source !== 'team') out.delete('admin');
+  // `host` is the desktop-proof class, not a project permission.
+  out.delete('host');
+  return [...out];
+}
+
+/** The member-shaped view a class check needs. `project.admin` is checked separately. */
+export function projectGrantAsMember(grant) {
+  return { teamRole: grant.role, maxMode: grant.maxMode, usdCapMonth: grant.usdCapMonth };
+}
+
+/**
+ * True when a grant may manage the project's membership (project admin/owner, or a global admin/owner).
+ * `max_mode` narrows model actions, not management, exactly as the team `admin` class does.
+ */
+export function canManageProjectGrant(grant) {
+  return atLeast(grant.role, 'admin');
+}
+
+// ── registry ───────────────────────────────────────────────────────────────
+
+export function getProject(db, projectId) {
+  if (typeof projectId !== 'string' || !PROJECT_ID_RE.test(projectId)) return null;
+  return db.prepare(
+    'SELECT id, name, root, created_by, created_at, updated_at FROM projects WHERE id = ?',
+  ).get(projectId) ?? null;
+}
+
+export function requireProject(db, projectId) {
+  const project = getProject(db, projectId);
+  if (!project) throw err('NOT_FOUND', 'Project not found', 404);
+  return project;
+}
+
+/** Every registered project, newest name order. Team-wide: the install has one registry. */
+export function listProjects(db) {
+  return db.prepare('SELECT id, name, created_at FROM projects ORDER BY name, id').all();
+}
+
+function validName(name) {
+  if (typeof name !== 'string') return null;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > MAX_PROJECT_NAME) return null;
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function defaultName(root) {
+  if (typeof root !== 'string') return 'Project';
+  const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/);
+  const last = parts[parts.length - 1] || 'Project';
+  return validName(last) ?? 'Project';
+}
+
+/**
+ * Create or update the canonical registry entry for a project id.
+ *
+ * A NEW project needs the team's `fs.write` class (owner/admin/engineer + execute) and gives the
+ * creator `owner`/`execute`/no-cap membership, so the first person to register it can manage it.
+ * Re-registering an existing project needs project admin (or global admin/owner). The handler also
+ * validates the folder through `kb/project-roots.mjs`; this helper is the DB truth.
+ */
+export function registerProject(db, actorId, { id, root = null, name = null } = {}) {
+  if (typeof id !== 'string' || !PROJECT_ID_RE.test(id)) {
+    throw err('VALIDATION', 'project id must be 1 to 128 letters, digits, _ or -', 400);
+  }
+  const actor = getMember(db, actorId);
+  if (!actor) throw err('ROLE_DENIED', 'Requires a team role', 403);
+  const cleanName = name == null ? null : validName(name);
+  if (name != null && cleanName === null) throw err('VALIDATION', 'Invalid project name', 400);
+  if (root != null && (typeof root !== 'string' || root.length === 0 || root.length > MAX_PROJECT_ROOT)) {
+    throw err('VALIDATION', 'Invalid project root', 400);
+  }
+
+  return db.transaction(() => {
+    const existing = getProject(db, id);
+    if (existing) {
+      const grant = effectiveProjectGrant(db, actorId, id);
+      if (!canManageProjectGrant(grant)) throw err('ROLE_DENIED', 'Requires project admin', 403);
+      db.prepare(`
+        UPDATE projects
+           SET name = COALESCE(?, name), root = COALESCE(?, root), updated_at = datetime('now')
+         WHERE id = ?
+      `).run(cleanName, root, id);
+      return { project: getProject(db, id), created: false };
+    }
+
+    const refusal = classRefusal(actor, 'fs.write');
+    if (refusal) throw err('ROLE_DENIED', 'Requires team role member with execute', 403);
+    db.prepare(`
+      INSERT INTO projects (id, name, root, created_by)
+      VALUES (?, ?, ?, ?)
+    `).run(id, cleanName ?? defaultName(root), root, String(actorId));
+    db.prepare(`
+      INSERT INTO project_members (user_id, project_id, role, max_mode, usd_cap_month, granted_by)
+      VALUES (?, ?, 'owner', 'execute', 0, ?)
+    `).run(String(actorId), id, String(actorId));
+    return { project: getProject(db, id), created: true };
+  })();
+}
+
+// ── membership ─────────────────────────────────────────────────────────────
+
+export function getProjectMember(db, userId, projectId) {
+  if (!userId || typeof projectId !== 'string') return null;
+  const row = db.prepare(`
+    SELECT user_id, project_id, role, max_mode, usd_cap_month, granted_by, updated_at
+      FROM project_members
+     WHERE user_id = ? AND project_id = ?
+  `).get(String(userId), projectId);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    projectId: row.project_id,
+    role: row.role,
+    maxMode: row.max_mode,
+    usdCapMonth: row.usd_cap_month,
+    grantedBy: row.granted_by,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** The effective project grant for a caller. Missing project or account fails closed to viewer. */
+export function effectiveProjectGrant(db, userId, projectId) {
+  const member = getMember(db, userId);
+  if (!getProject(db, projectId)) {
+    return computeProjectGrant(member, null);
+  }
+  return computeProjectGrant(member, getProjectMember(db, userId, projectId));
+}
+
+export function canManageProject(db, userId, projectId) {
+  if (!getProject(db, projectId)) return false;
+  return canManageProjectGrant(effectiveProjectGrant(db, userId, projectId));
+}
+
+/** The project list a client shows: id, name, the caller's effective role and permissions. */
+export function listProjectsForUser(db, userId) {
+  const member = getMember(db, userId);
+  const rows = db.prepare('SELECT id, name, created_at FROM projects ORDER BY name, id').all();
+  const membership = new Map(
+    db.prepare(
+      'SELECT project_id, role, max_mode, usd_cap_month FROM project_members WHERE user_id = ?',
+    ).all(String(userId)).map((r) => [r.project_id, {
+      role: r.role, maxMode: r.max_mode, usdCapMonth: r.usd_cap_month,
+    }]),
+  );
+  return rows.map((row) => {
+    const grant = computeProjectGrant(member, membership.get(row.id) ?? null);
+    return {
+      id: row.id,
+      name: row.name,
+      role: grant.role,
+      maxMode: grant.maxMode,
+      usdCapMonth: grant.usdCapMonth,
+      permissions: projectPermissions(grant),
+    };
+  });
+}
+
+/** The team-facing member row joined with the users row, ordered by role then email. */
+export function listProjectMembers(db, projectId) {
+  requireProject(db, projectId);
+  return db.prepare(`
+    SELECT pm.user_id, u.email, u.display_name, u.status, pm.role, pm.max_mode,
+           pm.usd_cap_month, pm.updated_at
+      FROM project_members pm
+      JOIN users u ON u.id = pm.user_id
+     WHERE pm.project_id = ?
+     ORDER BY CASE pm.role
+                WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
+              u.email
+  `).all(projectId).map((r) => ({
+    userId: r.user_id,
+    email: r.email,
+    displayName: r.display_name,
+    status: r.status,
+    role: r.role,
+    maxMode: r.max_mode,
+    usdCapMonth: r.usd_cap_month,
+    updatedAt: r.updated_at,
+  }));
+}
+
+function memberView(db, userId, projectId) {
+  const row = db.prepare(`
+    SELECT pm.user_id, u.email, u.display_name, u.status, pm.role, pm.max_mode,
+           pm.usd_cap_month, pm.updated_at
+      FROM project_members pm JOIN users u ON u.id = pm.user_id
+     WHERE pm.user_id = ? AND pm.project_id = ?
+  `).get(String(userId), projectId);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    email: row.email,
+    displayName: row.display_name,
+    status: row.status,
+    role: row.role,
+    maxMode: row.max_mode,
+    usdCapMonth: row.usd_cap_month,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Change one project membership, inserting the row when the member had none.
+ *
+ * Rules (one home, like `setMember`):
+ *   - the actor must manage the project (project admin/owner or global admin/owner);
+ *   - an actor may only touch a member at or below their own project role;
+ *   - nobody changes their own project role;
+ *   - a role above the actor's own cannot be granted (only a project/team owner grants project owner).
+ */
+export function setProjectMember(db, actorId, projectId, userId, patch = {}) {
+  requireProject(db, projectId);
+  if (!userId) throw err('VALIDATION', 'userId is required', 400);
+  const grant = effectiveProjectGrant(db, actorId, projectId);
+  if (!canManageProjectGrant(grant)) throw err('ROLE_DENIED', 'Requires project admin', 403);
+
+  const next = {};
+  if (patch.role !== undefined) {
+    if (!isProjectRole(patch.role)) throw err('VALIDATION', 'Invalid project role', 400);
+    next.role = patch.role;
+  }
+  if (patch.maxMode !== undefined) {
+    if (!isProjectMaxMode(patch.maxMode)) throw err('VALIDATION', 'Invalid max mode', 400);
+    next.maxMode = patch.maxMode;
+  }
+  if (patch.usdCapMonth !== undefined) {
+    if (!validUsdCap(patch.usdCapMonth)) throw err('VALIDATION', 'Invalid USD cap', 400);
+    next.usdCapMonth = Number(patch.usdCapMonth);
+  }
+  if (Object.keys(next).length === 0) throw err('VALIDATION', 'Nothing to change', 400);
+
+  const targetUser = db.prepare('SELECT id, email FROM users WHERE id = ?').get(String(userId));
+  if (!targetUser) throw err('NOT_FOUND', 'Member not found', 404);
+  if (String(actorId) === String(userId)) throw err('SELF_GRANT', 'You cannot change your own project role', 403);
+
+  const target = getProjectMember(db, userId, projectId);
+  if (target && !atLeast(grant.role, target.role)) {
+    throw err('ROLE_DENIED', 'You cannot change a project role above your own', 403);
+  }
+  if (next.role !== undefined && !atLeast(grant.role, next.role)) {
+    throw err('ROLE_DENIED', 'You cannot grant a project role above your own', 403);
+  }
+
+  db.prepare(`
+    INSERT INTO project_members (user_id, project_id, role, max_mode, usd_cap_month, granted_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, project_id) DO UPDATE SET
+      role = excluded.role,
+      max_mode = excluded.max_mode,
+      usd_cap_month = excluded.usd_cap_month,
+      granted_by = excluded.granted_by,
+      updated_at = datetime('now')
+  `).run(
+    String(userId), projectId,
+    next.role ?? target?.role ?? 'viewer',
+    next.maxMode ?? target?.maxMode ?? 'read_only',
+    next.usdCapMonth ?? Number(target?.usdCapMonth ?? 20),
+    String(actorId),
+  );
+  return memberView(db, userId, projectId);
+}
+
+/** Add an existing team member to a project by email (the project admin path, no team list needed). */
+export function addProjectMemberByEmail(db, actorId, projectId, { email, role = 'viewer', maxMode = 'read_only', usdCapMonth = 20 } = {}) {
+  requireProject(db, projectId);
+  const clean = typeof email === 'string' ? email.trim() : '';
+  if (!clean || clean.length > 254) throw err('VALIDATION', 'Invalid email', 400);
+  const user = db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(clean);
+  if (!user) throw err('NOT_FOUND', 'Member not found', 404);
+  return setProjectMember(db, actorId, projectId, user.id, { role, maxMode, usdCapMonth });
+}
+
+/** Remove a project membership. The member returns to the implicit viewer default (no row). */
+export function removeProjectMember(db, actorId, projectId, userId) {
+  requireProject(db, projectId);
+  const grant = effectiveProjectGrant(db, actorId, projectId);
+  if (!canManageProjectGrant(grant)) throw err('ROLE_DENIED', 'Requires project admin', 403);
+  const target = getProjectMember(db, userId, projectId);
+  if (!target) return false;
+  if (!atLeast(grant.role, target.role)) {
+    throw err('ROLE_DENIED', 'You cannot remove a project role above your own', 403);
+  }
+  return db.prepare(
+    'DELETE FROM project_members WHERE user_id = ? AND project_id = ?',
+  ).run(String(userId), projectId).changes > 0;
+}
+
+// ── team.yaml support ──────────────────────────────────────────────────────
+
+/** Every explicit project assignment, in the shape team.yaml writes. */
+export function listProjectAssignmentRows(db) {
+  return db.prepare(`
+    SELECT pm.project_id, p.name AS project_name, u.email, pm.role, pm.max_mode, pm.usd_cap_month
+      FROM project_members pm
+      JOIN users u ON u.id = pm.user_id
+      JOIN projects p ON p.id = pm.project_id
+     ORDER BY p.name, p.id, u.email
+  `).all().map((r) => ({
+    projectId: r.project_id,
+    projectName: r.project_name,
+    email: String(r.email).trim().toLowerCase(),
+    role: r.role,
+    maxMode: r.max_mode,
+    usdCapMonth: Number(r.usd_cap_month),
+  }));
+}
+
+/** The full row for undoing a write-through failure (R-013#2). */
+export function getProjectMemberSnapshot(db, userId, projectId) {
+  return db.prepare(
+    'SELECT user_id, project_id, role, max_mode, usd_cap_month, granted_by, updated_at FROM project_members WHERE user_id = ? AND project_id = ?',
+  ).get(String(userId), projectId) ?? null;
+}
+
+export function restoreProjectMemberSnapshot(db, snapshot) {
+  if (!snapshot) return;
+  db.prepare(`
+    INSERT INTO project_members (user_id, project_id, role, max_mode, usd_cap_month, granted_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, project_id) DO UPDATE SET
+      role = excluded.role,
+      max_mode = excluded.max_mode,
+      usd_cap_month = excluded.usd_cap_month,
+      granted_by = excluded.granted_by,
+      updated_at = excluded.updated_at
+  `).run(
+    snapshot.user_id, snapshot.project_id, snapshot.role, snapshot.max_mode,
+    snapshot.usd_cap_month, snapshot.granted_by, snapshot.updated_at,
+  );
+}
+
+/** Remove a row captured by `getProjectMemberSnapshot` (undoing an insert). */
+export function deleteProjectMemberRow(db, userId, projectId) {
+  db.prepare('DELETE FROM project_members WHERE user_id = ? AND project_id = ?').run(String(userId), projectId);
+}
