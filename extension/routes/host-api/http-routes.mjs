@@ -18,6 +18,7 @@ import { sendError } from '../../core/errors.mjs';
 import { config } from '../../core/config.mjs';
 import { logger } from '../../core/logger.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
+import fs from 'node:fs';
 import { requireRole } from '../../server/auth.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { mintPin } from './pin.mjs';
@@ -85,6 +86,16 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
     const port = api?.listener?.port ?? null;
     if (!port) return fail(res, 503, 'HOST_API_UNAVAILABLE', 'The Host API listener is not running');
     const { pin, expiresAt } = mintPin(userId);
+    if (hub) {
+      // P4.2: the hub's v1 listener is plaintext on loopback; the public origin is nginx, and the pin is the
+      // front certificate's leaf SPKI (written by the deploy). A missing/malformed file is a hard 503.
+      const fingerprint = frontPin();
+      const url = hubPublicUrl();
+      if (!fingerprint || !url) return fail(res, 503, 'HUB_PIN_UNAVAILABLE', 'The hub certificate pin or public URL is not configured');
+      const host = new URL(url).hostname;
+      send(res, 200, { pin, expiresAt, port: 443, fingerprint, addresses: [host], url });
+      return true;
+    }
     const fingerprint = api.fingerprint ?? null;
     // Addresses only with TLS: the dev listener is loopback-only, and a plaintext host is never offered to a phone.
     send(res, 200, { pin, expiresAt, port, fingerprint, addresses: fingerprint ? pairingAddresses(interfaces()) : [] });
@@ -107,6 +118,23 @@ async function route(req, res, { hostApi = () => null, enabled = config.hostApiM
   }
   if (path.startsWith('/host-api/push/')) return pushRoute(req, res, path, userId, { env, audit, pushDeps });
   return fail(res, 404, 'NOT_FOUND', 'No such Host API route');
+}
+
+const PIN_RE = /^sha256:[A-Za-z0-9_-]{43}$/;
+const HUB_URL_RE = /^wss:\/\/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?\/host-api\/v1$/;
+
+/** The front certificate's leaf SPKI, read from the root-owned file written by the deploy. */
+export function frontPin(file = config.hostApiFingerprintFile) {
+  if (!file) return null;
+  try {
+    const value = fs.readFileSync(file, 'utf8').trim();
+    return PIN_RE.test(value) ? value : null;
+  } catch { return null; }
+}
+
+/** The public WSS URL of the hub listener, validated; null when unset or not a v1 URL. */
+export function hubPublicUrl(value = config.hostApiPublicUrl) {
+  return typeof value === 'string' && HUB_URL_RE.test(value) ? value : null;
 }
 
 const PUSH_KEY_RE = /^[A-Za-z0-9_.:-]{1,64}$/;

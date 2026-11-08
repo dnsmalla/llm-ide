@@ -73,7 +73,11 @@
               "items": {
                 "type": "string"
               },
-              "description": "TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener"
+              "description": "TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener; hub mode: the hub hostname"
+            },
+            "url": {
+              "type": "string",
+              "description": "Hub mode only: the public WSS URL, wss://<hub>/host-api/v1; absent outside hub mode"
             }
           }
         },

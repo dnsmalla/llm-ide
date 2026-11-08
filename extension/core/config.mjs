@@ -292,6 +292,8 @@ export const config = Object.freeze({
   hostApiChatClear:     process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
   hostApiTls:           HOST_API_TLS,
   hostApiHub:           HOST_API_HUB,
+  hostApiFingerprintFile: envStr('LLMIDE_HOST_API_FINGERPRINT_FILE', ''),
+  hostApiPublicUrl:     envStr('LLMIDE_HUB_PUBLIC_URL', ''),
   hostApiWebOrigins:    parseOriginAllowlist(process.env.LLMIDE_HOST_API_WEB_ORIGINS, console.warn),
   // The one v1 listener: 'tls' (pinned, every interface) wins over 'dev' (plaintext loopback); 'off' starts nothing.
   hostApiMode:          HOST_API_HUB ? 'hub' : HOST_API_TLS ? 'tls' : HOST_API_DEV ? 'dev' : 'off',

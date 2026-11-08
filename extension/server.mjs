@@ -400,7 +400,11 @@ const HOST = config.host;
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
 const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/self-heal' || p.startsWith('/kb/self-heal/'); };
 
-const SERVER_API_VERSION = 128;
+//   v129 — hub pairing, additive (schema/http/host-api.schema.json; Host API v1 unchanged): in hub mode
+//          POST /host-api/pin returns port 443, `url` (wss://<hub>/host-api/v1), the front certificate's leaf
+//          SPKI `fingerprint`, and the hub hostname in `addresses`; a missing pin file/URL is 503
+//          HUB_PIN_UNAVAILABLE. Outside hub mode the answer is unchanged.
+const SERVER_API_VERSION = 129;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

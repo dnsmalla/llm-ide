@@ -5069,8 +5069,10 @@ export type PostHostApiPinResponse200 = {
   port?: number;
   /** TLS mode: sha256: + unpadded base64url SHA-256 of the certificate's DER SubjectPublicKeyInfo, which the client pins; null for the plaintext dev listener */
   fingerprint?: string | null;
-  /** TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener */
+  /** TLS mode: this computer's IPv4 addresses for the llmide://pair QR, best first (Tailscale 100.64.0.0/10, then LAN, then container or VM bridges; never loopback, link-local or IPv6); always [] for the dev listener; hub mode: the hub hostname */
   addresses?: string[];
+  /** Hub mode only: the public WSS URL, wss://<hub>/host-api/v1; absent outside hub mode */
+  url?: string;
 };
 
 export type PostHostApiPinResponse403 = CommonError;
