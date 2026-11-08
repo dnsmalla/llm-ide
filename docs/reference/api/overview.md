@@ -160,6 +160,22 @@ with status `404`. The body is deliberately not the usual error envelope, so a c
 
 `GET /health` reports the applied set as `features` (`null` = every feature, otherwise the sorted enabled keys) and leaves the disabled paths out of `endpoints`. The Chrome extension's `REQUIRED_ENDPOINTS` are all always-on, so any feature set satisfies it. `doc_gen` prunes `/generate-doc` only (its module is `routes/doc-gen.mjs`); `/generate-docx` is always on because the Chrome extension's ExportMenu calls it. Unknown keys are ignored with one warning line. `code_graph_3d`, `gantt_issues` and `doc_gen` are dropped when `file_explorer` is not enabled, the same rule `mac/Package.swift` applies.
 
+## Project roles (API 126)
+
+Per-project team roles ([ADR 0022](../../decisions/0022-project-scoped-team-roles.md)). A team member with no
+project row is a viewer on that project (read/Ask only); a global team owner/admin overrides every project.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/projects` | The caller's projects with their effective role, mode and permissions |
+| `GET` | `/projects/:id/members` | A project's explicit members (project admin) |
+| `POST` | `/projects/:id/members` | Add an existing team member by email (project admin) |
+| `PATCH` | `/projects/:id/members/:userId` | Change role / max mode / monthly USD cap |
+| `DELETE` | `/projects/:id/members/:userId` | Remove the row; the member falls back to viewer |
+
+`GET /auth/me` also returns `projects`. `POST /kb/projects/register` creates/updates the canonical project row
+and makes a new project's creator its owner. Membership writes are audited and written through to `team.yaml`.
+
 ## Rate limits
 
 Profiles are tuned per workload. Defaults:

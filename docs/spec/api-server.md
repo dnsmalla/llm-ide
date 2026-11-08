@@ -240,7 +240,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/code-assist` (removed, 410), `/kb/agent/ask`, `/kb/complete`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models`, `/kb/providers/catalog/test`, `/kb/providers/catalog/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/kb/google/gmail/fetch`, `/kb/google/sync`, `/kb/google/calendars`, `/kb/google/drive/folders`, `/kb/calendar-ical/sync` (reaches the feed host), `/kb/sync/test`, `/kb/sync/publish` (MEGA calls), `/kb/repos/check-token` (reaches GitHub or GitLab), `/kb/issues/create`, `/kb/issues/comment`, `/kb/issues/close` (each one GitHub or GitLab write), `/auth/me/extensions/install`, `/auth/me/extensions/catalog/refresh`, `/auth/me/extensions/updates/check`, `/auth/me/extensions/update/preview`, `/auth/me/extensions/update`, `/auth/me/extensions/repair` (each reaches GitHub or the MCP registry), `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
-| `kbWrite` | 30 | 5/s | `/bus/` (every command bus route), `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `GET /agent/v2/turns`, `GET /agent/v2/turns/stream`, `GET /kb/index/search`, `GET /kb/providers/custom`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `/kb/google/start`, `/kb/google/options`, `/kb/google/disconnect`, `/kb/google/gmail/seen`, `/kb/calendar-ical/sources` (POST and GET), `/kb/calendar-ical/options`, `DELETE /kb/calendar-ical/` (prefix), `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack`, `/host-api/` (the pairing PIN `/host-api/pin`, devices), `/kb/sync/` (status, MEGA setup and the enable toggle), `/kb/self-heal/` (Self-Heal incidents, debug desktop builds), `/admin/members` (PATCH), `/admin/invites` (POST, DELETE) |
+| `kbWrite` | 30 | 5/s | `/bus/` (every command bus route), `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `PUT /agent/v2/session/route`, `GET /agent/v2/turns`, `GET /agent/v2/turns/stream`, `GET /kb/index/search`, `GET /kb/providers/custom`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `/kb/google/start`, `/kb/google/options`, `/kb/google/disconnect`, `/kb/google/gmail/seen`, `/kb/calendar-ical/sources` (POST and GET), `/kb/calendar-ical/options`, `DELETE /kb/calendar-ical/` (prefix), `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack`, `/host-api/` (the pairing PIN `/host-api/pin`, devices), `/kb/sync/` (status, MEGA setup and the enable toggle), `/kb/self-heal/` (Self-Heal incidents, debug desktop builds), `/admin/members` (PATCH), `/admin/invites` (POST, DELETE), `POST /projects`, `/projects/` (PATCH, DELETE) |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
@@ -463,6 +463,62 @@ table in ADR 0021): `public`, `self.read`, `self.write`, `model.ask`, `model.rea
   nothing else changes.
 - **Background jobs** re-check when they act: the bus executor (`KIND_CLASS`), the meeting agent (`tickRun`) and the
   outcome poller (`usersAllowedToPoll`).
+
+## 7p. Team Hub H1.3: project-scoped roles (API 126)
+
+ADR 0022 adds a per-project grant beside the team grant. Migration 0070 creates `projects(id, name, root,
+created_by, created_at, updated_at)`, `project_members(user_id, project_id, role, max_mode, usd_cap_month,
+granted_by, updated_at)` and the nullable `usage_ledger.project_id` (with `(user_id, project_id, ts)`). The
+role order is `viewer < member < admin < owner`. **No project row is a viewer** on that project.
+
+The effective project grant is computed in ONE place (`extension/kb/projects.mjs` `computeProjectGrant`): a
+global team owner/admin overrides every project (team grant); a global team viewer stays a viewer even if a
+project row names them higher (H1.2); a global member/engineer gets the project row or the implicit viewer
+default; `max_mode` is the tighter of the global/project values; the USD cap is the tighter positive cap.
+`project.admin` (project membership management) is a class of its own, never the team `admin` class.
+
+Routes (`extension/routes/project-routes.mjs`, always on, contract `schema/http/projects.schema.json`; writes
+ride `kbWrite`):
+
+- `GET /projects` → `{ projects: [{ id, name, role, maxMode, usdCapMonth, permissions }] }`; every registered
+  project with the caller's effective role (unassigned = viewer). Self read only.
+- `GET /projects/:id/members` → `{ project: { id, name }, members: [{ userId, email, displayName, status, role,
+  maxMode, usdCapMonth, updatedAt }] }`; explicit rows only.
+- `POST /projects/:id/members { email, role?, maxMode?, usdCapMonth? }` → `{ member }`; adds an existing account
+  by email (defaults viewer/read_only/20).
+- `PATCH /projects/:id/members/:userId { role?, maxMode?, usdCapMonth? }` → `{ member }`.
+- `DELETE /projects/:id/members/:userId` → `{ removed }`; the member falls back to the implicit viewer.
+
+The membership routes need project admin/owner (or a global team admin/owner), answer `403 ROLE_DENIED`, and
+reject an unknown body key, an unknown project/account (404) or an invalid role/mode/cap (400). An actor may
+not change their own project role (`403 SELF_GRANT`), cannot touch a role above their own, and cannot grant
+above their own. Every write is audited (`project.member.grant` / `project.member.revoke` with the project,
+user and grant only) and written through to `team.yaml` atomically; a failed file write rolls the row back
+(500). `GET /auth/me` adds `projects` with the same rows (additive).
+
+`POST /kb/projects/register { id, root, name? }` also creates/updates the canonical registry row; a NEW
+project's registrar becomes its project owner (`owner`/`execute`/no cap). A caller who is not a project manager
+may still register their own Doc Gen folder mapping but never rewrites the project's name/root. The whole
+`doc_gen` feature gate still applies to this route.
+
+`route-authority.mjs` resolves a project id from `?project=` / `?projectId=` (Doc Gen, index search) or
+`/projects/:id/...`, and checks the effective project grant for the route's class. A body-carried project id is
+checked by its handler. A chat turn resolves `body.projectId`, `agentContext.projectId`, or the registered
+`agentContext.workspaceRoot` (`projects.root`), then uses the project role/mode and the project cap
+(`usedUsdMonthForProject`); its ledger rows carry `project_id`. No project id keeps today's team clamp.
+
+Host API v1 (additive): `projects.list` (capability `host`) returns the device's projects with the effective
+role. `chat.send`, `chat.new`, `chat.snapshot`, `chat.history.clear`, `chat.cancel`, `chat.options`,
+`approvals.answer` and `toolApprovals.answer` accept an optional `projectId`; the gateway re-checks the fresh
+project grant on EVERY frame (unassigned = viewer; refusal `denied`, unknown project `not_found`, cap `denied`
+with the USD message) and forwards `projectId` to `startHostTurn`. A frame without `projectId` keeps the v1
+team behavior, so existing pairings keep working.
+
+`team.yaml` gains an optional `projects:` section (project id → lower-cased email → the same three keys as
+`members:`). A file without the section leaves the DB project rows alone (upgrade-safe); once present it is
+authoritative: a missing account row is deleted (implicit viewer). Generation writes the DB rows; each API
+membership change writes through atomically. Invalid YAML/role/mode/cap/project id fails the boot closed;
+unknown project ids and emails are ignored and audited.
 
 ## 8. See also
 
