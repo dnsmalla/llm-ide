@@ -1512,6 +1512,19 @@ if (!IS_LOOPBACK && !config.allowRemote) {
   process.exit(1);
 }
 
+// ADR 0021 hub: a non-loopback hub bind is only safe behind a declared TLS terminator. Refuse the boot
+// rather than serve every member's data over plaintext HTTP (a loopback bind needs no declaration).
+if (config.hub && !IS_LOOPBACK && !config.tlsTerminated) {
+  logger.error('hub_requires_tls', {
+    host: HOST,
+    message:
+      `Hub mode refuses to bind non-loopback address "${HOST}" without LLMIDE_TLS_TERMINATED=1. ` +
+      'The only thing in front of this core may be a TLS terminator (nginx, Caddy): set ' +
+      'LLMIDE_TLS_TERMINATED=1 only when that is true, or set LLMIDE_HOST=127.0.0.1.',
+  });
+  process.exit(1);
+}
+
 // Import the enabled feature route groups BEFORE accepting traffic: a broken
 // route module then fails the boot (as its static import used to) instead of
 // the first request, and no request pays the import cost.

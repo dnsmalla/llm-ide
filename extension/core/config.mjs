@@ -295,6 +295,9 @@ export const config = Object.freeze({
   // Team Hub mode (ADR 0021): LLMIDE_HUB=1. H1 only closes registration here (computeRegistrationOpen)
   // and switches a no-invite registration's defaults to read-only / 20 USD; the rest of hub mode is H2.
   hub:                  envBool('LLMIDE_HUB', false),
+  // The operator declares that the only thing in front of a non-loopback hub bind is a TLS terminator
+  // (nginx, Caddy). server.mjs refuses to boot a hub on any other interface without it.
+  tlsTerminated:        envBool('LLMIDE_TLS_TERMINATED', false),
 
   // Self-Heal incident capture (routes/self-heal.mjs): the Tauri host passes LLMIDE_SELF_HEAL=1 only in a debug build.
   // Off: /kb/self-heal/* answers 404 feature_disabled and nothing is recorded. Never in production.

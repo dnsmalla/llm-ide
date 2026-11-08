@@ -41,6 +41,11 @@ LLMIDE_JWT_SECRET=<64 hex chars>
 LLMIDE_VAULT_KEY=<64 hex chars>
 ```
 
+For hub mode on a non-loopback bind (`LLMIDE_HUB=1` with `LLMIDE_HOST=0.0.0.0`), also set
+`LLMIDE_TLS_TERMINATED=1` and keep nginx (or Caddy) in front: the core refuses to start otherwise
+(`hub_requires_tls`, exit 1), because the only safe thing in front of that bind is a TLS terminator.
+The loopback bind above needs no declaration.
+
 The first account was created with registration temporarily open, then `LLMIDE_DISABLE_REGISTRATION=1`
 was restored and the service restarted. The credentials are root-owned at `/root/llm-ide-admin.txt`
 (mode `0600`) — move them into a password manager and remove that file.
