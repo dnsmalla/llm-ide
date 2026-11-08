@@ -51,7 +51,11 @@ function makeRes() {
   };
 }
 
-async function call(user, method, url, body, rawBody, dir) {
+// Every registration writes team.yaml through; keep it in a temp dir, never in the checkout.
+const YAML_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-routes-yaml-'));
+test.after(() => { try { fs.rmSync(YAML_DIR, { recursive: true, force: true }); } catch { /* gone */ } });
+
+async function call(user, method, url, body, rawBody, dir = YAML_DIR) {
   const req = makeReq({ method, url, body, rawBody, user: user ? { id: user } : undefined });
   const res = makeRes();
   await handleDocsRoutes(req, res, { userId: user, url, dir });
