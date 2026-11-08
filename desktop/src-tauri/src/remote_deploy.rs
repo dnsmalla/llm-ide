@@ -25,7 +25,7 @@ use crate::remote::{prepare, ssh_args_with, PreparedTarget, RawOutput, SshTarget
 /// per stage; there is no wildcard and no free-form argument.
 pub const STAGES: &[&str] = &[
     "check", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
-    "open-registration", "lock-registration", "backup", "rollback",
+    "open-registration", "lock-registration", "backup", "rollback", "uninstall", "uninstall-purge",
 ];
 
 pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
@@ -518,6 +518,38 @@ pub async fn remote_deploy_run(target: SshTarget, plan_id: String, confirmation:
 }
 
 #[tauri::command]
+pub async fn remote_backup_now(target: SshTarget) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target)?;
+        let out = SystemDeploy.run(&prepared, &stage_command("backup").unwrap(), None)?;
+        if out.code != Some(0) { return Err(herr("backup_failed", "the hub backup did not finish")); }
+        Ok(())
+    }).await.map_err(|e| herr("internal", format!("the backup did not finish: {e}")))?
+}
+
+/// Bounded, redacted journal tail. The helper is not involved: the command and its fixed flags are constants.
+#[tauri::command]
+pub async fn remote_logs(target: SshTarget, lines: u16) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target).map_err(|e| e.message)?;
+        let n = lines.clamp(1, 2000);
+        let cmd = format!("journalctl -u llmide-core -n {n} --no-pager -o short-iso");
+        let out = SystemDeploy.run(&prepared, &cmd, None).map_err(|e| e.message)?;
+        if out.code != Some(0) { return Err("journalctl is not available on the hub".to_string()); }
+        Ok(redact_logs(&out.stdout))
+    }).await.map_err(|e| format!("the log read did not finish: {e}"))?
+}
+
+/// Removes the service and vhost; keeps `/var/lib/llmide` unless `purge` and the exact hostname are given.
+#[tauri::command]
+pub async fn remote_uninstall(target: SshTarget, confirmation: String, purge: bool) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target)?;
+        uninstall(&SystemDeploy, &prepared, &confirmation, purge)
+    }).await.map_err(|e| herr("internal", format!("the uninstall did not finish: {e}")))?
+}
+
+#[tauri::command]
 pub async fn remote_deploy_lock(target: SshTarget) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
@@ -535,6 +567,36 @@ pub async fn remote_deploy_rollback(target: SshTarget) -> Result<(), FsError> {
         if out.code != Some(0) { return Err(herr("rollback_failed", "there is no previous release to restore")); }
         Ok(())
     }).await.map_err(|e| herr("internal", format!("the rollback did not finish: {e}")))?
+}
+
+const REDACTED: &str = "<redacted>";
+/// Removes the known credential shapes from a journal tail. It never tries to be a full secret scanner;
+/// it covers the values the hub itself handles (JWT/vault env lines, bearer tokens, Anthropic keys).
+pub fn redact_logs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("llmide_jwt_secret=") || lower.contains("llmide_vault_key=") || lower.contains("llmide_bootstrap_token=") {
+            out.push_str(REDACTED); out.push('\n'); continue;
+        }
+        let mut cleaned = line.to_string();
+        for marker in ["Bearer ", "sk-ant-"] {
+            if let Some(pos) = cleaned.find(marker) {
+                let end = cleaned[pos + marker.len()..].find(char::is_whitespace).map(|i| pos + marker.len() + i).unwrap_or(cleaned.len());
+                cleaned.replace_range(pos..end, &format!("{marker}{REDACTED}"));
+            }
+        }
+        out.push_str(&cleaned); out.push('\n');
+    }
+    out
+}
+
+pub fn uninstall<R: DeployRunner>(runner: &R, target: &PreparedTarget, confirmation: &str, purge: bool) -> Result<(), FsError> {
+    if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to uninstall")); }
+    let stage = if purge { "uninstall-purge" } else { "uninstall" };
+    let out = runner.run(target, &stage_command(stage).unwrap(), None)?;
+    if out.code != Some(0) { return Err(herr("uninstall_failed", "the hub uninstall did not finish")); }
+    Ok(())
 }
 
 pub fn random_hex(bytes: usize) -> String {
@@ -615,6 +677,21 @@ mod tests {
         for bad in ["NODE_OPTIONS=--require /tmp/x", "LD_PRELOAD=/tmp/x.so", "BASH_ENV=/tmp/x", "EVIL=1", "no_equals"] {
             assert!(validate_env_text(&format!("NODE_ENV=production\n{bad}\n")).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    #[test]
+    fn logs_are_bounded_and_redacted() {
+        assert_eq!(redact_logs("LLMIDE_VAULT_KEY=abcdef\nAuthorization: Bearer abc.def\nsk-ant-123\nok\n").matches("<redacted>").count(), 3);
+        assert!(redact_logs("ok\n").contains("ok"));
+    }
+
+    #[test]
+    fn uninstall_refuses_a_wrong_hostname() {
+        let fake = Fake::new();
+        let prepared = target();
+        assert_eq!(uninstall(&fake, &prepared, "wrong.example.com", false).unwrap_err().code, "confirmation_mismatch");
+        assert!(uninstall(&fake, &prepared, "hub.example.com", false).is_ok());
+        assert!(fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy uninstall")));
     }
 
     #[test]

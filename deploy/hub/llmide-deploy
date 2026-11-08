@@ -209,6 +209,26 @@ case "$stage" in
     say "ok"
     ;;
 
+  uninstall)
+    systemctl disable --now llmide-core 2>/dev/null || true
+    rm -f "$UNIT" "$BACKUP_UNIT"
+    systemctl daemon-reload 2>/dev/null || true
+    rm -f "$SITE"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+    conf 2>/dev/null && printf 'certificate kept: certbot delete --cert-name %s\n' "$DOMAIN" >&2 || true
+    # Data is kept by default: /var/lib/llmide and /srv/llmide/projects stay for a manual restore.
+    say "ok (data kept)"
+    ;;
+
+  uninstall-purge)
+    systemctl disable --now llmide-core 2>/dev/null || true
+    rm -f "$UNIT" "$BACKUP_UNIT" "$SITE"
+    systemctl daemon-reload 2>/dev/null || true
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+    rm -rf /var/lib/llmide /var/lib/llmide-deploy /srv/llmide/projects /opt/llmide
+    say "ok (data deleted)"
+    ;;
+
   *)
     echo "llmide-deploy: unknown stage '$stage'" >&2
     exit 2
