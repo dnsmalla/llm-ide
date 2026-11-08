@@ -10,17 +10,6 @@ use std::path::{Path, PathBuf};
 
 /// Creates `dir` (and parents) as a private directory and returns it.
 pub fn private_dir(dir: &Path) -> Result<PathBuf, String> {
-    // Never create the PARENT chain: a missing parent means the configured data folder is unavailable (an
-    // unplugged drive, a deleted folder), and silently recreating it on another disk would look like a fresh
-    // install. The default location's parent (Application Support, LOCALAPPDATA, XDG_DATA_HOME) always exists.
-    if let Some(parent) = dir.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            return Err(format!(
-                "Your data folder is not available: {}. Reconnect the drive or change the location in Settings.",
-                dir.display()
-            ));
-        }
-    }
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("cannot stat {}: {e}", dir.display()))?;
     if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -110,9 +99,24 @@ pub fn data_dir_for(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Result<Path
     Ok(base.join(DATA_DIR_NAME))
 }
 
+/// A resolved app data dir, refused when its PARENT is gone: a configured folder on an unplugged drive (or a
+/// deleted one) is unavailable, and silently recreating the chain on another disk would look like a fresh install.
+/// The default location's parent (Application Support, LOCALAPPDATA, XDG_DATA_HOME) always exists.
+fn checked_data_dir(dir: PathBuf) -> Result<PathBuf, String> {
+    if let Some(parent) = dir.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            return Err(format!(
+                "Your data folder is not available: {}. Reconnect the drive or change the location in Settings.",
+                dir.display()
+            ));
+        }
+    }
+    Ok(dir)
+}
+
 /// The data dir for this machine and process environment.
 pub fn desktop_data_dir() -> Result<PathBuf, String> {
-    data_dir_for(current_os(), &|k| std::env::var(k).ok())
+    checked_data_dir(data_dir_for(current_os(), &|k| std::env::var(k).ok())?)
 }
 
 /// Holds the single-instance lock for the life of the process (drop releases it).
@@ -327,17 +331,17 @@ mod tests {
     }
 
     #[test]
-    fn private_dir_refuses_a_missing_parent_instead_of_creating_it() {
+    fn the_app_data_dir_refuses_a_missing_parent_instead_of_creating_it() {
         let root = std::env::temp_dir().join(format!("llmide-fsutil-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let target = root.join("gone").join("llmide-desktop");
-        let err = private_dir(&target).unwrap_err();
+        let err = checked_data_dir(target.clone()).unwrap_err();
         assert!(err.contains("Your data folder is not available"), "{err}");
         assert!(err.contains("Reconnect the drive or change the location in Settings."), "{err}");
         assert!(!root.join("gone").exists(), "nothing was created");
         std::fs::create_dir_all(&root).unwrap();
-        let made = private_dir(&root.join("llmide-desktop")).unwrap();
-        assert!(made.is_dir());
+        let existing = root.join("llmide-desktop");
+        assert_eq!(checked_data_dir(existing.clone()).unwrap(), existing, "an existing parent is fine");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
