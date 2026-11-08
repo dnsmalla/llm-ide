@@ -18,6 +18,7 @@ import {
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
+import { MAX_PENDING_FINALIZE_BYTES_PER_USER, MAX_PENDING_FINALIZE_BYTES_TOTAL, finalizeBytes, byteCapRefusal } from '../server/finalize-budget.mjs';
 
 // Per-user cap on concurrent SSE streams. A hostile or buggy client
 // opening N streams pins N idle timers + listener pairs; we cap so a
@@ -37,7 +38,17 @@ export const MAX_FINALIZE_PARTS = Math.ceil(MAX_ASSEMBLED_LINES / FINALIZE_PART_
 export const MAX_PENDING_FINALIZE_PER_USER = 4;
 const pendingFinalize = new Map(); // `${userId}\0${sessionId}` -> { of, parts: Map<number, captions[]>, at }
 const FINALIZE_PART_TTL_MS = 10 * 60_000;
-function takeFinalizeParts(userId, sessionId, body) {
+function userPendingBytes(userId) {
+  let n = 0;
+  for (const [k, v] of pendingFinalize) if (k.startsWith(`${userId}\0`)) for (const captions of v.parts.values()) n += finalizeBytes(captions);
+  return n;
+}
+function totalPendingBytes() {
+  let n = 0;
+  for (const v of pendingFinalize.values()) for (const captions of v.parts.values()) n += finalizeBytes(captions);
+  return n;
+}
+export function takeFinalizeParts(userId, sessionId, body) {
   const part = Number(body.part);
   const of = Number(body.of);
   if (!Number.isInteger(of) || of < 2 || !Number.isInteger(part) || part < 1 || part > of) return { error: 'part/of are invalid' };
@@ -59,6 +70,13 @@ function takeFinalizeParts(userId, sessionId, body) {
     }
     entry = { of, parts: new Map(), at: now };
   }
+  const addBytes = finalizeBytes(body.captions);
+  const oldBytes = entry.parts.has(part) ? finalizeBytes(entry.parts.get(part)) : 0;
+  const userBytes = userPendingBytes(userId) - oldBytes;
+  const totalBytes = totalPendingBytes() - oldBytes;
+  const refusal = byteCapRefusal(userBytes, addBytes, MAX_PENDING_FINALIZE_BYTES_PER_USER, MAX_PENDING_FINALIZE_BYTES_TOTAL)
+    || byteCapRefusal(totalBytes, addBytes, MAX_PENDING_FINALIZE_BYTES_TOTAL, MAX_PENDING_FINALIZE_BYTES_TOTAL);
+  if (refusal) return { tooLarge: true, scope: refusal };
   entry.at = now;
   entry.parts.set(part, body.captions);
   pendingFinalize.set(key, entry);
@@ -172,6 +190,10 @@ export async function handleLiveRoutes(req, res, ctx) {
       }
       if (partResult.tooMany) {
         sendJSON(res, 429, { error: { code: 'TOO_MANY_CAPTURES', message: 'Too many finalize requests are in flight' } });
+        return true;
+      }
+      if (partResult.tooLarge) {
+        sendJSON(res, 413, { error: { code: 'CAPTURE_TOO_LARGE', message: 'The pending finalize data exceeds the byte cap' } });
         return true;
       }
       if (partResult.pending) {
