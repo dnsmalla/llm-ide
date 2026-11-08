@@ -19,22 +19,22 @@ process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '../..');
 const { isAuthRoute } = await import('../server/auth-routes.mjs');
 const { isExtensionRoute, handleExtensionRoute } = await import('../routes/extension-routes.mjs');
+// Read the table from the generator output, not the committed snapshot: the
+// snapshot is no longer gated for drift (CI regenerates it), so a test that
+// read it would silently check an old table.
+const { buildInventoryModel } = await import('../../scripts/http-inventory.mjs');
 
 test('inventory method+path table for the moved routes is unchanged', () => {
   const golden = fs.readFileSync(path.join(here, 'fixtures/extension-route-table-before-track-q.txt'), 'utf8')
     .split('\n').filter(Boolean).map((l) => l.trim());
-  const inv = fs.readFileSync(path.join(root, 'schema/http/INVENTORY.md'), 'utf8');
   const now = [];
-  for (const line of inv.split('\n')) {
-    const cols = line.split('|').map((c) => c.trim().replace(/`/g, ''));
-    const p = cols[1];
-    if (!p || !/^\/auth\/me\/(plugins|claude-plugins|codex-plugins|llm-sources|mcp-plugins)/.test(p)) continue;
-    now.push(`${cols[3]} ${p}`);
-    assert.match(cols[6], /^(extension\/routes\/extension-routes\.mjs:\d+|-)$/, `${p} handler moved`);
-    assert.equal(cols[4], 'token', `${p} stays authenticated`);
+  for (const row of buildInventoryModel().rows) {
+    if (!/^\/auth\/me\/(plugins|claude-plugins|codex-plugins|llm-sources|mcp-plugins)/.test(row.path)) continue;
+    now.push(`${row.methods} ${row.path}`);
+    assert.match(row.handler, /^(extension\/routes\/extension-routes\.mjs:\d+|-)$/, `${row.path} handler moved`);
+    assert.equal(row.auth, 'token', `${row.path} stays authenticated`);
   }
   assert.deepEqual(now.sort(), golden.slice().sort());
 });

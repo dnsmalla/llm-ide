@@ -19,6 +19,7 @@ Add an authenticated HTTP endpoint that the side panel can call.
 6. **Add a hook** under `extension/src/sidepanel/hooks/` with `AbortController` + `language` param.
 7. **Document.** Add an entry to [`docs/reference/api/overview.md`](../reference/api/overview.md) and to `docs/reference/api/openapi.yaml`.
 8. **Test.** Add a `node:test` file under `extension/tests/`.
+9. **Do not commit `schema/http/INVENTORY.md`.** It is a generated snapshot; the contract gate checks route coverage from the generator output, and CI regenerates the file. `make inventory` refreshes your working copy if you want to read it.
 
 ## Verification
 

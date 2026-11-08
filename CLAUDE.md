@@ -29,6 +29,10 @@ make test             # Extension/core tests (Node test runner)
 make test-desktop     # Desktop node checks + cargo test --lib
 make regression       # Pre-push regression gate (contracts, desktop/ui/web, agent/v2, graph-kit)
 make test-shared-protocol   # iOS wire types (ios_app/SharedProtocol)
+
+# Generated HTTP inventory (a snapshot, never a push gate)
+make inventory        # Regenerate schema/http/INVENTORY.md
+make inventory-check  # Full drift check only (not part of contract-gates)
 ```
 
 ## Architecture Overview
@@ -135,6 +139,10 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 - **All LLM hooks accept `language?: string`** — Forward to request body
 - **AbortController on every request** — Cancel-on-unmount via `useEffect` cleanup
 - **Strict response validation** — `typeof data?.notes !== 'string'` → throw
+
+### Generated artifacts (`schema/http/INVENTORY.md`)
+- **`schema/http/INVENTORY.md` is a generated snapshot, never a reviewed artifact** — do not hand-edit it and do not commit it just to make a push pass. `make inventory` regenerates it; `make inventory-check` is the full drift check only.
+- **The contract gate checks coverage, not the committed diff** — `make contract-gates` runs `node scripts/http-inventory.mjs --coverage`, which validates every roster route/handler and client path from the generator output. A stale snapshot is not a failure; CI regenerates it and uploads the `http-inventory` artifact (no bot commit to `main`). See [invariants.md](docs/explanation/invariants.md#generated-artifacts-http-inventory).
 
 ## Mobile and web
 

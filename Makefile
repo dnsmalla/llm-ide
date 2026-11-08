@@ -139,6 +139,10 @@ relay-check:
 
 # HTTP endpoint contract (schema/http): request and response shapes per route
 # group, checked against the roster. Part of `regression`; fast (node only).
+# The HTTP inventory gate validates ROUTE COVERAGE from the generator output
+# (`--coverage`), never the committed snapshot: INVENTORY.md is generated, CI
+# regenerates it, and a stale copy must not fail a push. scripts/http-inventory.test.mjs
+# proves both halves of that rule.
 .PHONY: contract-gates
 contract-gates:
 	node scripts/conformance-http.mjs
@@ -149,8 +153,21 @@ contract-gates:
 	$(MAKE) relay-check
 	node scripts/gen-api-types.mjs --check
 	node scripts/gen-openapi.mjs --check
-	node scripts/http-inventory.mjs --check
+	node scripts/http-inventory.mjs --coverage
+	node --test scripts/http-inventory.test.mjs
 	node scripts/gen-design-tokens.mjs --check
+
+# Regenerate the HTTP inventory snapshot. Not a gate and never needed for a
+# push: `contract-gates` validates coverage from the generator output, and CI
+# regenerates the file. Use it when you want a current snapshot in the working
+# tree (e.g. while reading the caller table). `inventory-check` is the full
+# drift check, for a deliberate freshness audit, not a push gate.
+.PHONY: inventory inventory-check
+inventory:
+	node scripts/http-inventory.mjs
+
+inventory-check:
+	node scripts/http-inventory.mjs --check
 
 # Feature matrix: every removable feature switched off, one row at a time,
 # server side (feature_disabled 404s, /health features and endpoints, extension

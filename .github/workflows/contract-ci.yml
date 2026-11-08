@@ -1,10 +1,13 @@
 name: contract-ci
 
 # The HTTP contract gate (Phase 1 P16): schema conformance of every fixture,
-# and the generated outputs (client types, openapi.yaml, endpoint inventory,
-# design tokens) checked against their sources. Node only, ~1 s once deps are
-# installed. Its inputs span the repo, so it triggers on all of them; a
-# schema-only commit otherwise reached main with no check at all.
+# and the generated outputs (client types, openapi.yaml, design tokens) checked
+# against their sources. The HTTP inventory is the exception: its committed
+# snapshot is not a gate — route coverage is validated from the generator
+# output, and the snapshot is regenerated here and uploaded as an artifact.
+# Node only, ~1 s once deps are installed. Its inputs span the repo, so it
+# triggers on all of them; a schema-only commit otherwise reached main with no
+# check at all.
 
 on:
   workflow_dispatch:
@@ -53,3 +56,17 @@ jobs:
 
       - name: make contract-gates
         run: make contract-gates
+
+      # INVENTORY.md is a generated snapshot, not a reviewed artifact: the gate
+      # above validated route coverage from the generator output. Regenerate it
+      # here (never committed back) so reviewers can download the current table
+      # without anyone hand-committing the file.
+      - name: Regenerate HTTP inventory snapshot
+        run: node scripts/http-inventory.mjs
+
+      - name: Upload HTTP inventory
+        uses: actions/upload-artifact@v7
+        with:
+          name: http-inventory
+          path: schema/http/INVENTORY.md
+          if-no-files-found: error
