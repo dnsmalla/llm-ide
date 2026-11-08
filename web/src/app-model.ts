@@ -56,7 +56,11 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
       onSelectionChange: () => { void controller?.resync(); void compose?.load(); void read?.projectChanged(); },
     });
     const onProjectRefused = (e: unknown) => { projects.noteRefusal(e); };
-    controller = createChatController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
+    controller = createChatController(connection, {
+      projectId: () => projects.getSelectedId(),
+      scopeReady: () => projects.whenLoaded(),
+      onProjectRefused,
+    });
     compose = createComposeController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
     read = createReadController(connection, { projectId: () => projects.getSelectedId() });
     return { url, tokens, connection, projects, controller, read, compose };

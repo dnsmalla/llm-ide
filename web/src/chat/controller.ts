@@ -12,25 +12,38 @@ export interface ChatControllerOptions {
   historyLimit?: number;
   /** The project every project-scoped frame names; null/absent keeps the v1 team behavior. */
   projectId?: () => string | null;
+  /**
+   * Resolves once the project list has answered. The first snapshot and a send typed before the picker
+   * loads wait for it, so they name the selected project instead of running under the team grant.
+   */
+  scopeReady?: () => Promise<void>;
   /** Called for a refused frame so the project picker can show the host's reason. */
   onProjectRefused?: (e: unknown) => void;
 }
 
-export function createChatController(link: HostLink, { historyLimit = 200, projectId, onProjectRefused }: ChatControllerOptions = {}) {
+export function createChatController(link: HostLink, { historyLimit = 200, projectId, scopeReady, onProjectRefused }: ChatControllerOptions = {}) {
   let state: ChatState = initialChatState;
   const subs = new Set<() => void>();
   const dispatch = (a: ChatAction) => { state = reduce(state, a); for (const fn of subs) fn(); };
   let resyncing: Promise<void> | null = null;
   let resyncQueued = false; // a project change landed while a snapshot was in flight: run once more with the new id
+  // A selection change fired by the first projects.list is not a reason for a second snapshot: the resync
+  // waiting on that same list already reads the new selection. Once primed, every change queues a resync.
+  let scopePrimed = !scopeReady;
   const pid = () => projectId?.() ?? null;
+  const waitForScope = async () => {
+    if (!scopeReady) return;
+    try { await scopeReady(); } catch { /* a failed list keeps the previous/team scope */ }
+  };
 
   const resync = (): Promise<void> => {
-    if (resyncing) { resyncQueued = true; return resyncing; }
+    if (resyncing) { if (scopePrimed) resyncQueued = true; return resyncing; }
     return (resyncing = (async () => {
       try {
         do {
           resyncQueued = false;
           dispatch({ type: "capabilities", capabilities: link.capabilities });
+          if (scopeReady) { await waitForScope(); scopePrimed = true; }
           const project = pid();
           try {
             const r = await link.send("chat.snapshot", project ? { limit: historyLimit, projectId: project } : { limit: historyLimit }).done;
@@ -76,6 +89,8 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
       const t = text.trim();
       if (!t || state.turn) return false;
       if (t.length > MAX_SEND_CHARS) { dispatch({ type: "notice", text: "Keep a message under 100,000 characters." }); return false; }
+      // A message typed before projects.list replied still names the selected project (L4).
+      if (scopeReady) { await waitForScope(); if (state.turn) return false; } // another send won the wait
       const project = pid();
       const payload = { text: t, ...extra, ...(project ? { projectId: project } : {}) };
       // The connection refuses an oversize frame too, but only after the line is shown as sent; say it up front.

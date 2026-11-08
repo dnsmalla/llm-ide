@@ -77,6 +77,54 @@ test("a stored project that is gone falls back to the first project; an empty li
   assert.equal(empty.getState().loaded, true);
 });
 
+test("a stored project is selected at construction, before projects.list, and an empty list keeps it stored", async () => {
+  const s = store();
+  s.set("p-2");
+  let reply;
+  const link = fakeLink({ "projects.list": () => new Promise((r) => { reply = () => r({ projects: [proj("p-1", "Alpha", "viewer"), proj("p-2", "Beta", "owner")] }); }) });
+  const c = createProjectsController(link, { storage: s });
+  assert.equal(c.getState().selectedId, "p-2", "the remembered project scopes the first frame");
+  assert.equal(c.getState().loaded, false);
+  const loading = c.load();
+  assert.equal(c.getState().loading, true);
+  reply();
+  await loading;
+  assert.equal(c.getState().selectedId, "p-2");
+  assert.equal(s.get(), "p-2");
+
+  // L5: a host that briefly answers an empty list must not erase the remembered choice.
+  const empty = createProjectsController(fakeLink({ "projects.list": { projects: [] } }), { storage: s });
+  assert.equal(empty.getState().selectedId, "p-2", "seeded again on the next page load");
+  await empty.load();
+  assert.equal(empty.getState().selectedId, null);
+  assert.equal(s.get(), "p-2", "the empty list did not overwrite the stored id");
+});
+
+test("the first snapshot and a send typed before the list wait for projects.list and name the stored project", async () => {
+  const s = store();
+  s.set("p-2");
+  let release;
+  const link = fakeLink({
+    "projects.list": () => new Promise((r) => { release = () => r({ projects: [proj("p-1", "Alpha", "viewer"), proj("p-2", "Beta", "owner")] }); }),
+    "chat.snapshot": { messages: [] },
+    "chat.send": { accepted: true, requestId: "c-1" },
+  });
+  const projects = createProjectsController(link, { storage: s });
+  const chat = createChatController(link, { projectId: () => projects.getSelectedId(), scopeReady: () => projects.whenLoaded() });
+  link.resync();
+  await tick();
+  assert.equal(link.calls.filter((x) => x.command === "chat.snapshot").length, 0, "the snapshot waits");
+  const sending = chat.send("hi");
+  await tick();
+  assert.equal(link.calls.filter((x) => x.command === "chat.send").length, 0, "the send waits too");
+
+  release();
+  await sending;
+  await tick(10);
+  assert.deepEqual(link.calls.find((x) => x.command === "chat.snapshot").payload, { limit: 200, projectId: "p-2" });
+  assert.deepEqual(link.calls.find((x) => x.command === "chat.send").payload, { text: "hi", projectId: "p-2" });
+});
+
 test("the picker renders each project with the caller's role and a role badge", () => {
   const state = { projects: [proj("p-1", "Alpha", "viewer"), proj("p-2", "Beta", "owner")], selectedId: "p-2", loading: false, loaded: true, error: null, refusal: null };
   const out = html(h(UI.ProjectPicker, { state, onSelect: noop }));

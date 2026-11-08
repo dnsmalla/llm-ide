@@ -123,6 +123,18 @@ test("capabilities apply before any snapshot, so an unserved tool approval is ig
   assert.equal(chat.getState().approvals.length, 0);
 });
 
+test("a successful snapshot clears an earlier refusal notice", async () => {
+  const results = { "chat.snapshot": new Error("PROJECT_REQUIRED: a project is required on this hub") };
+  const link = fakeLink(results);
+  const chat = createChatController(link);
+  await chat.resync();
+  assert.match(chat.getState().notice, /PROJECT_REQUIRED/);
+  results["chat.snapshot"] = { messages: [] };
+  await chat.resync();
+  assert.equal(chat.getState().loaded, true);
+  assert.equal(chat.getState().notice, null, "the successful snapshot is proof the transient refusal is over");
+});
+
 test("send carries compose extras and reports whether the host accepted it", async () => {
   const link = fakeLink({ "chat.send": { accepted: true } });
   const chat = createChatController(link);

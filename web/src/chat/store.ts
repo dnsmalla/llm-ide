@@ -73,7 +73,8 @@ export function reduce(s: ChatState, a: ChatAction): ChatState {
         if (asked && msgs.at(-1)?.text !== asked.text) msgs.push({ ...asked, key: `m-${++seq}` });
         if (live) msgs.push({ ...live, key: `m-${++seq}` });
       }
-      return { ...s, seq, messages: cap(msgs), loaded: true };
+      // A successful snapshot is the proof a transient refusal (e.g. the pre-load team scope) is over.
+      return { ...s, seq, messages: cap(msgs), loaded: true, notice: null };
     }
     case "sent": {
       const seq = s.seq + 2;

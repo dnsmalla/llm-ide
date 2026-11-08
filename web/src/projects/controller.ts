@@ -62,8 +62,14 @@ export interface ProjectsControllerOptions {
 }
 
 export function createProjectsController(link: HostLink, { storage, onSelectionChange }: ProjectsControllerOptions) {
-  let state = initialProjectsState;
+  // The remembered project is the scope of the FIRST chat frame, before projects.list lands. The list
+  // confirms or replaces it; without this seed a page load named no project and ran under the team grant.
+  const seeded = storage.get();
+  let state = seeded ? { ...initialProjectsState, selectedId: seeded } : initialProjectsState;
   let seq = 0;
+  let loadedResolve: (() => void) | null = null;
+  const loaded = new Promise<void>((resolve) => { loadedResolve = resolve; });
+  const settled = () => { loadedResolve?.(); loadedResolve = null; };
   const subs = new Set<() => void>();
   const set = (p: Partial<ProjectsState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
   const select = (id: string | null) => {
@@ -85,12 +91,16 @@ export function createProjectsController(link: HostLink, { storage, onSelectionC
       const next = keep ?? projects.find((p) => p.id === stored)?.id ?? projects[0]?.id ?? null;
       const changed = next !== state.selectedId;
       set({ projects, loading: false, loaded: true, error: null, selectedId: next, refusal: changed ? null : state.refusal });
-      storage.set(next);
+      // L5: an empty list must not erase the host's remembered choice. Only a real selection is persisted;
+      // next time the list answers, the stored id is still there to be restored.
+      if (next !== null) storage.set(next);
       if (changed) onSelectionChange?.(next);
+      settled();
     } catch (e) {
       if (mine !== seq) return;
       // A failed list must not throw the picker away; keep the previous projects and choice.
       set({ loading: false, loaded: true, error: messageOf(e) });
+      settled();
     }
   };
 
@@ -100,6 +110,8 @@ export function createProjectsController(link: HostLink, { storage, onSelectionC
     getSelectedId: () => state.selectedId,
     subscribe: (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn); }; },
     load,
+    /** Resolves after the first projects.list outcome (success or failure); the chat waits for it. */
+    whenLoaded: () => (state.loaded ? Promise.resolve() : loaded),
     select(id: string): boolean {
       const hit = state.projects.find((p) => p.id === id);
       if (!hit) return false;
@@ -113,7 +125,7 @@ export function createProjectsController(link: HostLink, { storage, onSelectionC
       return refusal;
     },
     clearRefusal() { if (state.refusal) set({ refusal: null }); },
-    dispose() { seq += 1; off(); subs.clear(); },
+    dispose() { seq += 1; off(); settled(); subs.clear(); },
   };
 }
 
