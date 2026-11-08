@@ -55,7 +55,3 @@ export function projectFrameAuthority(db, userId, command, payload, { usedUsd = 
     : { ok: true, projectId, scoped: true, grant, member: member ? { teamRole: member.teamRole } : null };
 }
 
-/** The per-project role a paired device shows for a project, or null when it has no row. */
-export function projectRoleForDevice(db, userId, projectId) {
-  return effectiveProjectGrant(db, userId, projectId).role;
-}

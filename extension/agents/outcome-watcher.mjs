@@ -285,6 +285,18 @@ async function pollAndReschedule() {
   }
 }
 
+/**
+ * A new task was dispatched: wake the poller on the base interval instead of waiting out a backed-off hour
+ * (R-020 B#10). Safe when the poller is stopped (it just resets the base for the next start).
+ */
+export function nudgeOutcomePoller() {
+  _bgIntervalMs = OUTCOME_POLL_INTERVAL_MS;
+  if (_bgTimer === null) return;
+  clearTimeout(_bgTimer);
+  _bgTimer = setTimeout(() => { void pollAndReschedule(); }, _bgIntervalMs);
+  if (typeof _bgTimer.unref === 'function') _bgTimer.unref();
+}
+
 export function startBackgroundOutcomePoller() {
   if (_bgTimer) return; // already running
   // First poll after one full interval so server boot isn't slowed.

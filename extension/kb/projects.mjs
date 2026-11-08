@@ -169,10 +169,6 @@ export function projectIdForRoot(db, root) {
   return null;
 }
 
-/** Every registered project, newest name order. Team-wide: the install has one registry. */
-export function listProjects(db) {
-  return db.prepare('SELECT id, name, created_at FROM projects ORDER BY name, id').all();
-}
 
 function validName(name) {
   if (typeof name !== 'string') return null;

@@ -21,12 +21,3 @@ export function usedUsdMonthForProject(db, userId, projectId, now = new Date()) 
   }
 }
 
-/**
- * The spend a project-scoped cap check should compare: the project's own month when a project cap is
- * in force, the member's whole month otherwise. `cap` 0 = no cap. Pure decision, injected readers.
- */
-export function projectCapSpend({ cap, projectUsed, memberUsed }) {
-  const n = Number(cap);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Number.isFinite(projectUsed) ? projectUsed : memberUsed;
-}

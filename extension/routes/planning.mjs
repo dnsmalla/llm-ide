@@ -16,6 +16,7 @@ import { generatePlan } from '../agents/planner.mjs';
 import { analyzeRisks } from '../agents/risk.mjs';
 import { codeSync } from '../agents/code-sync.mjs';
 import { dispatchPlan } from '../agents/dispatcher.mjs';
+import { nudgeOutcomePoller } from '../agents/outcome-watcher.mjs';
 import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
@@ -303,6 +304,8 @@ export async function handlePlanningRoutes(req, res, ctx) {
       // The approved review is consumed; its submit-time credentials are
       // no longer needed in memory.
       if (target !== 'preview' && body.reviewId) dropHeldSecrets(userId, String(body.reviewId));
+      // A newly dispatched task is polled on the base interval, not after an idle hour (R-020 B#10).
+      if (target !== 'preview') nudgeOutcomePoller();
       sendJSON(res, 200, result);
     } catch (err) {
       // Roll back the consumed review so the failure is visible and

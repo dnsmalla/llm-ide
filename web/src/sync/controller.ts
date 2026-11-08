@@ -19,9 +19,10 @@ export const ACK_WAIT_MS = 150_000;
 export const WRAP_WAIT_MS = 300_000;
 export const MAX_PENDING = 5;
 export const MAX_ANSWERED = 50;
-// A queued prompt the desktop still has not answered after its own acceptance window (7 days,
-// `LIMITS.maxAgeMs` in extension/routes/sync/consumer.mjs) can never run: show it as expired.
-export const PENDING_EXPIRY_MS = 7 * 86_400_000;
+// A queued prompt the desktop still has not answered after its acceptance window (7 days) plus its clock-skew
+// allowance (10 min) and the longest turn (10 min) can never run: show it as expired. The margin keeps a prompt
+// accepted at 6 d 23 h 55 m from being marked expired while its answer is still being written (R-020 B#9).
+export const PENDING_EXPIRY_MS = 7 * 86_400_000 + 600_000 + 600_000;
 
 export type SyncPhase = "none" | "pairing" | "locked" | "ready" | "removed";
 export type PairStep = "login" | "claiming" | "sas" | null;

@@ -112,10 +112,11 @@ test('queue a prompt, the desktop answers, the answer appears and the queue empt
   assert.match(r.c.getState().error, /already waiting/);
 });
 
-test('a queued prompt older than the desktop\'s 7 days is shown as expired', async () => {
+test('a queued prompt older than the desktop\'s 7 days (plus its skew/turn margin) is shown as expired', async () => {
   const r = await ready();
   assert.equal(await r.c.send('still there?'), true);
-  r.clock += 7 * 86_400_000 + 1;
+  // 7 days + 20 min: the acceptance window plus clock skew and the longest turn.
+  r.clock += 7 * 86_400_000 + 20 * 60_000 + 1;
   await r.c.refresh();
   const s = r.c.getState();
   assert.deepEqual(s.pending, []);

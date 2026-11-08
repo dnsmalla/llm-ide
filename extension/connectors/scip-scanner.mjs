@@ -5,6 +5,7 @@
 // TS is published, swap this for an `import` behind the connector in scip.mjs.
 
 import { spawn } from 'node:child_process';
+import { scrubbedChildEnv } from '../core/child-env.mjs';
 
 /** Read a foreign-JSON field tolerating snake_case or camelCase. */
 function field(o, snake, camel) {
@@ -149,7 +150,7 @@ export function parseScipJson(index) {
 
 export function loadScipIndex(scipPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn('scip', ['print', '--json', scipPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('scip', ['print', '--json', scipPath], { stdio: ['ignore', 'pipe', 'pipe'], env: scrubbedChildEnv() });
     let out = '';
     let err = '';
     let settled = false;

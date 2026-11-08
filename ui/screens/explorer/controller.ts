@@ -139,6 +139,12 @@ export class ExplorerController {
     this.set({ notice: { severity, message } });
   }
 
+  /** A warning that does not replace an error the user still needs to read. */
+  private warnNotice(message: string): void {
+    if (this.snap.notice?.severity === "error") return;
+    this.notify("warning", message);
+  }
+
   dismissNotice(): void {
     if (this.snap.notice) this.set({ notice: null });
   }
@@ -872,14 +878,15 @@ export class ExplorerController {
       // Say it once when the expanded set outgrows what the host watches, instead of silently watching a prefix.
       const capped = want.size > WATCH_DIR_CAP;
       if (capped && !this.watchCapped) {
-        this.notify("warning", `Changes in folders beyond the first ${WATCH_DIR_CAP} expanded are not watched; collapse some folders.`);
+        this.warnNotice(`Changes in folders beyond the first ${WATCH_DIR_CAP} expanded are not watched; collapse some folders.`);
       }
       this.watchCapped = capped;
       void this.fs.watchSet([...want].slice(0, WATCH_DIR_CAP))
         .then(() => { this.watchErrorShown = false; })
         .catch((e) => {
-          // Never swallow it: a watcher that cannot follow every folder must be visible (once).
-          if (!this.watchErrorShown) this.notify("warning", `The file watcher could not follow every folder: ${toFsError(e).message}`);
+          // Never swallow it: a watcher that cannot follow every folder must be visible (once), but a watcher
+          // warning never replaces an error the user still needs to read (R-020 U#F6).
+          if (!this.watchErrorShown) this.warnNotice(`The file watcher could not follow every folder: ${toFsError(e).message}`);
           this.watchErrorShown = true;
         });
     }, 0);

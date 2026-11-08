@@ -14,7 +14,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-project-usage-'));
 process.env.LLMIDE_DB_PATH = path.join(root, 'kb.db');
 
 const { getDb } = await import('../kb/db.mjs');
-const { usedUsdMonthForProject, projectCapSpend } = await import('../kb/project-usage.mjs');
+const { usedUsdMonthForProject } = await import('../kb/project-usage.mjs');
 
 after(() => {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -53,8 +53,3 @@ test('a missing user/project or an unreadable ledger is safe', () => {
   assert.equal(usedUsdMonthForProject(broken, 'u1', 'p-a'), Number.POSITIVE_INFINITY);
 });
 
-test('projectCapSpend uses the project month only when a project cap is in force', () => {
-  assert.equal(projectCapSpend({ cap: 5, projectUsed: 2, memberUsed: 9 }), 2);
-  assert.equal(projectCapSpend({ cap: 0, projectUsed: 2, memberUsed: 9 }), 0);
-  assert.equal(projectCapSpend({ cap: 5, projectUsed: undefined, memberUsed: 9 }), 9);
-});

@@ -209,10 +209,12 @@ export default function HostApiPairing(): ReactNode {
     });
     return () => { live = false; };
   }, [host]);
-  const savePrefs = (patch: Partial<HostApiPrefs>) => {
+  const savePrefs = async (patch: Partial<HostApiPrefs>) => {
     if (!prefs) return;
+    const before = prefs;
+    // The switch must not show a value the host refused to store (R-020 B#8).
     setPrefs({ ...prefs, ...patch });
-    void host.setExtraPrefs?.(patch);
+    try { await host.setExtraPrefs?.(patch); } catch (e) { setPrefs(before); setError(describeError(e)); }
   };
   const refresh = useCallback(async () => {
     // A failed first load keeps the card hidden; a later failure keeps the last list and shows why.
@@ -240,7 +242,7 @@ export default function HostApiPairing(): ReactNode {
   };
   return (
     <div className="st-stack">
-      {prefs && host.getExtraPrefs ? <HostApiSettingsView prefs={prefs} onSave={savePrefs} /> : null}
+      {prefs && host.getExtraPrefs ? <HostApiSettingsView prefs={prefs} onSave={(patch) => void savePrefs(patch)} /> : null}
       {devices === null
         ? <p className="st-hint" role="status">{PAIRING_UNAVAILABLE_HINT}</p>
         : <HostApiPairingView

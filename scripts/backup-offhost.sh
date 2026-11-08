@@ -29,7 +29,7 @@ scp "${scp_opts[@]}" "${files[@]}" "$remote:$LLMIDE_OFFHOST_PATH/"
 # Keep the newest N stamps there (the pair is deleted together).
 keep=$(( LLMIDE_OFFHOST_KEEP > 0 ? LLMIDE_OFFHOST_KEEP : 1 ))
 ssh "${ssh_opts[@]}" "$remote" "cd $(printf '%q' "$LLMIDE_OFFHOST_PATH") && ls -1 data-*.db 2>/dev/null \
-  | sed -e 's/^data-//' -e 's/\.agent\.db$//' -e 's/\.db$//' | sort -nu | head -n -$keep \
+  | sed -e 's/^data-//' -e 's/\.agent\.db$//' -e 's/\.db$//' | sort -nur | tail -n +$((keep + 1)) \
   | while read -r s; do rm -f \"data-\$s.db\" \"data-\$s.agent.db\"; done"
 
 echo "backup-offhost: data-$newest copied to $remote:$LLMIDE_OFFHOST_PATH"

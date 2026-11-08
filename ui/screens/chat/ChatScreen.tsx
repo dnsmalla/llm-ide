@@ -167,6 +167,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       .then(async (body) => {
         if (openProjectRoot) {
           const projectId = await projectIdFor(openProjectRoot);
+          if (ac.signal.aborted) return; // unmounted or another core restart superseded this read
           const project = projectsFromMe(body)?.find((p) => p.id === projectId);
           if (project) { setPerms(new Set(project.permissions)); return; }
         }

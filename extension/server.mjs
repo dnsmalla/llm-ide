@@ -34,6 +34,7 @@ import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
 import { getDb, closeDb, statsAdmin, purgeExpiredJti, pruneMissingCodeRepos } from './kb/db.mjs';
 import { backupDatabasesInWorker, killBackupWorkers } from './kb/backup-databases.mjs';
+import { scrubbedChildEnv } from './core/child-env.mjs';
 import { runMaintenance } from './kb/maintenance.mjs';
 import { agentRunsInFlight } from './kb/agent-runs.mjs';
 import { openAgentStoreAtBoot, startAgentStoreJobs, stopAgentStoreJobs } from './kb/agent-jobs.mjs';
@@ -1334,7 +1335,8 @@ const CLAUDE_PROBE_INTERVAL_MS = 60 * 60_000;
 
 function probeClaude() {
   return new Promise((resolve) => {
-    execFile('claude', ['--version'], { timeout: 5000 }, (err) => {
+    // A child gets no vault/JWT secret in its environment (B4's promise; R-020 B#4).
+    execFile('claude', ['--version'], { timeout: 5000, env: scrubbedChildEnv() }, (err) => {
       if (err) {
         _claudeProbe = {
           ok: false,
