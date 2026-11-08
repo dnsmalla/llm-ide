@@ -25,7 +25,7 @@ export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every 
 // Refusals that clear by themselves; SESSION_TOKEN_LIMIT, SLASH_COMMAND_FAILED, ROLE_DENIED and USD_CAP do not.
 // ROLE_DENIED is the team clamp's refusal (ADR 0021): its message is the gateway's own text, so it is
 // relayed like the other known codes instead of the generic "turn failed" line.
-const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
+const RETRYABLE = new Set(['TURN_IN_PROGRESS', 'BUSY', 'SDK_UPDATING', 'PLUGIN_UPDATING', 'ROUTE_UNAVAILABLE']);
 const KNOWN = new Set([...RETRYABLE, 'SESSION_TOKEN_LIMIT', 'SLASH_COMMAND_FAILED', 'ROLE_DENIED', 'USD_CAP']);
 // ADR 0021 + plan H1.2: a max_mode none member, or a caller with no authority row (fail closed), is
 // served host + read + push. A viewer may also Ask: chat + approvals (runV2Turn forces the turn to

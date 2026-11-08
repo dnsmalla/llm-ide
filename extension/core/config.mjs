@@ -300,6 +300,11 @@ export const config = Object.freeze({
   // Off: /kb/self-heal/* answers 404 feature_disabled and nothing is recorded. Never in production.
   selfHeal:             process.env.LLMIDE_SELF_HEAL === '1' && !isProd,
 
+  // In-flight v2 chat turns allowed at once, process-wide (routes/agent-v2.mjs): the engine starts SDK
+  // subprocesses and model calls, and a hub's shared host must not start unbounded work. A turn that cannot
+  // get a slot in time is refused 429 BUSY. LLMIDE_MAX_TURNS=1 serialises every turn.
+  maxConcurrentTurns:   envIntClamped('LLMIDE_MAX_TURNS', 8, 1, 64),
+
   // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
   // the first chat turn does not pay ~200 ms of module loading; boot itself
   // never loads them. LLMIDE_ENGINE_PREWARM=0 skips it — module-count and

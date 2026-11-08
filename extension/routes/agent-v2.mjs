@@ -61,6 +61,8 @@ import { planContinuation } from '../providers/continuation.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
 import { routerEnabled, routerCapEnabled } from '../core/router-flags.mjs';
+import { config } from '../core/config.mjs';
+import { Semaphore } from '../core/semaphore.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
 
@@ -174,6 +176,31 @@ export function activeTurnCount() {
 
 function chatSessionLockKey(userId, chatSessionId) {
   return `${userId}:${chatSessionId}`;
+}
+
+// One process-wide cap on in-flight turns (LLMIDE_MAX_TURNS, default 8). The providers CLI has its own
+// 6-slot semaphore; this one covers every engine turn, the Host API's in-process turns included. A turn
+// that cannot get a slot within TURN_QUEUE_MS is refused 429 BUSY before the engine starts, so it never
+// writes a usage row. A queued acquire that arrives after the refusal hands its slot straight back.
+const TURN_QUEUE_MS = 30_000;
+const turnSlots = new Semaphore(config.maxConcurrentTurns);
+
+function acquireTurnSlot(queueMs) {
+  const slot = turnSlots.acquire();
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, queueMs);
+    slot.then(() => {
+      if (settled) { turnSlots.release(); return; }
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
 }
 
 // The abort controller of each chat's in-flight turn, by the same lock key —
@@ -623,19 +650,32 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // Re-checked here because the classifier above can await an LLM call: an
   // SDK or plugin update that started meanwhile saw no active turn (this one
   // is not in inFlightChatSessions yet), so the turn must not start now.
-  // Nothing awaits between this check and the add below.
   const updatingNow = updateRefusal();
   if (updatingNow) return io.refuse(updatingNow);
-  inFlightChatSessions.add(lockKey);
-  inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt, mode });
-  emitOsEvent(userId, 'turn-start');
+  // Global in-flight cap. Waiting can outlive the checks above (another turn may start or an update may
+  // begin while queued), so both are re-checked after the slot is held.
+  const queueMs = Number.isFinite(deps.turnQueueMs) ? deps.turnQueueMs : TURN_QUEUE_MS;
+  if (!(await acquireTurnSlot(queueMs))) {
+    return io.refuse({ code: 'BUSY', status: 429, message: 'The computer is busy with other turns — try again in a moment.' });
+  }
+  let holdsChat = false;
   try {
+    if (inFlightChatSessions.has(lockKey)) return io.refuse(turnInProgressRefusal());
+    const updatingAfterQueue = updateRefusal();
+    if (updatingAfterQueue) return io.refuse(updatingAfterQueue);
+    inFlightChatSessions.add(lockKey);
+    holdsChat = true;
+    inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt, mode });
+    emitOsEvent(userId, 'turn-start');
     return await runV2Stream(io, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
-    inFlightChatSessions.delete(lockKey);
-    inFlightAborts.delete(lockKey);
-    inFlightTurns.delete(lockKey);
-    emitOsEvent(userId, 'turn-end');
+    if (holdsChat) {
+      inFlightChatSessions.delete(lockKey);
+      inFlightAborts.delete(lockKey);
+      inFlightTurns.delete(lockKey);
+      emitOsEvent(userId, 'turn-end');
+    }
+    turnSlots.release();
   }
 }
 
