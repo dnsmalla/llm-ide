@@ -76,7 +76,7 @@ fn children(buf: &[u8], start: usize, end: usize) -> Option<Vec<(usize, usize)>>
 
 /// The full DER TLV of the certificate's SubjectPublicKeyInfo.
 pub fn spki_of_certificate(cert: &[u8]) -> Option<&[u8]> {
-    let (tag, cs, len, _) = tlv(cert, 0)?;
+    let (tag, cs, _len, _) = tlv(cert, 0)?;
     if tag != 0x30 { return None; }
     let (tbs_tag, tbs_start, tbs_len, _) = tlv(cert, cs)?;
     if tbs_tag != 0x30 { return None; }
