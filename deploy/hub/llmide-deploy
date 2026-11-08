@@ -181,10 +181,15 @@ LLMIDE_LOG
   bundle)
     staging
     conf
+    bundle_version=$VERSION
+    if [ -f "$STAGING/VERSION" ]; then
+      bundle_version=$(tr -cd '0-9.' < "$STAGING/VERSION" | head -c 40)
+      case "$bundle_version" in *.*.*) ;; *) die "the staged VERSION is not x.y.z" ;; esac
+    fi
     [ -f "$STAGING/bundle.tar.gz" ] || die "bundle.tar.gz is missing"
     [ -f "$STAGING/bundle.sha256" ] || die "bundle.sha256 is missing"
     ( cd "$STAGING" && sha256sum -c bundle.sha256 --status ) || die "the bundle checksum does not match"
-    work="/opt/llmide/releases/$VERSION.tmp"
+    work="/opt/llmide/releases/$bundle_version.tmp"
     rm -rf "$work"
     install -d -m 0755 -o root -g root "$work"
     tar -xzf "$STAGING/bundle.tar.gz" -C "$work" --no-same-owner --no-same-permissions
@@ -194,18 +199,24 @@ LLMIDE_LOG
     [ -x "$work/core/node/node" ] || die "the bundle has no node binary"
     node_version=$(runuser -u llmide -- "$work/core/node/node" --version 2>/dev/null || true)
     case "$node_version" in v22.*) ;; *) die "the bundled node is not 22 ($node_version)" ;; esac
-    install -d -m 0755 -o root -g root "/opt/llmide/releases/$VERSION"
-    # Replace a same-version directory atomically enough for a single-host deploy.
-    rm -rf "/opt/llmide/releases/$VERSION"
-    mv "$work" "/opt/llmide/releases/$VERSION"
+    release="/opt/llmide/releases/$bundle_version"
+    current_real=$(readlink /opt/llmide/current 2>/dev/null || true)
+    if [ "$current_real" = "$release" ]; then
+      die "refusing to replace the running release $bundle_version (same version)"
+    fi
+    # Replace a same-version directory only when it is not the running one.
+    rm -rf "$release"
+    mv "$work" "$release"
+    printf '%s\n' "$bundle_version" > "$release/VERSION"
+    chmod 0644 "$release/VERSION"; chown root:root "$release/VERSION"
     if [ -L /opt/llmide/current ]; then
-      old=$(readlink -f /opt/llmide/current || true)
+      old=$(readlink /opt/llmide/current || true)
       case "$old" in
         /opt/llmide/releases/*) ln -sfn "$old" /opt/llmide/previous ;;
       esac
     fi
-    ln -sfn "/opt/llmide/releases/$VERSION" /opt/llmide/current
-    release=/opt/llmide/releases/$VERSION
+    ln -sfn "$release" /opt/llmide/current
+    printf 'LLMIDE_BUNDLE_SWITCHED=%s\n' "$bundle_version"
     if [ -d "$release/core/root/web" ]; then
       install -d -m 0755 -o root -g root /var/www/llmide-web
       cp -a "$release/core/root/web/." /var/www/llmide-web/
@@ -213,7 +224,7 @@ LLMIDE_LOG
     fi
     # Keep current, previous and one older release.
     ls -1dt /opt/llmide/releases/* 2>/dev/null | sed -n '4,$p' | xargs -r rm -rf
-    say "ok ($VERSION)"
+    say "ok ($bundle_version)"
     ;;
 
   nginx)
@@ -315,7 +326,7 @@ HOOK
 
   rollback)
     if [ ! -L /opt/llmide/previous ]; then die "no previous release to roll back to"; fi
-    ln -sfn "$(readlink -f /opt/llmide/previous)" /opt/llmide/current
+    ln -sfn "$(readlink /opt/llmide/previous)" /opt/llmide/current
     systemctl restart llmide-core
     say "ok"
     ;;
@@ -328,7 +339,11 @@ HOOK
     case "$new" in *.*.*) ;; *) die "the new version is not x.y.z" ;; esac
     current=$(cat /opt/llmide/current/VERSION 2>/dev/null || true)
     [ "$new" = "$current" ] && die "the hub already runs $new"
-    "$0" bundle
+    if ! bundle_out=$("$0" bundle); then
+      printf '%s\n' "$bundle_out"
+      die "bundle failed before/after the switch"
+    fi
+    printf '%s\n' "$bundle_out"
     printf 'LLMIDE_UPDATE_SWITCHED=%s\n' "$new"
     replace_line "$CONF" LLMIDE_HUB_VERSION "$new"
     "$0" start

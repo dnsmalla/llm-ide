@@ -152,13 +152,32 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
     assert.match(h.run('check'), /helper=1/, 'check reports the helper version');
-    h.run('upload', 'VERSION\n1.2.3\n');
+    h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
     h.run('start');
     const calls = readFileSync(h.systemctlLog, 'utf8');
     assert.match(calls, /^enable llmide-core$/m);
     assert.match(calls, /^restart llmide-core$/m);
+  } finally { h.cleanup(); }
+});
+
+test('update installs the NEW version beside the running release and rollback restores it', { skip }, () => {
+  const h = harness();
+  try {
+    h.run('base', `${h.stage}\n`);
+    h.run('env', ENV1); // 1.2.3
+    fakeBundle(h);
+    h.run('bundle');
+    assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.3')));
+    h.run('upload', 'VERSION\n1.2.4\n');
+    h.run('update');
+    assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.3')), 'the running release is never deleted');
+    assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.4')));
+    assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.4$/);
+    assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/previous')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
+    h.run('rollback');
+    assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
   } finally { h.cleanup(); }
 });
 

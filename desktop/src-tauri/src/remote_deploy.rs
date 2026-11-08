@@ -537,6 +537,9 @@ pub async fn remote_deploy_run(target: SshTarget, plan_id: String, confirmation:
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         let plan = confirm_plan(&plan_id, &confirmation, crate::confirm::now_ms())?;
+        if !crate::confirm::ask("Deploy the LLM-IDE hub?", &format!("Install the hub for {} and start its service?", plan.domain), "Deploy hub", true) {
+            return Err(herr("cancelled", "the deploy was cancelled at the host confirmation"));
+        }
         let secrets = generate_secrets()?;
         let bundle = std::fs::read(&plan.bundle_path).map_err(|e| herr("bundle_missing", format!("the staged hub bundle is missing: {e}")))?;
         if bundle.len() > 256 * 1024 * 1024 { return Err(herr("bundle_too_large", "the hub bundle is larger than 256 MB")); }
@@ -611,6 +614,9 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
+        if !crate::confirm::ask("Update the LLM-IDE hub?", &format!("Update {} to {version}?", target.host), "Update hub", true) {
+            return Err(herr("cancelled", "the update was cancelled at the host confirmation"));
+        }
         let pre = SystemDeploy.run(&prepared, &stage_command("predeploy-backup").unwrap(), None)?;
         if pre.code != Some(0) { return Err(herr("backup_failed", "the pre-update backup failed; nothing was changed")); }
         let Some(bundle) = bundle_path(&version) else { return Err(herr("bundle_missing", "the staged hub bundle is missing; run node desktop/scripts/stage-hub-core.mjs")); };
@@ -644,6 +650,10 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
 pub async fn remote_uninstall(target: SshTarget, confirmation: String, purge: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        let what = if purge { "Uninstall the hub AND DELETE its data?" } else { "Uninstall the hub? Data is kept." };
+        if !crate::confirm::ask(what, &format!("Remove the service and vhost on {}?", target.host), "Uninstall hub", true) {
+            return Err(herr("cancelled", "the uninstall was cancelled at the host confirmation"));
+        }
         uninstall(&SystemDeploy, &prepared, &confirmation, purge)
     }).await.map_err(|e| herr("internal", format!("the uninstall did not finish: {e}")))?
 }
@@ -691,7 +701,7 @@ pub fn redact_logs(text: &str) -> String {
 }
 
 pub fn update_switched(code: Option<i32>, stdout: &str) -> bool {
-    code != Some(0) && stdout.contains("LLMIDE_UPDATE_SWITCHED=")
+    code != Some(0) && (stdout.contains("LLMIDE_UPDATE_SWITCHED=") || stdout.contains("LLMIDE_BUNDLE_SWITCHED="))
 }
 
 pub fn uninstall<R: DeployRunner>(runner: &R, target: &PreparedTarget, confirmation: &str, purge: bool) -> Result<(), FsError> {
@@ -855,6 +865,25 @@ mod tests {
     fn a_helper_version_mismatch_forces_a_reinstall() {
         assert!(format!("helper={HELPER_VERSION}\nok\n").contains(&format!("helper={HELPER_VERSION}")));
         assert!(!format!("helper=0\nok\n").contains(&format!("helper={HELPER_VERSION}")));
+    }
+
+    struct HelperZero { calls: StdMutex<Vec<String>> }
+    impl DeployRunner for HelperZero {
+        fn run(&self, _t: &PreparedTarget, command: &str, _stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
+            self.calls.lock().unwrap().push(command.to_string());
+            let stdout = if command.contains("llmide-deploy check") { "helper=0\nok\n".to_string() } else { "ok\n".to_string() };
+            Ok(RawOutput { code: Some(0), stdout, stderr: String::new() })
+        }
+    }
+
+    #[test]
+    fn a_helper_version_zero_is_reinstalled_with_full_sudo() {
+        let fake = HelperZero { calls: StdMutex::new(Vec::new()) };
+        let b = bootstrap_with(&fake, &target()).unwrap();
+        assert!(b.installed);
+        let calls = fake.calls.lock().unwrap().clone();
+        assert!(calls.iter().any(|c| c.contains("/usr/local/sbin/llmide-deploy upload") == false && c.contains("install -m 0755")), "the old helper is reinstalled");
+        assert!(calls.iter().any(|c| c.contains("base")));
     }
 
     #[test]

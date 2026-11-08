@@ -9,7 +9,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -187,9 +187,15 @@ pub async fn remote_tls_probe(hub_url: String) -> Result<TlsInfo, FsError> {
         let certs = conn.peer_certificates().ok_or_else(|| herr("tls_failed", "the hub presented no certificate"))?;
         let leaf = certs.first().ok_or_else(|| herr("tls_failed", "the hub presented no leaf certificate"))?;
         let fingerprint = fingerprint_of_certificate(leaf.as_ref()).ok_or_else(|| herr("tls_failed", "the leaf SPKI is unreadable"))?;
+        *last_probe().lock().unwrap_or_else(|e| e.into_inner()) = Some((hub_url.trim().to_string(), fingerprint.clone()));
         let _ = sock.flush();
         Ok(TlsInfo { fingerprint, subject: String::new(), issuer: String::new(), not_before: 0, not_after: 0, dns_names: Vec::new() })
     }).await.map_err(|e| herr("internal", format!("the TLS probe did not finish: {e}")))?
+}
+
+fn last_probe() -> &'static Mutex<Option<(String, String)>> {
+    static LAST: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
 }
 
 /// Stores `remote_server.hub_url` + `tls_pin` after the user confirms the probe. No other pref changes.
@@ -197,6 +203,10 @@ pub async fn remote_tls_probe(hub_url: String) -> Result<TlsInfo, FsError> {
 pub fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsError> {
     let (host, port) = split_hub(hub_url.trim())?;
     if !valid_pin(&fingerprint) { return Err(herr("invalid_pin", "the fingerprint is not a sha256 SPKI pin")); }
+    // Pin only a fingerprint this host actually probed for this URL (the UI comparison is not authority).
+    let matches = last_probe().lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        .is_some_and(|(h, f)| h == hub_url.trim() && f == &fingerprint);
+    if !matches { return Err(herr("probe_required", "probe the hub certificate before trusting it")); }
     let mut block = crate::prefs::stored().remote_server;
     block.hub_url = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
     block.tls_pin = fingerprint;
@@ -224,6 +234,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(include_str!("../../../schema/host-api/v1/fixtures/security/identity-vector.json")).unwrap();
         let spki = base64::engine::general_purpose::STANDARD.decode(v["spkiDerBase64"].as_str().unwrap()).unwrap();
         assert_eq!(fingerprint_from_spki(&spki), v["fingerprint"].as_str().unwrap());
+    }
+
+    #[test]
+    fn pinning_requires_a_matching_probe() {
+        let err = remote_tls_pin("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
+        assert_eq!(err.code, "probe_required");
     }
 
     #[test]
