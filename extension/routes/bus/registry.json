@@ -18,24 +18,102 @@
     "commandRetentionDays": 7
   },
   "clientClasses": {
-    "phone-pwa": { "rank": 1, "mayStart": ["R"], "mayApprove": false, "note": "web client: read and queued low-risk chat only, never T0/T1/T2, never approvals" },
-    "extension": { "rank": 2, "mayStart": ["R", "C"], "mayApprove": false, "note": "the Chrome extension: read and chat on the Mac-managed server, no task start" },
-    "ios-native": { "rank": 3, "mayStart": ["R", "C", "T0", "T1", "T2"], "mayApprove": false, "note": "native phone: may start T0 and enqueue T1/T2 (which wait for a desktop click)" },
-    "desktop-ui": { "rank": 4, "mayStart": ["R", "C", "T0", "T1", "T2", "D"], "mayApprove": true, "note": "the desktop UI: the only class that approves; proven by the host nonce" }
+    "phone-pwa": {
+      "rank": 1,
+      "mayStart": [
+        "R"
+      ],
+      "mayApprove": false,
+      "note": "web client: read and queued low-risk chat only, never T0/T1/T2, never approvals"
+    },
+    "extension": {
+      "rank": 2,
+      "mayStart": [
+        "R",
+        "C"
+      ],
+      "mayApprove": false,
+      "note": "the Chrome extension: read and chat on the Mac-managed server, no task start"
+    },
+    "ios-native": {
+      "rank": 3,
+      "mayStart": [
+        "R",
+        "C",
+        "T0",
+        "T1",
+        "T2"
+      ],
+      "mayApprove": false,
+      "note": "native phone: may start T0 and enqueue T1/T2 (which wait for a desktop click)"
+    },
+    "desktop-ui": {
+      "rank": 4,
+      "mayStart": [
+        "R",
+        "C",
+        "T0",
+        "T1",
+        "T2",
+        "D"
+      ],
+      "mayApprove": true,
+      "note": "the desktop UI: the only class that approves; proven by the host nonce"
+    }
   },
   "tiers": {
-    "R": { "approval": "none", "meaning": "read-only, no write, no spend beyond a chat quota" },
-    "C": { "approval": "none", "meaning": "chat under the fixed remote-safe ceiling" },
-    "T0": { "approval": "none", "meaning": "auto-task kind with a read-only ceiling; needs the kind enabled, else a desktop approval" },
-    "T1": { "approval": "desktop", "meaning": "enqueue only; waits for a desktop approval; permission re-checked at execution" },
-    "T2": { "approval": "desktop_confirm", "meaning": "writes code or leaves the machine; desktop approval with the exact ids confirmed; never inherits Bypass" },
-    "D": { "approval": "never_remote", "meaning": "desktop-only: refused for every other class" }
+    "R": {
+      "approval": "none",
+      "meaning": "read-only, no write, no spend beyond a chat quota"
+    },
+    "C": {
+      "approval": "none",
+      "meaning": "chat under the fixed remote-safe ceiling"
+    },
+    "T0": {
+      "approval": "none",
+      "meaning": "auto-task kind with a read-only ceiling; needs the kind enabled, else a desktop approval"
+    },
+    "T1": {
+      "approval": "desktop",
+      "meaning": "enqueue only; waits for a desktop approval; permission re-checked at execution"
+    },
+    "T2": {
+      "approval": "desktop_confirm",
+      "meaning": "writes code or leaves the machine; desktop approval with the exact ids confirmed; never inherits Bypass"
+    },
+    "D": {
+      "approval": "never_remote",
+      "meaning": "desktop-only: refused for every other class"
+    }
   },
   "errorCodes": [
-    "invalid_args", "unknown_kind", "unsupported_version", "tier_denied", "switch_off", "needs_desktop_approval",
-    "expired", "duplicate", "idem_conflict", "engine_not_logged_in", "engine_no_key", "rate_limited", "quota_exceeded",
-    "payload_too_large", "desktop_busy", "not_found", "kind_not_available", "project_not_registered", "project_not_allowed",
-    "engine_failed", "read_only_violated", "interrupted", "timeout", "cancelled", "server_restarted", "internal"
+    "invalid_args",
+    "unknown_kind",
+    "unsupported_version",
+    "tier_denied",
+    "switch_off",
+    "needs_desktop_approval",
+    "expired",
+    "duplicate",
+    "idem_conflict",
+    "engine_not_logged_in",
+    "engine_no_key",
+    "rate_limited",
+    "quota_exceeded",
+    "payload_too_large",
+    "desktop_busy",
+    "not_found",
+    "kind_not_available",
+    "project_not_registered",
+    "project_not_allowed",
+    "engine_failed",
+    "read_only_violated",
+    "interrupted",
+    "timeout",
+    "cancelled",
+    "server_restarted",
+    "internal"
   ],
   "kinds": {
     "review": {
@@ -44,22 +122,54 @@
       "write": false,
       "available": true,
       "description": "Read-only review of a registered project (code, docs or merge conflicts) on a chosen engine.",
-      "engines": ["claude", "adapter", "codex", "gemini"],
+      "engines": [
+        "claude",
+        "adapter",
+        "codex",
+        "gemini"
+      ],
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["focus", "projectId"],
+        "required": [
+          "focus",
+          "projectId"
+        ],
         "properties": {
-          "focus": { "type": "string", "enum": ["code", "doc", "conflicts"] },
-          "projectId": { "type": "string", "x-format": "id" },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "code",
+              "doc",
+              "conflicts"
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "x-format": "id"
+          },
           "engine": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["provider"],
+            "required": [
+              "provider"
+            ],
             "properties": {
-              "provider": { "type": "string", "x-format": "provider" },
-              "model": { "type": "string", "x-format": "model" },
-              "credential": { "type": "string", "enum": ["cli-login", "api-key"] }
+              "provider": {
+                "type": "string",
+                "x-format": "provider"
+              },
+              "model": {
+                "type": "string",
+                "x-format": "model"
+              },
+              "credential": {
+                "type": "string",
+                "enum": [
+                  "cli-login",
+                  "api-key"
+                ]
+              }
             }
           }
         }
@@ -71,13 +181,20 @@
       "write": true,
       "available": true,
       "engineless": true,
-      "description": "Sync the connected server-side sources (Google Calendar, Google Drive, iCal feeds) into the Library; ids are gcal:<account>, gdrive:<account>, ical:<source>, none means all.",
+      "description": "Sync the connected server-side sources (Google Calendar, Google Drive, iCal feeds, Box) into the Library; ids are gcal:<account>, gdrive:<account>, ical:<source>, box:default, none means all. A scheduled Box re-index runs at most once every 6 hours per user.",
       "engines": [],
       "args": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "sourceIds": { "type": "array", "maxItems": 50, "items": { "type": "string", "x-format": "id" } }
+          "sourceIds": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "x-format": "id"
+            }
+          }
         }
       }
     },
@@ -92,10 +209,18 @@
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["projectId"],
+        "required": [
+          "projectId"
+        ],
         "properties": {
-          "projectId": { "type": "string", "x-format": "id" },
-          "since": { "type": "string", "x-format": "date" }
+          "projectId": {
+            "type": "string",
+            "x-format": "id"
+          },
+          "since": {
+            "type": "string",
+            "x-format": "date"
+          }
         }
       }
     },
@@ -110,11 +235,27 @@
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["projectId", "issueIds"],
+        "required": [
+          "projectId",
+          "issueIds"
+        ],
         "properties": {
-          "projectId": { "type": "string", "x-format": "id" },
-          "issueIds": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "x-format": "id" } },
-          "ship": { "type": "boolean" }
+          "projectId": {
+            "type": "string",
+            "x-format": "id"
+          },
+          "issueIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "x-format": "id"
+            }
+          },
+          "ship": {
+            "type": "boolean"
+          }
         }
       }
     },
@@ -129,11 +270,23 @@
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["projectId", "loopId"],
+        "required": [
+          "projectId",
+          "loopId"
+        ],
         "properties": {
-          "projectId": { "type": "string", "x-format": "id" },
-          "loopId": { "type": "string", "x-format": "id" },
-          "stageId": { "type": "string", "x-format": "id" }
+          "projectId": {
+            "type": "string",
+            "x-format": "id"
+          },
+          "loopId": {
+            "type": "string",
+            "x-format": "id"
+          },
+          "stageId": {
+            "type": "string",
+            "x-format": "id"
+          }
         }
       }
     },
@@ -141,7 +294,9 @@
       "tier": "T1",
       "lane": "write",
       "write": true,
-      "clients": ["desktop-ui"],
+      "clients": [
+        "desktop-ui"
+      ],
       "available": false,
       "unavailableReason": "Saved custom tasks (named prompt, cron, project) live in the Mac app; Node has no store to resolve a customTaskId.",
       "description": "Run a saved custom task by id (the prompt is part of the saved task, never of the command).",
@@ -149,9 +304,14 @@
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["customTaskId"],
+        "required": [
+          "customTaskId"
+        ],
         "properties": {
-          "customTaskId": { "type": "string", "x-format": "id" }
+          "customTaskId": {
+            "type": "string",
+            "x-format": "id"
+          }
         }
       }
     }

@@ -130,6 +130,13 @@ const ALLOWED_KEYS = new Set([
   // reads it back in /kb/box/test and /kb/connect-box so the secret never
   // travels on those requests.
   'box.clientSecret',
+  // C6 — the rest of the stored Box connection (non-secret ids), beside the secret, so the scheduled
+  // `sources.update` can re-index the folder without the client resending it.
+  'box.clientId',
+  'box.subjectType',
+  'box.subjectId',
+  'box.folderId',
+  'box.lastIndexedAt',
   // IMAP app password for the Email input source. The Mac client stores
   // it here via /auth/me/secrets; the server reads it back when fetching
   // recent messages so the password never travels on the fetch request.
@@ -218,7 +225,7 @@ const ICAL_SOURCE_KEY_RE = /^ical\.src\.[a-f0-9]{12}\.url$/;
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
-const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.prevRootKey', 'sync.boxClientSecret', 'sync.boxRefreshToken', 'push.vapidKey', 'push.apnsKey', 'push.apnsKeyId', 'push.apnsTeamId']);
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'box.lastIndexedAt', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.prevRootKey', 'sync.boxClientSecret', 'sync.boxRefreshToken', 'push.vapidKey', 'push.apnsKey', 'push.apnsKeyId', 'push.apnsTeamId']);
 
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed

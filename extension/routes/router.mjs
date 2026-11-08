@@ -56,7 +56,7 @@ import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
 import { agentBusySummary } from '../core/agent-busy.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
-import { getSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
+import { getSecret, setSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
 import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
@@ -939,6 +939,14 @@ export async function handleKB(req, res) {
       const started = Date.now();
       try {
         const { indexed, files, skipped, truncated } = await indexBoxFolder(userId, creds);
+        // C6: keep the connection (non-secret ids in the vault, beside the secret already there) so the scheduled
+        // `sources.update` can re-index this folder without the client resending it.
+        const db = kb.getDb();
+        setSecret(db, userId, 'box.clientId', clientId);
+        setSecret(db, userId, 'box.subjectType', subjectType);
+        setSecret(db, userId, 'box.subjectId', subjectId);
+        setSecret(db, userId, 'box.folderId', folderId);
+        setSecret(db, userId, 'box.lastIndexedAt', String(Date.now()));
         logger.info('box_index', { userId, folderId, indexed, files, skipped, truncated, durationMs: Date.now() - started });
         sendJSON(res, 200, { ok: true, indexed, files, skipped, truncated });
       } catch (e) {
