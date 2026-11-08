@@ -74,6 +74,24 @@ public enum HostApiProjectNotices {
     }
 }
 
+/// Where a phone remembers its per-host project choice. The pinned certificate fingerprint is the host's
+/// stable identity (it survives a DHCP address change); the device address is only the fallback when this
+/// pairing has no pin (a DEBUG/dev URL), and `unknown` when there is neither.
+public enum HostApiProjectStorage {
+    public static let keyPrefix = "llmide.hostApi.v1.project."
+
+    public static func hostIdentity(pinnedFingerprint: String?, address: String?) -> String {
+        let pin = pinnedFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !pin.isEmpty { return "pin:" + pin }
+        let ip = address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return ip.isEmpty ? "unknown" : "ip:" + ip
+    }
+
+    public static func key(pinnedFingerprint: String?, address: String?) -> String {
+        keyPrefix + hostIdentity(pinnedFingerprint: pinnedFingerprint, address: address)
+    }
+}
+
 public struct HostApiProjectsState: Equatable, Sendable {
     public var projects: [HostApiProjectsListResultProjectsItem]
     /// The project every project-scoped frame names; nil keeps the v1 team behavior.
@@ -105,7 +123,10 @@ public final class HostApiProjectController {
     public static let maxProjects = 500
 
     public private(set) var state = HostApiProjectsState() {
-        didSet { if state != oldValue { onChange?(state) } }
+        didSet {
+            if state != oldValue { onChange?(state) }
+            if state.loaded && !oldValue.loaded { finishLoadWaiters() }
+        }
     }
     public var onChange: ((HostApiProjectsState) -> Void)?
 
@@ -114,6 +135,7 @@ public final class HostApiProjectController {
     private let persist: (String?) -> Void
     private var generation = 0
     private var ticket = 0
+    private var loadedWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(host: @escaping () -> HostConnection?,
                 storedId: @escaping () -> String? = { nil },
@@ -121,6 +143,9 @@ public final class HostApiProjectController {
         self.host = host
         self.storedId = storedId
         self.persist = persist
+        // Seed the remembered choice so the first scoped frame names it before projects.list lands. The
+        // list confirms or replaces it (a gone id falls back to the first project).
+        state = HostApiProjectsState(selectedId: storedId())
     }
 
     public var selectedId: String? { state.selectedId }
@@ -155,7 +180,8 @@ public final class HostApiProjectController {
             updated.error = nil
             if next != current { updated.refusal = nil }
             state = updated
-            persist(next)
+            // L5: an empty list must not erase the remembered choice. Only a real selection is persisted.
+            if let next { persist(next) }
         } catch {
             guard gen == generation, mine == ticket else { return }
             var updated = state
@@ -197,10 +223,35 @@ public final class HostApiProjectController {
         state = updated
     }
 
+    /// Suspends until at least one `projects.list` reply has landed (success or failure). The chat waits on
+    /// this before its first snapshot/send, so it never names no project while the picker is still loading.
+    public func waitUntilLoaded() async {
+        if state.loaded { return }
+        await withCheckedContinuation { continuation in
+            if state.loaded { continuation.resume(); return }
+            loadedWaiters.append(continuation)
+        }
+    }
+
+    /// The id a scoped chat frame should name once the list has answered (the seeded stored choice before it).
+    public func projectIdForScopedFrame() async -> String? {
+        await waitUntilLoaded()
+        return state.selectedId
+    }
+
+    private func finishLoadWaiters() {
+        let waiters = loadedWaiters
+        loadedWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
     /// A new device or a fresh pairing: forget the list, but keep the stored per-host choice for next time.
     public func reset() {
         generation += 1
         ticket += 1
         state = HostApiProjectsState()
+        // A chat frame waiting on the old host's list must not hang across a re-pair; it proceeds with
+        // team scope (or the new host's seeded choice on its first refresh).
+        finishLoadWaiters()
     }
 }

@@ -313,11 +313,14 @@ struct LlmIdeControlView: View {
         dictating = false   // a late final transcript must not repopulate the composer after send
         if speech.isListening { speech.finish() }
         // Refused by the host's limits (a too-large file): keep the composer so the user can remove it.
-        guard llmIdeStore.sendLlmideChat(text, files: files) else { return }
-        inputText = ""
-        pendingFiles = []
-        isInputFocused = false
-        haptic(.light)
+        // The store waits for the project list before sending, so this runs off the input handler.
+        Task {
+            guard await llmIdeStore.sendLlmideChat(text, files: files) else { return }
+            inputText = ""
+            pendingFiles = []
+            isInputFocused = false
+            haptic(.light)
+        }
     }
 
     private func selectProject(_ id: String) {

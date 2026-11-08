@@ -17,17 +17,14 @@ final class ProjectsStore: ObservableObject {
     private weak var connectionStore: ConnectionStore?
     private let controller: HostApiProjectController
 
-    /// The choice is per host and is not a secret: the host returns `projects.list` to any paired device.
-    private static let keyPrefix = "llmide.hostApi.v1.project."
-
     init(connection: ConnectionService, connectionStore: ConnectionStore) {
         self.connection = connection
         self.connectionStore = connectionStore
         let store = connectionStore
         controller = HostApiProjectController(
             host: { [weak connection] in connection?.host },
-            storedId: { [weak store] in Self.read(host: store?.deviceIP) },
-            persist: { [weak store] id in Self.write(id, host: store?.deviceIP) })
+            storedId: { [weak store] in Self.read(store) },
+            persist: { [weak store] id in Self.write(id, store) })
         controller.onChange = { [weak self] state in self?.state = state }
         connection.projectsStore = self
     }
@@ -37,6 +34,12 @@ final class ProjectsStore: ObservableObject {
         guard connection?.connectionStatus == .connected else { return }
         Task { await controller.refresh() }
     }
+
+    /// Wait for the first projects.list reply (the chat's first snapshot/send is gated on it).
+    func waitUntilLoaded() async { await controller.waitUntilLoaded() }
+
+    /// The project the next scoped frame should name, after the list has answered.
+    func projectIdForScopedFrame() async -> String? { await controller.projectIdForScopedFrame() }
 
     /// Pick a project the host offered; returns false for an unknown id.
     @discardableResult
@@ -56,27 +59,39 @@ final class ProjectsStore: ObservableObject {
 
     // MARK: — Per-host persistence
 
-    private static func key(host: String?) -> String {
-        let name = (host?.isEmpty == false) ? host! : "unknown"
-        return keyPrefix + name
+    /// The choice is keyed by the host's stable identity (pinned fingerprint), not its address: a DHCP
+    /// change keeps the choice, and a second desktop that inherits the old IP does not inherit it.
+    private static func read(_ store: ConnectionStore?) -> String? {
+        guard let store else { return nil }
+        let stable = HostApiProjectStorage.key(pinnedFingerprint: store.hostApiPin, address: store.deviceIP)
+        if let found = valid(UserDefaults.standard.string(forKey: stable)) { return found }
+        // A choice saved before the fingerprint key existed lived under the bare address (or "unknown").
+        // Read it once; the next persist migrates it and removes the old key.
+        let legacy = HostApiProjectStorage.keyPrefix + Self.legacyName(store.deviceIP)
+        return valid(UserDefaults.standard.string(forKey: legacy))
+    }
+
+    private static func write(_ id: String?, _ store: ConnectionStore?) {
+        guard let store else { return }
+        let stable = HostApiProjectStorage.key(pinnedFingerprint: store.hostApiPin, address: store.deviceIP)
+        if let id = valid(id) {
+            UserDefaults.standard.set(id, forKey: stable)
+        } else {
+            UserDefaults.standard.removeObject(forKey: stable)
+        }
+        // Drop a pre-L6 address-keyed value after migrating it, so an old address cannot leak this host's
+        // choice to another. (With no pin and no address the two keys are the same one.)
+        let legacy = HostApiProjectStorage.keyPrefix + Self.legacyName(store.deviceIP)
+        if legacy != stable { UserDefaults.standard.removeObject(forKey: legacy) }
+    }
+
+    private static func legacyName(_ address: String) -> String {
+        address.isEmpty ? "unknown" : address
     }
 
     /// Same shape the contract allows for `projectId`, so a corrupt defaults value can never reach a frame.
     private static func valid(_ raw: String?) -> String? {
         guard let raw, raw.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { return nil }
         return raw
-    }
-
-    private static func read(host: String?) -> String? {
-        valid(UserDefaults.standard.string(forKey: key(host: host)))
-    }
-
-    private static func write(_ id: String?, host: String?) {
-        let key = key(host: host)
-        if let id = valid(id) {
-            UserDefaults.standard.set(id, forKey: key)
-        } else {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
     }
 }

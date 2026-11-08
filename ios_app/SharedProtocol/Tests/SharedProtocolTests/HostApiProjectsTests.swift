@@ -34,6 +34,11 @@ final class FakeProjectHost: HostConnection {
     func payload<P: Decodable>(_ i: Int, as: P.Type) -> P { try! JSONDecoder().decode(P.self, from: calls[i].payload) }
 }
 
+private actor CompletionFlag {
+    private(set) var isDone = false
+    func mark() { isDone = true }
+}
+
 @MainActor
 @Suite("HostApiProjectController")
 struct HostApiProjectControllerTests {
@@ -70,6 +75,16 @@ struct HostApiProjectControllerTests {
         #expect(c.selectedId == "p-2", "an id the host did not offer is never selected")
     }
 
+    @Test("the stored choice is the selection at construction, before projects.list lands")
+    func storedBeforeList() async {
+        let c = controller(stored: "p-2")
+        #expect(c.selectedId == "p-2", "the first scoped frame names the remembered project, not team scope")
+        #expect(!c.state.loaded)
+        await load(c, [project("p-1", "Alpha", "member"), project("p-2", "Beta", "owner")])
+        #expect(c.selectedId == "p-2")
+        #expect(c.state.loaded)
+    }
+
     @Test("the stored choice wins while it exists; a gone one falls back to the first; empty keeps none")
     func storedChoice() async {
         let stored = controller(stored: "p-2")
@@ -82,11 +97,59 @@ struct HostApiProjectControllerTests {
         #expect(gone.selectedId == "p-11")
         #expect(saved.compactMap { $0 }.last == "p-11", "a stale stored id is replaced with the first project")
 
-        let empty = controller(stored: "p-gone")
+        var emptySaved: [String?] = []
+        let empty = controller(stored: "p-gone", persist: { emptySaved.append($0) })
+        #expect(empty.selectedId == "p-gone", "the stored choice is seeded even when the list is empty")
         await load(empty, [])
         #expect(empty.state.projects.isEmpty && empty.selectedId == nil)
         #expect(empty.state.loaded && empty.state.error == nil)
+        #expect(emptySaved.isEmpty, "an empty list does not erase the remembered choice")
         #expect(HostApiProjectNotices.empty == "No projects are available to this account.")
+    }
+
+    @Test("a scoped frame waits for projects.list instead of naming a stale stored id")
+    func waitsForList() async {
+        var stored: String? = "p-gone"
+        let c = HostApiProjectController(host: { [host] in host }, storedId: { stored }, persist: { stored = $0 })
+        let refresh = Task { await c.refresh() }
+        await host.waitForCalls(1)
+
+        let started = CompletionFlag()
+        let finished = CompletionFlag()
+        let gated = Task {
+            await started.mark()
+            let id = await c.projectIdForScopedFrame()
+            await finished.mark()
+            return id
+        }
+        for _ in 0..<100 {
+            if await started.isDone { break }
+            await Task.yield()
+        }
+        let startedNow = await started.isDone
+        let finishedEarly = await finished.isDone
+        #expect(startedNow, "the gated frame started")
+        #expect(!finishedEarly, "it does not return the seeded id before the list answers")
+
+        host.answer(0, HostApiProjectsListResult(projects: [project("p-1", "Alpha", "member")]))
+        await refresh.value
+        let resolved = await gated.value
+        #expect(resolved == "p-1", "the list corrected the stale stored id before the frame was built")
+        #expect(stored == "p-1")
+    }
+
+    @Test("the per-host project key prefers the pinned fingerprint and falls back to the address")
+    func projectHostKey() {
+        let pin = String(repeating: "ab", count: 32)
+        #expect(HostApiProjectStorage.hostIdentity(pinnedFingerprint: pin, address: "10.0.0.5") == "pin:" + pin)
+        #expect(HostApiProjectStorage.hostIdentity(pinnedFingerprint: nil, address: "10.0.0.5") == "ip:10.0.0.5")
+        #expect(HostApiProjectStorage.hostIdentity(pinnedFingerprint: "  ", address: "") == "unknown")
+        #expect(HostApiProjectStorage.key(pinnedFingerprint: pin, address: "10.0.0.9") ==
+                HostApiProjectStorage.key(pinnedFingerprint: pin, address: "10.0.0.5"),
+                "a DHCP address change keeps the same key")
+        #expect(HostApiProjectStorage.key(pinnedFingerprint: pin, address: "10.0.0.5") !=
+                HostApiProjectStorage.key(pinnedFingerprint: nil, address: "10.0.0.5"),
+                "a second desktop on the old address does not inherit the key")
     }
 
     @Test("roles decode from the contract fixture")

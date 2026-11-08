@@ -47,6 +47,20 @@ final class LlmIdeChatStore: ObservableObject {
     /// The project every project-scoped frame names (ADR 0022); nil keeps the v1 team behavior.
     private var selectedProjectId: String? { connection?.projectsStore?.selectedId }
 
+    /// Guards a snapshot reply so an older project's load cannot overwrite a newer selection's transcript.
+    private var historyTicket = 0
+
+    /// The project a scoped frame should name, waiting for the first `projects.list` reply when the picker
+    /// is still loading. Without this the first snapshot/send went out with no project and ran under the
+    /// team grant even though a project was remembered. Offline keeps the seeded choice.
+    private func scopedProjectId() async -> String? {
+        guard connection?.connectionStatus == .connected, let projects = connection?.projectsStore else {
+            return selectedProjectId
+        }
+        if !projects.state.loaded { projects.refresh() }
+        return await projects.projectIdForScopedFrame()
+    }
+
     /// Send a refused frame's reason to the picker. A non-project error is left to the caller.
     @discardableResult
     private func noteProjectRefusal(_ error: Error) -> Bool {
@@ -61,14 +75,21 @@ final class LlmIdeChatStore: ObservableObject {
     /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary. Returns false only when
     /// the host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
     @discardableResult
-    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) -> Bool {
+    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) async -> Bool {
         guard connection?.connectionStatus == .connected else {
             connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
             return true
         }
+        // A send typed before projects.list replied still names the selected project (L4).
+        let projectId = await scopedProjectId()
+        guard connection?.connectionStatus == .connected else {
+            connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
+            return true
+        }
+        guard !isStreaming else { return false } // a second tap while the first waited for the list
         // Validated against the `chat.send` schema limits before any turn starts.
         let request: HostApiChatSendRequest
-        switch HostApiChatSendPolicy.request(text: text, files: files, projectId: selectedProjectId) {
+        switch HostApiChatSendPolicy.request(text: text, files: files, projectId: projectId) {
         case .send(let r): request = r
         case .refuse(let message): connection?.errorMessage = message; return false
         }
@@ -103,16 +124,23 @@ final class LlmIdeChatStore: ObservableObject {
         if local { connection?.disconnect() }
     }
 
-    /// Load the host's shared chat transcript (`chat.snapshot`) for the selected project.
+    /// Load the host's shared chat transcript (`chat.snapshot`) for the selected project, after the first
+    /// projects.list reply so the first frame names the project (L4).
     func loadSharedHistory() {
+        guard connection?.connectionStatus == .connected else { return }
+        historyTicket += 1
+        let ticket = historyTicket
         Task { [weak self] in
             guard let self else { return }
+            let projectId = await self.scopedProjectId()
             do {
                 let result = try await self.connection?.host.send(
-                    .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: self.selectedProjectId),
+                    .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: projectId),
                     as: HostApiChatSnapshotResult.self)
+                guard ticket == self.historyTicket else { return } // a newer project's load won
                 if let result { self.applySnapshot(result) }
             } catch {
+                guard ticket == self.historyTicket else { return }
                 self.noteProjectRefusal(error)
             }
         }
