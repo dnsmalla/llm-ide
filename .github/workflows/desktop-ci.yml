@@ -12,6 +12,7 @@ on:
     paths:
       - 'desktop/**'
       - 'ui/**'
+      - 'web/**'
       - 'extension/**'
       - 'schema/design/**'
       - 'graph-kit'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'desktop/**'
       - 'ui/**'
+      - 'web/**'
       - 'extension/**'
       - 'schema/design/**'
       - 'graph-kit'
